@@ -162,6 +162,8 @@ async fn example_exprs_eval_same_as_mysql() {
         r"'a%b' like 'a\\_b'",
         r"'a%b' like 'a\\%b'",
         r"'a\b' like 'a\\b'",
+        r"CAST(-1 AS signed)",
+        r"CAST(2 AS unsigned integer)",
     ] {
         compare_eval(expr, &mut conn).await;
     }

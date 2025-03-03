@@ -1544,7 +1544,7 @@ mod tests {
                             ),
                             ColumnSpecification::with_constraints(
                                 Column::from("action_flag"),
-                                SqlType::UnsignedSmallInt(None),
+                                SqlType::SmallIntUnsigned(None),
                                 vec![ColumnConstraint::NotNull],
                             ),
                             ColumnSpecification::with_constraints(
@@ -1776,7 +1776,7 @@ mod tests {
                         fields: vec![
                             ColumnSpecification::with_constraints(
                                 Column::from("id"),
-                                SqlType::UnsignedInt(None),
+                                SqlType::IntUnsigned(None),
                                 vec![
                                     ColumnConstraint::NotNull,
                                     ColumnConstraint::AutoIncrement,
@@ -2150,7 +2150,7 @@ mod tests {
                             ),
                             ColumnSpecification::with_constraints(
                                 Column::from("action_flag"),
-                                SqlType::UnsignedSmallInt(None),
+                                SqlType::SmallIntUnsigned(None),
                                 vec![ColumnConstraint::NotNull],
                             ),
                             ColumnSpecification::with_constraints(
@@ -2285,7 +2285,7 @@ mod tests {
                         fields: vec![
                             ColumnSpecification::with_constraints(
                                 Column::from("id"),
-                                SqlType::UnsignedInt(None),
+                                SqlType::IntUnsigned(None),
                                 vec![
                                     ColumnConstraint::NotNull,
                                     ColumnConstraint::AutoIncrement,
@@ -2466,7 +2466,7 @@ mod tests {
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             "id".into(),
-                            SqlType::UnsignedInt(Some(10)),
+                            SqlType::IntUnsigned(Some(10)),
                             vec![ColumnConstraint::NotNull, ColumnConstraint::AutoIncrement,]
                         ),
                         ColumnSpecification::with_constraints(
@@ -2480,7 +2480,7 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             "user_id".into(),
-                            SqlType::UnsignedInt(Some(10)),
+                            SqlType::IntUnsigned(Some(10)),
                             vec![ColumnConstraint::NotNull]
                         ),
                         ColumnSpecification::with_constraints(
@@ -2593,12 +2593,12 @@ mod tests {
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             "post_id".into(),
-                            SqlType::UnsignedInt(None),
+                            SqlType::IntUnsigned(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
                             "mentions_id".into(),
-                            SqlType::UnsignedInt(None),
+                            SqlType::IntUnsigned(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                     ],

@@ -442,7 +442,7 @@ impl DfValue {
         match self {
             Self::None | Self::PassThrough(_) | Self::Default | Self::Max => None,
             Self::Int(_) => Some(BigInt(None)),
-            Self::UnsignedInt(_) => Some(UnsignedBigInt(None)),
+            Self::UnsignedInt(_) => Some(BigIntUnsigned(None)),
             // FIXME: `SqlType::Float` precision can be either single (MySQL) or
             // double (PostgreSQL).
             Self::Float(_) => Some(Float),

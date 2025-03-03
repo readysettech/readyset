@@ -429,13 +429,17 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
             DfValue::ByteArray(Arc::new(vec![0u8]))
         }
         SqlType::Int(_) | SqlType::MediumInt(_) | SqlType::Int4 | SqlType::Serial => 1i32.into(),
-        SqlType::BigInt(_) | SqlType::Int8 | SqlType::BigSerial => 1i64.into(),
-        SqlType::UnsignedInt(_) | SqlType::UnsignedMediumInt(_) => 1u32.into(),
-        SqlType::UnsignedBigInt(_) => 1u64.into(),
+        SqlType::BigInt(_)
+        | SqlType::Int8
+        | SqlType::BigSerial
+        | SqlType::Signed
+        | SqlType::SignedInteger => 1i64.into(),
+        SqlType::BigIntUnsigned(_) | SqlType::Unsigned | SqlType::UnsignedInteger => 1u64.into(),
+        SqlType::MediumIntUnsigned(_) | SqlType::IntUnsigned(_) => 1u32.into(),
         SqlType::TinyInt(_) => 1i8.into(),
-        SqlType::UnsignedTinyInt(_) => 1u8.into(),
+        SqlType::TinyIntUnsigned(_) => 1u8.into(),
         SqlType::SmallInt(_) | SqlType::Int2 => 1i16.into(),
-        SqlType::UnsignedSmallInt(_) => 1u16.into(),
+        SqlType::SmallIntUnsigned(_) => 1u16.into(),
         SqlType::Float | SqlType::Double => 1.5f64.try_into().unwrap(),
         SqlType::Real => 1.5f32.try_into().unwrap(),
         SqlType::Decimal(prec, scale) => {
@@ -527,15 +531,19 @@ where
             DfValue::ByteArray(Arc::new(array))
         }
         SqlType::Int(_) | SqlType::Int4 => rng.gen::<i32>().into(),
-        SqlType::BigInt(_) | SqlType::Int8 => rng.gen::<i64>().into(),
-        SqlType::UnsignedInt(_) => rng.gen::<u32>().into(),
-        SqlType::UnsignedBigInt(_) => rng.gen::<u32>().into(),
+        SqlType::BigInt(_) | SqlType::Int8 | SqlType::Signed | SqlType::SignedInteger => {
+            rng.gen::<i64>().into()
+        }
+        SqlType::BigIntUnsigned(_) | SqlType::Unsigned | SqlType::UnsignedInteger => {
+            rng.gen::<u64>().into()
+        }
+        SqlType::IntUnsigned(_) => rng.gen::<u32>().into(),
         SqlType::TinyInt(_) => rng.gen::<i8>().into(),
-        SqlType::UnsignedTinyInt(_) => rng.gen::<u8>().into(),
+        SqlType::TinyIntUnsigned(_) => rng.gen::<u8>().into(),
         SqlType::SmallInt(_) | SqlType::Int2 => rng.gen::<i16>().into(),
-        SqlType::UnsignedSmallInt(_) => rng.gen::<u16>().into(),
+        SqlType::SmallIntUnsigned(_) => rng.gen::<u16>().into(),
         SqlType::MediumInt(_) => rng.gen_range((-1i32 << 23)..(1i32 << 23)).into(),
-        SqlType::UnsignedMediumInt(_) => rng.gen_range(0..(1u32 << 24)).into(),
+        SqlType::MediumIntUnsigned(_) => rng.gen_range(0..(1u32 << 24)).into(),
         SqlType::Float | SqlType::Double => 1.5f64.try_into().unwrap(),
         SqlType::Real => 1.5f32.try_into().unwrap(),
         SqlType::Decimal(prec, scale) => {
@@ -656,15 +664,19 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         SqlType::Char(None) => (idx % 10).to_string().into(),
         SqlType::QuotedChar => (idx as i8).into(),
         SqlType::Int(_) | SqlType::Int4 => (idx as i32).into(),
-        SqlType::BigInt(_) | SqlType::Int8 => (idx as i64).into(),
-        SqlType::UnsignedInt(_) => idx.into(),
-        SqlType::UnsignedBigInt(_) => (idx as u64).into(),
+        SqlType::BigInt(_) | SqlType::Int8 | SqlType::Signed | SqlType::SignedInteger => {
+            (idx as i64).into()
+        }
+        SqlType::IntUnsigned(_) => idx.into(),
+        SqlType::BigIntUnsigned(_) | SqlType::Unsigned | SqlType::UnsignedInteger => {
+            (idx as u64).into()
+        }
         SqlType::TinyInt(_) => (idx as i8).into(),
-        SqlType::UnsignedTinyInt(_) => (idx).into(),
+        SqlType::TinyIntUnsigned(_) => (idx).into(),
         SqlType::SmallInt(_) | SqlType::Int2 => (idx as i16).into(),
-        SqlType::UnsignedSmallInt(_) => (idx as u16).into(),
+        SqlType::SmallIntUnsigned(_) => (idx as u16).into(),
         SqlType::MediumInt(_) => (idx as i32).into(),
-        SqlType::UnsignedMediumInt(_) => (idx).into(),
+        SqlType::MediumIntUnsigned(_) => (idx).into(),
         SqlType::Float | SqlType::Double => (1.5 + idx as f64).try_into().unwrap(),
         SqlType::Real => (1.5 + idx as f32).try_into().unwrap(),
         SqlType::Decimal(prec, scale) => Decimal::new(clamp_digits(*prec as _), *scale as _).into(),

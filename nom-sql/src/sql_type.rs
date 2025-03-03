@@ -274,19 +274,19 @@ fn type_identifier_part1(
             value(SqlType::Int2, tag_no_case("int2")),
             value(SqlType::Int4, tag_no_case("int4")),
             value(SqlType::Int8, tag_no_case("int8")),
-            |i| int_type("tinyint", SqlType::UnsignedTinyInt, SqlType::TinyInt, i),
-            |i| int_type("smallint", SqlType::UnsignedSmallInt, SqlType::SmallInt, i),
+            |i| int_type("tinyint", SqlType::TinyIntUnsigned, SqlType::TinyInt, i),
+            |i| int_type("smallint", SqlType::SmallIntUnsigned, SqlType::SmallInt, i),
             cond_fail(dialect == Dialect::MySQL, |i| {
                 int_type(
                     "mediumint",
-                    SqlType::UnsignedMediumInt,
+                    SqlType::MediumIntUnsigned,
                     SqlType::MediumInt,
                     i,
                 )
             }),
-            |i| int_type("integer", SqlType::UnsignedInt, SqlType::Int, i),
-            |i| int_type("int", SqlType::UnsignedInt, SqlType::Int, i),
-            |i| int_type("bigint", SqlType::UnsignedBigInt, SqlType::BigInt, i),
+            |i| int_type("integer", SqlType::IntUnsigned, SqlType::Int, i),
+            |i| int_type("int", SqlType::IntUnsigned, SqlType::Int, i),
+            |i| int_type("bigint", SqlType::BigIntUnsigned, SqlType::BigInt, i),
             map(alt((tag_no_case("boolean"), tag_no_case("bool"))), |_| {
                 SqlType::Bool
             }),
@@ -519,7 +519,13 @@ pub fn mysql_int_cast_targets() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&
                     whitespace0,
                     opt(tag_no_case("integer")),
                 )),
-                |_| SqlType::BigInt(None),
+                |(_, _, int)| {
+                    if int.is_some() {
+                        SqlType::SignedInteger
+                    } else {
+                        SqlType::Signed
+                    }
+                },
             ),
             map(
                 tuple((
@@ -527,7 +533,13 @@ pub fn mysql_int_cast_targets() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&
                     whitespace0,
                     opt(tag_no_case("integer")),
                 )),
-                |_| SqlType::UnsignedBigInt(None),
+                |(_, _, int)| {
+                    if int.is_some() {
+                        SqlType::UnsignedInteger
+                    } else {
+                        SqlType::Unsigned
+                    }
+                },
             ),
         ))(i)
     }
@@ -599,11 +611,11 @@ mod tests {
         let res = type_identifier(Dialect::MySQL)(LocatedSpan::new(type1.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::VarChar(Some(255)));
         let res = type_identifier(Dialect::MySQL)(LocatedSpan::new(type2.as_bytes()));
-        assert_eq!(res.unwrap().1, SqlType::UnsignedBigInt(Some(20)));
+        assert_eq!(res.unwrap().1, SqlType::BigIntUnsigned(Some(20)));
         let res = type_identifier(Dialect::MySQL)(LocatedSpan::new(type3.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::BigInt(Some(20)));
         let res = type_identifier(Dialect::MySQL)(LocatedSpan::new(type2.as_bytes()));
-        assert_eq!(res.unwrap().1, SqlType::UnsignedBigInt(Some(20)));
+        assert_eq!(res.unwrap().1, SqlType::BigIntUnsigned(Some(20)));
 
         let ok = [
             "bool",

@@ -1002,7 +1002,7 @@ mod tests {
                 res.unwrap().1,
                 Expr::Cast {
                     expr: Box::new(Expr::Literal(Literal::Integer(-128))),
-                    ty: SqlType::UnsignedBigInt(None),
+                    ty: SqlType::Unsigned,
                     postgres_style: false
                 }
             );

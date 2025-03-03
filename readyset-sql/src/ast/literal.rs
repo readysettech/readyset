@@ -297,29 +297,29 @@ impl Literal {
             SqlType::Int(_) | SqlType::Int4 => {
                 any::<i32>().prop_map(|i| Self::Integer(i as _)).boxed()
             }
-            SqlType::UnsignedInt(_) => any::<u32>()
+            SqlType::IntUnsigned(_) => any::<u32>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
             SqlType::BigInt(_) | SqlType::Int8 => {
                 any::<i64>().prop_map(|i| Self::Integer(i as _)).boxed()
             }
-            SqlType::UnsignedBigInt(_) => any::<u64>()
+            SqlType::BigIntUnsigned(_) => any::<u64>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
             SqlType::TinyInt(_) => any::<i8>().prop_map(|i| Self::Integer(i as _)).boxed(),
-            SqlType::UnsignedTinyInt(_) => any::<u8>()
+            SqlType::TinyIntUnsigned(_) => any::<u8>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
             SqlType::SmallInt(_) | SqlType::Int2 => {
                 any::<i16>().prop_map(|i| Self::Integer(i as _)).boxed()
             }
-            SqlType::UnsignedSmallInt(_) => any::<u16>()
+            SqlType::SmallIntUnsigned(_) => any::<u16>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
             SqlType::MediumInt(_) => ((-1i32 << 23)..(1i32 << 23))
                 .prop_map(|i| Self::Integer(i as _))
                 .boxed(),
-            SqlType::UnsignedMediumInt(_) => (0..(1u32 << 24))
+            SqlType::MediumIntUnsigned(_) => (0..(1u32 << 24))
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
             SqlType::Blob
@@ -388,6 +388,12 @@ impl Literal {
             SqlType::Other(ty) => {
                 unimplemented!("Other({}) isn't implemented yet", ty.display_unquoted())
             }
+            SqlType::Signed
+            | SqlType::Unsigned
+            | SqlType::SignedInteger
+            | SqlType::UnsignedInteger => unimplemented!(
+                "This type is only valid in `CAST` and can't be used as a Column Def"
+            ),
         }
     }
 

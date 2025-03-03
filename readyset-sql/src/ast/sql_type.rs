@@ -54,15 +54,20 @@ pub enum SqlType {
     Char(Option<u16>),
     VarChar(Option<u16>),
     Int(Option<u16>),
-    UnsignedInt(Option<u16>),
+    // These 4 are used only in MySQL CAST
+    Signed,
+    Unsigned,
+    UnsignedInteger,
+    SignedInteger,
+    IntUnsigned(Option<u16>),
     BigInt(Option<u16>),
-    UnsignedBigInt(Option<u16>),
+    BigIntUnsigned(Option<u16>),
     TinyInt(Option<u16>),
-    UnsignedTinyInt(Option<u16>),
+    TinyIntUnsigned(Option<u16>),
     SmallInt(Option<u16>),
-    UnsignedSmallInt(Option<u16>),
+    SmallIntUnsigned(Option<u16>),
     MediumInt(Option<u16>),
-    UnsignedMediumInt(Option<u16>),
+    MediumIntUnsigned(Option<u16>),
     Int2,
     Int4,
     Int8,
@@ -203,11 +208,11 @@ impl Arbitrary for SqlType {
                 (1..255u16).prop_map(|p| SmallInt(Some(p))).boxed(),
                 option::of(1..255u16).prop_map(TinyInt).boxed(),
                 option::of(1..255u16).prop_map(MediumInt).boxed(),
-                option::of(1..255u16).prop_map(UnsignedInt).boxed(),
-                option::of(1..255u16).prop_map(UnsignedSmallInt).boxed(),
-                option::of(1..255u16).prop_map(UnsignedBigInt).boxed(),
-                option::of(1..255u16).prop_map(UnsignedTinyInt).boxed(),
-                option::of(1..255u16).prop_map(UnsignedMediumInt).boxed(),
+                option::of(1..255u16).prop_map(IntUnsigned).boxed(),
+                option::of(1..255u16).prop_map(SmallIntUnsigned).boxed(),
+                option::of(1..255u16).prop_map(BigIntUnsigned).boxed(),
+                option::of(1..255u16).prop_map(TinyIntUnsigned).boxed(),
+                option::of(1..255u16).prop_map(MediumIntUnsigned).boxed(),
                 Just(TinyText).boxed(),
                 Just(MediumText).boxed(),
                 Just(LongText).boxed(),
@@ -296,27 +301,27 @@ impl DialectDisplay for SqlType {
                 SqlType::Char(len) => write_with_len(f, "CHAR", len),
                 SqlType::VarChar(len) => write_with_len(f, "VARCHAR", len),
                 SqlType::Int(len) => write_with_len(f, "INT", len),
-                SqlType::UnsignedInt(len) => {
+                SqlType::IntUnsigned(len) => {
                     write_with_len(f, "INT", len)?;
                     write!(f, " UNSIGNED")
                 }
                 SqlType::BigInt(len) => write_with_len(f, "BIGINT", len),
-                SqlType::UnsignedBigInt(len) => {
+                SqlType::BigIntUnsigned(len) => {
                     write_with_len(f, "BIGINT", len)?;
                     write!(f, " UNSIGNED")
                 }
                 SqlType::TinyInt(len) => write_with_len(f, "TINYINT", len),
-                SqlType::UnsignedTinyInt(len) => {
+                SqlType::TinyIntUnsigned(len) => {
                     write_with_len(f, "TINYINT", len)?;
                     write!(f, " UNSIGNED")
                 }
                 SqlType::SmallInt(len) => write_with_len(f, "SMALLINT", len),
-                SqlType::UnsignedSmallInt(len) => {
+                SqlType::SmallIntUnsigned(len) => {
                     write_with_len(f, "SMALLINT", len)?;
                     write!(f, " UNSIGNED")
                 }
                 SqlType::MediumInt(len) => write_with_len(f, "MEDIUMINT", len),
-                SqlType::UnsignedMediumInt(len) => {
+                SqlType::MediumIntUnsigned(len) => {
                     write_with_len(f, "MEDIUMINT", len)?;
                     write!(f, " UNSIGNED")
                 }
@@ -398,6 +403,10 @@ impl DialectDisplay for SqlType {
                 SqlType::BigSerial => write!(f, "BIGSERIAL"),
                 SqlType::Array(ref t) => write!(f, "{}[]", t.display(dialect)),
                 SqlType::Other(ref t) => write!(f, "{}", t.display(dialect)),
+                SqlType::Signed => write!(f, "SIGNED"),
+                SqlType::Unsigned => write!(f, "UNSIGNED"),
+                SqlType::SignedInteger => write!(f, "SIGNED INTEGER"),
+                SqlType::UnsignedInteger => write!(f, "UNSIGNED INTEGER"),
             }
         })
     }

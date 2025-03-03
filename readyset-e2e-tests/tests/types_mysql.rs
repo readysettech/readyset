@@ -296,11 +296,11 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
         SqlType::MediumInt(_) => ((-1i64 << 23)..(1i64 << 23)).prop_map(Value::Int).boxed(),
         SqlType::Int(_) => any::<i32>().prop_map(|i| Value::Int(i as i64)).boxed(),
         SqlType::BigInt(_) => any::<i64>().prop_map(Value::Int).boxed(),
-        SqlType::UnsignedTinyInt(_) => any::<u8>().prop_map(|i| Value::UInt(i as u64)).boxed(),
-        SqlType::UnsignedSmallInt(_) => any::<u16>().prop_map(|i| Value::UInt(i as u64)).boxed(),
-        SqlType::UnsignedMediumInt(_) => (0..(1u64 << 24)).prop_map(Value::UInt).boxed(),
-        SqlType::UnsignedInt(_) => any::<u32>().prop_map(|i| Value::UInt(i as u64)).boxed(),
-        SqlType::UnsignedBigInt(_) => any::<u64>().prop_map(Value::UInt).boxed(),
+        SqlType::TinyIntUnsigned(_) => any::<u8>().prop_map(|i| Value::UInt(i as u64)).boxed(),
+        SqlType::SmallIntUnsigned(_) => any::<u16>().prop_map(|i| Value::UInt(i as u64)).boxed(),
+        SqlType::MediumIntUnsigned(_) => (0..(1u64 << 24)).prop_map(Value::UInt).boxed(),
+        SqlType::IntUnsigned(_) => any::<u32>().prop_map(|i| Value::UInt(i as u64)).boxed(),
+        SqlType::BigIntUnsigned(_) => any::<u64>().prop_map(Value::UInt).boxed(),
         SqlType::Decimal(m, d) => arbitrary_decimal_bytes_with_digits(m.into(), d)
             .prop_map(Value::Bytes)
             .boxed(),
@@ -315,6 +315,9 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
         SqlType::Enum(variants) => select(variants.iter().cloned().collect::<Vec<_>>())
             .prop_map(|variant: String| variant.into())
             .boxed(),
+        SqlType::Signed | SqlType::Unsigned | SqlType::UnsignedInteger | SqlType::SignedInteger => {
+            unimplemented!("This type is only valid in `CAST` and can't be used as a Column Def")
+        }
     }
 }
 
@@ -385,7 +388,7 @@ fn round_trip_mysql_type_regressions_mediumint_positive() {
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_unsigned_positive() {
     round_trip_mysql_type(
-        SqlType::UnsignedMediumInt(None),
+        SqlType::MediumIntUnsigned(None),
         Value::UInt(1),
         Value::UInt(2),
     );
@@ -403,7 +406,7 @@ fn round_trip_mysql_type_regressions_mediumint_negative() {
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_signed() {
     round_trip_mysql_type(
-        SqlType::UnsignedMediumInt(None),
+        SqlType::MediumIntUnsigned(None),
         Value::Int(8388608),
         Value::Int(8388609),
     );
@@ -414,7 +417,7 @@ fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_s
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_unsigned() {
     round_trip_mysql_type(
-        SqlType::UnsignedMediumInt(None),
+        SqlType::MediumIntUnsigned(None),
         Value::UInt(8388608),
         Value::UInt(8388609),
     );
@@ -546,7 +549,7 @@ fn round_trip_mysql_type_regressions_char_255_length_nonempty() {
 #[slow]
 fn round_trip_mysql_type_regressions_bigint_high() {
     round_trip_mysql_type(
-        SqlType::UnsignedBigInt(None),
+        SqlType::BigIntUnsigned(None),
         Value::UInt(9223372036854775808),
         Value::UInt(9223372036854775809),
     )

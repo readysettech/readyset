@@ -240,34 +240,28 @@ impl DfType {
                 resolve_custom_type,
                 collation,
             )?)),
-
             Enum(ref variants) => Self::Enum {
                 // PERF: Cloning variants is O(1).
                 variants: variants.clone(),
                 metadata: None,
             },
-
             // FIXME(ENG-1650): Convert to `tinyint(1)` for MySQL.
             Bool => Self::Bool,
-
             Serial => dialect.serial_type(),
             BigSerial => Self::BigInt,
-
             Int(_) | Int4 => Self::Int,
             TinyInt(_) => Self::TinyInt,
             SmallInt(_) | Int2 => Self::SmallInt,
             MediumInt(_) => Self::MediumInt,
-            BigInt(_) | Int8 => Self::BigInt,
-            UnsignedInt(_) => Self::UnsignedInt,
-            UnsignedTinyInt(_) => Self::UnsignedTinyInt,
-            UnsignedSmallInt(_) => Self::UnsignedSmallInt,
-            UnsignedMediumInt(_) => Self::UnsignedMediumInt,
-            UnsignedBigInt(_) => Self::UnsignedBigInt,
-
+            BigInt(_) | Signed | Int8 | SignedInteger => Self::BigInt,
+            IntUnsigned(_) => Self::UnsignedInt,
+            TinyIntUnsigned(_) => Self::UnsignedTinyInt,
+            SmallIntUnsigned(_) => Self::UnsignedSmallInt,
+            MediumIntUnsigned(_) => Self::UnsignedMediumInt,
+            BigIntUnsigned(_) | Unsigned | UnsignedInteger => Self::UnsignedBigInt,
             Double => Self::Double,
             Float => dialect.float_type(),
             Real => dialect.real_type(),
-
             // Decimal and Numeric are semantically aliases.
             Numeric(prec) => {
                 let (prec, scale) = prec.unwrap_or((Self::DEFAULT_NUMERIC_PREC, None));
@@ -278,7 +272,6 @@ impl DfType {
                 prec: prec.into(),
                 scale,
             },
-
             // Character string types.
             //
             // `varchar` by itself is an error in MySQL but synonymous with `text` in PostgreSQL.
@@ -288,17 +281,13 @@ impl DfType {
             VarChar(Some(len)) => Self::VarChar(len, collation.unwrap_or_default()),
             Char(len) => Self::Char(len.unwrap_or(1), collation.unwrap_or_default()),
             QuotedChar => Self::TinyInt,
-
             Blob | TinyBlob | MediumBlob | LongBlob | ByteArray => Self::Blob,
             VarBinary(len) => Self::VarBinary(len),
             Binary(len) => Self::Binary(len.unwrap_or(1)),
-
             Bit(len) => Self::Bit(len.unwrap_or(1)),
             VarBit(len) => Self::VarBit(len),
-
             Json => Self::Json,
             Jsonb => Self::Jsonb,
-
             Date => Self::Date,
             #[allow(clippy::or_fun_call)]
             DateTime(subsecond_digits) => Self::DateTime {

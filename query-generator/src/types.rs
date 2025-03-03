@@ -11,10 +11,10 @@ pub fn arbitrary_numeric_type(dialect: Option<Dialect>) -> impl Strategy<Value =
     if dialect.is_none() || dialect == Some(Dialect::MySQL) {
         variants.extend([
             TinyInt(None),
-            UnsignedInt(None),
-            UnsignedBigInt(None),
-            UnsignedTinyInt(None),
-            UnsignedSmallInt(None),
+            IntUnsigned(None),
+            BigIntUnsigned(None),
+            TinyIntUnsigned(None),
+            SmallIntUnsigned(None),
         ])
     }
 
