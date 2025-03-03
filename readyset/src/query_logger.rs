@@ -6,7 +6,7 @@ use readyset_client_metrics::{
 };
 use readyset_sql::ast::SqlQuery;
 
-use readyset_sql::DialectDisplay;
+use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
 use readyset_sql_passes::anonymize::anonymize_literals;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -27,10 +27,11 @@ pub struct QueryLogger {
 
     log_mode: QueryLogMode,
     rewrite_params: AdapterRewriteParams,
+    dialect: Dialect,
 }
 
 impl QueryLogger {
-    pub fn new(mode: QueryLogMode, rewrite_params: AdapterRewriteParams) -> Self {
+    pub fn new(mode: QueryLogMode, dialect: Dialect, rewrite_params: AdapterRewriteParams) -> Self {
         QueryLogger {
             parse_error_count: counter!(readyset_client_metrics::recorded::QUERY_LOG_PARSE_ERRORS,),
             set_disallowed_count: counter!(
@@ -47,6 +48,7 @@ impl QueryLogger {
 
             log_mode: mode,
             rewrite_params,
+            dialect,
         }
     }
 
@@ -54,14 +56,14 @@ impl QueryLogger {
         query: &SqlQuery,
         query_id_wrapper: &QueryIdWrapper,
         rewrite_params: AdapterRewriteParams,
+        dialect: Dialect,
     ) -> (SharedString, Option<QueryId>) {
         match query {
             SqlQuery::Select(stmt) => {
                 let mut stmt = stmt.clone();
                 if adapter_rewrites::process_query(&mut stmt, rewrite_params).is_ok() {
                     anonymize_literals(&mut stmt);
-                    // FIXME(REA-2168): Use correct dialect.
-                    let query_string = stmt.display(readyset_sql::Dialect::MySQL).to_string();
+                    let query_string = stmt.display(dialect).to_string();
 
                     let query_id = match query_id_wrapper {
                         QueryIdWrapper::Uncalculated(schema_search_path) => {
@@ -171,7 +173,7 @@ impl QueryLogger {
         };
 
         let (query_string, query_id) =
-            Self::process_query(query, &event.query_id, self.rewrite_params);
+            Self::process_query(query, &event.query_id, self.rewrite_params, self.dialect);
 
         let mut labels = Self::create_labels(DatabaseType::Upstream, Some(query_string), query_id);
         self.record_query_metrics(event, &labels);
