@@ -100,13 +100,18 @@ impl QueryLogger {
     fn record_query_metrics(
         &self,
         event: &QueryExecutionEvent,
-        labels: &[(&'static str, SharedString)],
+        query_string: Option<SharedString>,
+        query_id: Option<QueryId>,
     ) {
         if let Some(duration) = event.upstream_duration {
-            histogram!(recorded::QUERY_LOG_EXECUTION_TIME, labels)
+            let upstream_labels =
+                Self::create_labels(DatabaseType::Upstream, query_string.clone(), query_id);
+            histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &upstream_labels)
                 .record(duration.as_micros() as f64);
-            counter!(recorded::QUERY_LOG_EXECUTION_COUNT, labels).increment(1);
+            counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &upstream_labels).increment(1);
         }
+
+        let labels = Self::create_labels(DatabaseType::ReadySet, query_string, query_id);
 
         match &event.readyset_event {
             Some(ReadysetExecutionEvent::CacheRead {
@@ -127,16 +132,16 @@ impl QueryLogger {
                         .increment(*cache_misses);
                 }
 
-                cached_labels.extend_from_slice(labels);
+                cached_labels.extend_from_slice(&labels);
 
                 histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &cached_labels)
                     .record(duration.as_micros() as f64);
                 counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &cached_labels).increment(1);
             }
             Some(ReadysetExecutionEvent::Other { duration }) => {
-                histogram!(recorded::QUERY_LOG_EXECUTION_TIME, labels)
+                histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &labels)
                     .record(duration.as_micros() as f64);
-                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, labels).increment(1);
+                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &labels).increment(1);
             }
             None => (),
         }
@@ -162,8 +167,7 @@ impl QueryLogger {
         }
 
         if !self.log_mode.is_verbose() {
-            let labels = Self::create_labels(DatabaseType::Upstream, None, None);
-            self.record_query_metrics(event, &labels);
+            self.record_query_metrics(event, None, None);
             return;
         }
 
@@ -175,14 +179,15 @@ impl QueryLogger {
         let (query_string, query_id) =
             Self::process_query(query, &event.query_id, self.rewrite_params, self.dialect);
 
-        let mut labels = Self::create_labels(DatabaseType::Upstream, Some(query_string), query_id);
-        self.record_query_metrics(event, &labels);
-
         if let Some(duration) = event.parse_duration {
+            let mut labels =
+                Self::create_labels(DatabaseType::ReadySet, Some(query_string.clone()), query_id);
             labels.push(("event_type", SharedString::from(event.event)));
             labels.push(("query_type", SharedString::from(event.sql_type)));
             histogram!(recorded::QUERY_LOG_PARSE_TIME, &labels).record(duration.as_micros() as f64);
         }
+
+        self.record_query_metrics(event, Some(query_string), query_id);
     }
 
     /// Async task that logs query stats.
