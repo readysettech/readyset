@@ -57,7 +57,7 @@ impl QueryLogger {
         query_id_wrapper: &QueryIdWrapper,
         rewrite_params: AdapterRewriteParams,
         dialect: Dialect,
-    ) -> (SharedString, Option<QueryId>) {
+    ) -> (SharedString, Option<SharedString>) {
         match query {
             SqlQuery::Select(stmt) => {
                 let mut stmt = stmt.clone();
@@ -66,10 +66,12 @@ impl QueryLogger {
                     let query_string = stmt.display(dialect).to_string();
 
                     let query_id = match query_id_wrapper {
-                        QueryIdWrapper::Uncalculated(schema_search_path) => {
-                            Some(QueryId::from_select(&stmt, schema_search_path))
-                        }
-                        QueryIdWrapper::Calculated(qid) => Some(*qid),
+                        QueryIdWrapper::Uncalculated(schema_search_path) => Some(
+                            QueryId::from_select(&stmt, schema_search_path)
+                                .to_string()
+                                .into(),
+                        ),
+                        QueryIdWrapper::Calculated(qid) => Some(qid.to_string().into()),
                         QueryIdWrapper::None => None,
                     };
 
@@ -85,14 +87,14 @@ impl QueryLogger {
     fn create_labels(
         database_type: DatabaseType,
         query_string: Option<SharedString>,
-        query_id: Option<QueryId>,
+        query_id: Option<SharedString>,
     ) -> Vec<(&'static str, SharedString)> {
-        let mut labels = vec![("database_type", SharedString::from(database_type))];
+        let mut labels = vec![("database_type", database_type.into())];
         if let Some(query) = query_string {
             labels.push(("query", query));
         }
         if let Some(id) = query_id {
-            labels.push(("query_id", SharedString::from(id.to_string())));
+            labels.push(("query_id", id));
         }
         labels
     }
@@ -101,11 +103,14 @@ impl QueryLogger {
         &self,
         event: &QueryExecutionEvent,
         query_string: Option<SharedString>,
-        query_id: Option<QueryId>,
+        query_id: Option<SharedString>,
     ) {
         if let Some(duration) = event.upstream_duration {
-            let upstream_labels =
-                Self::create_labels(DatabaseType::Upstream, query_string.clone(), query_id);
+            let upstream_labels = Self::create_labels(
+                DatabaseType::Upstream,
+                query_string.clone(),
+                query_id.clone(),
+            );
             histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &upstream_labels)
                 .record(duration.as_micros() as f64);
             counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &upstream_labels).increment(1);
@@ -180,8 +185,11 @@ impl QueryLogger {
             Self::process_query(query, &event.query_id, self.rewrite_params, self.dialect);
 
         if let Some(duration) = event.parse_duration {
-            let mut labels =
-                Self::create_labels(DatabaseType::ReadySet, Some(query_string.clone()), query_id);
+            let mut labels = Self::create_labels(
+                DatabaseType::ReadySet,
+                Some(query_string.clone()),
+                query_id.clone(),
+            );
             labels.push(("event_type", SharedString::from(event.event)));
             labels.push(("query_type", SharedString::from(event.sql_type)));
             histogram!(recorded::QUERY_LOG_PARSE_TIME, &labels).record(duration.as_micros() as f64);
