@@ -82,7 +82,7 @@ fn binary_operator_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Binar
             let (i, _) = tag_no_case("ilike")(i)?;
             let (i, _) = whitespace1(i)?;
 
-            Ok((i, BinaryOperator::NotLike))
+            Ok((i, BinaryOperator::NotILike))
         },
         move |i| {
             let (i, _) = tag_no_case("is")(i)?;
