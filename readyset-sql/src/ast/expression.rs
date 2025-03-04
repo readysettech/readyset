@@ -1108,22 +1108,26 @@ impl FromDialect<sqlparser::ast::Ident> for Expr {
 
 /// Convert a function call into an expression.
 ///
-/// We don't turn every function into a [`FunctionExpr`], beacuse we have some special
-/// cases that turn into other kinds of expressions, such as `DATE(x)` into `CAST(x AS DATE)`.
+/// We don't turn every function into a [`FunctionExpr`], because we have some special cases that
+/// turn into other kinds of expressions, such as `DATE(x)` into `CAST(x AS DATE)`.
 impl TryFromDialect<sqlparser::ast::Function> for Expr {
     fn try_from_dialect(
         value: sqlparser::ast::Function,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
         // TODO: handle null treatment and other stuff
-        let sqlparser::ast::Function { args, mut name, .. } = value;
+        let sqlparser::ast::Function { args, name, .. } = value;
 
-        // TODO: if there's not exactly 1 component, it's presumably a UDF or something and we should bail
-        let sqlparser::ast::ObjectNamePart::Identifier(name) = name.0.pop().unwrap();
-        let name_lowercase = name.value.to_lowercase();
+        let sqlparser::ast::ObjectNamePart::Identifier(sqlparser::ast::Ident {
+            value: name, ..
+        }) = name
+            .0
+            .into_iter()
+            .exactly_one()
+            .map_err(|_| unsupported_err!("non-builtin function (UDF)"))?;
 
         // Special case for `COUNT(*)`
-        if name_lowercase.as_str() == "count" {
+        if name.eq_ignore_ascii_case("COUNT") {
             use sqlparser::ast::{
                 FunctionArg, FunctionArgExpr, FunctionArgumentList, FunctionArguments,
             };
@@ -1137,13 +1141,13 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             }
         }
 
-        let (exprs, distinct, separator): (Vec<Expr>, bool, Option<String>) = match args {
+        let (args, distinct, separator) = match args {
             sqlparser::ast::FunctionArguments::List(sqlparser::ast::FunctionArgumentList {
                 args,
                 duplicate_treatment,
                 clauses, // TODO: handle other stuff like order/limit, etc.
             }) => (
-                args.try_into_dialect(dialect)?,
+                args,
                 duplicate_treatment == Some(sqlparser::ast::DuplicateTreatment::Distinct),
                 clauses.into_iter().find_map(|clause| match clause {
                     sqlparser::ast::FunctionArgumentClause::Separator(separator) => {
@@ -1154,54 +1158,73 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             ),
             sqlparser::ast::FunctionArguments::None => (vec![], false, None),
             other => {
-                return not_yet_implemented!("function call args: {other:?}");
+                return not_yet_implemented!(
+                    "subquery function call argument for {name}: {other:?}"
+                );
             }
         };
-        Ok(match name_lowercase.as_str() {
-            // TODO: fix this unnecessary cloning
-            "avg" => Self::Call(FunctionExpr::Avg {
-                expr: Box::new(exprs[0].clone()),
+
+        let mut exprs = args.into_iter().map(|arg| arg.try_into_dialect(dialect));
+        let mut next_expr = || {
+            exprs
+                .next()
+                .ok_or_else(|| failed_err!("not enough arguments for {name}"))?
+                .map(Box::new)
+        };
+
+        let expr = if name.eq_ignore_ascii_case("AVG") {
+            Self::Call(FunctionExpr::Avg {
+                expr: next_expr()?,
                 distinct,
-            }),
-            // TODO: check for `count(*)` which we have a separate enum variant for
-            "count" => Self::Call(FunctionExpr::Count {
-                expr: Box::new(exprs[0].clone()),
+            })
+        } else if name.eq_ignore_ascii_case("COUNT") {
+            Self::Call(FunctionExpr::Count {
+                expr: next_expr()?,
                 distinct,
-            }),
-            "group_concat" => Self::Call(FunctionExpr::GroupConcat {
-                expr: Box::new(exprs[0].clone()),
+            })
+        } else if name.eq_ignore_ascii_case("GROUP_CONCAT") {
+            Self::Call(FunctionExpr::GroupConcat {
+                expr: next_expr()?,
                 separator,
-            }),
-            "max" => Self::Call(FunctionExpr::Max(Box::new(exprs[0].clone()))),
-            "min" => Self::Call(FunctionExpr::Min(Box::new(exprs[0].clone()))),
-            "sum" => Self::Call(FunctionExpr::Sum {
-                expr: Box::new(exprs[0].clone()),
+            })
+        } else if name.eq_ignore_ascii_case("MAX") {
+            Self::Call(FunctionExpr::Max(next_expr()?))
+        } else if name.eq_ignore_ascii_case("MIN") {
+            Self::Call(FunctionExpr::Min(next_expr()?))
+        } else if name.eq_ignore_ascii_case("SUM") {
+            Self::Call(FunctionExpr::Sum {
+                expr: next_expr()?,
                 distinct,
-            }),
-            "date" => Self::Cast {
-                expr: Box::new(exprs[0].clone()),
+            })
+        } else if name.eq_ignore_ascii_case("DATE") {
+            // TODO: Arguably, this should be in a SQL rewrite pass to preserve input when rendering
+            Self::Cast {
+                expr: next_expr()?,
                 ty: crate::ast::SqlType::Date,
                 postgres_style: false,
-            },
+            }
+        } else if name.eq_ignore_ascii_case("LOWER") {
             // TODO(mvzink): support COLLATE for upper and lower. nom-sql doesn't seem to parse
             // collation here, and in the case of sqlparser-rs we would have to pull it out of the
             // inner expression
-            "lower" => Self::Call(FunctionExpr::Lower {
-                expr: Box::new(exprs[0].clone()),
+            Self::Call(FunctionExpr::Lower {
+                expr: next_expr()?,
                 collation: None,
-            }),
-            "upper" => Self::Call(FunctionExpr::Upper {
-                expr: Box::new(exprs[0].clone()),
+            })
+        } else if name.eq_ignore_ascii_case("UPPER") {
+            Self::Call(FunctionExpr::Upper {
+                expr: next_expr()?,
                 collation: None,
-            }),
-            name @ ("extract" | "substring") => {
-                return failed!("{name} should have been converted earlier")
-            }
-            _ => Self::Call(FunctionExpr::Call {
-                name: name.into_dialect(dialect),
-                arguments: exprs,
-            }),
-        })
+            })
+        } else if name.eq_ignore_ascii_case("EXTRACT") || name.eq_ignore_ascii_case("SUBSTRING") {
+            return failed!("{name} should have been converted earlier");
+        } else {
+            Self::Call(FunctionExpr::Call {
+                name: name.into(),
+                arguments: exprs.try_collect()?,
+            })
+        };
+        Ok(expr)
     }
 }
 
