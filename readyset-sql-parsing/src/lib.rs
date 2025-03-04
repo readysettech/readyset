@@ -41,6 +41,9 @@ fn sqlparser_dialect_from_readyset_dialect(
 #[derive(Debug, Clone, Copy)]
 enum ReadysetKeyword {
     CACHES,
+    ENTER,
+    EXIT,
+    MAINTENANCE,
     MIGRATION,
     PROXIED,
     QUERIES,
@@ -57,6 +60,9 @@ impl ReadysetKeyword {
     fn as_str(&self) -> &str {
         match self {
             Self::CACHES => "CACHES",
+            Self::ENTER => "ENTER",
+            Self::EXIT => "EXIT",
+            Self::MAINTENANCE => "MAINTENANCE",
             Self::MIGRATION => "MIGRATION",
             Self::PROXIED => "PROXIED",
             Self::QUERIES => "QUERIES",
@@ -133,6 +139,7 @@ fn parse_readyset_keywords(parser: &mut Parser, keywords: &[ReadysetKeyword]) ->
 /// ALTER READYSET
 ///     | ADD TABLES
 ///     | RESNAPSHOT TABLE
+///     | {ENTER | EXIT} MAINTENANCE MODE
 #[cfg(feature = "sqlparser")]
 fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keyword(parser, ReadysetKeyword::READYSET) {
@@ -158,6 +165,28 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
             Ok(SqlQuery::AlterReadySet(AlterReadysetStatement::AddTables(
                 AddTablesStatement { tables },
             )))
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::ENTER,
+                ReadysetKeyword::MAINTENANCE,
+                ReadysetKeyword::Standard(Keyword::MODE),
+            ],
+        ) {
+            Ok(SqlQuery::AlterReadySet(
+                AlterReadysetStatement::EnterMaintenanceMode,
+            ))
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::EXIT,
+                ReadysetKeyword::MAINTENANCE,
+                ReadysetKeyword::Standard(Keyword::MODE),
+            ],
+        ) {
+            Ok(SqlQuery::AlterReadySet(
+                AlterReadysetStatement::ExitMaintenanceMode,
+            ))
         } else {
             Err(ReadysetParsingError::ReadysetParsingError(
                 "expected RESNAPSHOT TABLE, or ADD TABLES after READYSET".into(),
