@@ -896,13 +896,6 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             Function(function) => function.try_into_dialect(dialect),
             GroupingSets(_vec) => unsupported!("GROUPING SETS"),
             Identifier(ident) => Ok(ident.try_into_dialect(dialect)?),
-            ILike {
-                negated: _,
-                expr: _,
-                pattern: _,
-                escape_char: _,
-                any: _,
-            } => not_yet_implemented!("ILIKE"),
             InList {
                 expr,
                 list,
@@ -957,21 +950,38 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 pattern,
                 escape_char: _,
                 any: _,
-            } => {
-                let like = Self::BinaryOp {
+            } => Ok(if negated {
+                Self::BinaryOp {
+                    lhs: expr.try_into_dialect(dialect)?,
+                    op: crate::ast::BinaryOperator::NotLike,
+                    rhs: pattern.try_into_dialect(dialect)?,
+                }
+            } else {
+                Self::BinaryOp {
                     lhs: expr.try_into_dialect(dialect)?,
                     op: crate::ast::BinaryOperator::Like,
                     rhs: pattern.try_into_dialect(dialect)?,
-                };
-                if negated {
-                    Ok(Self::UnaryOp {
-                        op: crate::ast::UnaryOperator::Not,
-                        rhs: Box::new(like),
-                    })
-                } else {
-                    Ok(like)
                 }
-            }
+            }),
+            ILike {
+                negated,
+                expr,
+                pattern,
+                escape_char: _,
+                any: _,
+            } => Ok(if negated {
+                Self::BinaryOp {
+                    lhs: expr.try_into_dialect(dialect)?,
+                    op: crate::ast::BinaryOperator::NotILike,
+                    rhs: pattern.try_into_dialect(dialect)?,
+                }
+            } else {
+                Self::BinaryOp {
+                    lhs: expr.try_into_dialect(dialect)?,
+                    op: crate::ast::BinaryOperator::ILike,
+                    rhs: pattern.try_into_dialect(dialect)?,
+                }
+            }),
             Map(_map) => not_yet_implemented!("MAP"),
             MatchAgainst {
                 columns: _,
