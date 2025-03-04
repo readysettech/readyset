@@ -730,6 +730,41 @@ mod tests {
     }
 
     #[test]
+    fn tuple_condition_expr() {
+        let qstring = "select data from Records where ROW(recordId, recordType) = (?, ?);";
+
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+
+        let expected_where_cond = Some(Expr::BinaryOp {
+            lhs: Box::new(Expr::Row {
+                explicit: true,
+                exprs: vec![
+                    Expr::Column(Column::from("recordId")),
+                    Expr::Column(Column::from("recordType")),
+                ],
+            }),
+            op: BinaryOperator::Equal,
+            rhs: Box::new(Expr::Row {
+                explicit: false,
+                exprs: vec![
+                    Expr::Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark)),
+                    Expr::Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark)),
+                ],
+            }),
+        });
+
+        assert_eq!(
+            res.unwrap().1,
+            SelectStatement {
+                tables: vec![TableExpr::from(Relation::from("Records"))],
+                fields: columns(&["data"]),
+                where_clause: expected_where_cond,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
     fn simple_condition_expr() {
         let qstring = "select infoJson from PaperStorage where paperId=? and paperStorageId=?;";
 

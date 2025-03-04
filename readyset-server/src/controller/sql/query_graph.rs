@@ -623,9 +623,9 @@ fn classify_conditionals(
 
                 params.extend(new_params);
             } else if is_predicate(op) {
-                // atomic selection predicate
-                if let Expr::Literal(Literal::Placeholder(ref placeholder)) = **rhs {
-                    if let Expr::Column(ref lf) = **lhs {
+                match (&**lhs, &**rhs) {
+                    // Atomic selection predicate: Column compared to a Placeholder
+                    (Expr::Column(lf), Expr::Literal(Literal::Placeholder(placeholder))) => {
                         let idx = match placeholder {
                             ItemPlaceholder::DollarNumber(idx) => Some(*idx as usize),
                             _ => None,
@@ -636,15 +636,47 @@ fn classify_conditionals(
                             placeholder_idx: idx,
                         });
                     }
-                } else if let Expr::Column(Column {
-                    table: Some(table), ..
-                }) = &**lhs
-                {
-                    local.entry(table.clone()).or_default().push(ce.clone());
-                } else {
-                    // comparisons between computed columns and literals are global
-                    // predicates
-                    global.push(ce.clone());
+
+                    // Row equality: A Row of Columns compared to a Row of Placeholders
+                    (
+                        Expr::Row {
+                            exprs: lhs_exprs, ..
+                        },
+                        Expr::Row {
+                            exprs: rhs_exprs, ..
+                        },
+                    ) if lhs_exprs.len() == rhs_exprs.len() => {
+                        for (lf, expr) in lhs_exprs.iter().zip(rhs_exprs) {
+                            if let Expr::Column(lf) = lf {
+                                if let Expr::Literal(Literal::Placeholder(placeholder)) = expr {
+                                    let idx = match placeholder {
+                                        ItemPlaceholder::DollarNumber(idx) => Some(*idx as usize),
+                                        _ => None,
+                                    };
+                                    params.push(Parameter {
+                                        col: lf.clone(),
+                                        op: *op,
+                                        placeholder_idx: idx,
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    // Column from a specific table: Store locally
+                    (
+                        Expr::Column(Column {
+                            table: Some(table), ..
+                        }),
+                        _,
+                    ) => {
+                        local.entry(table.clone()).or_default().push(ce.clone());
+                    }
+
+                    // Comparisons between computed columns and literals: Store globally
+                    _ => {
+                        global.push(ce.clone());
+                    }
                 }
             } else {
                 unsupported!("Arithmetic not supported here")

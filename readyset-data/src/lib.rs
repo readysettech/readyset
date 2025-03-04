@@ -591,6 +591,7 @@ impl DfValue {
         match self {
             DfValue::None => Ok(DfValue::None),
             DfValue::Array(arr) => match to_ty {
+                DfType::Row => Ok(DfValue::Array(arr.clone())),
                 DfType::Array(t) => Ok(DfValue::from(arr.coerce_to(t, from_ty)?)),
                 DfType::Text(collation) => Ok(DfValue::from_str_and_collation(
                     &arr.to_string(),
@@ -2443,7 +2444,8 @@ mod arbitrary {
             | Some(DfType::Json)
             | Some(DfType::MacAddr)
             | Some(DfType::Uuid)
-            | Some(DfType::Inet) => Just(DfValue::None).boxed(),
+            | Some(DfType::Inet)
+            | Some(DfType::Row) => Just(DfValue::None).boxed(),
         }
     }
 }

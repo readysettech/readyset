@@ -237,6 +237,13 @@ impl Expr {
         D: Borrow<DfValue>,
     {
         match self {
+            // At this point, `Array`s are no longer homogenous and therefore there is no difference
+            Expr::Row { elements } => Ok(DfValue::from(Array::from(
+                elements
+                    .iter()
+                    .map(|expr| expr.eval(record))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ))),
             Expr::Column { index, .. } => record
                 .get(*index)
                 .map(|dt| dt.borrow().clone())

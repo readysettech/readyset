@@ -138,12 +138,14 @@ impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
         // We do not call walk_expr() if we know all placeholders in the expr are supported.
         match expr {
             Expr::BinaryOp { lhs, rhs, op } => {
-                // The placeholder is supported if we have an equality or ordering comparison with a
-                // column on the left and placeholder on the right.
-                if !(matches!(**lhs, Expr::Column(_))
-                    && matches!(**rhs, Expr::Literal(_)) // no need to walk for any literal
-                    && (matches!(op, BinaryOperator::Equal) || op.is_ordering_comparison()))
-                {
+                let is_tuple_equality = matches!(op, BinaryOperator::Equal)
+                    && matches!((&**lhs, &**rhs), (Expr::Row { .. }, Expr::Row { .. }));
+
+                let is_column_literal_comparison = matches!(**lhs, Expr::Column(_))
+                    && matches!(**rhs, Expr::Literal(_)) // No need to walk for any literal
+                    && (matches!(op, BinaryOperator::Equal) || op.is_ordering_comparison());
+
+                if !is_column_literal_comparison && !is_tuple_equality {
                     let Ok(_) = walk_expr(self, expr);
                 } else {
                     // Record placeholders in either Context::equality_comparisons or

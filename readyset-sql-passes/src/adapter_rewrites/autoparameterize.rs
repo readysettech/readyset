@@ -60,6 +60,17 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                         BinaryOperator::Equal,
                         Expr::Literal(Literal::Placeholder(_)),
                     ) => {}
+                    (Expr::Row { .. }, BinaryOperator::Equal, Expr::Row { exprs, .. }) => {
+                        for expr in exprs {
+                            if let Expr::Literal(lit) = expr {
+                                match lit {
+                                    Literal::Placeholder(_) => continue,
+                                    _ => self.replace_literal(lit),
+                                }
+                            }
+                        }
+                        return Ok(());
+                    }
                     (Expr::Column(_), op, Expr::Literal(Literal::Placeholder(_)))
                         if op.is_ordering_comparison() => {}
                     (Expr::Column(_), BinaryOperator::Equal, Expr::Literal(lit)) => {
@@ -204,6 +215,16 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
                         self.contains_equal = true;
                         if let Literal::Placeholder(_) = lit {
                             self.contains_equal_placeholder = true;
+                        }
+                        return Ok(());
+                    }
+                    // We don't parametrize `(a,b) IN ((w,x),(y,z))`
+                    (Expr::Row { .. }, BinaryOperator::Equal, Expr::Row { exprs, .. }) => {
+                        self.contains_equal = true;
+                        for expr in exprs {
+                            if let Expr::Literal(Literal::Placeholder(_)) = expr {
+                                self.contains_equal_placeholder = true;
+                            }
                         }
                         return Ok(());
                     }
@@ -844,6 +865,15 @@ mod tests {
                 "SELECT id FROM users JOIN (SELECT id FROM users WHERE age > 50) s ON users.id = s.id WHERE id = 1 AND age > 21",
                 "SELECT id FROM users JOIN (SELECT id FROM users WHERE age > 50) s ON users.id = s.id WHERE id = ? AND age > ?",
                 vec![(0, 1.into()), (1, 21.into())],
+            )
+        }
+
+        #[test]
+        fn supported_row_equality_predicates() {
+            test_auto_parameterize_mysql(
+                "SELECT id FROM users WHERE (name, age) = ('Bob', 27)",
+                "SELECT id FROM users WHERE (name, age) = (?, ?)",
+                vec![(0, "Bob".into()), (1, 27.into())],
             )
         }
     }

@@ -4,6 +4,7 @@ pub mod anonymize;
 mod create_table_columns;
 mod detect_problematic_self_joins;
 pub mod detect_unsupported_placeholders;
+mod disallow_row;
 pub mod expr;
 mod implied_tables;
 mod inline_literals;
@@ -22,6 +23,7 @@ use std::collections::{HashMap, HashSet};
 
 use alias_removal::TableAliasRewrite;
 use dataflow_expression::Dialect;
+use disallow_row::DisallowRow;
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{
     CompoundSelectStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
@@ -163,6 +165,7 @@ impl Rewrite for SelectStatement {
         let query_name = context.query_name.unwrap_or("unknown");
 
         self.rewrite_between()
+            .disallow_row()?
             .scalar_optimize_expressions(context.dialect)
             .strip_post_filters()
             .resolve_schemas(

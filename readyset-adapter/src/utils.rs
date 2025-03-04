@@ -370,6 +370,7 @@ where
                         .ok_or_else(|| {
                             bad_request_err("Not enough parameter values given in EXECUTE")
                         })?,
+
                     v => DfValue::try_from(v)?,
                 };
                 let oldv = col2v.insert(c.name.to_string(), v);

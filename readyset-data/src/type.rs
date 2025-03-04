@@ -40,6 +40,8 @@ pub enum DfType {
     /// however this type does not represent that.
     Unknown,
 
+    Row,
+
     /// [PostgreSQL `T[]`](https://www.postgresql.org/docs/current/arrays.html).
     Array(Box<DfType>),
 
@@ -158,17 +160,25 @@ pub enum DfType {
     Date,
 
     /// [MySQL `datetime`](https://dev.mysql.com/doc/refman/8.0/en/datetime.html).
-    DateTime { subsecond_digits: u16 },
+    DateTime {
+        subsecond_digits: u16,
+    },
 
     /// [MySQL `time`](https://dev.mysql.com/doc/refman/8.0/en/datetime.html).
-    Time { subsecond_digits: u16 },
+    Time {
+        subsecond_digits: u16,
+    },
 
     /// [MySQL `timestamp`](https://dev.mysql.com/doc/refman/8.0/en/datetime.html) or
     /// [PostgreSQL `timestamp`](https://www.postgresql.org/docs/current/datatype-datetime.html).
-    Timestamp { subsecond_digits: u16 },
+    Timestamp {
+        subsecond_digits: u16,
+    },
 
     /// [PostgreSQL `timestamptz`/`timestamp with timezone`](https://www.postgresql.org/docs/current/datatype-datetime.html).
-    TimestampTz { subsecond_digits: u16 },
+    TimestampTz {
+        subsecond_digits: u16,
+    },
 
     /// [PostgreSQL `macaddr`](https://www.postgresql.org/docs/current/datatype-net-types.html).
     MacAddr,
@@ -335,6 +345,7 @@ impl DfType {
         match self {
             DfType::Unknown => PgTypeCategory::Unknown,
             DfType::Array(_) => PgTypeCategory::Array,
+            DfType::Row => PgTypeCategory::Composite,
             DfType::Bool => PgTypeCategory::Boolean,
             DfType::Int
             | DfType::UnsignedInt
@@ -766,7 +777,8 @@ impl fmt::Display for DfType {
             | Self::MacAddr
             | Self::Uuid
             | Self::Json
-            | Self::Jsonb => write!(f, "{kind:?}"),
+            | Self::Jsonb
+            | Self::Row => write!(f, "{kind:?}"),
 
             Self::Text(collation) => {
                 write!(f, "Text")?;

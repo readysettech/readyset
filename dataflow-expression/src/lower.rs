@@ -1375,7 +1375,12 @@ impl Expr {
                     ty,
                 })
             }
-            AstExpr::Row { .. } => unsupported!("Row expressions not currently supported"),
+            AstExpr::Row { exprs, .. } => Ok(Self::Row {
+                elements: exprs
+                    .into_iter()
+                    .map(|e| Self::lower(e, dialect, context))
+                    .collect::<ReadySetResult<Vec<_>>>()?,
+            }),
             AstExpr::Exists(_) => unsupported!("EXISTS not currently supported"),
             AstExpr::Variable(_) => unsupported!("Variables not currently supported"),
             AstExpr::Between { .. } | AstExpr::NestedSelect(_) | AstExpr::In { .. } => {
