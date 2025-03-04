@@ -326,14 +326,10 @@ impl Leader {
         };
 
         match (&method, path) {
-            (&Method::GET, "/simple_graph") => {
-                let ds = self.dataflow_state_handle.read().await;
-                Ok(ds.graphviz(false, None).into_bytes())
-            }
             (&Method::GET, "/graph") => {
                 let ds = self.dataflow_state_handle.read().await;
                 let node_sizes = ds.node_sizes().await?;
-                Ok(ds.graphviz(true, Some(node_sizes)).into_bytes())
+                Ok(ds.graphviz(Some(node_sizes)).into_bytes())
             }
             (&Method::GET, path) if path.starts_with("/graph/") => {
                 #[allow(clippy::unwrap_used)]
@@ -344,7 +340,7 @@ impl Leader {
                 let ds = self.dataflow_state_handle.read().await;
                 let node_sizes = ds.node_sizes().await?;
                 Ok(ds
-                    .graphviz_for_query(&query_name, true, Some(node_sizes))?
+                    .graphviz_for_query(&query_name, Some(node_sizes))?
                     .into_bytes())
             }
             (&Method::POST, "/graphviz") => {
@@ -352,9 +348,9 @@ impl Leader {
                 let ds = self.dataflow_state_handle.read().await;
                 let node_sizes = ds.node_sizes().await?;
                 return_serialized!(if let Some(query) = &opts.for_query {
-                    ds.graphviz_for_query(query, opts.detailed, Some(node_sizes))?
+                    ds.graphviz_for_query(query, Some(node_sizes))?
                 } else {
-                    ds.graphviz(opts.detailed, Some(node_sizes))
+                    ds.graphviz(Some(node_sizes))
                 });
             }
             (&Method::GET | &Method::POST, "/get_statistics") => {
@@ -503,7 +499,7 @@ impl Leader {
                     .filter_map(|ni| {
                         let n = &ds.ingredients[ni];
                         if n.is_internal() {
-                            Some((ni, n.name(), n.description(true)))
+                            Some((ni, n.name(), n.description()))
                         } else if n.is_base() {
                             Some((ni, n.name(), "Base table".to_owned()))
                         } else if n.is_reader() {

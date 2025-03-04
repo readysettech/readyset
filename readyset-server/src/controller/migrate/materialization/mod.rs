@@ -639,7 +639,7 @@ impl Materializations {
                      (node {} / {} / {}  would be fully materialized)",
                     ni.index(),
                     graph[ni].name().display_unquoted(),
-                    graph[ni].description(true),
+                    graph[ni].description(),
                 );
             } else {
                 invariant!(
@@ -893,7 +893,6 @@ impl Materializations {
                                                     "{}",
                                                     Graphviz {
                                                         graph,
-                                                        detailed: true,
                                                         node_sizes: None,
                                                         materializations: self,
                                                         domain_nodes: None,
@@ -939,7 +938,6 @@ impl Materializations {
                         "{}",
                         Graphviz {
                             graph,
-                            detailed: true,
                             node_sizes: None,
                             materializations: self,
                             domain_nodes: None,
@@ -1109,7 +1107,6 @@ impl Materializations {
                                 "{}",
                                 Graphviz {
                                     graph,
-                                    detailed: true,
                                     node_sizes: None,
                                     materializations: self,
                                     domain_nodes: None,

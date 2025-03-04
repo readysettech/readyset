@@ -793,14 +793,14 @@ pub fn validate(
                         "invalid sharding: {} ({}) sharded by {:?} != {} ({})'s {:?}",
                         in_ni.index(),
                         if graph[in_ni].is_internal() {
-                            graph[in_ni].description(true)
+                            graph[in_ni].description()
                         } else {
                             "ext".into()
                         },
                         in_sharding,
                         node.index(),
                         if graph[node].is_internal() {
-                            graph[node].description(true)
+                            graph[node].description()
                         } else {
                             "ext".into()
                         },

@@ -498,7 +498,6 @@ impl<'a> Plan<'a> {
                         "{}",
                         Graphviz {
                             graph: self.graph,
-                            detailed: true,
                             node_sizes: None,
                             materializations: self.m,
                             domain_nodes: None,

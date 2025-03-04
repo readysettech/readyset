@@ -437,11 +437,7 @@ impl Ingredient for TopK {
         ColumnSource::exact_copy(self.src.as_global(), cols.into())
     }
 
-    fn description(&self, detailed: bool) -> String {
-        if !detailed {
-            return String::from("TopK");
-        }
-
+    fn description(&self) -> String {
         format!(
             "TopK k={} γ[{}] o[{}]",
             self.k,

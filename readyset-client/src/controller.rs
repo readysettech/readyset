@@ -295,21 +295,10 @@ impl Service<ControllerRequest> for Controller {
 /// Used as the argument to [`ReadySetHandle::graphviz`].
 ///
 /// [dot]: https://graphviz.org/doc/info/lang.html
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct GraphvizOptions {
     /// Limit to only visualizing the graph for a single query by name
     pub for_query: Option<Relation>,
-    /// Generate a detailed representation of the graph, larger and with more information
-    pub detailed: bool,
-}
-
-impl Default for GraphvizOptions {
-    fn default() -> Self {
-        Self {
-            for_query: None,
-            detailed: true,
-        }
-    }
 }
 
 /// A handle to a ReadySet controller.

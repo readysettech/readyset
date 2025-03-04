@@ -85,12 +85,8 @@ impl Ingredient for Filter {
         ColumnSource::exact_copy(self.src.as_global(), cols.to_vec())
     }
 
-    fn description(&self, detailed: bool) -> String {
-        if !detailed {
-            String::from("σ")
-        } else {
-            format!("σ[{}]", self.expression)
-        }
+    fn description(&self) -> String {
+        format!("σ[{}]", self.expression)
     }
 
     fn can_query_through(&self) -> bool {

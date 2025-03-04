@@ -549,14 +549,7 @@ impl Ingredient for Join {
         ])
     }
 
-    fn description(&self, detailed: bool) -> String {
-        if !detailed {
-            return String::from(match self.kind {
-                JoinType::Left => "⋉",
-                JoinType::Inner => "⋈",
-            });
-        }
-
+    fn description(&self) -> String {
         let emit = self
             .emit
             .iter()
@@ -780,7 +773,7 @@ mod tests {
     fn it_describes() {
         let (j, l, r) = setup();
         assert_eq!(
-            j.node().description(true),
+            j.node().description(),
             format!("[{}:0, {}:1, {}:1] {}:(0) ⋉ {}:(0)", l, l, r, l, r)
         );
     }

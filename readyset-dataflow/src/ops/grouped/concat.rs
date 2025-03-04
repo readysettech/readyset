@@ -189,11 +189,7 @@ impl GroupedOperation for GroupConcat {
         Ok(Some(out_str.into()))
     }
 
-    fn description(&self, detailed: bool) -> String {
-        if !detailed {
-            return "CONCAT2".into();
-        }
-
+    fn description(&self) -> String {
         format!(
             "||({}, {:?}) γ{:?}",
             self.source_col, self.separator, self.group_by
@@ -241,7 +237,7 @@ mod tests {
     #[test]
     fn it_describes() {
         let c = setup(true);
-        assert_eq!(c.node().description(true), "||(1, \"#\") γ[0]",);
+        assert_eq!(c.node().description(), "||(1, \"#\") γ[0]",);
     }
 
     #[test]

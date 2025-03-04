@@ -343,29 +343,8 @@ impl Node {
         ))
     }
 
-    /// Produce a compact, human-readable description of this node for Graphviz.
-    ///
-    /// If `detailed` is true, and `self.inner` has is variant `NodeType::Internal`, emit more info.
-    ///
-    ///  Symbol   Description
-    /// --------|-------------
-    ///    ⊥    |  Source
-    ///    B    |  Base
-    ///    ||   |  Concat
-    ///    ⧖    |  Latest
-    ///    γ    |  Group by
-    ///   |*|   |  Count
-    ///    𝛴    |  Sum
-    ///    ⋈    |  Join
-    ///    ⋉    |  Left join
-    ///    ⋃    |  Union
-    ///    →|   |  Ingress
-    ///    |→   |  Egress
-    ///    ÷    |  Dropped
-    ///    R    |  Reader
-    ///    ☒    |  Dropped
-    pub fn description(&self, detailed: bool) -> String {
-        self.inner.description(detailed)
+    pub fn description(&self) -> String {
+        self.inner.description()
     }
 
     pub fn initial_auxiliary_state(&self) -> Option<AuxiliaryNodeState> {

@@ -56,7 +56,7 @@ impl Ingredient for Identity {
         ColumnSource::exact_copy(self.src.as_global(), cols.into())
     }
 
-    fn description(&self, _: bool) -> String {
+    fn description(&self) -> String {
         "≡".into()
     }
 }
