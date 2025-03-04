@@ -121,3 +121,9 @@ fn test_mysql_variable_scope() {
 fn test_postgres_variable_scope() {
     // check_postgres_variable_scope("SET SESSION var = 1;", Some(VariableScope::Session));
 }
+
+#[test]
+fn test_not_like_expressions() {
+    check_parse_both("SELECT * FROM t WHERE a NOT LIKE 'foo';");
+    check_parse_both("SELECT * FROM t WHERE a NOT ILIKE 'foo';");
+}
