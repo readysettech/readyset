@@ -423,23 +423,15 @@ impl NoriaConnector {
 
     pub(crate) async fn graphviz(
         &mut self,
-        simplified: bool,
         for_query: Option<Relation>,
     ) -> ReadySetResult<QueryResult<'static>> {
-        let label = if simplified {
-            "SIMPLIFIED GRAPHVIZ"
-        } else {
-            "GRAPHVIZ"
-        };
+        let label = "GRAPHVIZ";
 
         let graphviz = self
             .inner
             .get_mut()?
             .noria
-            .graphviz(GraphvizOptions {
-                detailed: !simplified,
-                for_query,
-            })
+            .graphviz(GraphvizOptions { for_query })
             .await?;
 
         Ok(QueryResult::Meta(vec![(label, graphviz).into()]))

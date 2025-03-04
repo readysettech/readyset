@@ -702,14 +702,9 @@ impl DfState {
             .collect()
     }
 
-    pub(super) fn graphviz(
-        &self,
-        detailed: bool,
-        node_sizes: Option<HashMap<NodeIndex, NodeSize>>,
-    ) -> String {
+    pub(super) fn graphviz(&self, node_sizes: Option<HashMap<NodeIndex, NodeSize>>) -> String {
         Graphviz {
             graph: &self.ingredients,
-            detailed,
             node_sizes,
             materializations: &self.materializations,
             domain_nodes: Some(&self.domain_nodes),
@@ -721,7 +716,6 @@ impl DfState {
     pub(super) fn graphviz_for_query(
         &self,
         query: &Relation,
-        detailed: bool,
         node_sizes: Option<HashMap<NodeIndex, NodeSize>>,
     ) -> ReadySetResult<String> {
         let ni = self
@@ -736,7 +730,6 @@ impl DfState {
 
         Ok(Graphviz {
             graph: &self.ingredients,
-            detailed,
             node_sizes,
             materializations: &self.materializations,
             domain_nodes: Some(&self.domain_nodes),
@@ -784,7 +777,7 @@ impl DfState {
                 (
                     ni,
                     self.ingredients[ni].name().clone(),
-                    self.ingredients[ni].description(true),
+                    self.ingredients[ni].description(),
                     self.materializations
                         .indexes_for(ni)
                         .expect("Node index came from materializations")
@@ -796,7 +789,7 @@ impl DfState {
                     (
                         ni,
                         n.name().clone(),
-                        n.description(true),
+                        n.description(),
                         HashSet::from([idx.clone()]),
                     )
                 })

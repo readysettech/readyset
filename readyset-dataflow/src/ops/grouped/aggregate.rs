@@ -316,27 +316,7 @@ impl GroupedOperation for Aggregator {
             .map(Some)
     }
 
-    fn description(&self, detailed: bool) -> String {
-        if !detailed {
-            return match self.op {
-                Aggregation::Count => "+".to_owned(),
-                Aggregation::Sum => "𝛴".to_owned(),
-                Aggregation::Avg => "Avg".to_owned(),
-                Aggregation::GroupConcat { separator: ref s } => {
-                    format!("||({})", s)
-                }
-                Aggregation::JsonObjectAgg {
-                    allow_duplicate_keys,
-                } => {
-                    if allow_duplicate_keys {
-                        "JsonObjectAgg".to_owned()
-                    } else {
-                        "JsonbObjectAgg".to_owned()
-                    }
-                }
-            };
-        }
-
+    fn description(&self) -> String {
         let op_string = match self.op {
             Aggregation::Count => "|*|".to_owned(),
             Aggregation::Sum => format!("𝛴({})", self.over),
@@ -444,17 +424,17 @@ mod tests {
         let c = Aggregation::Count
             .over(src, 1, &[0, 2], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
             .unwrap();
-        assert_eq!(c.description(true), "|*| γ[0, 2]");
+        assert_eq!(c.description(), "|*| γ[0, 2]");
 
         let s = Aggregation::Sum
             .over(src, 1, &[2, 0], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
             .unwrap();
-        assert_eq!(s.description(true), "𝛴(1) γ[2, 0]");
+        assert_eq!(s.description(), "𝛴(1) γ[2, 0]");
 
         let a = Aggregation::Avg
             .over(src, 1, &[2, 0], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
             .unwrap();
-        assert_eq!(a.description(true), "Avg(1) γ[2, 0]");
+        assert_eq!(a.description(), "Avg(1) γ[2, 0]");
     }
 
     /// Testing count emits correct records with single column group and single over column

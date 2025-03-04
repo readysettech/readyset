@@ -137,14 +137,7 @@ impl GroupedOperation for ExtremumOperator {
         Ok(extreme)
     }
 
-    fn description(&self, detailed: bool) -> String {
-        if !detailed {
-            return String::from(match self.op {
-                Extremum::Min => "MIN",
-                Extremum::Max => "MAX",
-            });
-        }
-
+    fn description(&self) -> String {
         let op_string = match self.op {
             Extremum::Min => format!("min({})", self.over),
             Extremum::Max => format!("max({})", self.over),

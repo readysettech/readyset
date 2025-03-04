@@ -1062,32 +1062,27 @@ impl Ingredient for Union {
         }
     }
 
-    fn description(&self, detailed: bool) -> String {
+    fn description(&self) -> String {
         // Ensure we get a consistent output by sorting.
         match self.emit {
             Emit::AllFrom(..) => "⊍".to_string(),
-            Emit::Project { .. } if !detailed => String::from("⋃"),
             Emit::Project { ref emit, .. } => {
                 let symbol = if self.bag_union_state.is_none() {
                     '⋃' // DuplicateMode::UnionAll
                 } else {
                     '⊎' // DuplicateMode::BagUnion
                 };
-                if detailed {
-                    emit.iter()
-                        .sorted()
-                        .map(|(src, emit)| {
-                            let cols = emit
-                                .iter()
-                                .map(ToString::to_string)
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            format!("{}:[{}]", src.as_global().index(), cols)
-                        })
-                        .join(&format!(" {} ", symbol))
-                } else {
-                    String::from(symbol)
-                }
+                emit.iter()
+                    .sorted()
+                    .map(|(src, emit)| {
+                        let cols = emit
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("{}:[{}]", src.as_global().index(), cols)
+                    })
+                    .join(&format!(" {} ", symbol))
             }
         }
     }
@@ -1119,7 +1114,7 @@ mod tests {
     fn it_describes() {
         let (u, l, r) = setup(DuplicateMode::UnionAll);
         assert_eq!(
-            u.node().description(true),
+            u.node().description(),
             format!("{}:[0, 1] ⋃ {}:[0, 2]", l, r)
         );
     }

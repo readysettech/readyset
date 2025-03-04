@@ -73,7 +73,7 @@ pub trait GroupedOperation: fmt::Debug + Clone {
         auxiliary_node_state: Option<&mut AuxiliaryNodeState>,
     ) -> ReadySetResult<Option<DfValue>>;
 
-    fn description(&self, detailed: bool) -> String;
+    fn description(&self) -> String;
 
     /// The column that is being aggregated over.
     fn over_column(&self) -> usize;
@@ -442,7 +442,7 @@ where
         }
     }
 
-    fn description(&self, detailed: bool) -> String {
-        self.inner.description(detailed)
+    fn description(&self) -> String {
+        self.inner.description()
     }
 }

@@ -148,11 +148,7 @@ impl Ingredient for Project {
         }
     }
 
-    fn description(&self, detailed: bool) -> String {
-        if !detailed {
-            return String::from("π");
-        }
-
+    fn description(&self) -> String {
         format!("π[{}]", self.emit.iter().join(", "))
     }
 }
@@ -238,23 +234,20 @@ mod tests {
     #[test]
     fn it_describes() {
         let p = setup(false, false, true);
-        assert_eq!(
-            p.node().description(true),
-            "π[2, 0, (lit: hello), (lit: 42)]"
-        );
+        assert_eq!(p.node().description(), "π[2, 0, (lit: hello), (lit: 42)]");
     }
 
     #[test]
     fn it_describes_arithmetic() {
         let p = setup_column_arithmetic(BinaryOperator::Add);
-        assert_eq!(p.node().description(true), "π[0, 1, (0 + 1)]");
+        assert_eq!(p.node().description(), "π[0, 1, (0 + 1)]");
     }
 
     #[test]
     fn it_describes_all_w_literals() {
         let p = setup(false, true, true);
         assert_eq!(
-            p.node().description(true),
+            p.node().description(),
             "π[0, 1, 2, (lit: hello), (lit: 42)]"
         );
     }

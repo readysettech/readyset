@@ -136,8 +136,8 @@ impl Ingredient for NodeOperator {
         impl_ingredient_fn_ref!(self, is_join,)
     }
 
-    fn description(&self, detailed: bool) -> String {
-        impl_ingredient_fn_ref!(self, description, detailed)
+    fn description(&self) -> String {
+        impl_ingredient_fn_ref!(self, description,)
     }
 
     fn probe(&self) -> HashMap<String, String> {

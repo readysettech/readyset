@@ -21,7 +21,6 @@ fn sanitize(s: &str) -> Cow<str> {
 
 pub(in crate::controller) struct Graphviz<'a> {
     pub graph: &'a Graph,
-    pub detailed: bool,
     pub node_sizes: Option<HashMap<NodeIndex, NodeSize>>,
     pub materializations: &'a Materializations,
     pub domain_nodes: Option<&'a HashMap<DomainIndex, NodeMap<NodeIndex>>>,
@@ -52,21 +51,7 @@ impl Display for Graphviz<'_> {
 
         // global formatting.
         out!(f, 1, "fontsize=10");
-        if self.detailed {
-            out!(f, 1, "node [shape=record, fontsize=10]");
-        } else {
-            out!(
-                f,
-                1,
-                "graph [ fontsize=24 fontcolor=\"#0C6fA9\", outputorder=edgesfirst ]"
-            );
-            out!(f, 1, "edge [ color=\"#0C6fA9\", style=bold ]");
-            out!(
-                f,
-                1,
-                "node [ color=\"#0C6fA9\", shape=box, style=\"rounded,bold\" ]"
-            );
-        }
+        out!(f, 1, "node [shape=record, fontsize=10]");
 
         let nodes = if let Some((ni, dir)) = self.reachable_from {
             let mut nodes = HashSet::new();
@@ -118,13 +103,7 @@ impl Display for Graphviz<'_> {
                     2,
                     "n{} {}",
                     index.index(),
-                    sanitize(&node.describe(
-                        index,
-                        self.detailed,
-                        &node_sizes,
-                        materialization_status
-                    ))
-                    .as_ref()
+                    sanitize(&node.describe(index, &node_sizes, materialization_status)).as_ref()
                 );
             }
             if domain.is_some() {

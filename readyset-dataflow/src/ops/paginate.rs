@@ -348,11 +348,7 @@ impl Ingredient for Paginate {
         }])
     }
 
-    fn description(&self, detailed: bool) -> String {
-        if !detailed {
-            return "Paginate".into();
-        }
-
+    fn description(&self) -> String {
         format!(
             "Paginate limit={} γ[{}] o[{}]",
             self.limit,

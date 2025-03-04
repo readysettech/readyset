@@ -19,7 +19,7 @@ impl fmt::Debug for Node {
             NodeType::Sharder(ref s) => write!(f, "sharder [{}] node", s.sharded_by()),
             NodeType::Reader(..) => write!(f, "reader node"),
             NodeType::Base(..) => write!(f, "B"),
-            NodeType::Internal(ref i) => write!(f, "internal {} node", i.description(true)),
+            NodeType::Internal(ref i) => write!(f, "internal {} node", i.description()),
         }
     }
 }
@@ -38,7 +38,6 @@ impl Node {
     pub fn describe(
         &self,
         idx: NodeIndex,
-        detailed: bool,
         node_sizes: &HashMap<NodeIndex, NodeSize>,
         materialization_status: MaterializationStatus,
     ) -> String {
@@ -48,208 +47,133 @@ impl Node {
             _ => "filled",
         };
 
-        if !detailed {
-            match self.inner {
-                NodeType::Dropped => {
-                    s.push_str("[shape=none]\n");
-                }
-                NodeType::Source | NodeType::Ingress | NodeType::Egress { .. } => {
-                    s.push_str("[shape=point]\n");
-                }
-                NodeType::Base(..) => {
-                    s.push_str(&format!(
-                        "[style=bold, shape=tab, label=\"{}\"]\n",
-                        escape(self.name().display_unquoted())
-                    ));
-                }
-                NodeType::Sharder(ref sharder) => {
-                    s.push_str(&format!(
-                        "[style=bold, shape=Msquare, label=\"shard by {}\"]\n",
-                        escape(&self.columns[sharder.sharded_by()].name),
-                    ));
-                }
-                NodeType::Reader(_) => {
-                    s.push_str(&format!(
-                        "[style=\"bold,filled\", fillcolor=\"{}\", shape=box3d, label=\"{}\"]\n",
-                        if let MaterializationStatus::Full = materialization_status {
-                            "#0C6FA9"
-                        } else {
-                            "#5CBFF9"
-                        },
-                        escape(self.name().display_unquoted().to_string())
-                    ));
-                }
-                NodeType::Internal(ref i) => {
-                    s.push_str(&format!(
-                        "[label=\"{}\"]\n",
-                        escape(i.description(detailed))
-                    ));
+        s.push_str(&format!(
+            " [style=\"{}\", fillcolor={}, label=\"",
+            border,
+            self.domain
+                .map(|d| -> usize { d.into() })
+                .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
+                .unwrap_or_else(|| "white".into())
+        ));
 
-                    match materialization_status {
-                        MaterializationStatus::Not => {}
-                        MaterializationStatus::Full => {
-                            s.push_str(&format!(
-                                "n{}_m [shape=tab, style=\"bold,filled\", color=\"#AA4444\", fillcolor=\"#AA4444\", label=\"\"]\n\
-                                 n{} -> n{}_m {{ dir=none }}\n\
-                                 {{rank=same; n{} n{}_m}}\n",
-                                idx.index(),
-                                idx.index(),
-                                idx.index(),
-                                idx.index(),
-                                idx.index()
-                            ));
-                        }
-                        MaterializationStatus::Partial {
-                            beyond_materialization_frontier,
-                        } => {
-                            s.push_str(&format!(
-                                "n{}_m [shape=tab, style=\"bold,filled\", color=\"#AA4444\", {}, label=\"\"]\n\
-                                 n{} -> n{}_m {{ dir=none }}\n\
-                                 {{rank=same; n{} n{}_m}}\n",
-                                idx.index(),
-                                if beyond_materialization_frontier {
-                                "fillcolor=\"#EEBB99\""
-                                } else {
-                                "fillcolor=\"#EE9999\""
-                                },
-                                idx.index(),
-                                idx.index(),
-                                idx.index(),
-                                idx.index()
-                            ));
-                        }
-                    }
+        let (key_count_str, node_size_str) = match node_sizes.get(&idx) {
+            Some(NodeSize { key_count, bytes }) => {
+                (format!("&nbsp;({})", key_count), format!("| {}", bytes))
+            }
+            _ => ("".to_string(), "".to_string()),
+        };
+
+        let materialized = match materialization_status {
+            MaterializationStatus::Not => "",
+            MaterializationStatus::Partial {
+                beyond_materialization_frontier,
+            } => {
+                if beyond_materialization_frontier {
+                    "| ◔"
+                } else {
+                    "| ◕"
                 }
             }
-        } else {
-            s.push_str(&format!(
-                " [style=\"{}\", fillcolor={}, label=\"",
-                border,
-                self.domain
-                    .map(|d| -> usize { d.into() })
-                    .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
-                    .unwrap_or_else(|| "white".into())
-            ));
+            MaterializationStatus::Full => "| ●",
+        };
 
-            let (key_count_str, node_size_str) = match node_sizes.get(&idx) {
-                Some(NodeSize { key_count, bytes }) => {
-                    (format!("&nbsp;({})", key_count), format!("| {}", bytes))
-                }
-                _ => ("".to_string(), "".to_string()),
-            };
+        let sharding = match self.sharded_by {
+            Sharding::ByColumn(k, w) => {
+                format!("shard ⚷: {} / {}-way", self.columns[k].name, w)
+            }
+            Sharding::Random(_) => "shard randomly".to_owned(),
+            Sharding::None => "unsharded".to_owned(),
+            Sharding::ForcedNone => "desharded to avoid SS".to_owned(),
+        };
 
-            let materialized = match materialization_status {
-                MaterializationStatus::Not => "",
-                MaterializationStatus::Partial {
-                    beyond_materialization_frontier,
-                } => {
-                    if beyond_materialization_frontier {
-                        "| ◔"
-                    } else {
-                        "| ◕"
-                    }
+        let addr = match self.index {
+            Some(ref idx) => {
+                if idx.has_local() {
+                    format!("{} / {}", idx.as_global().index(), **idx)
+                } else {
+                    format!("{} / -", idx.as_global().index())
                 }
-                MaterializationStatus::Full => "| ●",
-            };
+            }
+            None => format!("{} / -", idx.index()),
+        };
 
-            let sharding = match self.sharded_by {
-                Sharding::ByColumn(k, w) => {
-                    format!("shard ⚷: {} / {}-way", self.columns[k].name, w)
-                }
-                Sharding::Random(_) => "shard randomly".to_owned(),
-                Sharding::None => "unsharded".to_owned(),
-                Sharding::ForcedNone => "desharded to avoid SS".to_owned(),
-            };
-
-            let addr = match self.index {
-                Some(ref idx) => {
-                    if idx.has_local() {
-                        format!("{} / {}", idx.as_global().index(), **idx)
-                    } else {
-                        format!("{} / -", idx.as_global().index())
-                    }
-                }
-                None => format!("{} / -", idx.index()),
-            };
-
-            match self.inner {
-                NodeType::Source => s.push_str("(source)"),
-                NodeType::Dropped => s.push_str(&format!("{{ {} | dropped }}", addr)),
-                NodeType::Base(..) => {
-                    s.push_str(&format!(
-                        "{{ {{ {} / {} | {} {} {} }} | {} | {} }}",
-                        addr,
-                        escape(self.name().display_unquoted()),
-                        "B",
-                        materialized,
-                        key_count_str,
-                        self.columns()
-                            .iter()
-                            .enumerate()
-                            .map(|(i, c)| format!("[{}] {} : {}", i, c.name, c.ty()))
-                            .join(", \\n"),
-                        sharding
-                    ));
-                }
-                NodeType::Ingress => s.push_str(&format!(
-                    "{{ {{ {} {} {} {} }} | (ingress) | {} }}",
-                    addr, materialized, key_count_str, node_size_str, sharding
-                )),
-                NodeType::Egress { .. } => {
-                    s.push_str(&format!("{{ {} | (egress) | {} }}", addr, sharding))
-                }
-                NodeType::Sharder(ref sharder) => s.push_str(&format!(
-                    "{{ {} | shard by {} | {} }}",
+        match self.inner {
+            NodeType::Source => s.push_str("(source)"),
+            NodeType::Dropped => s.push_str(&format!("{{ {} | dropped }}", addr)),
+            NodeType::Base(..) => {
+                s.push_str(&format!(
+                    "{{ {{ {} / {} | {} {} {} }} | {} | {} }}",
                     addr,
-                    self.columns[sharder.sharded_by()].name,
+                    escape(self.name().display_unquoted()),
+                    "B",
+                    materialized,
+                    key_count_str,
+                    self.columns()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| format!("[{}] {} : {}", i, c.name, c.ty()))
+                        .join(", \\n"),
                     sharding
-                )),
-                NodeType::Reader(ref r) => {
-                    let key = match r.index() {
-                        None => String::from("none"),
-                        Some(index) => format!("{:?}({:?})", index.index_type, index.columns),
-                    };
-                    s.push_str(&format!(
-                        "{{ {{ {} / {} {} {} {} }} | (reader / ⚷: {}) | {} }}",
-                        addr,
-                        escape(self.name().display_unquoted()),
-                        materialized,
-                        key_count_str,
-                        node_size_str,
-                        key,
-                        sharding,
-                    ))
-                }
-                NodeType::Internal(ref i) => {
-                    s.push('{');
+                ));
+            }
+            NodeType::Ingress => s.push_str(&format!(
+                "{{ {{ {} {} {} {} }} | (ingress) | {} }}",
+                addr, materialized, key_count_str, node_size_str, sharding
+            )),
+            NodeType::Egress { .. } => {
+                s.push_str(&format!("{{ {} | (egress) | {} }}", addr, sharding))
+            }
+            NodeType::Sharder(ref sharder) => s.push_str(&format!(
+                "{{ {} | shard by {} | {} }}",
+                addr,
+                self.columns[sharder.sharded_by()].name,
+                sharding
+            )),
+            NodeType::Reader(ref r) => {
+                let key = match r.index() {
+                    None => String::from("none"),
+                    Some(index) => format!("{:?}({:?})", index.index_type, index.columns),
+                };
+                s.push_str(&format!(
+                    "{{ {{ {} / {} {} {} {} }} | (reader / ⚷: {}) | {} }}",
+                    addr,
+                    escape(self.name().display_unquoted()),
+                    materialized,
+                    key_count_str,
+                    node_size_str,
+                    key,
+                    sharding,
+                ))
+            }
+            NodeType::Internal(ref i) => {
+                s.push('{');
 
-                    // Output node name and description. First row.
-                    s.push_str(&format!(
-                        "{{ {} / {} | {} {} {} {} }}",
-                        addr,
-                        escape(self.name().display_unquoted()),
-                        escape(i.description(detailed)),
-                        materialized,
-                        key_count_str,
-                        node_size_str,
-                    ));
+                // Output node name and description. First row.
+                s.push_str(&format!(
+                    "{{ {} / {} | {} {} {} {} }}",
+                    addr,
+                    escape(self.name().display_unquoted()),
+                    escape(i.description()),
+                    materialized,
+                    key_count_str,
+                    node_size_str,
+                ));
 
-                    // Output node outputs. Second row.
-                    s.push_str(&format!(
-                        " | {}",
-                        self.columns()
-                            .iter()
-                            .enumerate()
-                            .map(|(i, c)| format!("[{}] {} : {}", i, c.name, c.ty()))
-                            .join(", \\n"),
-                    ));
-                    s.push_str(&format!(" | {}", sharding));
+                // Output node outputs. Second row.
+                s.push_str(&format!(
+                    " | {}",
+                    self.columns()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| format!("[{}] {} : {}", i, c.name, c.ty()))
+                        .join(", \\n"),
+                ));
+                s.push_str(&format!(" | {}", sharding));
 
-                    s.push('}');
-                }
-            };
-            s.push_str("\"]\n");
-        }
+                s.push('}');
+            }
+        };
+        s.push_str("\"]\n");
 
         s
     }

@@ -722,8 +722,6 @@ where
 
     /// Produce a compact, human-readable description of this node for Graphviz.
     ///
-    /// If `detailed` is true, emit more info.
-    ///
     ///  Symbol   Description
     /// --------|-------------
     ///    B    |  Base
@@ -739,7 +737,7 @@ where
     ///    π    |  Projection
     ///    ≡    |  Identity
     ///    T    |  Trigger
-    fn description(&self, detailed: bool) -> String;
+    fn description(&self) -> String;
 
     /// Provide measurements of transient internal state that may be useful in debugging contexts.
     ///

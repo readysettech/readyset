@@ -2333,9 +2333,9 @@ where
         let res = match query {
             SqlQuery::Explain(ExplainStatement::LastStatement) => self.explain_last_statement(),
             SqlQuery::Explain(ExplainStatement::Graphviz {
-                simplified,
+                simplified: _,
                 for_cache,
-            }) => self.noria.graphviz(*simplified, for_cache.clone()).await,
+            }) => self.noria.graphviz(for_cache.clone()).await,
             SqlQuery::Explain(ExplainStatement::Domains) => self.noria.explain_domains().await,
             SqlQuery::Explain(ExplainStatement::Caches) => self.explain_caches().await,
             SqlQuery::Explain(ExplainStatement::Materializations) => {

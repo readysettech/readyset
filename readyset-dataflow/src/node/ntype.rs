@@ -37,7 +37,6 @@ impl NodeType {
 
     /// Produce a compact, human-readable description of this node for Graphviz.
     ///
-    /// If `detailed` is true, and node type is `Internal`,  emit more info.
     ///  Symbol   Description
     /// --------|-------------
     ///    ⊥    |  Source
@@ -55,14 +54,14 @@ impl NodeType {
     ///    ÷    |  Sharder
     ///    R    |  Reader
     ///    ☒    |  Dropped
-    pub(super) fn description(&self, detailed: bool) -> String {
+    pub(super) fn description(&self) -> String {
         match self {
             NodeType::Base(_) => "B".to_string(),
             NodeType::Egress(_) => "|→".to_string(),
             NodeType::Reader(_) => "R".to_string(),
             NodeType::Sharder(_) => "÷".to_string(),
             NodeType::Ingress => "→|".to_string(),
-            NodeType::Internal(i) => Ingredient::description(i, detailed),
+            NodeType::Internal(i) => Ingredient::description(i),
             NodeType::Source => "⊥".to_string(),
             NodeType::Dropped => "☒".to_string(),
         }
