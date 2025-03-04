@@ -28,6 +28,16 @@ pub(in crate::controller) struct Graphviz<'a> {
     pub reachable_from: Option<(NodeIndex, Direction)>,
 }
 
+macro_rules! out {
+    ($f:ident, $indent:literal, $fmt:literal $(, $arg:expr)*) => {
+        #[allow(clippy::reversed_empty_ranges)]
+        for _ in 0..$indent {
+            $f.write_str("    ")?;
+        }
+        writeln!($f, $fmt, $($arg),*)?;
+    }
+}
+
 /// Builds a graphviz [dot][] representation of the graph
 ///
 /// For more information, see <http://docs/debugging.html#graphviz>
@@ -35,28 +45,27 @@ pub(in crate::controller) struct Graphviz<'a> {
 /// [dot]: https://graphviz.org/doc/info/lang.html
 impl Display for Graphviz<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let indentln = |f: &mut fmt::Formatter<'_>| f.write_str("    ");
         let node_sizes = self.node_sizes.clone().unwrap_or_default();
 
         // header.
-        writeln!(f, "digraph {{")?;
+        out!(f, 0, "digraph {{");
 
         // global formatting.
-        indentln(f)?;
-        write!(f, "fontsize=10")?;
-        indentln(f)?;
+        out!(f, 1, "fontsize=10");
         if self.detailed {
-            writeln!(f, "node [shape=record, fontsize=10]")?;
+            out!(f, 1, "node [shape=record, fontsize=10]");
         } else {
-            writeln!(
+            out!(
                 f,
+                1,
                 "graph [ fontsize=24 fontcolor=\"#0C6fA9\", outputorder=edgesfirst ]"
-            )?;
-            writeln!(f, "edge [ color=\"#0C6fA9\", style=bold ]")?;
-            writeln!(
+            );
+            out!(f, 1, "edge [ color=\"#0C6fA9\", style=bold ]");
+            out!(
                 f,
+                1,
                 "node [ color=\"#0C6fA9\", shape=box, style=\"rounded,bold\" ]"
-            )?;
+            );
         }
 
         let nodes = if let Some((ni, dir)) = self.reachable_from {
@@ -95,61 +104,60 @@ impl Display for Graphviz<'_> {
         // node descriptions.
         for (domain, nodes) in domains_to_nodes {
             if let Some(domain) = domain {
-                indentln(f)?;
-                write!(
-                    f,
-                    "subgraph cluster_d{domain} {{\n    \
-                 label = \"Domain {domain}\";\n    \
-                 style=filled;\n    \
-                 color=grey97;\n    "
-                )?;
+                out!(f, 1, "subgraph cluster_d{domain} {{");
+                out!(f, 2, "label = \"Domain {domain}\";");
             }
             for index in nodes {
                 let node = &self.graph[index];
+                if node.is_source() {
+                    continue;
+                }
                 let materialization_status = self.materializations.get_status(index, node);
-                indentln(f)?;
-                write!(f, "n{}", index.index())?;
-                write!(
+                out!(
                     f,
-                    "{}",
+                    2,
+                    "n{} {}",
+                    index.index(),
                     sanitize(&node.describe(
                         index,
                         self.detailed,
                         &node_sizes,
                         materialization_status
                     ))
-                    .as_ref(),
-                )?;
+                    .as_ref()
+                );
             }
             if domain.is_some() {
-                write!(f, "\n    }}\n")?;
+                out!(f, 1, "}}");
             }
         }
 
         // edges.
         for edge in self.graph.raw_edges() {
+            if self.graph[edge.source()].is_source() {
+                continue;
+            }
             if !(nodes.contains(&edge.source()) && nodes.contains(&edge.target())) {
                 continue;
             }
 
-            indentln(f)?;
-            write!(
+            out!(
                 f,
+                1,
                 "n{} -> n{} [ {} ]",
                 edge.source().index(),
                 edge.target().index(),
                 if self.graph[edge.source()].is_egress() {
-                    "color=\"#CCCCCC\""
-                } else if self.graph[edge.source()].is_source() {
-                    "style=invis"
+                    "penwidth=4"
                 } else {
                     ""
                 }
-            )?;
-            writeln!(f)?;
+            );
         }
 
         // footer.
-        write!(f, "}}")
+        out!(f, 0, "}}");
+
+        Ok(())
     }
 }
