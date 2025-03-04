@@ -139,3 +139,9 @@ fn test_postgres_variable_scope() {
         Some(PostgresParameterScope::Session),
     );
 }
+
+#[test]
+fn test_not_like_expressions() {
+    check_parse_both("SELECT * FROM t WHERE a NOT LIKE 'foo';");
+    check_parse_both("SELECT * FROM t WHERE a NOT ILIKE 'foo';");
+}
