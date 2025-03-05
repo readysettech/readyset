@@ -76,6 +76,6 @@ impl LocalNodeIndex {
 
 impl Display for LocalNodeIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "l{}", self.id)
+        write!(f, "L {}", self.id)
     }
 }
