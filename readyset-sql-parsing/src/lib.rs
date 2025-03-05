@@ -40,6 +40,7 @@ fn sqlparser_dialect_from_readyset_dialect(
 #[expect(clippy::upper_case_acronyms, reason = "SQL keywords are capitalized")]
 #[derive(Debug, Clone, Copy)]
 enum ReadysetKeyword {
+    CACHED,
     CACHES,
     ENTER,
     EXIT,
@@ -59,6 +60,7 @@ enum ReadysetKeyword {
 impl ReadysetKeyword {
     fn as_str(&self) -> &str {
         match self {
+            Self::CACHED => "CACHED",
             Self::CACHES => "CACHES",
             Self::ENTER => "ENTER",
             Self::EXIT => "EXIT",
@@ -321,6 +323,10 @@ fn parse_explain(
 ///     | MIGRATION STATUS <query_id>
 ///     | STATUS
 ///     | ALL TABLES
+/// SHOW
+///     | CACHES
+///     | CACHED QUERIES
+///     | PROXIED QUERIES
 #[cfg(feature = "sqlparser")]
 fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keyword(parser, ReadysetKeyword::READYSET) {
@@ -361,6 +367,27 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
                     .into(),
             ))
         }
+    } else if parse_readyset_keywords(
+        parser,
+        &[ReadysetKeyword::PROXIED, ReadysetKeyword::QUERIES],
+    ) {
+        // TODO: Parse extra options
+        Ok(SqlQuery::Show(
+            readyset_sql::ast::ShowStatement::ProxiedQueries(
+                readyset_sql::ast::ProxiedQueriesOptions {
+                    query_id: None,
+                    only_supported: false,
+                    limit: None,
+                },
+            ),
+        ))
+    } else if parse_readyset_keyword(parser, ReadysetKeyword::CACHES)
+        || parse_readyset_keywords(parser, &[ReadysetKeyword::CACHED, ReadysetKeyword::QUERIES])
+    {
+        // TODO: Parse extra options
+        Ok(SqlQuery::Show(
+            readyset_sql::ast::ShowStatement::CachedQueries(None),
+        ))
     } else {
         Ok(parser.parse_show()?.try_into_dialect(dialect)?)
     }
