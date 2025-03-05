@@ -388,7 +388,7 @@ impl AuthenticationPlugin for MysqlNativePassword {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum CachingSha2PasswordAuthStatus {
     Error,
     FastAuth,
@@ -581,6 +581,7 @@ fn sha256(input: &[u8]) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
 
     #[test]
     fn hash_native_password_works() {
@@ -595,5 +596,159 @@ mod tests {
                 219
             ]
         );
+    }
+
+    #[test]
+    fn auth_cache_saves_rsa() {
+        let temp_dir = env::temp_dir();
+        let auth_cache1 = AuthCache::new(Some(temp_dir.clone()));
+
+        let key_path = temp_dir.as_path().join(RSA_KEY_FILE_NAME);
+
+        let original_key = auth_cache1.public_key_pem();
+
+        assert!(key_path.exists());
+
+        // Create a new AuthCache instance with the same path
+        let auth_cache2 = AuthCache::new(Some(temp_dir.clone()));
+        let new_key = auth_cache2.public_key_pem();
+
+        // Verify both keys are the same
+        assert_eq!(original_key, new_key);
+    }
+
+    #[test]
+    fn auth_cache_sets_static_key() {
+        let auth_cache = AuthCache::new(None);
+        let key = AuthCache::get_pub_key_string().lock().unwrap();
+        assert_eq!(*key, auth_cache.public_key_pem());
+    }
+
+    #[test]
+    fn sha256_works() {
+        let input = b"password";
+        let result = sha256(input);
+        assert_eq!(
+            result,
+            [
+                0x5e, 0x88, 0x48, 0x98, 0xda, 0x28, 0x04, 0x71, 0x51, 0xd0, 0xe5, 0x6f, 0x8d, 0xc6,
+                0x29, 0x27, 0x73, 0x60, 0x3d, 0x0d, 0x6a, 0xab, 0xbd, 0xd6, 0x2a, 0x11, 0xef, 0x72,
+                0x1d, 0x15, 0x42, 0xd8
+            ]
+        );
+    }
+
+    #[test]
+    fn auth_cache_fast_digest_works() {
+        let auth_cache = AuthCache::new(None);
+        let password = b"password";
+        let digest = auth_cache.generate_fast_digest(password);
+        assert_eq!(
+            digest,
+            [
+                0x73, 0x64, 0x1c, 0x99, 0xf7, 0x71, 0x9f, 0x57, 0xd8, 0xf4, 0xbe, 0xb1, 0x1a, 0x30,
+                0x3a, 0xfc, 0xd1, 0x90, 0x24, 0x3a, 0x51, 0xce, 0xd8, 0x78, 0x2c, 0xa6, 0xd3, 0xdb,
+                0xe0, 0x14, 0xd1, 0x46
+            ]
+        );
+    }
+
+    #[test]
+    fn auth_cache_check_cache_works() {
+        let auth_cache = AuthCache::new(None);
+
+        // Cacche a password - use "noria" as the password
+        auth_cache.cache_auth("readyset", b"noria");
+
+        // This is the scramble for the password "test"
+        let scramble = [
+            0xf9, 0x84, 0xa1, 0x9d, 0x9b, 0xa5, 0xef, 0x9, 0x61, 0x2d, 0xe0, 0x48, 0xe4, 0x88,
+            0xfa, 0xa6, 0x38, 0x3, 0xd6, 0x51, 0x57, 0x13, 0x99, 0x59, 0x33, 0x9d, 0x86, 0x8e,
+            0xf1, 0x31, 0x81, 0x9e,
+        ];
+        let auth_data = [
+            0x15, 0x2d, 0x62, 0x1, 0x34, 0x1d, 0x68, 0x47, 0x14, 0x60, 0x19, 0x4c, 0x73, 0x23,
+            0x63, 0x75, 0x1b, 0x64, 0x28, 0x4e,
+        ];
+
+        // Check that the fast auth fails - the cached password is "noria" and scramble is for "test"
+        assert!(!auth_cache.check_cache("readyset", &scramble, &auth_data));
+
+        // Cache the correct password
+        auth_cache.cache_auth("readyset", b"test");
+
+        // Check that the fast auth succeeds
+        assert!(auth_cache.check_cache("readyset", &scramble, &auth_data));
+    }
+
+    #[tokio::test]
+    async fn caching_sha2_password_fast_auth_works() {
+        let auth_cache = AuthCache::new(None);
+        let password = b"test";
+
+        // Cache the correct password
+        auth_cache.cache_auth("readyset", password);
+
+        let plugin = CachingSha2Password;
+        let ctx = AuthContext {
+            username: "readyset",
+            password: &None,
+            handshake_password: &[
+                0xf9, 0x84, 0xa1, 0x9d, 0x9b, 0xa5, 0xef, 0x9, 0x61, 0x2d, 0xe0, 0x48, 0xe4, 0x88,
+                0xfa, 0xa6, 0x38, 0x3, 0xd6, 0x51, 0x57, 0x13, 0x99, 0x59, 0x33, 0x9d, 0x86, 0x8e,
+                0xf1, 0x31, 0x81, 0x9e,
+            ],
+            auth_data: &[
+                0x15, 0x2d, 0x62, 0x1, 0x34, 0x1d, 0x68, 0x47, 0x14, 0x60, 0x19, 0x4c, 0x73, 0x23,
+                0x63, 0x75, 0x1b, 0x64, 0x28, 0x4e,
+            ],
+            require_auth: true,
+        };
+
+        let (status, _) = plugin.check_fast_auth(&ctx, &auth_cache, false).await;
+        assert_eq!(status, CachingSha2PasswordAuthStatus::FastAuth);
+    }
+
+    #[tokio::test]
+    async fn caching_sha2_password_fast_auth_switch_to_full_auth() {
+        let auth_cache = AuthCache::new(None);
+        let plugin = CachingSha2Password;
+        let ctx = AuthContext {
+            username: "readyset",
+            password: &None,
+            handshake_password: &[0; 32],
+            auth_data: &[0; 20],
+            require_auth: true,
+        };
+
+        // The fast auth fails, so it should switch to full auth
+        let (status, _) = plugin.check_fast_auth(&ctx, &auth_cache, false).await;
+        assert_eq!(status, CachingSha2PasswordAuthStatus::FullAuth);
+    }
+
+    #[tokio::test]
+    async fn caching_sha2_password_full_auth_certs() {
+        let auth_cache = AuthCache::new(None);
+        let plugin = CachingSha2Password;
+        let ctx = AuthContext {
+            username: "readyset",
+            password: &None,
+            handshake_password: &[0; 32],
+            auth_data: &[0; 20],
+            require_auth: true,
+        };
+
+        let (status, public_key) = plugin.check_fast_auth(&ctx, &auth_cache, false).await;
+
+        // The fast auth fails, so it should switch to full auth
+        assert_eq!(status, CachingSha2PasswordAuthStatus::FullAuth);
+
+        // We are passing secure=false, so it should have a public key
+        assert!(public_key.is_some());
+
+        let (_, public_key) = plugin.check_fast_auth(&ctx, &auth_cache, true).await;
+
+        // We are passing secure=true, so it should not have a public key
+        assert!(public_key.is_none());
     }
 }
