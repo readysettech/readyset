@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use html_escape::encode_text;
 use itertools::Itertools;
-use lazy_static::lazy_static;
 use readyset_client::debug::info::NodeSize;
-use regex::Regex;
 
 use crate::node::{Node, NodeType};
 use crate::prelude::*;
@@ -24,14 +23,44 @@ impl fmt::Debug for Node {
     }
 }
 
-fn escape<S>(s: S) -> String
-where
-    S: ToString,
-{
-    lazy_static! {
-        static ref ESCAPE_RE: Regex = Regex::new("([\"|{}])").unwrap();
-    };
-    ESCAPE_RE.replace_all(&s.to_string(), "\\$1").into_owned()
+fn out_header(
+    s: &mut String,
+    addr: &str,
+    materialized: &str,
+    key_count: &str,
+    node_size: &str,
+) -> usize {
+    s.push_str(&format!("<tr><td>{}</td> ", addr));
+    let mut span = 1;
+    if !materialized.is_empty() {
+        s.push_str(&format!("<td>{} {}</td> ", materialized, key_count));
+        span += 1;
+    }
+    if !node_size.is_empty() {
+        s.push_str(&format!("<td>{}</td> ", node_size));
+        span += 1;
+    }
+    s.push_str("</tr> ");
+    span
+}
+
+fn out_columns(s: &mut String, span: usize, node: &Node) {
+    s.push_str(&format!(
+        "<tr><td colspan=\"{}\">{}</td></tr> ",
+        span,
+        node.columns()
+            .iter()
+            .enumerate()
+            .map(|(i, c)| format!("[{}] {} : {}", i, c.name, c.ty()))
+            .join("<br/>"),
+    ));
+}
+
+fn out_sharding(s: &mut String, span: usize, sharding: &str) {
+    s.push_str(&format!(
+        "<tr><td colspan=\"{}\">{}</td></tr>",
+        span, sharding
+    ));
 }
 
 impl Node {
@@ -42,23 +71,20 @@ impl Node {
         materialization_status: MaterializationStatus,
     ) -> String {
         let mut s = String::new();
-        let border = match self.sharded_by {
-            Sharding::ByColumn(_, _) | Sharding::Random(_) => "filled,dashed",
-            _ => "filled",
-        };
+        let color = self
+            .domain
+            .map(|d| format!("/set312/{}", (usize::from(d) % 12) + 1))
+            .unwrap_or_else(|| "white".into());
 
+        s.push_str("[label=< <table ");
         s.push_str(&format!(
-            " [style=\"{}\", fillcolor={}, label=\"",
-            border,
-            self.domain
-                .map(|d| -> usize { d.into() })
-                .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
-                .unwrap_or_else(|| "white".into())
+            r#"cellspacing="0" cellpadding="4" border="0" cellborder="1" bgcolor="{}"> "#,
+            color
         ));
 
-        let (key_count_str, node_size_str) = match node_sizes.get(&idx) {
+        let (key_count, node_size) = match node_sizes.get(&idx) {
             Some(NodeSize { key_count, bytes }) => {
-                (format!("&nbsp;({})", key_count), format!("| {}", bytes))
+                (format!("({})", key_count), format!("{}", bytes))
             }
             _ => ("".to_string(), "".to_string()),
         };
@@ -69,12 +95,12 @@ impl Node {
                 beyond_materialization_frontier,
             } => {
                 if beyond_materialization_frontier {
-                    "| ◔"
+                    "◔"
                 } else {
-                    "| ◕"
+                    "◕"
                 }
             }
-            MaterializationStatus::Full => "| ●",
+            MaterializationStatus::Full => "●",
         };
 
         let sharding = match self.sharded_by {
@@ -87,93 +113,86 @@ impl Node {
         };
 
         let addr = match self.index {
+            Some(ref idx) if idx.has_local() => {
+                format!("{} / {}", idx.as_global().index(), **idx)
+            }
             Some(ref idx) => {
-                if idx.has_local() {
-                    format!("{} / {}", idx.as_global().index(), **idx)
-                } else {
-                    format!("{} / -", idx.as_global().index())
-                }
+                format!("{} / -", idx.as_global().index())
             }
             None => format!("{} / -", idx.index()),
         };
 
         match self.inner {
-            NodeType::Source => s.push_str("(source)"),
-            NodeType::Dropped => s.push_str(&format!("{{ {} | dropped }}", addr)),
+            NodeType::Source => s.push_str("<tr><td>source</td></tr>"),
+            NodeType::Dropped => s.push_str(&format!(
+                "<tr><td>{}</td></tr><tr><td>dropped</td></tr>",
+                addr
+            )),
             NodeType::Base(..) => {
                 s.push_str(&format!(
-                    "{{ {{ {} / {} | {} {} {} }} | {} | {} }}",
+                    "<tr><td>{} / {}</td> <td>base</td> <td>{} {}</td></tr> ",
                     addr,
-                    escape(self.name().display_unquoted()),
-                    "B",
+                    encode_text(&self.name().display_unquoted().to_string()),
                     materialized,
-                    key_count_str,
-                    self.columns()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, c)| format!("[{}] {} : {}", i, c.name, c.ty()))
-                        .join(", \\n"),
-                    sharding
+                    key_count,
                 ));
+                out_columns(&mut s, 3, self);
+                out_sharding(&mut s, 3, &sharding);
             }
-            NodeType::Ingress => s.push_str(&format!(
-                "{{ {{ {} {} {} {} }} | (ingress) | {} }}",
-                addr, materialized, key_count_str, node_size_str, sharding
-            )),
+            NodeType::Ingress => {
+                let span = out_header(&mut s, &addr, materialized, &key_count, &node_size);
+                s.push_str(&format!("<tr><td colspan=\"{}\">ingress</td></tr> ", span));
+                out_sharding(&mut s, span, &sharding);
+            }
             NodeType::Egress { .. } => {
-                s.push_str(&format!("{{ {} | (egress) | {} }}", addr, sharding))
+                s.push_str(&format!("<tr><td>{}</td></tr> ", addr));
+                s.push_str("<tr><td>egress</td></tr> ");
+                out_sharding(&mut s, 1, &sharding);
             }
-            NodeType::Sharder(ref sharder) => s.push_str(&format!(
-                "{{ {} | shard by {} | {} }}",
-                addr,
-                self.columns[sharder.sharded_by()].name,
-                sharding
-            )),
+            NodeType::Sharder(ref sharder) => {
+                s.push_str(&format!("<tr><td>{}</td></tr> ", addr));
+                s.push_str(&format!(
+                    "<tr><td>shard by {}</td></tr> ",
+                    self.columns[sharder.sharded_by()].name
+                ));
+                out_sharding(&mut s, 1, &sharding);
+            }
             NodeType::Reader(ref r) => {
                 let key = match r.index() {
                     None => String::from("none"),
                     Some(index) => format!("{:?}({:?})", index.index_type, index.columns),
                 };
+                let span = out_header(&mut s, &addr, materialized, &key_count, &node_size);
                 s.push_str(&format!(
-                    "{{ {{ {} / {} {} {} {} }} | (reader / ⚷: {}) | {} }}",
-                    addr,
-                    escape(self.name().display_unquoted()),
-                    materialized,
-                    key_count_str,
-                    node_size_str,
-                    key,
-                    sharding,
-                ))
+                    "<tr><td colspan=\"{}\">reader — ⚷: {}</td></tr> ",
+                    span, key,
+                ));
+                out_sharding(&mut s, span, &sharding);
             }
             NodeType::Internal(ref i) => {
-                s.push('{');
-
-                // Output node name and description. First row.
                 s.push_str(&format!(
-                    "{{ {} / {} | {} {} {} {} }}",
+                    "<tr><td>{} / {}</td> <td>{}</td> ",
                     addr,
-                    escape(self.name().display_unquoted()),
-                    escape(i.description()),
-                    materialized,
-                    key_count_str,
-                    node_size_str,
+                    encode_text(&self.name().display_unquoted().to_string()),
+                    encode_text(&i.description()),
                 ));
 
-                // Output node outputs. Second row.
-                s.push_str(&format!(
-                    " | {}",
-                    self.columns()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, c)| format!("[{}] {} : {}", i, c.name, c.ty()))
-                        .join(", \\n"),
-                ));
-                s.push_str(&format!(" | {}", sharding));
+                let mut span = 2;
+                if !materialized.is_empty() {
+                    s.push_str(&format!("<td>{}</td> ", materialized));
+                    span += 1;
+                }
+                if !key_count.is_empty() {
+                    s.push_str(&format!("<td>{}</td> ", key_count));
+                    span += 1;
+                }
+                s.push_str("</tr> ");
 
-                s.push('}');
+                out_columns(&mut s, span, self);
+                out_sharding(&mut s, span, &sharding);
             }
         };
-        s.push_str("\"]\n");
+        s.push_str("</table> >]");
 
         s
     }

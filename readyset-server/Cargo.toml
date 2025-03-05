@@ -59,7 +59,6 @@ url = { workspace = true, features = ["serde"] }
 tokio-stream = { workspace = true }
 tokio-retry = { workspace = true }
 lazy_static = { workspace = true }
-regex = { workspace = true }
 tracing-futures = { workspace = true }
 parking_lot = { workspace = true }
 fail = { workspace = true }

@@ -1,23 +1,12 @@
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display};
 
 use dataflow::prelude::{Graph, NodeIndex};
 use dataflow::{DomainIndex, NodeMap};
-use lazy_static::lazy_static;
 use petgraph::Direction;
 use readyset_client::debug::info::NodeSize;
-use regex::Regex;
 
 use crate::controller::migrate::materialization::Materializations;
-
-#[allow(clippy::unwrap_used)] // regex is hardcoded and valid
-fn sanitize(s: &str) -> Cow<str> {
-    lazy_static! {
-        static ref SANITIZE_RE: Regex = Regex::new("([<>])").unwrap();
-    };
-    SANITIZE_RE.replace_all(s, "\\$1")
-}
 
 pub(in crate::controller) struct Graphviz<'a> {
     pub graph: &'a Graph,
@@ -51,7 +40,7 @@ impl Display for Graphviz<'_> {
 
         // global formatting.
         out!(f, 1, "fontsize=10");
-        out!(f, 1, "node [shape=record, fontsize=10]");
+        out!(f, 1, "node [shape=none, fontsize=10]");
 
         let nodes = if let Some((ni, dir)) = self.reachable_from {
             let mut nodes = HashSet::new();
@@ -103,7 +92,7 @@ impl Display for Graphviz<'_> {
                     2,
                     "n{} {}",
                     index.index(),
-                    sanitize(&node.describe(index, &node_sizes, materialization_status)).as_ref()
+                    node.describe(index, &node_sizes, materialization_status)
                 );
             }
             if domain.is_some() {
@@ -132,6 +121,23 @@ impl Display for Graphviz<'_> {
                     ""
                 }
             );
+        }
+
+        // replay paths
+        for (src, paths) in &self.materializations.paths {
+            for (tag, (index, dsts)) in paths {
+                let s = "&nbsp;&nbsp;";
+                let dst = dsts[0]; // ignore downward path; obvious
+                let t = format!("{s}tag: {}{s}\n{s}cols: {:?}{s}", tag, index.columns);
+                out!(
+                    f,
+                    1,
+                    "n{} -> n{} [ label=\"{}\", constraint=false, color=IndianRed ];",
+                    src.index(),
+                    dst.index(),
+                    t
+                );
+            }
         }
 
         // footer.

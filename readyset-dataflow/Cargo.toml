@@ -17,13 +17,11 @@ byteorder = { workspace = true }
 hashbag = { workspace = true }
 ahash = { workspace = true }
 futures-util = { workspace = true }
-lazy_static = { workspace = true }
 itertools = { workspace = true }
 metrics = { workspace = true }
 pin-project = { workspace = true }
 indexmap = { workspace = true }
 rand = { workspace = true }
-regex = { workspace = true }
 serde_derive = { workspace = true }
 serde_with = { workspace = true }
 serde_json = { workspace = true }
@@ -45,6 +43,7 @@ strum = { workspace = true }
 strum_macros = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 url = { workspace = true }
+html-escape = { workspace = true }
 
 # need features
 petgraph = { workspace = true, features = ["serde-1"] }
