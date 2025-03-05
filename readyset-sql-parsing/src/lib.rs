@@ -120,6 +120,8 @@ fn parse_readyset_keywords(parser: &mut Parser, keywords: &[ReadysetKeyword]) ->
                 num_tokens_parsed -= 1;
             }
             return false;
+        } else {
+            num_tokens_parsed += 1;
         }
     }
 
