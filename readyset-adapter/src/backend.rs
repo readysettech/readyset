@@ -76,6 +76,14 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::backend::noria_connector::ExecuteSelectContext;
+use crate::metrics_handle::{MetricsHandle, MetricsSummary};
+use crate::query_handler::SetBehavior;
+use crate::query_status_cache::QueryStatusCache;
+use crate::status_reporter::ReadySetStatusReporter;
+pub use crate::upstream_database::UpstreamPrepare;
+use crate::utils::{create_dummy_column, time_or_null};
+use crate::{create_dummy_schema, QueryHandler, UpstreamDatabase, UpstreamDestination};
 use clap::ValueEnum;
 use crossbeam_skiplist::SkipSet;
 use futures::future::{self, OptionFuture};
@@ -93,6 +101,7 @@ use readyset_client_metrics::{
     recorded, EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode, ReadysetExecutionEvent,
     SqlQueryType,
 };
+use readyset_data::rls_repo::get_rls_sys_vars_for_query;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
@@ -112,15 +121,6 @@ use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error, trace, warn};
 use vec1::Vec1;
-
-use crate::backend::noria_connector::ExecuteSelectContext;
-use crate::metrics_handle::{MetricsHandle, MetricsSummary};
-use crate::query_handler::SetBehavior;
-use crate::query_status_cache::QueryStatusCache;
-use crate::status_reporter::ReadySetStatusReporter;
-pub use crate::upstream_database::UpstreamPrepare;
-use crate::utils::{create_dummy_column, time_or_null};
-use crate::{create_dummy_schema, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
 pub mod noria_connector;
 
@@ -1442,6 +1442,7 @@ where
     /// Executes a prepared statement on ReadySet
     async fn execute_noria<'a>(
         noria: &'a mut NoriaConnector,
+        upstream: Option<&mut DB>,
         prep: &noria_connector::PrepareResult,
         params: &[DfValue],
         ticket: Option<Timestamp>,
@@ -1453,8 +1454,16 @@ where
 
         let res = match prep {
             Select { statement, .. } => {
+                let mut statement = statement.clone();
+                Self::manage_rls_for_statement(
+                    upstream,
+                    &statement.name,
+                    &mut statement.processed_query_params,
+                )
+                .await
+                .map_err(|e| internal_err!("{e}"))?;
                 let ctx = ExecuteSelectContext::Prepared {
-                    ps: statement,
+                    ps: &statement,
                     params,
                 };
                 noria.execute_select(ctx, ticket, event).await
@@ -1514,7 +1523,9 @@ where
         ticket: Option<Timestamp>,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let noria_res = Self::execute_noria(noria, noria_prep, params, ticket, event).await;
+        let noria_res =
+            Self::execute_noria(noria, upstream.as_mut(), noria_prep, params, ticket, event).await;
+
         match noria_res {
             Ok(noria_ok) => {
                 if let Some(info) = ex_info {
@@ -1758,7 +1769,7 @@ where
 
         let result = match &cached_statement.prep.inner {
             PrepareResultInner::Noria(prep) => {
-                Self::execute_noria(noria, prep, params, ticket, &mut event)
+                Self::execute_noria(noria, upstream.as_mut(), prep, params, ticket, &mut event)
                     .await
                     .map_err(Into::into)
             }
@@ -2609,17 +2620,84 @@ where
         res
     }
 
+    // Check if `view_request` contains a statement which has been RLS managed, and
+    // extend `processed_query_params.auto_parameters` with the values of the system
+    // variables, corresponding to the RLS placeholders.
+    // Verify that all RLS required variables have been set up at this moment.
+    // Return `true` if the statement was RLS managed and
+    // `processed_query_params.auto_parameters` was updated.
+    async fn manage_rls_for_statement(
+        upstream: Option<&mut DB>,
+        qname: &Relation,
+        processed_query_params: &mut ProcessedQueryParams,
+    ) -> Result<bool, DB::Error> {
+        // Check if the statement has been RLS managed
+        if let Some(rls_sys_vars) = get_rls_sys_vars_for_query(qname)? {
+            // Read the required system variables via the upstream interface
+            let var_vals = if let Some(db) = upstream {
+                db.read_system_vars(&rls_sys_vars).await?
+            } else {
+                internal!("The upstream does not exist, but required for RLS managed query")
+            };
+
+            // Make sure, all required variables have been set up, and have values
+            let unset_vars = var_vals
+                .iter()
+                .enumerate()
+                .filter_map(|v| {
+                    if v.1.is_none() {
+                        Some(&rls_sys_vars[v.0])
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<&SqlIdentifier>>();
+
+            if !unset_vars.is_empty() {
+                internal!(
+                    "Variables [{:?}] are set up, but required for RLS managed query",
+                    unset_vars
+                );
+            }
+
+            // Build `rls_params` which is a vector of tuple (0-based placeholder index, Literal).
+            // This one will be used to extend the existing `processed_query_params.auto_parameters`.
+            let mut rls_params = Vec::with_capacity(var_vals.len());
+
+            // Start the RLS placeholder index right after the existing ones.
+            // Note that here the placeholder indexes are 0-based, and the existing placeholder
+            // indexes are contiguous.
+            let mut rls_placeholder_index = processed_query_params.get_auto_parameters_count();
+            for var_val in var_vals {
+                // This is not necessary for PostgreSQL, b/c all system variables are text,
+                // but coerce it to DfType::Text, until we clarify this aspect for MySQL as well.
+                let str_val = var_val.coerce_to(
+                    &DfType::Text(Default::default()),
+                    &var_val.infer_dataflow_type(),
+                )?;
+                rls_params.push((rls_placeholder_index, str_val.to_string().into()));
+                rls_placeholder_index += 1;
+            }
+
+            processed_query_params.extend_auto_parameters(rls_params);
+
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn query_adhoc_select<'a>(
         noria: &'a mut NoriaConnector,
-        upstream: Option<&'a mut DB>,
+        mut upstream: Option<&'a mut DB>,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         original_query: &'a str,
         view_request: &ViewCreateRequest,
         mut status: QueryStatus,
         event: &mut QueryExecutionEvent,
-        processed_query_params: ProcessedQueryParams,
+        mut processed_query_params: ProcessedQueryParams,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let original_status = status.clone();
         let did_work = if let Some(ref mut i) = status.execution_info {
@@ -2660,6 +2738,16 @@ where
         }
 
         let noria_res = {
+            Self::manage_rls_for_statement(
+                upstream.as_deref_mut(),
+                &QueryId::from_select(
+                    &view_request.statement,
+                    view_request.schema_search_path.as_slice(),
+                )
+                .into(),
+                &mut processed_query_params,
+            )
+            .await?;
             event.destination = Some(QueryDestination::Readyset);
             let ctx = ExecuteSelectContext::AdHoc {
                 statement: &view_request.statement,

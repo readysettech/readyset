@@ -39,8 +39,8 @@ use crate::utils;
 
 #[derive(Clone, Debug)]
 pub struct PreparedSelectStatement {
-    name: Relation,
-    processed_query_params: ProcessedQueryParams,
+    pub name: Relation,
+    pub processed_query_params: ProcessedQueryParams,
 }
 
 /// Wrapper around a NoriaBackendInner which may not have been successfully

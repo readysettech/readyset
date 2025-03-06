@@ -38,6 +38,7 @@ mod r#enum;
 mod float;
 mod integer;
 mod ranges;
+pub mod rls_repo;
 mod serde;
 mod text;
 mod timestamp;

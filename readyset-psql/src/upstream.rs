@@ -1,7 +1,8 @@
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -190,6 +191,26 @@ fn convert_params_for_upstream(params: &[DfValue], types: &[Type]) -> ReadySetRe
         })
         .collect()
 }
+
+// The following PG predefined system variables are not available via `current_setting()` function, and
+// should be selected just by name.
+// For ex.: SELECT USER, CURRENT_ROLE, CURRENT_SCHEMA;
+const PG_PREDEFINED_SYSTEM_VARS: [&str; 11] = [
+    "CURRENT_USER",
+    "SESSION_USER",
+    "USER",
+    "CURRENT_ROLE",
+    "CURRENT_CATALOG",
+    "CURRENT_SCHEMA",
+    "CURRENT_TIMESTAMP",
+    "CURRENT_DATE",
+    "CURRENT_TIME",
+    "LOCALTIME",
+    "LOCALTIMESTAMP",
+];
+
+static PG_PREDEFINED_VARS: LazyLock<HashSet<&str>> =
+    LazyLock::new(|| PG_PREDEFINED_SYSTEM_VARS.into_iter().collect());
 
 #[async_trait]
 impl UpstreamDatabase for PostgreSqlUpstream {
@@ -574,6 +595,40 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             .get::<_, String>("TimeZone");
         debug!(%tz_name, "Loaded system timezone from upstream");
         Ok(tz_name.into())
+    }
+
+    async fn read_system_vars(
+        &mut self,
+        var_names: &[SqlIdentifier],
+    ) -> Result<Vec<DfValue>, Self::Error> {
+        // In PG, there are some system variables, which are not available via current_setting() function,
+        // and instead should be selected by their names.
+        // `PG_PREDEFINED_VARS` table contains such variables.
+        let mut query = "select ".to_string();
+        for (i, v) in var_names.iter().enumerate() {
+            if i > 0 {
+                query.push_str(", ");
+            }
+            let var_name = v.as_str();
+            if PG_PREDEFINED_VARS.contains(var_name.to_uppercase().as_str()) {
+                query.push_str(var_name);
+            } else {
+                // Note, the 2nd argument should be `true`, to get NULL if the `var_name` is not set up.
+                query.push_str(format!("current_setting('{}', true)", var_name).as_str());
+            }
+        }
+
+        let row = self.client.query_one(&query, &[]).await?;
+
+        let mut result = vec![DfValue::None; var_names.len()];
+        for i in 0..row.len() {
+            result[i] = match row.try_get::<usize, Option<&str>>(i)? {
+                Some(val) if !val.is_empty() => val.into(),
+                _ => DfValue::None,
+            };
+        }
+
+        Ok(result)
     }
 }
 
