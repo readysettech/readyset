@@ -1216,6 +1216,20 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 expr: next_expr()?,
                 collation: None,
             })
+        } else if name.eq_ignore_ascii_case("JSON_OBJECT_AGG") {
+            Self::Call(FunctionExpr::JsonObjectAgg {
+                key: next_expr()?,
+                value: next_expr()?,
+                allow_duplicate_keys: true,
+            })
+        } else if name.eq_ignore_ascii_case("JSONB_OBJECT_AGG")
+            || name.eq_ignore_ascii_case("JSON_OBJECTAGG")
+        {
+            Self::Call(FunctionExpr::JsonObjectAgg {
+                key: next_expr()?,
+                value: next_expr()?,
+                allow_duplicate_keys: false,
+            })
         } else if name.eq_ignore_ascii_case("EXTRACT") || name.eq_ignore_ascii_case("SUBSTRING") {
             return failed!("{name} should have been converted earlier");
         } else {
