@@ -224,6 +224,13 @@ pub trait UpstreamDatabase: Sized + Send {
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error>;
 
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error>;
+
+    /// Query the upstream database for the system variables specified by names.
+    /// Returns Some(value) for those which are set up, and None otherwise
+    async fn read_session_vars(
+        &mut self,
+        var_names: &[SqlIdentifier],
+    ) -> Result<Vec<DfValue>, Self::Error>;
 }
 
 pub struct LazyUpstream<U> {
@@ -425,5 +432,12 @@ where
 
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error> {
         self.upstream().await?.timezone_name().await
+    }
+
+    async fn read_session_vars(
+        &mut self,
+        var_names: &[SqlIdentifier],
+    ) -> Result<Vec<DfValue>, Self::Error> {
+        self.upstream().await?.read_session_vars(var_names).await
     }
 }

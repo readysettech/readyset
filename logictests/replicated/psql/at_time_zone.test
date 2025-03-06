@@ -1,10 +1,4 @@
 statement ok
-ALTER SYSTEM SET timezone = 'Asia/Tokyo';
-
-statement ok
-SELECT pg_reload_conf();
-
-statement ok
 create table test (tm timestamp, tmz timestamptz);
 
 statement ok
@@ -12,6 +6,11 @@ insert into test (tm, tmz) values
 ('2018-09-02 07:09:19', '2018-09-02 07:09:19-04'),
 ('2018-09-02 07:09:19', '2018-09-02 07:09:19-05'),
 ('2018-09-02 07:09:19', '2018-09-02 07:09:19-06');
+
+query T
+select set_config('timezone', 'Asia/Tokyo', false);
+----
+Asia/Tokyo
 
 query Z rowsort
 SELECT tm AT TIME ZONE 'America/Chicago' from test limit 1;
@@ -91,8 +90,3 @@ SELECT tmz AT TIME ZONE 'America/Los_Angeles' AT TIME ZONE 'America/Chicago' AT 
 2018-09-02 19:09:19
 2018-09-02 20:09:19
 
-statement ok
-ALTER SYSTEM SET timezone = 'Etc/UTC';
-
-statement ok
-SELECT pg_reload_conf();
