@@ -466,7 +466,16 @@ impl UpstreamDatabase for MySqlUpstream {
     }
 
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error> {
+        // TODO: implement for MySQL
         Ok(DEFAULT_TIMEZONE_NAME.into())
+    }
+
+    async fn read_session_vars(
+        &mut self,
+        var_names: &[SqlIdentifier],
+    ) -> Result<Vec<DfValue>, Self::Error> {
+        // TODO: implement for MySQL
+        Ok(vec![DfValue::None; var_names.len()])
     }
 }
 

@@ -34,13 +34,13 @@ use readyset_util::shared_cache::{self, LocalCache};
 use tokio::sync::RwLock;
 use tracing::{error, info, trace, warn};
 
-use crate::backend::SelectSchema;
+use crate::backend::{MigrationMode, SelectSchema};
 use crate::utils;
 
 #[derive(Clone, Debug)]
 pub struct PreparedSelectStatement {
-    name: Relation,
-    processed_query_params: ProcessedQueryParams,
+    pub name: Relation,
+    pub processed_query_params: ProcessedQueryParams,
 }
 
 /// Wrapper around a NoriaBackendInner which may not have been successfully
@@ -357,8 +357,7 @@ pub(crate) enum ExecuteSelectContext<'ctx> {
         params: &'ctx [DfValue],
     },
     AdHoc {
-        statement: &'ctx SelectStatement,
-        create_if_missing: bool,
+        name: Relation,
         processed_query_params: ProcessedQueryParams,
     },
 }
@@ -1562,6 +1561,20 @@ impl NoriaConnector {
         Ok(PrepareResult::Select { types, statement })
     }
 
+    pub(crate) async fn retrieve_cached_query_name(
+        &mut self,
+        stmt: &SelectStatement,
+        migration_mode: MigrationMode,
+    ) -> ReadySetResult<Relation> {
+        self.get_view_name_cached(
+            stmt,
+            false,
+            migration_mode == MigrationMode::InRequestPath,
+            None,
+        )
+        .await
+    }
+
     pub(crate) async fn execute_select(
         &mut self,
         ctx: ExecuteSelectContext<'_>,
@@ -1583,19 +1596,13 @@ impl NoriaConnector {
                 params,
             ),
             ExecuteSelectContext::AdHoc {
-                statement,
-                create_if_missing,
+                name,
                 processed_query_params,
-            } => {
-                let name = self
-                    .get_view_name_cached(statement, false, create_if_missing, None)
-                    .await?;
-                (
-                    Cow::Owned(name),
-                    Cow::Owned(processed_query_params),
-                    &[][..],
-                )
-            }
+            } => (
+                Cow::Owned(name),
+                Cow::Owned(processed_query_params),
+                &[][..],
+            ),
         };
 
         let view_failed = self.failed_views.take(qname.as_ref()).is_some();

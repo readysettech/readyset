@@ -1,8 +1,3 @@
-use std::fmt::Debug;
-use std::pin::Pin;
-use std::str::FromStr;
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use futures::StreamExt;
 use postgres_types::Kind;
@@ -15,6 +10,10 @@ use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_util::redacted::RedactedString;
+use std::fmt::Debug;
+use std::pin::Pin;
+use std::str::FromStr;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio_postgres::types::Type;
 use tokio_postgres::{
@@ -574,6 +573,33 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             .get::<_, String>("TimeZone");
         debug!(%tz_name, "Loaded system timezone from upstream");
         Ok(tz_name.into())
+    }
+
+    async fn read_session_vars(
+        &mut self,
+        var_names: &[SqlIdentifier],
+    ) -> Result<Vec<DfValue>, Self::Error> {
+        let mut query = "select ".to_string();
+        for (i, v) in var_names.iter().enumerate() {
+            if i > 0 {
+                query.push_str(", ");
+            }
+            query.push_str("current_setting('");
+            query.push_str(v.as_str());
+            query.push_str("', true)");
+        }
+
+        let row = self.client.query_one(&query, &[]).await?;
+
+        let mut result = vec![DfValue::None; var_names.len()];
+        for i in 0..row.len() {
+            result[i] = match row.try_get::<usize, Option<&str>>(i)? {
+                Some(val) if !val.is_empty() => val.into(),
+                _ => DfValue::None,
+            };
+        }
+
+        Ok(result)
     }
 }
 

@@ -1166,7 +1166,7 @@ impl DfState {
     {
         debug!("starting migration");
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS).set(1.0);
-        let mut m = Migration::new(self, dialect);
+        let mut m = Migration::new(self, dry_run, dialect);
         let r = f(&mut m)?;
         m.commit(dry_run).await?;
         debug!("finished migration");

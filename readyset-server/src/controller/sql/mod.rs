@@ -2,6 +2,15 @@ use std::collections::{HashMap, HashSet};
 use std::str;
 use std::vec::Vec;
 
+use self::mir::{LeafBehavior, NodeIndex as MirNodeIndex, SqlToMirConverter};
+use self::query_graph::to_query_graph;
+pub(crate) use self::recipe::{ExprId, Recipe, Schema};
+use self::registry::ExprRegistry;
+use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
+pub(crate) use crate::controller::sql::registry::RecipeExpr;
+use crate::controller::Migration;
+use crate::sql::mir::MirRemovalResult;
+use crate::ReuseConfigType;
 use ::mir::visualize::GraphViz;
 use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
@@ -10,6 +19,7 @@ use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
 use readyset_client::recipe::ChangeList;
 use readyset_data::dialect::SqlEngine;
+use readyset_data::rls::try_apply_rls;
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
 use readyset_errors::{
     internal, internal_err, invalid_query_err, invariant, unsupported, ReadySetError,
@@ -26,16 +36,6 @@ use readyset_sql_passes::{DetectUnsupportedPlaceholders, Rewrite, RewriteContext
 use readyset_util::redacted::Sensitive;
 use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
-
-use self::mir::{LeafBehavior, NodeIndex as MirNodeIndex, SqlToMirConverter};
-use self::query_graph::to_query_graph;
-pub(crate) use self::recipe::{ExprId, Recipe, Schema};
-use self::registry::ExprRegistry;
-use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
-pub(crate) use crate::controller::sql::registry::RecipeExpr;
-use crate::controller::Migration;
-use crate::sql::mir::MirRemovalResult;
-use crate::ReuseConfigType;
 
 pub(crate) mod mir;
 mod query_graph;
@@ -1141,6 +1141,8 @@ impl SqlIncorporator {
         // FIXME(REA-2168): Use correct dialect.
         trace!(stmt = %stmt.display(readyset_sql::Dialect::MySQL), "Adding select query");
         let mut table_alias_rewrites = vec![];
+        // Note, we update `stmt` at the caller with the original rewritten statement.
+        // The `SHOW CACHES` will display this statement.
         *stmt = self.rewrite(
             stmt.clone(),
             Some(&query_name.name),
@@ -1200,8 +1202,27 @@ impl SqlIncorporator {
         trace!(rewritten_query = %stmt.display(readyset_sql::Dialect::MySQL));
         trace!("SelectStatement: {:?}", &stmt);
 
-        let query_graph = to_query_graph(stmt.clone())?;
+        let mut query_graph = to_query_graph(stmt.clone())?;
         trace!("QueryGraph: {:?}", &query_graph);
+
+        // Try to apply the RLS to the statement, if applicable.
+        if !mig.is_dry_run {
+            let mut rls_stmt = stmt.clone();
+            if try_apply_rls(query_name.clone(), &mut rls_stmt)? {
+                // Rewrite the statement if the RLS was applied
+                rls_stmt = self.rewrite(
+                    rls_stmt,
+                    Some(&query_name.name),
+                    search_path,
+                    mig.dialect,
+                    None,
+                    None,
+                )?;
+                // build `query_graph` for the RLS managed statement
+                query_graph = to_query_graph(rls_stmt)?;
+                trace!("RLS updated QueryGraph: {:?}", &query_graph);
+            }
+        }
 
         self.mir_converter.named_query_to_mir(
             query_name,
