@@ -76,6 +76,14 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::backend::noria_connector::{ExecuteSelectContext, PreparedSelectStatement};
+use crate::metrics_handle::{MetricsHandle, MetricsSummary};
+use crate::query_handler::SetBehavior;
+use crate::query_status_cache::QueryStatusCache;
+use crate::status_reporter::ReadySetStatusReporter;
+pub use crate::upstream_database::UpstreamPrepare;
+use crate::utils::{create_dummy_column, time_or_null};
+use crate::{create_dummy_schema, QueryHandler, UpstreamDatabase, UpstreamDestination};
 use clap::ValueEnum;
 use crossbeam_skiplist::SkipSet;
 use futures::future::{self, OptionFuture};
@@ -93,14 +101,21 @@ use readyset_client_metrics::{
     recorded, EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode, ReadysetExecutionEvent,
     SqlQueryType,
 };
+use readyset_data::rls::{
+    create_rls, drop_rls, get_cached_queries_referencing_table, get_rls, get_rls_vars_for_query,
+    RlsPersistentState,
+};
+use readyset_data::upstream_system_props::get_session_variables;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
-use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
+use readyset_errors::{
+    internal, internal_err, invariant_eq, unsupported, unsupported_err, ReadySetResult,
+};
 use readyset_sql::ast::{
-    self, AlterReadysetStatement, CacheInner, CreateCacheStatement, DeallocateStatement,
-    DeleteStatement, DropCacheStatement, ExplainStatement, InsertStatement, Relation,
-    SelectStatement, SetStatement, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier,
-    UpdateStatement, UseStatement,
+    self, AlterReadysetStatement, CacheInner, CreateCacheStatement, CreateRlsStatement,
+    DeallocateStatement, DeleteStatement, DropCacheStatement, DropRlsStatement, ExplainStatement,
+    InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement, SqlIdentifier,
+    SqlQuery, StatementIdentifier, UpdateStatement, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::adapter_rewrites::{self, ProcessedQueryParams};
@@ -112,15 +127,6 @@ use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error, trace, warn};
 use vec1::Vec1;
-
-use crate::backend::noria_connector::ExecuteSelectContext;
-use crate::metrics_handle::{MetricsHandle, MetricsSummary};
-use crate::query_handler::SetBehavior;
-use crate::query_status_cache::QueryStatusCache;
-use crate::status_reporter::ReadySetStatusReporter;
-pub use crate::upstream_database::UpstreamPrepare;
-use crate::utils::{create_dummy_column, time_or_null};
-use crate::{create_dummy_schema, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
 pub mod noria_connector;
 
@@ -1453,6 +1459,15 @@ where
 
         let res = match prep {
             Select { statement, .. } => {
+                let mut statement: &PreparedSelectStatement = statement;
+                let mut rls_statement: PreparedSelectStatement;
+                if let Some(rls_vars) = get_rls_vars_for_query(&statement.name)? {
+                    rls_statement = statement.clone();
+                    Self::apply_rls(&rls_vars, &mut rls_statement.processed_query_params)
+                        .await
+                        .map_err(|e| internal_err!("{e}"))?;
+                    statement = &rls_statement;
+                }
                 let ctx = ExecuteSelectContext::Prepared {
                     ps: statement,
                     params,
@@ -1515,6 +1530,7 @@ where
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let noria_res = Self::execute_noria(noria, noria_prep, params, ticket, event).await;
+
         match noria_res {
             Ok(noria_ok) => {
                 if let Some(info) = ex_info {
@@ -1960,6 +1976,7 @@ where
                 self.drop_cached_query(name).await?;
             }
         }
+
         // Now migrate the new query
         adapter_rewrites::process_query(&mut stmt, self.noria.rewrite_params())?;
         let migration_state = match self
@@ -2300,6 +2317,143 @@ where
         ))
     }
 
+    /// Responds to a `SHOW {ALL RLS | RLS ON <table>}` query
+    fn show_rls(
+        &self,
+        table: &Option<Relation>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        get_rls(table.clone()).map(|opt_rows| {
+            noria_connector::QueryResult::from_owned(
+                create_dummy_schema!("Table", "Policy"),
+                vec![Results::new(opt_rows.unwrap_or_default())],
+            )
+        })
+    }
+
+    async fn rebuild_cached_queries<'a, I>(&mut self, queries: I) -> Vec<ReadySetResult<()>>
+    where
+        I: Iterator<Item = &'a Relation>,
+    {
+        let mut view_requests = Vec::new();
+        for query in queries {
+            if let Some(view_request) = self.noria.view_create_request_from_name(query).await {
+                view_requests.push(Ok((query.clone(), view_request)));
+            } else {
+                view_requests.push(Err(internal_err!(
+                    "Cached query {} not found in Noria views",
+                    query.display_unquoted()
+                )))
+            }
+        }
+
+        let mut statuses: Vec<ReadySetResult<()>> = Vec::with_capacity(view_requests.len());
+        for r in view_requests {
+            match r {
+                Ok((query, view_request)) => {
+                    statuses.push(
+                        self.create_cached_query(
+                            &mut Some(query),
+                            view_request.statement.clone(),
+                            Some(view_request.schema_search_path.clone()),
+                            true,
+                            false,
+                        )
+                        .await
+                        .map(|_| ()),
+                    );
+                }
+                Err(e) => {
+                    statuses.push(Err(e));
+                }
+            }
+        }
+
+        statuses
+    }
+
+    fn build_rls_impacted_cached_queries_result_set<'a, I>(
+        &mut self,
+        impacted_queries: I,
+        statuses: Vec<ReadySetResult<()>>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>>
+    where
+        I: Iterator<Item = &'a Relation>,
+    {
+        Ok(noria_connector::QueryResult::from_owned(
+            create_dummy_schema!("Impacted cache name", "Status"),
+            vec![Results::new(
+                impacted_queries
+                    .zip(statuses)
+                    .map(|(query, status)| {
+                        vec![
+                            query.display_unquoted().to_string().into(),
+                            if let Err(e) = status {
+                                let err_str = e.to_string();
+                                match err_str.rfind(": ") {
+                                    Some(index) => {
+                                        format!("Dropped: {}", &err_str[index + 2..])
+                                    }
+                                    None => err_str,
+                                }
+                            } else {
+                                "Updated".to_string()
+                            }
+                            .into(),
+                        ]
+                    })
+                    .collect(),
+            )],
+        ))
+    }
+
+    async fn update_rls_persistent_state(&mut self) -> ReadySetResult<()> {
+        self.authority
+            .update_rls_persistent_state(|_| RlsPersistentState::get())
+            .await
+    }
+
+    async fn create_rls(
+        &mut self,
+        stmt: &CreateRlsStatement,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        // Obtain the cached queries which reference the table we create the RLS on.
+        let impacted_queries = get_cached_queries_referencing_table(&stmt.table)?;
+
+        // Create RLS on the requested table, don't do anything if we have to overwrite, and
+        // the new content is identical to the existing one
+        if !create_rls(
+            stmt.table.clone(),
+            stmt.policy
+                .iter()
+                .map(|(col, var)| (col.clone(), var.name.clone()))
+                .collect(),
+            stmt.if_not_exists,
+        )? {
+            return Ok(noria_connector::QueryResult::Empty);
+        }
+
+        // Rebuild the query graphs for the impacted queries
+        let statuses = self.rebuild_cached_queries(impacted_queries.iter()).await;
+        // Return the list of impacted queries along with their update status
+        self.build_rls_impacted_cached_queries_result_set(impacted_queries.iter(), statuses)
+    }
+
+    async fn drop_rls(
+        &mut self,
+        stmt: &DropRlsStatement,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        // Drop the RLS on the requested table, and return the impacted queries' names.
+        if let Some(impacted_queries) = drop_rls(stmt.table.clone())? {
+            // Rebuild the query graphs for the impacted queries
+            let statuses = self.rebuild_cached_queries(impacted_queries.iter()).await;
+            // Return the list of impacted queries along with their update status
+            self.build_rls_impacted_cached_queries_result_set(impacted_queries.iter(), statuses)
+        } else {
+            // Empty return, as we did not have any cached queries referencing the table
+            Ok(noria_connector::QueryResult::Empty)
+        }
+    }
+
     fn readyset_adapter_status(&self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let mut statuses = match self.metrics_handle.as_ref() {
             Some(handle) => handle.readyset_status(),
@@ -2462,6 +2616,7 @@ where
                 let res = self
                     .create_cached_query(&mut name, stmt, search_path, *always, *concurrently)
                     .await;
+                let _ = self.update_rls_persistent_state().await;
                 // The extend_recipe may have failed, in which case we should remove our intention
                 // to create this cache. Extend recipe waits a bit and then returns an
                 // Ok(ExtendRecipeResult::Pending) if it is still creating a cache in the
@@ -2505,6 +2660,7 @@ where
                     .await?;
                 let DropCacheStatement { name } = drop_cache;
                 let res = self.drop_cached_query(name).await;
+                let _ = self.update_rls_persistent_state().await;
                 // `drop_cached_query` may return an Err, but if the cache fails to be dropped for
                 // certain reasons, we can also see an Ok(Delete) here with num_rows_deleted set to
                 // 0.
@@ -2533,7 +2689,9 @@ where
                 if !self.allow_cache_ddl {
                     unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
                 }
-                self.drop_all_caches().await
+                let res = self.drop_all_caches().await;
+                let _ = self.update_rls_persistent_state().await;
+                res
             }
             SqlQuery::DropAllProxiedQueries(_) => {
                 if !self.allow_cache_ddl {
@@ -2585,9 +2743,7 @@ where
                 )
                 .await
             }
-            SqlQuery::Show(ShowStatement::Rls(_maybe_table)) => {
-                unsupported!("SHOW RLS statement is not yet supported")
-            }
+            SqlQuery::Show(ShowStatement::Rls(maybe_table)) => self.show_rls(maybe_table),
             SqlQuery::AlterReadySet(AlterReadysetStatement::ResnapshotTable(stmt)) => {
                 let mut table = stmt.table.clone();
                 self.noria.resnapshot_table(&mut table).await
@@ -2602,11 +2758,15 @@ where
             SqlQuery::AlterReadySet(AlterReadysetStatement::ExitMaintenanceMode) => {
                 self.noria.exit_maintenance_mode().await
             }
-            SqlQuery::CreateRls(_create_rls) => {
-                unsupported!("CREATE RLS statement is not yet supported")
+            SqlQuery::CreateRls(stmt) => {
+                let res = self.create_rls(stmt).await;
+                let _ = self.update_rls_persistent_state().await;
+                res
             }
-            SqlQuery::DropRls(_drop_rls) => {
-                unsupported!("DROP RLS statement is not yet supported")
+            SqlQuery::DropRls(stmt) => {
+                let res = self.drop_rls(stmt).await;
+                let _ = self.update_rls_persistent_state().await;
+                res
             }
             _ => Err(internal_err!("Provided query is not a ReadySet extension")),
         };
@@ -2616,6 +2776,76 @@ where
         });
 
         res
+    }
+
+    fn read_rls_variables(rls_vars: &[SqlIdentifier]) -> ReadySetResult<Vec<DfValue>> {
+        let mut unset_vars = None;
+
+        let mut var_vals: Vec<DfValue> = Vec::with_capacity(rls_vars.len());
+        for (i, maybe_val) in get_session_variables(rls_vars)?.iter().enumerate() {
+            if let Some(val) = maybe_val {
+                var_vals.push(val.as_str().into());
+            } else {
+                if unset_vars.is_none() {
+                    unset_vars = Some(Vec::new());
+                }
+                if let Some(unset_vars) = &mut unset_vars {
+                    unset_vars.push(rls_vars[i].as_str());
+                }
+            }
+        }
+
+        if let Some(unset_vars) = unset_vars {
+            let mut var_list: String = "".to_string();
+            unset_vars.into_iter().all(|v| {
+                if !var_list.is_empty() {
+                    var_list.push_str(", ");
+                }
+                var_list.push_str(v);
+                true
+            });
+            internal!("Variables [{var_list}] not set up, but required for RLS managed query")
+        }
+
+        Ok(var_vals)
+    }
+
+    // Extend `processed_query_params.auto_parameters` with the values of the RLS
+    // session variables `rls_vars`, which correspond to the RLS placeholders.
+    // Verify that all RLS required variables have been set up at this moment.
+    // Return `true` if the statement was RLS managed and
+    // `processed_query_params.auto_parameters` was updated.
+    async fn apply_rls(
+        rls_vars: &[SqlIdentifier],
+        processed_query_params: &mut ProcessedQueryParams,
+    ) -> Result<(), DB::Error> {
+        // Read the required system variables
+        let var_vals = Self::read_rls_variables(rls_vars)?;
+        invariant_eq!(var_vals.len(), rls_vars.len());
+
+        // Build `rls_params` which is a vector of tuple (0-based placeholder index, Literal).
+        // This one will be used to extend the existing `processed_query_params.auto_parameters`.
+        let mut rls_params = Vec::with_capacity(var_vals.len());
+
+        // Start the RLS placeholder index right after the existing ones.
+        // Note that here the placeholder indexes are 0-based, and the existing placeholder
+        // indexes are contiguous.
+        let mut rls_placeholder_index = processed_query_params.get_auto_parameters_count();
+        for i in 0..var_vals.len() {
+            let Some(str_val) = var_vals[i].as_str() else {
+                internal!(
+                    "Variable '{}' is of type {:?}, though expected to be text",
+                    rls_vars[i].as_str(),
+                    var_vals[i].infer_dataflow_type()
+                )
+            };
+            rls_params.push((rls_placeholder_index, str_val.into()));
+            rls_placeholder_index += 1;
+        }
+
+        processed_query_params.extend_auto_parameters(rls_params);
+
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2628,7 +2858,7 @@ where
         view_request: &ViewCreateRequest,
         mut status: QueryStatus,
         event: &mut QueryExecutionEvent,
-        processed_query_params: ProcessedQueryParams,
+        mut processed_query_params: ProcessedQueryParams,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let original_status = status.clone();
         let did_work = if let Some(ref mut i) = status.execution_info {
@@ -2669,10 +2899,17 @@ where
         }
 
         let noria_res = {
+            let name = noria
+                .retrieve_cached_query_name(&view_request.statement, settings.migration_mode)
+                .await?;
+            if let Some(rls_vars) = get_rls_vars_for_query(&name)? {
+                Self::apply_rls(&rls_vars, &mut processed_query_params)
+                    .await
+                    .map_err(|e| internal_err!("{e}"))?;
+            }
             event.destination = Some(QueryDestination::Readyset);
             let ctx = ExecuteSelectContext::AdHoc {
-                statement: &view_request.statement,
-                create_if_missing: settings.migration_mode == MigrationMode::InRequestPath,
+                name,
                 processed_query_params,
             };
             noria.execute_select(ctx, state.ticket.clone(), event).await

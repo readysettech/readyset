@@ -2,6 +2,15 @@ use std::collections::{HashMap, HashSet};
 use std::str;
 use std::vec::Vec;
 
+use self::mir::{LeafBehavior, NodeIndex as MirNodeIndex, SqlToMirConverter};
+use self::query_graph::to_query_graph;
+pub(crate) use self::recipe::{ExprId, Recipe, Schema};
+use self::registry::ExprRegistry;
+use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
+pub(crate) use crate::controller::sql::registry::RecipeExpr;
+use crate::controller::Migration;
+use crate::sql::mir::MirRemovalResult;
+use crate::ReuseConfigType;
 use ::mir::visualize::GraphViz;
 use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
@@ -10,6 +19,7 @@ use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
 use readyset_client::recipe::ChangeList;
 use readyset_data::dialect::SqlEngine;
+use readyset_data::rls::{add_cached_query, drop_cached_query, try_apply_rls};
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
 use readyset_errors::{
     internal, internal_err, invalid_query_err, invariant, unsupported, ReadySetError,
@@ -22,20 +32,10 @@ use readyset_sql::ast::{
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
-use readyset_sql_passes::{DetectUnsupportedPlaceholders, Rewrite, RewriteContext};
+use readyset_sql_passes::{DetectUnsupportedPlaceholders, ResolveSchemas, Rewrite, RewriteContext};
 use readyset_util::redacted::Sensitive;
 use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
-
-use self::mir::{LeafBehavior, NodeIndex as MirNodeIndex, SqlToMirConverter};
-use self::query_graph::to_query_graph;
-pub(crate) use self::recipe::{ExprId, Recipe, Schema};
-use self::registry::ExprRegistry;
-use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
-pub(crate) use crate::controller::sql::registry::RecipeExpr;
-use crate::controller::Migration;
-use crate::sql::mir::MirRemovalResult;
-use crate::ReuseConfigType;
 
 pub(crate) mod mir;
 mod query_graph;
@@ -134,6 +134,28 @@ pub(crate) struct SqlIncorporator {
     permissive_writes: bool,
 }
 
+macro_rules! build_base_schemas {
+    ($self:expr) => {
+        $self
+            .base_schemas
+            .iter()
+            .map(|(k, BaseSchema { statement, .. })| (k, statement))
+            .collect()
+    };
+}
+macro_rules! build_custom_types {
+    ($self:expr) => {
+        $self
+            .custom_types
+            .keys()
+            .filter_map(|t| Some((t.schema.as_ref()?, &t.name)))
+            .fold(HashMap::new(), |mut acc, (schema, name)| {
+                acc.entry(schema).or_default().insert(name);
+                acc
+            })
+    };
+}
+
 impl SqlIncorporator {
     /// Creates a new `SqlIncorporator` for an empty flow graph.
     pub(super) fn new() -> Self {
@@ -189,27 +211,36 @@ impl SqlIncorporator {
     {
         stmt.rewrite(&mut RewriteContext {
             view_schemas: &self.view_schemas,
-            base_schemas: self
-                .base_schemas
-                .iter()
-                .map(|(k, BaseSchema { statement, .. })| (k, statement))
-                .collect(),
+            base_schemas: build_base_schemas!(self),
             uncompiled_views: &self.uncompiled_views.keys().collect::<Vec<_>>(),
             non_replicated_relations: &self.mir_converter.non_replicated_relations,
-            custom_types: &self
-                .custom_types
-                .keys()
-                .filter_map(|t| Some((t.schema.as_ref()?, &t.name)))
-                .fold(HashMap::new(), |mut acc, (schema, name)| {
-                    acc.entry(schema).or_default().insert(name);
-                    acc
-                }),
+            custom_types: &build_custom_types!(self),
             search_path,
             dialect,
             invalidating_tables,
             table_alias_rewrites,
             query_name,
         })
+    }
+
+    pub(crate) fn resolve_schemas(
+        &self,
+        stmt: SelectStatement,
+        search_path: &[SqlIdentifier],
+    ) -> ReadySetResult<SelectStatement> {
+        let context = RewriteContext {
+            view_schemas: &self.view_schemas,
+            base_schemas: build_base_schemas!(self),
+            uncompiled_views: &self.uncompiled_views.keys().collect::<Vec<_>>(),
+            non_replicated_relations: &self.mir_converter.non_replicated_relations,
+            custom_types: &build_custom_types!(self),
+            search_path,
+            dialect: Dialect::DEFAULT_POSTGRESQL,
+            invalidating_tables: None,
+            table_alias_rewrites: None,
+            query_name: None,
+        };
+        stmt.resolve_schemas(context.tables(), context.custom_types, search_path, None)
     }
 
     pub(crate) fn apply_changelist(
@@ -655,6 +686,18 @@ impl SqlIncorporator {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
         let query_id = QueryId::from_select(&stmt, schema_search_path);
 
+        // Add the query being cached to the RLS metadata.
+        // NOTE: it has to be done before the actual readyset action, and it has to be
+        // dropped from the RLS metadata in case readyset fails to add it.
+        let _ = add_cached_query(&name, stmt.clone(), |stmt| {
+            self.resolve_schemas(stmt, schema_search_path)
+        });
+
+        // Use this lambda to `inspect_err` on each ReadySetResult that can exit via operator `?`
+        let on_error = |_: &ReadySetError| {
+            let _ = drop_cached_query(&name);
+        };
+
         let mut invalidating_tables = vec![];
         let detect_placeholders_config =
             readyset_sql_passes::detect_unsupported_placeholders::Config {
@@ -690,7 +733,7 @@ impl SqlIncorporator {
                 let caches = self.registry.caches_for_query(rewritten_stmt)?;
                 if caches.is_empty() {
                     // Can't reuse anything. Return the error.
-                    return Err(err);
+                    Err(err)
                 } else {
                     #[allow(clippy::unwrap_used)]
                     // we checked that caches is not empty
@@ -710,16 +753,22 @@ impl SqlIncorporator {
             // We did not detect unsupported placeholders, but we failed to migrate the query.
             // Unlikely that we could reuse a cache, so we don't attempt to do so.
             Err(err) => Err(err),
-        }?;
+        }
+        .inspect_err(on_error)?;
 
-        let aliased = !self.registry.add_query(RecipeExpr::Cache {
-            name: name.clone(),
-            statement: stmt,
-            always,
-            query_id,
-        })?;
+        let aliased = !self
+            .registry
+            .add_query(RecipeExpr::Cache {
+                name: name.clone(),
+                statement: stmt,
+                always,
+                query_id,
+            })
+            .inspect_err(on_error)?;
+
         self.registry
-            .insert_invalidating_tables(name.clone(), invalidating_tables)?;
+            .insert_invalidating_tables(name.clone(), invalidating_tables)
+            .inspect_err(on_error)?;
 
         if aliased {
             return Ok(name);
@@ -727,7 +776,10 @@ impl SqlIncorporator {
 
         // We don't add a leaf if we're reusing a query
         if let Some(mir_query) = mir_query {
-            let leaf = self.mir_to_dataflow(name.clone(), mir_query, mig)?;
+            let leaf = self
+                .mir_to_dataflow(name.clone(), mir_query, mig)
+                .inspect_err(on_error)?;
+
             self.leaf_addresses.insert(name.clone(), leaf);
         }
 
@@ -1141,6 +1193,8 @@ impl SqlIncorporator {
         // FIXME(REA-2168): Use correct dialect.
         trace!(stmt = %stmt.display(readyset_sql::Dialect::MySQL), "Adding select query");
         let mut table_alias_rewrites = vec![];
+        // Note, we update `stmt` at the caller with the original rewritten statement.
+        // The `SHOW CACHES` will display this statement.
         *stmt = self.rewrite(
             stmt.clone(),
             Some(&query_name.name),
@@ -1200,8 +1254,39 @@ impl SqlIncorporator {
         trace!(rewritten_query = %stmt.display(readyset_sql::Dialect::MySQL));
         trace!("SelectStatement: {:?}", &stmt);
 
-        let query_graph = to_query_graph(stmt.clone())?;
+        let mut query_graph = to_query_graph(stmt.clone())?;
         trace!("QueryGraph: {:?}", &query_graph);
+
+        // Try to apply the RLS to the statement, if applicable.
+        if !mig.is_dry_run {
+            // Try to apply the RLS to the statement.
+            let mut rls_stmt = stmt.clone();
+            match try_apply_rls(query_name.clone(), &mut rls_stmt) {
+                Ok(true) => {
+                    // Rewrite the statement if the RLS was applied
+                    rls_stmt = self.rewrite(
+                        rls_stmt,
+                        Some(&query_name.name),
+                        search_path,
+                        mig.dialect,
+                        None,
+                        None,
+                    )?;
+                    // build `query_graph` for the RLS managed statement
+                    query_graph = to_query_graph(rls_stmt)?;
+                    trace!("RLS updated QueryGraph: {:?}", &query_graph);
+                }
+                Ok(false) => {
+                    // Not an RLS managed statement
+                }
+                Err(e) => {
+                    warn!(
+                        "\"{e}\": applying RLS to: {}",
+                        rls_stmt.display(readyset_sql::Dialect::PostgreSQL)
+                    );
+                }
+            }
+        }
 
         self.mir_converter.named_query_to_mir(
             query_name,
@@ -1296,6 +1381,7 @@ impl SqlIncorporator {
         let mut mir_removal_result = self.mir_converter.remove_query(query_name)?;
         self.process_removal(&mut mir_removal_result, mig);
         self.view_schemas.remove(query_name);
+        let _ = drop_cached_query(query_name);
         Ok(mir_removal_result)
     }
 

@@ -11,6 +11,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use clap::ValueEnum;
 use enum_dispatch::enum_dispatch;
+use readyset_data::rls::RlsPersistentState;
 use readyset_data::Dialect;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::SqlIdentifier;
@@ -42,6 +43,7 @@ pub type WorkerId = String;
 const CACHE_DDL_REQUESTS_PATH: &str = "cache_ddl_requests";
 const PERSISTENT_STATS_PATH: &str = "persistent_stats";
 const SCHEMA_REPLICATION_OFFSET_PATH: &str = "schema_replication_offset";
+const RLS_PERSISTENT_STATE_PATH: &str = "rls_persistent_state";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct CacheDDLRequest {
@@ -292,6 +294,19 @@ pub trait AuthorityControl: Send + Sync {
         self.read_modify_write(PERSISTENT_STATS_PATH, f)
             .await
             .and_then(std::convert::identity)
+    }
+
+    async fn update_rls_persistent_state<F>(&self, f: F) -> ReadySetResult<()>
+    where
+        F: Send + FnMut(Option<RlsPersistentState>) -> ReadySetResult<RlsPersistentState>,
+    {
+        self.read_modify_write(RLS_PERSISTENT_STATE_PATH, f)
+            .await
+            .map(|_| ())
+    }
+
+    async fn rls_persistent_state(&self) -> ReadySetResult<Option<RlsPersistentState>> {
+        self.try_read(RLS_PERSISTENT_STATE_PATH).await
     }
 
     /// Returns the stored schema [`ReplicationOffset`], if present. Wrapper around Self::try_read

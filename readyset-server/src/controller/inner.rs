@@ -11,6 +11,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::controller::state::{DfState, DfStateHandle};
+use crate::controller::{ControllerState, Worker, WorkerIdentifier};
+use crate::worker::WorkerRequestKind;
 use database_utils::{DatabaseURL, UpstreamConfig};
 use dataflow::DomainIndex;
 use failpoint_macros::failpoint;
@@ -48,10 +51,6 @@ use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use tracing::{debug, error, info, info_span, warn};
-
-use crate::controller::state::{DfState, DfStateHandle};
-use crate::controller::{ControllerState, Worker, WorkerIdentifier};
-use crate::worker::WorkerRequestKind;
 
 /// Maximum amount of time to wait for an `extend_recipe` request to run synchronously, before we
 /// let it run in the background and return [`ExtendRecipeResult::Pending`].
@@ -141,6 +140,17 @@ impl Leader {
             .await
         {
             warn!(%error, "Failed to persist stats in the Authority");
+        }
+
+        match self.authority.rls_persistent_state().await {
+            Ok(maybe_rls_state) => {
+                if let Some(rls_state) = maybe_rls_state {
+                    if let Err(error) = rls_state.apply() {
+                        warn!(%error, "Failed to apply the RLS persistent state")
+                    }
+                }
+            }
+            Err(error) => warn!(%error, "Failed to read RLS persistent state from the Authority"),
         }
 
         // When the controller becomes the leader, we need to read updates

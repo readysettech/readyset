@@ -5,12 +5,13 @@ use lazy_static::lazy_static;
 use readyset_adapter::backend::noria_connector::QueryResult;
 use readyset_adapter::backend::{noria_connector, SelectSchema};
 use readyset_adapter::{QueryHandler, SetBehavior};
+use readyset_data::upstream_system_props::update_session_variable;
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{
     Literal, PostgresParameterValue, PostgresParameterValueInner, SetNames, SetPostgresParameter,
-    SetPostgresParameterValue, SetStatement, SqlQuery,
+    SetPostgresParameterValue, SetStatement, SqlIdentifier, SqlQuery,
 };
-use readyset_sql::DialectDisplay;
+use readyset_sql::{Dialect, DialectDisplay};
 
 enum AllowedParameterValue {
     Literal(PostgresParameterValue),
@@ -410,6 +411,34 @@ impl QueryHandler for PostgreSqlQueryHandler {
                 _ => {
                     if let Some(allowed_value) = ALLOWED_PARAMETERS_WITH_VALUE.get(name.as_str()) {
                         SetBehavior::proxy_if(allowed_value.set_value_is_allowed(value))
+                    } else if let Some((_, _)) = name.as_str().split_once('.') {
+                        if let SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                            PostgresParameterValueInner::Literal(lit),
+                        )) = value
+                        {
+                            let s: SqlIdentifier = if let Literal::String(s) = lit {
+                                s.into()
+                            } else if lit.is_number()
+                                || matches!(lit, Literal::Null | Literal::Boolean(_))
+                            {
+                                // NOTE: For numbers, NULL(s) and booleans, `dialect` doesn't matter
+                                lit.display(Dialect::PostgreSQL).to_string().into()
+                            } else {
+                                // For session variables of other types, such as BLOB, ByteArray, BitVector
+                                // TODO: clarify what to do in this case.
+                                return SetBehavior::Proxy;
+                            };
+                            if update_session_variable(name.clone(), s).is_ok() {
+                                SetBehavior::Proxy
+                            } else {
+                                // Error here means, the internal lock was poisoned, so we have lost track
+                                // of the session variables at this point.
+                                // TODO: clarify what to do in this case.
+                                SetBehavior::Unsupported
+                            }
+                        } else {
+                            SetBehavior::Unsupported
+                        }
                     } else {
                         SetBehavior::Unsupported
                     }

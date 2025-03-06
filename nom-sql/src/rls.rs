@@ -92,7 +92,7 @@ pub fn create_rls(
                     (
                         col,
                         Variable {
-                            scope: VariableScope::Session,
+                            scope: VariableScope::User,
                             name: var.display_unquoted().to_string().into(),
                         },
                     )

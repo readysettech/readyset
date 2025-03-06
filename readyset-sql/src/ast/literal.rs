@@ -532,4 +532,15 @@ impl Literal {
     pub fn is_placeholder(&self) -> bool {
         matches!(self, Self::Placeholder(_))
     }
+
+    pub fn is_number(&self) -> bool {
+        matches!(
+            self,
+            Literal::Integer(_)
+                | Literal::UnsignedInteger(_)
+                | Literal::Float(_)
+                | Literal::Double(_)
+                | Literal::Numeric(..)
+        )
+    }
 }

@@ -2,7 +2,9 @@ use chrono_tz::Tz;
 use once_cell::sync::OnceCell;
 use readyset_errors::{internal, internal_err, ReadySetResult};
 use readyset_sql::ast::SqlIdentifier;
+use std::collections::HashMap;
 use std::fmt;
+use std::sync::{Arc, LazyLock, RwLock};
 
 #[derive(Default, Clone, Debug)]
 pub struct UpstreamSystemProperties {
@@ -73,4 +75,42 @@ pub fn lower_case_database_names() -> bool {
 
 pub fn lower_case_table_names() -> bool {
     get(&LOWER_CASE_TABLE_NAMES)
+}
+
+static SESSION_VARIABLES_REPO: LazyLock<Arc<RwLock<HashMap<SqlIdentifier, SqlIdentifier>>>> =
+    LazyLock::new(|| Arc::new(RwLock::new(HashMap::new())));
+
+pub fn update_session_variable(
+    var_name: SqlIdentifier,
+    value: SqlIdentifier,
+) -> ReadySetResult<()> {
+    match SESSION_VARIABLES_REPO.write() {
+        Ok(mut guard) => {
+            guard.insert(var_name, value);
+            Ok(())
+        }
+        Err(_) => Err(internal_err!("Internal lock is poisoned")),
+    }
+}
+
+pub fn get_session_variable(var_name: &SqlIdentifier) -> ReadySetResult<Option<SqlIdentifier>> {
+    match SESSION_VARIABLES_REPO.read() {
+        Ok(guard) => Ok(guard.get(var_name).cloned()),
+        Err(_) => Err(internal_err!("Internal lock is poisoned")),
+    }
+}
+
+pub fn get_session_variables(
+    var_names: &[SqlIdentifier],
+) -> ReadySetResult<Vec<Option<SqlIdentifier>>> {
+    match SESSION_VARIABLES_REPO.read() {
+        Ok(guard) => {
+            let mut result = Vec::with_capacity(var_names.len());
+            for var_name in var_names {
+                result.push(guard.get(var_name).cloned());
+            }
+            Ok(result)
+        }
+        Err(_) => Err(internal_err!("Internal lock is poisoned")),
+    }
 }

@@ -670,17 +670,24 @@ pub struct Migration<'df> {
     pub(super) readers: HashMap<NodeIndex, NodeIndex>,
     pub(super) worker: Option<WorkerIdentifier>,
     pub(super) dialect: Dialect,
+    pub(super) is_dry_run: bool,
+
     pub(super) start: Instant,
 }
 
 impl<'df> Migration<'df> {
-    pub(super) fn new(dataflow_state: &'df mut DfState, dialect: Dialect) -> Self {
+    pub(super) fn new(
+        dataflow_state: &'df mut DfState,
+        is_dry_run: bool,
+        dialect: Dialect,
+    ) -> Self {
         Self {
             dataflow_state,
             changes: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
             worker: None,
+            is_dry_run,
             dialect,
             start: Instant::now(),
         }

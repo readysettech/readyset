@@ -3,10 +3,9 @@ use crate::{Dialect, DialectDisplay};
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use test_strategy::Arbitrary;
 
-#[derive(Clone, Debug, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, PartialOrd, Ord, Serialize, Deserialize, Arbitrary, PartialEq, Eq, Hash)]
 pub struct CreateRlsStatement {
     pub table: Relation,
     pub policy: Vec<(Column, Variable)>,
@@ -63,24 +62,6 @@ impl DialectDisplay for CreateRlsStatement {
             )?;
             Ok(())
         })
-    }
-}
-
-impl PartialEq<Self> for CreateRlsStatement {
-    fn eq(&self, other: &Self) -> bool {
-        self.table == other.table
-            && self.if_not_exists == other.if_not_exists
-            && self.policy == other.policy
-    }
-}
-
-impl Eq for CreateRlsStatement {}
-
-impl Hash for CreateRlsStatement {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.table.hash(state);
-        self.if_not_exists.hash(state);
-        self.policy.hash(state);
     }
 }
 

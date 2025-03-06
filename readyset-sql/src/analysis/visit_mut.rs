@@ -10,7 +10,6 @@
 
 #![warn(clippy::todo, clippy::unimplemented)]
 
-use crate::ast::rls::CreateRlsStatement;
 use crate::ast::*;
 
 /// Each method of the `VisitorMut` trait is a hook to be potentially overridden when recursively

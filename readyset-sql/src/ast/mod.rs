@@ -17,7 +17,7 @@ mod literal;
 mod order;
 mod query;
 mod rename;
-pub mod rls;
+mod rls;
 mod select;
 mod set;
 mod show;

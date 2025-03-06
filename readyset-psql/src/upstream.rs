@@ -1,8 +1,3 @@
-use std::fmt::Debug;
-use std::pin::Pin;
-use std::str::FromStr;
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use futures::StreamExt;
 use postgres_types::Kind;
@@ -15,6 +10,10 @@ use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_util::redacted::RedactedString;
+use std::fmt::Debug;
+use std::pin::Pin;
+use std::str::FromStr;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio_postgres::types::Type;
 use tokio_postgres::{

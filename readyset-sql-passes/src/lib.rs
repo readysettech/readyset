@@ -112,9 +112,7 @@ pub enum CanQuery {
 }
 
 impl<'a> RewriteContext<'a> {
-    pub(crate) fn tables(
-        &self,
-    ) -> HashMap<&'a SqlIdentifier, HashMap<&'a SqlIdentifier, CanQuery>> {
+    pub fn tables(&self) -> HashMap<&'a SqlIdentifier, HashMap<&'a SqlIdentifier, CanQuery>> {
         self.view_schemas
             .keys()
             .chain(self.uncompiled_views.iter().copied())

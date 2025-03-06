@@ -232,6 +232,14 @@ impl ProcessedQueryParams {
                 .collect(),
         )
     }
+
+    pub fn get_auto_parameters_count(&self) -> usize {
+        self.auto_parameters.len()
+    }
+
+    pub fn extend_auto_parameters(&mut self, extra: Vec<(usize, Literal)>) {
+        self.auto_parameters.extend(extra);
+    }
 }
 
 /// Information about a single parameterized IN condition that has been rewritten to an equality

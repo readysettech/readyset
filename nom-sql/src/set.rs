@@ -2,7 +2,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
-use nom::sequence::{terminated, tuple};
+use nom::sequence::{preceded, terminated, tuple};
 use nom::Parser;
 use nom_locate::LocatedSpan;
 use readyset_sql::{ast::*, Dialect};
@@ -179,11 +179,21 @@ fn set_names(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[
 
 fn set_postgres_parameter(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SetPostgresParameter> {
     let (i, scope) = opt(terminated(postgres_parameter_scope, whitespace1))(i)?;
-    let (i, name) = Dialect::PostgreSQL.identifier()(i)?;
+    let (i, name) = tuple((
+        Dialect::PostgreSQL.identifier(),
+        opt(preceded(tag("."), Dialect::PostgreSQL.identifier())),
+    ))(i)?;
     let (i, _) = whitespace0(i)?;
     let (i, _) = alt((terminated(tag_no_case("to"), whitespace1), tag("=")))(i)?;
     let (i, _) = whitespace0(i)?;
     let (i, value) = set_postgres_parameter_value(i)?;
+
+    let (prefix, postfix) = name;
+    let name: SqlIdentifier = if let Some(postfix) = postfix {
+        [prefix.as_str(), postfix.as_str()].join(".").into()
+    } else {
+        prefix
+    };
 
     Ok((i, SetPostgresParameter { scope, name, value }))
 }

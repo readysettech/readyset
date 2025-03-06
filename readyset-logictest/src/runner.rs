@@ -285,7 +285,7 @@ impl TestScript {
         .map_err(|e| anyhow!(e))
     }
 
-    fn might_be_timezone_changing_statement(conn: &mut DatabaseConnection, stmt: &str) -> bool {
+    fn might_be_timezone_changing_statement(conn: &DatabaseConnection, stmt: &str) -> bool {
         let stmt = stmt.to_lowercase();
         stmt.contains("set ")
             && if matches!(conn, DatabaseConnection::PostgreSQL(..)) {
@@ -293,6 +293,16 @@ impl TestScript {
             } else {
                 stmt.contains("time_zone")
             }
+    }
+
+    fn might_be_timezone_changing_query(conn: &DatabaseConnection, query: &str) -> bool {
+        if matches!(conn, DatabaseConnection::PostgreSQL(..)) {
+            query
+                .to_lowercase()
+                .starts_with("select set_config('timezone',")
+        } else {
+            false
+        }
     }
 
     pub async fn run_on_database(
@@ -360,7 +370,9 @@ impl TestScript {
                         eprintln!("     > {}", query.query);
                     }
 
-                    if update_system_timezone {
+                    if update_system_timezone
+                        || Self::might_be_timezone_changing_query(conn, &query.query)
+                    {
                         if let Err(e) = Self::update_system_timezone(conn).await {
                             eprintln!("{e}");
                         }

@@ -467,6 +467,7 @@ impl UpstreamDatabase for MySqlUpstream {
     }
 
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error> {
+        // TODO: implement for MySQL
         Ok(DEFAULT_TIMEZONE_NAME.into())
     }
 
