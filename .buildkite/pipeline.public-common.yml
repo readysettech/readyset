@@ -24,17 +24,17 @@ steps:
       - '[ -d public ] && cd public'
       - "cargo --locked fmt -- --check"
     depends_on:
-    - build-image
+      - build-image
     plugins:
       - docker#${DOCKER_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
-          - 'target:/workdir/target'
+            - 'target:/workdir/target'
           environment:
-          - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
-          - SCCACHE_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          - RUST_BACKTRACE=full
+            - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
+            - SCCACHE_REGION=us-east-2
+            - CARGO_INCREMENTAL=0
+            - RUST_BACKTRACE=full
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
@@ -46,15 +46,15 @@ steps:
       - export RUST_BACKTRACE=full
       - cargo --locked deny check
     depends_on:
-    - cargo-deny-image
+      - cargo-deny-image
     plugins:
       - docker#${DOCKER_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-deny:${BUILDKITE_COMMIT}'
           environment:
-          - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
-          - SCCACHE_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          - RUST_BACKTRACE=full
+            - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
+            - SCCACHE_REGION=us-east-2
+            - CARGO_INCREMENTAL=0
+            - RUST_BACKTRACE=full
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
@@ -67,17 +67,17 @@ steps:
       - export RUST_BACKTRACE=full
       - cargo --locked clippy --workspace --all-targets --all-features -- -D warnings
     depends_on:
-    - build-image
+      - build-image
     plugins:
       - docker#${DOCKER_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
-          - 'target:/workdir/target'
+            - 'target:/workdir/target'
           environment:
-          - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
-          - SCCACHE_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          - RUST_BACKTRACE=full
+            - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
+            - SCCACHE_REGION=us-east-2
+            - CARGO_INCREMENTAL=0
+            - RUST_BACKTRACE=full
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
@@ -91,21 +91,21 @@ steps:
       - '.buildkite/run-tests.sh'
     timeout_in_minutes: 60
     depends_on:
-    - build-image
+      - build-image
     plugins:
       - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
           run: app
           tty: true           # nextest makes colored output if we use tty
           env:
-          - BUILDKITE_PARALLEL_JOB
-          - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
-          - SCCACHE_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          - RUST_BACKTRACE=full
-          - MYSQL_HOST=mysql
-          - MYSQL_PWD=noria
-          - MYSQL_DB=noria
-          - CARGO_TERM_PROGRESS_WHEN=never     # disable progress bars if tty=true
+            - BUILDKITE_PARALLEL_JOB
+            - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
+            - SCCACHE_REGION=us-east-2
+            - CARGO_INCREMENTAL=0
+            - RUST_BACKTRACE=full
+            - MYSQL_HOST=mysql
+            - MYSQL_PWD=noria
+            - MYSQL_DB=noria
+            - CARGO_TERM_PROGRESS_WHEN=never     # disable progress bars if tty=true
           volumes:
             - 'target:/workdir/target'
           config:
@@ -135,17 +135,17 @@ steps:
       - cargo --locked run --bin readyset-logictest -- verify logictests/replicated/mysql --database-type mysql --replication-url mysql://root:noria@mysql/noria
     timeout_in_minutes: 60
     depends_on:
-    - build-image
+      - build-image
     plugins:
       - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
           run: app
           tty: true           # tests make colored output if we use tty
           env:
-          - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
-          - SCCACHE_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          - RUST_BACKTRACE=full
-          - CARGO_TERM_PROGRESS_WHEN=never     # disable progress bars if tty=true
+            - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
+            - SCCACHE_REGION=us-east-2
+            - CARGO_INCREMENTAL=0
+            - RUST_BACKTRACE=full
+            - CARGO_TERM_PROGRESS_WHEN=never     # disable progress bars if tty=true
           config:
             - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
             - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
