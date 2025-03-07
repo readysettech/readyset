@@ -14,10 +14,7 @@ hex = { workspace = true }
 md5 = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true, features = ["chrono"] }
-tikv-jemallocator = { workspace = true }
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
-postgres-native-tls = { workspace = true }
-native-tls = { workspace = true }
 nom = { workspace = true }
 nom_locate = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

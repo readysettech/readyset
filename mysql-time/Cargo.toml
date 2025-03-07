@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 nom = { workspace = true }
-regex = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 readyset-util = { path = "../readyset-util" }
 proptest = { workspace = true }

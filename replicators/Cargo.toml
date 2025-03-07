@@ -9,7 +9,6 @@ edition = "2021"
 atoi = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-clap = { workspace = true, features = ["derive", "env"] }
 native-tls = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 futures = { workspace = true }

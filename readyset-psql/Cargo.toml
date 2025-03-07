@@ -17,11 +17,8 @@ readyset-adapter = { path = "../readyset-adapter" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-util = { path = "../readyset-util" }
-readyset-version = { path = "../readyset-version" }
-failpoint-macros = { path = "../failpoint-macros" }
 readyset-sql = { path = "../readyset-sql" }
 psql-srv = { path = "../psql-srv" }
-anyhow = { workspace = true }
 fail = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = [
@@ -37,7 +34,6 @@ native-tls = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
 thiserror = { workspace = true }
-tikv-jemallocator = { workspace = true }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 tracing-futures = { workspace = true }
 rust_decimal = { workspace = true }
@@ -45,8 +41,6 @@ eui48 = { workspace = true }
 uuid = { workspace = true }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 bit-vec = { workspace = true, features = ["serde"] }
-streaming-iterator = { workspace = true }
-rand = { workspace = true }
 cidr = { workspace = true }
 metrics = { workspace = true }
 tempfile = { workspace = true }

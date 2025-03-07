@@ -6,13 +6,10 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-clap = { workspace = true, features = ["derive","env"] }
-parking_lot = { workspace = true }
-rand = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
-lazy_static = { workspace = true }
+tokio = { workspace = true }
 
 tracing = { workspace = true }
 opentelemetry = { workspace = true }

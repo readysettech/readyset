@@ -8,31 +8,24 @@ edition = "2021"
 description = "ReadySet dataflow crate"
 
 [dependencies]
-anyhow = { workspace = true }
 async-bincode = { workspace = true }
 exponential-backoff = { workspace = true }
 bincode = { workspace = true }
 bufstream = { workspace = true }
 byteorder = { workspace = true }
-hashbag = { workspace = true }
 ahash = { workspace = true }
 futures-util = { workspace = true }
 itertools = { workspace = true }
 metrics = { workspace = true }
 pin-project = { workspace = true }
-indexmap = { workspace = true }
 rand = { workspace = true }
-serde_derive = { workspace = true }
 serde_with = { workspace = true }
-serde_json = { workspace = true }
 socket2 = { workspace = true }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["net"] }
 vec_map = { workspace = true, features = ["eders"] }
-tempfile = { workspace = true }
 derive_more = { workspace = true }
-tuple = { workspace = true }
 vec1 = { workspace = true }
 criterion = { workspace = true, features=["async_tokio"], optional = true }
 test-strategy = { workspace = true }
@@ -56,7 +49,6 @@ dataflow-expression = { path = "../dataflow-expression" }
 dataflow-state = { path = "../dataflow-state" }
 failpoint-macros = { path = "../failpoint-macros" }
 merging-interval-tree = { path = "../merging-interval-tree" }
-partial-map = { path = "../partial-map" }
 reader-map = { path = "../reader-map" }
 readyset-alloc = { path = "../readyset-alloc" }
 readyset-client = { path = "../readyset-client" }

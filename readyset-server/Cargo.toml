@@ -30,12 +30,8 @@ redact_sensitive = ["readyset-util/redact_sensitive"]
 clap = { workspace = true, features = ["derive", "env"] }
 anyhow = { workspace = true }
 bimap = { workspace = true, features = ["serde"] }
-thiserror = { workspace = true }
 futures = { workspace = true }
-futures-core = { workspace = true }
 futures-util = { workspace = true }
-futures-sink = { workspace = true }
-futures-executor = { workspace = true }
 pin-project = { workspace = true }
 hyper = { workspace = true, features = ["stream", "server"] }
 querystring = { workspace = true }
@@ -43,12 +39,10 @@ itertools = { workspace = true }
 metrics = { workspace = true }
 metrics-util = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
-nom = { workspace = true }
 petgraph = { workspace = true, features = ["serde-1"] }
 rand = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
-slab = { workspace = true }
 bincode = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 async-bincode = { workspace = true }
@@ -63,19 +57,14 @@ tracing-futures = { workspace = true }
 parking_lot = { workspace = true }
 fail = { workspace = true }
 sha1 = { workspace = true }
-derive_more = { workspace = true }
 streaming-iterator = { workspace = true }
-proptest = { workspace = true }
 enum-kinds = { workspace = true }
 slotmap = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true }
-rlimit = { workspace = true }
 indexmap = { workspace = true }
 quanta = { workspace = true }
 base64 = { workspace = true }
-
 timekeeper = { workspace = true }
-vec_map = { workspace = true, features = ["eders"] }
 serde = { workspace = true, features = ["rc", "derive"] }
 tokio-tower = { workspace = true }
 tower = { workspace = true, features = ["util"] }
@@ -105,8 +94,6 @@ health-reporter = { path = "../health-reporter" }
 database-utils = { path = "../database-utils" }
 catalog-tables = { path = "../catalog-tables" }
 replication-offset = { path = "../replication-offset" }
-num_cpus = { workspace = true }
-dataflow-expression = { path = "../dataflow-expression" }
 
 [dev-dependencies]
 assert_approx_eq = { workspace = true }

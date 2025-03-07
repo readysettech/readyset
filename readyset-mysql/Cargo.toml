@@ -6,7 +6,6 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-clap = { workspace = true, features = ["derive", "env"] }
 async-trait = { workspace = true }
 fail = { workspace = true }
 metrics = { workspace = true }
@@ -24,13 +23,8 @@ readyset-data = { path = "../readyset-data" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
-readyset-version = { path = "../readyset-version" }
-failpoint-macros = { path = "../failpoint-macros" }
-tikv-jemallocator = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
-anyhow = { workspace = true }
-derive_more = { workspace = true }
 thiserror = { workspace = true }
 mysql_common = { workspace = true }
 itertools = { workspace = true }

@@ -11,20 +11,17 @@ A real-time SQL caching engine for Postgres and MySQL."""
 
 [dependencies]
 anyhow = { workspace = true }
-chrono = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 crossbeam-skiplist = { workspace = true }
 futures-util = { workspace = true }
 fail = { workspace = true }
 failpoint-macros = { path = "../failpoint-macros" }
 metrics = { workspace = true }
-metrics-exporter-prometheus = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-native-tls = { workspace = true }
 tokio-stream = { workspace = true, features = ["net"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
-tracing-subscriber = { workspace = true }
 tracing-futures = { workspace = true }
 
 # Local dependencies

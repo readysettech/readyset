@@ -13,7 +13,6 @@ petgraph = { workspace = true, features = ["serde-1"] }
 itertools = { workspace = true }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 serde = { workspace = true, features = ["rc", "derive"] }
-proptest = { workspace = true }
 vec1 = { workspace = true }
 fixedbitset = { workspace = true }
 derive_more = { workspace = true }
@@ -23,7 +22,6 @@ common = { path = "../readyset-common", package = "readyset-common" }
 dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow" }
 readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }
-readyset-data = { path = "../readyset-data" }
 readyset-sql = { path = "../readyset-sql" }
 
 [dev-dependencies]

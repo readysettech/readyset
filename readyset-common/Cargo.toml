@@ -11,8 +11,6 @@ description = "Artifacts commonly shared among other ReadySet crates"
 chrono = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["rc", "derive"] }
 petgraph = { workspace = true, features = ["serde-1"] }
-vec1 = { workspace = true }
-triomphe = { workspace = true }
 proptest = { workspace = true }
 test-strategy = { workspace = true }
 rlimit = { workspace = true }
@@ -28,4 +26,3 @@ metrics = { workspace = true }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }
-readyset-util = { path = "../readyset-util" }

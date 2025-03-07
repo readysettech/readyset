@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 tokio = { workspace = true, features = ["full"] }
 futures = { workspace = true }
-futures-util = { workspace = true }
 anyhow = { workspace = true }
 rand = { workspace = true }
 url = { workspace = true }

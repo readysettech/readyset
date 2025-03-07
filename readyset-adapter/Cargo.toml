@@ -12,41 +12,27 @@ ahash = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 fail = { workspace = true }
-futures-executor = { workspace = true }
 futures-util = { workspace = true }
-lazy_static = { workspace = true }
-nom = { workspace = true }
-regex = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-chrono = { workspace = true }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
-tracing-futures = { workspace = true }
 vec1 = { workspace = true }
 itertools = { workspace = true }
-derive_more = { workspace = true }
 async-trait = { workspace = true }
-thiserror = { workspace = true }
 readyset-util = { path = "../readyset-util" }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
-metrics-util = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-rust_decimal = { workspace = true }
-bit-vec = { workspace = true, features = ["serde"] }
 hyper = { workspace = true, features = ["stream", "server"] }
 tokio-stream = { workspace = true, features = ["net"] }
-tokio-tower = { workspace = true }
 tower = { workspace = true, features = ["util"] }
-time = { workspace = true, features = ["local-offset"] }
 dashmap = { workspace = true }
 mysql_common = { workspace = true }
 bincode = { workspace = true }
 parking_lot = { workspace = true }
 sqlformat = { workspace = true }
 indexmap = { workspace = true }
-quanta = { workspace = true }
 lru = { workspace = true }
 crossbeam-skiplist = { workspace = true }
 slab = { workspace = true }

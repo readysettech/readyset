@@ -208,12 +208,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "atomic-counter"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62f447d68cfa5a9ab0c1c862a703da2a65b5ed1b7ce1153c9eb0169506d56019"
-
-[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -336,13 +330,9 @@ name = "benchmarks"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-stream",
  "async-trait",
- "atomic-counter",
- "chrono",
  "clap",
  "crossbeam-skiplist",
- "csv",
  "data-generator",
  "database-utils",
  "enum_dispatch",
@@ -351,25 +341,19 @@ dependencies = [
  "indicatif",
  "indoc",
  "itertools 0.13.0",
- "lazy_static",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
  "nom",
  "nom-sql",
  "nom_locate",
- "num-integer",
- "parking_lot",
- "prometheus-parse",
  "proptest",
  "query-generator",
  "rand",
  "rand_distr",
  "readyset-adapter",
  "readyset-client",
- "readyset-client-test-helpers",
  "readyset-data",
- "readyset-errors",
  "readyset-mysql",
  "readyset-psql",
  "readyset-server",
@@ -380,15 +364,12 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "serde_with 3.11.0",
  "serde_yaml_ng",
  "test-strategy",
- "thiserror",
  "tokio",
  "tokio-postgres",
  "tracing",
  "url",
- "vec1",
  "walkdir",
  "zipf",
 ]
@@ -3073,7 +3054,6 @@ dependencies = [
  "nom",
  "proptest",
  "readyset-util",
- "regex",
  "serde",
  "test-strategy",
  "thiserror",
@@ -3243,16 +3223,10 @@ dependencies = [
  "assert_approx_eq",
  "bincode",
  "bit-vec",
- "chrono",
- "clap",
- "concrete-iter",
  "criterion",
- "derive_more",
- "eui48",
  "fail",
  "failpoint-macros",
  "hex",
- "itertools 0.13.0",
  "lazy_static",
  "nom",
  "nom_locate",
@@ -3262,14 +3236,8 @@ dependencies = [
  "proptest",
  "readyset-sql",
  "readyset-util",
- "rust_decimal",
- "serde",
- "serde_json",
  "sqlparser",
  "test-strategy",
- "thiserror",
- "triomphe",
- "uuid 0.8.2",
 ]
 
 [[package]]
@@ -3387,15 +3355,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4161fcb6d602d4d2081af7c3a45852d875a03dd337a6bfdd6e06407b61342a43"
 dependencies = [
  "hermit-abi 0.3.9",
- "libc",
-]
-
-[[package]]
-name = "num_threads"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c7398b9c8b70908f6371f47ed36737907c87c52af34c268fed0bf0ceb92ead9"
-dependencies = [
  "libc",
 ]
 
@@ -3947,18 +3906,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prometheus-parse"
-version = "0.2.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "811031bea65e5a401fb2e1f37d802cca6601e204ac463809a3189352d13b78a5"
-dependencies = [
- "chrono",
- "itertools 0.12.1",
- "once_cell",
- "regex",
-]
-
-[[package]]
 name = "proptest"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4083,39 +4030,27 @@ name = "query-generator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bit-vec",
- "chrono",
  "clap",
  "data-generator",
  "derive_more",
- "eui48",
- "futures-util",
- "growable-bloom-filter",
  "itertools 0.13.0",
  "lazy_static",
  "mysql_async",
  "parking_lot",
  "proptest",
  "rand",
- "rand_regex",
  "readyset-data",
  "readyset-sql",
  "readyset-sql-passes",
  "readyset-util",
- "regex",
- "rust_decimal",
  "serde",
- "serde_json",
  "serial_test",
  "strum",
  "strum_macros",
  "test-strategy",
  "test-utils",
- "thiserror",
  "tokio",
  "tokio-postgres",
- "uuid 0.8.2",
- "zipf",
 ]
 
 [[package]]
@@ -4285,7 +4220,6 @@ name = "readyset"
 version = "1.13.0"
 dependencies = [
  "anyhow",
- "chrono",
  "clap",
  "criterion",
  "crossbeam-skiplist",
@@ -4297,7 +4231,6 @@ dependencies = [
  "futures-util",
  "health-reporter",
  "metrics",
- "metrics-exporter-prometheus",
  "mysql-srv",
  "pprof",
  "psql-srv",
@@ -4331,7 +4264,6 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-futures",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -4342,34 +4274,26 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bincode",
- "bit-vec",
- "chrono",
  "clap",
  "criterion",
  "crossbeam-skiplist",
  "dashmap",
  "database-utils",
  "dataflow-expression",
- "derive_more",
  "fail",
  "futures",
- "futures-executor",
  "futures-util",
  "health-reporter",
  "hyper 0.14.28",
  "indexmap 2.6.0",
  "itertools 0.13.0",
- "lazy_static",
  "lru",
  "metrics",
  "metrics-exporter-prometheus",
- "metrics-util",
  "mysql_common",
- "nom",
  "nom-sql",
  "parking_lot",
  "proptest",
- "quanta",
  "rand",
  "readyset-adapter-types",
  "readyset-alloc",
@@ -4385,22 +4309,16 @@ dependencies = [
  "readyset-tracing",
  "readyset-util",
  "readyset-version",
- "regex",
- "rust_decimal",
  "serde",
  "serde_json",
  "slab",
  "sqlformat",
  "test-strategy",
- "thiserror",
- "time",
  "timestamp-service",
  "tokio",
  "tokio-stream",
- "tokio-tower",
  "tower",
  "tracing",
- "tracing-futures",
  "vec1",
  "xxhash-rust",
 ]
@@ -4444,18 +4362,13 @@ dependencies = [
  "array2",
  "async-bincode",
  "async-trait",
- "base64 0.22.1",
  "bincode",
- "bit-vec",
- "bytes",
- "chrono",
  "clap",
  "cloudflare-zlib",
  "consulrs",
  "dataflow-expression",
  "derive_more",
  "enum_dispatch",
- "eui48",
  "fail",
  "failpoint-macros",
  "futures",
@@ -4464,9 +4377,6 @@ dependencies = [
  "itertools 0.13.0",
  "metrics",
  "metrics-util",
- "mysql-time",
- "mysql_async",
- "mysql_common",
  "parking_lot",
  "petgraph",
  "proptest",
@@ -4482,9 +4392,7 @@ dependencies = [
  "reqwest",
  "rmp-serde",
  "rocksdb",
- "rust_decimal",
  "serde",
- "serde_bytes",
  "serde_json",
  "serde_with 3.11.0",
  "serial_test",
@@ -4494,14 +4402,10 @@ dependencies = [
  "tempfile",
  "test-strategy",
  "test-utils",
- "thiserror",
- "time",
  "tokio",
- "tokio-postgres",
  "tokio-tower",
  "tournament-kway",
  "tower",
- "tower-layer",
  "tower-service",
  "tracing",
  "tracing-futures",
@@ -4522,7 +4426,6 @@ dependencies = [
  "readyset-errors",
  "readyset-sql",
  "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -4530,7 +4433,6 @@ name = "readyset-client-test-helpers"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "chrono",
  "database-utils",
  "mysql-srv",
  "mysql_async",
@@ -4559,7 +4461,6 @@ dependencies = [
  "database-utils",
  "envy",
  "futures",
- "futures-util",
  "hyper 0.14.28",
  "itertools 0.13.0",
  "jobserver",
@@ -4607,15 +4508,12 @@ dependencies = [
  "readyset-client",
  "readyset-data",
  "readyset-errors",
- "readyset-util",
  "reqwest",
  "rlimit",
  "serde",
  "test-strategy",
  "tracing",
- "triomphe",
  "url",
- "vec1",
 ]
 
 [[package]]
@@ -4661,7 +4559,6 @@ dependencies = [
  "strum_macros",
  "test-strategy",
  "test-utils",
- "time",
  "tokio",
  "tokio-postgres",
  "triomphe",
@@ -4674,7 +4571,6 @@ name = "readyset-dataflow"
 version = "0.7.0"
 dependencies = [
  "ahash",
- "anyhow",
  "async-bincode",
  "bincode",
  "bufstream",
@@ -4688,13 +4584,10 @@ dependencies = [
  "fail",
  "failpoint-macros",
  "futures-util",
- "hashbag",
  "html-escape",
- "indexmap 2.6.0",
  "itertools 0.13.0",
  "merging-interval-tree",
  "metrics",
- "partial-map",
  "petgraph",
  "pin-project",
  "proptest",
@@ -4709,20 +4602,16 @@ dependencies = [
  "readyset-util",
  "replication-offset",
  "serde",
- "serde_derive",
- "serde_json",
  "serde_with 3.11.0",
  "socket2",
  "strum",
  "strum_macros",
- "tempfile",
  "test-strategy",
  "thiserror",
  "timekeeper",
  "tokio",
  "tokio-stream",
  "tracing",
- "tuple",
  "url",
  "vec1",
  "vec_map",
@@ -4800,11 +4689,9 @@ dependencies = [
  "mysql-time",
  "mysql_async",
  "mysql_common",
- "native-tls",
  "nom",
  "nom-sql",
  "nom_locate",
- "postgres-native-tls",
  "pretty_assertions",
  "proptest",
  "psql-srv",
@@ -4822,7 +4709,6 @@ dependencies = [
  "readyset-util",
  "rust_decimal",
  "thiserror",
- "tikv-jemallocator",
  "tokio",
  "tokio-postgres",
  "walkdir",
@@ -4838,10 +4724,8 @@ dependencies = [
  "lazy_static",
  "nom-sql",
  "petgraph",
- "proptest",
  "readyset-client",
  "readyset-common",
- "readyset-data",
  "readyset-dataflow",
  "readyset-errors",
  "readyset-sql",
@@ -4856,14 +4740,10 @@ dependencies = [
 name = "readyset-mysql"
 version = "0.4.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "bincode",
  "chrono",
- "clap",
- "derive_more",
  "fail",
- "failpoint-macros",
  "futures",
  "futures-util",
  "itertools 0.13.0",
@@ -4889,7 +4769,6 @@ dependencies = [
  "readyset-telemetry-reporter",
  "readyset-tracing",
  "readyset-util",
- "readyset-version",
  "regex",
  "reqwest",
  "serial_test",
@@ -4897,7 +4776,6 @@ dependencies = [
  "test-strategy",
  "test-utils",
  "thiserror",
- "tikv-jemallocator",
  "tokio",
  "tracing",
 ]
@@ -4906,7 +4784,6 @@ dependencies = [
 name = "readyset-psql"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "bit-vec",
  "chrono",
@@ -4916,7 +4793,6 @@ dependencies = [
  "database-utils",
  "eui48",
  "fail",
- "failpoint-macros",
  "futures",
  "itertools 0.13.0",
  "lazy_static",
@@ -4926,7 +4802,6 @@ dependencies = [
  "postgres-types",
  "proptest",
  "psql-srv",
- "rand",
  "readyset-adapter",
  "readyset-adapter-types",
  "readyset-client",
@@ -4939,16 +4814,13 @@ dependencies = [
  "readyset-sql-parsing",
  "readyset-tracing",
  "readyset-util",
- "readyset-version",
  "rust_decimal",
  "serde_json",
  "serial_test",
- "streaming-iterator",
  "tempfile",
  "test-strategy",
  "test-utils",
  "thiserror",
- "tikv-jemallocator",
  "tokio",
  "tokio-postgres",
  "tracing",
@@ -4968,7 +4840,6 @@ dependencies = [
  "postgres-types",
  "prettytable",
  "readyset-data",
- "readyset-errors",
  "rustyline",
  "rustyline-derive",
  "textwrap",
@@ -4992,17 +4863,12 @@ dependencies = [
  "clap",
  "criterion",
  "database-utils",
- "dataflow-expression",
  "dataflow-state",
- "derive_more",
  "diff",
  "enum-kinds",
  "fail",
  "failpoint-macros",
  "futures",
- "futures-core",
- "futures-executor",
- "futures-sink",
  "futures-util",
  "health-reporter",
  "hyper 0.14.28",
@@ -5014,13 +4880,10 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-util",
  "mysql",
- "nom",
  "nom-sql",
- "num_cpus",
  "parking_lot",
  "petgraph",
  "pin-project",
- "proptest",
  "quanta",
  "querystring",
  "rand",
@@ -5042,21 +4905,18 @@ dependencies = [
  "replication-offset",
  "replicators",
  "reqwest",
- "rlimit",
  "rust_decimal",
  "rusty-fork",
  "serde",
  "serde_json",
  "serde_with 3.11.0",
  "sha1",
- "slab",
  "slotmap",
  "strawpoll",
  "streaming-iterator",
  "tempfile",
  "test-strategy",
  "test-utils",
- "thiserror",
  "tikv-jemalloc-ctl",
  "timekeeper",
  "tokio",
@@ -5070,7 +4930,6 @@ dependencies = [
  "triomphe",
  "url",
  "vec1",
- "vec_map",
 ]
 
 [[package]]
@@ -5099,7 +4958,6 @@ dependencies = [
 name = "readyset-sql-parsing"
 version = "0.1.0"
 dependencies = [
- "itertools 0.13.0",
  "nom-sql",
  "pretty_assertions",
  "readyset-sql",
@@ -5170,13 +5028,10 @@ name = "readyset-tracing"
 version = "0.1.0"
 dependencies = [
  "clap",
- "lazy_static",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
- "parking_lot",
- "rand",
  "serde",
  "thiserror",
  "tokio",
@@ -5332,7 +5187,6 @@ dependencies = [
  "bit-vec",
  "bytes",
  "chrono",
- "clap",
  "database-utils",
  "deadpool-postgres",
  "fail",
@@ -6286,7 +6140,6 @@ dependencies = [
  "temp-dir",
  "tikv-jemallocator",
  "tokio",
- "tokio-postgres",
 ]
 
 [[package]]
@@ -6474,9 +6327,7 @@ checksum = "5dfd88e563464686c916c7e46e623e520ddc6d79fa6641390f2e3fa86e83e885"
 dependencies = [
  "deranged",
  "itoa",
- "libc",
  "num-conv",
- "num_threads",
  "powerfmt",
  "serde",
  "time-core",

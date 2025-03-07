@@ -16,22 +16,17 @@ anyhow = { workspace = true }
 async-bincode = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 fail = { workspace = true }
-thiserror = { workspace = true }
 hyper = { workspace = true, features = ["stream", "client", "http2"] }
 serde = { workspace = true, features = ["rc", "derive"] }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 serde_with = { workspace = true }
-serde_bytes = { workspace = true }
 rmp-serde = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 bincode = { workspace = true }
 vec_map = { workspace = true, features = ["eders"] }
 petgraph = { workspace = true, features = ["serde-1"] }
 ahash = { workspace = true }
-chrono = { workspace = true, features = ["serde"] }
-time = { workspace = true, features = ["local-offset"] }
 tower-service = { workspace = true }
-tower-layer = { workspace = true }
 tokio-tower = { workspace = true }
 tower = { workspace = true, features = [
     "limit",
@@ -46,36 +41,19 @@ tracing-futures = { workspace = true }
 slab = { workspace = true }
 futures-util = { workspace = true }
 futures = { workspace = true }
-mysql_common = { workspace = true, features = ["chrono"] }
 vec1 = { workspace = true, features = ["serde"] }
 proptest = { workspace = true }
 derive_more = { workspace = true }
 url = { workspace = true, features = ["serde"] }
-mysql_async = { workspace = true }
 rand = { workspace = true }
 parking_lot = { workspace = true }
 cloudflare-zlib = { workspace = true, features = ["arm-always"] }
 smallvec = { workspace = true }
 rocksdb.workspace = true
-
-tokio-postgres = { workspace = true, features = [
-    "with-chrono-0_4",
-    "with-eui48-1",
-    "with-uuid-0_8",
-    "with-serde_json-1",
-    "with-bit-vec-0_6",
-] }
 metrics = { workspace = true }
 metrics-util = { workspace = true }
 itertools = { workspace = true }
-bytes = { workspace = true }
-rust_decimal = { workspace = true, features = [
-    "db-tokio-postgres",
-    "serde-str",
-] }
-eui48 = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
-bit-vec = { workspace = true, features = ["serde"] }
 triomphe = { workspace = true }
 streaming-iterator = { workspace = true }
 test-strategy = { workspace = true }
@@ -84,7 +62,6 @@ test-strategy = { workspace = true }
 enum_dispatch = { workspace = true }
 async-trait = { workspace = true }
 consulrs = { workspace = true }
-base64 = { workspace = true }
 
 # metrics/
 reqwest = { workspace = true, features = ["json"] }
@@ -93,7 +70,6 @@ reqwest = { workspace = true, features = ["json"] }
 failpoint-macros = { path = "../failpoint-macros" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
-mysql-time = { path = "../mysql-time" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
 dataflow-expression = { path = "../dataflow-expression" }

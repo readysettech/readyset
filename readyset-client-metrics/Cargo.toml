@@ -9,7 +9,6 @@ edition = "2021"
 clap = { workspace = true, features = ["derive","env"] }
 metrics = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 
 # local dependencies
 readyset-client = { path = "../readyset-client" }

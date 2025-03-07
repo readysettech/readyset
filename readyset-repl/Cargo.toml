@@ -19,4 +19,3 @@ nom = { workspace = true }
 
 database-utils = { path = "../database-utils" }
 readyset-data = { path = "../readyset-data" }
-readyset-errors = { path = "../readyset-errors" }

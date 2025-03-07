@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-chrono = { workspace = true }
 mysql_async = { workspace = true, optional = true }
 tokio-postgres = { workspace = true, features = [
     "with-chrono-0_4",
