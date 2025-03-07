@@ -14,7 +14,7 @@ use metrics::{Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder, Share
 use metrics_exporter_prometheus::formatting::{
     key_to_parts, sanitize_metric_name, write_help_line, write_metric_line, write_type_line,
 };
-use metrics_exporter_prometheus::{BuildError, Distribution, DistributionBuilder, ExporterFuture};
+use metrics_exporter_prometheus::{BuildError, Distribution, DistributionBuilder};
 use metrics_util::registry::{Recency, Registry};
 use metrics_util::MetricKindMask;
 use metrics_util::{registry::GenerationalStorage, AtomicBucket};
@@ -534,7 +534,7 @@ fn exporter(
     password: Option<String>,
     interval: Duration,
     endpoint: Uri,
-) -> ExporterFuture {
+) -> impl std::future::Future<Output = Result<(), Box<dyn std::error::Error + Send>>> {
     Box::pin(async move {
         let client = Client::new();
         let auth = username
@@ -655,7 +655,15 @@ impl PrometheusBuilder {
         rec
     }
 
-    pub fn build(self) -> Result<(PrometheusRecorder, ExporterFuture), BuildError> {
+    pub fn build(
+        self,
+    ) -> Result<
+        (
+            PrometheusRecorder,
+            impl std::future::Future<Output = Result<(), Box<dyn std::error::Error + Send>>>,
+        ),
+        BuildError,
+    > {
         let gw = self.push_gateway.clone().expect("gateway not configured");
         let recorder = self.build_recorder();
         let handle = recorder.handle();

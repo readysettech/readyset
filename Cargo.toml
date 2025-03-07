@@ -167,7 +167,7 @@ lru = "0.12.3"
 machine-uid = "0.5"
 md5 = "0.7.0"
 metrics = "0.24.0"
-metrics-exporter-prometheus = "0.16.0"
+metrics-exporter-prometheus = { version = "0.16.0", default-features = false }
 metrics-util = "0.18.0"
 mysql = "25"
 mysql_common = "0.32"
