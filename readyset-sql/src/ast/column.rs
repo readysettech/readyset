@@ -1,5 +1,6 @@
 use std::{cmp::Ordering, fmt};
 
+use itertools::Itertools;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -244,8 +245,48 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
                 sqlparser::ast::ColumnOption::Comment(s) => {
                     comment = Some(s);
                 }
-                sqlparser::ast::ColumnOption::OnUpdate(_expr) => {
-                    todo!("on update (check for current_timestamp)")
+                sqlparser::ast::ColumnOption::OnUpdate(expr) => {
+                    use sqlparser::ast::{
+                        Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
+                        FunctionArguments,
+                    };
+                    if let sqlparser::ast::Expr::Function(Function { name, args, .. }) = expr {
+                        if name.to_string().eq_ignore_ascii_case("CURRENT_TIMESTAMP") {
+                            let arg = match args {
+                                FunctionArguments::None => None,
+                                FunctionArguments::Subquery(_query) => {
+                                    return failed!("subquery argument to CURRENT_TIMESTAMP")
+                                }
+                                FunctionArguments::List(FunctionArgumentList { args, .. }) => {
+                                    match args.into_iter().exactly_one().map_err(|_| {
+                                        failed_err!(
+                                            "Expected exactly one argument to CURRENT_TIMESTAMP()"
+                                        )
+                                    })? {
+                                        FunctionArg::Named { arg, .. }
+                                        | FunctionArg::ExprNamed { arg, .. }
+                                        | FunctionArg::Unnamed(arg) => Some(arg),
+                                    }
+                                }
+                            };
+                            let value: Option<Expr> = arg
+                                .map(|arg| match arg {
+                                    FunctionArgExpr::Expr(expr) => expr.try_into_dialect(dialect),
+                                    FunctionArgExpr::QualifiedWildcard(_)
+                                    | FunctionArgExpr::Wildcard => {
+                                        failed!("Unexpected wildcard arg to CURRENT_TIMESTAMP()")
+                                    }
+                                })
+                                .transpose()?;
+                            let literal = value
+                                .map(|expr| match expr {
+                                    Expr::Literal(literal) => Ok(literal),
+                                    _ => failed!("Unexpected expression in CURRENT_TIMESTAMP()"),
+                                })
+                                .transpose()?;
+                            constraints.push(ColumnConstraint::OnUpdateCurrentTimestamp(literal));
+                        }
+                    }
                 }
                 sqlparser::ast::ColumnOption::Generated {
                     generated_as: _,
