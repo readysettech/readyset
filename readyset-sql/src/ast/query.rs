@@ -1,5 +1,6 @@
 use std::{fmt, str};
 
+use itertools::Itertools;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -161,6 +162,37 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
             Deallocate { name, prepare: _ } => Ok(Self::Deallocate(DeallocateStatement {
                 identifier: StatementIdentifier::SingleStatement(name.to_string()),
             })),
+            Comment {
+                object_type: sqlparser::ast::CommentObject::Table,
+                object_name,
+                comment,
+                if_exists: _,
+            } => Ok(Self::Comment(CommentStatement::Table {
+                table_name: object_name
+                    .0
+                    .into_iter()
+                    .exactly_one()
+                    .map_err(|_| {
+                        failed_err!("Expected unqualified table name in COMMENT ON TABLE")
+                    })?
+                    .into_dialect(dialect),
+                comment: comment.unwrap_or("".to_owned()),
+            })),
+            Comment {
+                object_type: sqlparser::ast::CommentObject::Column,
+                object_name,
+                comment,
+                if_exists: _,
+            } => {
+                let Relation { schema, name } = object_name.into_dialect(dialect);
+                Ok(Self::Comment(CommentStatement::Column {
+                    column_name: name,
+                    table_name: schema.ok_or_else(|| {
+                        failed_err!("Expected qualified table name in COMMENT ON COLUMN")
+                    })?,
+                    comment: comment.unwrap_or("".to_owned()),
+                }))
+            }
             _ => not_yet_implemented!("other query: {value:?}"),
         }
     }
