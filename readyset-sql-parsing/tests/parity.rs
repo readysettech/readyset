@@ -276,3 +276,17 @@ fn test_not_like_expressions() {
     check_parse_both!("SELECT * FROM t WHERE a NOT LIKE 'foo';");
     check_parse_both!("SELECT * FROM t WHERE a NOT ILIKE 'foo';");
 }
+
+#[test]
+fn test_comment_on_table() {
+    check_parse_postgres!(
+        r#"COMMENT ON TABLE "config" IS 'The base table for configuration data.'"#
+    );
+}
+
+#[test]
+fn test_comment_on_column() {
+    check_parse_postgres!(
+        r#"COMMENT ON COLUMN "config"."id" IS 'The unique identifier for the configuration.'"#
+    );
+}
