@@ -193,6 +193,9 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
                     comment: comment.unwrap_or("".to_owned()),
                 }))
             }
+            Deallocate { name, prepare: _ } => Ok(Self::Deallocate(DeallocateStatement {
+                identifier: StatementIdentifier::SingleStatement(name.to_string()),
+            })),
             _ => not_yet_implemented!("other query: {value:?}"),
         }
     }
