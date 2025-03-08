@@ -161,6 +161,9 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
             alter @ AlterTable { .. } => Ok(Self::AlterTable(alter.try_into_dialect(dialect)?)),
             truncate @ Truncate { .. } => Ok(Self::Truncate(truncate.try_into_dialect(dialect)?)),
             CreateDatabase { .. } => skipped!("CREATE DATABASE"),
+            Deallocate { name, prepare: _ } => Ok(Self::Deallocate(DeallocateStatement {
+                identifier: StatementIdentifier::SingleStatement(name.to_string()),
+            })),
             _ => not_yet_implemented!("other query: {value:?}"),
         }
     }
