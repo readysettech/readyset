@@ -150,3 +150,8 @@ fn test_on_update_current_timestamp() {
         )"#,
     );
 }
+
+#[test]
+fn test_deallocate() {
+    check_parse_mysql("DEALLOCATE pdo_stmt_00000001;");
+}
