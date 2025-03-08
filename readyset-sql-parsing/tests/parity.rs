@@ -141,3 +141,14 @@ fn test_comment_on_column() {
         r#"COMMENT ON COLUMN "config"."id" IS 'The unique identifier for the configuration.'"#,
     );
 }
+
+#[test]
+fn test_on_update_current_timestamp() {
+    check_parse_mysql(
+        r#"CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP(5)
+        )"#,
+    );
+}
