@@ -25,17 +25,13 @@ impl TryFromDialect<sqlparser::ast::Set> for SetStatement {
         use sqlparser::ast::Set;
         match value {
             Set::SingleAssignment {
-                local,
+                scope,
                 hivevar: _,
                 variable,
                 values,
             } => match dialect {
                 Dialect::PostgreSQL => {
-                    let scope = if local {
-                        Some(PostgresParameterScope::Local)
-                    } else {
-                        Some(PostgresParameterScope::Session)
-                    };
+                    let scope = scope.map(TryInto::try_into).transpose()?;
                     let name = variable
                         .0
                         .into_iter()
@@ -118,6 +114,18 @@ impl SetStatement {
 pub enum PostgresParameterScope {
     Session,
     Local,
+}
+
+impl TryFrom<sqlparser::ast::VariableScope> for PostgresParameterScope {
+    type Error = AstConversionError;
+
+    fn try_from(scope: sqlparser::ast::VariableScope) -> Result<Self, Self::Error> {
+        match scope {
+            sqlparser::ast::VariableScope::Session => Ok(PostgresParameterScope::Session),
+            sqlparser::ast::VariableScope::Local => Ok(PostgresParameterScope::Local),
+            _ => unsupported!("Postgres only has LOCAL and SESSION scope, found {scope}"),
+        }
+    }
 }
 
 impl fmt::Display for PostgresParameterScope {
@@ -292,6 +300,16 @@ impl From<sqlparser::ast::ObjectNamePart> for VariableScope {
     }
 }
 
+impl From<sqlparser::ast::VariableScope> for VariableScope {
+    fn from(value: sqlparser::ast::VariableScope) -> Self {
+        match value {
+            sqlparser::ast::VariableScope::Session => Self::Session,
+            sqlparser::ast::VariableScope::Global => Self::Global,
+            sqlparser::ast::VariableScope::Local => Self::Local,
+        }
+    }
+}
+
 impl fmt::Display for VariableScope {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -309,39 +327,29 @@ pub struct Variable {
     pub name: SqlIdentifier,
 }
 
+fn split_variable(value: String) -> (Option<VariableScope>, SqlIdentifier) {
+    let lowered = value[..(10.min(value.len()))].to_lowercase();
+    if lowered.starts_with("@@local.") {
+        (Some(VariableScope::Local), value[8..].into())
+    } else if lowered.starts_with("@@global.") {
+        (Some(VariableScope::Global), value[9..].into())
+    } else if lowered.starts_with("@@session.") {
+        (Some(VariableScope::Session), value[10..].into())
+    } else if lowered.starts_with("@@") {
+        (Some(VariableScope::Session), value[2..].into())
+    } else if lowered.starts_with("@") {
+        (Some(VariableScope::User), value[1..].into())
+    } else {
+        (None, value.into())
+    }
+}
+
 impl From<String> for Variable {
     fn from(value: String) -> Self {
-        let lowered = value[..(10.min(value.len()))].to_lowercase();
-        if lowered.starts_with("@@local.") {
-            Self {
-                scope: VariableScope::Local,
-                name: value[8..].into(),
-            }
-        } else if lowered.starts_with("@@global.") {
-            Self {
-                scope: VariableScope::Global,
-                name: value[9..].into(),
-            }
-        } else if lowered.starts_with("@@session.") {
-            Self {
-                scope: VariableScope::Session,
-                name: value[10..].into(),
-            }
-        } else if lowered.starts_with("@@") {
-            Self {
-                scope: VariableScope::Session,
-                name: value[2..].into(),
-            }
-        } else if lowered.starts_with("@") {
-            Self {
-                scope: VariableScope::User,
-                name: value[1..].into(),
-            }
-        } else {
-            Self {
-                scope: VariableScope::Local,
-                name: value.into(),
-            }
+        let (scope, name) = split_variable(value);
+        Variable {
+            scope: scope.unwrap_or(VariableScope::User),
+            name,
         }
     }
 }
@@ -349,7 +357,11 @@ impl From<String> for Variable {
 impl From<sqlparser::ast::Ident> for Variable {
     fn from(value: sqlparser::ast::Ident) -> Self {
         // XXX(mvzink): We lowercase across the board (even ignoring dialect) just to match nom-sql
-        value.value.to_lowercase().into()
+        let (scope, name) = split_variable(value.value.to_lowercase());
+        Variable {
+            scope: scope.unwrap_or(VariableScope::User),
+            name,
+        }
     }
 }
 
