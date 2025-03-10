@@ -155,3 +155,8 @@ fn test_on_update_current_timestamp() {
 fn test_deallocate() {
     check_parse_mysql("DEALLOCATE pdo_stmt_00000001;");
 }
+
+#[test]
+fn test_function_casing() {
+    check_parse_both("SELECT setval('users_uid_seq', GREATEST(MAX(uid), '1')) FROM users");
+}

@@ -1118,16 +1118,14 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
         // TODO: handle null treatment and other stuff
         let sqlparser::ast::Function { args, name, .. } = value;
 
-        let sqlparser::ast::ObjectNamePart::Identifier(sqlparser::ast::Ident {
-            value: name, ..
-        }) = name
+        let sqlparser::ast::ObjectNamePart::Identifier(ident) = name
             .0
             .into_iter()
             .exactly_one()
             .map_err(|_| unsupported_err!("non-builtin function (UDF)"))?;
 
         // Special case for `COUNT(*)`
-        if name.eq_ignore_ascii_case("COUNT") {
+        if ident.value.eq_ignore_ascii_case("COUNT") {
             use sqlparser::ast::{
                 FunctionArg, FunctionArgExpr, FunctionArgumentList, FunctionArguments,
             };
@@ -1159,7 +1157,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             sqlparser::ast::FunctionArguments::None => (vec![], false, None),
             other => {
                 return not_yet_implemented!(
-                    "subquery function call argument for {name}: {other:?}"
+                    "subquery function call argument for {ident}: {other:?}"
                 );
             }
         };
@@ -1168,42 +1166,42 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
         let mut next_expr = || {
             exprs
                 .next()
-                .ok_or_else(|| failed_err!("not enough arguments for {name}"))?
+                .ok_or_else(|| failed_err!("not enough arguments for {ident}"))?
                 .map(Box::new)
         };
 
-        let expr = if name.eq_ignore_ascii_case("AVG") {
+        let expr = if ident.value.eq_ignore_ascii_case("AVG") {
             Self::Call(FunctionExpr::Avg {
                 expr: next_expr()?,
                 distinct,
             })
-        } else if name.eq_ignore_ascii_case("COUNT") {
+        } else if ident.value.eq_ignore_ascii_case("COUNT") {
             Self::Call(FunctionExpr::Count {
                 expr: next_expr()?,
                 distinct,
             })
-        } else if name.eq_ignore_ascii_case("GROUP_CONCAT") {
+        } else if ident.value.eq_ignore_ascii_case("GROUP_CONCAT") {
             Self::Call(FunctionExpr::GroupConcat {
                 expr: next_expr()?,
                 separator,
             })
-        } else if name.eq_ignore_ascii_case("MAX") {
+        } else if ident.value.eq_ignore_ascii_case("MAX") {
             Self::Call(FunctionExpr::Max(next_expr()?))
-        } else if name.eq_ignore_ascii_case("MIN") {
+        } else if ident.value.eq_ignore_ascii_case("MIN") {
             Self::Call(FunctionExpr::Min(next_expr()?))
-        } else if name.eq_ignore_ascii_case("SUM") {
+        } else if ident.value.eq_ignore_ascii_case("SUM") {
             Self::Call(FunctionExpr::Sum {
                 expr: next_expr()?,
                 distinct,
             })
-        } else if name.eq_ignore_ascii_case("DATE") {
+        } else if ident.value.eq_ignore_ascii_case("DATE") {
             // TODO: Arguably, this should be in a SQL rewrite pass to preserve input when rendering
             Self::Cast {
                 expr: next_expr()?,
                 ty: crate::ast::SqlType::Date,
                 postgres_style: false,
             }
-        } else if name.eq_ignore_ascii_case("LOWER") {
+        } else if ident.value.eq_ignore_ascii_case("LOWER") {
             // TODO(mvzink): support COLLATE for upper and lower. nom-sql doesn't seem to parse
             // collation here, and in the case of sqlparser-rs we would have to pull it out of the
             // inner expression
@@ -1211,30 +1209,32 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 expr: next_expr()?,
                 collation: None,
             })
-        } else if name.eq_ignore_ascii_case("UPPER") {
+        } else if ident.value.eq_ignore_ascii_case("UPPER") {
             Self::Call(FunctionExpr::Upper {
                 expr: next_expr()?,
                 collation: None,
             })
-        } else if name.eq_ignore_ascii_case("JSON_OBJECT_AGG") {
+        } else if ident.value.eq_ignore_ascii_case("JSON_OBJECT_AGG") {
             Self::Call(FunctionExpr::JsonObjectAgg {
                 key: next_expr()?,
                 value: next_expr()?,
                 allow_duplicate_keys: true,
             })
-        } else if name.eq_ignore_ascii_case("JSONB_OBJECT_AGG")
-            || name.eq_ignore_ascii_case("JSON_OBJECTAGG")
+        } else if ident.value.eq_ignore_ascii_case("JSONB_OBJECT_AGG")
+            || ident.value.eq_ignore_ascii_case("JSON_OBJECTAGG")
         {
             Self::Call(FunctionExpr::JsonObjectAgg {
                 key: next_expr()?,
                 value: next_expr()?,
                 allow_duplicate_keys: false,
             })
-        } else if name.eq_ignore_ascii_case("EXTRACT") || name.eq_ignore_ascii_case("SUBSTRING") {
-            return failed!("{name} should have been converted earlier");
+        } else if ident.value.eq_ignore_ascii_case("EXTRACT")
+            || ident.value.eq_ignore_ascii_case("SUBSTRING")
+        {
+            return failed!("{ident} should have been converted earlier");
         } else {
             Self::Call(FunctionExpr::Call {
-                name: name.into(),
+                name: ident.into_dialect(dialect),
                 arguments: exprs.try_collect()?,
             })
         };
