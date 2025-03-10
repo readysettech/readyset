@@ -5,8 +5,8 @@
 
 use readyset_sql::{
     ast::{
-        PostgresParameterScope, SetPostgresParameter, SetStatement, SetVariables, SqlQuery,
-        Variable, VariableScope,
+        AlterTableDefinition, AlterTableStatement, PostgresParameterScope, SetPostgresParameter,
+        SetStatement, SetVariables, SqlIdentifier, SqlQuery, Variable, VariableScope,
     },
     Dialect,
 };
@@ -165,4 +165,23 @@ fn test_function_casing() {
 fn test_select_limit_without_table() {
     check_parse_mysql("select @@version_comment limit 1");
     check_parse_both("select now() order by 1 limit 1");
+}
+
+#[test]
+fn test_alter_drop_foreign_key() {
+    assert_eq!(
+        SqlQuery::AlterTable(AlterTableStatement {
+            table: readyset_sql::ast::Relation {
+                schema: None,
+                name: "orderitem".into()
+            },
+            definitions: Ok(vec![AlterTableDefinition::DropForeignKey {
+                name: SqlIdentifier::from("orderitem_ibfk_1"),
+            }]),
+            algorithm: None,
+            lock: None,
+            only: false,
+        }),
+        check_parse_mysql("ALTER TABLE `orderitem` DROP FOREIGN KEY `orderitem_ibfk_1`")
+    );
 }

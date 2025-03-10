@@ -198,6 +198,23 @@ fn drop_constraint(
     }
 }
 
+fn drop_foreign_key(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
+    move |i| {
+        let (i, _) = tag_no_case("drop")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("foreign")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("key")(i)?;
+        let (i, _) = whitespace1(i)?;
+
+        let (i, name) = dialect.identifier()(i)?;
+
+        Ok((i, AlterTableDefinition::DropForeignKey { name }))
+    }
+}
+
 fn replica_identity(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
@@ -237,6 +254,7 @@ fn alter_table_definition(
             modify_column(dialect),
             rename_column(dialect),
             drop_constraint(dialect),
+            drop_foreign_key(dialect),
             replica_identity(dialect),
         ))(i)
     }
