@@ -23,7 +23,7 @@ fi
 # Allows setting this manually if testing locally
 if [ -z "$READYSET_DOCKER_IMG" ]; then
   # Use the latest image that hasn't been pushed to docker hub yet (if any) to test it before releasing it
-  READYSET_DOCKER_IMG="public.ecr.aws/z3o1l5n4/readyset:latest"
+  READYSET_DOCKER_IMG="public.ecr.aws/z3o1l5n4/readyset:latest-stable"
 fi
 
 sed_in_place() {
