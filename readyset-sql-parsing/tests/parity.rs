@@ -160,3 +160,9 @@ fn test_deallocate() {
 fn test_function_casing() {
     check_parse_both("SELECT setval('users_uid_seq', GREATEST(MAX(uid), '1')) FROM users");
 }
+
+#[test]
+fn test_select_limit_without_table() {
+    check_parse_mysql("select @@version_comment limit 1");
+    check_parse_both("select now() order by 1 limit 1");
+}
