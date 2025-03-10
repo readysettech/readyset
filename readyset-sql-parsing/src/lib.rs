@@ -467,7 +467,8 @@ pub fn parse_query(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlQuery,
             pretty_assertions::assert_eq!(
                 nom_ast,
                 &sqlparser_ast,
-                "nom-sql AST differs from sqlparser-rs AST. input: {:?}",
+                "nom-sql AST differs from sqlparser-rs AST for {} input: {:?}",
+                dialect,
                 input.as_ref()
             );
         }

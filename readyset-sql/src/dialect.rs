@@ -40,6 +40,15 @@ impl FromStr for Dialect {
     }
 }
 
+impl fmt::Display for Dialect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PostgreSQL => f.write_str("PostgreSQL"),
+            Self::MySQL => f.write_str("MySQL"),
+        }
+    }
+}
+
 impl Dialect {
     /// All SQL dialects.
     pub const ALL: &'static [Self] = &[Self::MySQL, Self::PostgreSQL];
