@@ -109,6 +109,9 @@ pub enum AlterTableDefinition {
         drop_behavior: Option<DropBehavior>,
     },
     ReplicaIdentity(ReplicaIdentity),
+    DropForeignKey {
+        name: SqlIdentifier,
+    },
     /* TODO(aspen): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#add%20table%20constraint%20definition
      * AddTableConstraint(..),
      * TODO(aspen): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#drop%20table%20constraint%20definition
@@ -228,6 +231,7 @@ impl DialectDisplay for AlterTableDefinition {
             Self::ReplicaIdentity(replica_identity) => {
                 write!(f, "REPLICA IDENTITY {replica_identity}")
             }
+            Self::DropForeignKey { name } => write!(f, "DROP FOREIGN KEY {}", name),
         })
     }
 }

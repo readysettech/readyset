@@ -1019,25 +1019,25 @@ pub fn walk_alter_table_definition<'a, V: VisitorMut<'a>>(
     match alter_table_definition {
         AlterTableDefinition::AddColumn(spec) => visitor.visit_column_specification(spec),
         AlterTableDefinition::AddKey(key) => visitor.visit_table_key(key),
-        AlterTableDefinition::AlterColumn { name: _, operation } => {
+        AlterTableDefinition::AlterColumn { name, operation } => {
+            visitor.visit_sql_identifier(name)?;
             visitor.visit_alter_column_operation(operation)
         }
-        AlterTableDefinition::ChangeColumn { name: _, spec } => {
+        AlterTableDefinition::ChangeColumn { name, spec } => {
+            visitor.visit_sql_identifier(name)?;
             visitor.visit_column_specification(spec)
         }
-        AlterTableDefinition::DropColumn {
-            name: _,
-            behavior: _,
-        }
-        | AlterTableDefinition::RenameColumn {
-            name: _,
-            new_name: _,
-        }
+        AlterTableDefinition::DropColumn { name, behavior: _ }
         | AlterTableDefinition::DropConstraint {
-            name: _,
+            name,
             drop_behavior: _,
         }
-        | AlterTableDefinition::ReplicaIdentity(_) => Ok(()),
+        | AlterTableDefinition::DropForeignKey { name } => visitor.visit_sql_identifier(name),
+        AlterTableDefinition::RenameColumn { name, new_name } => {
+            visitor.visit_sql_identifier(name)?;
+            visitor.visit_sql_identifier(new_name)
+        }
+        AlterTableDefinition::ReplicaIdentity(_) => Ok(()),
     }
 }
 

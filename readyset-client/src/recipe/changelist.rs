@@ -394,6 +394,7 @@ impl Change {
                         | AlterTableDefinition::ChangeColumn { .. }
                         | AlterTableDefinition::RenameColumn { .. }
                         | AlterTableDefinition::AddKey(_)
+                        | AlterTableDefinition::DropForeignKey { .. }
                         | AlterTableDefinition::DropConstraint { .. } => true,
                         AlterTableDefinition::ReplicaIdentity(_) => false,
                     })
