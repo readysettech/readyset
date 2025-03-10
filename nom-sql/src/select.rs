@@ -279,53 +279,44 @@ pub fn nested_selection(
         let (i, from_clause) = opt(move |i| {
             let (i, from) = from_clause(dialect)(i)?;
             let (i, extra_joins) = many0(join_clause(dialect))(i)?;
-            let (i, where_clause) = opt(where_clause(dialect))(i)?;
-            let (i, group_by) = opt(group_by_clause(dialect))(i)?;
-            let (i, having) = opt(having_clause(dialect))(i)?;
-            let (i, order) = opt(order_clause(dialect))(i)?;
-            let (i, limit_clause) = opt(limit_offset_clause(dialect))(i)?;
-
-            Ok((
-                i,
-                (
-                    from,
-                    extra_joins,
-                    where_clause,
-                    having,
-                    group_by,
-                    order,
-                    limit_clause.unwrap_or_default(),
-                ),
-            ))
+            Ok((i, (from, extra_joins)))
         })(i)?;
 
-        let mut result = SelectStatement {
-            ctes: ctes.unwrap_or_default(),
-            distinct: distinct.is_some(),
-            fields,
-            ..Default::default()
-        };
+        let (i, where_clause) = opt(where_clause(dialect))(i)?;
+        let (i, group_by) = opt(group_by_clause(dialect))(i)?;
+        let (i, having) = opt(having_clause(dialect))(i)?;
+        let (i, order) = opt(order_clause(dialect))(i)?;
+        let (i, limit_clause) = opt(limit_offset_clause(dialect))(i)?;
+        let limit_clause = limit_clause.unwrap_or_default();
 
-        if let Some((from, extra_joins, where_clause, having, group_by, order, limit_clause)) =
-            from_clause
-        {
+        let (tables, join) = if let Some((from, extra_joins)) = from_clause {
             let (tables, mut join) = from.into_tables_and_joins().map_err(|_| {
                 nom::Err::Error(NomSqlError {
                     input: i,
                     kind: ErrorKind::Tag,
                 })
             })?;
-
             join.extend(extra_joins);
+            (tables, join)
+        } else {
+            (Default::default(), Default::default())
+        };
 
-            result.tables = tables;
-            result.join = join;
-            result.where_clause = where_clause;
-            result.group_by = group_by;
-            result.having = having;
-            result.order = order;
-            result.limit_clause = limit_clause;
-        }
+        let ctes = ctes.unwrap_or_default();
+        let distinct = distinct.is_some();
+
+        let result = SelectStatement {
+            tables,
+            join,
+            ctes,
+            distinct,
+            fields,
+            where_clause,
+            group_by,
+            having,
+            order,
+            limit_clause,
+        };
 
         Ok((i, result))
     }
@@ -377,6 +368,33 @@ mod tests {
                     expr: Expr::Literal(Literal::Integer(1)),
                     alias: None
                 }],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn select_scalar_with_limit_order() {
+        let qstring = "SELECT 1 ORDER BY 1 LIMIT 1";
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            SelectStatement {
+                fields: vec![FieldDefinitionExpr::Expr {
+                    expr: Expr::Literal(Literal::Integer(1)),
+                    alias: None
+                }],
+                limit_clause: LimitClause::LimitOffset {
+                    limit: Some(LimitValue::Literal(Literal::Integer(1))),
+                    offset: None
+                },
+                order: Some(OrderClause {
+                    order_by: vec![OrderBy {
+                        field: FieldReference::Numeric(1),
+                        order_type: None,
+                        null_order: None
+                    }],
+                }),
                 ..Default::default()
             }
         );
