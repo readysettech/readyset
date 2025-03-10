@@ -22,9 +22,9 @@ yanked = "warn"
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
-  # paste is unmaintained but works fine, lots of crates depend on it, and there doesn't seem to
-  # be an alternative, so temporarily ignore it.
-  "RUSTSEC-2024-0436",
+    # paste is unmaintained but works fine, lots of crates depend on it, and there doesn't seem to
+    # be an alternative, so temporarily ignore it.
+    "RUSTSEC-2024-0436",
 ]
 # Ignore "unmaintained" advisories that we do not directly depend on.
 # see: https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html#the-unmaintained-field-optional
@@ -166,7 +166,10 @@ unknown-git = "warn"
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
-allow-git = ["git+https://github.com/mvzink/datafusion-sqlparser-rs"]
+allow-git = [
+    "git+https://github.com/apache/datafusion-sqlparser-rs",
+    "git+https://github.com/mvzink/datafusion-sqlparser-rs",
+]
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for

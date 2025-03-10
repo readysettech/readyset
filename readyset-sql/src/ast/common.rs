@@ -6,21 +6,34 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::{
-    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
+    ast::*, AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
     TryIntoDialect,
 };
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+/// TODO(mvzink): Could be deleted in favor of directly using [`sqlparser::ast::IndexType`]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum IndexType {
     BTree,
     Hash,
+    GIN,
+    GiST,
+    SPGiST,
+    BRIN,
+    Bloom,
+    Custom(SqlIdentifier),
 }
 
-impl From<sqlparser::ast::IndexType> for IndexType {
-    fn from(value: sqlparser::ast::IndexType) -> Self {
+impl FromDialect<sqlparser::ast::IndexType> for IndexType {
+    fn from_dialect(value: sqlparser::ast::IndexType, dialect: Dialect) -> Self {
         match value {
             sqlparser::ast::IndexType::BTree => Self::BTree,
             sqlparser::ast::IndexType::Hash => Self::Hash,
+            sqlparser::ast::IndexType::GIN => Self::GIN,
+            sqlparser::ast::IndexType::GiST => Self::GiST,
+            sqlparser::ast::IndexType::SPGiST => Self::SPGiST,
+            sqlparser::ast::IndexType::BRIN => Self::BRIN,
+            sqlparser::ast::IndexType::Bloom => Self::Bloom,
+            sqlparser::ast::IndexType::Custom(ident) => Self::Custom(ident.into_dialect(dialect)),
         }
     }
 }
@@ -28,8 +41,14 @@ impl From<sqlparser::ast::IndexType> for IndexType {
 impl fmt::Display for IndexType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IndexType::BTree => write!(f, "BTREE"),
-            IndexType::Hash => write!(f, "HASH"),
+            IndexType::BTree => f.write_str("BTREE"),
+            IndexType::Hash => f.write_str("HASH"),
+            IndexType::GIN => f.write_str("GIN"),
+            IndexType::GiST => f.write_str("GIST"),
+            IndexType::SPGiST => f.write_str("SPGIST"),
+            IndexType::BRIN => f.write_str("BRIN"),
+            IndexType::Bloom => f.write_str("BLOOM"),
+            IndexType::Custom(sql_identifier) => sql_identifier.fmt(f),
         }
     }
 }
@@ -235,7 +254,7 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 constraint_name: None,
                 index_name: name.into_dialect(dialect),
                 columns: columns.into_dialect(dialect),
-                index_type: index_type.map(Into::into),
+                index_type: index_type.into_dialect(dialect),
             }),
             PrimaryKey {
                 name,
@@ -265,7 +284,7 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 constraint_name: name.into_dialect(dialect),
                 index_name: index_name.into_dialect(dialect),
                 columns: columns.into_dialect(dialect),
-                index_type: index_type.map(Into::into),
+                index_type: index_type.into_dialect(dialect),
                 constraint_timing: characteristics.map(Into::into),
                 nulls_distinct: match nulls_distinct {
                     sqlparser::ast::NullsDistinctOption::Distinct => Some(NullsDistinct::Distinct),
