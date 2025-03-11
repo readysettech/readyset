@@ -225,3 +225,30 @@ fn test_set_names_default() {
 fn test_set_names_unquoted() {
     check_parse_mysql!("SET NAMES utf8mb4 COLLATE utf8_general_ci");
 }
+
+#[test]
+fn test_limit_offset() {
+    check_parse_both!("select * from users limit 10");
+    check_parse_both!("select * from users limit 10 offset 10");
+    check_parse_mysql!("select * from users limit 5, 10");
+    check_parse_postgres!("select * from users offset 10");
+}
+
+#[test]
+#[ignore = "sqlparser-rs ignores explicit LIMIT ALL"]
+fn test_postgres_limit_all() {
+    check_parse_postgres!("select * from users limit all");
+    check_parse_postgres!("select * from users limit all offset 10");
+    check_parse_postgres!("select * from users limit all");
+}
+
+#[test]
+fn test_limit_offset_placeholders() {
+    check_parse_mysql!("select * from users limit 10 offset ?");
+    check_parse_mysql!("select * from users limit 5, ?");
+    check_parse_postgres!("select * from users offset $1");
+    // Would fail upstream, but nom-sql and sqlparser-rs are permissive enough to allow this:
+    check_parse_mysql!("select * from users limit 5, $1");
+    // Ditto, except we don't support the non-numeric $ placeholder:
+    // check_parse_postgres!("select * from users offset $f");
+}
