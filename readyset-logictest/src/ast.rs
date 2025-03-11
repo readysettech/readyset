@@ -28,19 +28,25 @@ use thiserror::Error;
 use tokio_postgres as pgsql;
 
 /// The expected result of a statement
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum StatementResult {
     /// The statement should succeed
     Ok,
     /// The statement should fail
-    Error,
+    Error { pattern: Option<String> },
 }
 
 impl Display for StatementResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StatementResult::Ok => f.write_str("ok"),
-            StatementResult::Error => f.write_str("error"),
+            StatementResult::Error { pattern } => {
+                f.write_str("error")?;
+                if let Some(pattern) = pattern {
+                    write!(f, " \"{pattern}\"")?;
+                }
+                Ok(())
+            }
         }
     }
 }

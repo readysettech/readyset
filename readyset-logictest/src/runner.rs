@@ -430,11 +430,16 @@ impl TestScript {
                     bail!("Statement failed: {}", e);
                 }
             }
-            StatementResult::Error => {
-                if res.is_ok() {
-                    bail!("Statement should have failed, but succeeded");
+            StatementResult::Error { ref pattern } => match res {
+                Err(e) => {
+                    if let Some(pattern) = pattern {
+                        if !pattern.is_empty() && !e.to_string().contains(pattern) {
+                            bail!("Statement failed with unexpected error: {} (expected to match: {})", e, pattern);
+                        }
+                    }
                 }
-            }
+                Ok(_) => bail!("Statement should have failed, but succeeded"),
+            },
         }
         Ok(())
     }

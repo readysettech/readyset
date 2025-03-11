@@ -18,7 +18,7 @@ SELECT json_object(a, b, c, d) FROM t1;
 {"2":0,"xyz":2.71}
 
 # Requires even number of arguments
-statement error
+statement error: Incorrect parameter count
 SELECT json_object(a, b, c) FROM t1;
 
 query T
