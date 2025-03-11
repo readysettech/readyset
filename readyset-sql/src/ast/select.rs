@@ -128,6 +128,25 @@ pub enum LimitValue {
     All,
 }
 
+impl TryFromDialect<sqlparser::ast::Expr> for LimitValue {
+    fn try_from_dialect(
+        value: sqlparser::ast::Expr,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        match value {
+            sqlparser::ast::Expr::Value(value) => match value.try_into()? {
+                n @ Literal::Integer(i) if i >= 0 => Ok(Self::Literal(n)),
+                n @ Literal::UnsignedInteger(_) => Ok(Self::Literal(n)),
+                v => unsupported!(
+                    "unexpected LIMIT {} (not a non-negative integer)",
+                    v.display(dialect)
+                ),
+            },
+            _ => unsupported!("unexpected LIMIT {value} (not a literal)"),
+        }
+    }
+}
+
 impl DialectDisplay for LimitValue {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
@@ -159,6 +178,30 @@ pub enum LimitClause {
     },
     /// MySQL's alternative limit and offset syntax: `LIMIT <offset>, <limit>`.
     OffsetCommaLimit { offset: Literal, limit: LimitValue },
+}
+
+impl TryFromDialect<sqlparser::ast::LimitClause> for LimitClause {
+    fn try_from_dialect(
+        value: sqlparser::ast::LimitClause,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        match value {
+            sqlparser::ast::LimitClause::LimitOffset {
+                limit,
+                offset,
+                limit_by: _,
+            } => Ok(Self::LimitOffset {
+                limit: limit.try_into_dialect(dialect)?,
+                offset: offset.map(TryInto::try_into).transpose()?,
+            }),
+            sqlparser::ast::LimitClause::OffsetCommaLimit { offset, limit } => {
+                Ok(Self::OffsetCommaLimit {
+                    offset: offset.try_into()?,
+                    limit: limit.try_into_dialect(dialect)?,
+                })
+            }
+        }
+    }
 }
 
 /// Options for generating arbitrary [`LimitClause`]s
@@ -275,36 +318,6 @@ impl Default for LimitClause {
             limit: None,
             offset: None,
         }
-    }
-}
-
-impl TryFromDialect<(Option<sqlparser::ast::Expr>, Option<sqlparser::ast::Offset>)>
-    for LimitClause
-{
-    fn try_from_dialect(
-        (limit, offset): (Option<sqlparser::ast::Expr>, Option<sqlparser::ast::Offset>),
-        dialect: Dialect,
-    ) -> Result<Self, AstConversionError> {
-        Ok(LimitClause::LimitOffset {
-            limit: limit
-                .map(|expr| {
-                    if let crate::ast::Expr::Literal(literal) = expr.try_into_dialect(dialect)? {
-                        Ok(crate::ast::LimitValue::Literal(literal))
-                    } else {
-                        not_yet_implemented!("non-literal limit expression")
-                    }
-                })
-                .transpose()?,
-            offset: offset
-                .map(|sqlparser::ast::Offset { value: expr, .. }| {
-                    if let crate::ast::Expr::Literal(literal) = expr.try_into_dialect(dialect)? {
-                        Ok(literal)
-                    } else {
-                        not_yet_implemented!("non-literal offset expression")
-                    }
-                })
-                .transpose()?,
-        })
     }
 }
 
@@ -430,8 +443,7 @@ impl TryFromDialect<sqlparser::ast::Query> for SelectStatement {
         let sqlparser::ast::Query {
             body,
             order_by,
-            limit,
-            offset,
+            limit_clause,
             with,
             ..
         } = value;
@@ -444,7 +456,12 @@ impl TryFromDialect<sqlparser::ast::Query> for SelectStatement {
                     Vec::new()
                 };
                 select.order = order_by.try_into_dialect(dialect)?;
-                select.limit_clause = (limit, offset).try_into_dialect(dialect)?;
+                let limit_clause: Option<LimitClause> = limit_clause.try_into_dialect(dialect)?;
+                select.limit_clause = limit_clause.unwrap_or(LimitClause::LimitOffset {
+                    limit: None,
+                    offset: None,
+                });
+
                 Ok(select)
             }
             // XXX(mvzink): See note in `flatten_set_expr` in `compound_select.rs`: this could be a

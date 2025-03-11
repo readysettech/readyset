@@ -55,8 +55,7 @@ impl TryFromDialect<sqlparser::ast::Query> for CompoundSelectStatement {
         let sqlparser::ast::Query {
             body,
             order_by,
-            limit,
-            offset,
+            limit_clause,
             with,
             ..
         } = value;
@@ -70,11 +69,14 @@ impl TryFromDialect<sqlparser::ast::Query> for CompoundSelectStatement {
         }
         let selects = flatten_set_expr(body, dialect)?;
         let order = order_by.try_into_dialect(dialect)?;
-        let limit_clause = (limit, offset).try_into_dialect(dialect)?;
+        let limit_clause: Option<LimitClause> = limit_clause.try_into_dialect(dialect)?;
         Ok(Self {
             selects,
             order,
-            limit_clause,
+            limit_clause: limit_clause.unwrap_or(LimitClause::LimitOffset {
+                limit: None,
+                offset: None,
+            }),
         })
     }
 }
