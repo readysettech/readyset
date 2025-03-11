@@ -266,13 +266,13 @@ impl SqlToMirConverter {
             format!("{}_union", query_name.display_unquoted()).into()
         };
         let mut final_node = match op {
-            CompoundSelectOperator::Union => self.make_union_node(
+            CompoundSelectOperator::UnionAll => self.make_union_node(
                 query_name,
                 name,
                 subquery_leaves.as_slice(),
                 union::DuplicateMode::UnionAll,
             )?,
-            _ => internal!(),
+            op => unsupported!("Unsupported compound select operator {op}"),
         };
 
         if let Some((limit, offset)) = extract_limit_offset(limit_clause)? {
