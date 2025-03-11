@@ -271,6 +271,26 @@ impl TryFrom<sqlparser::ast::ValueWithSpan> for Literal {
     }
 }
 
+impl TryFrom<sqlparser::ast::Expr> for Literal {
+    type Error = AstConversionError;
+
+    fn try_from(expr: sqlparser::ast::Expr) -> Result<Self, Self::Error> {
+        match expr {
+            sqlparser::ast::Expr::Value(value) => value.try_into(),
+            _ => unsupported!("unexpected non-literal {expr}"),
+        }
+    }
+}
+
+impl TryFrom<sqlparser::ast::Offset> for Literal {
+    type Error = AstConversionError;
+
+    fn try_from(offset: sqlparser::ast::Offset) -> Result<Self, Self::Error> {
+        let sqlparser::ast::Offset { value, .. } = offset;
+        value.try_into()
+    }
+}
+
 impl DialectDisplay for Literal {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
