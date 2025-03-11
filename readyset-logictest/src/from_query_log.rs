@@ -151,8 +151,10 @@ impl FromQueryLog {
                     )
                 }
             }
-            Err(_) => Record::Statement(Statement {
-                result: StatementResult::Error,
+            Err(err) => Record::Statement(Statement {
+                result: StatementResult::Error {
+                    pattern: Some(err.to_string()),
+                },
                 command: entry.arguments.clone(),
                 conditionals: vec![],
             }),
