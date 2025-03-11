@@ -109,14 +109,40 @@ pub enum ItemPlaceholder {
     ColonNumber(u32),
 }
 
-impl From<String> for crate::ast::ItemPlaceholder {
-    fn from(value: String) -> Self {
+// Postgres doesn't accept MySQL-style ? placeholders, and MySQL doesn't accept PostgreSQL-style $
+// placeholders, but for better or worse we often use each in both dialects in `CREATE CACHE`
+// statements. Luckily, sqlparser-rs parses these permissively too, so we accept both here. If that
+// changes in sqlparser-rs upstream, we may have to upstream a fix to let the
+// [`sqlparser::dialect::Dialect`] determine what placeholders are supported, and override it with a
+// custom dialect that supports both.
+impl TryFrom<&String> for ItemPlaceholder {
+    type Error = AstConversionError;
+
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
         if value == "?" {
-            Self::QuestionMark
+            Ok(Self::QuestionMark)
         } else if let Some(number) = value.strip_prefix("$") {
-            Self::DollarNumber(number.parse().unwrap())
+            Ok(Self::DollarNumber(number.parse().map_err(|_| {
+                failed_err!("Could not parse number for placeholder: {number:?}")
+            })?))
+        } else if let Some(number) = value.strip_prefix(":") {
+            Ok(Self::ColonNumber(number.parse().map_err(|_| {
+                failed_err!("Could not parse number for placeholder: {number:?}")
+            })?))
         } else {
-            unimplemented!("ItemPlaceholder::from({value:?}) is not supported")
+            unsupported!("string is not a PostgreSQL placeholder: {value}")
+        }
+    }
+}
+
+impl TryFrom<&sqlparser::ast::Ident> for ItemPlaceholder {
+    type Error = AstConversionError;
+
+    fn try_from(value: &sqlparser::ast::Ident) -> Result<Self, Self::Error> {
+        if value.quote_style.is_none() {
+            (&value.value).try_into()
+        } else {
+            failed!("ident is not a placeholder: {value}")
         }
     }
 }
@@ -222,7 +248,7 @@ impl TryFrom<sqlparser::ast::Value> for Literal {
     fn try_from(value: sqlparser::ast::Value) -> Result<Self, Self::Error> {
         use sqlparser::ast::Value;
         match value {
-            Value::Placeholder(name) => Ok(Self::Placeholder(name.into())),
+            Value::Placeholder(ref name) => Ok(Self::Placeholder(name.try_into()?)),
             Value::Boolean(b) => Ok(Self::Boolean(b)),
             Value::Null => Ok(Self::Null),
             Value::DoubleQuotedString(s) | Value::SingleQuotedString(s) => Ok(Self::String(s)),
@@ -277,6 +303,13 @@ impl TryFrom<sqlparser::ast::Expr> for Literal {
     fn try_from(expr: sqlparser::ast::Expr) -> Result<Self, Self::Error> {
         match expr {
             sqlparser::ast::Expr::Value(value) => value.try_into(),
+            sqlparser::ast::Expr::Identifier(ref id) => {
+                if let Ok(placeholder) = id.try_into() {
+                    Ok(Literal::Placeholder(placeholder))
+                } else {
+                    failed!("unsupported non-literal identifier {id}")
+                }
+            }
             _ => unsupported!("unexpected non-literal {expr}"),
         }
     }
