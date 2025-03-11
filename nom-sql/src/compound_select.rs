@@ -21,21 +21,15 @@ fn compound_op(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CompoundSelectOpera
                 opt(preceded(
                     whitespace1,
                     alt((
-                        map(tag_no_case("all"), |_| false),
-                        map(tag_no_case("distinct"), |_| true),
+                        map(tag_no_case("all"), |_| true),
+                        map(tag_no_case("distinct"), |_| false),
                     )),
                 )),
             ),
-            |distinct| match distinct {
+            |all| match all {
+                Some(true) => CompoundSelectOperator::UnionAll,
                 // DISTINCT is the default in both MySQL and SQLite
-                None => CompoundSelectOperator::DistinctUnion,
-                Some(d) => {
-                    if d {
-                        CompoundSelectOperator::DistinctUnion
-                    } else {
-                        CompoundSelectOperator::Union
-                    }
-                }
+                _ => CompoundSelectOperator::UnionDistinct,
             },
         ),
         map(tag_no_case("intersect"), |_| {
@@ -137,7 +131,7 @@ mod tests {
         let expected = CompoundSelectStatement {
             selects: vec![
                 (None, first_select),
-                (Some(CompoundSelectOperator::DistinctUnion), second_select),
+                (Some(CompoundSelectOperator::UnionDistinct), second_select),
             ],
             order: None,
             limit_clause: LimitClause::LimitOffset {
@@ -229,8 +223,8 @@ mod tests {
         let expected = CompoundSelectStatement {
             selects: vec![
                 (None, first_select),
-                (Some(CompoundSelectOperator::DistinctUnion), second_select),
-                (Some(CompoundSelectOperator::DistinctUnion), third_select),
+                (Some(CompoundSelectOperator::UnionDistinct), second_select),
+                (Some(CompoundSelectOperator::UnionDistinct), third_select),
             ],
             order: None,
             limit_clause: LimitClause::default(),
@@ -263,7 +257,7 @@ mod tests {
         let expected = CompoundSelectStatement {
             selects: vec![
                 (None, first_select),
-                (Some(CompoundSelectOperator::Union), second_select),
+                (Some(CompoundSelectOperator::UnionAll), second_select),
             ],
             order: None,
             limit_clause: LimitClause::default(),
@@ -312,7 +306,7 @@ mod tests {
         let expected = CompoundSelectStatement {
             selects: vec![
                 (None, first_select),
-                (Some(CompoundSelectOperator::DistinctUnion), second_select),
+                (Some(CompoundSelectOperator::UnionDistinct), second_select),
             ],
             order: Some(OrderClause {
                 order_by: vec![OrderBy {
@@ -358,7 +352,7 @@ mod tests {
         let expected = CompoundSelectStatement {
             selects: vec![
                 (None, first_select),
-                (Some(CompoundSelectOperator::DistinctUnion), second_select),
+                (Some(CompoundSelectOperator::UnionDistinct), second_select),
             ],
             order: Some(OrderClause {
                 order_by: vec![OrderBy {

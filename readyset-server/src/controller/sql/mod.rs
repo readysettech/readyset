@@ -16,9 +16,9 @@ use readyset_errors::{
     ReadySetResult,
 };
 use readyset_sql::ast::{
-    self, CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, CreateTableOption,
-    FieldDefinitionExpr, NonReplicatedRelation, NotReplicatedReason, Relation, SelectSpecification,
-    SelectStatement, SqlIdentifier, SqlType, TableExpr,
+    self, CompoundSelectStatement, CreateTableBody, CreateTableOption, FieldDefinitionExpr,
+    NonReplicatedRelation, NotReplicatedReason, Relation, SelectSpecification, SelectStatement,
+    SqlIdentifier, SqlType, TableExpr,
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
@@ -1008,7 +1008,8 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirNodeIndex> {
         let mut subqueries = Vec::with_capacity(query.selects.len());
-        for (_, stmt) in &mut query.selects {
+        let mut final_op = None;
+        for (op, stmt) in &mut query.selects {
             let mut tables = invalidating_tables.is_some().then(Vec::new);
             subqueries.push(self.select_query_to_mir(
                 query_name.clone(),
@@ -1023,12 +1024,33 @@ impl SqlIncorporator {
                     its.extend(ts);
                 }
             }
+
+            if let Some(op) = op {
+                match final_op.as_mut() {
+                    Some(final_op) => {
+                        if *final_op != *op {
+                            unsupported!(
+                                "non-uniform set operators in compound select: {final_op} != {op}"
+                            );
+                        }
+                    }
+                    None => {
+                        final_op = Some(op.clone());
+                    }
+                }
+            }
         }
+
+        let final_op = if let Some(op) = final_op {
+            op
+        } else {
+            unsupported!("compound select without operator");
+        };
 
         self.mir_converter.compound_query_to_mir(
             &query_name,
             subqueries,
-            CompoundSelectOperator::Union,
+            final_op,
             &query.order,
             &query.limit_clause,
             leaf_behavior,

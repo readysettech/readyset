@@ -1,0 +1,77 @@
+statement ok
+create table table_1 (column_1 int);
+
+statement ok
+insert into table_1 values (0), (6), (6), (10), (10), (15)
+
+statement ok
+CREATE VIEW view_union_all AS
+SELECT column_1 FROM table_1 WHERE column_1 < 10
+UNION ALL
+SELECT column_1 FROM table_1 WHERE column_1 > 10;
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT * FROM view_union_all;
+
+graphviz
+
+query I valuesort
+SELECT * FROM view_union_all;
+----
+0
+15
+6
+6
+
+statement ok
+CREATE VIEW view_union_distinct AS
+SELECT column_1 FROM table_1 WHERE column_1 < 10
+UNION DISTINCT
+SELECT column_1 FROM table_1 WHERE column_1 > 10;
+
+onlyif readyset
+statement error: Unsupported compound select operator UNION DISTINCT
+CREATE CACHE FROM SELECT * FROM view_union_distinct;
+
+skipif readyset
+query I valuesort
+SELECT * FROM view_union_distinct;
+----
+0
+15
+6
+
+statement ok
+CREATE VIEW view_intersect AS
+SELECT column_1 FROM table_1 WHERE column_1 <= 10
+INTERSECT
+SELECT column_1 FROM table_1 WHERE column_1 >= 6;
+
+onlyif readyset
+statement error: Unsupported compound select operator INTERSECT
+CREATE CACHE FROM SELECT * FROM view_intersect;
+
+skipif readyset
+query I valuesort
+SELECT * FROM view_intersect;
+----
+10
+6
+
+statement ok
+CREATE VIEW view_except AS
+SELECT column_1 FROM table_1 WHERE column_1 <= 10
+EXCEPT
+SELECT column_1 FROM table_1 WHERE column_1 >= 10;
+
+onlyif readyset
+statement error: Unsupported compound select operator EXCEPT
+CREATE CACHE FROM SELECT * FROM view_except;
+
+skipif readyset
+query I valuesort
+SELECT * FROM view_except;
+----
+0
+6
