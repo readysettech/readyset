@@ -8,22 +8,32 @@ use crate::{ast::*, AstConversionError, Dialect, DialectDisplay, TryFromDialect,
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize, Arbitrary)]
 pub enum CompoundSelectOperator {
-    Union,
-    DistinctUnion,
+    UnionAll,
+    UnionDistinct,
     Intersect,
     Except,
 }
 
-impl TryFrom<sqlparser::ast::SetOperator> for CompoundSelectOperator {
+impl TryFrom<(sqlparser::ast::SetOperator, sqlparser::ast::SetQuantifier)>
+    for CompoundSelectOperator
+{
     type Error = AstConversionError;
 
-    fn try_from(value: sqlparser::ast::SetOperator) -> Result<Self, Self::Error> {
-        match value {
-            sqlparser::ast::SetOperator::Union => Ok(CompoundSelectOperator::Union),
+    fn try_from(
+        (op, quantifier): (sqlparser::ast::SetOperator, sqlparser::ast::SetQuantifier),
+    ) -> Result<Self, Self::Error> {
+        match op {
+            sqlparser::ast::SetOperator::Union => match quantifier {
+                sqlparser::ast::SetQuantifier::All => Ok(CompoundSelectOperator::UnionAll),
+                sqlparser::ast::SetQuantifier::Distinct | sqlparser::ast::SetQuantifier::None => {
+                    Ok(CompoundSelectOperator::UnionDistinct)
+                }
+                _ => unsupported!("set quantifier {quantifier}"),
+            },
             sqlparser::ast::SetOperator::Intersect => Ok(CompoundSelectOperator::Intersect),
             sqlparser::ast::SetOperator::Except => Ok(CompoundSelectOperator::Except),
             sqlparser::ast::SetOperator::Minus => {
-                unsupported!("Neither Postgres nor MySQL support MINUS set operator")
+                unsupported!("MINUS set operator")
             }
         }
     }
@@ -32,8 +42,8 @@ impl TryFrom<sqlparser::ast::SetOperator> for CompoundSelectOperator {
 impl fmt::Display for CompoundSelectOperator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            CompoundSelectOperator::Union => write!(f, "UNION"),
-            CompoundSelectOperator::DistinctUnion => write!(f, "UNION DISTINCT"),
+            CompoundSelectOperator::UnionAll => write!(f, "UNION ALL"),
+            CompoundSelectOperator::UnionDistinct => write!(f, "UNION DISTINCT"),
             CompoundSelectOperator::Intersect => write!(f, "INTERSECT"),
             CompoundSelectOperator::Except => write!(f, "EXCEPT"),
         }
@@ -96,28 +106,9 @@ fn flatten_set_expr(
             let mut left_vec = flatten_set_expr(left, dialect)?;
             let mut right_vec = flatten_set_expr(right, dialect)?;
 
-            // The right part gets the operator
+            // The right part gets the operator in nom-sql
             if let Some((ref mut right_op @ None, _stmt)) = right_vec.first_mut() {
-                // XXX(mvzink): nom-sql implicitly parses `UNION` as `UNION DISTINCT`, and has a
-                // separate operator variant for it instead of separately representing the
-                // quantifier. So we mimic that here by checking for an explicit `ALL`.
-                //
-                // However, if you look at `SqlIncorporator::add_compound_query`, it looks like we
-                // throw the operator away entirely and assume they are all `UNION` (which,
-                // according to the parser, would be `UNION DISTINCT`). Worse yet, from
-                // `SqlToMirConverter::compound_query_to_mir`, it appears that we actually interpret
-                // plain `UNION` as `UNION ALL`! So unless I am missing these operators being
-                // handled sanely elsewhere, maybe in a rewrite pass, we may be doing things wildly
-                // wrong any time we encounter any compound select statement.
-                let new_op = match op.try_into()? {
-                    CompoundSelectOperator::Union
-                        if set_quantifier != sqlparser::ast::SetQuantifier::All =>
-                    {
-                        CompoundSelectOperator::DistinctUnion
-                    }
-                    new_op => new_op,
-                };
-                right_op.replace(new_op);
+                right_op.replace((op, set_quantifier).try_into()?);
             }
 
             left_vec.extend(right_vec);

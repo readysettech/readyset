@@ -3905,9 +3905,9 @@ async fn albums() {
     let sql = vec![
         "CREATE VIEW album_friends AS
             (SELECT album.a_id AS aid, friend.userb AS uid FROM album JOIN friend ON (album.u_id = friend.usera) WHERE album.public = 0)
-            UNION
+            UNION ALL
             (SELECT album.a_id AS aid, friend.usera AS uid FROM album JOIN friend ON (album.u_id = friend.userb) WHERE album.public = 0)
-            UNION
+            UNION ALL
             (SELECT album.a_id AS aid, album.u_id AS uid FROM album WHERE album.public = 0);",
         "CREATE CACHE private_photos FROM
             SELECT photo.p_id FROM photo JOIN album_friends ON (photo.album = album_friends.aid) WHERE album_friends.uid = ? AND photo.album = ?;",
@@ -4010,7 +4010,7 @@ async fn union_basic() {
     let sql = vec![
         "CREATE TABLE twos (id INTEGER PRIMARY KEY);",
         "CREATE TABLE threes (id INTEGER PRIMARY KEY);",
-        "CREATE VIEW twos_union_threes AS (SELECT id FROM twos) UNION (SELECT id FROM threes);",
+        "CREATE VIEW twos_union_threes AS (SELECT id FROM twos) UNION ALL (SELECT id FROM threes);",
         "CREATE CACHE `query` FROM SELECT id FROM twos_union_threes;",
     ];
     g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())

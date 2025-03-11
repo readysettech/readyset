@@ -1096,7 +1096,7 @@ mod tests {
                                 },
                             ),
                             (
-                                Some(CompoundSelectOperator::DistinctUnion),
+                                Some(CompoundSelectOperator::UnionDistinct),
                                 SelectStatement {
                                     tables: vec![TableExpr::from(Relation::from("old_users"))],
                                     fields: vec![FieldDefinitionExpr::All],

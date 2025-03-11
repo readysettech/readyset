@@ -251,7 +251,7 @@ async fn it_works_basic_standalone_impl() {
     g.extend_recipe(
         ChangeList::from_strings(
             vec![
-                "CREATE VIEW c AS SELECT a,b FROM a WHERE a = ? UNION (SELECT a,b FROM b WHERE a = ? ORDER BY b);",
+                "CREATE VIEW c AS SELECT a,b FROM a WHERE a = ? UNION ALL (SELECT a,b FROM b WHERE a = ? ORDER BY b);",
                 "CREATE CACHE q FROM SELECT a,b FROM c WHERE a = ?;",
             ],
             Dialect::DEFAULT_MYSQL,
