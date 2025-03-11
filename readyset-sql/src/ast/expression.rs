@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::{
-    ast::*, AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
+    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
     TryIntoDialect,
 };
 
@@ -895,7 +895,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             Floor { expr: _, field: _ } => not_yet_implemented!("FLOOR"),
             Function(function) => function.try_into_dialect(dialect),
             GroupingSets(_vec) => unsupported!("GROUPING SETS"),
-            Identifier(ident) => Ok(ident.into_dialect(dialect)),
+            Identifier(ident) => Ok(ident.try_into_dialect(dialect)?),
             ILike {
                 negated: _,
                 expr: _,
@@ -1094,14 +1094,21 @@ impl TryFromDialect<Box<sqlparser::ast::Expr>> for Expr {
 /// TODO(mvzink): This may not actually be necessary for recent sqlparser versions: check for usage
 /// of `CompoundIdentifier`; also check whether this needs to know the dialect for re-parsing the
 /// variable name.
-impl FromDialect<sqlparser::ast::Ident> for Expr {
-    fn from_dialect(value: sqlparser::ast::Ident, dialect: Dialect) -> Self {
+impl TryFromDialect<sqlparser::ast::Ident> for Expr {
+    fn try_from_dialect(
+        value: sqlparser::ast::Ident,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         if value.quote_style.is_none() && value.value.starts_with('@') {
-            Self::Variable(value.into())
-        } else if value.quote_style.is_none() && value.value.starts_with('$') {
-            Self::Literal(Literal::Placeholder(value.value.into()))
+            Ok(Self::Variable(value.into()))
+        } else if value.quote_style.is_none()
+            && (value.value.starts_with('$') || value.value == "?" || value.value.starts_with(':'))
+        {
+            Ok(Self::Literal(Literal::Placeholder(
+                (&value.value).try_into()?,
+            )))
         } else {
-            Self::Column(value.into_dialect(dialect))
+            Ok(Self::Column(value.into_dialect(dialect)))
         }
     }
 }

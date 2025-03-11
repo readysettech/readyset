@@ -247,8 +247,26 @@ fn test_limit_offset_placeholders() {
     check_parse_mysql!("select * from users limit 10 offset ?");
     check_parse_mysql!("select * from users limit 5, ?");
     check_parse_postgres!("select * from users offset $1");
-    // Would fail upstream, but nom-sql and sqlparser-rs are permissive enough to allow this:
+    check_parse_postgres!("select * from users offset :1");
+}
+
+#[test]
+fn test_limit_offset_placeholders_should_fail() {
+    // Should fail, but both nom-sql and sqlparser-rs are apparently pretty permissive and allow
+    // dollar and colon placeholders in both MySQL and PostgreSQL:
     check_parse_mysql!("select * from users limit 5, $1");
-    // Ditto, except we don't support the non-numeric $ placeholder:
-    // check_parse_postgres!("select * from users offset $f");
+    check_parse_mysql!("select * from users limit 5, :1");
+
+    // Actually fails:
+    parse_query(Dialect::PostgreSQL, "select * from users offset $f")
+        .expect_err("Should fail with bogus placeholder $f");
+}
+
+#[test]
+#[should_panic]
+fn test_mysql_placeholders_fail_in_postgres() {
+    // nom-sql, again being very permissive, supports MySQL-style placeholders in PostgreSQL, but
+    // sqlparser-rs does not:
+    parse_query(Dialect::PostgreSQL, "select * from users offset ?")
+        .expect_err("Should fail with MySQL placeholder ?");
 }
