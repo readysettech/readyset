@@ -27,7 +27,6 @@ futures = { workspace = true }
 bytes = { workspace = true }
 enum-display-derive = { workspace = true }
 lazy_static = { workspace = true }
-humantime = { workspace = true }
 rust_decimal = { workspace = true, features = ["db-tokio-postgres"] }
 indicatif = { workspace = true }
 bit-vec = { workspace = true, features = ["serde"] }

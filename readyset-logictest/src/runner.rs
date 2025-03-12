@@ -384,13 +384,16 @@ impl TestScript {
                         }
                     }
                     if let Some((label, start_time)) = timer {
-                        let duration = start_time.elapsed();
+                        let duration = start_time.elapsed().as_secs();
+                        let hours = duration / 3600;
+                        let minutes = (duration % 3600) / 60;
+                        let seconds = duration % 60;
                         println!(
                             "{} {} {} {}",
                             style("  > Query").bold(),
                             style(label).blue(),
                             style("ran in").bold(),
-                            style(humantime::format_duration(duration).to_string()).blue()
+                            style(format!("{hours}:{minutes:02}:{seconds:02}")).blue()
                         );
                     }
                 }
