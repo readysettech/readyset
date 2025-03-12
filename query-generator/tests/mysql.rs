@@ -1,7 +1,7 @@
 use std::env;
 
 use mysql_async::prelude::Queryable;
-use mysql_async::{OptsBuilder, Params};
+use mysql_async::Params;
 use query_generator::{GeneratorState, QuerySeed};
 use readyset_sql::{ast::CreateTableStatement, Dialect, DialectDisplay};
 use test_strategy::proptest;
@@ -17,8 +17,9 @@ async fn mysql_connection() -> mysql_async::Conn {
         .pass(Some(
             env::var("MYSQL_PWD").unwrap_or_else(|_| "noria".to_owned()),
         ))
-        .db_name(Some(db_name.clone()));
-    let admin_url = OptsBuilder::from_opts(opts.clone()).db_name::<String>(None);
+        .db_name(Some(db_name.clone()))
+        .prefer_socket(false);
+    let admin_url = opts.clone().db_name::<String>(None);
     let mut admin_conn = mysql_async::Conn::new(admin_url).await.unwrap();
 
     admin_conn

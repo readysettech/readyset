@@ -178,8 +178,9 @@ impl DbConnection {
         if url.starts_with("mysql") {
             let opts: mysql_async::Opts = url.parse().unwrap();
             let test_db_name = opts.db_name().unwrap();
-            let no_db_opts =
-                mysql_async::OptsBuilder::from_opts(opts.clone()).db_name::<String>(None);
+            let no_db_opts = mysql_async::OptsBuilder::from_opts(opts.clone())
+                .db_name::<String>(None)
+                .prefer_socket(false);
 
             // First, connect without a db
             let mut client = mysql_async::Conn::new(no_db_opts).await?;

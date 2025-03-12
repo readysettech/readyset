@@ -422,7 +422,8 @@ impl FromStr for DatabaseURL {
     type Err = DatabaseURLParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.starts_with("mysql://") {
-            Ok(Self::MySQL(mysql::Opts::from_url(s)?))
+            let builder = OptsBuilder::from_opts(mysql::Opts::from_url(s)?).prefer_socket(false);
+            Ok(Self::MySQL(builder.into()))
         } else if s.starts_with("postgresql://") || s.starts_with("postgres://") {
             let result = Self::PostgreSQL(pgsql::Config::from_str(s)?);
             // Require that Postgres URLs specify a database

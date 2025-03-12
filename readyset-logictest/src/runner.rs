@@ -708,7 +708,10 @@ impl TestScript {
         (
             task,
             match database_type {
-                DatabaseType::MySQL => mysql::OptsBuilder::default().tcp_port(addr.port()).into(),
+                DatabaseType::MySQL => mysql::OptsBuilder::default()
+                    .tcp_port(addr.port())
+                    .prefer_socket(false)
+                    .into(),
                 DatabaseType::PostgreSQL => {
                     let mut config = pgsql::Config::default();
                     config.host("localhost");

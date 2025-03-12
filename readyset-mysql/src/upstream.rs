@@ -177,7 +177,9 @@ impl MySqlUpstream {
         let mut builder = {
             let opts = Opts::from_url(url)
                 .map_err(|e: UrlError| Error::MySql(mysql_async::Error::Url(e)))?;
-            OptsBuilder::from_opts(opts).stmt_cache_size(0)
+            OptsBuilder::from_opts(opts)
+                .stmt_cache_size(0)
+                .prefer_socket(false)
         };
 
         if let Some(cert_path) = upstream_config.ssl_root_cert.clone() {

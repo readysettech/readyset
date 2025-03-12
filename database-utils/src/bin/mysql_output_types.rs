@@ -89,7 +89,8 @@ async fn main() {
     let opts = mysql_async::OptsBuilder::default()
         .ip_or_hostname("127.0.0.1")
         .user(Some("root"))
-        .pass(Some("noria"));
+        .pass(Some("noria"))
+        .prefer_socket(false);
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     let mut map = HashMap::new();

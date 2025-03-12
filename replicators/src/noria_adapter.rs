@@ -274,7 +274,7 @@ impl<'a> NoriaAdapter<'a> {
     /// * Adapter keeps reading binlog from the next position keeping ReadySet up to date
     #[allow(clippy::too_many_arguments)]
     async fn start_inner_mysql(
-        mut mysql_options: mysql::Opts,
+        mysql_options: mysql::Opts,
         mut noria: ReadySetHandle,
         config: &UpstreamConfig,
         notification_channel: &UnboundedSender<ReplicatorMessage>,
@@ -287,11 +287,11 @@ impl<'a> NoriaAdapter<'a> {
     ) -> ReadySetResult<std::convert::Infallible> {
         use replication_offset::mysql::MySqlPosition;
 
+        let mut mysql_opts_builder = OptsBuilder::from_opts(mysql_options).prefer_socket(false);
+
         if let Some(cert_path) = config.ssl_root_cert.clone() {
             let ssl_opts = SslOpts::default().with_root_certs(vec![cert_path.into()]);
-            mysql_options = OptsBuilder::from_opts(mysql_options)
-                .ssl_opts(ssl_opts)
-                .into();
+            mysql_opts_builder = mysql_opts_builder.ssl_opts(ssl_opts);
         }
 
         // Load the replication offset for all tables and the schema from ReadySet
@@ -324,7 +324,7 @@ impl<'a> NoriaAdapter<'a> {
                 };
                 let pool_opts = PoolOpts::default().with_constraints(constraints);
                 let replicator_opts: mysql_async::Opts =
-                    OptsBuilder::from_opts(mysql_options.clone())
+                    mysql_opts_builder.clone()
                         .pool_opts(pool_opts)
                         .setup(vec!["SET SESSION sql_mode='ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'".to_string()])
                         .into();
@@ -426,7 +426,7 @@ impl<'a> NoriaAdapter<'a> {
 
         let connector = Box::new(
             MySqlBinlogConnector::connect(
-                mysql_options.clone(),
+                mysql_opts_builder,
                 pos.clone(),
                 server_id,
                 enable_statement_logging,

@@ -14,6 +14,12 @@ async fn mysql_connection() -> mysql_async::Conn {
     mysql_async::Conn::new(
         mysql_async::OptsBuilder::default()
             .ip_or_hostname(env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".to_owned()))
+            .tcp_port(
+                env::var("MYSQL_TCP_PORT")
+                    .unwrap_or_else(|_| "3306".to_owned())
+                    .parse()
+                    .unwrap(),
+            )
             .user(Some(
                 env::var("MYSQL_USER").unwrap_or_else(|_| "root".to_owned()),
             ))

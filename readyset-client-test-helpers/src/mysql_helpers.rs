@@ -27,6 +27,7 @@ pub fn upstream_config() -> mysql_async::OptsBuilder {
                 .parse()
                 .unwrap(),
         )
+        .prefer_socket(false)
 }
 /// Retrieves where the query executed by parsing the row returned by
 /// EXPLAIN LAST STATEMENT.
@@ -79,6 +80,7 @@ impl Adapter for MySQLAdapter {
         mysql_async::OptsBuilder::default()
             .tcp_port(port)
             .db_name(db)
+            .prefer_socket(false)
             .into()
     }
 

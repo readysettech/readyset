@@ -415,7 +415,8 @@ where
                         .parse()
                         .unwrap(),
                 )
-                .db_name(Some("vertical")),
+                .db_name(Some("vertical"))
+                .prefer_socket(false),
         )
         .await
         .unwrap();

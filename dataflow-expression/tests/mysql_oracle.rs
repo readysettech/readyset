@@ -27,6 +27,7 @@ fn opts() -> Opts {
         .db_name(Some(
             env::var("MYSQL_DATABASE").unwrap_or_else(|_| "noria".into()),
         ))
+        .prefer_socket(false)
         .into()
 }
 
