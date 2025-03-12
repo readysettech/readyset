@@ -1313,7 +1313,7 @@ async fn handle_controller_request(
             if let Some(ref ci) = *guard {
                 Ok(ci
                     .external_request(
-                        method,
+                        method.clone(),
                         path.as_ref(),
                         query,
                         body,
@@ -1346,12 +1346,12 @@ async fn handle_controller_request(
 
     histogram!(
         recorded::CONTROLLER_RPC_REQUEST_TIME,
-        "path" => path
+        "path" => path.clone()
     )
     .record(request_start.elapsed().as_micros() as f64);
 
     if reply_tx.send(ret).is_err() {
-        warn!("client hung up");
+        warn!(%method, %path, "client hung up");
     }
 }
 
