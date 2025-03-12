@@ -86,7 +86,7 @@ steps:
 
   - label: ':rust: Run tests'
     key: rust-tests
-    parallelism: 2
+    parallelism: 3
     commands:
       - '[ -d public ] && cd public'
       - '.buildkite/run-tests.sh'

@@ -30,6 +30,41 @@ elif [[ "$BUILDKITE_PARALLEL_JOB" == "1" ]]; then
         --workspace --features failure_injection \
         --exclude readyset-clustertest --exclude benchmarks \
         || upload_artifacts
+elif [[ "$BUILDKITE_PARALLEL_JOB" == "2" ]]; then
+    echo "+++ :rust: Run tests (mysql minimal row-based replication)"
+
+    # Need a mysql-client to set binlog_row_image:
+    if ! command -v mysql &> /dev/null; then
+        echo "'mysql' command not found. Installing MySQL client..."
+        apt-get update
+        apt-get install -y --no-install-recommends default-mysql-client
+    fi
+
+    # For minimal row based replication testing, we must set `binlog_row_image=MINIMAL` on the mysql
+    # database.  However, it might not be up yet, so attempt it in a retry loop:
+    max_attempts=10
+    attempt=1
+    interval=3
+    while [ $attempt -le $max_attempts ]; do
+        if (mysql -h mysql --password=noria -e "SET GLOBAL binlog_row_image=MINIMAL;"); then
+            echo "mysql 'SET GLOBAL binlog_row_image=MINIMAL' succeeded."
+            break
+        else
+            echo "mysql 'SET GLOBAL binlog_row_image=MINIMAL' failed.  Retrying..."
+            attempt=$((attempt + 1))
+            sleep $interval
+        fi
+    done
+    if [ $attempt -gt $max_attempts ]; then
+        echo "mysql 'SET GLOBAL binlog_row_image=MINIMAL' failed after $max_attempts attempts."
+        exit 1
+    fi
+
+    cargo --locked nextest run --profile ci --hide-progress-bar \
+        --workspace --features failure_injection \
+        --exclude readyset-clustertest --exclude benchmarks \
+        --ignore-default-filter -E 'test(~serial_mysql)' \
+        || upload_artifacts
 else
     echo "No command defined for this parallel job."
     exit 1
