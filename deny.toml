@@ -22,10 +22,13 @@ yanked = "warn"
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
-    # paste is unmaintained but works fine, lots of crates depend on it, and there doesn't seem to
-    # be an alternative, so temporarily ignore it.
-    "RUSTSEC-2024-0436",
+  # paste is unmaintained but works fine, lots of crates depend on it, and there doesn't seem to
+  # be an alternative, so temporarily ignore it.
+  "RUSTSEC-2024-0436",
 ]
+# Ignore "unmaintained" advisories that we do not directly depend on.
+# see: https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html#the-unmaintained-field-optional
+unmaintained = "workspace"
 # Threshold for security vulnerabilities, any vulnerability with a CVSS score
 # lower than the range specified will be ignored. Note that ignored advisories
 # will still output a note when they are encountered.
