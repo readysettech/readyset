@@ -138,6 +138,7 @@ impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
         // We do not call walk_expr() if we know all placeholders in the expr are supported.
         match expr {
             Expr::BinaryOp { lhs, rhs, op } => {
+                // (a, b) = (?, ?)
                 let is_tuple_equality = matches!(op, BinaryOperator::Equal)
                     && matches!((&**lhs, &**rhs), (Expr::Row { .. }, Expr::Row { .. }));
 

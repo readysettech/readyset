@@ -1030,7 +1030,10 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 trim_what: _,
                 trim_characters: _,
             } => not_yet_implemented!("TRIM"),
-            Tuple(_vec) => unsupported!("TUPLE"),
+            Tuple(vec) => Ok(Self::Row {
+                exprs: vec.try_into_dialect(dialect)?,
+                explicit: false, // TODO: Fix upstrem in sqlparser
+            }),
             TypedString {
                 data_type: _,
                 value: _,
