@@ -1,5 +1,6 @@
 use std::mem;
 
+use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
 
@@ -22,7 +23,7 @@ impl AutoParameterizeVisitor {
 }
 
 impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
-    type Error = std::convert::Infallible;
+    type Error = ReadySetError;
 
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         if matches!(literal, Literal::Placeholder(_)) {
@@ -55,11 +56,7 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
         if was_supported {
             match expression {
                 Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_mut(), op, rhs.as_mut()) {
-                    (
-                        Expr::Column(_),
-                        BinaryOperator::Equal,
-                        Expr::Literal(Literal::Placeholder(_)),
-                    ) => {}
+                    (Expr::Column(_), BinaryOperator::Equal, Expr::Literal(Literal::Placeholder(_))) => {}
                     (Expr::Row { .. }, BinaryOperator::Equal, Expr::Row { exprs, .. }) => {
                         for expr in exprs {
                             if let Expr::Literal(lit) = expr {
@@ -71,8 +68,7 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                         }
                         return Ok(());
                     }
-                    (Expr::Column(_), op, Expr::Literal(Literal::Placeholder(_)))
-                        if op.is_ordering_comparison() => {}
+                    (Expr::Column(_), op, Expr::Literal(Literal::Placeholder(_))) if op.is_ordering_comparison() => {}
                     (Expr::Column(_), BinaryOperator::Equal, Expr::Literal(lit)) => {
                         if self.autoparameterize_equals {
                             self.replace_literal(lit);
@@ -85,11 +81,7 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                         }
                         return Ok(());
                     }
-                    (
-                        Expr::Literal(_),
-                        BinaryOperator::Equal | BinaryOperator::NotEqual,
-                        Expr::Column(_),
-                    ) => {
+                    (Expr::Literal(_), BinaryOperator::Equal | BinaryOperator::NotEqual, Expr::Column(_)) => {
                         // for lit = col and lit != col, swap the equality first then revisit
                         mem::swap(lhs, rhs);
                         return self.visit_expr(expression);
@@ -116,40 +108,123 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
                     rhs: InValue::List(exprs),
                     negated: false,
                 } => match lhs.as_ref() {
+                    // Case 1: Single-column IN (a IN (1,2,3))
                     Expr::Column(_)
-                        if exprs.iter().all(|e| {
-                            matches!(
-                                e,
-                                Expr::Literal(lit) if !matches!(lit, Literal::Placeholder(_))
-                            )
-                        }) =>
+                        if exprs
+                            .iter()
+                            .all(|e| matches!( e, Expr::Literal(lit) if !matches!(lit, Literal::Placeholder(_)))) =>
                     {
                         if self.autoparameterize_equals {
                             let exprs = mem::replace(
                                 exprs,
                                 std::iter::repeat_n(
-                                    Expr::Literal(Literal::Placeholder(
-                                        ItemPlaceholder::QuestionMark,
-                                    )),
+                                    Expr::Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark)),
                                     exprs.len(),
                                 )
                                 .collect(),
                             );
                             let num_exprs = exprs.len();
                             let start_index = self.param_index;
-                            self.out.extend(exprs.into_iter().enumerate().filter_map(
-                                move |(i, expr)| match expr {
+                            self.out
+                                .extend(exprs.into_iter().enumerate().filter_map(move |(i, expr)| match expr {
                                     Expr::Literal(lit) => Some((i + start_index, lit)),
                                     // unreachable since we checked everything in the list is a
                                     // literal above, but best
                                     // not to panic regardless
                                     _ => None,
-                                },
-                            ));
+                                }));
                             self.param_index += num_exprs;
                         }
                         return Ok(());
                     }
+
+                    // Case 2: Tuple IN ((a, b) IN ((1,2), (3,4)))
+                    Expr::Row { .. }
+                        if exprs.iter().all(|e| {
+                            match e {
+                                Expr::Row { exprs, .. } => exprs.iter().all(
+                                    |e| matches!(e, Expr::Literal(lit) if !matches!(lit, Literal::Placeholder(_))),
+                                ),
+                                // FIXME(sqlparser): This is a special case because nom parses `(a, b) IN ((1,2))` as
+                                // `(a, b) IN (1,2)` instead of `((a, b)) IN ((1,2))`.
+                                // This case should be removed once migration to sqlparser is
+                                // finalized.
+                                // To fix this, we readd the removed parens before proceeding.
+                                Expr::Literal(lit) if !matches!(lit, Literal::Placeholder(_)) => true,
+                                _ => false,
+                            }
+                        }) =>
+                    {
+                        if self.autoparameterize_equals {
+                            // FIXME(sqlparser): this handles the special case mentioned in the comment
+                            // just before this
+                            if !exprs.is_empty() && matches!(exprs[0], Expr::Literal(_)) {
+                                let _ = mem::replace(
+                                    exprs,
+                                    vec![Expr::Row {
+                                        exprs: exprs.clone(),
+                                        explicit: false,
+                                    }],
+                                );
+                            };
+
+                            let exprs = mem::replace(
+                                exprs,
+                                exprs
+                                    .iter()
+                                    .map(|e| -> Result<Expr, ReadySetError> {
+                                        match e {
+                                            Expr::Row { exprs, .. } => Ok(Expr::Row {
+                                                exprs: std::iter::repeat_n(
+                                                    Expr::Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark)),
+                                                    exprs.len(),
+                                                )
+                                                .collect(),
+                                                explicit: false,
+                                            }),
+                                            // ideally, this should be fully checked by the guard
+                                            // above, unfortunately, it's not because of the workaround
+                                            // mentioned above
+                                            _ => unsupported!("Expected a ROW of placeholders"),
+                                        }
+                                    })
+                                    .collect::<ReadySetResult<Vec<_>>>()?,
+                            );
+
+                            // same as the error above
+                            let num_exprs: usize = exprs
+                                .iter()
+                                .map(|e| match e {
+                                    Expr::Row { exprs, .. } => Ok(exprs.len()),
+                                    _ => unsupported!("Expected a ROW of placeholders"),
+                                })
+                                .collect::<ReadySetResult<Vec<_>>>()?
+                                .into_iter()
+                                .sum();
+
+                            let start_index = self.param_index;
+                            let param_offset = 0;
+
+                            self.out.extend(
+                                exprs
+                                    .into_iter()
+                                    .flat_map(|e| match e {
+                                        Expr::Row { exprs, .. } => exprs,
+                                        _ => unreachable!(), // checked above
+                                    })
+                                    .enumerate()
+                                    .map(|(i, e)| match e {
+                                        Expr::Literal(lit) => Ok((start_index + param_offset + i, lit)),
+                                        _ => unsupported!("Expected ROWs to only contain Literals"),
+                                    })
+                                    .collect::<ReadySetResult<Vec<_>>>()?,
+                            );
+
+                            self.param_index += num_exprs;
+                        }
+                        return Ok(());
+                    }
+
                     _ => self.in_supported_position = false,
                 },
                 _ => self.in_supported_position = false,
@@ -218,7 +293,6 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
                         }
                         return Ok(());
                     }
-                    // We don't parametrize `(a,b) IN ((w,x),(y,z))`
                     (Expr::Row { .. }, BinaryOperator::Equal, Expr::Row { exprs, .. }) => {
                         self.contains_equal = true;
                         for expr in exprs {
@@ -235,11 +309,7 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
                         }
                         return Ok(());
                     }
-                    (
-                        Expr::Literal(_),
-                        BinaryOperator::Equal | BinaryOperator::NotEqual,
-                        Expr::Column(_),
-                    ) => {
+                    (Expr::Literal(_), BinaryOperator::Equal | BinaryOperator::NotEqual, Expr::Column(_)) => {
                         // for lit = col and lit != col, swap the equality first then revisit
                         mem::swap(lhs, rhs);
                         return self.visit_expr(expression);
@@ -276,14 +346,23 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
                     rhs: InValue::List(exprs),
                     negated: false,
                 } if exprs.iter().all(|e| {
-                    matches!(
-                        e,
-                        Expr::Literal(lit) if !matches!(lit, Literal::Placeholder(_))
-                    )
+                    match e {
+                        // Case 1: Single-column IN (a IN (1,2,3))
+                        Expr::Literal(lit) if !matches!(lit, Literal::Placeholder(_)) => true,
+                        // Case 2: Multi-column IN ((a,b) IN ((1,2), (3,4)))
+                        Expr::Row { exprs, .. }
+                            if exprs.iter().all(
+                                |inner| matches!(inner, Expr::Literal(lit) if !matches!(lit, Literal::Placeholder(_))),
+                            ) =>
+                        {
+                            true
+                        }
+                        _ => false,
+                    }
                 }) && !self.has_aggregates =>
                 {
                     match lhs.as_ref() {
-                        Expr::Column(_) => {
+                        Expr::Column(_) | Expr::Row { .. } => {
                             self.contains_equal = true;
                             return Ok(());
                         }
@@ -496,10 +575,10 @@ mod tests {
     #[test]
     fn literal_in_subquery_where() {
         test_auto_parameterize_mysql(
-                "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = 1",
-                "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = ?",
-                vec![(0, 1.into())],
-            )
+            "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = 1",
+            "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = ?",
+            vec![(0, 1.into())],
+        )
     }
 
     #[test]
@@ -509,6 +588,29 @@ mod tests {
             "SELECT id + 1 FROM users WHERE id = ?",
             vec![(0, 1.into())],
         )
+    }
+
+    #[test]
+    fn row_in_predicate() {
+        // FIXME(sqlparser): Read the FIXME above, the expected query gets parsed incorrectly
+        // because of nom, but the actual query itself works as expected because of the hardcoded
+        // check above
+        // test_auto_parameterize_mysql(
+        //     "SELECT * FROM t WHERE (a, b) IN ((1, 10))",
+        //     "SELECT * FROM t WHERE (a, b) IN ((?, ?))",
+        //     vec![(0, 1.into()), (1, 10.into())],
+        // );
+
+        test_auto_parameterize_mysql(
+            "SELECT * FROM t WHERE (a, b) IN ((1, 'str'),(2, 'string'))",
+            "SELECT * FROM t WHERE (a, b) IN ((?, ?), (?, ?))",
+            vec![
+                (0, 1.into()),
+                (1, "str".into()),
+                (2, 2.into()),
+                (3, "string".into()),
+            ],
+        );
     }
 
     #[test]
