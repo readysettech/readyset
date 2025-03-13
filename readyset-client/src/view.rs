@@ -1672,7 +1672,11 @@ impl<'a> KeyComparisonBuilder<'a> {
                     literal => &DfValue::try_from(literal)?,
                 }
             }
-            None => &key[*idx - 1],
+            None => key.get(*idx - 1).ok_or_else(|| {
+                internal_err!(
+                    "Key remapping for ReusedReaderHandle tries to access non-existent index"
+                )
+            })?,
         };
         key.coerce_for_comparison(key_type, self.dialect)
     }

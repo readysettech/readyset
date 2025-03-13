@@ -1,13 +1,12 @@
 mod autoparameterize;
 
 use std::borrow::Cow;
-use std::cmp::max;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Debug;
 use std::{iter, mem};
 
 pub use autoparameterize::auto_parameterize_query;
-use itertools::{Either, Itertools};
+use itertools::{repeat_n, Either, Itertools};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{
     internal_err, invalid_query_err, unsupported, ReadySetError, ReadySetResult,
@@ -245,6 +244,10 @@ struct RewrittenIn {
 
     /// The list of placeholders in the IN list itself
     literals: Vec<ItemPlaceholder>,
+
+    /// If these literals are grouped together in a tuple/row (i.e. `IN ((?, ?))`)
+    /// and therefore chunks of size `group_size` should be treated as a single parameter
+    group_size: usize,
 }
 
 /// This function replaces the current `value IN (?, ?, ?, ..)` expression with
@@ -267,15 +270,26 @@ fn where_in_to_placeholders(
     }
     let list_iter = std::mem::take(list).into_iter(); // Take the list to free the mutable reference
     let literals = list_iter
-        .map(|e| match e {
-            Expr::Literal(Literal::Placeholder(ph)) => Ok(ph),
-            _ => unsupported!(
-                "IN only supported on placeholders, got: {}",
-                // FIXME(REA-2168): Use correct dialect.
-                e.display(readyset_sql::Dialect::MySQL)
-            ),
+        .map(|e| -> ReadySetResult<Vec<_>> {
+            match e {
+                Expr::Literal(Literal::Placeholder(ph)) => Ok(vec![ph]),
+                Expr::Row { exprs, .. } => exprs
+                    .into_iter()
+                    .map(|e| match e {
+                        Expr::Literal(Literal::Placeholder(ph)) => Ok(ph),
+                        _ => unsupported!("Expected a ROW of placeholders"),
+                    })
+                    .collect(),
+                _ => unsupported!(
+                    "IN only supported on placeholders, got: {}",
+                    e.display(readyset_sql::Dialect::MySQL)
+                ),
+            }
         })
-        .collect::<ReadySetResult<Vec<_>>>()?;
+        .collect::<ReadySetResult<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
 
     let first_param_index = *leftmost_param_index;
     *leftmost_param_index += literals.len();
@@ -286,17 +300,35 @@ fn where_in_to_placeholders(
         BinaryOperator::Equal
     };
 
+    let rhs = match **lhs {
+        Expr::Row { ref exprs, .. } => Box::new(Expr::Row {
+            explicit: false,
+            exprs: repeat_n(
+                Expr::Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark)),
+                exprs.len(),
+            )
+            .collect(),
+        }),
+        _ => Box::new(Expr::Literal(Literal::Placeholder(
+            ItemPlaceholder::QuestionMark,
+        ))),
+    };
+
+    let group_size = match *rhs {
+        Expr::Row { ref exprs, .. } => exprs.len(),
+        _ => 1,
+    };
+
     *expr = Expr::BinaryOp {
         lhs: Box::new(lhs.take()),
         op,
-        rhs: Box::new(Expr::Literal(Literal::Placeholder(
-            ItemPlaceholder::QuestionMark,
-        ))),
+        rhs,
     };
 
     Ok(RewrittenIn {
         first_param_index,
         literals,
+        group_size,
     })
 }
 
@@ -319,13 +351,33 @@ impl<'ast> VisitorMut<'ast> for CollapseWhereInVisitor {
     fn visit_expr(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
         if let Expr::In {
             rhs: InValue::List(list),
+            lhs,
             ..
         } = expression
         {
-            if list
-                .iter()
-                .any(|l| matches!(l, Expr::Literal(Literal::Placeholder(_))))
-            {
+            if let Expr::Row { exprs: ref l, .. } = **lhs {
+                if list.iter().any(|expr| match expr {
+                    Expr::Row { exprs: r, .. } if l.len() != r.len() => true,
+                    Expr::Row { .. } => false,
+                    _ => true,
+                }) {
+                    return Err(ReadySetError::InvalidQuery(
+                        "Expected a list of Tuples with the same arity".to_string(),
+                    ));
+                }
+            };
+
+            if list.iter().any(|l| match l {
+                Expr::Literal(Literal::Placeholder(_)) => true,
+                Expr::Row { exprs, .. }
+                    if exprs
+                        .iter()
+                        .all(|e| matches!(e, Expr::Literal(Literal::Placeholder(_)))) =>
+                {
+                    true
+                }
+                _ => false,
+            }) {
                 // If the list contains placeholders, flatten them. `where_in_to_placeholders` takes
                 // care of erroring-out if the list contains any *non*-placeholders
                 self.out.push(where_in_to_placeholders(
@@ -382,37 +434,56 @@ where
         };
     }
 
+    let mut index = 0;
+    let mut chunks = Vec::with_capacity(params.len());
+
+    let sorted_conditions = rewritten_in_conditions
+        .iter()
+        .sorted_by_key(|i| i.first_param_index);
+
+    for RewrittenIn {
+        first_param_index,
+        literals,
+        group_size,
+    } in sorted_conditions
+    {
+        // Push atomic parameters before this rewritten `IN` clause
+        if index < *first_param_index {
+            chunks.push(
+                params[index..*first_param_index]
+                    .iter()
+                    .map(|x| vec![x.clone()])
+                    .collect(),
+            );
+        }
+
+        index = *first_param_index;
+
+        // Handle `(a, b) IN ((?, ?), (?, ?))` by chunking literals based on `group_size`
+        // This also works for `a IN (?,?)` because `group_size` will be 1
+        chunks.push(
+            params[index..index + literals.len()]
+                .chunks(*group_size)
+                .map(|x| x.to_vec())
+                .collect::<Vec<_>>(),
+        );
+
+        index += literals.len();
+    }
+
+    // Append any remaining parameters
+    if index < params.len() {
+        chunks.push(vec![params[index..].to_vec()]);
+    }
+
+    // generate possible combinations using cartesian product (Vec<Chunks>)
+    // flatten the chunks (Vec<T>) to go from Vec<Vec<T>> to Vec<T>
     Either::Right(Either::Right(
-        rewritten_in_conditions
-            .iter()
-            .map(
-                |RewrittenIn {
-                     first_param_index,
-                     literals,
-                 }| {
-                    (0..literals.len())
-                        .map(move |in_idx| (*first_param_index, in_idx, literals.len()))
-                },
-            )
+        chunks
+            .into_iter()
             .multi_cartesian_product()
-            .map(move |mut ins| {
-                ins.sort_by_key(|(first_param_index, _, _)| *first_param_index);
-                let mut res = vec![];
-                let mut taken = 0;
-                for (first_param_index, in_idx, in_len) in ins {
-                    res.extend(
-                        params
-                            .iter()
-                            .skip(taken)
-                            .take(first_param_index - taken)
-                            .cloned(),
-                    );
-                    res.push(params[first_param_index + in_idx].clone());
-                    taken = max(taken, first_param_index + in_len);
-                }
-                res.extend(params.iter().skip(taken).cloned());
-                Cow::Owned(res)
-            }),
+            .map(|x| x.into_iter().flatten().collect())
+            .map(Cow::Owned),
     ))
 }
 
@@ -581,7 +652,8 @@ mod tests {
                 rewritten,
                 vec![RewrittenIn {
                     first_param_index: 0,
-                    literals: vec![ItemPlaceholder::QuestionMark; 3]
+                    literals: vec![ItemPlaceholder::QuestionMark; 3],
+                    group_size: 1,
                 }]
             );
             assert_eq!(
@@ -595,7 +667,8 @@ mod tests {
                 rewritten,
                 vec![RewrittenIn {
                     first_param_index: 0,
-                    literals: vec![ItemPlaceholder::QuestionMark; 3]
+                    literals: vec![ItemPlaceholder::QuestionMark; 3],
+                    group_size: 1,
                 }]
             );
             assert_eq!(
@@ -609,7 +682,8 @@ mod tests {
                 rewritten,
                 vec![RewrittenIn {
                     first_param_index: 0,
-                    literals: vec![ItemPlaceholder::QuestionMark; 3]
+                    literals: vec![ItemPlaceholder::QuestionMark; 3],
+                    group_size: 1,
                 }]
             );
             assert_eq!(
@@ -625,7 +699,8 @@ mod tests {
                 rewritten,
                 vec![RewrittenIn {
                     first_param_index: 1,
-                    literals: vec![ItemPlaceholder::QuestionMark; 3]
+                    literals: vec![ItemPlaceholder::QuestionMark; 3],
+                    group_size: 1,
                 }]
             );
             assert_eq!(
@@ -641,7 +716,8 @@ mod tests {
                 rewritten,
                 vec![RewrittenIn {
                     first_param_index: 1,
-                    literals: vec![ItemPlaceholder::QuestionMark; 2]
+                    literals: vec![ItemPlaceholder::QuestionMark; 2],
+                    group_size: 1,
                 }]
             );
             assert_eq!(
@@ -659,7 +735,8 @@ mod tests {
                 rewritten,
                 vec![RewrittenIn {
                     first_param_index: 1,
-                    literals: vec![ItemPlaceholder::QuestionMark; 2]
+                    literals: vec![ItemPlaceholder::QuestionMark; 2],
+                    group_size: 1,
                 }]
             );
             assert_eq!(
@@ -692,7 +769,8 @@ mod tests {
                         ItemPlaceholder::DollarNumber(1),
                         ItemPlaceholder::DollarNumber(2),
                         ItemPlaceholder::DollarNumber(3),
-                    ]
+                    ],
+                    group_size: 1,
                 }]
             );
             assert_eq!(
@@ -710,7 +788,8 @@ mod tests {
                         ItemPlaceholder::DollarNumber(1),
                         ItemPlaceholder::DollarNumber(2),
                         ItemPlaceholder::DollarNumber(3),
-                    ]
+                    ],
+                    group_size: 1,
                 }]
             );
             assert_eq!(
@@ -729,7 +808,8 @@ mod tests {
                         ItemPlaceholder::DollarNumber(1),
                         ItemPlaceholder::DollarNumber(2),
                         ItemPlaceholder::DollarNumber(3),
-                    ]
+                    ],
+                    group_size: 1,
                 }]
             );
             assert_eq!(
@@ -749,7 +829,8 @@ mod tests {
                         ItemPlaceholder::DollarNumber(2),
                         ItemPlaceholder::DollarNumber(3),
                         ItemPlaceholder::DollarNumber(4),
-                    ]
+                    ],
+                    group_size: 1,
                 }]
             );
             assert_eq!(
@@ -758,8 +839,8 @@ mod tests {
             );
 
             let mut q = parse_select_statement_postgres(
-            "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y IN ($2, $3) OR z = $4",
-        );
+                "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y IN ($2, $3) OR z = $4",
+            );
             let rewritten = collapse_where_in(&mut q).unwrap();
             assert_eq!(
                 rewritten,
@@ -768,7 +849,8 @@ mod tests {
                     literals: vec![
                         ItemPlaceholder::DollarNumber(2),
                         ItemPlaceholder::DollarNumber(3),
-                    ]
+                    ],
+                    group_size: 1,
                 }]
             );
             assert_eq!(
@@ -779,8 +861,8 @@ mod tests {
             );
 
             let mut q = parse_select_statement_postgres(
-            "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = $1 AND a IN ($2, $3)) OR z = $4",
-        );
+                "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = $1 AND a IN ($2, $3)) OR z = $4",
+            );
             let rewritten = collapse_where_in(&mut q).unwrap();
             assert_eq!(
                 rewritten,
@@ -789,7 +871,8 @@ mod tests {
                     literals: vec![
                         ItemPlaceholder::DollarNumber(2),
                         ItemPlaceholder::DollarNumber(3),
-                    ]
+                    ],
+                    group_size: 1,
                 }]
             );
             assert_eq!(
@@ -810,17 +893,31 @@ mod tests {
                 vec![
                     RewrittenIn {
                         first_param_index: 0,
-                        literals: vec![ItemPlaceholder::QuestionMark; 2]
+                        literals: vec![ItemPlaceholder::QuestionMark; 2],
+                        group_size: 1,
                     },
                     RewrittenIn {
                         first_param_index: 2,
-                        literals: vec![ItemPlaceholder::QuestionMark; 2]
+                        literals: vec![ItemPlaceholder::QuestionMark; 2],
+                        group_size: 1,
                     }
                 ]
             );
             assert_eq!(
                 q,
                 parse_select_statement_mysql("SELECT * FROM t WHERE x = ? AND y = ?")
+            );
+        }
+
+        #[test]
+        fn collapse_where_row_in() {
+            let mut q =
+                parse_select_statement_mysql("SELECT * FROM t WHERE (x, y) IN ((?, ?), (?,?))");
+
+            let _ = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                q,
+                parse_select_statement_mysql("SELECT * FROM t WHERE (x, y) = (?, ?)")
             );
         }
     }
@@ -843,6 +940,7 @@ mod tests {
             let rewritten_in_conditions = vec![RewrittenIn {
                 first_param_index: 1,
                 literals: vec![ItemPlaceholder::QuestionMark; 2],
+                group_size: 1,
             }];
             let params = vec![1u32, 2, 3, 4];
             let res = explode_params(&params, &rewritten_in_conditions).collect::<Vec<_>>();
@@ -858,10 +956,12 @@ mod tests {
                 RewrittenIn {
                     first_param_index: 1,
                     literals: vec![ItemPlaceholder::QuestionMark; 2],
+                    group_size: 1,
                 },
                 RewrittenIn {
                     first_param_index: 4,
                     literals: vec![ItemPlaceholder::QuestionMark; 2],
+                    group_size: 1,
                 },
             ];
             let params = vec![1u32, 2, 3, 4, 5, 6, 7];
