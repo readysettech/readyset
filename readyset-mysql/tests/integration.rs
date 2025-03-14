@@ -2374,17 +2374,17 @@ async fn timestamp_text_protocol() {
     direct_mysql.query_drop("
              SET SESSION time_zone = '+05:00';
              DROP TABLE IF EXISTS ts_text_protocol CASCADE;
-             CREATE TABLE ts_text_protocol (col1 TIMESTAMP, col2 TIMESTAMP(2), col3 TIMESTAMP(4), col4 TIMESTAMP(6));
-             INSERT INTO ts_text_protocol VALUES ('2021-01-01 00:00:00', '2021-01-01 00:00:00.00', '2021-01-01 00:00:00.0000', '2021-01-01 00:00:00.000000');
-             INSERT INTO ts_text_protocol VALUES ('2021-01-01 00:00:00', '2021-01-01 00:00:00.01', '2021-01-01 00:00:00.0001', '2021-01-01 00:00:00.000001');")
+             CREATE TABLE ts_text_protocol (ID INT PRIMARY KEY, col1 TIMESTAMP, col2 TIMESTAMP(2), col3 TIMESTAMP(4), col4 TIMESTAMP(6));
+             INSERT INTO ts_text_protocol VALUES (1, '2021-01-01 00:00:00', '2021-01-01 00:00:00.00', '2021-01-01 00:00:00.0000', '2021-01-01 00:00:00.000000');
+             INSERT INTO ts_text_protocol VALUES (2, '2021-01-01 00:00:00', '2021-01-01 00:00:00.01', '2021-01-01 00:00:00.0001', '2021-01-01 00:00:00.000001');")
         .await
         .unwrap();
     let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     sleep().await;
 
-    direct_mysql.query_drop("INSERT INTO ts_text_protocol VALUES ('2021-01-02 00:00:00', '2021-01-02 00:00:00.00', '2021-01-02 00:00:00.0000', '2021-01-02 00:00:00.000000');").await.unwrap();
-    direct_mysql.query_drop("INSERT INTO ts_text_protocol VALUES ('2021-01-02 00:00:00', '2021-01-02 00:00:00.01', '2021-01-02 00:00:00.0001', '2021-01-02 00:00:00.000001');").await.unwrap();
+    direct_mysql.query_drop("INSERT INTO ts_text_protocol VALUES (3, '2021-01-02 00:00:00', '2021-01-02 00:00:00.00', '2021-01-02 00:00:00.0000', '2021-01-02 00:00:00.000000');").await.unwrap();
+    direct_mysql.query_drop("INSERT INTO ts_text_protocol VALUES (4, '2021-01-02 00:00:00', '2021-01-02 00:00:00.01', '2021-01-02 00:00:00.0001', '2021-01-02 00:00:00.000001');").await.unwrap();
     direct_mysql
         .query_drop("SET SESSION time_zone = SYSTEM;")
         .await
@@ -2394,21 +2394,24 @@ async fn timestamp_text_protocol() {
         .unwrap();
     sleep().await;
 
-    eventually!(run_test: {
+    for id in 1..=4 {
+        eventually!(run_test: {
 
-    let my_rows: Vec<(String, String, String, String)> = direct_mysql
-        .query("SELECT * FROM ts_text_protocol")
-        .await
-        .unwrap();
-    let rs_rows: Vec<(String, String, String, String)> = conn
-        .query("SELECT * FROM ts_text_protocol")
-        .await
-        .unwrap();
-        AssertUnwindSafe(move || (rs_rows, my_rows))
-    },then_assert: |results| {
-        let (rs_rows, my_rows) = results();
-        assert_eq!(rs_rows, my_rows)
-    });
+        let q = format!("SELECT * FROM ts_text_protocol WHERE ID = {}", id);
+        let my_rows: Vec<(String, String, String, String, String)> = direct_mysql
+            .query(&q)
+            .await
+            .unwrap();
+        let rs_rows: Vec<(String, String, String, String, String)> = conn
+            .query(&q)
+            .await
+            .unwrap();
+            AssertUnwindSafe(move || (rs_rows, my_rows))
+        },then_assert: |results| {
+            let (rs_rows, my_rows) = results();
+            assert_eq!(rs_rows, my_rows)
+        });
+    }
     shutdown_tx.shutdown().await;
 }
 
