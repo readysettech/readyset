@@ -1234,6 +1234,25 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
             // we also separately register it as a parameter so that we can set keys
             // correctly on the leaf view
             rel.parameters.push(param.clone());
+        } else {
+            let found = stmt.fields.iter().any(|f| {
+                matches!(
+                    f,
+                    FieldDefinitionExpr::Expr {
+                        alias: None,
+                        expr: Expr::Column(Column { name, .. }),
+                    }
+                    | FieldDefinitionExpr::Expr {
+                        alias: Some(name), ..
+                    } if *name == param.col.name
+                )
+            });
+            if !found {
+                unsupported!(
+                    "Column `{}` as placeholder cannot be resolved",
+                    param.col.name
+                );
+            }
         }
     }
 
