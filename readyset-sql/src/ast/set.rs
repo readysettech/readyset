@@ -17,36 +17,34 @@ pub enum SetStatement {
     PostgresParameter(SetPostgresParameter),
 }
 
-/// XXX(mvzink): We don't bother trying to produce `SetVariables` because we don't actually use it
-/// anywhere. It will just get turned into a slightly botched `SetPostgresParameter` (see
-/// [datafusion-sqlparser-rs#1697](https://github.com/apache/datafusion-sqlparser-rs/issues/1697)).
-impl TryFromDialect<sqlparser::ast::Statement> for SetStatement {
+impl TryFromDialect<sqlparser::ast::Set> for SetStatement {
     fn try_from_dialect(
-        value: sqlparser::ast::Statement,
+        value: sqlparser::ast::Set,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
+        use sqlparser::ast::Set;
         match value {
-            sqlparser::ast::Statement::SetVariable {
+            Set::SingleAssignment {
                 local,
                 hivevar: _,
-                variables,
-                value,
+                variable,
+                values,
             } => match dialect {
                 Dialect::PostgreSQL => {
-                    let name = variables
-                        .into_iter()
-                        .exactly_one()
-                        .map_err(|_| failed_err!("Missing variable name"))?
-                        .0
-                        .pop()
-                        .unwrap()
-                        .into_dialect(dialect);
-                    let value: SetPostgresParameterValue = value.try_into_dialect(dialect)?;
                     let scope = if local {
                         Some(PostgresParameterScope::Local)
                     } else {
-                        None
+                        Some(PostgresParameterScope::Session)
                     };
+                    let name = variable
+                        .0
+                        .into_iter()
+                        .exactly_one()
+                        .map_err(|_| {
+                            not_yet_implemented_err!("SET with namespaced Postgres parameter names")
+                        })?
+                        .into_dialect(dialect);
+                    let value = values.try_into_dialect(dialect)?;
                     Ok(Self::PostgresParameter(SetPostgresParameter {
                         scope,
                         name,
@@ -54,31 +52,42 @@ impl TryFromDialect<sqlparser::ast::Statement> for SetStatement {
                     }))
                 }
                 Dialect::MySQL => {
-                    let name = variables.into_iter().exactly_one().map_err(|_| {
-                        unsupported_err!("Only single variable assignment supported")
-                    })?;
+                    let name = variable.try_into()?;
+                    let value = values
+                        .into_iter()
+                        .exactly_one()
+                        .map_err(|_| {
+                            not_yet_implemented_err!("SET with single variable and multiple values")
+                        })?
+                        .try_into_dialect(dialect)?;
                     Ok(Self::Variable(SetVariables {
-                        variables: vec![(
-                            name.try_into()?,
-                            value
-                                .into_iter()
-                                .exactly_one()
-                                .map_err(|_| {
-                                    unsupported_err!("Only single variable assignment supported")
-                                })?
-                                .try_into_dialect(dialect)?,
-                        )],
+                        variables: vec![(name, value)],
                     }))
                 }
             },
-            sqlparser::ast::Statement::SetNames {
+            Set::MultipleAssignments { assignments } => {
+                let variables = assignments
+                    .into_iter()
+                    .map(|set_assignment| {
+                        let name = set_assignment.name.try_into()?;
+                        let value = set_assignment.value.try_into_dialect(dialect)?;
+                        Ok((name, value))
+                    })
+                    .try_collect()?;
+                Ok(Self::Variable(SetVariables { variables }))
+            }
+            Set::SetNames {
                 charset_name,
                 collation_name,
             } => Ok(Self::Names(SetNames {
-                charset: charset_name.value,
+                charset: charset_name.value.to_string(),
                 collation: collation_name,
             })),
-            _ => todo!("unsupported set statement {value:?} (convert to TryFrom)"),
+            Set::SetNamesDefault {} => Ok(Self::Names(SetNames {
+                charset: "DEFAULT".to_string(),
+                collation: None,
+            })),
+            set => unsupported!("SET statement kind: {set}"),
         }
     }
 }

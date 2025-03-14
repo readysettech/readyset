@@ -137,6 +137,11 @@ fn test_mysql_variable_scope() {
     check_mysql_variable_scope("SET GLOBAL var = 1;", VariableScope::Global);
 }
 
+#[test]
+fn test_mysql_multiple_variables() {
+    check_parse_mysql!("SET @var1 = 1, @var2 = 2;");
+}
+
 fn check_postgres_variable_scope(sql: &str, expected_scope: Option<PostgresParameterScope>) {
     match parse_query(Dialect::PostgreSQL, sql).expect("Failed to parse query") {
         SqlQuery::Set(SetStatement::PostgresParameter(SetPostgresParameter { scope, .. })) => {
@@ -201,4 +206,22 @@ fn test_alter_drop_foreign_key() {
         }),
         check_parse_mysql!("ALTER TABLE `orderitem` DROP FOREIGN KEY `orderitem_ibfk_1`")
     );
+}
+
+#[test]
+fn test_set_names() {
+    check_parse_mysql!("SET NAMES 'utf8mb4' COLLATE 'utf8_general_ci'");
+    check_parse_postgres!("SET NAMES 'UTF8'");
+}
+
+#[test]
+#[ignore = "nom-sql doesn't support SET NAMES DEFAULT"]
+fn test_set_names_default() {
+    check_parse_both!("SET NAMES DEFAULT");
+}
+
+#[test]
+#[ignore = "nom-sql doesn't support unquoted SET NAMES"]
+fn test_set_names_unquoted() {
+    check_parse_mysql!("SET NAMES utf8mb4 COLLATE utf8_general_ci");
 }
