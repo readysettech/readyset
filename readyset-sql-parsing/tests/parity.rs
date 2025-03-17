@@ -320,3 +320,8 @@ fn test_convert_with_using() {
         "NomSqlError"
     );
 }
+
+#[test]
+fn test_empty_insert() {
+    check_parse_mysql!("INSERT INTO t () VALUES ()");
+}

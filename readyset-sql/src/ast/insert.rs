@@ -34,11 +34,7 @@ impl TryFromDialect<sqlparser::ast::Insert> for InsertStatement {
         {
             Ok(Self {
                 table: name.into_dialect(dialect),
-                fields: if columns.is_empty() {
-                    None
-                } else {
-                    Some(columns.into_dialect(dialect))
-                },
+                fields: Some(columns.into_dialect(dialect)),
                 data: if let Some(query) = source {
                     match *query.body {
                         sqlparser::ast::SetExpr::Values(values) => {
