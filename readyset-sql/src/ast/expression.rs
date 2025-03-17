@@ -871,7 +871,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 target_before_value: _,
                 styles: _,
                 is_try: _,
-            } => not_yet_implemented!("CONVERT"),
+            } => unsupported!("CONVERT"), // XXX: this could be supported in some cases by rewriting to `CAST`
             Cube(_vec) => not_yet_implemented!("CUBE"),
             Dictionary(_vec) => not_yet_implemented!("DICTIONARY"),
             Exists { subquery, negated } => {

@@ -32,6 +32,19 @@ macro_rules! check_parse_both {
     };
 }
 
+macro_rules! check_parse_fails {
+    ($dialect:expr, $sql:expr, $expected_error:expr) => {
+        let result = parse_query($dialect, $sql)
+            .expect_err(&format!("Expected failure for MySQL: {:?}", $sql));
+        assert!(
+            result.to_string().contains($expected_error),
+            "Expected error '{}' not found: got {}",
+            $expected_error,
+            result
+        );
+    };
+}
+
 #[test]
 fn test_select_query_parsing() {
     let sql = "SELECT * FROM users WHERE age > 18;";
@@ -258,17 +271,20 @@ fn test_limit_offset_placeholders_should_fail() {
     check_parse_mysql!("select * from users limit 5, :1");
 
     // Actually fails:
-    parse_query(Dialect::PostgreSQL, "select * from users offset $f")
-        .expect_err("Should fail with bogus placeholder $f");
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "select * from users offset $f",
+        "NomSqlError"
+    );
 }
 
 #[test]
-#[should_panic]
+#[cfg(feature = "sqlparser")]
+#[should_panic(expected = "Expected: an expression, found: ?")]
 fn test_mysql_placeholders_fail_in_postgres() {
     // nom-sql, again being very permissive, supports MySQL-style placeholders in PostgreSQL, but
     // sqlparser-rs does not:
-    parse_query(Dialect::PostgreSQL, "select * from users offset ?")
-        .expect_err("Should fail with MySQL placeholder ?");
+    check_parse_postgres!("select * from users offset ?");
 }
 
 #[test]
@@ -288,5 +304,19 @@ fn test_comment_on_table() {
 fn test_comment_on_column() {
     check_parse_postgres!(
         r#"COMMENT ON COLUMN "config"."id" IS 'The unique identifier for the configuration.'"#
+    );
+}
+
+#[test]
+fn test_convert_mysql_style() {
+    check_parse_mysql!("SELECT CONVERT('foo', CHAR)");
+}
+
+#[test]
+fn test_convert_with_using() {
+    check_parse_fails!(
+        Dialect::MySQL,
+        "SELECT CONVERT('foo' USING latin1)",
+        "NomSqlError"
     );
 }
