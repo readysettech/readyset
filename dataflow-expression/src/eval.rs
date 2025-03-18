@@ -373,10 +373,10 @@ impl Expr {
 #[cfg(test)]
 mod tests {
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-    use nom_sql::parse_expr;
     use readyset_data::{ArrayD, Collation, DfType, Dialect, IxDyn, PgEnumMetadata};
     use readyset_errors::internal;
     use readyset_sql::Dialect::*;
+    use readyset_sql_parsing::parse_expr;
     use serde_json::json;
     use Expr::*;
 

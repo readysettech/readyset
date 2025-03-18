@@ -379,10 +379,10 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
 #[cfg(test)]
 mod tests {
     use common::IndexType;
-    use nom_sql::parse_expr;
     use readyset_client::ViewPlaceholder;
     use readyset_sql::ast::{self, ColumnSpecification, Relation, SqlType};
     use readyset_sql::Dialect;
+    use readyset_sql_parsing::parse_expr;
 
     use super::*;
     use crate::graph::MirGraph;

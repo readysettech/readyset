@@ -101,8 +101,8 @@ pub fn normalize_negation(expr: &mut Expr) {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::parse_expr;
     use readyset_sql::{Dialect, DialectDisplay};
+    use readyset_sql_parsing::parse_expr;
 
     use super::*;
 
@@ -175,8 +175,9 @@ mod tests {
 
     #[test]
     fn normalize_question_mark() {
-        let mut expr = parse_expr(Dialect::MySQL, "NOT (j ? 'key' AND NOT b)").unwrap();
-        let expected = parse_expr(Dialect::MySQL, "NOT j ? 'key' OR b").unwrap();
+        // The ? Operator is Postgres-specific
+        let mut expr = parse_expr(Dialect::PostgreSQL, "NOT (j ? 'key' AND NOT b)").unwrap();
+        let expected = parse_expr(Dialect::PostgreSQL, "NOT j ? 'key' OR b").unwrap();
         normalize_negation(&mut expr);
         assert_eq!(expr, expected);
     }

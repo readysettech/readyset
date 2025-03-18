@@ -482,7 +482,7 @@ impl From<sqlparser::ast::BinaryOperator> for BinaryOperator {
             BinOp::PGRegexNotMatch => todo!(),
             BinOp::PGStartsWith => todo!(),
             BinOp::Plus => Self::Add,
-            BinOp::Question => todo!(),
+            BinOp::Question => Self::QuestionMark,
             BinOp::QuestionAnd => Self::QuestionMarkAnd,
             BinOp::QuestionPipe => Self::QuestionMarkPipe,
             BinOp::Spaceship => todo!(),
@@ -861,7 +861,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 rhs: right.try_into_dialect(dialect)?,
             }),
             Case {
-                operand: None, // XXX do we really not support the CASE operand?
+                operand: None,
                 conditions,
                 else_result,
             } => Ok(Self::CaseWhen {
@@ -877,10 +877,25 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 else_expr: else_result.try_into_dialect(dialect)?,
             }),
             Case {
-                operand: Some(expr), // XXX do we really not support the CASE operand?
-                conditions: _,
-                else_result: _,
-            } => not_yet_implemented!("CASE WHEN with operand: {expr:?}"),
+                operand: Some(expr),
+                conditions,
+                else_result,
+            } => Ok(Self::CaseWhen {
+                branches: conditions
+                    .into_iter()
+                    .map(|condition| {
+                        Ok(CaseWhenBranch {
+                            condition: Expr::BinaryOp {
+                                lhs: expr.clone().try_into_dialect(dialect)?,
+                                op: BinaryOperator::Equal,
+                                rhs: Box::new(condition.condition.try_into_dialect(dialect)?),
+                            },
+                            body: condition.result.try_into_dialect(dialect)?,
+                        })
+                    })
+                    .try_collect()?,
+                else_expr: else_result.try_into_dialect(dialect)?,
+            }),
             Cast {
                 kind,
                 expr,
@@ -1121,9 +1136,9 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 // XXX: Unfortunately, we have lost the original casing by now. This will cause some
                 // spurious mismatches with nom-sql.
                 let name = if shorthand {
-                    "SUBSTR".into_dialect(dialect)
+                    "substr".into_dialect(dialect)
                 } else {
-                    "SUBSTRING".into_dialect(dialect)
+                    "substring".into_dialect(dialect)
                 };
                 Ok(Self::Call(FunctionExpr::Call { name, arguments }))
             }
