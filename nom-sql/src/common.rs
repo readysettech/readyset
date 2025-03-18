@@ -126,31 +126,37 @@ fn delim_fx_args(
     }
 }
 
-fn function_call_without_parens(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
-    // Some functions can be called without parentheses, in both mysql and postgres
-    let (i, name) = map(
-        alt((
-            tag_no_case("now"),
-            tag_no_case("current_date"),
-            tag_no_case("current_timestamp"),
-            tag_no_case("current_time"),
-            tag_no_case("localtimestamp"),
-            tag_no_case("localtime"),
-        )),
-        |n: LocatedSpan<&[u8]>| {
-            String::from_utf8(n.to_vec())
-                .expect("Only constant string literals")
-                .into()
-        },
-    )(i)?;
+fn function_call_without_parens(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
+    move |i| {
+        // Some functions can be called without parentheses, in both mysql and postgres
+        let (i, name) = map(
+            alt((
+                tag_no_case("now"),
+                tag_no_case("current_date"),
+                tag_no_case("current_timestamp"),
+                tag_no_case("current_time"),
+                tag_no_case("localtimestamp"),
+                tag_no_case("localtime"),
+            )),
+            |n: LocatedSpan<&[u8]>| {
+                let s = String::from_utf8(n.to_vec()).expect("Only constant string literals");
+                match dialect {
+                    Dialect::MySQL => s.into(),
+                    Dialect::PostgreSQL => s.to_lowercase().into(),
+                }
+            },
+        )(i)?;
 
-    Ok((
-        i,
-        FunctionExpr::Call {
-            name,
-            arguments: vec![],
-        },
-    ))
+        Ok((
+            i,
+            FunctionExpr::Call {
+                name,
+                arguments: vec![],
+            },
+        ))
+    }
 }
 
 fn timestamp_field() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TimestampField> {
@@ -400,7 +406,7 @@ pub fn function_expr(
             upper(dialect),
             substring(dialect),
             function_call(dialect),
-            function_call_without_parens,
+            function_call_without_parens(dialect),
         ))(i)
     }
 }
