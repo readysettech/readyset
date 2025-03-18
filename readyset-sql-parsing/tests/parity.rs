@@ -357,3 +357,11 @@ fn test_op_any_all() {
         "NomSqlError"
     );
 }
+
+#[test]
+fn test_substring() {
+    check_parse_both!("SELECT SUBSTRING('foo', 1, 2) FROM t");
+    check_parse_both!("SELECT SUBSTR('foo', 1, 2) FROM t");
+    check_parse_both!("SELECT SUBSTRING('foo' FROM 1 FOR 2) FROM t");
+    check_parse_both!("SELECT SUBSTR('foo' FROM 1 FOR 2) FROM t");
+}

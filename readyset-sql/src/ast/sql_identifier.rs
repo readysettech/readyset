@@ -280,6 +280,17 @@ impl From<Cow<'_, str>> for SqlIdentifier {
     }
 }
 
+impl FromDialect<&str> for SqlIdentifier {
+    #[inline]
+    fn from_dialect(value: &str, dialect: Dialect) -> Self {
+        if dialect == Dialect::PostgreSQL {
+            Self::from(value.to_lowercase())
+        } else {
+            Self::from(value)
+        }
+    }
+}
+
 impl FromDialect<sqlparser::ast::Ident> for SqlIdentifier {
     #[inline]
     fn from_dialect(value: sqlparser::ast::Ident, dialect: Dialect) -> Self {

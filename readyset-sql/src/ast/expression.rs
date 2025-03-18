@@ -1093,7 +1093,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 expr,
                 substring_from,
                 substring_for,
-                special: _,
+                special: false,
                 shorthand: _,
             } => Ok(Self::Call(FunctionExpr::Substring {
                 string: expr.try_into_dialect(dialect)?,
@@ -1104,6 +1104,29 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                     .map(|expr| expr.try_into_dialect(dialect))
                     .transpose()?,
             })),
+            Substring {
+                expr,
+                substring_from,
+                substring_for,
+                special: true,
+                shorthand,
+            } => {
+                let mut arguments = vec![expr.try_into_dialect(dialect)?];
+                if let Some(pos) = substring_from.try_into_dialect(dialect)? {
+                    arguments.push(pos);
+                }
+                if let Some(len) = substring_for.try_into_dialect(dialect)? {
+                    arguments.push(len);
+                }
+                // XXX: Unfortunately, we have lost the original casing by now. This will cause some
+                // spurious mismatches with nom-sql.
+                let name = if shorthand {
+                    "SUBSTR".into_dialect(dialect)
+                } else {
+                    "SUBSTRING".into_dialect(dialect)
+                };
+                Ok(Self::Call(FunctionExpr::Call { name, arguments }))
+            }
             Trim {
                 expr: _,
                 trim_where: _,
@@ -1319,9 +1342,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 value: next_expr()?,
                 allow_duplicate_keys: false,
             })
-        } else if ident.value.eq_ignore_ascii_case("EXTRACT")
-            || ident.value.eq_ignore_ascii_case("SUBSTRING")
-        {
+        } else if ident.value.eq_ignore_ascii_case("EXTRACT") {
             return failed!("{ident} should have been converted earlier");
         } else {
             Self::Call(FunctionExpr::Call {
