@@ -2480,3 +2480,35 @@ async fn date_only_text_protocol() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial(mysql)]
+async fn test_case_expr_then_expr() {
+    let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    sleep().await;
+
+    conn.query_drop("DROP TABLE IF EXISTS test_case_expr_then_expr CASCADE;")
+        .await
+        .unwrap();
+    conn.query_drop(
+        "CREATE TABLE test_case_expr_then_expr (id INT PRIMARY KEY, col1 INT, col2 INT);",
+    )
+    .await
+    .unwrap();
+    conn.query_drop("INSERT INTO test_case_expr_then_expr VALUES (1, 1, 2);")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE CACHE FROM SELECT CASE col1 WHEN 1 THEN col2 ELSE col1 END AS t FROM test_case_expr_then_expr WHERE id = ?")    
+        .await
+        .unwrap();
+    sleep().await;
+
+    let rs_rows: Vec<String> = conn
+        .query("SELECT CASE col1 WHEN 1 THEN col2 ELSE col1 END AS t FROM test_case_expr_then_expr WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(rs_rows, vec![(String::from("2"))]);
+
+    shutdown_tx.shutdown().await;
+}

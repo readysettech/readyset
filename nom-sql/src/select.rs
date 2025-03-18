@@ -994,6 +994,38 @@ mod tests {
     }
 
     #[test]
+    fn sum_filter_case_expr_when() {
+        let qstring =
+            "SELECT SUM(CASE sign WHEN 1 THEN vote_id ELSE 6 END) FROM votes GROUP BY aid;";
+
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+
+        let filter_cond = Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("sign"))),
+            op: BinaryOperator::Equal,
+            rhs: Box::new(Expr::Literal(Literal::Integer(1))),
+        };
+        let agg_expr = FunctionExpr::Sum {
+            expr: Box::new(Expr::CaseWhen {
+                branches: vec![CaseWhenBranch {
+                    condition: filter_cond,
+                    body: Expr::Column(Column::from("vote_id")),
+                }],
+                else_expr: Some(Box::new(Expr::Literal(Literal::Integer(6)))),
+            }),
+            distinct: false,
+        };
+        let expected_stmt = SelectStatement {
+            tables: vec![TableExpr::from(Relation::from("votes"))],
+            fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr))],
+            group_by: Some(GroupByClause {
+                fields: vec![FieldReference::Expr(Expr::Column(Column::from("aid")))],
+            }),
+            ..Default::default()
+        };
+        assert_eq!(res.unwrap().1, expected_stmt);
+    }
+    #[test]
     fn sum_filter_else_literal() {
         let qstring =
             "SELECT SUM(CASE WHEN sign = 1 THEN vote_id ELSE 6 END) FROM votes GROUP BY aid;";
