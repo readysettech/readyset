@@ -223,7 +223,7 @@ slotmap = "1.0.7"
 smallvec = { version = "1.13.2", default-features = false }
 socket2 = "0.5"
 sqlformat = "0.3.1"
-sqlparser = { git = "https://github.com/apache/datafusion-sqlparser-rs", rev = "53aba68e2dc758e591292115b1dd5faf71374346" }
+sqlparser = { git = "https://github.com/apache/datafusion-sqlparser-rs", rev = "ac0367ce1d6f71d80108d9e19be4b6574b832080" }
 strawpoll = "0.2.3"
 streaming-iterator = "0.1"
 stringprep = "0.1.4"

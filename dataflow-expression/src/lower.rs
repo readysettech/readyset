@@ -1495,10 +1495,10 @@ impl Expr {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use nom_sql::parse_expr;
     use readyset_data::{Collation, PgEnumMetadata};
     use readyset_sql::ast::{BinaryOperator as AstBinaryOperator, Float, Literal};
     use readyset_sql::Dialect as ParserDialect;
+    use readyset_sql_parsing::parse_expr;
 
     use super::*;
 
@@ -1729,7 +1729,7 @@ pub(crate) mod tests {
 
     #[test]
     fn substr_regular() {
-        let input = parse_expr(ParserDialect::MySQL, "SUBSTR('abcdefghi', 1, 7)").unwrap();
+        let input = parse_expr(ParserDialect::MySQL, "substr('abcdefghi', 1, 7)").unwrap();
         let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context()).unwrap();
         assert_eq!(
             res,
@@ -1755,7 +1755,7 @@ pub(crate) mod tests {
 
     #[test]
     fn substring_regular() {
-        let input = parse_expr(ParserDialect::MySQL, "SUBSTRING('abcdefghi', 1, 7)").unwrap();
+        let input = parse_expr(ParserDialect::MySQL, "substring('abcdefghi', 1, 7)").unwrap();
         let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context()).unwrap();
         assert_eq!(
             res,
@@ -1781,7 +1781,7 @@ pub(crate) mod tests {
 
     #[test]
     fn substring_without_string_arg() {
-        let input = parse_expr(ParserDialect::MySQL, "SUBSTRING(123 from 2)").unwrap();
+        let input = parse_expr(ParserDialect::MySQL, "substring(123 from 2)").unwrap();
         let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context()).unwrap();
         assert_eq!(res.ty(), &DfType::DEFAULT_TEXT);
     }

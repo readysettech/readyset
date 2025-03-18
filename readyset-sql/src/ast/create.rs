@@ -7,6 +7,9 @@ use derive_more::From;
 use itertools::Itertools;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use sqlparser::ast::{
+    CreateTableOptions, Ident, NamedParenthesizedList, SqlOption, Value, ValueWithSpan,
+};
 use test_strategy::Arbitrary;
 
 use crate::{
@@ -191,27 +194,86 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
         //
         // [sqlparser#1747]: https://github.com/apache/datafusion-sqlparser-rs/pull/1747
         let mut options = vec![];
-        if let Some(engine) = value.engine {
-            options.push(CreateTableOption::Engine(Some(engine.name)));
-        }
-        if let Some(auto_increment) = value.auto_increment_offset {
-            options.push(CreateTableOption::AutoIncrement(auto_increment as u64));
-        }
-        if let Some(charset) = value.default_charset {
-            options.push(CreateTableOption::Charset(CharsetName::Unquoted(
-                charset.into(),
-            )));
-        }
-        if let Some(collation) = value.collation {
-            options.push(CreateTableOption::Collate(CollationName::Unquoted(
-                collation.into(),
-            )));
+        if let CreateTableOptions::Plain(opts) = value.table_options {
+            for option in opts {
+                match option {
+                    SqlOption::KeyValue { key, value } => match key.value.as_str() {
+                        "AUTO_INCREMENT" => {
+                            if let sqlparser::ast::Expr::Value(ValueWithSpan {
+                                value: Value::Number(v, _),
+                                ..
+                            }) = value
+                            {
+                                options.push(CreateTableOption::AutoIncrement(v.parse().map_err(
+                                    |_| {
+                                        AstConversionError::Failed(
+                                            "Failed to parse AUTO_INCREMENT value as u64".into(),
+                                        )
+                                    },
+                                )?))
+                            }
+                        }
+                        "DEFAULT CHARSET"
+                        | "CHARSET"
+                        | "DEFAULT CHARACTER SET"
+                        | "CHARACTER SETS" => match value {
+                            sqlparser::ast::Expr::Value(ValueWithSpan {
+                                value: Value::SingleQuotedString(v),
+                                ..
+                            }) => options
+                                .push(CreateTableOption::Charset(CharsetName::Quoted(v.into()))),
+                            sqlparser::ast::Expr::Identifier(Ident { value: v, .. }) => options
+                                .push(CreateTableOption::Charset(CharsetName::Unquoted(v.into()))),
+                            v => {
+                                return Err(AstConversionError::Failed(format!(
+                                    "Unsupported charset option {v}"
+                                )))
+                            }
+                        },
+                        "COLLATE" | "DEFAULT COLLATE" => match value {
+                            sqlparser::ast::Expr::Value(ValueWithSpan {
+                                value: Value::SingleQuotedString(v),
+                                ..
+                            }) => options
+                                .push(CreateTableOption::Collate(CollationName::Quoted(v.into()))),
+                            sqlparser::ast::Expr::Identifier(Ident { value: v, .. }) => options
+                                .push(CreateTableOption::Collate(CollationName::Unquoted(
+                                    v.into(),
+                                ))),
+                            v => {
+                                return Err(AstConversionError::Failed(format!(
+                                    "Unsupported collate value {v}"
+                                )))
+                            }
+                        },
+                        _ => {
+                            return Err(AstConversionError::Failed(format!(
+                                "Unsupported table option {key}"
+                            )))
+                        }
+                    },
+
+                    SqlOption::NamedParenthesizedList(NamedParenthesizedList {
+                        key,
+                        value,
+                        ..
+                    }) => {
+                        if key.value == "ENGINE" {
+                            options.push(CreateTableOption::Engine(value.map(|v| v.value)));
+                        }
+                    }
+                    e => {
+                        return Err(AstConversionError::Failed(format!(
+                            "Unsupported table option {e}"
+                        )))
+                    }
+                }
+            }
         }
         if let Some(
             sqlparser::ast::CommentDef::WithEq(comment)
-            | sqlparser::ast::CommentDef::WithoutEq(comment)
-            | sqlparser::ast::CommentDef::AfterColumnDefsWithoutEq(comment),
-        ) = value.comment
+            | sqlparser::ast::CommentDef::WithoutEq(comment),
+        ) = value.comment_after_column_def
         {
             options.push(CreateTableOption::Comment(comment));
         }

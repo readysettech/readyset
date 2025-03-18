@@ -1146,6 +1146,7 @@ dependencies = [
  "readyset-data",
  "readyset-errors",
  "readyset-sql",
+ "readyset-sql-parsing",
  "readyset-util",
  "regex",
  "rust_decimal",
@@ -4540,13 +4541,13 @@ dependencies = [
  "fixedbitset",
  "itertools 0.13.0",
  "lazy_static",
- "nom-sql",
  "petgraph",
  "readyset-client",
  "readyset-common",
  "readyset-dataflow",
  "readyset-errors",
  "readyset-sql",
+ "readyset-sql-parsing",
  "readyset-tracing",
  "regex",
  "serde",
@@ -5645,7 +5646,7 @@ dependencies = [
 [[package]]
 name = "sqlparser"
 version = "0.55.0"
-source = "git+https://github.com/apache/datafusion-sqlparser-rs?rev=53aba68e2dc758e591292115b1dd5faf71374346#53aba68e2dc758e591292115b1dd5faf71374346"
+source = "git+https://github.com/apache/datafusion-sqlparser-rs?rev=ac0367ce1d6f71d80108d9e19be4b6574b832080#ac0367ce1d6f71d80108d9e19be4b6574b832080"
 dependencies = [
  "log",
  "recursive",

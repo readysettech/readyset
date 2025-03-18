@@ -276,6 +276,7 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
             GeometricType(geometric_type_kind) => {
                 unsupported!("geometric type {geometric_type_kind}")
             }
+            TimestampNtz => todo!(),
         }
     }
 }

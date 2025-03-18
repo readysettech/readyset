@@ -484,7 +484,7 @@ impl TryFrom<sqlparser::ast::BinaryOperator> for BinaryOperator {
             BinOp::PGRegexNotMatch => unsupported!("PGRegexNotMatch '!~'")?,
             BinOp::PGStartsWith => todo!(),
             BinOp::Plus => Self::Add,
-            BinOp::Question => todo!(),
+            BinOp::Question => Self::QuestionMark,
             BinOp::QuestionAnd => Self::QuestionMarkAnd,
             BinOp::QuestionPipe => Self::QuestionMarkPipe,
             BinOp::Spaceship => todo!(),
@@ -506,6 +506,7 @@ impl TryFrom<sqlparser::ast::BinaryOperator> for BinaryOperator {
             BinOp::QuestionDoublePipe => todo!(),
             BinOp::At => todo!(),
             BinOp::TildeEq => todo!(),
+            BinOp::Assignment => todo!(),
         })
     }
 }
@@ -863,7 +864,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 rhs: right.try_into_dialect(dialect)?,
             }),
             Case {
-                operand: None, // XXX do we really not support the CASE operand?
+                operand: None,
                 conditions,
                 else_result,
             } => Ok(Self::CaseWhen {
@@ -1135,8 +1136,6 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 if let Some(len) = substring_for.try_into_dialect(dialect)? {
                     arguments.push(len);
                 }
-                // XXX: Unfortunately, we have lost the original casing by now. This will cause some
-                // spurious mismatches with nom-sql.
                 let name = if shorthand {
                     "substr".into_dialect(dialect)
                 } else {

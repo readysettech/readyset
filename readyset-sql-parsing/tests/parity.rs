@@ -329,6 +329,23 @@ fn test_convert_with_using() {
 }
 
 #[test]
+fn test_empty_insert() {
+    // MySQL parses `insert into t () VALUES ...` into `insert into t VALUES ...`
+    check_parse_mysql!("INSERT INTO t VALUES ()");
+}
+
+#[test]
+#[cfg(feature = "sqlparser")]
+#[should_panic(expected = "sqlparser error")]
+fn test_empty_insert_fails_in_postgres() {
+    // Invalid postgres syntax, parsed by nom but not by sqlparser
+    // Invalid because of empty values list
+    check_parse_postgres!("INSERT INTO t VALUES ()");
+    // Invalid because of empty cols list, accepted by mysql thought
+    check_parse_postgres!("INSERT INTO t () VALUES ()");
+}
+
+#[test]
 fn test_column_default_without_parens() {
     check_parse_both!(
         "CREATE TABLE IF NOT EXISTS m (version VARCHAR(50) PRIMARY KEY NOT NULL, run_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);"
@@ -354,10 +371,10 @@ fn test_op_any_all() {
 
 #[test]
 fn test_substring() {
-    check_parse_both!("SELECT SUBSTRING('foo', 1, 2) FROM t");
-    check_parse_both!("SELECT SUBSTR('foo', 1, 2) FROM t");
-    check_parse_both!("SELECT SUBSTRING('foo' FROM 1 FOR 2) FROM t");
-    check_parse_both!("SELECT SUBSTR('foo' FROM 1 FOR 2) FROM t");
+    check_parse_both!("SELECT substring('foo', 1, 2) FROM t");
+    check_parse_both!("SELECT substr('foo', 1, 2) FROM t");
+    check_parse_both!("SELECT substring('foo' FROM 1 FOR 2) FROM t");
+    check_parse_both!("SELECT substr('foo' FROM 1 FOR 2) FROM t");
 }
 
 #[test]
@@ -388,15 +405,6 @@ fn test_unsupported_op() {
     // This operator is psql-specific
     check_parse_postgres!("CREATE CACHE FROM SELECT * FROM t WHERE a ~* 'f.*'");
     check_parse_postgres!("create cache from selecT * from t where a !~* 'f.*' and a ~ 'g.*'");
-}
-
-#[test]
-#[cfg(feature = "sqlparser")]
-#[should_panic(expected = "sqlparser error")]
-/// Invalid postgres syntax, parsed by nom but not by sqlparser
-fn test_empty_insert_fails_in_postgres() {
-    // Invalid because of empty values list
-    check_parse_postgres!("INSERT INTO t VALUES ()");
 }
 
 #[test]

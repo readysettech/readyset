@@ -1,4 +1,7 @@
-use readyset_sql::{ast::SqlQuery, Dialect};
+use readyset_sql::{
+    ast::{Expr, SqlQuery},
+    Dialect,
+};
 
 #[cfg(feature = "sqlparser")]
 use readyset_sql::{
@@ -471,13 +474,33 @@ fn parse_readyset_query(
 }
 
 #[cfg(feature = "sqlparser")]
-pub fn parse_query(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlQuery, String> {
-    let nom_result = nom_sql::parse_query(dialect, input.as_ref());
+fn parse_readyset_expr(
+    parser: &mut Parser,
+    dialect: Dialect,
+    _input: impl AsRef<str>,
+) -> Result<Expr, ReadysetParsingError> {
+    Ok(parser.parse_expr()?.try_into_dialect(dialect)?)
+}
+
+#[cfg(feature = "sqlparser")]
+fn parse_both_inner<S, T, NP, SP>(
+    dialect: Dialect,
+    input: S,
+    nom_parser: NP,
+    sqlparser_parser: SP,
+) -> Result<T, String>
+where
+    T: PartialEq + std::fmt::Debug,
+    S: AsRef<str>,
+    for<'a> NP: FnOnce(Dialect, &'a str) -> Result<T, String>,
+    for<'a> SP: FnOnce(&mut Parser, Dialect, &'a str) -> Result<T, ReadysetParsingError>,
+{
+    let nom_result = nom_parser(dialect, input.as_ref());
     let sqlparser_dialect = sqlparser_dialect_from_readyset_dialect(dialect);
     let sqlparser_result = Parser::new(sqlparser_dialect.as_ref())
         .try_with_sql(input.as_ref())
         .map_err(Into::into)
-        .and_then(|mut p| parse_readyset_query(&mut p, dialect, input.as_ref()));
+        .and_then(|mut p| sqlparser_parser(&mut p, dialect, input.as_ref()));
 
     match (&nom_result, sqlparser_result) {
         (Ok(nom_ast), Ok(sqlparser_ast)) => {
@@ -515,7 +538,33 @@ pub fn parse_query(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlQuery,
     nom_result
 }
 
+#[cfg(feature = "sqlparser")]
+pub fn parse_query(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlQuery, String> {
+    parse_both_inner(
+        dialect,
+        input,
+        |d, s| nom_sql::parse_query(d, s),
+        |p, d, s| parse_readyset_query(p, d, s),
+    )
+}
+
 #[cfg(not(feature = "sqlparser"))]
 pub fn parse_query(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlQuery, String> {
     nom_sql::parse_query(dialect, input.as_ref())
+}
+
+/// Parses a single expression; only intended for use in tests.
+#[cfg(feature = "sqlparser")]
+pub fn parse_expr(dialect: Dialect, input: impl AsRef<str>) -> Result<Expr, String> {
+    parse_both_inner(
+        dialect,
+        input,
+        |d, s| nom_sql::parse_expr(d, s),
+        |p, d, s| parse_readyset_expr(p, d, s),
+    )
+}
+
+#[cfg(not(feature = "sqlparser"))]
+pub fn parse_expr(dialect: Dialect, input: impl AsRef<str>) -> Result<Expr, String> {
+    nom_sql::parse_expr(dialect, input.as_ref())
 }

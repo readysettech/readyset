@@ -25,7 +25,7 @@ readyset-errors = { path = "../readyset-errors" }
 readyset-sql = { path = "../readyset-sql" }
 
 [dev-dependencies]
-nom-sql = { path = "../nom-sql" }
+readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-tracing = { path = "../readyset-tracing" }
 
 [lints]

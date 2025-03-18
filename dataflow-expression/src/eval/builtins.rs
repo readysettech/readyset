@@ -1436,9 +1436,9 @@ mod tests {
     use chrono::NaiveTime;
     use chrono_tz::{Asia, Atlantic};
     use lazy_static::lazy_static;
-    use nom_sql::parse_expr;
     use readyset_errors::{internal, internal_err};
     use readyset_sql::Dialect::*;
+    use readyset_sql_parsing::parse_expr;
     use readyset_util::arbitrary::{
         arbitrary_timestamp_naive_date_time, arbitrary_timestamp_naive_date_time_for_timezone,
     };
@@ -2099,7 +2099,7 @@ mod tests {
 
     #[test]
     fn substring_with_from_and_for() {
-        let expr = parse_and_lower("SUBSTRING('abcdef', c0, c1)", MySQL);
+        let expr = parse_and_lower("substring('abcdef', c0, c1)", MySQL);
         let call_with =
             |from: i64, len: i64| expr.eval::<DfValue>(&[from.into(), len.into()]).unwrap();
 
@@ -2116,21 +2116,21 @@ mod tests {
 
     #[test]
     fn substring_multibyte() {
-        let expr = parse_and_lower("SUBSTRING('é' from 1 for 1)", PostgreSQL);
+        let expr = parse_and_lower("substring('é' from 1 for 1)", PostgreSQL);
         let res = expr.eval::<DfValue>(&[]).unwrap();
         assert_eq!(res, "é".into());
     }
 
     #[test]
     fn substring_with_from() {
-        let expr = parse_and_lower("SUBSTRING('abcdef' from c0)", PostgreSQL);
+        let expr = parse_and_lower("substring('abcdef' from c0)", PostgreSQL);
         let res = expr.eval::<DfValue>(&[2.into()]).unwrap();
         assert_eq!(res, "bcdef".into());
     }
 
     #[test]
     fn substring_with_for() {
-        let expr = parse_and_lower("SUBSTRING('abcdef' for c0)", PostgreSQL);
+        let expr = parse_and_lower("substring('abcdef' for c0)", PostgreSQL);
         let res = expr.eval::<DfValue>(&[3.into()]).unwrap();
         assert_eq!(res, "abc".into());
     }
