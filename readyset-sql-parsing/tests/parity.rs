@@ -325,3 +325,10 @@ fn test_convert_with_using() {
 fn test_empty_insert() {
     check_parse_mysql!("INSERT INTO t () VALUES ()");
 }
+
+#[test]
+fn test_column_default_without_parens() {
+    check_parse_both!(
+        "CREATE TABLE IF NOT EXISTS m (version VARCHAR(50) PRIMARY KEY NOT NULL, run_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);"
+    );
+}

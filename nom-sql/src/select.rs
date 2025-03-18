@@ -1855,7 +1855,7 @@ mod tests {
                             Expr::Literal(Literal::String("foo".to_owned()),)
                         ),
                         FieldDefinitionExpr::from(Expr::Call(FunctionExpr::Call {
-                            name: "CURRENT_TIME".into(),
+                            name: "current_time".into(),
                             arguments: vec![]
                         })),
                     ],
