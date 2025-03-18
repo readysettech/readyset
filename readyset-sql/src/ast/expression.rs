@@ -762,6 +762,51 @@ impl Expr {
 
         Some(alias.into())
     }
+
+    /// If this is a `Self::BinaryOp` where the right hand side is an ANY or ALL function call,
+    /// extract it to turn this into a `Self::AllOp` or `Self::AnyOp`.
+    ///
+    /// This is necessary because for some binary operators (namely, `LIKE` and its variants),
+    /// sqlparser-rs does not parse them as binary operators, but as special expression variants. As
+    /// a result, it does not recognize the `ALL` or `ANY` comparison on the right, and parses it as
+    /// a regular function call (in the case of `ALL`) or with a special flag on the `Expr::Like`
+    /// variant (in the case of `ANY`). So for `LIKE`/`ILIKE`, which have the special `any` flag,
+    /// this pass does nothing: but it should catch any other operators which behave this way and
+    /// *don't* have a special flag for `any`.
+    ///
+    /// It may be worth the effort to make these representations more uniform on the sqlparser-rs
+    /// side; see issue [#1770](https://github.com/apache/datafusion-sqlparser-rs/issues/1770).
+    fn extract_all_any_op(self) -> Result<Self, AstConversionError> {
+        if let Expr::BinaryOp { lhs, op, rhs } = self {
+            match *rhs {
+                Expr::Call(FunctionExpr::Call { name, arguments })
+                    if name.eq_ignore_ascii_case("ALL") =>
+                {
+                    Ok(Self::OpAll {
+                        lhs,
+                        op,
+                        rhs: Box::new(arguments.into_iter().exactly_one().map_err(|_| {
+                            failed_err!("Wrong number of arguments for ALL operator")
+                        })?),
+                    })
+                }
+                Expr::Call(FunctionExpr::Call { name, arguments })
+                    if name.eq_ignore_ascii_case("ANY") =>
+                {
+                    Ok(Self::OpAny {
+                        lhs,
+                        op,
+                        rhs: Box::new(arguments.into_iter().exactly_one().map_err(|_| {
+                            failed_err!("Wrong number of arguments for ANY operator")
+                        })?),
+                    })
+                }
+                _ => Ok(Expr::BinaryOp { lhs, op, rhs }),
+            }
+        } else {
+            Ok(self)
+        }
+    }
 }
 
 impl TryFromDialect<sqlparser::ast::Expr> for Expr {
@@ -930,14 +975,14 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             IsNotFalse(_expr) => not_yet_implemented!("IS NOT FALSE"),
             IsNotNull(expr) => Ok(Self::BinaryOp {
                 lhs: expr.try_into_dialect(dialect)?,
-                op: crate::ast::BinaryOperator::IsNot,
+                op: BinaryOperator::IsNot,
                 rhs: Box::new(Expr::Literal(crate::ast::Literal::Null)),
             }),
             IsNotTrue(_expr) => not_yet_implemented!("IS NOT TRUE"),
             IsNotUnknown(_expr) => not_yet_implemented!("IS NOT UNKNOWN"),
             IsNull(expr) => Ok(Self::BinaryOp {
                 lhs: expr.try_into_dialect(dialect)?,
-                op: crate::ast::BinaryOperator::Is,
+                op: BinaryOperator::Is,
                 rhs: Box::new(Expr::Literal(crate::ast::Literal::Null)),
             }),
             IsTrue(_expr) => not_yet_implemented!("IS TRUE"),
@@ -949,38 +994,62 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 expr,
                 pattern,
                 escape_char: _,
-                any: _,
-            } => Ok(if negated {
-                Self::BinaryOp {
-                    lhs: expr.try_into_dialect(dialect)?,
-                    op: crate::ast::BinaryOperator::NotLike,
-                    rhs: pattern.try_into_dialect(dialect)?,
-                }
-            } else {
-                Self::BinaryOp {
-                    lhs: expr.try_into_dialect(dialect)?,
-                    op: crate::ast::BinaryOperator::Like,
-                    rhs: pattern.try_into_dialect(dialect)?,
-                }
+                any: false,
+            } => Ok(Self::BinaryOp {
+                lhs: expr.try_into_dialect(dialect)?,
+                op: if negated {
+                    BinaryOperator::NotLike
+                } else {
+                    BinaryOperator::Like
+                },
+                rhs: pattern.try_into_dialect(dialect)?,
+            }
+            .extract_all_any_op()?),
+            Like {
+                negated,
+                expr,
+                pattern,
+                escape_char: _,
+                any: true,
+            } => Ok(Self::OpAny {
+                lhs: expr.try_into_dialect(dialect)?,
+                op: if negated {
+                    BinaryOperator::NotLike
+                } else {
+                    BinaryOperator::Like
+                },
+                rhs: pattern.try_into_dialect(dialect)?,
             }),
             ILike {
                 negated,
                 expr,
                 pattern,
                 escape_char: _,
-                any: _,
-            } => Ok(if negated {
-                Self::BinaryOp {
-                    lhs: expr.try_into_dialect(dialect)?,
-                    op: crate::ast::BinaryOperator::NotILike,
-                    rhs: pattern.try_into_dialect(dialect)?,
-                }
-            } else {
-                Self::BinaryOp {
-                    lhs: expr.try_into_dialect(dialect)?,
-                    op: crate::ast::BinaryOperator::ILike,
-                    rhs: pattern.try_into_dialect(dialect)?,
-                }
+                any: false,
+            } => Ok(Self::BinaryOp {
+                lhs: expr.try_into_dialect(dialect)?,
+                op: if negated {
+                    BinaryOperator::NotILike
+                } else {
+                    BinaryOperator::ILike
+                },
+                rhs: pattern.try_into_dialect(dialect)?,
+            }
+            .extract_all_any_op()?),
+            ILike {
+                negated,
+                expr,
+                pattern,
+                escape_char: _,
+                any: true,
+            } => Ok(Self::OpAny {
+                lhs: expr.try_into_dialect(dialect)?,
+                op: if negated {
+                    BinaryOperator::NotILike
+                } else {
+                    BinaryOperator::ILike
+                },
+                rhs: pattern.try_into_dialect(dialect)?,
             }),
             Map(_map) => not_yet_implemented!("MAP"),
             MatchAgainst {

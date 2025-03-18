@@ -332,3 +332,20 @@ fn test_column_default_without_parens() {
         "CREATE TABLE IF NOT EXISTS m (version VARCHAR(50) PRIMARY KEY NOT NULL, run_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);"
     );
 }
+
+#[test]
+fn test_op_any_all() {
+    check_parse_postgres!("SELECT * FROM t WHERE 'abc' NOT ILIKE ANY('{\"aBC\"}')");
+    check_parse_postgres!("SELECT * FROM t WHERE 'abc' ILIKE all('{\"aBC\"}')");
+
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "SELECT * FROM t WHERE a >= ANY(SELECT b FROM t2)",
+        "NomSqlError"
+    );
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "SELECT * FROM t WHERE a = ALL(SELECT b FROM t2)",
+        "NomSqlError"
+    );
+}
