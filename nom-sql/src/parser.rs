@@ -22,6 +22,7 @@ use crate::explain::explain_statement;
 use crate::expression::expression;
 use crate::insert::insertion;
 use crate::rename::rename_table;
+use crate::rls::{create_rls, drop_rls};
 use crate::select::selection;
 use crate::set::set;
 use crate::show::show;
@@ -75,6 +76,8 @@ fn sql_query_part1(
             alt((
                 map(explain_statement(dialect), SqlQuery::Explain),
                 map(create_database(dialect), SqlQuery::CreateDatabase),
+                map(create_rls(dialect), SqlQuery::CreateRls),
+                map(drop_rls(dialect), SqlQuery::DropRls),
             )),
         ))(i)
     }

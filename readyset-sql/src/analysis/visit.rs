@@ -10,6 +10,7 @@
 
 #![warn(clippy::todo, clippy::unimplemented)]
 
+use crate::ast::rls::CreateRlsStatement;
 use crate::ast::*;
 
 /// Each method of the `Visitor` trait is a hook to be potentially overridden when recursively
@@ -197,6 +198,32 @@ pub trait Visitor<'ast>: Sized {
         create_database_statement: &'ast CreateDatabaseStatement,
     ) -> Result<(), Self::Error> {
         walk_create_database_statement(self, create_database_statement)
+    }
+
+    fn visit_drop_rls_statement(
+        &mut self,
+        drop_rls_statement: &'ast DropRlsStatement,
+    ) -> Result<(), Self::Error> {
+        walk_drop_rls_statement(self, drop_rls_statement)
+    }
+
+    fn visit_create_rls_statement(
+        &mut self,
+        create_rls_statement: &'ast CreateRlsStatement,
+    ) -> Result<(), Self::Error> {
+        walk_create_rls_statement(self, create_rls_statement)
+    }
+
+    fn visit_rls_rule(
+        &mut self,
+        col: &'ast Column,
+        var: &'ast Variable,
+    ) -> Result<(), Self::Error> {
+        walk_rls_rule(self, col, var)
+    }
+
+    fn visit_rls_if_not_exists(&mut self, _if_not_exists: bool) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     fn visit_column_specification(
@@ -806,6 +833,38 @@ pub fn walk_create_database_statement<'a, V: Visitor<'a>>(
     Ok(())
 }
 
+pub fn walk_drop_rls_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    drop_rls_statement: &'a DropRlsStatement,
+) -> Result<(), V::Error> {
+    if let Some(table) = &drop_rls_statement.table {
+        visitor.visit_table(table)?;
+    }
+    Ok(())
+}
+
+pub fn walk_create_rls_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    create_rls_statement: &'a CreateRlsStatement,
+) -> Result<(), V::Error> {
+    visitor.visit_table(&create_rls_statement.table)?;
+    for (col, var) in &create_rls_statement.policy {
+        visitor.visit_rls_rule(col, var)?;
+    }
+    visitor.visit_rls_if_not_exists(create_rls_statement.if_not_exists)?;
+    Ok(())
+}
+
+pub fn walk_rls_rule<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    col: &'a Column,
+    var: &'a Variable,
+) -> Result<(), V::Error> {
+    visitor.visit_column(col)?;
+    visitor.visit_variable(var)?;
+    Ok(())
+}
+
 pub fn walk_column_specification<'a, V: Visitor<'a>>(
     visitor: &mut V,
     column_specification: &'a ColumnSpecification,
@@ -1226,6 +1285,8 @@ pub fn walk_sql_query<'a, V: Visitor<'a>>(
         SqlQuery::Deallocate(statement) => visitor.visit_deallocate_statement(statement),
         SqlQuery::Truncate(statement) => visitor.visit_truncate_statement(statement),
         SqlQuery::CreateDatabase(statement) => visitor.visit_create_database_statement(statement),
+        SqlQuery::CreateRls(statement) => visitor.visit_create_rls_statement(statement),
+        SqlQuery::DropRls(statement) => visitor.visit_drop_rls_statement(statement),
     }
 }
 
