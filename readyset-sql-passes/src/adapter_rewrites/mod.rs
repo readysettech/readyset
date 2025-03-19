@@ -435,7 +435,7 @@ where
     }
 
     let mut index = 0;
-    let mut chunks = Vec::with_capacity(params.len());
+    let mut chunks: Vec<Vec<Vec<T>>> = Vec::with_capacity(params.len());
 
     let sorted_conditions = rewritten_in_conditions
         .iter()
@@ -449,12 +449,7 @@ where
     {
         // Push atomic parameters before this rewritten `IN` clause
         if index < *first_param_index {
-            chunks.push(
-                params[index..*first_param_index]
-                    .iter()
-                    .map(|x| vec![x.clone()])
-                    .collect(),
-            );
+            chunks.push(vec![params[index..*first_param_index].to_vec()]);
         }
 
         index = *first_param_index;
@@ -465,7 +460,7 @@ where
             params[index..index + literals.len()]
                 .chunks(*group_size)
                 .map(|x| x.to_vec())
-                .collect::<Vec<_>>(),
+                .collect(),
         );
 
         index += literals.len();
@@ -976,6 +971,58 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn test_trailing_in() {
+        // SELECT * FROM t WHERE x = ? AND y = ? AND z IN (?, ?, ?)
+        let rewritten_in_conditions = vec![RewrittenIn {
+            first_param_index: 2,
+            literals: vec![ItemPlaceholder::QuestionMark; 3],
+            group_size: 1,
+        }];
+        let params = vec![1u32, 2, 3, 4, 5];
+        let res = explode_params(&params, &rewritten_in_conditions).collect::<Vec<_>>();
+        assert_eq!(res, vec![vec![1, 2, 3], vec![1, 2, 4], vec![1, 2, 5],]);
+    }
+
+    #[test]
+    fn test_leading_in() {
+        // SELECT * FROM t WHERE x IN (?, ?, ?) AND y = ? AND z = ?
+        let rewritten_in_conditions = vec![RewrittenIn {
+            first_param_index: 0,
+            literals: vec![ItemPlaceholder::QuestionMark; 3],
+            group_size: 1,
+        }];
+        let params = vec![1u32, 2, 3, 4, 5];
+        let res = explode_params(&params, &rewritten_in_conditions).collect::<Vec<_>>();
+        assert_eq!(res, vec![vec![1, 4, 5], vec![2, 4, 5], vec![3, 4, 5],]);
+    }
+
+    #[test]
+    fn test_leading_row_in() {
+        // SELECT * FROM t WHERE (x, y) IN ((?, ?), (?,?)) AND z = ? AND a = ?
+        let rewritten_in_conditions = vec![RewrittenIn {
+            first_param_index: 0,
+            literals: vec![ItemPlaceholder::QuestionMark; 4],
+            group_size: 2,
+        }];
+        let params = vec![1u32, 2, 3, 4, 5, 6];
+        let res = explode_params(&params, &rewritten_in_conditions).collect::<Vec<_>>();
+        assert_eq!(res, vec![vec![1, 2, 5, 6], vec![3, 4, 5, 6]]);
+    }
+
+    #[test]
+    fn test_trailing_row_in() {
+        // SELECT * FROM t WHERE x = ? AND y = ? AND (z, a) IN ((?, ?), (?,?))
+        let rewritten_in_conditions = vec![RewrittenIn {
+            first_param_index: 2,
+            literals: vec![ItemPlaceholder::QuestionMark; 4],
+            group_size: 2,
+        }];
+        let params = vec![1u32, 2, 3, 4, 5, 6];
+        let res = explode_params(&params, &rewritten_in_conditions).collect::<Vec<_>>();
+        assert_eq!(res, vec![vec![1, 2, 3, 4], vec![1, 2, 5, 6]]);
     }
 
     mod splice_auto_parameters {
