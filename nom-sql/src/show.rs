@@ -8,6 +8,7 @@ use readyset_sql::{ast::*, Dialect};
 
 use crate::dialect::DialectParser;
 use crate::expression::expression;
+use crate::rls::parse_rest_of_drop_or_show_rls;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{literal, NomSqlResult};
 
@@ -123,6 +124,14 @@ fn readyset_tables() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowS
     }
 }
 
+/// Parse rule for our custom `SHOW {ALL RLS | RLS ON <table>}` statement.
+fn show_rls(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
+    move |i| {
+        let (i, maybe_table) = parse_rest_of_drop_or_show_rls(dialect)(i)?;
+        Ok((i, ShowStatement::Rls(maybe_table)))
+    }
+}
+
 pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
     move |i| {
         let (i, _) = tag_no_case("show")(i)?;
@@ -130,6 +139,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
         let (i, statement) = alt((
             cached_queries(dialect),
             proxied_queries(dialect),
+            show_rls(dialect),
             readyset_migration_status,
             readyset_status(),
             value(
@@ -439,5 +449,29 @@ mod tests {
             test_parse!(show(Dialect::MySQL), b"SHOW CONNECTIONS"),
             ShowStatement::Connections
         );
+    }
+
+    #[test]
+    fn show_rls() {
+        let qstring1 = "SHOW RLS ON public.test";
+        let res1 = show(Dialect::PostgreSQL)(LocatedSpan::new(qstring1.as_bytes()))
+            .unwrap()
+            .1;
+        assert_eq!(
+            res1,
+            ShowStatement::Rls(Some(Relation {
+                name: "test".into(),
+                schema: Some("public".into()),
+            }))
+        );
+    }
+
+    #[test]
+    fn show_all_rls() {
+        let qstring1 = "SHOW ALL RLS";
+        let res1 = show(Dialect::PostgreSQL)(LocatedSpan::new(qstring1.as_bytes()))
+            .unwrap()
+            .1;
+        assert_eq!(res1, ShowStatement::Rls(None));
     }
 }

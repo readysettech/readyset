@@ -14,6 +14,7 @@ use crate::literal::{raw_string_literal, raw_string_single_quoted_unescaped, Quo
 use crate::whitespace::whitespace0;
 use crate::{literal, NomSqlError, NomSqlResult};
 
+#[macro_export]
 macro_rules! failed {
     ($input:expr) => {
         return Err(nom::Err::Error(NomSqlError {

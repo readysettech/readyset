@@ -39,6 +39,7 @@ mod keywords;
 mod literal;
 mod order;
 mod rename;
+mod rls;
 mod select;
 mod set;
 mod show;

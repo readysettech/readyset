@@ -25,6 +25,7 @@ pub enum ShowStatement {
     ReadySetTables(ReadySetTablesOptions),
     Connections,
     Databases,
+    Rls(Option<Relation>),
 }
 
 impl DialectDisplay for ShowStatement {
@@ -65,6 +66,13 @@ impl DialectDisplay for ShowStatement {
                 }
                 Self::Connections => write!(f, "CONNECTIONS"),
                 Self::Databases => write!(f, "DATABASES"),
+                Self::Rls(maybe_table) => {
+                    if let Some(table) = maybe_table {
+                        write!(f, "RLS ON = {}", table.display(dialect))
+                    } else {
+                        write!(f, "ALL RLS")
+                    }
+                }
             }
         })
     }

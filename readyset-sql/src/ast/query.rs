@@ -40,6 +40,8 @@ pub enum SqlQuery {
     Comment(CommentStatement),
     Deallocate(DeallocateStatement),
     Truncate(TruncateStatement),
+    CreateRls(CreateRlsStatement),
+    DropRls(DropRlsStatement),
 }
 
 impl DialectDisplay for SqlQuery {
@@ -72,6 +74,8 @@ impl DialectDisplay for SqlQuery {
             Self::Deallocate(dealloc) => write!(f, "{}", dealloc.display(dialect)),
             Self::Truncate(truncate) => write!(f, "{}", truncate.display(dialect)),
             Self::CreateDatabase(create) => write!(f, "{}", create.display(dialect)),
+            Self::CreateRls(create_rls) => write!(f, "{}", create_rls.display(dialect)),
+            Self::DropRls(drop_rls) => write!(f, "{}", drop_rls.display(dialect)),
         })
     }
 }
@@ -259,6 +263,8 @@ impl SqlQuery {
             Self::Comment(_) => "COMMENT",
             Self::Deallocate(_) => "DEALLOCATE",
             Self::Truncate(_) => "TRUNCATE",
+            Self::CreateRls(_) => "CREATE RLS",
+            Self::DropRls(_) => "DROP RLS",
         }
     }
 
@@ -295,8 +301,10 @@ impl SqlQuery {
                 | ShowStatement::ReadySetMigrationStatus(_)
                 | ShowStatement::ReadySetVersion
                 | ShowStatement::ReadySetTables(..)
-                | ShowStatement::Connections => true,
+                | ShowStatement::Connections
+                | ShowStatement::Rls(_) => true,
             },
+            SqlQuery::CreateRls(_) | SqlQuery::DropRls(_) => true,
             SqlQuery::CreateDatabase(_)
             | SqlQuery::CreateTable(_)
             | SqlQuery::CreateView(_)

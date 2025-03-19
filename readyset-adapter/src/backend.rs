@@ -2585,6 +2585,9 @@ where
                 )
                 .await
             }
+            SqlQuery::Show(ShowStatement::Rls(_maybe_table)) => {
+                unsupported!("SHOW RLS statement is not yet supported")
+            }
             SqlQuery::AlterReadySet(AlterReadysetStatement::ResnapshotTable(stmt)) => {
                 let mut table = stmt.table.clone();
                 self.noria.resnapshot_table(&mut table).await
@@ -2598,6 +2601,12 @@ where
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::ExitMaintenanceMode) => {
                 self.noria.exit_maintenance_mode().await
+            }
+            SqlQuery::CreateRls(_create_rls) => {
+                unsupported!("CREATE RLS statement is not yet supported")
+            }
+            SqlQuery::DropRls(_drop_rls) => {
+                unsupported!("DROP RLS statement is not yet supported")
             }
             _ => Err(internal_err!("Provided query is not a ReadySet extension")),
         };
@@ -2958,7 +2967,9 @@ where
                     | SqlQuery::DropAllCaches(_)
                     | SqlQuery::DropAllProxiedQueries(_)
                     | SqlQuery::AlterReadySet(_)
-                    | SqlQuery::Explain(_) => {
+                    | SqlQuery::Explain(_)
+                    | SqlQuery::CreateRls(_)
+                    | SqlQuery::DropRls(_) => {
                         unreachable!("path returns prior")
                     }
                 }
