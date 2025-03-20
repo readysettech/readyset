@@ -120,7 +120,7 @@ fn primary_key(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
         debug_print("before primary_key", &i);
         let (i, constraint_name) = constraint_identifier(dialect)(i)?;
         let (i, _) = whitespace0(i)?;
-        let (remaining_input, (_, index_name, _, columns, _, constraint_timing)) = tuple((
+        let (i, (_, index_name, _, columns, _, constraint_timing)) = tuple((
             tag_no_case("primary key"),
             opt(preceded(whitespace1, dialect.identifier())),
             whitespace0,
@@ -136,10 +136,11 @@ fn primary_key(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
             opt(deferrable(dialect, true)),
         ))(i)?;
         let constraint_timing = constraint_timing.unwrap_or(None);
+        let (i, _index_type) = opt(using_index)(i)?;
 
         debug_print("after primary_key", &i);
         Ok((
-            remaining_input,
+            i,
             TableKey::PrimaryKey {
                 constraint_name,
                 constraint_timing,
