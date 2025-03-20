@@ -598,8 +598,8 @@ impl MySqlReplicator<'_> {
             let mut conn = self.pool.get_conn().await?;
             match conn.query_drop("LOCK INSTANCE FOR BACKUP").await {
                 Ok(_) => Some(conn),
-                Err(err) => {
-                    warn!(%err, "Failed to acquire instance lock, if new tables are created, we might not detect them.");
+                Err(_) => {
+                    warn!("Upstream does not support LOCK INSTANCE FOR BACKUP. If new tables are created before snapshotting starts, we might not detect them.");
                     None
                 }
             }
