@@ -500,8 +500,9 @@ fn apply_table_op_coercions(
 ) -> ReadySetResult<()> {
     let coerce_row = |row: &mut Vec<DfValue>| {
         for (idx, (val, col)) in row.iter_mut().zip(columns).enumerate() {
-            val.maybe_coerce_for_table_op(col.ty())?;
+            // Apply the default must happen before coercion
             val.maybe_apply_default(defaults, idx);
+            val.maybe_coerce_for_table_op(col.ty())?;
         }
         Ok(())
     };

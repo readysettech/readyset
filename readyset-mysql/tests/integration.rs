@@ -2734,3 +2734,53 @@ async fn test_column_definition_upstream_readyset_replication() {
     test_column_definition_verify(&mut direct_mysql, &mut conn).await;
     tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial(mysql)]
+async fn text_citext_default_coercion_minimal_row_base_replication() {
+    readyset_tracing::init_test_logging();
+    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+
+    direct_mysql
+        .query_drop("DROP TABLE IF EXISTS text_citext_default_coercion CASCADE;")
+        .await
+        .unwrap();
+    direct_mysql
+        .query_drop("CREATE TABLE text_citext_default_coercion (id INT PRIMARY KEY, col1 TEXT);")
+        .await
+        .unwrap();
+
+    let (rs_opts, _rs_handle, tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    sleep().await;
+    let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    direct_mysql
+        .query_drop("SET SESSION binlog_row_image = MINIMAL;")
+        .await
+        .unwrap();
+    direct_mysql
+        .query_drop("INSERT INTO text_citext_default_coercion (id) VALUES (1);")
+        .await
+        .unwrap();
+    sleep().await;
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM text_citext_default_coercion WHERE id = ?")
+        .await
+        .unwrap();
+    let rs_row: Row = conn
+        .query_first("SELECT * FROM text_citext_default_coercion WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    let direct_row: Row = direct_mysql
+        .query_first("SELECT * FROM text_citext_default_coercion WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(rs_row.len(), 2);
+    assert_eq!(rs_row[0], direct_row[0]);
+    assert_eq!(rs_row[1], direct_row[1]);
+    tx.shutdown().await;
+}
