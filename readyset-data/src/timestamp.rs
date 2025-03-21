@@ -7,7 +7,7 @@ use chrono::{
     DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike,
 };
 use proptest::arbitrary::Arbitrary;
-use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 use crate::{DfType, DfValue};
@@ -23,6 +23,9 @@ pub const TIMESTAMP_TZ_FORMAT: &str = "%Y-%m-%d %H:%M:%S%:z";
 
 /// The format for dates when parsed as text
 pub const DATE_FORMAT: &str = "%Y-%m-%d";
+
+/// The format for times when parsed as text
+pub const TIME_PARSE_FORMAT: &str = "%H:%M:%S%.f";
 
 /// An optimized storage for date and datetime SQL formats. The possible inner data
 /// may be:
@@ -397,12 +400,29 @@ impl TimestampTz {
                 }
             } else if let Ok(dt) = NaiveDateTime::parse_from_str(ts, TIMESTAMP_PARSE_FORMAT) {
                 dt.into()
-            } else {
+            } else if let Ok(dt) = NaiveDate::parse_from_str(ts, DATE_FORMAT) {
                 // Make TimestampTz object with time portion 00:00:00
-                NaiveDate::parse_from_str(ts, DATE_FORMAT)?
-                    .and_hms_opt(0, 0, 0)
+                dt.and_hms_opt(0, 0, 0)
                     .ok_or(internal_err!("Invalid date format"))?
                     .into()
+            } else if ts.starts_with("+0000-00-00") {
+                const ZERO_TIME: NaiveTime = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+                match ts.split_once(' ') {
+                    None | Some((_, "")) => Self::zero(),
+                    Some((_, time)) => {
+                        if let Ok(time) = NaiveTime::parse_from_str(time, TIME_PARSE_FORMAT) {
+                            if time == ZERO_TIME {
+                                Self::zero()
+                            } else {
+                                internal!("Invalid date format")
+                            }
+                        } else {
+                            internal!("Invalid date format")
+                        }
+                    }
+                }
+            } else {
+                internal!("Invalid date format")
             },
         )
     }
