@@ -31,7 +31,7 @@ use readyset_errors::{
 };
 use readyset_sql::ast::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, ItemPlaceholder, Literal,
-    Relation, SelectStatement, SqlIdentifier,
+    Relation, SelectStatement, SqlIdentifier, SqlType,
 };
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_tracing::child_span;
@@ -156,6 +156,8 @@ pub struct ColumnBase {
     pub table_oid: Option<u32>,
     /// If known, the PostgreSQL `attnum` for the column
     pub attnum: Option<i16>,
+    /// Original SQL type
+    pub sql_type: SqlType,
 }
 
 /// Combines the specification for a columns with its base name
@@ -185,6 +187,7 @@ impl ColumnSchema {
                 constraints: spec.constraints,
                 table_oid: None,
                 attnum: None,
+                sql_type: spec.sql_type.clone(),
             }),
             column: spec.column,
             column_type: DfType::from_sql_type(
@@ -2124,6 +2127,7 @@ mod tests {
                             constraints: vec![],
                             table_oid: None,
                             attnum: None,
+                            sql_type: SqlType::Int(None),
                         }),
                     },
                     ColumnSchema {
@@ -2138,6 +2142,7 @@ mod tests {
                             constraints: vec![],
                             table_oid: None,
                             attnum: None,
+                            sql_type: SqlType::Text,
                         }),
                     },
                 ],
@@ -2154,6 +2159,7 @@ mod tests {
                             constraints: vec![],
                             table_oid: None,
                             attnum: None,
+                            sql_type: SqlType::Int(None),
                         }),
                     },
                     ColumnSchema {
@@ -2168,6 +2174,7 @@ mod tests {
                             constraints: vec![],
                             table_oid: None,
                             attnum: None,
+                            sql_type: SqlType::Text,
                         }),
                     },
                 ],
