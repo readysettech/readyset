@@ -7,7 +7,7 @@ use chrono::{
     DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike,
 };
 use proptest::arbitrary::Arbitrary;
-use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 use crate::{DfType, DfValue};
@@ -397,12 +397,15 @@ impl TimestampTz {
                 }
             } else if let Ok(dt) = NaiveDateTime::parse_from_str(ts, TIMESTAMP_PARSE_FORMAT) {
                 dt.into()
-            } else {
+            } else if let Ok(dt) = NaiveDate::parse_from_str(ts, DATE_FORMAT) {
                 // Make TimestampTz object with time portion 00:00:00
-                NaiveDate::parse_from_str(ts, DATE_FORMAT)?
-                    .and_hms_opt(0, 0, 0)
+                dt.and_hms_opt(0, 0, 0)
                     .ok_or(internal_err!("Invalid date format"))?
                     .into()
+            } else if ts == "+0000-00-00 00:00:00" {
+                Self::zero()
+            } else {
+                internal!("Invalid date format")
             },
         )
     }
