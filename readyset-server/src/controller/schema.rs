@@ -62,6 +62,7 @@ fn get_base_for_column(
             {
                 let col_index = cols.first().unwrap().unwrap();
                 let column_name = statement.fields[col_index].column.name.clone();
+                let sql_type = statement.fields[col_index].sql_type.clone();
                 #[allow(clippy::unwrap_used)] // occurs after implied table rewrite
                 return Ok(Some(ColumnBase {
                     attnum: pg_meta
@@ -77,6 +78,7 @@ fn get_base_for_column(
                         .clone(),
                     constraints: statement.fields[col_index].constraints.clone(),
                     table_oid: pg_meta.as_ref().map(|m| m.oid),
+                    sql_type,
                 }));
             }
         }

@@ -213,9 +213,10 @@ async fn write_meta_table<S: AsyncRead + AsyncWrite + Unpin>(
             table: "".to_owned(),
             column: v.name.to_string(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
-            column_length: None,
+            column_length: 1024,
             colflags: ColumnFlags::empty(),
             character_set: DEFAULT_CHARACTER_SET,
+            decimals: 0,
         })
         .collect::<Vec<_>>();
 
@@ -241,17 +242,19 @@ async fn write_meta_variables<S: AsyncRead + AsyncWrite + Unpin>(
             table: "".to_owned(),
             column: "Variable_name".to_string(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
-            column_length: None,
+            column_length: 1024,
             colflags: ColumnFlags::empty(),
             character_set: DEFAULT_CHARACTER_SET,
+            decimals: 0,
         },
         Column {
             table: "".to_owned(),
             column: "Value".to_string(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
-            column_length: None,
+            column_length: 1024,
             colflags: ColumnFlags::empty(),
             character_set: DEFAULT_CHARACTER_SET,
+            decimals: 0,
         },
     ];
     let mut writer = results.start(&cols).await?;
@@ -275,17 +278,19 @@ async fn write_meta_with_header<S: AsyncRead + AsyncWrite + Unpin>(
             table: "".to_owned(),
             column: vars[0].name.to_string(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
-            column_length: None,
+            column_length: 1024,
             colflags: ColumnFlags::empty(),
             character_set: DEFAULT_CHARACTER_SET,
+            decimals: 0,
         },
         Column {
             table: "".to_owned(),
             column: vars[0].value.to_string(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
-            column_length: None,
+            column_length: 1024,
             colflags: ColumnFlags::empty(),
             character_set: DEFAULT_CHARACTER_SET,
+            decimals: 0,
         },
     ];
     let mut writer = results.start(&cols).await?;

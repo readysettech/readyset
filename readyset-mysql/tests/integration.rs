@@ -2512,3 +2512,225 @@ async fn test_case_expr_then_expr() {
 
     shutdown_tx.shutdown().await;
 }
+
+async fn populate_all_data_types(direct_mysql: &mut mysql_async::Conn) {
+    // Drop existing table if any
+    direct_mysql
+        .query_drop("DROP TABLE IF EXISTS all_data_types CASCADE;")
+        .await
+        .unwrap();
+    // Create table
+    direct_mysql
+        .query_drop(
+            "CREATE TABLE all_data_types (
+        -- Numeric Data Types (Signed and Unsigned Integers)
+        col_tinyint TINYINT,                  -- Signed (-128 to 127)
+        col_tinyint_unsigned TINYINT UNSIGNED, -- Unsigned (0 to 255)
+        
+        col_smallint SMALLINT,                 -- Signed (-32,768 to 32,767)
+        col_smallint_unsigned SMALLINT UNSIGNED, -- Unsigned (0 to 65,535)
+        
+        col_mediumint MEDIUMINT,               -- Signed (-8,388,608 to 8,388,607)
+        col_mediumint_unsigned MEDIUMINT UNSIGNED, -- Unsigned (0 to 16,777,215)
+        
+        col_int INT,                           -- Signed (-2,147,483,648 to 2,147,483,647)
+        col_int_unsigned INT UNSIGNED,         -- Unsigned (0 to 4,294,967,295)
+        
+        col_bigint BIGINT,                     -- Signed (-2^63 to 2^63-1)
+        col_bigint_unsigned BIGINT UNSIGNED,   -- Unsigned (0 to 2^64-1)
+
+        col_decimal DECIMAL(12,2),             -- Fixed-point exact decimal (e.g., 99999999.99)
+        col_numeric NUMERIC(10,2),             -- Synonym for DECIMAL
+        
+        col_float FLOAT,                       -- 32-bit floating point (approximate value)
+        col_double DOUBLE,                     -- 64-bit floating point (approximate value)
+        col_real REAL,                         -- Synonym for DOUBLE
+        
+        col_bit BIT(8),                        -- Bit field (e.g., 8-bit binary)
+        col_boolean BOOLEAN,                   -- Alias for TINYINT(1) (0 = false, 1 = true)
+        
+        -- Date and Time Data Types
+        col_date DATE,                         
+        col_datetime DATETIME(2),             
+        col_timestamp TIMESTAMP,               
+        col_time TIME,                         
+
+        -- String Data Types
+        col_char CHAR(10),                     
+        col_varchar VARCHAR(255),              
+
+        col_text TEXT,                         
+        col_tinytext TINYTEXT,                 
+        col_mediumtext MEDIUMTEXT,             
+        col_longtext LONGTEXT,                 
+
+        col_blob BLOB,                         
+        col_tinyblob TINYBLOB,                 
+        col_mediumblob MEDIUMBLOB,             
+        col_longblob LONGBLOB,                 
+
+        col_enum ENUM('small', 'medium', 'large'), 
+        col_json JSON                         
+    );",
+        )
+        .await
+        .unwrap();
+    // Insert test data
+    direct_mysql
+        .query_drop(
+            "INSERT INTO all_data_types (
+col_tinyint, col_tinyint_unsigned,
+col_smallint, col_smallint_unsigned,
+col_mediumint, col_mediumint_unsigned,
+col_int, col_int_unsigned,
+col_bigint, col_bigint_unsigned,
+
+col_decimal, col_numeric,
+col_float, col_double, col_real,
+col_bit, col_boolean,
+
+col_date, col_datetime, col_timestamp, col_time,
+
+col_char, col_varchar,
+
+col_text, col_tinytext, col_mediumtext, col_longtext,
+
+col_blob, col_tinyblob, col_mediumblob, col_longblob,
+
+col_enum, col_json
+) VALUES (
+-- Integer types
+-128, 255,
+-32768, 65535,
+-8388608, 16777215,
+-2147483648, 4294967295,
+-9223372036854775808, 18446744073709551615,
+
+-- Fixed-point and floating types
+1234567890.12, 98765.43,
+3.14, 2.71828, 1.618,
+
+-- Bit and boolean
+b'10101010', TRUE,
+
+-- Date and time
+'2025-03-20',
+'2025-03-20 12:34:56.78',
+CURRENT_TIMESTAMP,
+'23:59:59',
+
+-- Strings
+'char_data',
+'This is a varchar string.',
+
+'This is some long TEXT content...',
+'tiny text!',
+'This is a medium text field. It can hold more data than tinytext.',
+'This is a LONGTEXT. It can store a LOT of characters — up to 4GB!',
+
+'blob data here',
+'tb',
+'medium blob example',
+'long blob contents here',
+
+'medium',
+'{\"name\": \"Alice\", \"roles\": [\"admin\", \"editor\"], \"active\": true}'
+);",
+        )
+        .await
+        .unwrap();
+}
+
+async fn test_column_definition_verify(
+    direct_mysql: &mut mysql_async::Conn,
+    rs_conn: &mut mysql_async::Conn,
+) {
+    // Verify results
+    let direct_rows: Vec<Row> = direct_mysql
+        .query("SELECT * FROM all_data_types")
+        .await
+        .unwrap();
+    let rs_rows: Vec<Row> = rs_conn.query("SELECT * FROM all_data_types").await.unwrap();
+
+    let direct_columns = direct_rows[0].columns();
+    let rs_columns = rs_rows[0].columns();
+
+    // Compare columns
+    for (direct_column, rs_column) in direct_columns.iter().zip(rs_columns.iter()) {
+        let column_name = String::from_utf8_lossy(direct_column.name_ref());
+        assert_eq!(
+            direct_column.column_length(),
+            rs_column.column_length(),
+            "Column length mismatch for column: {}",
+            column_name
+        );
+        assert_eq!(
+            direct_column.character_set(),
+            rs_column.character_set(),
+            "Character set mismatch for column: {}",
+            column_name
+        );
+        assert_eq!(
+            direct_column.column_type(),
+            rs_column.column_type(),
+            "Column type mismatch for column: {}",
+            column_name
+        );
+        assert_eq!(
+            direct_column.flags(),
+            rs_column.flags(),
+            "Column flags mismatch for column: {}",
+            column_name
+        );
+        assert_eq!(
+            direct_column.decimals(),
+            rs_column.decimals(),
+            "Column decimals mismatch for column: {}",
+            column_name
+        );
+        assert_eq!(
+            direct_column.name_ref(),
+            rs_column.name_ref(),
+            "Column name mismatch for column: {}",
+            column_name
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial(mysql)]
+async fn test_column_definition_upstream_readyset_snapshot() {
+    readyset_tracing::init_test_logging();
+    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    populate_all_data_types(&mut direct_mysql).await;
+
+    // Setup ReadySet connection after table creation
+    let (rs_opts, _rs_handle, tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+
+    test_column_definition_verify(&mut direct_mysql, &mut conn).await;
+    tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial(mysql)]
+async fn test_column_definition_upstream_readyset_replication() {
+    readyset_tracing::init_test_logging();
+    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+
+    // Setup ReadySet connection before table creation
+    let (rs_opts, _rs_handle, tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+
+    populate_all_data_types(&mut direct_mysql).await;
+    test_column_definition_verify(&mut direct_mysql, &mut conn).await;
+    tx.shutdown().await;
+}

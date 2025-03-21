@@ -111,7 +111,7 @@ fn col_enc_len(c: &Column) -> usize {
         + (1 + 2 + 4 + 1 + 2 + 1 + 2)
 }
 
-// See https://dev.mysql.com/doc/internals/en/com-query-response.html for documentation
+// See https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query_response_text_resultset_column_definition.html for documentation
 fn write_column_definition(c: &Column, buf: &mut Vec<u8>) {
     // The following unwraps are fine because writes to a Vec can't fail
 
@@ -135,14 +135,13 @@ fn write_column_definition(c: &Column, buf: &mut Vec<u8>) {
     //
     // TODO: `column_length` should not be an option. Using 1024 as a default is not necessarily
     // correct
-    buf.write_u32::<LittleEndian>(c.column_length.unwrap_or(1024))
-        .unwrap();
+    buf.write_u32::<LittleEndian>(c.column_length).unwrap();
     // Column Type (1 byte)
     buf.write_u8(c.coltype as u8).unwrap();
     // Column Flags (2 bytes)
     buf.write_u16::<LittleEndian>(c.colflags.bits()).unwrap();
     // Decimals (1 byte) - maximum shown decimal digits
-    buf.write_all(&[0x00]).unwrap(); // decimals
+    buf.write_all(&[c.decimals]).unwrap(); // decimals
     buf.write_all(&[0x00, 0x00]).unwrap(); // unused
 }
 

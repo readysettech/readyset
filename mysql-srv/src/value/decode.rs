@@ -359,9 +359,10 @@ mod tests {
                     table: String::new(),
                     column: String::new(),
                     coltype: $ct,
-                    column_length: None,
+                    column_length: 0,
                     colflags: ColumnFlags::empty(),
                     character_set: 33,
+                    decimals: 0,
                 };
 
                 if !$sig {
