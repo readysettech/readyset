@@ -45,3 +45,65 @@ select a.id, c.other from a join (select * from b) as c where a.b_id = c.id;
 30
 4
 50
+
+statement ok
+create table c(id int, name text);
+
+statement ok
+create table d(id int, name text);
+
+statement ok
+insert into c values (1, 'hello'), (2, 'WORLD'), (3, 'HELLO');
+
+statement ok
+insert into d values (1, 'hello'), (4, 'not world');
+
+query IT rowsort
+select c.id, d.name from c join d where c.name = d.name;
+----
+1
+hello
+
+query IT rowsort
+select c.id, d.name from c join d where lower(c.name) = d.name;
+----
+1
+hello
+3
+hello
+
+query IT rowsort
+select c.id, d.name from c join d where c.name = upper(d.name);
+----
+3
+hello
+
+query TI rowsort
+select c.name, d.id from c join d where lower(c.name) = substr(d.name, 5, 5);
+----
+WORLD
+4
+
+query IT rowsort
+select c.id, d.name from c join d where lower(d.name) = lower(c.name);
+----
+1
+hello
+3
+hello
+
+query IT rowsort
+select c.id, d.name from c join d where upper(d.name) = c.name;
+----
+3
+hello
+
+# Test nested functions
+query IT rowsort
+select c.id, d.name from c join d where ascii(substr(lower(c.name), 1, 5)) = ascii(lower(upper(d.name)));
+----
+1
+hello
+3
+hello
+

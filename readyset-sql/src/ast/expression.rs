@@ -157,6 +157,7 @@ impl FunctionExpr {
                     value.alias(dialect)?
                 )
             }
+            FunctionExpr::CountStar => "count(*)".to_string(),
             FunctionExpr::Call { name, arguments } => format!(
                 "{}({})",
                 name,
@@ -166,7 +167,6 @@ impl FunctionExpr {
                     .collect::<Option<Vec<_>>>()?
                     .join(", ") //FIXME
             ),
-            e => e.display(dialect).to_string(),
         })
     }
 }

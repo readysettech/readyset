@@ -1,12 +1,124 @@
 use std::collections::BTreeMap;
 
-use readyset_errors::{internal, internal_err, ReadySetResult};
-use readyset_sql::ast::{BinaryOperator, Expr};
+use petgraph::graph::NodeIndex;
+use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
+use readyset_sql::ast::{BinaryOperator, Expr, FunctionExpr};
+use readyset_sql::Dialect;
 use tracing::{trace, trace_span};
 
-use crate::node::MirNodeInner;
+use crate::node::{MirNode, MirNodeInner, ProjectExpr};
 use crate::query::MirQuery;
-use crate::Column;
+use crate::{Column, Ix};
+
+// We may need to inject nodes between the join and it's parents.
+// How do we specify if the injected node is right or left?
+// We use weights when adding edges! That's why we have the impl below.
+#[derive(Copy, Clone)]
+enum Side {
+    Left,
+    Right,
+}
+
+impl Into<usize> for &Side {
+    fn into(self) -> usize {
+        match self {
+            Side::Left => 0,
+            Side::Right => 1,
+        }
+    }
+}
+
+struct FunctionProcessor<'a> {
+    query: &'a MirQuery<'a>,
+    project_nodes_to_inject: &'a mut Vec<(MirNode, NodeIndex<Ix>, NodeIndex<Ix>, Side)>,
+    ancestor_idx: NodeIndex<Ix>,
+    dialect: Dialect,
+}
+
+impl FunctionProcessor<'_> {
+    fn find_column(
+        &self,
+        parent: NodeIndex<Ix>,
+        f: &FunctionExpr,
+    ) -> ReadySetResult<Option<Column>> {
+        let expr = match f {
+            FunctionExpr::Lower { expr, .. }
+            | FunctionExpr::Upper { expr, .. }
+            | FunctionExpr::Extract { expr, .. }
+            | FunctionExpr::Substring { string: expr, .. } => expr,
+            FunctionExpr::Call { name, arguments }
+                if matches!(
+                    name.as_str(),
+                    "ascii" | "substring" | "substr" | "lower" | "upper" // TODO: Support more ?
+                ) =>
+            {
+                arguments.get(0).ok_or_else(|| {
+                    internal_err!(
+                        "Call to {} must have at least one argument",
+                        f.alias(self.dialect).unwrap_or_default()
+                    )
+                })?
+            }
+            f => unsupported!(
+                "Can not push filter {} into join key",
+                f.alias(self.dialect).unwrap_or_default()
+            ),
+        };
+
+        Ok(match expr {
+            Expr::Column(c) => Some(Column::from(c)),
+            Expr::Call(func) => self.find_column(parent, &func)?,
+            _ => None,
+        })
+    }
+
+    fn process(
+        &mut self,
+        f: Option<&FunctionExpr>,
+        parent: NodeIndex<Ix>,
+        side: Side,
+    ) -> ReadySetResult<Option<Column>> {
+        match f {
+            Some(f) => {
+                let col = self.find_column(parent, f)?.ok_or_else(|| {
+                    unsupported_err!(
+                        "Can not push filter {} into join key",
+                        f.alias(self.dialect).unwrap_or_default(),
+                    )
+                })?;
+
+                if !self.query.graph.provides_column(parent, &col) {
+                    return Ok(None);
+                }
+
+                let mut new_node = MirNode::new(
+                    format!("push_filter_{}", f.alias(self.dialect).unwrap_or_default()).into(),
+                    MirNodeInner::Project {
+                        emit: self
+                            .query
+                            .graph
+                            .columns(parent)
+                            .iter()
+                            .map(|c| ProjectExpr::Column(c.clone()))
+                            .chain(vec![ProjectExpr::Expr {
+                                expr: Expr::Call(f.clone()),
+                                alias: f.alias(self.dialect).unwrap_or_default().into(),
+                            }])
+                            .collect(),
+                    },
+                );
+
+                new_node.add_owner(self.query.name().clone());
+
+                self.project_nodes_to_inject
+                    .push((new_node, parent, self.ancestor_idx, side));
+
+                Ok(Some(col))
+            }
+            _ => Ok(None),
+        }
+    }
+}
 
 /// Optimization: Convert all filters in the query that *could* be join keys in a join in their
 /// parent (because they compare a column on the lhs of the join to a column on the rhs of the join)
@@ -26,12 +138,17 @@ use crate::Column;
 pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
     // We'll be constructing a map from join_idx -> Vec<(filter_idx, (left_join_col,
     // right_join_col))>
+    let dialect = Dialect::MySQL;
+
     let mut filters_to_add = BTreeMap::<_, Vec<_>>::new();
+    let mut project_nodes_to_inject: Vec<(MirNode, NodeIndex<_>, NodeIndex<_>, Side)> = vec![];
 
     // First, loop through all the filters in the query where the condition compares one column
-    // against another column
+    // against another column.
+    // In case function calls are involved, we keep track of them and use their generated aliases
+    // as join keys
     'filter: for (filter_idx, node) in query.node_references() {
-        let (mut c1, mut c2) = if let MirNodeInner::Filter {
+        let (mut c1, mut c2, f1, f2) = if let MirNodeInner::Filter {
             conditions:
                 Expr::BinaryOp {
                     lhs,
@@ -40,10 +157,34 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
                 },
         } = &node.inner
         {
-            if let (Expr::Column(c1), Expr::Column(c2)) = (lhs.as_ref(), rhs.as_ref()) {
-                (Column::from(c1.clone()), Column::from(c2.clone()))
-            } else {
-                continue;
+            match (lhs.as_ref(), rhs.as_ref()) {
+                (Expr::Column(c1), Expr::Column(c2)) => (
+                    Column::from(c1.clone()),
+                    Column::from(c2.clone()),
+                    None,
+                    None,
+                ),
+                (Expr::Call(f1), Expr::Column(c2)) => (
+                    Column::named(f1.alias(dialect).unwrap()),
+                    Column::from(c2.clone()),
+                    Some(f1),
+                    None,
+                ),
+                (Expr::Column(c1), Expr::Call(f2)) => (
+                    Column::from(c1.clone()),
+                    Column::named(f2.alias(dialect).unwrap()),
+                    None,
+                    Some(f2),
+                ),
+                (Expr::Call(f1), Expr::Call(f2)) => (
+                    Column::named(f1.alias(dialect).unwrap()),
+                    Column::named(f2.alias(dialect).unwrap()),
+                    Some(f1),
+                    Some(f2),
+                ),
+                _ => {
+                    continue;
+                }
             }
         } else {
             continue;
@@ -120,8 +261,35 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
                         .get(1)
                         .ok_or_else(|| internal_err!("Joins must have at least two ancestors"))?;
 
-                    // Could this filter be a join key in this join?
-                    if c1.table != c2.table {
+                    let mut fn_processor = FunctionProcessor {
+                        query,
+                        dialect,
+                        project_nodes_to_inject: &mut project_nodes_to_inject,
+                        ancestor_idx,
+                    };
+
+                    // If either sides of the filter is a fn(col) we need to push it before the
+                    // join. Find the table that provides that column and inject a node between it
+                    // and the join. This node will later provide the values for the join condition.
+                    fn_processor.process(f1, left_parent, Side::Left)?;
+                    fn_processor.process(f2, right_parent, Side::Right)?;
+                    let f1_right = fn_processor.process(f1, right_parent, Side::Right)?;
+                    let f2_left = fn_processor.process(f2, left_parent, Side::Left)?;
+
+                    // Nodes need to be injected
+                    if !project_nodes_to_inject.is_empty() {
+                        let ordering = if f1_right.is_some() || f2_left.is_some() {
+                            (c2.clone(), c1.clone())
+                        } else {
+                            (c1.clone(), c2.clone())
+                        };
+
+                        filters_to_add
+                            .entry(ancestor_idx)
+                            .or_default()
+                            .push((filter_idx, ordering));
+                    } else if c1.table != c2.table {
+                        // No injection needed; filter only contains columns
                         if query.graph.provides_column(left_parent, &c1)
                             && query.graph.provides_column(right_parent, &c2)
                         {
@@ -157,6 +325,15 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
         }
     }
 
+    // Inject the new node between the parent and the child (child will always be a join)
+    for (node, parent, child, side) in project_nodes_to_inject.iter() {
+        let node_idx = query.graph.add_node(node.clone());
+        let edge = query.graph.find_edge(*parent, *child).unwrap();
+        query.graph.remove_edge(edge);
+        query.graph.add_edge(*parent, node_idx, 0);
+        query.graph.add_edge(node_idx, *child, side.into());
+    }
+
     // Now that we've collected all the information we need, we can actually mutate the query - run
     // through `filters_to_add` and convert all filters to join keys in their respective joins.
     for (join, filters) in filters_to_add {
@@ -169,11 +346,25 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
             .ok_or_else(|| internal_err!("Node must exist"))?
             .inner
         {
-            MirNodeInner::Join { on, .. } => {
+            MirNodeInner::Join { on, project } => {
                 for (_, join_key) in filters {
                     if !on.contains(&join_key) {
                         on.push(join_key)
                     }
+                }
+
+                for (node, _, _, _) in project_nodes_to_inject.iter() {
+                    project.push(match &node.inner {
+                        MirNodeInner::Project { emit, .. } => match emit.last().unwrap() {
+                            ProjectExpr::Expr { alias, .. } => Column::named(alias),
+                            ProjectExpr::Column(_) => {
+                                internal!("Last col should be an expr not a col")
+                            }
+                        },
+                        _ => internal!(
+                            "Join parent must be a project when using functions in join keys"
+                        ),
+                    });
                 }
             }
             _ => {
