@@ -637,45 +637,45 @@ where
     }
 }
 
-/// Spawn a task to query the upstream for its currently-configured schema search path and timezone name
-/// in a loop until it succeeds, returning a lock that will contain the result when it finishes
+/// Spawn a task to query the upstream for its currently-configured schema search path and
+/// timezone name in a loop until it succeeds, returning a lock that will contain the result
+/// when it finishes
 ///
-/// NOTE: when we start tracking all configuration parameters, this should be folded into whatever
-/// loads those initially
+/// NOTE: when we start tracking all configuration parameters, this should be folded into
+/// whatever loads those initially
 async fn load_system_props<U>(
     upstream_config: UpstreamConfig,
-    no_upstream_connections: bool,
+    no_upstream_conns: bool,
 ) -> Arc<RwLock<Result<UpstreamSystemProperties, U::Error>>>
 where
     U: UpstreamDatabase,
 {
-    if no_upstream_connections {
+    if no_upstream_conns {
         return Arc::new(RwLock::new(Ok(UpstreamSystemProperties {
             search_path: upstream_config.default_schema_search_path(),
             timezone_name: upstream_config.default_timezone_name(),
+            ..Default::default()
         })));
     }
 
     let try_load = move |upstream_config: UpstreamConfig| async move {
-        let upstream =
-            connect_upstream::<U>(upstream_config.clone(), no_upstream_connections).await?;
+        let upstream = connect_upstream::<U>(upstream_config.clone(), no_upstream_conns).await?;
 
-        match upstream {
-            Some(mut upstream) => {
-                match (
-                    upstream.schema_search_path().await,
-                    upstream.timezone_name().await,
-                ) {
-                    (Ok(search_path), Ok(timezone_name)) => Ok(UpstreamSystemProperties {
-                        search_path,
-                        timezone_name,
-                    }),
-                    (Err(ssp_err), _) => Err(ssp_err),
-                    (_, Err(tzn_err)) => Err(tzn_err),
-                }
-            }
-            None => Ok(Default::default()),
-        }
+        let Some(mut upstream) = upstream else {
+            return Ok(Default::default());
+        };
+
+        let search_path = upstream.schema_search_path().await?;
+        let timezone_name = upstream.timezone_name().await?;
+        let lower_case_database_names = upstream.lower_case_database_names().await?;
+        let lower_case_table_names = upstream.lower_case_table_names().await?;
+
+        Ok(UpstreamSystemProperties {
+            search_path,
+            timezone_name,
+            lower_case_database_names,
+            lower_case_table_names,
+        })
     };
 
     // First, try to load once outside the loop

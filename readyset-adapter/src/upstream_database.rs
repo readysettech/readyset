@@ -224,6 +224,9 @@ pub trait UpstreamDatabase: Sized + Send {
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error>;
 
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error>;
+
+    async fn lower_case_database_names(&mut self) -> Result<bool, Self::Error>;
+    async fn lower_case_table_names(&mut self) -> Result<bool, Self::Error>;
 }
 
 pub struct LazyUpstream<U> {
@@ -425,5 +428,13 @@ where
 
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error> {
         self.upstream().await?.timezone_name().await
+    }
+
+    async fn lower_case_database_names(&mut self) -> Result<bool, Self::Error> {
+        self.upstream().await?.lower_case_database_names().await
+    }
+
+    async fn lower_case_table_names(&mut self) -> Result<bool, Self::Error> {
+        self.upstream().await?.lower_case_table_names().await
     }
 }

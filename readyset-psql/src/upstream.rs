@@ -575,6 +575,14 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         debug!(%tz_name, "Loaded system timezone from upstream");
         Ok(tz_name.into())
     }
+
+    async fn lower_case_database_names(&mut self) -> Result<bool, Self::Error> {
+        Ok(false)
+    }
+
+    async fn lower_case_table_names(&mut self) -> Result<bool, Self::Error> {
+        Ok(false)
+    }
 }
 
 impl Drop for PostgreSqlUpstream {

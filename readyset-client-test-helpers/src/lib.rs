@@ -315,11 +315,20 @@ impl TestBuilder {
                         UpstreamSystemProperties {
                             search_path: upstream.schema_search_path().await.unwrap(),
                             timezone_name: upstream.timezone_name().await.unwrap(),
+                            lower_case_database_names: upstream
+                                .lower_case_database_names()
+                                .await
+                                .unwrap(),
+                            lower_case_table_names: upstream
+                                .lower_case_table_names()
+                                .await
+                                .unwrap(),
                         }
                     } else {
                         UpstreamSystemProperties {
                             search_path: upstream_config.default_schema_search_path(),
                             timezone_name: upstream_config.default_timezone_name(),
+                            ..Default::default()
                         }
                     };
 

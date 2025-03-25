@@ -8,15 +8,13 @@ use std::fmt;
 pub struct UpstreamSystemProperties {
     pub search_path: Vec<SqlIdentifier>,
     pub timezone_name: SqlIdentifier,
+    pub lower_case_database_names: bool,
+    pub lower_case_table_names: bool,
 }
 
 impl fmt::Display for UpstreamSystemProperties {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "schema_search_path: \"{:?}\"; timezone_name: \"{:?}\";",
-            self.search_path, self.timezone_name
-        )
+        std::fmt::Debug::fmt(self, f)
     }
 }
 
