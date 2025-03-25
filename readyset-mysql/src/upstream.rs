@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_util::Stream;
-use mysql_async::consts::{CapabilityFlags, StatusFlags};
+use mysql_async::consts::{CapabilityFlags, Command, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{
     ChangeUserOpts, Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, SslOpts, TxOpts,
@@ -473,5 +473,10 @@ impl UpstreamDatabase for MySqlUpstream {
 impl Drop for MySqlUpstream {
     fn drop(&mut self) {
         metrics::gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS).decrement(1.0);
+        // Properly close the connection
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            let _ = rt.block_on(self.conn.write_command_data(Command::COM_QUIT, &[]));
+        });
     }
 }
