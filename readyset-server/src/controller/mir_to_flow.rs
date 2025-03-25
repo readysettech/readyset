@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::{iter, mem};
+use std::mem;
 
 use common::DfValue;
 use dataflow::node::Column as DfColumn;
@@ -177,7 +177,6 @@ pub(super) fn mir_node_to_flow_parts(
                         on,
                         project,
                         JoinType::Inner,
-                        custom_types,
                         mig,
                     )?)
                 }
@@ -259,7 +258,6 @@ pub(super) fn mir_node_to_flow_parts(
                         on,
                         project,
                         JoinType::Left,
-                        custom_types,
                         mig,
                     )?)
                 }
@@ -519,9 +517,11 @@ fn make_filter_node(
             mir_node_index: parent.index(),
         }
     })?;
+
     let mut parent_cols = mig.dataflow_state.ingredients[parent_na.address()]
         .columns()
         .to_vec();
+
     let filter_conditions = lower_expression(
         graph,
         parent,
@@ -702,7 +702,6 @@ fn make_join_node(
     on: &[(Column, Column)],
     proj_cols: &[Column],
     kind: JoinType,
-    custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeIndex> {
     let mut left_na = graph.resolve_dataflow_node(left).ok_or_else(|| {
@@ -778,48 +777,6 @@ fn make_join_node(
     }
 
     set_names(&column_names(columns), &mut cols)?;
-
-    // If we don't have any join condition, we're making a cross join.
-    // Dataflow needs a non-empty join condition, so project out a constant value on both sides to
-    // use as our join key
-    if on.is_empty() {
-        let mut make_cross_join_bogokey = |graph: &MirGraph, node: MirNodeIndex| {
-            let name = format!(
-                "{}_cross_join_bogokey",
-                graph[node].name().display_unquoted()
-            );
-            make_project_node(
-                graph,
-                name.into(),
-                node,
-                &graph
-                    .columns(node)
-                    .into_iter()
-                    .map(ProjectExpr::Column)
-                    .chain(iter::once(ProjectExpr::Expr {
-                        expr: Expr::Literal(0.into()),
-                        alias: "cross_join_bogokey".into(),
-                    }))
-                    .collect::<Vec<_>>(),
-                custom_types,
-                mig,
-            )
-        };
-
-        let left_col_idx = graph.columns(left).len();
-        let right_col_idx = graph.columns(right).len();
-
-        left_na = make_cross_join_bogokey(graph, left)?;
-        right_na = make_cross_join_bogokey(graph, right)?;
-
-        on_idxs.push((left_col_idx, right_col_idx));
-        emit.push((Side::Left, left_col_idx));
-        cols.push(DfColumn::new(
-            "cross_join_bogokey".into(),
-            DfType::BigInt,
-            Some(name.clone()),
-        ));
-    }
 
     let j = Join::new(left_na.address(), right_na.address(), kind, on_idxs, emit);
     let n = mig.add_ingredient(name, cols, j);

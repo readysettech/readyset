@@ -10,14 +10,7 @@ use crate::node::{MirNode, MirNodeInner};
 use crate::query::MirQuery;
 use crate::Column;
 
-/// If the given query has a Leaf but doesn't have any keys, create a key for it by adding a new
-/// node to the query that projects out a constant literal value (a "bogokey", from "bogus key") and
-/// making that the key for the query.
-///
-/// This pass will also handle ensuring that any topk or paginate nodes in leaf position in such
-/// queries have `group_by` columns, by lifting the bogokey project node over those nodes and adding
-/// the bogokey to their `group_by`
-pub(crate) fn add_bogokey_if_necessary(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
+fn add_bogokey_leaf(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
     match &query.leaf_node().inner {
         MirNodeInner::Leaf { keys, .. } if keys.is_empty() => {}
         _ => {
@@ -87,7 +80,83 @@ pub(crate) fn add_bogokey_if_necessary(query: &mut MirQuery<'_>) -> ReadySetResu
         &mut query.get_node_mut(node_to_insert_above).unwrap().inner
     {
         group_by.push(Column::named("bogokey"))
-    }
+    };
+
+    Ok(())
+}
+
+fn add_bogokey_join(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
+    let cross_joins = query
+        .node_references()
+        .filter(|(_, node)| {
+            matches!(
+                node,
+                MirNode {
+                    inner: MirNodeInner::Join { on, .. },
+                    ..
+                } if on.is_empty()
+            )
+        })
+        .map(|(idx, _)| idx)
+        .collect::<Vec<_>>();
+
+    cross_joins
+        .iter()
+        .try_for_each(|idx| -> ReadySetResult<()> {
+            trace!(?idx, "Adding bogokey to cross join");
+
+            let ancestors = query.ancestors(*idx).unwrap();
+            for (i, ancestor) in ancestors.into_iter().enumerate() {
+                query.insert_below(
+                    ancestor,
+                    MirNode::new(
+                        format!("{}_bogo_project_{}", query.name().display_unquoted(), i).into(),
+                        MirNodeInner::Project {
+                            emit: query
+                                .graph
+                                .columns(ancestor)
+                                .into_iter()
+                                .map(ProjectExpr::Column)
+                                .chain(iter::once(ProjectExpr::Expr {
+                                    expr: Expr::Literal(0.into()),
+                                    alias: "bogokey".into(),
+                                }))
+                                .collect(),
+                        },
+                    ),
+                )?;
+            }
+
+            match &mut query.get_node_mut(*idx).unwrap().inner {
+                MirNodeInner::Join { on, project } => {
+                    on.push((Column::named("bogokey"), Column::named("bogokey")));
+                    project.push(Column::named("bogokey"));
+                }
+                _ => unreachable!(),
+            }
+
+            Ok(())
+        })?;
+
+    Ok(())
+}
+
+/// A few scenarios where a bogokey (from "bogus key") is needed:
+///
+/// If the given query has a Leaf but doesn't have any keys, create a key for it by adding a new
+/// node to the query that projects out a constant literal value (a "bogokey", from "bogus key") and
+/// making that the key for the query.
+///
+/// This pass will also handle ensuring that any topk or paginate nodes in leaf position in such
+/// queries have `group_by` columns, by lifting the bogokey project node over those nodes and adding
+/// the bogokey to their `group_by`
+///
+/// Consider a join node without a join condition (i.e. a cross-join); however, all join nodes
+/// require a join condition, so we add a bogokey projection to both of the join's parents and
+/// use that as a filter condition..
+pub(crate) fn add_bogokey_if_necessary(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
+    add_bogokey_leaf(query)?;
+    add_bogokey_join(query)?;
 
     Ok(())
 }
@@ -312,5 +381,98 @@ mod tests {
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn test_add_bogokey_to_cross_join_node() {
+        let query_name = Relation::from("query_needing_bogokey");
+        let mut mir_graph = MirGraph::new();
+
+        let left = mir_graph.add_node(MirNode::new(
+            "left_base".into(),
+            MirNodeInner::Base {
+                column_specs: vec![ColumnSpecification {
+                    column: ast::Column::from("a"),
+                    sql_type: SqlType::Int(None),
+                    generated: None,
+                    constraints: vec![],
+                    comment: None,
+                }],
+                primary_key: Some([Column::from("a")].into()),
+                unique_keys: Default::default(),
+            },
+        ));
+        mir_graph[left].add_owner(query_name.clone());
+
+        let right = mir_graph.add_node(MirNode::new(
+            "right_base".into(),
+            MirNodeInner::Base {
+                column_specs: vec![ColumnSpecification {
+                    column: ast::Column::from("b"),
+                    sql_type: SqlType::Int(None),
+                    generated: None,
+                    constraints: vec![],
+                    comment: None,
+                }],
+                primary_key: Some([Column::from("b")].into()),
+                unique_keys: Default::default(),
+            },
+        ));
+        mir_graph[right].add_owner(query_name.clone());
+
+        let join_node = mir_graph.add_node(MirNode::new(
+            "join_node".into(),
+            MirNodeInner::Join {
+                on: vec![], // Empty join condition (i.e. cross join)
+                project: vec![Column::named("a"), Column::named("b")],
+            },
+        ));
+        mir_graph[join_node].add_owner(query_name.clone());
+        mir_graph.add_edge(left, join_node, 0);
+        mir_graph.add_edge(right, join_node, 1);
+
+        let mut query = MirQuery::new(query_name.clone(), join_node, &mut mir_graph);
+
+        add_bogokey_if_necessary(&mut query).unwrap();
+
+        match &query.get_node(join_node).unwrap().inner {
+            MirNodeInner::Join { on, .. } => {
+                assert_eq!(on.len(), 1, "Expected a bogo key to be added");
+                assert_eq!(
+                    on[0].0.name, "bogokey",
+                    "Bogo key column name should be 'bogokey'"
+                );
+                assert_eq!(
+                    on[0].1.name, "bogokey",
+                    "Bogo key column name should be 'bogokey'"
+                );
+            }
+            _ => panic!("Leaf node is not a Join node"),
+        }
+
+        // Helper closure to validate parent projections
+        let check_projection_node = |parent_name: &str| {
+            let parent = mir_graph
+                .neighbors_directed(join_node, petgraph::Direction::Incoming)
+                .inspect(|p| println!("Parent: {:?}", mir_graph[*p]))
+                .find(|&n| mir_graph[n].name() == &Relation::from(parent_name))
+                .unwrap_or_else(|| panic!("Expected a projection node for {}", parent_name));
+
+            match &mir_graph[parent].inner {
+                MirNodeInner::Project { emit, .. } => {
+                    assert!(
+                        emit.iter().any(
+                            |c| matches!(c, ProjectExpr::Expr{ alias, ..} if alias == "bogokey")
+                        ),
+                        "{} projection should output bogokey",
+                        parent_name
+                    );
+                }
+                _ => panic!("{} parent is not a Projection node", parent_name),
+            }
+        };
+
+        check_projection_node(format!("{}_bogo_project_0", query_name.display_unquoted()).as_str());
+        check_projection_node(format!("{}_bogo_project_1", query_name.display_unquoted()).as_str());
     }
 }
