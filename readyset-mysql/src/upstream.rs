@@ -17,7 +17,7 @@ use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::{recorded, QueryDestination};
 use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfValue;
-use readyset_errors::{internal_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_util::redacted::RedactedString;
 use tokio::runtime::RuntimeFlavor;
@@ -468,6 +468,25 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error> {
         Ok(DEFAULT_TIMEZONE_NAME.into())
+    }
+
+    async fn lower_case_table_names(&mut self) -> Result<bool, Self::Error> {
+        let res: Vec<u8> = self.conn.query("select @@lower_case_table_names").await?;
+        let [v] = &res[..] else {
+            internal!("upstream is missing lower_case_table_names system variable");
+        };
+        match v {
+            0 => Ok(false),
+            1 | 2 => Ok(true),
+            v => {
+                error!("lower_case_table_names value {} is unsupported", v);
+                Ok(false)
+            }
+        }
+    }
+
+    async fn lower_case_database_names(&mut self) -> Result<bool, Self::Error> {
+        self.lower_case_table_names().await
     }
 }
 
