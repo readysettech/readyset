@@ -34,6 +34,7 @@ use uuid::Uuid;
 mod array;
 mod collation;
 pub mod dialect;
+pub mod encoding;
 mod r#enum;
 mod float;
 mod integer;

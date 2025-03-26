@@ -4341,6 +4341,7 @@ dependencies = [
  "cidr",
  "criterion",
  "derive_more",
+ "encoding_rs",
  "enum-kinds",
  "eui48",
  "fallible-iterator",
@@ -4435,8 +4436,10 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
+ "itertools 0.13.0",
  "mysql_async",
  "mysql_common",
+ "pretty_assertions",
  "proptest",
  "readyset-adapter",
  "readyset-client-test-helpers",

@@ -8,8 +8,10 @@ edition = "2021"
 [dev-dependencies]
 chrono = { workspace = true }
 futures = { workspace = true }
+itertools = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true }
+pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = [

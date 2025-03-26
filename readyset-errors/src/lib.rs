@@ -737,6 +737,24 @@ pub enum ReadySetError {
     /// Failed to reach the Controller
     #[error("The ReadySet Controller could not be reached")]
     ControllerUnavailable,
+
+    /// Error decoding bytes from a source encoding to UTF-8
+    #[error("Failed to decode bytes from {encoding} to UTF-8: {message}")]
+    DecodingError {
+        /// The source encoding
+        encoding: String,
+        /// The error message
+        message: String,
+    },
+
+    /// Error encoding UTF-8 text to a target encoding
+    #[error("Failed to encode UTF-8 text to {encoding}: {message}")]
+    EncodingError {
+        /// The target encoding
+        encoding: String,
+        /// The error message
+        message: String,
+    },
 }
 
 impl ReadySetError {
