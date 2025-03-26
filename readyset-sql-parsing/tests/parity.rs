@@ -6,7 +6,7 @@
 use readyset_sql::{
     ast::{
         AlterTableDefinition, AlterTableStatement, PostgresParameterScope, SetPostgresParameter,
-        SetStatement, SetVariables, SqlIdentifier, SqlQuery, Variable, VariableScope,
+        SetStatement, SetVariables, SqlIdentifier, SqlQuery, VariableScope,
     },
     Dialect,
 };
@@ -123,40 +123,49 @@ fn test_union_with_limit_offset_precedence() {
     check_parse_both!("SELECT a FROM b UNION SELECT c FROM d LIMIT 1 OFFSET 1;");
 }
 
-fn check_mysql_variable_scope(sql: &str, expected_scope: VariableScope) {
-    match parse_query(Dialect::MySQL, sql).expect("Failed to parse query") {
+fn check_mysql_variable_scope(sql: &str, expected_scopes: &[VariableScope]) {
+    match check_parse_mysql!(sql) {
         SqlQuery::Set(SetStatement::Variable(SetVariables { variables })) => {
-            let (variable, _expr) = variables
-                .first()
-                .expect("Expected at least one variable assignment");
-            let Variable { scope, .. } = variable;
-            assert_eq!(*scope, expected_scope, "input: {sql:?}");
+            let scopes = variables
+                .iter()
+                .map(|(variable, _expr)| variable.scope)
+                .collect::<Vec<_>>();
+            assert_eq!(&scopes, expected_scopes, "input: {sql:?}");
         }
         query => panic!("Expected SET statement, got {query:?}"),
     }
 }
 
 #[test]
-#[ignore = "Fix sqlparser variable scopes"]
 fn test_mysql_variable_scope() {
-    check_mysql_variable_scope("SET var = 1;", VariableScope::Local);
-    check_mysql_variable_scope("SET @var = 1;", VariableScope::User);
-    check_mysql_variable_scope("SET @@var = 1;", VariableScope::Session);
-    check_mysql_variable_scope("SET @@session.var = 1;", VariableScope::Session);
-    check_mysql_variable_scope("SET @@local.var = 1;", VariableScope::Local);
-    check_mysql_variable_scope("SET @@global.var = 1;", VariableScope::Global);
-    check_mysql_variable_scope("SET LOCAL var = 1;", VariableScope::Local);
-    check_mysql_variable_scope("SET SESSION var = 1;", VariableScope::Session);
-    check_mysql_variable_scope("SET GLOBAL var = 1;", VariableScope::Global);
+    check_mysql_variable_scope("SET var = 1;", &[VariableScope::Local]);
+    check_mysql_variable_scope("SET @var = 1;", &[VariableScope::User]);
+    check_mysql_variable_scope("SET @@var = 1;", &[VariableScope::Session]);
+    check_mysql_variable_scope("SET @@session.var = 1;", &[VariableScope::Session]);
+    check_mysql_variable_scope("SET @@local.var = 1;", &[VariableScope::Local]);
+    check_mysql_variable_scope("SET @@global.var = 1;", &[VariableScope::Global]);
+    check_mysql_variable_scope("SET LOCAL var = 1;", &[VariableScope::Local]);
+    check_mysql_variable_scope("SET SESSION var = 1;", &[VariableScope::Session]);
+    check_mysql_variable_scope("SET GLOBAL var = 1;", &[VariableScope::Global]);
 }
 
 #[test]
 fn test_mysql_multiple_variables() {
-    check_parse_mysql!("SET @var1 = 1, @var2 = 2;");
+    let sql = "SET @var1 = 1, @@global.var2 = 2, @@session.var3 = 3, @@local.var4 = 4, LOCAL var5 = 5, SESSION var6 = 6, GLOBAL var7 = 7;";
+    let expected_scopes = vec![
+        VariableScope::User,
+        VariableScope::Global,
+        VariableScope::Session,
+        VariableScope::Local,
+        VariableScope::Local,
+        VariableScope::Session,
+        VariableScope::Global,
+    ];
+    check_mysql_variable_scope(sql, &expected_scopes);
 }
 
 fn check_postgres_variable_scope(sql: &str, expected_scope: Option<PostgresParameterScope>) {
-    match parse_query(Dialect::PostgreSQL, sql).expect("Failed to parse query") {
+    match check_parse_postgres!(sql) {
         SqlQuery::Set(SetStatement::PostgresParameter(SetPostgresParameter { scope, .. })) => {
             assert_eq!(scope, expected_scope, "input: {sql:?}");
         }
@@ -165,7 +174,6 @@ fn check_postgres_variable_scope(sql: &str, expected_scope: Option<PostgresParam
 }
 
 #[test]
-#[ignore = "Fix sqlparser variable scopes"]
 fn test_postgres_variable_scope() {
     check_postgres_variable_scope("SET var = 1;", None);
     check_postgres_variable_scope("SET LOCAL var = 1;", Some(PostgresParameterScope::Local));

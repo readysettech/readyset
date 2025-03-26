@@ -903,7 +903,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                     false
                 };
                 if is_variable {
-                    Ok(Self::Variable(idents.try_into()?))
+                    Ok(Self::Variable(idents.try_into_dialect(dialect)?))
                 } else {
                     let column: Column = idents.into_dialect(dialect);
                     Ok(Self::Column(column))
@@ -1094,6 +1094,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 substring_from,
                 substring_for,
                 special: _,
+                shorthand: _,
             } => Ok(Self::Call(FunctionExpr::Substring {
                 string: expr.try_into_dialect(dialect)?,
                 pos: substring_from
@@ -1181,8 +1182,9 @@ impl TryFromDialect<sqlparser::ast::Ident> for Expr {
         value: sqlparser::ast::Ident,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        if value.quote_style.is_none() && value.value.starts_with('@') {
-            Ok(Self::Variable(value.into()))
+        if dialect == Dialect::MySQL && value.quote_style.is_none() && value.value.starts_with('@')
+        {
+            Ok(Self::Variable(value.try_into_dialect(dialect)?))
         } else if value.quote_style.is_none()
             && (value.value.starts_with('$') || value.value == "?" || value.value.starts_with(':'))
         {
