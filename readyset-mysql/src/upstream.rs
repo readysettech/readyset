@@ -20,6 +20,7 @@ use readyset_data::DfValue;
 use readyset_errors::{internal_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_util::redacted::RedactedString;
+use tokio::runtime::RuntimeFlavor;
 use tracing::{debug, error, info_span, Instrument};
 
 use crate::Error;
@@ -473,10 +474,12 @@ impl UpstreamDatabase for MySqlUpstream {
 impl Drop for MySqlUpstream {
     fn drop(&mut self) {
         metrics::gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS).decrement(1.0);
-        // Properly close the connection
-        tokio::task::block_in_place(|| {
-            let rt = tokio::runtime::Handle::current();
-            let _ = rt.block_on(self.conn.write_command_data(Command::COM_QUIT, &[]));
-        });
+        // Properly close the connection unless this is a test using a single-threaded runtime
+        let rt = tokio::runtime::Handle::current();
+        if rt.runtime_flavor() != RuntimeFlavor::CurrentThread {
+            tokio::task::block_in_place(|| {
+                let _ = rt.block_on(self.conn.write_command_data(Command::COM_QUIT, &[]));
+            });
+        }
     }
 }
