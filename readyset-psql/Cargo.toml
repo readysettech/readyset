@@ -73,3 +73,6 @@ failure_injection = [
     "readyset-server/failure_injection",
     "readyset-util/failure_injection",
 ]
+
+[lints]
+workspace = true

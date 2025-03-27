@@ -41,3 +41,6 @@ slab = { workspace = true }
 futures = { workspace = true }
 
 test-utils = { path = "../test-utils" }
+
+[lints]
+workspace = true

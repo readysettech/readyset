@@ -17,3 +17,5 @@ mysql_common = { workspace = true }
 [dev-dependencies]
 test-strategy = { workspace = true }
 
+[lints]
+workspace = true

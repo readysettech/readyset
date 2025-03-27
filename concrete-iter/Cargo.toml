@@ -6,9 +6,19 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-syn = { workspace = true, features = ["full", "parsing", "printing", "visit", "visit-mut", "extra-traits"] }
+syn = { workspace = true, features = [
+    "full",
+    "parsing",
+    "printing",
+    "visit",
+    "visit-mut",
+    "extra-traits",
+] }
 quote = { workspace = true }
 proc-macro2 = { workspace = true }
 
 [lib]
 proc-macro = true
+
+[lints]
+workspace = true

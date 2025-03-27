@@ -15,3 +15,6 @@ tracing = { workspace = true }
 
 [features]
 sqlparser = ["dep:sqlparser"]
+
+[lints]
+workspace = true

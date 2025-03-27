@@ -7,3 +7,6 @@ edition = "2021"
 
 [dependencies]
 failpoint-proc-macros = { path = "./proc-macros" }
+
+[lints]
+workspace = true

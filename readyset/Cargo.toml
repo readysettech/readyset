@@ -110,3 +110,6 @@ assets = [
 ]
 maintainer-scripts = "pkg/debian"
 conf-files = ["/etc/readyset/readyset.conf"]
+
+[lints]
+workspace = true

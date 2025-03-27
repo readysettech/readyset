@@ -10,4 +10,14 @@ proc-macro = true
 
 [dependencies]
 quote = { workspace = true }
-syn = { workspace = true, features = ["full", "parsing", "printing", "proc-macro", "extra-traits", "clone-impls"] }
+syn = { workspace = true, features = [
+    "full",
+    "parsing",
+    "printing",
+    "proc-macro",
+    "extra-traits",
+    "clone-impls",
+] }
+
+[lints]
+workspace = true

@@ -19,3 +19,6 @@ nom = { workspace = true }
 
 database-utils = { path = "../database-utils" }
 readyset-data = { path = "../readyset-data" }
+
+[lints]
+workspace = true

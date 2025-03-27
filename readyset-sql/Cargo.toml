@@ -23,3 +23,8 @@ triomphe = { workspace = true }
 [dev-dependencies]
 bincode = { workspace = true }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
+
+[lints.clippy]
+dbg_macro = "warn"
+# During initial development, we are ok with todo!(); could remove them and just use workspace lints
+todo = "allow"

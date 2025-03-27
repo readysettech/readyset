@@ -9,3 +9,6 @@ edition = "2021"
 anyhow = { workspace = true }
 # local deps
 readyset-client = { path = "../readyset-client" }
+
+[lints]
+workspace = true

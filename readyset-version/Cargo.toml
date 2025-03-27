@@ -10,3 +10,6 @@ edition = "2021"
 [dependencies]
 const-str = { workspace = true }
 serde = { workspace = true }
+
+[lints]
+workspace = true

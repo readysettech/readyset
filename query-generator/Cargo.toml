@@ -31,3 +31,6 @@ serial_test = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres.workspace = true
 test-utils = { path = "../test-utils" }
+
+[lints]
+workspace = true

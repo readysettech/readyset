@@ -50,7 +50,7 @@ fn push_view_key(query: &mut MirQuery<'_>, node_idx: NodeIndex) -> ReadySetResul
             }
             query.swap_with_child(node_idx)?;
         }
-        MirNodeInner::JoinAggregates => todo!(),
+        MirNodeInner::JoinAggregates => internal!("Unexpected JoinAggregates in push_view_key"),
         // TODO: left joins are tricky if we're coming from the right side
         MirNodeInner::LeftJoin { .. } => unsupported!(
             "Parameters in subqueries on the right-hand side of LEFT JOIN not supported"

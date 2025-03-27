@@ -26,3 +26,6 @@ metrics = { workspace = true }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }
+
+[lints]
+workspace = true

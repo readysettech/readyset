@@ -27,7 +27,7 @@ tokio-stream = { workspace = true, features = ["net"] }
 vec_map = { workspace = true, features = ["eders"] }
 derive_more = { workspace = true }
 vec1 = { workspace = true }
-criterion = { workspace = true, features=["async_tokio"], optional = true }
+criterion = { workspace = true, features = ["async_tokio"], optional = true }
 test-strategy = { workspace = true }
 thiserror = { workspace = true }
 proptest = { workspace = true }
@@ -62,3 +62,6 @@ replication-offset = { path = "../replication-offset" }
 bench = ["criterion"]
 failure_injection = ["fail/failpoints", "readyset-util/failure_injection"]
 display_literals = []
+
+[lints]
+workspace = true

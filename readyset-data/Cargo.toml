@@ -73,3 +73,6 @@ test-utils = { path = "../test-utils" }
 [[bench]]
 name = "serde"
 harness = false
+
+[lints]
+workspace = true

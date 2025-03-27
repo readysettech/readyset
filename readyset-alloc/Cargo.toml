@@ -30,3 +30,6 @@ tokio = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

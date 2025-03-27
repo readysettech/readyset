@@ -286,3 +286,7 @@ strip = "debuginfo"
 inherits = "release"
 debug = false
 strip = "debuginfo"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "deny"

@@ -6,7 +6,7 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-clap = { workspace = true, features = ["derive","env"] }
+clap = { workspace = true, features = ["derive", "env"] }
 metrics = { workspace = true }
 serde = { workspace = true }
 
@@ -18,3 +18,5 @@ readyset-sql = { path = "../readyset-sql" }
 [lib]
 path = "src/lib.rs"
 
+[lints]
+workspace = true

@@ -120,3 +120,6 @@ triomphe = { workspace = true }
 [[bench]]
 name = "dataflow"
 harness = false
+
+[lints]
+workspace = true
