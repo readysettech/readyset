@@ -12,3 +12,6 @@ tokio = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
 tokio-scoped = { workspace = true }
+
+[lints]
+workspace = true

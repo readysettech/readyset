@@ -1,3 +1,4 @@
+allow-dbg-in-tests = true
 allow-panic-in-tests = true
 
 disallowed-methods = [

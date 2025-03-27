@@ -23,7 +23,9 @@ criterion = { workspace = true }
 pretty_assertions = { workspace = true }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 
-
 [[bench]]
 name = "adapter_rewrites"
 harness = false
+
+[lints]
+workspace = true

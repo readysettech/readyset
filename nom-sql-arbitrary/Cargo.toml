@@ -14,3 +14,6 @@ description = "A library with proptest utility to generate AST structs."
 proptest = { workspace = true }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
+
+[lints]
+workspace = true

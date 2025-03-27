@@ -23,3 +23,8 @@ serial_test = { workspace = true }
 test-strategy = { workspace = true }
 test-utils = { path = "../test-utils" }
 tokio = { workspace = true, features = ["full"] }
+
+[lints.clippy]
+dbg_macro = "warn"
+# In a test crate, we are ok with todo!(); could remove them and just use workspace lints
+todo = "allow"

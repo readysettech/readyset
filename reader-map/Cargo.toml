@@ -26,3 +26,6 @@ readyset-util = { path = "../readyset-util" }
 proptest = { workspace = true }
 test-strategy = { workspace = true }
 
+
+[lints]
+workspace = true

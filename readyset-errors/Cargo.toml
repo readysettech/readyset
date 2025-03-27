@@ -34,3 +34,6 @@ readyset-util = { path = "../readyset-util" }
 deadpool-postgres = { workspace = true }
 failpoint-macros = { path = "../failpoint-macros" }
 tokio-native-tls = { workspace = true }
+
+[lints]
+workspace = true

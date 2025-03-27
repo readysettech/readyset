@@ -35,3 +35,6 @@ psql-srv = { path = "../psql-srv", optional = true }
 default = []
 mysql = ["mysql_async", "readyset-mysql", "mysql-srv"]
 postgres = ["tokio-postgres", "readyset-psql", "psql-srv"]
+
+[lints]
+workspace = true

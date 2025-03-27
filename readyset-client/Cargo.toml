@@ -87,3 +87,6 @@ test-utils = { path = "../test-utils" }
 
 [features]
 failure_injection = ["fail/failpoints"]
+
+[lints]
+workspace = true

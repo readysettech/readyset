@@ -77,3 +77,6 @@ harness = false
 [features]
 ryw = []
 failure_injection = ["fail/failpoints"]
+
+[lints]
+workspace = true

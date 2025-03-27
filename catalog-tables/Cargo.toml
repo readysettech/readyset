@@ -7,3 +7,6 @@ edition = "2021"
 
 [dependencies]
 readyset-sql = { path = "../readyset-sql" }
+
+[lints]
+workspace = true

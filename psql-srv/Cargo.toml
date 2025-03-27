@@ -64,3 +64,6 @@ serial_test = { workspace = true }
 [[bench]]
 name = "parse"
 harness = false
+
+[lints]
+workspace = true

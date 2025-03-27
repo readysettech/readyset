@@ -47,3 +47,6 @@ tokio-postgres = { workspace = true, features = [
     "with-serde_json-1",
     "with-bit-vec-0_6",
 ] }
+
+[lints]
+workspace = true

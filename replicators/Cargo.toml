@@ -77,3 +77,6 @@ reqwest = { workspace = true }
 [features]
 ddl_vertical_tests = []
 failure_injection = ["fail/failpoints", "readyset-util/failure_injection"]
+
+[lints]
+workspace = true

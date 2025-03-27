@@ -51,3 +51,8 @@ harness = false
 [features]
 slow_bench = []
 failure_injection = ["readyset-util/failure_injection"]
+
+[lints.clippy]
+dbg_macro = "warn"
+# In a test crate, we are ok with todo!(); could remove them and just use workspace lints
+todo = "allow"

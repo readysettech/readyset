@@ -22,3 +22,6 @@ opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
 
 [dev-dependencies]
 tracing-attributes = { workspace = true }
+
+[lints]
+workspace = true

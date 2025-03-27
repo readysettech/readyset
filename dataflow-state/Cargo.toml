@@ -9,7 +9,7 @@ edition = "2021"
 ahash = { workspace = true }
 anyhow = { workspace = true }
 bincode = { workspace = true }
-clap = { workspace = true, features = ["derive","env"] }
+clap = { workspace = true, features = ["derive", "env"] }
 derive_more = { workspace = true }
 hashbag = { workspace = true }
 indexmap = { workspace = true }
@@ -46,8 +46,11 @@ proptest-stateful = { path = "../proptest-stateful" }
 async-trait = { workspace = true }
 pretty_assertions = { workspace = true }
 lazy_static = { workspace = true }
-criterion = { workspace = true, features=["async_tokio"] }
-rust_decimal = { workspace = true, features = ["db-tokio-postgres", "serde-str"] }
+criterion = { workspace = true, features = ["async_tokio"] }
+rust_decimal = { workspace = true, features = [
+    "db-tokio-postgres",
+    "serde-str",
+] }
 
 [[bench]]
 name = "persistent_state"
@@ -59,3 +62,6 @@ harness = false
 # https://bheisler.github.io/criterion.rs/book/faq.html#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 [lib]
 bench = false
+
+[lints]
+workspace = true

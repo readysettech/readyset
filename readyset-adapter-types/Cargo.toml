@@ -10,3 +10,6 @@ description = "Types shared between the adapter and database-specific front-end 
 [dependencies]
 
 # avoid depending on any readyset crates!
+
+[lints]
+workspace = true

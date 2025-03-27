@@ -10,3 +10,6 @@ edition = "2021"
 [dependencies]
 parking_lot = { workspace = true }
 chrono = { workspace = true }
+
+[lints]
+workspace = true
