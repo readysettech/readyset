@@ -22,7 +22,8 @@ use dataflow::ops::union::{self, Union};
 use dataflow::ops::Side;
 use dataflow::utils::{dataflow_column, make_columns};
 use dataflow::{
-    BinaryOperator, DurabilityMode, Expr as DfExpr, PersistenceParameters, ReaderProcessing,
+    BinaryOperator, DomainIndex, DurabilityMode, Expr as DfExpr, PersistenceParameters,
+    ReaderProcessing,
 };
 use futures::{join, StreamExt};
 use itertools::Itertools;
@@ -31,8 +32,10 @@ use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore}
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
-use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
-use readyset_data::{Bound, DfType, DfValue, Dialect, IntoBoundedRange};
+use readyset_client::{
+    KeyComparison, Modification, SchemaType, SingleKeyEviction, ViewPlaceholder, ViewQuery,
+};
+use readyset_data::{Bound, Collation, DfType, DfValue, Dialect, IntoBoundedRange, TinyText};
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_sql::ast;
 use readyset_sql::ast::{OrderType, Relation, SqlQuery};
@@ -9585,5 +9588,34 @@ async fn check_supported_mysql_storage_engines() {
     .await
     .expect("Should replicate table with supported storage engine");
 
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn evict_single_with_tag() {
+    readyset_tracing::init_test_logging();
+    let (mut g, shutdown_tx) = start_simple_unsharded("evict_single_with_tag").await;
+
+    g.extend_recipe(
+        ChangeList::from_strings(
+            vec!["CREATE TABLE t1 (x int, y int);"],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let mut tt: TinyText = "y".try_into().unwrap();
+    tt.set_collation(Collation::Citext);
+    let res = g
+        .evict_single(Some(SingleKeyEviction {
+            domain_idx: DomainIndex::new(0),
+            tag: 3,
+            key: vec![tt.into()],
+        }))
+        .await
+        .unwrap();
+    println!("res: {:?}", res);
     shutdown_tx.shutdown().await;
 }

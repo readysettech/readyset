@@ -11,6 +11,7 @@ use std::fmt::{self, Display};
 use bimap::BiHashMap;
 use dataflow::prelude::*;
 use dataflow::{DomainRequest, LookupIndex};
+use itertools::Itertools;
 use petgraph::graph::NodeIndex;
 use readyset_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -1292,7 +1293,7 @@ impl Materializations {
         // construct and disseminate a plan for each index
         let (pending, paths) = {
             let mut plan = plan::Plan::new(self, graph, ni, dmp);
-            for index in index_on.drain() {
+            for index in index_on.drain().sorted() {
                 plan.add(index)?;
             }
             plan.finalize()?

@@ -624,11 +624,13 @@ impl Leader {
                 return_serialized!(supports)
             }
             (&Method::POST, "/evict_single") => {
+                println!("evict_single body: {:?}", body);
                 let body = if body.is_empty() || body.as_ref() == [0] {
                     None
                 } else {
                     bincode::deserialize(&body)?
                 };
+                println!("body: {:?}", body);
                 let ds = self.dataflow_state_handle.read().await;
                 let key = ds.evict_single(body).await?;
                 return_serialized!(key);

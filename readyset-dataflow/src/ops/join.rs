@@ -102,6 +102,8 @@ impl Join {
             )
         };
 
+        // check if right node is a base node
+
         Self {
             left: left.into(),
             right: right.into(),
@@ -735,6 +737,15 @@ impl Ingredient for Join {
                 .filter_map(|(idx, col)| col.filter(|_| left_cols[idx].is_none()))
                 .collect::<Vec<_>>();
             let left_cols = left_cols.into_iter().flatten().collect::<Vec<_>>();
+            let mut join_right_cols = self.on.iter().map(|(_l, r)| *r).collect::<Vec<_>>();
+            join_right_cols.extend(right_cols.iter().copied());
+            let mut join_left_cols = self.on.iter().map(|(l, _r)| *l).collect::<Vec<_>>();
+            join_left_cols.extend(left_cols.iter().copied());
+            //println!("join_left_cols: {:?}", join_left_cols);
+            //println!("left_cols: {:?}", left_cols);
+            println!("right_cols: {:?}", right_cols);
+            println!("join_right_cols: {:?}", join_right_cols);
+
             ColumnSource::GeneratedFromColumns(vec1![
                 ColumnRef {
                     node: self.left.as_global(),
@@ -743,6 +754,14 @@ impl Ingredient for Join {
                 ColumnRef {
                     node: self.right.as_global(),
                     columns: right_cols
+                },
+                /*ColumnRef {
+                    node: self.left.as_global(),
+                    columns: join_left_cols
+                },*/
+                ColumnRef {
+                    node: self.right.as_global(),
+                    columns: join_right_cols
                 },
             ])
         }
