@@ -9,6 +9,7 @@ pub mod expr;
 mod implied_tables;
 mod inline_literals;
 mod key_def_coalescing;
+mod lowercase_names;
 mod normalize_topk_with_aggregate;
 mod order_limit_removal;
 mod remove_numeric_field_references;
@@ -24,6 +25,7 @@ use std::collections::{HashMap, HashSet};
 use alias_removal::TableAliasRewrite;
 use dataflow_expression::Dialect;
 use disallow_row::DisallowRow;
+use readyset_data::upstream_system_props::*;
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{
     CompoundSelectStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
@@ -38,6 +40,7 @@ pub use crate::expr::ScalarOptimizeExpressions;
 pub use crate::implied_tables::ImpliedTableExpansion;
 pub use crate::inline_literals::InlineLiterals;
 pub use crate::key_def_coalescing::KeyDefinitionCoalescing;
+use crate::lowercase_names::*;
 pub use crate::normalize_topk_with_aggregate::NormalizeTopKWithAggregate;
 pub use crate::order_limit_removal::OrderLimitRemoval;
 pub use crate::remove_numeric_field_references::RemoveNumericFieldReferences;
@@ -149,6 +152,7 @@ pub trait Rewrite: Sized {
 impl Rewrite for CreateTableStatement {
     fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
         Ok(self
+            .lowercase_column_names(context.dialect)
             .resolve_schemas(
                 context.tables(),
                 context.custom_types,
@@ -164,7 +168,10 @@ impl Rewrite for SelectStatement {
     fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
         let query_name = context.query_name.unwrap_or("unknown");
 
-        self.rewrite_between()
+        self.lowercase_database_names(lower_case_database_names())
+            .lowercase_table_names(lower_case_table_names())
+            .lowercase_column_names(context.dialect)
+            .rewrite_between()
             .disallow_row()?
             .scalar_optimize_expressions(context.dialect)
             .strip_post_filters()
