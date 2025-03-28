@@ -133,20 +133,32 @@ impl Encoding {
     }
 
     /// Encode a UTF-8 string to bytes in this encoding
+    ///
+    /// As with [`Encoding::decode`], we use the more involved non-replacing method in order to try
+    /// to surface a useful error message with the invalid bytes included.
     pub fn encode(&self, string: &str) -> ReadySetResult<Vec<u8>> {
         let Some(encoding) = self.get_encoding_rs() else {
             return Err(encoding_err!(self, "Unsupported encoding"));
         };
-        let (cow, _encoding_used, had_errors) = encoding.encode(string);
+        let mut encoder = encoding.new_encoder();
+        let Some(max_len) = encoder.max_buffer_length_from_utf8_without_replacement(string.len())
+        else {
+            // According to docs, only happens if it would overflow usize
+            return Err(decoding_err!(self, "Worst case output too long"));
+        };
+        let mut out = Vec::with_capacity(max_len);
+        let (result, _bytes_read) =
+            encoder.encode_from_utf8_to_vec_without_replacement(string, &mut out, true);
 
-        if had_errors {
-            return Err(encoding_err!(
-                self,
-                "Some characters couldn't be encoded properly"
-            ));
+        match result {
+            encoding_rs::EncoderResult::InputEmpty => Ok(out),
+            encoding_rs::EncoderResult::OutputFull => {
+                Err(encoding_err!(self, "Not enough space for output"))
+            }
+            encoding_rs::EncoderResult::Unmappable(ch) => {
+                Err(encoding_err!(self, "Unmappable character: {}", ch))
+            }
         }
-
-        Ok(cow.into_owned())
     }
 }
 
@@ -196,8 +208,9 @@ mod tests {
         let result = Encoding::Latin1.encode(utf8_str);
         assert!(result.is_err());
         match result.unwrap_err() {
-            ReadySetError::EncodingError { encoding, .. } => {
+            ReadySetError::EncodingError { encoding, message } => {
                 assert_eq!(encoding, "latin1");
+                assert!(message.contains("Unmappable character: 😊"), "{}", message);
             }
             e => panic!("Unexpected error type: {:?}", e),
         }
