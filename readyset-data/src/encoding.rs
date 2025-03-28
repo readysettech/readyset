@@ -4,6 +4,24 @@ use encoding_rs::{UTF_8, WINDOWS_1252};
 use readyset_errors::ReadySetError;
 use readyset_errors::ReadySetResult;
 
+macro_rules! decoding_err {
+    ($encoding:expr, $($format_args:tt)*) => {
+        ReadySetError::DecodingError {
+            encoding: $encoding.to_string(),
+            message: format!($($format_args)*),
+        }
+    };
+}
+
+macro_rules! encoding_err {
+    ($encoding:expr, $($format_args:tt)*) => {
+        ReadySetError::EncodingError {
+            encoding: $encoding.to_string(),
+            message: format!($($format_args)*),
+        }
+    };
+}
+
 /// Supported character encodings for string data
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Encoding {
@@ -62,19 +80,15 @@ impl Encoding {
     /// For Binary encoding, this returns an error as binary data can't be converted to a String.
     pub fn decode(&self, bytes: &[u8]) -> ReadySetResult<String> {
         let Some(encoding) = self.get_encoding_rs() else {
-            return Err(ReadySetError::DecodingError {
-                encoding: self.to_string(),
-                message: "Unsupported encoding".to_string(),
-            });
+            return Err(decoding_err!(self, "Unsupported encoding"));
         };
-
         let (cow, _encoding_used, had_errors) = encoding.decode(bytes);
 
         if had_errors {
-            return Err(ReadySetError::DecodingError {
-                encoding: self.to_string(),
-                message: "Some characters couldn't be decoded properly".to_string(),
-            });
+            return Err(decoding_err!(
+                self,
+                "Some characters couldn't be decoded properly"
+            ));
         }
 
         Ok(cow.into_owned())
@@ -83,19 +97,15 @@ impl Encoding {
     /// Encode a UTF-8 string to bytes in this encoding
     pub fn encode(&self, string: &str) -> ReadySetResult<Vec<u8>> {
         let Some(encoding) = self.get_encoding_rs() else {
-            return Err(ReadySetError::EncodingError {
-                encoding: self.to_string(),
-                message: "Unsupported encoding".to_string(),
-            });
+            return Err(encoding_err!(self, "Unsupported encoding"));
         };
-
         let (cow, _encoding_used, had_errors) = encoding.encode(string);
 
         if had_errors {
-            return Err(ReadySetError::EncodingError {
-                encoding: self.to_string(),
-                message: "Some characters couldn't be encoded properly".to_string(),
-            });
+            return Err(encoding_err!(
+                self,
+                "Some characters couldn't be encoded properly"
+            ));
         }
 
         Ok(cow.into_owned())
