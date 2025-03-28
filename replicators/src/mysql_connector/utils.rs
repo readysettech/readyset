@@ -1,56 +1,69 @@
 use mysql_async::{self as mysql, prelude::Queryable};
-use mysql_common::collations::{self, Collation, CollationId};
-use mysql_srv::ColumnType;
-use readyset_data::DfValue;
-use std::string::FromUtf8Error;
+use mysql_common::collations::{Collation as MyCollation, CollationId};
+use readyset_data::encoding::Encoding;
+use readyset_data::{Collation as RsCollation, DfValue};
+use readyset_errors::ReadySetResult;
 use std::sync::Arc;
 
 //TODO(marce): Make this a configuration parameter or dynamically adjust based on the table size
 pub const MYSQL_BATCH_SIZE: usize = 100_000; // How many rows to fetch at a time from MySQL
 
-/// Pad a MYSQL_TYPE_STRING (CHAR / BINARY) column value to the correct length for the given column
-/// type and charset.
+/// Pad a MYSQL_TYPE_STRING CHAR column value to the correct length for the given charset.
 ///
 /// Parameters:
 /// - `val`: The current column value as a vector of bytes.
-/// - `col`: The column type.
 /// - `collation`: The collation ID of the column.
+/// - `already_utf8_encoded`: Whether the column value is already UTF-8 encoded (i.e. during snapshot,
+///   but not during binlog streaming replication)
 /// - `col_len`: The length of the column in bytes.
 ///
 /// Returns:
-/// - A `DfValue` representing the padded column value - `CHAR` will return a `TinyText` or `Text`
-///   and `BINARY` will return a `ByteArray`.
-pub fn mysql_pad_collation_column(
+/// - A `DfValue::TinyText` or `DfValue::Text` encoded as UTF-8 padded with spaces on the right.
+pub(crate) fn mysql_pad_char_column(
     val: &[u8],
-    col: ColumnType,
     collation: u16,
     col_len: usize,
-) -> Result<DfValue, FromUtf8Error> {
-    assert_eq!(col, ColumnType::MYSQL_TYPE_STRING);
-    let collation: Collation = collations::CollationId::from(collation).into();
-    match collation.id() {
-        CollationId::BINARY => {
-            if val.len() < col_len {
-                let mut padded = val.to_owned();
-                padded.extend(std::iter::repeat_n(0, col_len - val.len()));
-                return Ok(DfValue::ByteArray(Arc::new(padded)));
-            }
-            Ok(DfValue::ByteArray(Arc::new(val.to_vec())))
-        }
-        _ => {
-            let column_length_characters = col_len / collation.max_len() as usize;
-            let mut str = String::from_utf8(val.to_vec())?;
-            let str_len = str.chars().count();
-            let rs_collation = readyset_data::Collation::from_mysql_collation(
-                Collation::resolve(collation.id()).collation(),
-            )
-            .unwrap_or_default();
-            if str_len < column_length_characters {
-                str.extend(std::iter::repeat_n(' ', column_length_characters - str_len));
-            }
-            Ok(DfValue::from_str_and_collation(str.as_str(), rs_collation))
-        }
+    already_utf8_encoded: bool,
+) -> ReadySetResult<DfValue> {
+    let collation: MyCollation = CollationId::from(collation).into();
+    // We calculate the length *in characters* to pad to based on the column length; but this is
+    // given in terms of bytes in the result set encoding (collation). In snapshot, the `collation`
+    // we have here is the stored collation of the column, but `val` is encoded as utf8mb4. When
+    // converting values from the binlog, `val` and `collation` match, and we infer the number of
+    // characters based on that.
+    let column_length_characters = if already_utf8_encoded {
+        col_len / 4
+    } else {
+        col_len / collation.max_len() as usize
+    };
+    let encoding = if already_utf8_encoded {
+        Encoding::Utf8
+    } else {
+        Encoding::from_mysql_collation_id(collation.id() as u16)
+    };
+    let mut str = encoding.decode(val)?;
+    let str_len = str.chars().count();
+    let rs_collation = RsCollation::from_mysql_collation(collation.collation()).unwrap_or_default();
+    if str_len < column_length_characters {
+        str.extend(std::iter::repeat_n(' ', column_length_characters - str_len));
     }
+    Ok(DfValue::from_str_and_collation(str.as_str(), rs_collation))
+}
+
+/// Pad a MYSQL_TYPE_STRING BINARY column or MYSQL_TYPE_STRING CHAR column with the `binary`
+/// character set/collation.
+///
+/// Parameters:
+/// - `val`: The value to pad.
+/// - `col_len`: The length to pad to.
+///
+/// Returns:
+/// - A `DfValue::ByteArray` padded to `col_len` with the zero byte.
+pub(crate) fn mysql_pad_binary_column(mut val: Vec<u8>, col_len: usize) -> ReadySetResult<DfValue> {
+    if val.len() < col_len {
+        val.extend(std::iter::repeat_n(0, col_len - val.len()));
+    }
+    Ok(DfValue::ByteArray(Arc::new(val)))
 }
 
 pub fn parse_mysql_version(version: &str) -> mysql_async::Result<u32> {

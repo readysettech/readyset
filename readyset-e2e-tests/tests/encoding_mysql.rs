@@ -304,6 +304,12 @@ test_encoding_replication!(
     format_u32s(2, 0..=127)
 );
 test_encoding_replication!(
+    ascii_general_ci_char,
+    "CHAR(10)",
+    "ascii_general_ci",
+    format_u32s(2, 0..=127)
+);
+test_encoding_replication!(
     ascii_general_ci_text,
     "TEXT",
     "ascii_general_ci",
@@ -315,6 +321,12 @@ test_encoding_replication!(
     "ascii_bin",
     format_u32s(2, 0..=127)
 );
+test_encoding_replication!(
+    ascii_bin_char,
+    "CHAR(10)",
+    "ascii_bin",
+    format_u32s(2, 0..=127)
+);
 test_encoding_replication!(ascii_bin_text, "TEXT", "ascii_bin", format_u32s(2, 0..=127));
 test_encoding_replication!(
     latin1_german1_ci_varchar,
@@ -323,9 +335,9 @@ test_encoding_replication!(
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    latin1_binary_blob,
-    "BLOB",
-    "binary",
+    latin1_german1_ci_char,
+    "CHAR(10)",
+    "latin1_german1_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
@@ -337,6 +349,12 @@ test_encoding_replication!(
 test_encoding_replication!(
     latin1_swedish_ci_varchar,
     "VARCHAR(255)",
+    "latin1_swedish_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    latin1_swedish_ci_char,
+    "CHAR(10)",
     "latin1_swedish_ci",
     format_u32s(2, 0..=255)
 );
@@ -353,6 +371,12 @@ test_encoding_replication!(
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
+    latin1_danish_ci_char,
+    "CHAR(10)",
+    "latin1_danish_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
     latin1_danish_ci_text,
     "TEXT",
     "latin1_danish_ci",
@@ -361,6 +385,12 @@ test_encoding_replication!(
 test_encoding_replication!(
     latin1_german2_ci_varchar,
     "VARCHAR(255)",
+    "latin1_german2_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    latin1_german2_ci_char,
+    "CHAR(10)",
     "latin1_german2_ci",
     format_u32s(2, 0..=255)
 );
@@ -377,6 +407,12 @@ test_encoding_replication!(
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
+    latin1_bin_char,
+    "CHAR(10)",
+    "latin1_bin",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
     latin1_bin_text,
     "TEXT",
     "latin1_bin",
@@ -385,6 +421,12 @@ test_encoding_replication!(
 test_encoding_replication!(
     latin1_general_ci_varchar,
     "VARCHAR(255)",
+    "latin1_general_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    latin1_general_ci_char,
+    "CHAR(10)",
     "latin1_general_ci",
     format_u32s(2, 0..=255)
 );
@@ -401,6 +443,12 @@ test_encoding_replication!(
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
+    latin1_general_cs_char,
+    "CHAR(10)",
+    "latin1_general_cs",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
     latin1_general_cs_text,
     "TEXT",
     "latin1_general_cs",
@@ -409,6 +457,12 @@ test_encoding_replication!(
 test_encoding_replication!(
     latin1_spanish_ci_varchar,
     "VARCHAR(255)",
+    "latin1_spanish_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    latin1_spanish_ci_char,
+    "CHAR(10)",
     "latin1_spanish_ci",
     format_u32s(2, 0..=255)
 );
@@ -425,6 +479,12 @@ test_encoding_replication!(
     format_u32s(2, 0..=127)
 );
 test_encoding_replication!(
+    utf8mb4_bin_ascii_char,
+    "CHAR(10)",
+    "utf8mb4_bin",
+    format_u32s(2, 0..=127)
+);
+test_encoding_replication!(
     utf8mb4_bin_ascii_text,
     "TEXT",
     "utf8mb4_bin",
@@ -433,6 +493,12 @@ test_encoding_replication!(
 test_encoding_replication!(
     utf8mb3_bin_ascii_varchar,
     "VARCHAR(255)",
+    "utf8mb3_bin",
+    format_u32s(2, 0..=127)
+);
+test_encoding_replication!(
+    utf8mb3_bin_ascii_char,
+    "CHAR(10)",
     "utf8mb3_bin",
     format_u32s(2, 0..=127)
 );
@@ -465,6 +531,12 @@ test_encoding_replication!(
     format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
 test_encoding_replication!(
+    utf8mb3_bmp_codepoints_char,
+    "CHAR(10)",
+    "utf8mb3_general_ci",
+    format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
+);
+test_encoding_replication!(
     utf8mb3_bmp_codepoints_text,
     "TEXT",
     "utf8mb3_general_ci",
@@ -474,6 +546,12 @@ test_encoding_replication!(
 test_encoding_replication!(
     utf8mb4_bmp_codepoints_varchar,
     "VARCHAR(255)",
+    "utf8mb4_general_ci",
+    format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
+);
+test_encoding_replication!(
+    utf8mb4_bmp_codepoints_char,
+    "CHAR(10)",
     "utf8mb4_general_ci",
     format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
@@ -489,6 +567,13 @@ test_encoding_replication!(
 test_encoding_replication!(
     utf8mb4_all_codepoints_varchar,
     "VARCHAR(255)",
+    "utf8mb4_general_ci",
+    format_utf8_chars(char::MIN..=char::MAX)
+);
+#[cfg(feature = "utf8mb4_all_codepoints_test")]
+test_encoding_replication!(
+    utf8mb4_all_codepoints_char,
+    "CHAR(10)",
     "utf8mb4_general_ci",
     format_utf8_chars(char::MIN..=char::MAX)
 );

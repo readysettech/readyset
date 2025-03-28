@@ -29,7 +29,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
-use super::utils::{get_mysql_version, mysql_pad_collation_column};
+use super::utils::{get_mysql_version, mysql_pad_binary_column, mysql_pad_char_column};
 use crate::db_util::DatabaseSchemas;
 use crate::mysql_connector::snapshot_type::SnapshotType;
 use crate::table_filter::TableFilter;
@@ -855,8 +855,8 @@ fn mysql_row_to_noria_row(
                 let require_padding = val != mysql_common::value::Value::NULL
                     && !flags.contains(ColumnFlags::ENUM_FLAG)
                     && !flags.contains(ColumnFlags::SET_FLAG);
-                let bytes = match val.clone() {
-                    mysql_common::value::Value::Bytes(b) => b,
+                let bytes = match val {
+                    mysql_common::value::Value::Bytes(b) => b.clone(),
                     mysql_common::value::Value::NULL => {
                         noria_row.push(DfValue::None);
                         continue;
@@ -870,18 +870,22 @@ fn mysql_row_to_noria_row(
                 };
                 match require_padding {
                     true => {
-                        let collation = match binary {
-                            true => CollationId::BINARY as u16,
-                            false => CollationId::from(*collation) as u16,
-                        };
-                        match mysql_pad_collation_column(
-                            &bytes,
-                            col.column_type(),
-                            collation,
-                            col.column_length() as usize,
-                        ) {
-                            Ok(padded) => noria_row.push(padded),
-                            Err(err) => return Err(internal_err!("Error padding column: {}", err)),
+                        if binary {
+                            let padded =
+                                mysql_pad_binary_column(bytes, col.column_length() as usize)?;
+                            noria_row.push(padded);
+                        } else {
+                            match mysql_pad_char_column(
+                                &bytes,
+                                *collation,
+                                col.column_length() as usize,
+                                true, // We connect with `character_set_results` set to utf8mb4
+                            ) {
+                                Ok(padded) => noria_row.push(padded),
+                                Err(err) => {
+                                    return Err(internal_err!("Error padding column: {}", err))
+                                }
+                            }
                         }
                     }
                     false => {

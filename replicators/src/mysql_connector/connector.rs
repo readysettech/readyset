@@ -39,7 +39,7 @@ use readyset_sql::ast::{
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::ReplicationOffset;
 
-use crate::mysql_connector::utils::mysql_pad_collation_column;
+use crate::mysql_connector::utils::{mysql_pad_binary_column, mysql_pad_char_column};
 use crate::noria_adapter::{Connector, ReplicationAction};
 use crate::table_filter::TableFilter;
 
@@ -1288,7 +1288,12 @@ fn binlog_val_to_noria_val(
             } else {
                 meta[1] as usize
             };
-            match mysql_pad_collation_column(buf, col_kind, collation, length) {
+            let res = if binary {
+                mysql_pad_binary_column(buf.to_owned(), length)
+            } else {
+                mysql_pad_char_column(buf, collation, length, false)
+            };
+            match res {
                 Ok(s) => Ok(s),
                 Err(e) => Err(mysql_async::Error::Other(Box::new(internal_err!("{e}")))),
             }
