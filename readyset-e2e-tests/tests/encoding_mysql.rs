@@ -10,9 +10,9 @@ use std::time::Duration;
 use test_utils::{serial, slow};
 
 macro_rules! check_rows {
-    ($my_rows:expr, $rs_rows:expr) => {
+    ($my_rows:expr, $rs_rows:expr, $($format_args:tt)*) => {
         for row in $my_rows.iter().zip($rs_rows.iter()) {
-            assert_eq!(row.0, row.1, "mysql (left) differed from readyset (right)");
+            assert_eq!(row.0, row.1, $($format_args)*);
         }
     };
 }
@@ -29,7 +29,7 @@ macro_rules! check_rows {
 /// and requesting the original character set results in it being re-encoded from utf8 to the
 /// original before being returned to the client.
 #[cfg(test)]
-async fn test_encoding_replication_inner<I>(collation: &str, range: I)
+async fn test_encoding_replication_inner<I>(column_type: &str, collation: &str, range: I)
 where
     I: IntoIterator<Item = (u32, String)>,
 {
@@ -47,10 +47,10 @@ where
             CREATE TABLE encoding_snapshot (
                 id INT NOT NULL PRIMARY KEY,
                 hex VARCHAR(255) CHARACTER SET utf8mb4,
-                text VARCHAR(255) COLLATE {}
+                text {} COLLATE {}
             );
         "#,
-        collation
+        column_type, collation
     );
     upstream_conn
         .query_drop(create_snapshot_table)
@@ -102,7 +102,11 @@ where
         .await
         .unwrap();
 
-    check_rows!(my_rows, rs_snapshot_rows);
+    check_rows!(
+        my_rows,
+        rs_snapshot_rows,
+        "mysql (left) differed from readyset (right) for snapshot replication; column type {column_type}, collation {collation}"
+    );
 
     // Test streaming replication
     let create_streaming_table = format!(
@@ -111,10 +115,10 @@ where
             CREATE TABLE encoding_streaming (
                 id INT NOT NULL PRIMARY KEY,
                 hex VARCHAR(255) CHARACTER SET utf8mb4,
-                text VARCHAR(255) COLLATE {}
+                text {} COLLATE {}
             );
         "#,
-        collation
+        column_type, collation
     );
     upstream_conn
         .query_drop(create_streaming_table)
@@ -157,19 +161,23 @@ where
             .await
             .unwrap();
 
-        check_rows!(my_streaming_rows_chunk, rs_streaming_rows_chunk);
+        check_rows!(
+            my_streaming_rows_chunk,
+            rs_streaming_rows_chunk,
+            "mysql (left) differed from readyset (right) for streaming replication; column type {column_type}, collation {collation}"
+        );
     }
 
     shutdown_tx.shutdown().await;
 }
 
 macro_rules! test_encoding_replication {
-    ($name:ident, $charset:expr, $range:expr) => {
+    ($name:ident, $coltype:expr, $charset:expr, $range:expr) => {
         #[tokio::test]
         #[serial(mysql)]
         #[slow]
         async fn $name() {
-            test_encoding_replication_inner($charset, $range).await;
+            test_encoding_replication_inner($coltype, $charset, $range).await;
         }
     };
 }
@@ -184,54 +192,74 @@ where
 }
 
 test_encoding_replication!(
-    test_ascii_general_ci,
+    test_ascii_general_ci_varchar,
+    "VARCHAR(255)",
     "ascii_general_ci",
     format_u32s(2, 0..=127)
 );
-test_encoding_replication!(test_ascii_bin, "ascii_bin", format_u32s(2, 0..=127));
 test_encoding_replication!(
-    test_latin1_german1_ci,
+    test_ascii_bin_varchar,
+    "VARCHAR(255)",
+    "ascii_bin",
+    format_u32s(2, 0..=127)
+);
+test_encoding_replication!(
+    test_latin1_german1_ci_varchar,
+    "VARCHAR(255)",
     "latin1_german1_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_swedish_ci,
+    test_latin1_swedish_ci_varchar,
+    "VARCHAR(255)",
     "latin1_swedish_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_danish_ci,
+    test_latin1_danish_ci_varchar,
+    "VARCHAR(255)",
     "latin1_danish_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_german2_ci,
+    test_latin1_german2_ci_varchar,
+    "VARCHAR(255)",
     "latin1_german2_ci",
     format_u32s(2, 0..=255)
 );
-test_encoding_replication!(test_latin1_bin, "latin1_bin", format_u32s(2, 0..=255));
 test_encoding_replication!(
-    test_latin1_general_ci,
+    test_latin1_bin_varchar,
+    "VARCHAR(255)",
+    "latin1_bin",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    test_latin1_general_ci_varchar,
+    "VARCHAR(255)",
     "latin1_general_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_general_cs,
+    test_latin1_general_cs_varchar,
+    "VARCHAR(255)",
     "latin1_general_cs",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_spanish_ci,
+    test_latin1_spanish_ci_varchar,
+    "VARCHAR(255)",
     "latin1_spanish_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_utf8mb4_bin_ascii,
+    test_utf8mb4_bin_ascii_varchar,
+    "VARCHAR(255)",
     "utf8mb4_bin",
     format_u32s(2, 0..=127)
 );
 test_encoding_replication!(
-    test_utf8mb3_bin_ascii,
+    test_utf8mb3_bin_ascii_varchar,
+    "VARCHAR(255)",
     "utf8mb3_bin",
     format_u32s(2, 0..=127)
 );
@@ -252,12 +280,14 @@ where
 }
 
 test_encoding_replication!(
-    test_utf8mb4_all_codepoints,
+    test_utf8mb4_all_codepoints_varchar,
+    "VARCHAR(255)",
     "utf8mb4_general_ci",
     format_utf8_chars(char::MIN..=char::MAX)
 );
 test_encoding_replication!(
-    test_utf8mb3_all_codepoints,
+    test_utf8mb3_all_codepoints_varchar,
+    "VARCHAR(255)",
     "utf8mb3_general_ci",
     format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
