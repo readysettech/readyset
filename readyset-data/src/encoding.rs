@@ -16,6 +16,8 @@ pub enum Encoding {
     Latin1,
     /// Binary data (not interpreted as text)
     Binary,
+    /// Unsupported encoding
+    OtherMySql(u16),
 }
 
 impl fmt::Display for Encoding {
@@ -24,6 +26,7 @@ impl fmt::Display for Encoding {
             Encoding::Utf8 => write!(f, "utf8"),
             Encoding::Latin1 => write!(f, "latin1"),
             Encoding::Binary => write!(f, "binary"),
+            Encoding::OtherMySql(id) => write!(f, "unsupported MySQL collation {}", id),
         }
     }
 }
@@ -33,14 +36,14 @@ impl Encoding {
     pub fn from_mysql_collation_id(collation_id: u16) -> Self {
         match collation_id {
             // ascii, utf8mb3, utf8mb4
-            11 | 192..=247 | 255..=323 => Self::Utf8,
+            11 | 33 | 45 | 46 | 65 | 76 | 83 | 192..=247 | 255..=323 => Self::Utf8,
             // latin1
             5 | 8 | 15 | 31 | 47 | 48 | 49 | 94 => Self::Latin1,
             // binary
             63 => Self::Binary,
 
             // Default to UTF-8 for other collations
-            _ => Self::Utf8,
+            _ => Self::OtherMySql(collation_id),
         }
     }
 
@@ -49,6 +52,7 @@ impl Encoding {
             Self::Utf8 => Some(UTF_8),
             Self::Latin1 => Some(WINDOWS_1252),
             Self::Binary => None,
+            Self::OtherMySql(_) => None,
         }
     }
 
@@ -57,60 +61,44 @@ impl Encoding {
     /// For UTF-8 encoding, this validates that the bytes are valid UTF-8.
     /// For Binary encoding, this returns an error as binary data can't be converted to a String.
     pub fn decode(&self, bytes: &[u8]) -> ReadySetResult<String> {
-        match self {
-            Encoding::Binary => Err(ReadySetError::DecodingError {
+        let Some(encoding) = self.get_encoding_rs() else {
+            return Err(ReadySetError::DecodingError {
                 encoding: self.to_string(),
-                message: "Cannot decode binary data to string".to_string(),
-            }),
-            _ => {
-                if let Some(encoding) = self.get_encoding_rs() {
-                    let (cow, _encoding_used, had_errors) = encoding.decode(bytes);
+                message: "Unsupported encoding".to_string(),
+            });
+        };
 
-                    if had_errors {
-                        return Err(ReadySetError::DecodingError {
-                            encoding: self.to_string(),
-                            message: "Some characters couldn't be decoded properly".to_string(),
-                        });
-                    }
+        let (cow, _encoding_used, had_errors) = encoding.decode(bytes);
 
-                    Ok(cow.into_owned())
-                } else {
-                    Err(ReadySetError::DecodingError {
-                        encoding: self.to_string(),
-                        message: "Unsupported encoding".to_string(),
-                    })
-                }
-            }
+        if had_errors {
+            return Err(ReadySetError::DecodingError {
+                encoding: self.to_string(),
+                message: "Some characters couldn't be decoded properly".to_string(),
+            });
         }
+
+        Ok(cow.into_owned())
     }
 
     /// Encode a UTF-8 string to bytes in this encoding
     pub fn encode(&self, string: &str) -> ReadySetResult<Vec<u8>> {
-        match self {
-            Encoding::Binary => Err(ReadySetError::EncodingError {
+        let Some(encoding) = self.get_encoding_rs() else {
+            return Err(ReadySetError::EncodingError {
                 encoding: self.to_string(),
-                message: "Cannot encode string to binary".to_string(),
-            }),
-            _ => {
-                if let Some(encoding) = self.get_encoding_rs() {
-                    let (cow, _encoding_used, had_errors) = encoding.encode(string);
+                message: "Unsupported encoding".to_string(),
+            });
+        };
 
-                    if had_errors {
-                        return Err(ReadySetError::EncodingError {
-                            encoding: self.to_string(),
-                            message: "Some characters couldn't be encoded properly".to_string(),
-                        });
-                    }
+        let (cow, _encoding_used, had_errors) = encoding.encode(string);
 
-                    Ok(cow.into_owned())
-                } else {
-                    Err(ReadySetError::EncodingError {
-                        encoding: self.to_string(),
-                        message: "Unsupported encoding".to_string(),
-                    })
-                }
-            }
+        if had_errors {
+            return Err(ReadySetError::EncodingError {
+                encoding: self.to_string(),
+                message: "Some characters couldn't be encoded properly".to_string(),
+            });
         }
+
+        Ok(cow.into_owned())
     }
 }
 
