@@ -3,8 +3,10 @@ use mysql_async::prelude::Queryable;
 use pretty_assertions::assert_eq;
 use readyset_client_test_helpers::{
     mysql_helpers::{self, MySQLAdapter},
-    sleep, TestBuilder,
+    TestBuilder,
 };
+use readyset_util::eventually;
+use std::time::Duration;
 use test_utils::{serial, slow};
 
 macro_rules! check_rows {
@@ -83,9 +85,17 @@ where
         .build::<MySQLAdapter>()
         .await;
 
-    sleep().await;
-
     let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+
+    // Smoke test to ensure snapshotting has finished
+    eventually!(attempts: 5, sleep: Duration::from_secs(5), {
+        let count: usize = rs_conn
+            .query_first("SELECT count(*) FROM encoding_snapshot")
+            .await
+            .unwrap()
+            .unwrap();
+        my_rows.len() == count
+    });
 
     let rs_snapshot_rows: Vec<(i64, String, Vec<u8>)> = rs_conn
         .query("SELECT id, hex, text FROM encoding_snapshot ORDER BY id")
@@ -123,6 +133,16 @@ where
             .await
             .unwrap();
     }
+
+    // Smoke test to ensure streaming replication has caught up
+    eventually!(attempts: 5, sleep: Duration::from_secs(5), {
+        let count: usize = rs_conn
+            .query_first("SELECT count(*) FROM encoding_streaming")
+            .await
+            .unwrap()
+            .unwrap();
+        my_rows.len() == count
+    });
 
     let rs_streaming_rows: Vec<(i64, String, Vec<u8>)> = rs_conn
         .query("SELECT id, hex, text FROM encoding_streaming ORDER BY id")
@@ -205,4 +225,30 @@ test_encoding_replication!(
     test_utf8mb3_bin_ascii,
     "utf8mb3_bin",
     format_u32s(2, 0..=127)
+);
+
+fn format_utf8_chars<I>(range: I) -> impl Iterator<Item = (u32, String)>
+where
+    I: IntoIterator<Item = char>,
+{
+    range.into_iter().map(|c| {
+        let mut utf8 = vec![0; c.len_utf8()];
+        c.encode_utf8(&mut utf8);
+        let mut out = String::new();
+        for byte in &utf8 {
+            out.push_str(&format!("{byte:02X}"));
+        }
+        (c as u32, out)
+    })
+}
+
+test_encoding_replication!(
+    test_utf8mb4_all_codepoints,
+    "utf8mb4_general_ci",
+    format_utf8_chars(char::MIN..=char::MAX)
+);
+test_encoding_replication!(
+    test_utf8mb3_all_codepoints,
+    "utf8mb3_general_ci",
+    format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
