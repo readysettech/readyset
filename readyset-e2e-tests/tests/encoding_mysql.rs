@@ -27,7 +27,7 @@ macro_rules! check_rows {
 /// and requesting the original character set results in it being re-encoded from utf8 to the
 /// original before being returned to the client.
 #[cfg(test)]
-async fn test_encoding_replication_inner<I>(charset: &str, range: I)
+async fn test_encoding_replication_inner<I>(collation: &str, range: I)
 where
     I: IntoIterator<Item = (u32, String)>,
 {
@@ -45,10 +45,10 @@ where
             CREATE TABLE encoding_snapshot (
                 id INT NOT NULL PRIMARY KEY,
                 hex VARCHAR(255) CHARACTER SET utf8mb4,
-                text VARCHAR(255) CHARACTER SET {}
+                text VARCHAR(255) COLLATE {}
             );
         "#,
-        charset
+        collation
     );
     upstream_conn
         .query_drop(create_snapshot_table)
@@ -101,10 +101,10 @@ where
             CREATE TABLE encoding_streaming (
                 id INT NOT NULL PRIMARY KEY,
                 hex VARCHAR(255) CHARACTER SET utf8mb4,
-                text VARCHAR(255) CHARACTER SET {}
+                text VARCHAR(255) COLLATE {}
             );
         "#,
-        charset
+        collation
     );
     upstream_conn
         .query_drop(create_streaming_table)
@@ -154,7 +154,55 @@ where
         .map(move |value| (value, format!("{value:0width$X}", width = width)))
 }
 
-test_encoding_replication!(ascii, "ascii", format_u32s(2, 0..=127));
-test_encoding_replication!(test_latin1, "latin1", format_u32s(2, 0..=255));
-test_encoding_replication!(test_utf8mb4, "utf8mb4", format_u32s(2, 0..=127));
-test_encoding_replication!(test_utf8mb3, "utf8mb3", format_u32s(2, 0..=127));
+test_encoding_replication!(
+    test_ascii_general_ci,
+    "ascii_general_ci",
+    format_u32s(2, 0..=127)
+);
+test_encoding_replication!(test_ascii_bin, "ascii_bin", format_u32s(2, 0..=127));
+test_encoding_replication!(
+    test_latin1_german1_ci,
+    "latin1_german1_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    test_latin1_swedish_ci,
+    "latin1_swedish_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    test_latin1_danish_ci,
+    "latin1_danish_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    test_latin1_german2_ci,
+    "latin1_german2_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(test_latin1_bin, "latin1_bin", format_u32s(2, 0..=255));
+test_encoding_replication!(
+    test_latin1_general_ci,
+    "latin1_general_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    test_latin1_general_cs,
+    "latin1_general_cs",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    test_latin1_spanish_ci,
+    "latin1_spanish_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    test_utf8mb4_bin_ascii,
+    "utf8mb4_bin",
+    format_u32s(2, 0..=127)
+);
+test_encoding_replication!(
+    test_utf8mb3_bin_ascii,
+    "utf8mb3_bin",
+    format_u32s(2, 0..=127)
+);
