@@ -39,6 +39,8 @@ postgres = { workspace = true, features = [
     "with-bit-vec-0_6",
 ] }
 regex = { workspace = true }
+serial_test = { workspace = true }
+test-utils = { path = "../test-utils" }
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = [
     "with-chrono-0_4",

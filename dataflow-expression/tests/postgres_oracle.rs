@@ -9,6 +9,7 @@ use proptest::prelude::*;
 use readyset_data::DfValue;
 use readyset_sql::ast::TimestampField;
 use readyset_util::arbitrary::{arbitrary_date_time_timezone, arbitrary_timestamp_naive_date_time};
+use test_utils::serial;
 
 use self::common::parse_lower_eval;
 
@@ -48,6 +49,7 @@ fn compare_eval(expr: &str, client: &mut Client) {
     );
 }
 
+#[serial(postgres)]
 #[test]
 fn example_exprs_eval_same_as_postgres() {
     let mut client = config().connect(NoTls).unwrap();

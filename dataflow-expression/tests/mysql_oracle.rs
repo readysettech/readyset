@@ -4,6 +4,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, Opts, OptsBuilder, Row};
 use nom_sql::parse_sql_type;
 use readyset_data::{DfType, DfValue};
+use test_utils::serial;
 
 use self::common::parse_lower_eval;
 
@@ -90,6 +91,7 @@ async fn compare_eval(expr: &str, conn: &mut Conn) {
 }
 
 #[tokio::test]
+#[serial(mysql)]
 async fn example_exprs_eval_same_as_mysql() {
     let mut conn = Conn::new(opts()).await.unwrap();
 
