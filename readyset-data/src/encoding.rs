@@ -4,6 +4,24 @@ use encoding_rs::{UTF_8, WINDOWS_1252};
 use readyset_errors::ReadySetError;
 use readyset_errors::ReadySetResult;
 
+macro_rules! decoding_err {
+    ($encoding:expr, $($format_args:tt)*) => {
+        ReadySetError::DecodingError {
+            encoding: $encoding.to_string(),
+            message: format!($($format_args)*),
+        }
+    };
+}
+
+macro_rules! encoding_err {
+    ($encoding:expr, $($format_args:tt)*) => {
+        ReadySetError::EncodingError {
+            encoding: $encoding.to_string(),
+            message: format!($($format_args)*),
+        }
+    };
+}
+
 /// Supported character encodings for string data
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Encoding {
@@ -64,30 +82,24 @@ impl Encoding {
         match self {
             Self::Utf8 | Self::Latin1 => {
                 let Some(encoding) = self.get_encoding_rs() else {
-                    return Err(ReadySetError::DecodingError {
-                        encoding: self.to_string(),
-                        message: "Missing decoder".to_string(),
-                    });
+                    return Err(decoding_err!(self, "Missing decoder"));
                 };
                 let (cow, _encoding_used, had_errors) = encoding.decode(bytes);
 
                 if had_errors {
-                    return Err(ReadySetError::DecodingError {
-                        encoding: self.to_string(),
-                        message: "Some characters couldn't be decoded properly".to_string(),
-                    });
+                    return Err(decoding_err!(
+                        self,
+                        "Some characters couldn't be decoded properly"
+                    ));
                 }
 
                 Ok(cow.into_owned())
             }
-            Self::Binary => Err(ReadySetError::DecodingError {
-                encoding: self.to_string(),
-                message: "Binary data cannot be converted to UTF-8".to_string(),
-            }),
-            _ => Err(ReadySetError::DecodingError {
-                encoding: self.to_string(),
-                message: "Unsupported encoding".to_string(),
-            }),
+            Self::Binary => Err(decoding_err!(
+                self,
+                "Binary data cannot be converted to UTF-8"
+            )),
+            _ => Err(decoding_err!(self, "Unsupported encoding")),
         }
     }
 
@@ -96,30 +108,21 @@ impl Encoding {
         match self {
             Self::Utf8 | Self::Latin1 => {
                 let Some(encoding) = self.get_encoding_rs() else {
-                    return Err(ReadySetError::DecodingError {
-                        encoding: self.to_string(),
-                        message: "Missing encoder".to_string(),
-                    });
+                    return Err(encoding_err!(self, "Missing encoder"));
                 };
                 let (cow, _encoding_used, had_errors) = encoding.encode(string);
 
                 if had_errors {
-                    return Err(ReadySetError::EncodingError {
-                        encoding: self.to_string(),
-                        message: "Some characters couldn't be encoded properly".to_string(),
-                    });
+                    return Err(encoding_err!(
+                        self,
+                        "Some characters couldn't be encoded properly"
+                    ));
                 }
 
                 Ok(cow.into_owned())
             }
-            Encoding::Binary => Err(ReadySetError::EncodingError {
-                encoding: self.to_string(),
-                message: "Cannot encode string to binary".to_string(),
-            }),
-            _ => Err(ReadySetError::EncodingError {
-                encoding: self.to_string(),
-                message: "Unsupported encoding".to_string(),
-            }),
+            Encoding::Binary => Err(encoding_err!(self, "Cannot encode string to binary")),
+            _ => Err(encoding_err!(self, "Unsupported encoding")),
         }
     }
 }
