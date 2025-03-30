@@ -1,0 +1,37 @@
+statement ok
+CREATE TABLE t1 (a INT, b INT);
+
+statement ok
+INSERT INTO t1 VALUES (1, 10), (2, 20), (3, 30), (4, 40);
+
+query I rowsort
+SELECT CASE WHEN a = 1 THEN b ELSE 0 END FROM t1;
+----
+0
+0
+0
+10
+
+query I rowsort
+SELECT CASE a WHEN 3 THEN b ELSE 0 END FROM t1;
+----
+0
+0
+0
+30
+
+query I rowsort
+SELECT CASE WHEN a = 1 THEN b WHEN a = 2 THEN 200 ELSE 0 END FROM t1;
+----
+0
+0
+10
+200
+
+query I rowsort
+SELECT CASE a WHEN 1 THEN 100 WHEN 2 THEN 200 ELSE 300 END FROM t1;
+----
+100
+200
+300
+300

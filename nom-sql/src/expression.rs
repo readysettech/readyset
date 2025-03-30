@@ -572,41 +572,7 @@ fn exists_expr(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
     }
 }
 
-/// Parse CASE <expr1> WHEN <expr2> THEN <expr3>
-fn case_expr_when_branch(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CaseWhenBranch> {
-    move |i| {
-        // parse <expr1> when <expr2> then <expr3>
-        // where <expr1> is a boolean expression to be evaluated against the result of <expr2>
-        // and <expr3> is the result of the entire case expression if <expr1> evaluates to true
-        let (i, value_expr) = expression(dialect)(i)?;
-        let (i, _) = whitespace1(i)?;
-        let (i, _) = tag_no_case("when")(i)?;
-        let (i, _) = whitespace1(i)?;
-        let (i, val) = expression(dialect)(i)?;
-        let (i, _) = whitespace1(i)?;
-        let (i, _) = tag_no_case("then")(i)?;
-        let (i, _) = whitespace1(i)?;
-        let (i, then_expr) = expression(dialect)(i)?;
-
-        let condition = Expr::BinaryOp {
-            lhs: Box::new(value_expr),
-            op: BinaryOperator::Equal,
-            rhs: Box::new(val),
-        };
-
-        Ok((
-            i,
-            CaseWhenBranch {
-                condition,
-                body: then_expr,
-            },
-        ))
-    }
-}
-
-/// Parse CASE WHEN <expr1> THEN <expr2>
+/// Parse WHEN <expr1> THEN <expr2>
 fn case_when_branch(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CaseWhenBranch> {
@@ -643,12 +609,28 @@ fn case_when_expr(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResu
     move |i| {
         let (i, _) = tag_no_case("case")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, branches) = many1(terminated(
-            alt((case_when_branch(dialect), case_expr_when_branch(dialect))),
-            whitespace1,
-        ))(i)?;
+        // Either `CASE expr WHEN .. THEN .. ELSE .. END` or `CASE WHEN .. THEN .. ELSE .. END`
+        let (i, expr) = opt(terminated(expression(dialect), whitespace1))(i)?;
+        let (i, branches) = many1(terminated(case_when_branch(dialect), whitespace1))(i)?;
         let (i, else_expr) = opt(map(case_when_else(dialect), Box::new))(i)?;
         let (i, _) = tag_no_case("end")(i)?;
+
+        let branches = if let Some(expr) = expr {
+            branches
+                .into_iter()
+                .map(|b| CaseWhenBranch {
+                    condition: Expr::BinaryOp {
+                        lhs: Box::new(expr.clone()),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(b.condition),
+                    },
+                    body: b.body,
+                })
+                .collect()
+        } else {
+            branches
+        };
+
         Ok((
             i,
             Expr::CaseWhen {
