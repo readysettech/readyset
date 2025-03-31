@@ -35,7 +35,6 @@ async fn setup_with_mysql(recreate_db: bool) -> (mysql_async::Opts, Handle, Shut
             .require_authentication(false)
             .users(users),
     )
-    .fallback(true)
     .recreate_database(recreate_db)
     .build::<MySQLAdapter>()
     .await
@@ -43,7 +42,10 @@ async fn setup_with_mysql(recreate_db: bool) -> (mysql_async::Opts, Handle, Shut
 
 async fn setup() -> (mysql_async::Opts, Handle, ShutdownSender) {
     readyset_tracing::init_test_logging();
-    TestBuilder::default().build::<MySQLAdapter>().await
+    TestBuilder::default()
+        .replicate(false)
+        .build::<MySQLAdapter>()
+        .await
 }
 
 async fn setup_telemetry() -> (TelemetryReporter, mysql_async::Opts, Handle, ShutdownSender) {
@@ -53,7 +55,10 @@ async fn setup_telemetry() -> (TelemetryReporter, mysql_async::Opts, Handle, Shu
         .require_authentication(false)
         .migration_mode(MigrationMode::OutOfBand)
         .telemetry_sender(sender);
-    let (opts, handle, shutdown_tx) = TestBuilder::new(backend).build::<MySQLAdapter>().await;
+    let (opts, handle, shutdown_tx) = TestBuilder::new(backend)
+        .replicate(false)
+        .build::<MySQLAdapter>()
+        .await;
 
     (reporter, opts, handle, shutdown_tx)
 }
@@ -1063,6 +1068,7 @@ async fn create_view_rev() {
 #[ignore]
 async fn prepare_ranged_query_non_partial() {
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .replicate(false)
         .partial(false)
         .build::<MySQLAdapter>()
         .await;
@@ -1094,6 +1100,7 @@ async fn prepare_ranged_query_non_partial() {
 #[should_panic]
 async fn prepare_conflicting_ranged_query() {
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .replicate(false)
         .partial(false)
         .build::<MySQLAdapter>()
         .await;
@@ -1966,6 +1973,7 @@ async fn show_readyset_version() {
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_nonblocking_select() {
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .replicate(false)
         .read_behavior(ReadBehavior::NonBlocking)
         .build::<MySQLAdapter>()
         .await;
@@ -2105,9 +2113,10 @@ async fn test_proxied_queries_telemetry() {
             .telemetry_sender(telemetry_sender.clone());
 
         let (opts, handle, shutdown_tx) = TestBuilder::new(backend)
+            .replicate(false)
             .query_status_cache(query_status_cache)
             .migration_mode(MigrationMode::OutOfBand)
-            .fallback(true)
+            .replicate(true)
             .build::<MySQLAdapter>()
             .await;
         (reporter, opts, handle, shutdown_tx)
@@ -2499,7 +2508,7 @@ async fn test_case_expr_then_expr() {
     conn.query_drop("INSERT INTO test_case_expr_then_expr VALUES (1, 1, 2);")
         .await
         .unwrap();
-    conn.query_drop("CREATE CACHE FROM SELECT CASE col1 WHEN 1 THEN col2 ELSE col1 END AS t FROM test_case_expr_then_expr WHERE id = ?")    
+    conn.query_drop("CREATE CACHE FROM SELECT CASE col1 WHEN 1 THEN col2 ELSE col1 END AS t FROM test_case_expr_then_expr WHERE id = ?")
         .await
         .unwrap();
     sleep().await;
@@ -2526,51 +2535,51 @@ async fn populate_all_data_types(direct_mysql: &mut mysql_async::Conn) {
         -- Numeric Data Types (Signed and Unsigned Integers)
         col_tinyint TINYINT,                  -- Signed (-128 to 127)
         col_tinyint_unsigned TINYINT UNSIGNED, -- Unsigned (0 to 255)
-        
+
         col_smallint SMALLINT,                 -- Signed (-32,768 to 32,767)
         col_smallint_unsigned SMALLINT UNSIGNED, -- Unsigned (0 to 65,535)
-        
+
         col_mediumint MEDIUMINT,               -- Signed (-8,388,608 to 8,388,607)
         col_mediumint_unsigned MEDIUMINT UNSIGNED, -- Unsigned (0 to 16,777,215)
-        
+
         col_int INT,                           -- Signed (-2,147,483,648 to 2,147,483,647)
         col_int_unsigned INT UNSIGNED,         -- Unsigned (0 to 4,294,967,295)
-        
+
         col_bigint BIGINT,                     -- Signed (-2^63 to 2^63-1)
         col_bigint_unsigned BIGINT UNSIGNED,   -- Unsigned (0 to 2^64-1)
 
         col_decimal DECIMAL(12,2),             -- Fixed-point exact decimal (e.g., 99999999.99)
         col_numeric NUMERIC(10,2),             -- Synonym for DECIMAL
-        
+
         col_float FLOAT,                       -- 32-bit floating point (approximate value)
         col_double DOUBLE,                     -- 64-bit floating point (approximate value)
         col_real REAL,                         -- Synonym for DOUBLE
-        
+
         col_bit BIT(8),                        -- Bit field (e.g., 8-bit binary)
         col_boolean BOOLEAN,                   -- Alias for TINYINT(1) (0 = false, 1 = true)
-        
+
         -- Date and Time Data Types
-        col_date DATE,                         
-        col_datetime DATETIME(2),             
-        col_timestamp TIMESTAMP,               
-        col_time TIME,                         
+        col_date DATE,
+        col_datetime DATETIME(2),
+        col_timestamp TIMESTAMP,
+        col_time TIME,
 
         -- String Data Types
-        col_char CHAR(10),                     
-        col_varchar VARCHAR(255),              
+        col_char CHAR(10),
+        col_varchar VARCHAR(255),
 
-        col_text TEXT,                         
-        col_tinytext TINYTEXT,                 
-        col_mediumtext MEDIUMTEXT,             
-        col_longtext LONGTEXT,                 
+        col_text TEXT,
+        col_tinytext TINYTEXT,
+        col_mediumtext MEDIUMTEXT,
+        col_longtext LONGTEXT,
 
-        col_blob BLOB,                         
-        col_tinyblob TINYBLOB,                 
-        col_mediumblob MEDIUMBLOB,             
-        col_longblob LONGBLOB,                 
+        col_blob BLOB,
+        col_tinyblob TINYBLOB,
+        col_mediumblob MEDIUMBLOB,
+        col_longblob LONGBLOB,
 
-        col_enum ENUM('small', 'medium', 'large'), 
-        col_json JSON                         
+        col_enum ENUM('small', 'medium', 'large'),
+        col_json JSON
     );",
         )
         .await
@@ -2707,7 +2716,6 @@ async fn test_column_definition_upstream_readyset_snapshot() {
     // Setup ReadySet connection after table creation
     let (rs_opts, _rs_handle, tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback(true)
         .build::<MySQLAdapter>()
         .await;
     let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
@@ -2725,7 +2733,6 @@ async fn test_column_definition_upstream_readyset_replication() {
     // Setup ReadySet connection before table creation
     let (rs_opts, _rs_handle, tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback(true)
         .build::<MySQLAdapter>()
         .await;
     let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
@@ -2752,7 +2759,6 @@ async fn text_citext_default_coercion_minimal_row_base_replication() {
 
     let (rs_opts, _rs_handle, tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback(true)
         .build::<MySQLAdapter>()
         .await;
     sleep().await;

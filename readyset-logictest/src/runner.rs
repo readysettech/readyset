@@ -555,7 +555,8 @@ impl TestScript {
             }
 
             if let Some(replication_url) = &run_opts.replication_url {
-                builder.set_replication_url(replication_url.to_owned());
+                builder.set_cdc_db_url(replication_url);
+                builder.set_upstream_db_url(replication_url);
             }
 
             let persistence = readyset_server::PersistenceParameters {

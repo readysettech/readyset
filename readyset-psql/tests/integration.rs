@@ -16,7 +16,10 @@ use crate::common::setup_standalone_with_authority;
 
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
     readyset_tracing::init_test_logging();
-    TestBuilder::default().build::<PostgreSQLAdapter>().await
+    TestBuilder::default()
+        .replicate(false)
+        .build::<PostgreSQLAdapter>()
+        .await
 }
 
 #[tokio::test(flavor = "multi_thread")]

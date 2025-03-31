@@ -161,7 +161,9 @@ impl Leader {
         telemetry_sender: TelemetrySender,
         mut shutdown_rx: ShutdownReceiver,
     ) {
-        if self.replicator_config.upstream_db_url.is_none() {
+        if self.replicator_config.cdc_db_url.is_none()
+            && self.replicator_config.upstream_db_url.is_none()
+        {
             // Controller must be notified that snapshot is completed even though we don't have an
             // upstream db. This is only relevant for tests as users will not run without an
             // upstream.

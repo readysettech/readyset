@@ -428,7 +428,10 @@ where
             .await
             .unwrap();
 
-        let (opts, handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
+        let (opts, handle, shutdown_tx) = TestBuilder::default()
+            .replicate(false)
+            .build::<MySQLAdapter>()
+            .await;
         let mut readyset = mysql_async::Conn::new(opts).await.unwrap();
 
         for table in tables.values() {

@@ -257,10 +257,14 @@ impl Builder {
         self.config.domain_config.aggressively_update_state_sizes = value;
     }
 
+    /// Sets the URL for the database to fallback to
+    pub fn set_upstream_db_url(&mut self, url: &str) {
+        self.config.replicator_config.upstream_db_url = Some(url.to_string().into());
+    }
+
     /// Sets the URL for the database to replicate from
-    pub fn set_replication_url(&mut self, url: String) {
-        self.config.replicator_config.upstream_db_url = Some(url.clone().into());
-        self.config.replicator_config.cdc_db_url = Some(url.into());
+    pub fn set_cdc_db_url(&mut self, url: &str) {
+        self.config.replicator_config.cdc_db_url = Some(url.to_string().into());
     }
 
     /// Sets configuration for the replicator thread

@@ -869,10 +869,7 @@ impl ModelState for DDLModelState {
     async fn init_test_run(&self) -> Self::RunContext {
         readyset_tracing::init_test_logging();
 
-        let (opts, handle, shutdown_tx) = TestBuilder::default()
-            .fallback(true)
-            .build::<PostgreSQLAdapter>()
-            .await;
+        let (opts, handle, shutdown_tx) = TestBuilder::default().build::<PostgreSQLAdapter>().await;
         // We need the raw hostname for eviction operations later:
         let rs_host = match &opts.get_hosts()[0] {
             Host::Tcp(host) => host.clone(),

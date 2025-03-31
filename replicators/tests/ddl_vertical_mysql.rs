@@ -628,10 +628,7 @@ impl ModelState for DDLModelState {
     async fn init_test_run(&self) -> Self::RunContext {
         readyset_tracing::init_test_logging();
 
-        let (opts, handle, shutdown_tx) = TestBuilder::default()
-            .fallback(true)
-            .build::<MySQLAdapter>()
-            .await;
+        let (opts, handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
         // We need the raw hostname for eviction operations later:
         let rs_host = opts.ip_or_hostname().to_string();
         let rs_conn = connect(OptsBuilder::from_opts(opts)).await;

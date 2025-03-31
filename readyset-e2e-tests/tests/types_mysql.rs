@@ -83,7 +83,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
     // Snapshot & check result
     let (rs_opts, _rs_handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_db("round_trip_mysql_types".to_string())
+        .replicate_db("round_trip_mysql_types".to_string())
         .build::<MySQLAdapter>()
         .await;
     let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();

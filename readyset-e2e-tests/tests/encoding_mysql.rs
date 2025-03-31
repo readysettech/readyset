@@ -81,7 +81,7 @@ where
     // Test snapshot replication
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_db("encoding_test".to_string())
+        .replicate_db("encoding_test".to_string())
         .build::<MySQLAdapter>()
         .await;
 

@@ -65,7 +65,10 @@ async fn create_table() {
 #[slow]
 async fn delete_case_sensitive() {
     for (opts, _handle, shutdown_tx) in [
-        TestBuilder::default().build::<PostgreSQLAdapter>().await,
+        TestBuilder::default()
+            .replicate(false)
+            .build::<PostgreSQLAdapter>()
+            .await,
         setup().await,
     ] {
         let conn = connect(opts).await;
@@ -424,7 +427,8 @@ async fn generated_columns() {
 
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
+        .replicate_url(PostgreSQLAdapter::upstream_url("noria"))
+        .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .build::<PostgreSQLAdapter>()
         .await;
@@ -519,7 +523,8 @@ async fn unsupported_numeric_scale() {
 
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
+        .replicate_url(PostgreSQLAdapter::upstream_url("noria"))
+        .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .build::<PostgreSQLAdapter>()
         .await;
@@ -1258,7 +1263,8 @@ async fn replication_of_other_tables_succeeds_even_after_error() {
 
     let (config, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
+        .replicate_url(PostgreSQLAdapter::upstream_url("noria"))
+        .fallback(true)
         .migration_mode(MigrationMode::InRequestPath)
         .build::<PostgreSQLAdapter>()
         .await;
@@ -1321,7 +1327,8 @@ async fn drop_cache_implicit_caching() {
 
     let (config, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
+        .replicate_url(PostgreSQLAdapter::upstream_url("noria"))
+        .fallback(true)
         .migration_mode(MigrationMode::InRequestPath)
         .build::<PostgreSQLAdapter>()
         .await;
@@ -1511,7 +1518,6 @@ async fn pgsql_test_replication_after_resnapshot() {
     readyset_tracing::init_test_logging();
 
     let (config, mut handle, shutdown_tx) = TestBuilder::default()
-        .migration_mode(MigrationMode::InRequestPath)
         .fallback(true)
         .build::<PostgreSQLAdapter>()
         .await;
@@ -1829,7 +1835,6 @@ async fn create_view_then_drop_table_then_create_view_with_same_name() {
     readyset_tracing::init_test_logging();
 
     let (config, _handle, shutdown_tx) = TestBuilder::default()
-        .migration_mode(MigrationMode::InRequestPath)
         .fallback(true)
         .build::<PostgreSQLAdapter>()
         .await;
@@ -1875,7 +1880,6 @@ async fn create_view_then_drop_view_then_create_view_with_same_name() {
     readyset_tracing::init_test_logging();
 
     let (config, _handle, shutdown_tx) = TestBuilder::default()
-        .migration_mode(MigrationMode::InRequestPath)
         .fallback(true)
         .build::<PostgreSQLAdapter>()
         .await;
@@ -1925,7 +1929,6 @@ async fn start_replication_invalidated_replication_slot() {
     readyset_tracing::init_test_logging();
 
     let (config, mut handle, shutdown_tx) = TestBuilder::default()
-        .migration_mode(MigrationMode::InRequestPath)
         .fallback(true)
         .build::<PostgreSQLAdapter>()
         .await;
@@ -2014,7 +2017,6 @@ async fn recreate_replication_slot() {
     readyset_tracing::init_test_logging();
 
     let (config, mut handle, shutdown_tx) = TestBuilder::default()
-        .migration_mode(MigrationMode::InRequestPath)
         .fallback(true)
         .build::<PostgreSQLAdapter>()
         .await;
@@ -2134,6 +2136,7 @@ async fn named_cache_queryable_after_being_cleared() {
     let storage_dir = {
         let (builder, authority, storage_dir) = setup_standalone_with_authority(prefix, None);
         let (config, handle, shutdown_tx) = builder
+            .replicate(true)
             .fallback(true)
             .migration_style(MigrationStyle::Explicit)
             .migration_mode(MigrationMode::OutOfBand)
@@ -2187,7 +2190,7 @@ async fn named_cache_queryable_after_being_cleared() {
         setup_standalone_with_authority(prefix, Some(storage_dir));
 
     let (config, _handle, shutdown_tx) = builder
-        .fallback(true)
+        .replicate(true)
         .recreate_database(false)
         .migration_style(MigrationStyle::Explicit)
         .migration_mode(MigrationMode::OutOfBand)
@@ -2280,6 +2283,7 @@ mod failure_injection_tests {
         let storage_dir = {
             let (builder, authority, storage_dir) = setup_standalone_with_authority(prefix, None);
             let (config, handle, shutdown_tx) = builder
+                .replicate(true)
                 .fallback(true)
                 .migration_style(MigrationStyle::Explicit)
                 .build::<PostgreSQLAdapter>()
@@ -2325,6 +2329,7 @@ mod failure_injection_tests {
             setup_standalone_with_authority(prefix, Some(storage_dir));
 
         let (config, handle, shutdown_tx) = builder
+            .replicate(true)
             .fallback(true)
             .recreate_database(false)
             .migration_style(MigrationStyle::Explicit)
@@ -2511,7 +2516,6 @@ mod failure_injection_tests {
         readyset_tracing::init_test_logging();
 
         let (config, mut handle, shutdown_tx) = TestBuilder::default()
-            .migration_mode(MigrationMode::InRequestPath)
             .replication_server_id("readyset_123".into())
             .fallback(true)
             .build::<PostgreSQLAdapter>()
@@ -2683,7 +2687,8 @@ async fn drop_all_proxied_queries() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
+        .replicate_url(PostgreSQLAdapter::upstream_url("noria"))
+        .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .migration_style(MigrationStyle::Explicit)
         .build::<PostgreSQLAdapter>()
@@ -2798,7 +2803,8 @@ async fn numeric_snapshot_nan() {
 
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
+        .replicate_url(PostgreSQLAdapter::upstream_url("noria"))
+        .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .build::<PostgreSQLAdapter>()
         .await;

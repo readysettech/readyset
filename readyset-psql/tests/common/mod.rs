@@ -26,6 +26,7 @@ pub fn setup_standalone_with_authority(
         StandaloneAuthority::new(dir_path, prefix).unwrap(),
     ));
     let builder = TestBuilder::default()
+        .replicate(false)
         .durability_mode(DurabilityMode::Permanent)
         .storage_dir_path(dir.path().into())
         .authority(authority.clone());

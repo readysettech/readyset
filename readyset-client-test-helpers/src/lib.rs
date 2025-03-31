@@ -66,12 +66,19 @@ pub trait Adapter: Send {
 }
 
 #[derive(Debug, Clone, Default)]
-enum Fallback {
-    #[default]
+enum ReplicationBehavior {
     None,
     Url(String),
     DB(String),
+    #[default]
     DefaultURL,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum FallbackBehavior {
+    #[default]
+    NoFallback,
+    UseReplicationUpstream,
 }
 
 /// A builder for an adapter integration test case.
@@ -80,7 +87,8 @@ enum Fallback {
 /// MySQL or PostgreSQL) adapter for use in integration tests.
 pub struct TestBuilder {
     backend_builder: BackendBuilder,
-    fallback: Fallback,
+    replicate: ReplicationBehavior,
+    fallback: FallbackBehavior,
     partial: bool,
     wait_for_backend: bool,
     read_behavior: ReadBehavior,
@@ -105,6 +113,7 @@ impl TestBuilder {
     pub fn new(backend_builder: BackendBuilder) -> Self {
         Self {
             backend_builder,
+            replicate: Default::default(),
             fallback: Default::default(),
             partial: true,
             wait_for_backend: true,
@@ -121,22 +130,31 @@ impl TestBuilder {
         }
     }
 
-    pub fn fallback(mut self, fallback: bool) -> Self {
-        self.fallback = if fallback {
-            Fallback::DefaultURL
+    pub fn replicate(mut self, default: bool) -> Self {
+        self.replicate = if default {
+            ReplicationBehavior::DefaultURL
         } else {
-            Fallback::None
+            ReplicationBehavior::None
         };
         self
     }
 
-    pub fn fallback_url(mut self, fallback_url: String) -> Self {
-        self.fallback = Fallback::Url(fallback_url);
+    pub fn replicate_url(mut self, fallback_url: String) -> Self {
+        self.replicate = ReplicationBehavior::Url(fallback_url);
         self
     }
 
-    pub fn fallback_db(mut self, db_name: String) -> Self {
-        self.fallback = Fallback::DB(db_name);
+    pub fn replicate_db(mut self, db_name: String) -> Self {
+        self.replicate = ReplicationBehavior::DB(db_name);
+        self
+    }
+
+    pub fn fallback(mut self, fallback: bool) -> Self {
+        self.fallback = if fallback {
+            FallbackBehavior::UseReplicationUpstream
+        } else {
+            FallbackBehavior::NoFallback
+        };
         self
     }
 
@@ -204,9 +222,9 @@ impl TestBuilder {
             readyset_tracing::init_test_logging();
         }
 
-        let fallback_url_and_db_name = match self.fallback {
-            Fallback::None => None,
-            Fallback::Url(url) => {
+        let cdc_url_and_db_name = match self.replicate {
+            ReplicationBehavior::None => None,
+            ReplicationBehavior::Url(url) => {
                 let db_name = DatabaseURL::from_str(&url)
                     .unwrap()
                     .db_name()
@@ -214,15 +232,15 @@ impl TestBuilder {
                     .to_owned();
                 Some((url, db_name))
             }
-            Fallback::DB(db) => Some((A::upstream_url(&db), db.to_owned())),
-            Fallback::DefaultURL => {
+            ReplicationBehavior::DB(db) => Some((A::upstream_url(&db), db.to_owned())),
+            ReplicationBehavior::DefaultURL => {
                 let db_name = "noria";
                 Some((A::upstream_url(db_name), db_name.to_owned()))
             }
         };
 
         if self.recreate_database {
-            if let Some((_, db_name)) = &fallback_url_and_db_name {
+            if let Some((_, db_name)) = &cdc_url_and_db_name {
                 A::recreate_database(db_name).await;
             }
         }
@@ -248,8 +266,13 @@ impl TestBuilder {
             builder.disable_partial();
         }
 
-        if let Some((f, _)) = &fallback_url_and_db_name {
-            builder.set_replication_url(f.clone());
+        if let Some((url, _)) = &cdc_url_and_db_name {
+            builder.set_cdc_db_url(url);
+            if self.fallback == FallbackBehavior::UseReplicationUpstream {
+                builder.set_upstream_db_url(url);
+            }
+        } else if self.fallback == FallbackBehavior::UseReplicationUpstream {
+            panic!("Replication must be configured when using fallback");
         }
 
         if let Some(id) = self.replication_server_id {
@@ -293,7 +316,7 @@ impl TestBuilder {
         let adapter_start_time = SystemTime::now();
 
         let mut backend_shutdown_rx = shutdown_tx.subscribe();
-        let fallback_url = fallback_url_and_db_name.as_ref().map(|(f, _)| f.clone());
+        let fallback_url = cdc_url_and_db_name.as_ref().map(|(f, _)| f.clone());
         tokio::spawn(async move {
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();
             let connection_fut = async move {
@@ -390,7 +413,7 @@ impl TestBuilder {
 
         (
             A::connection_opts_with_port(
-                fallback_url_and_db_name.as_ref().map(|(_, db)| db.as_str()),
+                cdc_url_and_db_name.as_ref().map(|(_, db)| db.as_str()),
                 addr.port(),
             ),
             handle,

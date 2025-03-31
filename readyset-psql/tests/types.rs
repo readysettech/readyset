@@ -1,4 +1,3 @@
-use readyset_adapter::backend::BackendBuilder;
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_server::Handle;
@@ -9,10 +8,7 @@ mod common;
 use common::connect;
 
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
-    TestBuilder::new(BackendBuilder::new().require_authentication(false))
-        .fallback(true)
-        .build::<PostgreSQLAdapter>()
-        .await
+    TestBuilder::default().build::<PostgreSQLAdapter>().await
 }
 
 mod types {
@@ -1040,13 +1036,12 @@ mod types {
             .await
             .unwrap();
 
-        let (rs_config, _handle, shutdown_tx) =
-            TestBuilder::new(BackendBuilder::new().require_authentication(false))
-                .fallback_db("psql_date_only_test".to_string())
-                .recreate_database(false)
-                .durability_mode(readyset_server::DurabilityMode::Permanent)
-                .build::<PostgreSQLAdapter>()
-                .await;
+        let (rs_config, _handle, shutdown_tx) = TestBuilder::default()
+            .replicate_db("psql_date_only_test".to_string())
+            .recreate_database(false)
+            .durability_mode(readyset_server::DurabilityMode::Permanent)
+            .build::<PostgreSQLAdapter>()
+            .await;
         let rs_client = connect(rs_config.clone()).await;
 
         rs_client
