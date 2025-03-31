@@ -3428,8 +3428,8 @@ async fn fk_resnapshot_inner(url: &str) -> ReadySetResult<()> {
             "DROP TABLE IF EXISTS fk_table1 CASCADE;
              CREATE TABLE fk_table1 (x INT PRIMARY KEY, p_id INT, CONSTRAINT fk_table1_id FOREIGN KEY (p_id) REFERENCES fk_table1 (x));
              INSERT INTO fk_table1 (x, p_id) VALUES (1, 1);
-             CREATE TABLE dummy (ID INT PRIMARY KEY);
-             INSERT INTO dummy (ID) VALUES (1);",
+             CREATE TABLE dummy (id INT PRIMARY KEY);
+             INSERT INTO dummy (id) VALUES (1);",
         )
         .await
         .unwrap();
