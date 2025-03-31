@@ -303,7 +303,7 @@ pub(crate) fn insert_statement_parameter_columns(query: &InsertStatement) -> Vec
         .iter()
         .flat_map(|d| {
             d.iter().enumerate().filter_map(|(i, v)| match *v {
-                Expr::Literal(Literal::Placeholder(_)) => Some(&query.fields.as_ref().unwrap()[i]),
+                Expr::Literal(Literal::Placeholder(_)) => Some(&query.fields[i]),
                 _ => None,
             })
         })
@@ -518,12 +518,7 @@ pub(crate) fn extract_insert(
     schema: &CreateTableBody,
     dialect: Dialect,
 ) -> ReadySetResult<Vec<Vec<DfValue>>> {
-    let num_cols = stmt
-        .fields
-        .as_ref()
-        .map(|f| f.len())
-        .or_else(|| stmt.data.first().map(|r| r.len()))
-        .ok_or_else(|| invalid_query_err!("INSERT statement must have either fields or rows"))?;
+    let num_cols = stmt.fields.iter().len();
     let param_cols = insert_statement_parameter_columns(stmt);
     params
         .iter()

@@ -11,7 +11,6 @@ use readyset_sql::{
     Dialect,
 };
 use readyset_sql_parsing::parse_query;
-
 macro_rules! check_parse_mysql {
     ($sql:expr) => {
         parse_query(Dialect::MySQL, $sql).expect(&format!("Failed to parse as MySQL: {:?}", $sql))
@@ -330,11 +329,6 @@ fn test_convert_with_using() {
 }
 
 #[test]
-fn test_empty_insert() {
-    check_parse_mysql!("INSERT INTO t () VALUES ()");
-}
-
-#[test]
 fn test_column_default_without_parens() {
     check_parse_both!(
         "CREATE TABLE IF NOT EXISTS m (version VARCHAR(50) PRIMARY KEY NOT NULL, run_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);"
@@ -364,4 +358,34 @@ fn test_substring() {
     check_parse_both!("SELECT SUBSTR('foo', 1, 2) FROM t");
     check_parse_both!("SELECT SUBSTRING('foo' FROM 1 FOR 2) FROM t");
     check_parse_both!("SELECT SUBSTR('foo' FROM 1 FOR 2) FROM t");
+}
+
+#[test]
+fn test_empty_insert_fields() {
+    // psql doesn't allow `VALUES ()`
+    check_parse_mysql!("INSERT INTO t VALUES ()");
+    // psql doesn't allow empty cols list
+    check_parse_mysql!("INSERT INTO t () VALUES ()");
+
+    // normal inserts
+    check_parse_both!("INSERT INTO t VALUES (1,2)");
+    check_parse_both!("INSERT INTO t (a,b) VALUES (1,2)");
+}
+
+#[test]
+#[cfg(feature = "sqlparser")]
+#[should_panic(expected = "sqlparser error")]
+/// Invalid postgres syntax, parsed by nom but not by sqlparser
+fn test_empty_insert_fails_in_postgres() {
+    // Invalid because of empty values list
+    check_parse_postgres!("INSERT INTO t VALUES ()");
+}
+
+#[test]
+#[cfg(feature = "sqlparser")]
+#[should_panic(expected = "sqlparser error")]
+/// Invalid postgres syntax, parsed by nom but not by sqlparser
+fn test_empty_insert_fields_fails_in_postgres() {
+    // Invalid because of empty cols list, accepted by mysql though
+    check_parse_postgres!("INSERT INTO t () VALUES ()");
 }

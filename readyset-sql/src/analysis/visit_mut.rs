@@ -1115,10 +1115,8 @@ pub fn walk_insert_statement<'a, V: VisitorMut<'a>>(
     insert_statement: &'a mut InsertStatement,
 ) -> Result<(), V::Error> {
     visitor.visit_table(&mut insert_statement.table)?;
-    if let Some(fields) = &mut insert_statement.fields {
-        for column in fields {
-            visitor.visit_column(column)?;
-        }
+    for column in &mut insert_statement.fields {
+        visitor.visit_column(column)?;
     }
 
     for row in &mut insert_statement.data {

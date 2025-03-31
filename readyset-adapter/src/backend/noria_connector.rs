@@ -586,13 +586,12 @@ impl NoriaConnector {
             .ok_or_else(|| internal_err!("no schema for table {}", table.display_unquoted()))?;
 
         // set column names (insert schema) if not set
-        let q = match q.fields {
-            Some(_) => Cow::Borrowed(q),
-            None => {
-                let mut query = q.clone();
-                query.fields = Some(schema.fields.iter().map(|cs| cs.column.clone()).collect());
-                Cow::Owned(query)
-            }
+        let q = if q.fields.is_empty() {
+            let mut query = q.clone();
+            query.fields = schema.fields.iter().map(|cs| cs.column.clone()).collect();
+            Cow::Owned(query)
+        } else {
+            Cow::Borrowed(q)
         };
 
         let data: Vec<Vec<DfValue>> = q
@@ -645,18 +644,14 @@ impl NoriaConnector {
             .map(|cs| ColumnSchema::from_base(cs.clone(), statement.table.clone(), self.dialect))
             .collect::<Result<Vec<_>, _>>()?;
 
-        if statement.fields.is_none() {
-            statement.fields = Some(
-                mutator
-                    .schema()
-                    .as_ref()
-                    .unwrap()
-                    .fields
-                    .iter()
-                    .map(|cs| cs.column.clone())
-                    .collect(),
-            );
-        }
+        statement.fields = mutator
+            .schema()
+            .as_ref()
+            .unwrap()
+            .fields
+            .iter()
+            .map(|cs| cs.column.clone())
+            .collect();
 
         let params: Vec<_> = {
             // extract parameter columns -- easy here, since they must all be in the same table
@@ -1242,8 +1237,6 @@ impl NoriaConnector {
 
         let columns_specified: Vec<_> = q
             .fields
-            .as_ref()
-            .unwrap()
             .iter()
             .cloned()
             .map(|mut c| {

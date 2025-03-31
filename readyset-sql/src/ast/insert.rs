@@ -13,7 +13,7 @@ use crate::{
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct InsertStatement {
     pub table: Relation,
-    pub fields: Option<Vec<Column>>,
+    pub fields: Vec<Column>,
     pub data: Vec<Vec<Expr>>,
     pub ignore: bool,
     pub on_duplicate: Option<Vec<(Column, Expr)>>,
@@ -34,7 +34,7 @@ impl TryFromDialect<sqlparser::ast::Insert> for InsertStatement {
         {
             Ok(Self {
                 table: name.into_dialect(dialect),
-                fields: Some(columns.into_dialect(dialect)),
+                fields: columns.into_dialect(dialect),
                 data: if let Some(query) = source {
                     match *query.body {
                         sqlparser::ast::SetExpr::Values(values) => {
@@ -84,16 +84,14 @@ impl DialectDisplay for InsertStatement {
         fmt_with(move |f| {
             write!(f, "INSERT INTO {}", self.table.display(dialect))?;
 
-            if let Some(ref fields) = self.fields {
-                write!(
-                    f,
-                    " ({})",
-                    fields
-                        .iter()
-                        .map(|col| dialect.quote_identifier(&col.name))
-                        .join(", ")
-                )?;
-            }
+            write!(
+                f,
+                " ({})",
+                self.fields
+                    .iter()
+                    .map(|col| dialect.quote_identifier(&col.name))
+                    .join(", ")
+            )?;
 
             write!(
                 f,

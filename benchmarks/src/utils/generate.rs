@@ -232,7 +232,7 @@ fn query_for_prepared_insert(
 ) -> String {
     InsertStatement {
         table: Relation::from(table_name.clone()),
-        fields: Some(cols.iter().map(|col| Column::from(col.clone())).collect()),
+        fields: cols.iter().map(|col| Column::from(col.clone())).collect(),
         data: match dialect {
             Dialect::MySQL => {
                 vec![vec![Expr::Literal(ItemPlaceholder::QuestionMark.into()); cols.len()]; rows]
@@ -391,7 +391,7 @@ pub async fn load_to_backend(db: &mut Backend, mut spec: DatabaseGenerationSpec)
         let columns = table_spec.table.columns.keys().collect::<Vec<_>>();
         let insert = InsertStatement {
             table: table_name.clone().into(),
-            fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
+            fields: columns.iter().map(|cn| (*cn).clone().into()).collect(),
             data: data
                 .into_iter()
                 .map(|mut row| {

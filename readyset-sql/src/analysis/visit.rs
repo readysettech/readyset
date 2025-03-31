@@ -1094,10 +1094,8 @@ pub fn walk_insert_statement<'a, V: Visitor<'a>>(
     insert_statement: &'a InsertStatement,
 ) -> Result<(), V::Error> {
     visitor.visit_table(&insert_statement.table)?;
-    if let Some(fields) = &insert_statement.fields {
-        for column in fields {
-            visitor.visit_column(column)?;
-        }
+    for column in &insert_statement.fields {
+        visitor.visit_column(column)?;
     }
 
     for row in &insert_statement.data {

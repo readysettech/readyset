@@ -201,7 +201,7 @@ mod tests {
 
             let expected = SqlQuery::Insert(InsertStatement {
                 table: Relation::from("users"),
-                fields: None,
+                fields: vec![],
                 data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                 ignore: false,
                 on_duplicate: None,
@@ -325,7 +325,7 @@ mod tests {
         #[test]
         fn display_insert_query_no_columns() {
             let qstring = "INSERT INTO users VALUES ('aaa', 'xxx')";
-            let expected = "INSERT INTO `users` VALUES ('aaa', 'xxx')";
+            let expected = "INSERT INTO `users` () VALUES ('aaa', 'xxx')";
             let res = parse_query(Dialect::MySQL, qstring);
             assert!(res.is_ok());
             assert_eq!(expected, res.unwrap().display(Dialect::MySQL).to_string());
@@ -458,7 +458,7 @@ mod tests {
 
             let expected = SqlQuery::Insert(InsertStatement {
                 table: Relation::from("users"),
-                fields: None,
+                fields: vec![],
                 data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                 ignore: false,
                 on_duplicate: None,
@@ -629,7 +629,7 @@ mod tests {
         #[test]
         fn display_insert_query_no_columns() {
             let qstring = "INSERT INTO users VALUES ('aaa', 'xxx')";
-            let expected = "INSERT INTO \"users\" VALUES ('aaa', 'xxx')";
+            let expected = "INSERT INTO \"users\" () VALUES ('aaa', 'xxx')";
             let res = parse_query(Dialect::PostgreSQL, qstring);
             assert!(res.is_ok());
             assert_eq!(

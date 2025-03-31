@@ -77,7 +77,7 @@ pub fn insertion(
             remaining_input,
             InsertStatement {
                 table,
-                fields,
+                fields: fields.unwrap_or_default(),
                 data,
                 ignore,
                 on_duplicate,
@@ -101,7 +101,7 @@ mod tests {
             res.unwrap().1,
             InsertStatement {
                 table: Relation::from("users"),
-                fields: Some(vec![Column::from("id"), Column::from("name")]),
+                fields: vec![Column::from("id"), Column::from("name")],
                 data: vec![vec![
                     Expr::Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark)),
                     Expr::Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark))
@@ -124,7 +124,7 @@ mod tests {
                 res.unwrap().1,
                 InsertStatement {
                     table: Relation::from("users"),
-                    fields: None,
+                    fields: vec![],
                     data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false
@@ -143,7 +143,7 @@ mod tests {
                 res,
                 InsertStatement {
                     table: Relation::from("users"),
-                    fields: None,
+                    fields: vec![],
                     data: vec![vec![
                         Expr::Literal(42.into()),
                         Expr::Literal("test".into()),
@@ -168,7 +168,7 @@ mod tests {
                 res.unwrap().1,
                 InsertStatement {
                     table: Relation::from("users"),
-                    fields: Some(vec![Column::from("id"), Column::from("name")]),
+                    fields: vec![Column::from("id"), Column::from("name")],
                     data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false
@@ -186,7 +186,7 @@ mod tests {
                 res.unwrap().1,
                 InsertStatement {
                     table: Relation::from("users"),
-                    fields: Some(vec![Column::from("id"), Column::from("name")]),
+                    fields: vec![Column::from("id"), Column::from("name")],
                     data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false
@@ -206,7 +206,7 @@ mod tests {
                         schema: Some("db1".into()),
                         name: "users".into(),
                     },
-                    fields: None,
+                    fields: vec![],
                     data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false,
@@ -223,7 +223,7 @@ mod tests {
                 res.unwrap().1,
                 InsertStatement {
                     table: Relation::from("users"),
-                    fields: Some(vec![Column::from("id"), Column::from("name")]),
+                    fields: vec![Column::from("id"), Column::from("name")],
                     data: vec![
                         vec![Expr::Literal(42.into()), Expr::Literal("test".into())],
                         vec![Expr::Literal(21.into()), Expr::Literal("test2".into())],
@@ -244,7 +244,7 @@ mod tests {
                 res.unwrap().1,
                 InsertStatement {
                     table: Relation::from("keystores"),
-                    fields: Some(vec![Column::from("key"), Column::from("value")]),
+                    fields: vec![Column::from("key"), Column::from("value")],
                     data: vec![vec![
                         Expr::Literal(Literal::Placeholder(ItemPlaceholder::DollarNumber(1))),
                         Expr::Literal(Literal::Placeholder(ItemPlaceholder::ColonNumber(2)))
@@ -271,7 +271,7 @@ mod tests {
                 res.unwrap().1,
                 InsertStatement {
                     table: Relation::from("users"),
-                    fields: Some(vec![Column::from("id"), Column::from("name")]),
+                    fields: vec![Column::from("id"), Column::from("name")],
                     data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false,
@@ -301,7 +301,7 @@ mod tests {
                 res.unwrap().1,
                 InsertStatement {
                     table: Relation::from("users"),
-                    fields: None,
+                    fields: vec![],
                     data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false,
@@ -318,7 +318,7 @@ mod tests {
                 res.unwrap().1,
                 InsertStatement {
                     table: Relation::from("users"),
-                    fields: None,
+                    fields: vec![],
                     data: vec![vec![
                         Expr::Literal(42.into()),
                         Expr::Literal("test".into()),
@@ -343,7 +343,7 @@ mod tests {
                 res.unwrap().1,
                 InsertStatement {
                     table: Relation::from("users"),
-                    fields: Some(vec![Column::from("id"), Column::from("name")]),
+                    fields: vec![Column::from("id"), Column::from("name")],
                     data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false,
@@ -361,7 +361,7 @@ mod tests {
                 res.unwrap().1,
                 InsertStatement {
                     table: Relation::from("users"),
-                    fields: Some(vec![Column::from("id"), Column::from("name")]),
+                    fields: vec![Column::from("id"), Column::from("name")],
                     data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false,
@@ -381,7 +381,7 @@ mod tests {
                         schema: Some("db1".into()),
                         name: "users".into(),
                     },
-                    fields: None,
+                    fields: vec![],
                     data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
                     ignore: false,
@@ -398,7 +398,7 @@ mod tests {
                 res.unwrap().1,
                 InsertStatement {
                     table: Relation::from("users"),
-                    fields: Some(vec![Column::from("id"), Column::from("name")]),
+                    fields: vec![Column::from("id"), Column::from("name")],
                     data: vec![
                         vec![Expr::Literal(42.into()), Expr::Literal("test".into())],
                         vec![Expr::Literal(21.into()), Expr::Literal("test2".into())],
@@ -419,7 +419,7 @@ mod tests {
                 res.unwrap().1,
                 InsertStatement {
                     table: Relation::from("keystores"),
-                    fields: Some(vec![Column::from("key"), Column::from("value")]),
+                    fields: vec![Column::from("key"), Column::from("value")],
                     data: vec![vec![
                         Expr::Literal(Literal::Placeholder(ItemPlaceholder::DollarNumber(1))),
                         Expr::Literal(Literal::Placeholder(ItemPlaceholder::ColonNumber(2)))
@@ -446,7 +446,7 @@ mod tests {
                 res.unwrap().1,
                 InsertStatement {
                     table: Relation::from("users"),
-                    fields: Some(vec![Column::from("id"), Column::from("name")]),
+                    fields: vec![Column::from("id"), Column::from("name")],
                     data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     ignore: false,
                     on_duplicate: None

@@ -233,15 +233,14 @@ impl ImpliedTableExpansion for SqlQuery {
             SqlQuery::Insert(mut iq) => {
                 let table = iq.table.clone();
                 // Expand within field list
-                iq.fields = iq.fields.map(|fields| {
-                    fields
-                        .into_iter()
-                        .map(|c| Column {
-                            table: Some(c.table.unwrap_or_else(|| table.clone())),
-                            ..c
-                        })
-                        .collect()
-                });
+                iq.fields = iq
+                    .fields
+                    .into_iter()
+                    .map(|c| Column {
+                        table: Some(c.table.unwrap_or_else(|| table.clone())),
+                        ..c
+                    })
+                    .collect();
 
                 SqlQuery::Insert(iq)
             }

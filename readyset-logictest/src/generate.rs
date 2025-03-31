@@ -262,7 +262,7 @@ impl Seed {
                 let columns = spec.columns.keys().collect::<Vec<_>>();
                 InsertStatement {
                     table: spec.name.clone().into(),
-                    fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
+                    fields: columns.iter().map(|cn| (*cn).clone().into()).collect(),
                     data: data
                         .clone()
                         .into_iter()
