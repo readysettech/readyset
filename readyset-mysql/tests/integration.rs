@@ -2224,7 +2224,7 @@ async fn datetime_nanosecond_precision_binary_protocol() {
     let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql.query_drop("SET sql_mode='';
              DROP TABLE IF EXISTS dt_nano_bin_protocol CASCADE;
-             CREATE TABLE dt_nano_bin_protocol (id INT PRIMARY KEY, col1 DATETIME, col2 DATETIME(2), col3 DATETIME(4), col4 DATETIME(6));
+             CREATE TABLE dt_nano_bin_protocol (ID INT PRIMARY KEY, col1 DATETIME, col2 DATETIME(2), col3 DATETIME(4), col4 DATETIME(6));
              INSERT INTO dt_nano_bin_protocol VALUES (1, '2021-01-01 00:00:00', '2021-01-01 00:00:00.00', '2021-01-01 00:00:00.0000', '2021-01-01 00:00:00.000000');
              INSERT INTO dt_nano_bin_protocol VALUES (2, '2021-01-01 00:00:00', '2021-01-01 00:00:00.01', '2021-01-01 00:00:00.0001', '2021-01-01 00:00:00.000001');
              INSERT INTO dt_nano_bin_protocol VALUES (3, '0000-00-00 00:00:00', '0000-00-00 00:00:00.00', '0000-00-00 00:00:00.0000', '0000-00-00 00:00:00.000000');")
@@ -2234,19 +2234,19 @@ async fn datetime_nanosecond_precision_binary_protocol() {
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     sleep().await;
 
-    conn.query_drop("CREATE CACHE FROM SELECT * FROM dt_nano_bin_protocol WHERE id = ?")
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM dt_nano_bin_protocol WHERE ID = ?")
         .await
         .unwrap();
     sleep().await;
 
     for id in 1..=3 {
         let my_rows: Row = direct_mysql
-            .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE id = ?", (id,))
+            .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE ID = ?", (id,))
             .await
             .unwrap()
             .unwrap();
         let rs_rows: Row = conn
-            .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE id = ?", (id,))
+            .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE ID = ?", (id,))
             .await
             .unwrap()
             .unwrap();
@@ -2261,12 +2261,12 @@ async fn datetime_nanosecond_precision_binary_protocol() {
     for id in 4..=5 {
         eventually!(run_test: {
             let my_rows: Row = direct_mysql
-                .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE id = ?", (id,))
+                .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE ID = ?", (id,))
                 .await
                 .unwrap()
                 .unwrap();
             let rs_rows: Row = conn
-                .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE id = ?", (id,))
+                .exec_first("SELECT * FROM dt_nano_bin_protocol WHERE ID = ?", (id,))
                 .await
                 .unwrap()
                 .unwrap();
@@ -2290,18 +2290,18 @@ async fn datetime_binary_protocol() {
         .query_drop("DROP TABLE IF EXISTS dt_bin_protocol CASCADE;")
         .await
         .unwrap();
-    direct_mysql.query_drop("CREATE TABLE dt_bin_protocol (id INT PRIMARY KEY, col1 DATETIME(6), col2 DATETIME(6), col3 DATETIME(6), col4 DATETIME(6));").await.unwrap();
+    direct_mysql.query_drop("CREATE TABLE dt_bin_protocol (ID INT PRIMARY KEY, col1 DATETIME(6), col2 DATETIME(6), col3 DATETIME(6), col4 DATETIME(6));").await.unwrap();
     direct_mysql.query_drop("INSERT INTO dt_bin_protocol VALUES (1, '0000-00-00 00:00:00.000000', '2021-01-01 00:00:00.000000', '2021-01-01 00:00:01.0000000', '2021-01-01 00:00:01.000001');")
         .await
         .unwrap();
     sleep().await;
 
-    conn.query_drop("CREATE CACHE FROM SELECT * FROM dt_bin_protocol WHERE id = ?")
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM dt_bin_protocol WHERE ID = ?")
         .await
         .unwrap();
     sleep().await;
     let rs_rows: Row = conn
-        .exec_first("SELECT * FROM dt_bin_protocol WHERE id = 1", ())
+        .exec_first("SELECT * FROM dt_bin_protocol WHERE ID = 1", ())
         .await
         .unwrap()
         .unwrap();
@@ -2325,7 +2325,7 @@ async fn timestamp_binary_protocol() {
     direct_mysql.query_drop("
              SET SESSION time_zone = '+05:00';
              DROP TABLE IF EXISTS ts_bin_protocol CASCADE;
-             CREATE TABLE ts_bin_protocol (id INT PRIMARY KEY, col1 TIMESTAMP, col2 TIMESTAMP(2), col3 TIMESTAMP(4), col4 TIMESTAMP(6));
+             CREATE TABLE ts_bin_protocol (ID INT PRIMARY KEY, col1 TIMESTAMP, col2 TIMESTAMP(2), col3 TIMESTAMP(4), col4 TIMESTAMP(6));
              INSERT INTO ts_bin_protocol VALUES (1, '2021-01-01 00:00:00', '2021-01-01 00:00:00.00', '2021-01-01 00:00:00.0000', '2021-01-01 00:00:00.000000');
              INSERT INTO ts_bin_protocol VALUES (2, '2021-01-01 00:00:00', '2021-01-01 00:00:00.01', '2021-01-01 00:00:00.0001', '2021-01-01 00:00:00.000001');")
         .await
@@ -2340,7 +2340,7 @@ async fn timestamp_binary_protocol() {
         .query_drop("SET SESSION time_zone = SYSTEM;")
         .await
         .unwrap();
-    conn.query_drop("CREATE CACHE FROM SELECT * FROM ts_bin_protocol WHERE id = ?")
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM ts_bin_protocol WHERE ID = ?")
         .await
         .unwrap();
     sleep().await;
@@ -2349,12 +2349,12 @@ async fn timestamp_binary_protocol() {
         eventually!(run_test: {
 
         let my_rows: Row = direct_mysql
-            .exec_first("SELECT * FROM ts_bin_protocol WHERE id = ?", (id,))
+            .exec_first("SELECT * FROM ts_bin_protocol WHERE ID = ?", (id,))
             .await
             .unwrap()
             .unwrap();
         let rs_rows: Row = conn
-            .exec_first("SELECT * FROM ts_bin_protocol WHERE id = ?", (id,))
+            .exec_first("SELECT * FROM ts_bin_protocol WHERE ID = ?", (id,))
             .await
             .unwrap()
             .unwrap();
@@ -2374,7 +2374,7 @@ async fn timestamp_text_protocol() {
     direct_mysql.query_drop("
              SET SESSION time_zone = '+05:00';
              DROP TABLE IF EXISTS ts_text_protocol CASCADE;
-             CREATE TABLE ts_text_protocol (id INT PRIMARY KEY, col1 TIMESTAMP, col2 TIMESTAMP(2), col3 TIMESTAMP(4), col4 TIMESTAMP(6));
+             CREATE TABLE ts_text_protocol (ID INT PRIMARY KEY, col1 TIMESTAMP, col2 TIMESTAMP(2), col3 TIMESTAMP(4), col4 TIMESTAMP(6));
              INSERT INTO ts_text_protocol VALUES (1, '2021-01-01 00:00:00', '2021-01-01 00:00:00.00', '2021-01-01 00:00:00.0000', '2021-01-01 00:00:00.000000');
              INSERT INTO ts_text_protocol VALUES (2, '2021-01-01 00:00:00', '2021-01-01 00:00:00.01', '2021-01-01 00:00:00.0001', '2021-01-01 00:00:00.000001');")
         .await
@@ -2389,7 +2389,7 @@ async fn timestamp_text_protocol() {
         .query_drop("SET SESSION time_zone = SYSTEM;")
         .await
         .unwrap();
-    conn.query_drop("CREATE CACHE FROM SELECT * FROM ts_text_protocol WHERE id = ?")
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM ts_text_protocol WHERE ID = ?")
         .await
         .unwrap();
     sleep().await;
@@ -2397,7 +2397,7 @@ async fn timestamp_text_protocol() {
     for id in 1..=4 {
         eventually!(run_test: {
 
-        let q = format!("SELECT * FROM ts_text_protocol WHERE id = {}", id);
+        let q = format!("SELECT * FROM ts_text_protocol WHERE ID = {}", id);
         let my_rows: Vec<(String, String, String, String, String)> = direct_mysql
             .query(&q)
             .await
