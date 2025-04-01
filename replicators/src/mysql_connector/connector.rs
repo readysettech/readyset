@@ -348,6 +348,12 @@ impl MySqlBinlogConnector {
             ));
         }
 
+        if inserted_rows.is_empty() {
+            inserted_rows.push(readyset_client::TableOperation::Insert(
+                vec![DfValue::Default; tme.columns_count() as usize],
+            ));
+        }
+
         Ok(ReplicationAction::TableAction {
             table: Relation {
                 schema: Some(tme.database_name().into()),

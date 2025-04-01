@@ -4031,3 +4031,51 @@ async fn mysql_minimal_row_based_replication() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial(mysql)]
+#[slow]
+async fn mysql_minimal_row_based_replication_empty_row() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query("DROP TABLE IF EXISTS mrbr_empty_row")
+        .await
+        .unwrap();
+    client
+        .query("CREATE TABLE mrbr_empty_row(b int default 1)")
+        .await
+        .unwrap();
+    client
+        .query("SET binlog_row_image = minimal;")
+        .await
+        .unwrap();
+    client.query("SET sql_mode = '';").await.unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    client
+        .query("INSERT INTO mrbr_empty_row () VALUES ();")
+        .await
+        .unwrap();
+
+    check_results!(
+        ctx,
+        "mrbr_empty_row",
+        "mrbr_empty_row_insert",
+        &[&[DfValue::Int(1)]]
+    );
+
+    shutdown_tx.shutdown().await;
+}
