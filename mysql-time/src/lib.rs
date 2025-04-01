@@ -301,7 +301,11 @@ impl Default for MySqlTime {
 
 impl fmt::Display for MySqlTime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let sign = if self.is_positive() { "" } else { "-" };
+        let sign = if self.is_positive() || self.nanos == 0 {
+            ""
+        } else {
+            "-"
+        };
         let h = self.hour();
         let m = self.minutes();
         let s = self.seconds();

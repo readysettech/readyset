@@ -877,6 +877,77 @@ impl DfValue {
             _ => self,
         }
     }
+
+    /// Returns an implicit default value for a column that is not null and has no default.
+    /// MySQL has [implicit defaults], and in case you disable sql_mode STRICT_TRANS_TABLES
+    /// it will let you either omit the columns that has no default and is defined as NOT NULL,
+    /// or allow you to set it to DEFAULT.
+    ///
+    /// [implicit defaults]: https://dev.mysql.com/doc/refman/8.4/en/data-type-defaults.html
+    ///
+    /// # Parameters
+    ///
+    /// * `collation`: The collation of the column.
+    /// * `dftype`: The type of the column.
+    /// * `dialect`: The dialect of the database.
+    ///
+    /// # Returns
+    ///
+    /// The implicit default value for the column.
+    pub fn implicit_default(collation: Collation, dftype: DfType, dialect: Dialect) -> Self {
+        match dialect {
+            Dialect::DEFAULT_MYSQL => {
+                // Yay, MySQL has implicit defaults if you omit a column that is not null and has no default
+                if matches!(dftype, DfType::Blob) {
+                    // TODO: Fix this to return ByteArray(Vec::new().into())
+                    return DfValue::from_str_and_collation("", collation);
+                } else if dftype.is_any_text() {
+                    return DfValue::from_str_and_collation("", collation);
+                } else if dftype.is_any_int() || dftype.is_bool() {
+                    return DfValue::Int(0);
+                } else if dftype.is_any_float() {
+                    return DfValue::Float(0.0);
+                } else if matches!(dftype, DfType::Numeric { .. }) {
+                    return DfValue::Numeric(Arc::new(Decimal::new(0, 2)));
+                } else if matches!(dftype, DfType::Bit { .. }) {
+                    return DfValue::from_str_and_collation("\0", Collation::Utf8);
+                } else if dftype.is_any_temporal() {
+                    match dftype {
+                        DfType::Timestamp { subsecond_digits }
+                        | DfType::DateTime { subsecond_digits } => {
+                            let mut dt = TimestampTz::zero();
+                            dt.set_subsecond_digits(subsecond_digits as u8);
+                            return DfValue::TimestampTz(dt);
+                        }
+                        DfType::Time { .. } => {
+                            return DfValue::Time(MySqlTime::default());
+                        }
+                        DfType::Date { .. } => {
+                            let mut dt = TimestampTz::zero();
+                            dt.set_date_only();
+                            return DfValue::TimestampTz(dt);
+                        }
+                        _ => {}
+                    }
+                } else if matches!(dftype, DfType::Enum { .. }) {
+                    if let DfType::Enum { variants, .. } = dftype {
+                        // Safety, I don't think this can happen
+                        if variants.is_empty() {
+                            return DfValue::from_str_and_collation("", collation);
+                        }
+                        return DfValue::from_str_and_collation(
+                            variants[0].as_str(),
+                            Collation::Utf8,
+                        );
+                    }
+                } else if matches!(dftype, DfType::Json { .. }) {
+                    return DfValue::from_str_and_collation("null", Collation::Utf8);
+                }
+                DfValue::None
+            }
+            Dialect::DEFAULT_POSTGRESQL => DfValue::None,
+        }
+    }
 }
 
 impl PartialEq for DfValue {

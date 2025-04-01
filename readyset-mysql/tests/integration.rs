@@ -2522,72 +2522,77 @@ async fn test_case_expr_then_expr() {
     shutdown_tx.shutdown().await;
 }
 
-async fn populate_all_data_types(direct_mysql: &mut mysql_async::Conn) {
+async fn populate_all_data_types(
+    direct_mysql: &mut mysql_async::Conn,
+    table_name: &str,
+    add_sample_data: bool,
+) {
     // Drop existing table if any
     direct_mysql
-        .query_drop("DROP TABLE IF EXISTS all_data_types CASCADE;")
+        .query_drop(format!("DROP TABLE IF EXISTS {} CASCADE;", table_name))
         .await
         .unwrap();
     // Create table
     direct_mysql
         .query_drop(
-            "CREATE TABLE all_data_types (
+            format!("CREATE TABLE {} (
         -- Numeric Data Types (Signed and Unsigned Integers)
-        col_tinyint TINYINT,                  -- Signed (-128 to 127)
-        col_tinyint_unsigned TINYINT UNSIGNED, -- Unsigned (0 to 255)
+        col_tinyint TINYINT NOT NULL,                  -- Signed (-128 to 127)
+        col_tinyint_unsigned TINYINT UNSIGNED NOT NULL, -- Unsigned (0 to 255)
+        
+        col_smallint SMALLINT NOT NULL,                 -- Signed (-32,768 to 32,767)
+        col_smallint_unsigned SMALLINT UNSIGNED NOT NULL, -- Unsigned (0 to 65,535)
+        
+        col_mediumint MEDIUMINT NOT NULL,               -- Signed (-8,388,608 to 8,388,607)
+        col_mediumint_unsigned MEDIUMINT UNSIGNED NOT NULL, -- Unsigned (0 to 16,777,215)
+        
+        col_int INT NOT NULL,                           -- Signed (-2,147,483,648 to 2,147,483,647)
+        col_int_unsigned INT UNSIGNED NOT NULL,         -- Unsigned (0 to 4,294,967,295)
+        
+        col_bigint BIGINT NOT NULL,                     -- Signed (-2^63 to 2^63-1)
+        col_bigint_unsigned BIGINT UNSIGNED NOT NULL,   -- Unsigned (0 to 2^64-1)
 
-        col_smallint SMALLINT,                 -- Signed (-32,768 to 32,767)
-        col_smallint_unsigned SMALLINT UNSIGNED, -- Unsigned (0 to 65,535)
-
-        col_mediumint MEDIUMINT,               -- Signed (-8,388,608 to 8,388,607)
-        col_mediumint_unsigned MEDIUMINT UNSIGNED, -- Unsigned (0 to 16,777,215)
-
-        col_int INT,                           -- Signed (-2,147,483,648 to 2,147,483,647)
-        col_int_unsigned INT UNSIGNED,         -- Unsigned (0 to 4,294,967,295)
-
-        col_bigint BIGINT,                     -- Signed (-2^63 to 2^63-1)
-        col_bigint_unsigned BIGINT UNSIGNED,   -- Unsigned (0 to 2^64-1)
-
-        col_decimal DECIMAL(12,2),             -- Fixed-point exact decimal (e.g., 99999999.99)
-        col_numeric NUMERIC(10,2),             -- Synonym for DECIMAL
-
-        col_float FLOAT,                       -- 32-bit floating point (approximate value)
-        col_double DOUBLE,                     -- 64-bit floating point (approximate value)
-        col_real REAL,                         -- Synonym for DOUBLE
-
-        col_bit BIT(8),                        -- Bit field (e.g., 8-bit binary)
-        col_boolean BOOLEAN,                   -- Alias for TINYINT(1) (0 = false, 1 = true)
-
+        col_decimal DECIMAL(12,2) NOT NULL,             -- Fixed-point exact decimal (e.g., 99999999.99)
+        col_numeric NUMERIC(10,2) NOT NULL,             -- Synonym for DECIMAL
+        
+        col_float FLOAT NOT NULL,                       -- 32-bit floating point (approximate value)
+        col_double DOUBLE NOT NULL,                     -- 64-bit floating point (approximate value)
+        col_real REAL NOT NULL,                         -- Synonym for DOUBLE
+        
+        col_bit BIT(8) NOT NULL,                        -- Bit field (e.g., 8-bit binary)
+        col_boolean BOOLEAN NOT NULL,                   -- Alias for TINYINT(1) (0 = false, 1 = true)
+        
         -- Date and Time Data Types
-        col_date DATE,
-        col_datetime DATETIME(2),
-        col_timestamp TIMESTAMP,
-        col_time TIME,
+        col_date DATE NOT NULL,
+        col_datetime DATETIME(2) NOT NULL,
+        col_timestamp TIMESTAMP NOT NULL,
+        col_time TIME NOT NULL,
 
         -- String Data Types
-        col_char CHAR(10),
-        col_varchar VARCHAR(255),
+        col_char CHAR(10) NOT NULL,
+        col_varchar VARCHAR(255) NOT NULL,
 
-        col_text TEXT,
-        col_tinytext TINYTEXT,
-        col_mediumtext MEDIUMTEXT,
-        col_longtext LONGTEXT,
+        col_text TEXT NOT NULL,
+        col_tinytext TINYTEXT NOT NULL,
+        col_mediumtext MEDIUMTEXT NOT NULL,
+        col_longtext LONGTEXT NOT NULL,
 
-        col_blob BLOB,
-        col_tinyblob TINYBLOB,
-        col_mediumblob MEDIUMBLOB,
-        col_longblob LONGBLOB,
+        col_blob BLOB NOT NULL,
+        col_tinyblob TINYBLOB NOT NULL,
+        col_mediumblob MEDIUMBLOB NOT NULL,
+        col_longblob LONGBLOB NOT NULL,
 
-        col_enum ENUM('small', 'medium', 'large'),
-        col_json JSON
-    );",
+        col_enum ENUM('small', 'medium', 'large') NOT NULL,
+        col_json JSON NOT NULL
+    );", table_name)
         )
         .await
         .unwrap();
-    // Insert test data
-    direct_mysql
-        .query_drop(
-            "INSERT INTO all_data_types (
+    if add_sample_data {
+        // Insert test data
+        direct_mysql
+            .query_drop(format!(
+                "INSERT INTO {} (
 col_tinyint, col_tinyint_unsigned,
 col_smallint, col_smallint_unsigned,
 col_mediumint, col_mediumint_unsigned,
@@ -2643,23 +2648,29 @@ CURRENT_TIMESTAMP,
 'long blob contents here',
 
 'medium',
-'{\"name\": \"Alice\", \"roles\": [\"admin\", \"editor\"], \"active\": true}'
+'{{\"name\": \"Alice\", \"roles\": [\"admin\", \"editor\"], \"active\": true}}'
 );",
-        )
-        .await
-        .unwrap();
+                table_name
+            ))
+            .await
+            .unwrap();
+    }
 }
 
 async fn test_column_definition_verify(
     direct_mysql: &mut mysql_async::Conn,
     rs_conn: &mut mysql_async::Conn,
+    table_name: &str,
 ) {
     // Verify results
     let direct_rows: Vec<Row> = direct_mysql
-        .query("SELECT * FROM all_data_types")
+        .query(format!("SELECT * FROM {}", table_name))
         .await
         .unwrap();
-    let rs_rows: Vec<Row> = rs_conn.query("SELECT * FROM all_data_types").await.unwrap();
+    let rs_rows: Vec<Row> = rs_conn
+        .query(format!("SELECT * FROM {}", table_name))
+        .await
+        .unwrap();
 
     let direct_columns = direct_rows[0].columns();
     let rs_columns = rs_rows[0].columns();
@@ -2711,7 +2722,7 @@ async fn test_column_definition_verify(
 async fn test_column_definition_upstream_readyset_snapshot() {
     readyset_tracing::init_test_logging();
     let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
-    populate_all_data_types(&mut direct_mysql).await;
+    populate_all_data_types(&mut direct_mysql, "all_data_types", true).await;
 
     // Setup ReadySet connection after table creation
     let (rs_opts, _rs_handle, tx) = TestBuilder::default()
@@ -2720,7 +2731,7 @@ async fn test_column_definition_upstream_readyset_snapshot() {
         .await;
     let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
 
-    test_column_definition_verify(&mut direct_mysql, &mut conn).await;
+    test_column_definition_verify(&mut direct_mysql, &mut conn, "all_data_types").await;
     tx.shutdown().await;
 }
 
@@ -2737,8 +2748,8 @@ async fn test_column_definition_upstream_readyset_replication() {
         .await;
     let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
 
-    populate_all_data_types(&mut direct_mysql).await;
-    test_column_definition_verify(&mut direct_mysql, &mut conn).await;
+    populate_all_data_types(&mut direct_mysql, "all_data_types", true).await;
+    test_column_definition_verify(&mut direct_mysql, &mut conn, "all_data_types").await;
     tx.shutdown().await;
 }
 
@@ -2788,5 +2799,53 @@ async fn text_citext_default_coercion_minimal_row_base_replication() {
     assert_eq!(rs_row.len(), 2);
     assert_eq!(rs_row[0], direct_row[0]);
     assert_eq!(rs_row[1], direct_row[1]);
+    tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial(mysql)]
+async fn test_default_value_not_null_for_replication() {
+    readyset_tracing::init_test_logging();
+    let (rs_opts, _rs_handle, tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    sleep().await;
+    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    direct_mysql
+        .query_drop("SET SESSION binlog_row_image = MINIMAL; SET SESSION sql_mode = '';")
+        .await
+        .unwrap();
+    populate_all_data_types(&mut direct_mysql, "all_data_types_not_null", false).await;
+    direct_mysql
+        .query_drop("INSERT INTO all_data_types_not_null () VALUES ();")
+        .await
+        .unwrap();
+
+    let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM all_data_types_not_null")
+        .await
+        .unwrap();
+    let rs_row: Row = conn
+        .query_first("SELECT * FROM all_data_types_not_null")
+        .await
+        .unwrap()
+        .unwrap();
+    let direct_row: Row = direct_mysql
+        .query_first("SELECT * FROM all_data_types_not_null")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(rs_row.len(), direct_row.len());
+    let row_length = rs_row.len();
+    for i in 0..row_length {
+        assert_eq!(
+            rs_row[i],
+            direct_row[i],
+            "Value mismatch for column: {}",
+            String::from_utf8_lossy(rs_row.columns()[i].name_ref())
+        );
+    }
     tx.shutdown().await;
 }
