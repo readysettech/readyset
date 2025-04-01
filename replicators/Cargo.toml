@@ -67,6 +67,7 @@ readyset-client-test-helpers = { path = "../readyset-client-test-helpers", featu
     "mysql",
     "postgres",
 ] }
+pretty_assertions = { workspace = true }
 proptest-stateful = { path = "../proptest-stateful" }
 rand = { workspace = true }
 proptest = { workspace = true }

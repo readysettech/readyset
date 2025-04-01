@@ -5019,6 +5019,7 @@ dependencies = [
  "postgres-native-tls",
  "postgres-protocol",
  "postgres-types",
+ "pretty_assertions",
  "proptest",
  "proptest-stateful",
  "rand",

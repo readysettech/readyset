@@ -416,37 +416,34 @@ impl TestHandle {
         Ok(replicator_tx)
     }
 
-    async fn check_results(
+    async fn get_results(
         &mut self,
         view_name: &str,
-        test_name: &str,
-        test_results: &[&[DfValue]],
-    ) -> ReadySetResult<()> {
+        expected_results: &[&[DfValue]],
+    ) -> ReadySetResult<Vec<Vec<DfValue>>> {
         let mut attempt: usize = 0;
-        loop {
-            match self.check_results_inner(view_name).await {
+        let result = loop {
+            match self.get_results_inner(view_name).await {
                 Err(_) if attempt < MAX_ATTEMPTS => {
                     // Sometimes things are slow in CI, so we retry a few times before giving up
                     attempt += 1;
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
-                Ok(res) if res != test_results && attempt < MAX_ATTEMPTS => {
+                Ok(res) if res != expected_results && attempt < MAX_ATTEMPTS => {
                     // Sometimes things are slow in CI, so we retry a few times before giving up
                     attempt += 1;
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
                 Ok(res) => {
-                    if res != *test_results {
-                        return Err(ReadySetError::Internal(format!("{} incorrect", test_name)));
-                    }
-                    break Ok(());
+                    break res;
                 }
-                Err(err) => break Err(err),
+                Err(err) => return Err(err),
             }
-        }
+        };
+        Ok(result)
     }
 
-    async fn check_results_inner(&mut self, view_name: &str) -> ReadySetResult<Vec<Vec<DfValue>>> {
+    async fn get_results_inner(&mut self, view_name: &str) -> ReadySetResult<Vec<Vec<DfValue>>> {
         let query_name = format!("q_{view_name}");
         let select_stmt = format!("SELECT * FROM public.{view_name}");
         self.controller()
@@ -515,6 +512,23 @@ impl TestHandle {
     }
 }
 
+macro_rules! check_results {
+    ($ctx:ident, $view:expr, $test_name:expr, $expected_results:expr $(,)?) => {
+        let expected_results: &[&[DfValue]] = $expected_results;
+        let result = $ctx.get_results($view, expected_results).await.unwrap();
+        let result_slices = result
+            .iter()
+            .map(|row| row.as_slice())
+            .collect::<Vec<&[DfValue]>>();
+        pretty_assertions::assert_eq!(
+            expected_results,
+            result_slices.as_slice(),
+            "test {} failed",
+            $test_name
+        );
+    };
+}
+
 /// Tests that we can have multiple ReadySet instances connected to the same postgres upstream
 /// without replication slot issues.
 async fn replication_test_multiple(url: &str) -> ReadySetResult<()> {
@@ -544,8 +558,7 @@ async fn replication_test_multiple(url: &str) -> ReadySetResult<()> {
             .await
             .unwrap();
 
-        ctx.check_results("noria_view", "Snapshot", SNAPSHOT_RESULT)
-            .await?;
+        check_results!(ctx, "noria_view", "Snapshot", SNAPSHOT_RESULT);
     }
 
     client.stop().await;
@@ -570,15 +583,11 @@ async fn replication_test_inner(url: &str) {
         .await
         .unwrap();
 
-    ctx.check_results("noria_view", "Snapshot", SNAPSHOT_RESULT)
-        .await
-        .unwrap();
+    check_results!(ctx, "noria_view", "Snapshot", SNAPSHOT_RESULT);
 
     for (test_name, test_query, test_results) in TESTS {
         client.query(test_query).await.unwrap();
-        ctx.check_results("noria_view", test_name, test_results)
-            .await
-            .unwrap();
+        check_results!(ctx, "noria_view", test_name, test_results);
     }
 
     // Stop the replication task, issue some queries then check they are picked up after reconnect
@@ -586,17 +595,13 @@ async fn replication_test_inner(url: &str) {
     client.query(DISCONNECT_QUERY).await.unwrap();
 
     // Make sure no replication takes place for real
-    ctx.check_results("noria_view", "Disconnected", TESTS[TESTS.len() - 1].2)
-        .await
-        .unwrap();
+    check_results!(ctx, "noria_view", "Disconnected", TESTS[TESTS.len() - 1].2);
 
     // Resume replication
     ctx.start_repl(None, TelemetrySender::new_no_op(), false)
         .await
         .unwrap();
-    ctx.check_results("noria_view", "Reconnect", RECONNECT_RESULT)
-        .await
-        .unwrap();
+    check_results!(ctx, "noria_view", "Reconnect", RECONNECT_RESULT);
 
     client.stop().await;
     ctx.stop().await;
@@ -708,9 +713,9 @@ async fn mysql_datetime_replication() {
     mysql_datetime_replication_inner().await.unwrap();
 }
 
-async fn mysql_binary_collation_padding_inner() -> ReadySetResult<()> {
+async fn mysql_binary_collation_padding_inner() {
     let url = &mysql_url();
-    let mut client = DbConnection::connect(url).await?;
+    let mut client = DbConnection::connect(url).await.unwrap();
     client
         .query(
             "
@@ -724,15 +729,19 @@ async fn mysql_binary_collation_padding_inner() -> ReadySetResult<()> {
             INSERT INTO `col_bin_pad` VALUES (3, 'AAA');
             INSERT INTO `col_bin_pad` VALUES (4, '¥');",
         )
-        .await?;
-    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
+        .await
+        .unwrap();
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
     ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
         .await
         .unwrap();
-    ctx.check_results(
+    check_results!(
+        ctx,
         "col_bin_pad",
         "Snapshot",
         &[
@@ -755,8 +764,7 @@ async fn mysql_binary_collation_padding_inner() -> ReadySetResult<()> {
                 DfValue::ByteArray(vec![0xC2, 0xA5, 0x0].into()),
             ],
         ],
-    )
-    .await?;
+    );
 
     // Replication and mix of characters from 1st and 2rd byte on the same row
     client
@@ -770,7 +778,8 @@ async fn mysql_binary_collation_padding_inner() -> ReadySetResult<()> {
         )
         .await
         .unwrap();
-    ctx.check_results(
+    check_results!(
+        ctx,
         "col_bin_pad",
         "Replication",
         &[
@@ -811,19 +820,16 @@ async fn mysql_binary_collation_padding_inner() -> ReadySetResult<()> {
                 DfValue::ByteArray(vec![0xC2, 0xA5, 0x0].into()),
             ],
         ],
-    )
-    .await?;
+    );
 
     client.stop().await;
     ctx.stop().await;
     shutdown_tx.shutdown().await;
-
-    Ok(())
 }
 
-async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
+async fn mysql_char_collation_padding_inner() {
     let url = &mysql_url();
-    let mut client = DbConnection::connect(url).await?;
+    let mut client = DbConnection::connect(url).await.unwrap();
     client
         .query(
             "
@@ -837,15 +843,19 @@ async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
             INSERT INTO `col_pad` VALUES (3, 'AAA');
             INSERT INTO `col_pad` (id) VALUES (4);",
         )
-        .await?;
-    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
+        .await
+        .unwrap();
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
     ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
         .await
         .unwrap();
-    ctx.check_results(
+    check_results!(
+        ctx,
         "col_pad",
         "Snapshot",
         &[
@@ -867,8 +877,7 @@ async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
             ],
             &[DfValue::Int(4), DfValue::None],
         ],
-    )
-    .await?;
+    );
 
     // Replication and mix of characters from 1st and 3rd byte on the same row
     client
@@ -882,7 +891,8 @@ async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
         )
         .await
         .unwrap();
-    ctx.check_results(
+    check_results!(
+        ctx,
         "col_pad",
         "Replication",
         &[
@@ -921,28 +931,25 @@ async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
             ],
             &[DfValue::Int(8), DfValue::None],
         ],
-    )
-    .await?;
+    );
 
     client.stop().await;
     ctx.stop().await;
     shutdown_tx.shutdown().await;
-
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial(mysql)]
 #[slow]
 async fn mysql_binary_collation_padding() {
-    mysql_binary_collation_padding_inner().await.unwrap();
+    mysql_binary_collation_padding_inner().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial(mysql)]
 #[slow]
 async fn mysql_char_collation_padding() {
-    mysql_char_collation_padding_inner().await.unwrap();
+    mysql_char_collation_padding_inner().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1133,17 +1140,13 @@ async fn replication_catch_up_inner(url: &str) -> ReadySetResult<()> {
     )
     .collect();
     let rs: Vec<&[DfValue]> = rs.iter().map(|r| r.as_slice()).collect();
-    ctx.check_results("catch_up_view", "Catch up", rs.as_slice())
-        .await
-        .unwrap();
+    check_results!(ctx, "catch_up_view", "Catch up", rs.as_slice());
 
     let rs: Vec<_> = (0..TOTAL_INSERTS)
         .map(|i| [DfValue::from(i as i32), DfValue::from("I am a teapot")])
         .collect();
     let rs: Vec<&[DfValue]> = rs.iter().map(|r| r.as_slice()).collect();
-    ctx.check_results("catch_up_pk_view", "Catch up with pk", rs.as_slice())
-        .await
-        .unwrap();
+    check_results!(ctx, "catch_up_pk_view", "Catch up with pk", rs.as_slice());
 
     ctx.stop().await;
 
@@ -1307,7 +1310,8 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
         .unwrap();
 
     // TODO: Those are obviously not the right answers, but at least we don't panic
-    ctx.check_results(
+    check_results!(
+        ctx,
         "dt_test_view",
         "Snapshot",
         &[
@@ -1326,8 +1330,7 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
                 DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
         ],
-    )
-    .await?;
+    );
 
     // Repeat, but this time using binlog replication
     client
@@ -1338,7 +1341,8 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
         )
         .await?;
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "dt_test_view",
         "Replication",
         &[
@@ -1371,8 +1375,7 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
                 DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
         ],
-    )
-    .await?;
+    );
 
     client.stop().await;
     ctx.stop().await;
@@ -1408,13 +1411,12 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "t2_view",
         "skip_unparsable",
         &[&[DfValue::Int(1)], &[DfValue::Int(2)], &[DfValue::Int(3)]],
-    )
-    .await
-    .expect("t2_view initial state incorrect");
+    );
 
     ctx.noria
         .table("t1")
@@ -1437,7 +1439,8 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
         .await
         .expect("query failed");
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "t2_view",
         "skip_unparsable",
         &[
@@ -1448,9 +1451,7 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
             &[DfValue::Int(5)],
             &[DfValue::Int(6)],
         ],
-    )
-    .await
-    .expect("t2 view state incorrect after adding 4, 5, 6");
+    );
 
     ctx.stop().await;
     client.stop().await;
@@ -1544,12 +1545,12 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
         .unwrap();
 
     for view in ["t1_view", "t3_view", "t4_view"] {
-        ctx.check_results(
+        check_results!(
+            ctx,
             view,
             "replication_filter",
             &[&[DfValue::Int(1)], &[DfValue::Int(2)], &[DfValue::Int(3)]],
-        )
-        .await?;
+        );
     }
 
     ctx.noria
@@ -1634,12 +1635,12 @@ async fn replication_all_schemas_inner(url: &str) -> ReadySetResult<()> {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "t4_view",
         "replication_filter",
         &[&[DfValue::Int(1)], &[DfValue::Int(2)], &[DfValue::Int(3)]],
-    )
-    .await?;
+    );
 
     ctx.assert_table_missing("public", "t5").await;
     ctx.assert_table_exists("noria3", "t6").await;
@@ -1700,12 +1701,8 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
         .map(|i| [DfValue::from(i as i32), DfValue::from("I am a teapot")])
         .collect();
     let rs: Vec<&[DfValue]> = rs.iter().map(|r| r.as_slice()).collect();
-    ctx.check_results("repl1_view", "Resnapshot initial", rs.as_slice())
-        .await
-        .unwrap();
-    ctx.check_results("repl2_view", "Resnapshot initial", rs.as_slice())
-        .await
-        .unwrap();
+    check_results!(ctx, "repl1_view", "Resnapshot initial", rs.as_slice());
+    check_results!(ctx, "repl2_view", "Resnapshot initial", rs.as_slice());
 
     // Issue a few ALTER TABLE statements
     client.query("ALTER TABLE repl2 ADD COLUMN x int").await?;
@@ -1733,9 +1730,7 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
         })
         .collect();
     let rs: Vec<&[DfValue]> = rs.iter().map(|r| r.as_slice()).collect();
-    ctx.check_results("repl1_view", "Resnapshot repl1", rs.as_slice())
-        .await
-        .unwrap();
+    check_results!(ctx, "repl1_view", "Resnapshot repl1", rs.as_slice());
 
     // TODO(fran): In theory the view should have been recreated properly, and this step should be
     // redundant
@@ -1766,9 +1761,7 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
     // dropped and recreated, which causes the below call to `check_results()` to fail due to
     // `repl2_view` missing a column. This sleep prevents the issue from happening.
     tokio::time::sleep(Duration::from_secs(1)).await;
-    ctx.check_results("repl2_view", "Resnapshot repl2", rs.as_slice())
-        .await
-        .unwrap();
+    check_results!(ctx, "repl2_view", "Resnapshot repl2", rs.as_slice());
 
     ctx.stop().await;
 
@@ -1832,7 +1825,8 @@ async fn mysql_enum_replication() {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "enum_test_view",
         "Snapshot",
         &[
@@ -1840,9 +1834,7 @@ async fn mysql_enum_replication() {
             &[DfValue::Int(1), DfValue::Int(2)],
             &[DfValue::Int(2), DfValue::Int(0)],
         ],
-    )
-    .await
-    .unwrap();
+    );
 
     // Repeat, but this time using binlog replication
     client
@@ -1855,7 +1847,8 @@ async fn mysql_enum_replication() {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "enum_test_view",
         "Replication",
         &[
@@ -1865,9 +1858,7 @@ async fn mysql_enum_replication() {
             &[DfValue::Int(3), DfValue::Int(1)],
             &[DfValue::Int(4), DfValue::Int(2)],
         ],
-    )
-    .await
-    .unwrap();
+    );
 
     client.stop().await;
     ctx.stop().await;
@@ -1933,7 +1924,8 @@ async fn mysql_binlog_transaction_compression() {
         )
         .await
         .unwrap();
-    ctx.check_results(
+    check_results!(
+        ctx,
         "binlog_compression_test",
         "mysql_binlog_transaction_compression",
         &[
@@ -1941,10 +1933,9 @@ async fn mysql_binlog_transaction_compression() {
             &[DfValue::Int(3), DfValue::Text("I am a big teapot".into())],
             &[DfValue::Int(4), DfValue::Text("I am a tiny teapot".into())],
         ],
-    )
-    .await
-    .unwrap();
-    ctx.check_results(
+    );
+    check_results!(
+        ctx,
         "binlog_compression_test2",
         "mysql_binlog_transaction_compression2",
         &[
@@ -1952,9 +1943,7 @@ async fn mysql_binlog_transaction_compression() {
             &[DfValue::Int(3), DfValue::Text("I am a big teapot".into())],
             &[DfValue::Int(4), DfValue::Text("I am a tiny teapot".into())],
         ],
-    )
-    .await
-    .unwrap();
+    );
 
     client.stop().await;
     ctx.stop().await;
@@ -2206,9 +2195,7 @@ async fn snapshot_telemetry_inner(url: &String) {
         .await
         .unwrap();
 
-    ctx.check_results("noria_view", "Snapshot", SNAPSHOT_RESULT)
-        .await
-        .unwrap();
+    check_results!(ctx, "noria_view", "Snapshot", SNAPSHOT_RESULT);
 
     reporter.run_timeout(Duration::from_millis(20)).await;
 
@@ -2366,13 +2353,12 @@ async fn postgresql_replicate_copy_from() {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "copy_from_v",
         "Snapshot",
         &[&[DfValue::from("snapshot check")]],
-    )
-    .await
-    .unwrap();
+    );
 
     client
         .query(
@@ -2386,17 +2372,16 @@ async fn postgresql_replicate_copy_from() {
         .map(|i| vec![DfValue::from(i.to_string())])
         .sorted()
         .collect::<Vec<_>>();
-    ctx.check_results(
+    let expected_slices = expected_vals
+        .iter()
+        .map(|v| v.as_slice())
+        .collect::<Vec<_>>();
+    check_results!(
+        ctx,
         "copy_from_v",
         "Replication",
-        expected_vals
-            .iter()
-            .map(|v| v.as_slice())
-            .collect::<Vec<_>>()
-            .as_slice(),
-    )
-    .await
-    .unwrap();
+        expected_slices.as_slice()
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -2435,9 +2420,7 @@ async fn postgresql_non_base_offsets() {
         .await
         .unwrap();
 
-    ctx.check_results("v1", "Snapshot", &[&[0.into()]])
-        .await
-        .unwrap();
+    check_results!(ctx, "v1", "Snapshot", &[&[0.into()]]);
 
     shutdown_tx.shutdown().await;
 }
@@ -2481,9 +2464,7 @@ async fn postgresql_orphaned_nodes() {
         .await
         .unwrap();
 
-    ctx.check_results("check_t1", "Snapshot", &[&[99.into()]])
-        .await
-        .unwrap();
+    check_results!(ctx, "check_t1", "Snapshot", &[&[99.into()]]);
 
     shutdown_tx.shutdown().await;
 }
@@ -2519,16 +2500,15 @@ async fn postgresql_replicate_citext() {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "citext_v",
         "Snapshot",
         &[
             &[DfValue::from_str_and_collation("AbC", Collation::Citext)],
             &[DfValue::from_str_and_collation("abc", Collation::Citext)],
         ],
-    )
-    .await
-    .unwrap();
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -2564,7 +2544,8 @@ async fn postgresql_replicate_citext_array() {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "citext_v",
         "Snapshot",
         &[
@@ -2577,9 +2558,7 @@ async fn postgresql_replicate_citext_array() {
                 DfValue::from_str_and_collation("def", Collation::Citext),
             ])],
         ],
-    )
-    .await
-    .unwrap();
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -2616,7 +2595,8 @@ async fn postgresql_replicate_custom_type() {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "enum_table_v",
         "Snapshot",
         &[
@@ -2629,9 +2609,7 @@ async fn postgresql_replicate_custom_type() {
                 DfValue::from(vec![DfValue::from(2), DfValue::from(1)]),
             ],
         ],
-    )
-    .await
-    .unwrap();
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -2668,7 +2646,8 @@ async fn postgresql_replicate_truncate() {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "v",
         "pre-truncate",
         &[
@@ -2676,11 +2655,10 @@ async fn postgresql_replicate_truncate() {
             &[DfValue::from(2)],
             &[DfValue::from(3)],
         ],
-    )
-    .await
-    .unwrap();
+    );
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "v2",
         "pre-truncate",
         &[
@@ -2688,14 +2666,12 @@ async fn postgresql_replicate_truncate() {
             &[DfValue::from(2)],
             &[DfValue::from(3)],
         ],
-    )
-    .await
-    .unwrap();
+    );
 
     client.query("TRUNCATE t, t2").await.unwrap();
 
-    ctx.check_results("v", "post-truncate", &[]).await.unwrap();
-    ctx.check_results("v2", "post-truncate", &[]).await.unwrap();
+    check_results!(ctx, "v", "post-truncate", &[]);
+    check_results!(ctx, "v2", "post-truncate", &[]);
 
     shutdown_tx.shutdown().await;
 }
@@ -2790,7 +2766,8 @@ async fn postgresql_toast_update_unkeyed() {
              CREATE TABLE t (col1 INT, col2 TEXT);
              ALTER TABLE t REPLICA IDENTITY FULL;
              CREATE VIEW v AS SELECT * FROM t;
-             INSERT INTO t VALUES (0, '{toast}');"
+             INSERT INTO t VALUES (0, '{}');",
+            &toast
         ))
         .await
         .unwrap();
@@ -2816,13 +2793,12 @@ async fn postgresql_toast_update_unkeyed() {
         .unwrap();
 
     // Check that ReadySet replicated the update
-    ctx.check_results(
+    check_results!(
+        ctx,
         "v",
         "toast_update_unkeyed",
         &[&[DfValue::from(1), DfValue::from(toast)]],
-    )
-    .await
-    .unwrap();
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -2853,7 +2829,8 @@ async fn postgresql_toast_update_key() {
         .sample_iter(&Alphanumeric)
         .take(9001)
         .map(char::from)
-        .collect::<String>();
+        .collect::<String>()
+        .into();
 
     // Create a TOAST-able table (one with potentially large columns)
     // Create a view so we can check it in ReadySet later
@@ -2889,13 +2866,7 @@ async fn postgresql_toast_update_key() {
         .unwrap();
 
     // Check that ReadySet replicated the update
-    ctx.check_results(
-        "v",
-        "toast_update_key",
-        &[&[DfValue::from(1), DfValue::from(toast)]],
-    )
-    .await
-    .unwrap();
+    check_results!(ctx, "v", "toast_update_key", &[&[DfValue::from(1), toast]],);
 
     shutdown_tx.shutdown().await;
 }
@@ -2963,13 +2934,12 @@ async fn postgresql_toast_update_not_key() {
         .unwrap();
 
     // Check that ReadySet replicated the update
-    ctx.check_results(
+    check_results!(
+        ctx,
         "v",
         "toast_update_not_key",
         &[&[DfValue::from(0), DfValue::from(1), DfValue::from(toast)]],
-    )
-    .await
-    .unwrap();
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -3052,23 +3022,21 @@ async fn pgsql_delete_from_table_without_pk() {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "t",
         "pgsql_delete_from_table_without_pk",
         &[&[DfValue::from(1)], &[DfValue::from(2)]],
-    )
-    .await
-    .unwrap();
+    );
 
     client.query("DELETE FROM t WHERE x = 1").await.unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "t",
         "pgsql_delete_from_table_without_pk",
         &[&[DfValue::from(2)]],
-    )
-    .await
-    .unwrap();
+    );
 
     // Also check newly replicated tables
 
@@ -3080,23 +3048,21 @@ async fn pgsql_delete_from_table_without_pk() {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "t2",
         "pgsql_delete_from_table_without_pk",
         &[&[DfValue::from(1)], &[DfValue::from(2)]],
-    )
-    .await
-    .unwrap();
+    );
 
     client.query("DELETE FROM t2 WHERE y = 1").await.unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "t2",
         "pgsql_delete_from_table_without_pk",
         &[&[DfValue::from(2)]],
-    )
-    .await
-    .unwrap();
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -3165,26 +3131,24 @@ async fn pgsql_dont_replicate_partitioned_table() {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "t_true",
         "pgsql_dont_replicate_partitioned_table",
         &[
             &[DfValue::from(true), DfValue::from(1)],
             &[DfValue::from(true), DfValue::from(2)],
         ],
-    )
-    .await
-    .unwrap();
-    ctx.check_results(
+    );
+    check_results!(
+        ctx,
         "t_false",
         "pgsql_dont_replicate_partitioned_table",
         &[
             &[DfValue::from(false), DfValue::from(10)],
             &[DfValue::from(false), DfValue::from(20)],
         ],
-    )
-    .await
-    .unwrap();
+    );
 
     client
         .query("CREATE TABLE t2 (key int, val int) PARTITION BY RANGE (key)")
@@ -3363,7 +3327,8 @@ async fn mysql_generated_columns() {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "t_generated",
         "test_snapshot",
         &[
@@ -3380,9 +3345,7 @@ async fn mysql_generated_columns() {
                 DfValue::from(5),
             ],
         ],
-    )
-    .await
-    .unwrap();
+    );
 
     // Test Generated Columns during Replication including updating a record and checking the
     // generated columns reflect the update and deleting a record.
@@ -3394,7 +3357,8 @@ async fn mysql_generated_columns() {
         )
         .await
         .unwrap();
-    ctx.check_results(
+    check_results!(
+        ctx,
         "t_generated",
         "test_snapshot",
         &[
@@ -3411,9 +3375,7 @@ async fn mysql_generated_columns() {
                 DfValue::from(13),
             ],
         ],
-    )
-    .await
-    .unwrap();
+    );
     shutdown_tx.shutdown().await;
 }
 
@@ -3444,13 +3406,12 @@ async fn fk_resnapshot_inner(url: &str) -> ReadySetResult<()> {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "fk_table1",
         "Snapshot1",
         &[&[DfValue::Int(1), DfValue::Int(1)]],
-    )
-    .await
-    .unwrap();
+    );
     let fk_relation = Relation {
         schema: Some("public".into()),
         name: "fk_table1".into(),
@@ -3467,16 +3428,15 @@ async fn fk_resnapshot_inner(url: &str) -> ReadySetResult<()> {
         .await
         .unwrap();
 
-    ctx.check_results(
+    check_results!(
+        ctx,
         "fk_table1",
         "Snapshot2",
         &[
             &[DfValue::Int(1), DfValue::Int(1)],
             &[DfValue::Int(2), DfValue::Int(1)],
         ],
-    )
-    .await
-    .unwrap();
+    );
 
     let tables = ctx.noria.tables().await.unwrap();
     let table_index_second_snapshot = tables.get(&fk_relation).unwrap();
@@ -3529,9 +3489,7 @@ async fn mysql_handle_dml_in_statement_events() {
         .await
         .unwrap();
 
-    ctx.check_results("stmt_table", "Snapshot1", &[&[DfValue::Int(1)]])
-        .await
-        .unwrap();
+    check_results!(ctx, "stmt_table", "Snapshot1", &[&[DfValue::Int(1)]]);
 
     // Ensure that:
     // 1. The base table exists
@@ -3595,39 +3553,35 @@ async fn mysql_replicate_json_field() {
         .unwrap();
 
     // Check that the row is replicated correctly
-    ctx.check_results(
-        "j_table",
-        "Snapshot1",
+    check_results!(ctx, "j_table",
+    "Snapshot1",
+    &[
         &[
-            &[
-                DfValue::Int(1),
-                DfValue::Text(
-                    "{\"age\":30,\"car\":[\"Ford\",\"BMW\",\"Fiat\"],\"name\":\"John\"}"
-                        .into(),
-                ),
-                DfValue::Text("A".into()),
-            ],
-            &[
-                DfValue::Int(2),
-                DfValue::Text(
-                    "{\"age\":30,\"car\":[\"Ford\",\"BMW\",\"Fiat\"],\"name\":\"John\"}"
-                        .into(),
-                ),
-                DfValue::Text("A".into()),
-            ],
-            &[
-                DfValue::Int(3),
-                DfValue::Text(
-                    "{\"amount\":{\"amount\":\"0.0\",\"currency\":\"USD\"},\"amount_formatted\":\"$0.00\",\"description\":\"My Description\",\"is_custom\":false}"
-                        .into(),
-                ),
-                DfValue::Text("A".into()),
-            ],
-            &[DfValue::Int(4), DfValue::None, DfValue::Text("A".into())],
+            DfValue::Int(1),
+            DfValue::Text(
+                "{\"age\":30,\"car\":[\"Ford\",\"BMW\",\"Fiat\"],\"name\":\"John\"}"
+                    .into(),
+            ),
+            DfValue::Text("A".into()),
         ],
-    )
-    .await
-    .unwrap();
+        &[
+            DfValue::Int(2),
+            DfValue::Text(
+                "{\"age\":30,\"car\":[\"Ford\",\"BMW\",\"Fiat\"],\"name\":\"John\"}"
+                    .into(),
+            ),
+            DfValue::Text("A".into()),
+        ],
+        &[
+            DfValue::Int(3),
+            DfValue::Text(
+                "{\"amount\":{\"amount\":\"0.0\",\"currency\":\"USD\"},\"amount_formatted\":\"$0.00\",\"description\":\"My Description\",\"is_custom\":false}"
+                    .into(),
+            ),
+            DfValue::Text("A".into()),
+        ],
+        &[DfValue::Int(4), DfValue::None, DfValue::Text("A".into())],
+    ],);
 
     // Update the JSON data
     client
@@ -3636,39 +3590,35 @@ async fn mysql_replicate_json_field() {
         .unwrap();
 
     // Check that the update is replicated correctly
-    ctx.check_results(
-        "j_table",
-        "Replication",
+    check_results!(ctx, "j_table",
+    "Replication",
+    &[
         &[
-            &[
-                DfValue::Int(1),
-                DfValue::Text(
-                    "{\"age\":30,\"car\":[\"Ford\",\"BMW\",\"Fiat\"],\"name\":\"John\"}"
-                        .into(),
-                ),
-                DfValue::Text("B".into()),
-            ],
-            &[
-                DfValue::Int(2),
-                DfValue::Text(
-                    "{\"age\":30,\"car\":[\"Ford\",\"BMW\",\"Fiat\"],\"name\":\"John\"}"
-                        .into(),
-                ),
-                DfValue::Text("B".into()),
-            ],
-            &[
-                DfValue::Int(3),
-                DfValue::Text(
-                    "{\"amount\":{\"amount\":\"0.0\",\"currency\":\"USD\"},\"amount_formatted\":\"$0.00\",\"description\":\"My Description\",\"is_custom\":false}"
-                        .into(),
-                ),
-                DfValue::Text("B".into()),
-            ],
-            &[DfValue::Int(4), DfValue::None, DfValue::Text("B".into())],
+            DfValue::Int(1),
+            DfValue::Text(
+                "{\"age\":30,\"car\":[\"Ford\",\"BMW\",\"Fiat\"],\"name\":\"John\"}"
+                    .into(),
+            ),
+            DfValue::Text("B".into()),
         ],
-    )
-    .await
-    .unwrap();
+        &[
+            DfValue::Int(2),
+            DfValue::Text(
+                "{\"age\":30,\"car\":[\"Ford\",\"BMW\",\"Fiat\"],\"name\":\"John\"}"
+                    .into(),
+            ),
+            DfValue::Text("B".into()),
+        ],
+        &[
+            DfValue::Int(3),
+            DfValue::Text(
+                "{\"amount\":{\"amount\":\"0.0\",\"currency\":\"USD\"},\"amount_formatted\":\"$0.00\",\"description\":\"My Description\",\"is_custom\":false}"
+                    .into(),
+            ),
+            DfValue::Text("B".into()),
+        ],
+        &[DfValue::Int(4), DfValue::None, DfValue::Text("B".into())],
+    ],);
 
     shutdown_tx.shutdown().await;
 }
@@ -3895,12 +3845,8 @@ async fn alter_readyset_add_table_replication_tables() {
         INSERT INTO filter_t2 (id) VALUES (2);"
         .to_string();
     client.query(&query).await.unwrap();
-    ctx.check_results("filter_t1", "filter_t1", &[&[DfValue::from(1)]])
-        .await
-        .unwrap();
-    ctx.check_results("filter_t2", "filter_t2", &[&[DfValue::from(2)]])
-        .await
-        .unwrap();
+    check_results!(ctx, "filter_t1", "filter_t1", &[&[DfValue::from(1)]]);
+    check_results!(ctx, "filter_t2", "filter_t2", &[&[DfValue::from(2)]]);
 
     ctx.stop().await;
     client.stop().await;
@@ -3981,12 +3927,8 @@ async fn alter_readyset_add_table_replication_tables_ignore() {
         INSERT INTO filter_t2 (id) VALUES (2);"
         .to_string();
     client.query(&query).await.unwrap();
-    ctx.check_results("filter_t1", "filter_t1", &[&[DfValue::from(1)]])
-        .await
-        .unwrap();
-    ctx.check_results("filter_t2", "filter_t2", &[&[DfValue::from(2)]])
-        .await
-        .unwrap();
+    check_results!(ctx, "filter_t1", "filter_t1", &[&[DfValue::from(1)]]);
+    check_results!(ctx, "filter_t2", "filter_t2", &[&[DfValue::from(2)]]);
 
     ctx.stop().await;
     client.stop().await;
@@ -4042,13 +3984,9 @@ async fn mysql_minimal_row_based_replication() {
         DfValue::None,
         DfValue::Int(1),
     ];
-    ctx.check_results("no_pk", "no_pk_insert", &[&row])
-        .await
-        .unwrap();
-    ctx.check_results("no_pk_with_uk", "no_pk_with_uk_insert", &[&row])
-        .await
-        .unwrap();
-    ctx.check_results("pk", "pk_insert", &[&row]).await.unwrap();
+    check_results!(ctx, "no_pk", "no_pk_insert", &[&row]);
+    check_results!(ctx, "no_pk_with_uk", "no_pk_with_uk_insert", &[&row]);
+    check_results!(ctx, "pk", "pk_insert", &[&row]);
 
     // update some of the columns
     client
@@ -4071,13 +4009,9 @@ async fn mysql_minimal_row_based_replication() {
         DfValue::None,
         DfValue::Int(1),
     ];
-    ctx.check_results("no_pk", "no_pk_update", &[&row])
-        .await
-        .unwrap();
-    ctx.check_results("no_pk_with_uk", "no_pk_with_uk_update", &[&row])
-        .await
-        .unwrap();
-    ctx.check_results("pk", "pk_update", &[&row]).await.unwrap();
+    check_results!(ctx, "no_pk", "no_pk_update", &[&row]);
+    check_results!(ctx, "no_pk_with_uk", "no_pk_with_uk_update", &[&row]);
+    check_results!(ctx, "pk", "pk_update", &[&row]);
 
     // delete the data
     client
@@ -4091,13 +4025,9 @@ async fn mysql_minimal_row_based_replication() {
     client.query("DELETE FROM pk where x = 1;").await.unwrap();
 
     // Check that the data is deleted
-    ctx.check_results("no_pk", "no_pk_delete", &[])
-        .await
-        .unwrap();
-    ctx.check_results("no_pk_with_uk", "no_pk_with_uk_delete", &[])
-        .await
-        .unwrap();
-    ctx.check_results("pk", "pk_delete", &[]).await.unwrap();
+    check_results!(ctx, "no_pk", "no_pk_delete", &[]);
+    check_results!(ctx, "no_pk_with_uk", "no_pk_with_uk_delete", &[]);
+    check_results!(ctx, "pk", "pk_delete", &[]);
 
     shutdown_tx.shutdown().await;
 }
