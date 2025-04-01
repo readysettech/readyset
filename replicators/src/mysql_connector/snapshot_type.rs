@@ -1,4 +1,4 @@
-use mysql_async::{self as mysql, Value};
+use mysql_async::{self as mysql};
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{Column, SqlIdentifier};
 use readyset_sql::DialectDisplay;
@@ -8,10 +8,11 @@ use super::utils::MYSQL_BATCH_SIZE;
 /// The type of snapshot to be taken
 /// KeyBased: Snapshot based on the primary key or unique key
 /// FullTableScan: Snapshot the entire table
-pub enum SnapshotType {
+pub(crate) enum SnapshotType {
     KeyBased {
         name: Option<SqlIdentifier>,
         keys: Vec<Column>,
+        column_indices: Vec<usize>,
     },
     FullTableScan,
 }
@@ -33,9 +34,26 @@ impl SnapshotType {
             return Ok(SnapshotType::FullTableScan);
         };
 
+        let mut column_indices = Vec::new();
+        for k in keys {
+            let name = k.name.to_lowercase();
+            let Some(col) = cts.fields.iter().enumerate().find_map(|(i, f)| {
+                if name == f.column.name.to_lowercase() {
+                    Some(i)
+                } else {
+                    None
+                }
+            }) else {
+                return Err(readyset_errors::ReadySetError::NoSuchColumn(name));
+            };
+            column_indices.push(col);
+        }
+        assert_eq!(keys.len(), column_indices.len());
+
         Ok(SnapshotType::KeyBased {
             name: name.clone(),
             keys: keys.to_vec(),
+            column_indices,
         })
     }
 
@@ -141,20 +159,21 @@ impl SnapshotType {
     /// * `row` - The row to compute the lower bound from
     pub fn get_lower_bound(&mut self, row: &mysql::Row) -> ReadySetResult<Vec<mysql::Value>> {
         match self {
-            SnapshotType::KeyBased { ref keys, .. } => {
+            SnapshotType::KeyBased {
+                column_indices: cols,
+                ..
+            } => {
                 // Calculate the required capacity using the triangular number formula
-                let capacity = keys.len() * (keys.len() + 1) / 2;
+                let capacity = cols.len() * (cols.len() + 1) / 2;
 
                 let mut new_lower_bound = Vec::with_capacity(capacity);
 
                 // Collect the key values from the row
-                let row_key_values: Vec<Value> = keys
-                    .iter()
-                    .map(|key| row.get(key.name.as_ref()).unwrap())
-                    .collect();
+                let row_key_values: Vec<_> =
+                    cols.iter().map(|col| row.get(*col).unwrap()).collect();
 
                 // Push the key values into the new_lower_bound vector
-                for i in 0..keys.len() {
+                for i in 0..cols.len() {
                     new_lower_bound.extend_from_slice(&row_key_values[..=i]);
                 }
 
