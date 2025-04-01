@@ -1,0 +1,20 @@
+[package]
+name = "support"
+version = "0.1.0"
+edition = "2024"
+publish = false
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
+license = "BSL 1.1"
+description = """\
+Support tool to troubleshoot Readyset."""
+
+[dependencies]
+anyhow = { workspace = true }
+bincode = { workspace = true }
+rocksdb = { workspace = true, features = ["lz4", "jemalloc"] }
+clap = { workspace = true, features = ["derive", "env"] }
+readyset-data = { path = "../readyset-data" }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

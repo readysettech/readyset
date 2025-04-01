@@ -24,6 +24,7 @@ members = [
     "nom-sql",
     "nom-sql-arbitrary",
     "partial-map",
+    "proptest-stateful",
     "psql-srv",
     "query-generator",
     "reader-map",
@@ -57,12 +58,12 @@ members = [
     "readyset-version",
     "replication-offset",
     "replicators",
-    "proptest-stateful",
+    "support",
     "system-benchmarks",
-    "tinylb",
     "test-utils",
     "timestamp-service",
-    "tournament-kway",
+    "tinylb",
+    "tournament-kway"
 ]
 resolver = "2"
 
