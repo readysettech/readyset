@@ -160,6 +160,20 @@ pub struct ColumnBase {
     pub sql_type: SqlType,
 }
 
+impl ColumnBase {
+    pub fn has_default(&self) -> bool {
+        self.constraints
+            .iter()
+            .any(|c| matches!(c, ColumnConstraint::DefaultValue(_)))
+    }
+
+    pub fn is_not_null(&self) -> bool {
+        self.constraints
+            .iter()
+            .any(|c| matches!(c, ColumnConstraint::NotNull))
+    }
+}
+
 /// Combines the specification for a columns with its base name
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnSchema {

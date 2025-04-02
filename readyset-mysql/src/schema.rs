@@ -296,6 +296,12 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
                 _ => mysql_srv::ColumnFlags::empty(),
             };
         }
+        if !base.has_default()
+            && base.is_not_null()
+            && !colflags.contains(mysql_srv::ColumnFlags::AUTO_INCREMENT_FLAG)
+        {
+            colflags |= mysql_srv::ColumnFlags::NO_DEFAULT_VALUE_FLAG;
+        }
     }
 
     Ok(mysql_srv::Column {
