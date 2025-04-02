@@ -213,18 +213,23 @@ macro_rules! eventually {
         compile_error!(concat!("`then_assert` must be specified using closure syntax",
                                "(see `eventually` docs for detail)"))
     };
-    ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? { $($body: tt)* }) => {{
+    ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? $(message: $message: expr,)? { $($body: tt)* }) => {{
         #[allow(unused_variables)]
         let attempts = 40;
         #[allow(unused_variables)]
         let sleep = std::time::Duration::from_millis(500);
-        $(let attempts = $attempts;)?
         // Shadow the above defaults if custom values were provided:
+        $(let attempts = $attempts;)?
         $(let sleep = $sleep;)?
 
         let mut attempt = 0;
         while !async { $($body)* }.await {
+            #[allow(unreachable_code)]
             if attempt > attempts {
+                // Will panic with custom message if provided, otherwise default message
+                $(
+                    panic!("{}", (|| $message )());
+                )?
                 panic!(
                     "{} did not become true after {} attempts",
                     stringify!({ $($body)* }),
