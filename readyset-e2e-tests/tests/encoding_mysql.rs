@@ -122,7 +122,11 @@ where
         .unwrap();
 
     for chunk in values.iter().chunks(1000).into_iter() {
+        let chunk: Vec<_> = chunk.collect();
+        let first_id = chunk.first().unwrap().0;
+        let last_id = chunk.last().unwrap().0;
         let insert_values: String = chunk
+            .iter()
             .map(|(i, h)| format!("({i}, '{h}', UNHEX('{h}'))"))
             .collect::<Vec<String>>()
             .join(",");
@@ -132,24 +136,29 @@ where
             ))
             .await
             .unwrap();
-    }
 
-    // Smoke test to ensure streaming replication has caught up
-    eventually!(attempts: 5, sleep: Duration::from_secs(5), {
-        let count: usize = rs_conn
-            .query_first("SELECT count(*) FROM encoding_streaming")
+        // Smoke test to ensure streaming replication has caught up
+        eventually!(sleep: Duration::from_millis(50), {
+            let count: usize = rs_conn
+                .exec_first("SELECT count(*) FROM encoding_streaming WHERE id >= ? AND id <= ?", (first_id, last_id))
+                .await
+                .unwrap()
+                .unwrap();
+            count == chunk.len()
+        });
+
+        let my_streaming_rows_chunk: Vec<(i64, String, Vec<u8>)> = upstream_conn
+            .exec("SELECT id, hex, text FROM encoding_streaming WHERE id >= ? AND id <= ? ORDER BY id", (first_id, last_id))
             .await
-            .unwrap()
             .unwrap();
-        my_rows.len() == count
-    });
 
-    let rs_streaming_rows: Vec<(i64, String, Vec<u8>)> = rs_conn
-        .query("SELECT id, hex, text FROM encoding_streaming ORDER BY id")
-        .await
-        .unwrap();
+        let rs_streaming_rows_chunk: Vec<(i64, String, Vec<u8>)> = rs_conn
+            .exec("SELECT id, hex, text FROM encoding_streaming WHERE id >= ? AND id <= ? ORDER BY id", (first_id, last_id))
+            .await
+            .unwrap();
 
-    check_rows!(my_rows, rs_streaming_rows);
+        check_rows!(my_streaming_rows_chunk, rs_streaming_rows_chunk);
+    }
 
     shutdown_tx.shutdown().await;
 }
