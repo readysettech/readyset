@@ -106,21 +106,20 @@ pub struct Leader {
 
     pub(super) running_recovery: Option<watch::Receiver<ReadySetResult<()>>>,
 
-    /// Controller Sender - This channel is a way to communicate between Controller -> Replication
-    /// This lets the replication act on ControllerMessage.
-    pub(super) controller_sender: UnboundedSender<ControllerMessage>,
+    /// This channel is for sending events to the replicator.
+    pub(super) replicator_tx: UnboundedSender<ReplicatorMessage>,
 
-    pub(super) notification_sender: UnboundedSender<ReplicatorMessage>,
+    /// This channel is for sending events to the controller.
+    pub(super) controller_tx: UnboundedSender<ControllerMessage>,
 }
 
 impl Leader {
-    /// Run all tasks required to be the leader. This may spawn tasks that
-    /// may become ready asynchronously. The notification channel is used to notify the Controller
-    /// of replication events.
+    /// Run all tasks required to be the leader. This may spawn tasks that may become ready
+    /// asynchronously. controller_tx is used to notify the Controller of events.
     pub(super) async fn start(
         &mut self,
-        notification_channel: UnboundedSender<ReplicatorMessage>,
-        controller_channel: UnboundedReceiver<ControllerMessage>,
+        controller_tx: UnboundedSender<ControllerMessage>,
+        replicator_rx: UnboundedReceiver<ReplicatorMessage>,
         telemetry_sender: TelemetrySender,
         shutdown_rx: ShutdownReceiver,
     ) {
@@ -145,13 +144,8 @@ impl Leader {
 
         // When the controller becomes the leader, we need to read updates
         // from the binlog.
-        self.start_replication_task(
-            notification_channel,
-            controller_channel,
-            telemetry_sender,
-            shutdown_rx,
-        )
-        .await;
+        self.start_replication_task(controller_tx, replicator_rx, telemetry_sender, shutdown_rx)
+            .await;
     }
 
     /// Start replication/binlog synchronization in an infinite loop
@@ -162,8 +156,8 @@ impl Leader {
     /// TODO: how to handle the case where we need a full new replica
     async fn start_replication_task(
         &mut self,
-        notification_channel: UnboundedSender<ReplicatorMessage>,
-        mut controller_channel: UnboundedReceiver<ControllerMessage>,
+        controller_tx: UnboundedSender<ControllerMessage>,
+        mut replicator_rx: UnboundedReceiver<ReplicatorMessage>,
         telemetry_sender: TelemetrySender,
         mut shutdown_rx: ShutdownReceiver,
     ) {
@@ -173,7 +167,7 @@ impl Leader {
             // upstream.
             // Ignore the result since we will not error unless we have somehow dropped the rx half
             // of the channel
-            let _ = notification_channel.send(ReplicatorMessage::SnapshotDone);
+            let _ = controller_tx.send(ControllerMessage::SnapshotDone);
             info!("No primary instance specified");
             return;
         }
@@ -181,8 +175,7 @@ impl Leader {
             Ok(url) => url,
             Err(e) => {
                 error!("Error in replication config: {e}");
-                if let Err(e) = notification_channel.send(ReplicatorMessage::UnrecoverableError(e))
-                {
+                if let Err(e) = controller_tx.send(ControllerMessage::UnrecoverableError(e)) {
                     error!("Failed to notify controller of replication config error: {e}");
                 }
                 return;
@@ -200,8 +193,7 @@ impl Leader {
             Ok(table_filter) => table_filter,
             Err(e) => {
                 error!("Error in replication filter config: {e}");
-                if let Err(e) = notification_channel.send(ReplicatorMessage::UnrecoverableError(e))
-                {
+                if let Err(e) = controller_tx.send(ControllerMessage::UnrecoverableError(e)) {
                     error!("Failed to notify controller of replication filter config error: {e}");
                 }
                 return;
@@ -231,8 +223,8 @@ impl Leader {
                         &config,
                         &url,
                         &mut table_filter,
-                        &notification_channel,
-                        &mut controller_channel,
+                        &controller_tx,
+                        &mut replicator_rx,
                         telemetry_sender.clone(),
                         server_startup,
                         replicator_statement_logging,
@@ -242,8 +234,8 @@ impl Leader {
                         // Unrecoverable errors, propagate the error the controller and kill the
                         // loop.
                         Err(err @ ReadySetError::RecipeInvariantViolated(_)) => {
-                            if let Err(e) = notification_channel
-                                .send(ReplicatorMessage::UnrecoverableError(err))
+                            if let Err(e) =
+                                controller_tx.send(ControllerMessage::UnrecoverableError(err))
                             {
                                 error!(error = %e, "Could not notify controller of critical error. The system may be in an invalid state");
                             }
@@ -260,8 +252,7 @@ impl Leader {
                             );
                             // Send the error to the controller so that we can update the replicator
                             // status
-                            let _ = notification_channel
-                                .send(ReplicatorMessage::RecoverableError(error));
+                            let _ = controller_tx.send(ControllerMessage::RecoverableError(error));
                             tokio::time::sleep(replicator_restart_timeout).await;
                         }
                     }
@@ -416,15 +407,15 @@ impl Leader {
             }
             (&Method::GET | &Method::POST, "/enter_maintenance_mode") => {
                 let _ = self
-                    .notification_sender
-                    .send(ReplicatorMessage::EnterMaintenanceMode);
+                    .controller_tx
+                    .send(ControllerMessage::EnterMaintenanceMode);
                 warn!("Entering maintenance mode");
                 return_serialized!(());
             }
             (&Method::GET | &Method::POST, "/exit_maintenance_mode") => {
                 let _ = self
-                    .notification_sender
-                    .send(ReplicatorMessage::ExitMaintenanceMode);
+                    .controller_tx
+                    .send(ControllerMessage::ExitMaintenanceMode);
                 warn!("Exiting maintenance mode");
                 return_serialized!(());
             }
@@ -443,15 +434,15 @@ impl Leader {
             (&Method::POST, "/resnapshot_table") => {
                 let table: Relation = bincode::deserialize(&body)?;
                 let _ = self
-                    .controller_sender
-                    .send(ControllerMessage::ResnapshotTable { table });
+                    .replicator_tx
+                    .send(ReplicatorMessage::ResnapshotTable { table });
                 return_serialized!(());
             }
             (&Method::POST, "/add_filter_tables") => {
                 let tables: Vec<Relation> = bincode::deserialize(&body)?;
                 let _ = self
-                    .controller_sender
-                    .send(ControllerMessage::AddTables { tables });
+                    .replicator_tx
+                    .send(ReplicatorMessage::AddTables { tables });
                 return_serialized!(());
             }
             (&Method::POST, "/non_replicated_relations") => {
@@ -1051,8 +1042,8 @@ impl Leader {
         replicator_config: UpstreamConfig,
         worker_request_timeout: Duration,
         background_recovery_interval: Duration,
-        controller_sender: UnboundedSender<ControllerMessage>,
-        notification_sender: UnboundedSender<ReplicatorMessage>,
+        replicator_tx: UnboundedSender<ReplicatorMessage>,
+        controller_tx: UnboundedSender<ControllerMessage>,
     ) -> Self {
         assert_ne!(state.config.min_workers, 0);
 
@@ -1073,8 +1064,8 @@ impl Leader {
             running_migrations: Default::default(),
             background_task_failed,
             running_recovery: None,
-            controller_sender,
-            notification_sender,
+            replicator_tx,
+            controller_tx,
         }
     }
 }

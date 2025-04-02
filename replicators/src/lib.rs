@@ -15,8 +15,8 @@ pub use replication_offset::mysql::MySqlPosition;
 pub use replication_offset::postgres::PostgresPosition;
 use tracing::info;
 
-/// Event notifications sent from the replicator to the controller.
-pub enum ReplicatorMessage {
+/// Event notification sent to the controller.
+pub enum ControllerMessage {
     /// The replicator finished an initial base table snapshot
     SnapshotDone,
     /// The replicator finished startup and entered the main replication loop
@@ -32,8 +32,8 @@ pub enum ReplicatorMessage {
     ExitMaintenanceMode,
 }
 
-/// Event notification sent from the controller to the replicator
-pub enum ControllerMessage {
+/// Event notification sent to the replicator.
+pub enum ReplicatorMessage {
     /// Drop the specified table and require a new partial snapshot
     ResnapshotTable { table: Relation },
     /// Add new tables to the replicator filter

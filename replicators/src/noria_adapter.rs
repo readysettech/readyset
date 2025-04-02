@@ -165,8 +165,8 @@ impl<'a> NoriaAdapter<'a> {
         config: &UpstreamConfig,
         url: &DatabaseURL,
         table_filter: &mut TableFilter,
-        notification_channel: &UnboundedSender<ReplicatorMessage>,
-        controller_channel: &mut UnboundedReceiver<ControllerMessage>,
+        controller_tx: &UnboundedSender<ControllerMessage>,
+        replicator_rx: &mut UnboundedReceiver<ReplicatorMessage>,
         telemetry_sender: TelemetrySender,
         server_startup: bool,
         enable_statement_logging: bool,
@@ -183,8 +183,8 @@ impl<'a> NoriaAdapter<'a> {
                         options,
                         noria,
                         config,
-                        notification_channel,
-                        controller_channel,
+                        controller_tx,
+                        replicator_rx,
                         resnapshot,
                         &telemetry_sender,
                         enable_statement_logging,
@@ -224,8 +224,8 @@ impl<'a> NoriaAdapter<'a> {
                         options,
                         noria,
                         config,
-                        notification_channel,
-                        controller_channel,
+                        controller_tx,
+                        replicator_rx,
                         resnapshot,
                         full_snapshot,
                         &telemetry_sender,
@@ -277,8 +277,8 @@ impl<'a> NoriaAdapter<'a> {
         mysql_options: mysql::Opts,
         mut noria: ReadySetHandle,
         config: &UpstreamConfig,
-        notification_channel: &UnboundedSender<ReplicatorMessage>,
-        controller_channel: &mut UnboundedReceiver<ControllerMessage>,
+        controller_tx: &UnboundedSender<ControllerMessage>,
+        replicator_rx: &mut UnboundedReceiver<ReplicatorMessage>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
@@ -463,12 +463,7 @@ impl<'a> NoriaAdapter<'a> {
                 info!(start = %current_pos, end = %max, "Catching up");
                 let max = max.clone();
                 adapter
-                    .main_loop(
-                        &mut current_pos,
-                        Some(max),
-                        notification_channel,
-                        controller_channel,
-                    )
+                    .main_loop(&mut current_pos, Some(max), controller_tx, replicator_rx)
                     .await?;
             }
             _ => {}
@@ -476,16 +471,11 @@ impl<'a> NoriaAdapter<'a> {
 
         // Let Controller know that the initial snapshotting is complete. Ignores the error, which
         // will not occur unless the Controller dropped the rx half of this channel.
-        let _ = notification_channel.send(ReplicatorMessage::SnapshotDone);
+        let _ = controller_tx.send(ControllerMessage::SnapshotDone);
 
         info!(position = %current_pos, "Streaming replication started");
         adapter
-            .main_loop(
-                &mut current_pos,
-                None,
-                notification_channel,
-                controller_channel,
-            )
+            .main_loop(&mut current_pos, None, controller_tx, replicator_rx)
             .await?;
 
         unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
@@ -496,8 +486,8 @@ impl<'a> NoriaAdapter<'a> {
         pgsql_opts: pgsql::Config,
         mut noria: ReadySetHandle,
         config: &UpstreamConfig,
-        notification_channel: &UnboundedSender<ReplicatorMessage>,
-        controller_channel: &mut UnboundedReceiver<ControllerMessage>,
+        controller_tx: &UnboundedSender<ControllerMessage>,
+        replicator_rx: &mut UnboundedReceiver<ReplicatorMessage>,
         resnapshot: bool,
         mut full_resnapshot: bool,
         telemetry_sender: &TelemetrySender,
@@ -722,22 +712,17 @@ impl<'a> NoriaAdapter<'a> {
         if min_pos != max_pos {
             info!(start = %min_pos, end = %max_pos, "Catching up");
             adapter
-                .main_loop(
-                    &mut min_pos,
-                    Some(max_pos),
-                    notification_channel,
-                    controller_channel,
-                )
+                .main_loop(&mut min_pos, Some(max_pos), controller_tx, replicator_rx)
                 .await?;
         }
 
         // Let Controller know that the initial snapshotting is complete. Ignores the error, which
         // will not occur unless the Controller dropped the rx half of this channel.
-        let _ = notification_channel.send(ReplicatorMessage::SnapshotDone);
+        let _ = controller_tx.send(ControllerMessage::SnapshotDone);
 
         info!(position = %min_pos, "Streaming replication started");
         adapter
-            .main_loop(&mut min_pos, None, notification_channel, controller_channel)
+            .main_loop(&mut min_pos, None, controller_tx, replicator_rx)
             .await?;
 
         unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
@@ -1046,14 +1031,14 @@ impl<'a> NoriaAdapter<'a> {
         &mut self,
         position: &mut ReplicationOffset,
         until: Option<ReplicationOffset>,
-        notification_channel: &UnboundedSender<ReplicatorMessage>,
-        controller_channel: &mut UnboundedReceiver<ControllerMessage>,
+        controller_tx: &UnboundedSender<ControllerMessage>,
+        replicator_rx: &mut UnboundedReceiver<ReplicatorMessage>,
     ) -> ReadySetResult<()> {
         // Notify the controller that we've started replication if we've entered the main (not
         // catchup) replication loop.
         if until.is_none() {
             // Will not error unless the Controller has dropped the rx half of the channel
-            let _ = notification_channel.send(ReplicatorMessage::ReplicationStarted);
+            let _ = controller_tx.send(ControllerMessage::ReplicationStarted);
         }
 
         loop {
@@ -1103,12 +1088,12 @@ impl<'a> NoriaAdapter<'a> {
                     }
                     Err(e) => return Err(e),
                 },
-                control_message = controller_channel.recv() => match control_message {
-                    Some(ControllerMessage::ResnapshotTable { table }) => {
+                replicator_message = replicator_rx.recv() => match replicator_message {
+                    Some(ReplicatorMessage::ResnapshotTable { table }) => {
                         self.drop_table_for_resnapshot(table).await?;
                         return Err(ReadySetError::ResnapshotNeeded);
                     }
-                    Some(ControllerMessage::AddTables { tables }) => {
+                    Some(ReplicatorMessage::AddTables { tables }) => {
                         for table in tables {
                             if !self.table_filter.should_be_processed(table.schema.as_deref().unwrap(), &table.name) {
                                 self.table_filter.allow_replication(table.schema.as_deref().unwrap(), &table.name);

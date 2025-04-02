@@ -120,26 +120,26 @@ const RECONNECT_RESULT: &[&[DfValue]] = &[
     &[DfValue::Int(50), tiny(b"xyz"), DfValue::Int(60)],
 ];
 
-/// Channel used to send notifications from the replicator. Contains the sender since the replicator
-/// takes a reference to the sender, and contains the receiver to listen to notifications in tests.
-struct TestChannel(UnboundedReceiver<ReplicatorMessage>);
+/// Channel used to receive notifications from the replicator. Contains the receiver since the
+/// replicator takes a reference to the sender.
+struct TestChannel(UnboundedReceiver<ControllerMessage>);
 
 impl TestChannel {
-    /// Creates a new `TestReceiver`. Also returns a static reference to the sender so that it can
-    /// be moved into tokio::spawn.
-    pub fn new() -> (&'static mut UnboundedSender<ReplicatorMessage>, Self) {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-        let sender = Box::leak(Box::new(sender));
-        (sender, Self(receiver))
+    /// Creates a new mock controller channel. Also returns a static reference to the sender so
+    /// that it can be moved into tokio::spawn.
+    pub fn new() -> (&'static mut UnboundedSender<ControllerMessage>, Self) {
+        let (controller_tx, controller_rx) = tokio::sync::mpsc::unbounded_channel();
+        let controller_tx = Box::leak(Box::new(controller_tx));
+        (controller_tx, Self(controller_rx))
     }
 
-    /// Returns after receiving `ReplicatorMessage::SnapshotDone`. Errors on receiving any other
+    /// Returns after receiving `ControllerMessage::SnapshotDone`. Errors on receiving any other
     /// message, which should not happen if this is called when waiting for snapshotting to
     /// complete.
     async fn snapshot_completed(&mut self) -> ReadySetResult<()> {
         match self.0.recv().await {
-            Some(ReplicatorMessage::SnapshotDone) => Ok(()),
-            Some(ReplicatorMessage::UnrecoverableError(e)) => Err(e),
+            Some(ControllerMessage::SnapshotDone) => Ok(()),
+            Some(ControllerMessage::UnrecoverableError(e)) => Err(e),
             _ => internal!(),
         }
     }
@@ -153,8 +153,8 @@ struct TestHandle {
     // We spin a whole runtime for the replication task because the tokio postgres
     // connection spawns a background task we can only terminate by dropping the runtime
     replication_rt: Option<tokio::runtime::Runtime>,
-    notification_channel: Option<TestChannel>,
-    controll_channel: Option<UnboundedSender<ControllerMessage>>,
+    controller_rx: Option<TestChannel>,
+    replicator_tx: Option<UnboundedSender<ReplicatorMessage>>,
 }
 
 impl Drop for TestHandle {
@@ -320,10 +320,10 @@ impl TestHandle {
             noria,
             authority,
             replication_rt: None,
-            notification_channel: None,
-            controll_channel: None,
+            controller_rx: None,
+            replicator_tx: None,
         };
-        handle.controll_channel = Some(handle.start_repl(config, telemetry_sender, true).await?);
+        handle.replicator_tx = Some(handle.start_repl(config, telemetry_sender, true).await?);
 
         Ok((handle, shutdown_tx))
     }
@@ -347,16 +347,16 @@ impl TestHandle {
         config: Option<Config>,
         telemetry_sender: TelemetrySender,
         server_startup: bool,
-    ) -> ReadySetResult<tokio::sync::mpsc::UnboundedSender<ControllerMessage>> {
+    ) -> ReadySetResult<tokio::sync::mpsc::UnboundedSender<ReplicatorMessage>> {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let controller = ReadySetHandle::new(Arc::clone(&self.authority)).await;
 
-        let (sender, receiver) = TestChannel::new();
-        let (controll_sender, mut controll_receiver): (
-            UnboundedSender<ControllerMessage>,
-            UnboundedReceiver<ControllerMessage>,
+        let (controller_tx, controller_rx) = TestChannel::new();
+        let (replicator_tx, mut replicator_rx): (
+            UnboundedSender<ReplicatorMessage>,
+            UnboundedReceiver<ReplicatorMessage>,
         ) = tokio::sync::mpsc::unbounded_channel();
-        self.notification_channel = Some(receiver);
+        self.controller_rx = Some(controller_rx);
         let (replication_tables, replication_tables_ignore) = if let Some(config) = &config {
             (
                 config.replication_tables.as_deref(),
@@ -387,23 +387,23 @@ impl TestHandle {
                 },
                 &url,
                 &mut table_filter,
-                sender,
-                &mut controll_receiver,
+                controller_tx,
+                &mut replicator_rx,
                 telemetry_sender,
                 server_startup,
                 false, // disable statement logging in tests
             )
             .await;
             error!(%error, "Error in replicator");
-            let _ = sender.send(ReplicatorMessage::UnrecoverableError(error));
+            let _ = controller_tx.send(ControllerMessage::UnrecoverableError(error));
         });
 
         // keep at least one sender open
-        let controll_sender_clone = controll_sender.clone();
+        let replicator_tx_clone = replicator_tx.clone();
         runtime.spawn(async move {
             loop {
                 sleep(Duration::from_secs(1)).await;
-                if controll_sender_clone.is_closed() {
+                if replicator_tx_clone.is_closed() {
                     break;
                 }
             }
@@ -413,7 +413,7 @@ impl TestHandle {
             rt.shutdown_background();
         }
 
-        Ok(controll_sender)
+        Ok(replicator_tx)
     }
 
     async fn check_results(
@@ -537,7 +537,7 @@ async fn replication_test_multiple(url: &str) -> ReadySetResult<()> {
         TestHandle::start_noria(url.to_string(), Some(config_two)).await?;
 
     for ctx in [&mut ctx_one, &mut ctx_two] {
-        ctx.notification_channel
+        ctx.controller_rx
             .as_mut()
             .unwrap()
             .snapshot_completed()
@@ -563,7 +563,7 @@ async fn replication_test_inner(url: &str) {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -726,7 +726,7 @@ async fn mysql_binary_collation_padding_inner() -> ReadySetResult<()> {
         )
         .await?;
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -839,7 +839,7 @@ async fn mysql_char_collation_padding_inner() -> ReadySetResult<()> {
         )
         .await?;
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -1119,7 +1119,7 @@ async fn replication_catch_up_inner(url: &str) -> ReadySetResult<()> {
     }
 
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -1179,7 +1179,7 @@ async fn replication_many_tables_inner(url: &str) -> ReadySetResult<()> {
     }
 
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -1235,7 +1235,7 @@ async fn replication_big_tables_inner(url: &str) -> ReadySetResult<()> {
     }
 
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -1299,7 +1299,7 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
         .await?;
 
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -1401,7 +1401,7 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .expect("failed to start noria");
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -1495,7 +1495,7 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
     )
     .await?;
 
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -1599,7 +1599,7 @@ async fn replication_all_schemas_inner(url: &str) -> ReadySetResult<()> {
     )
     .await?;
 
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -1689,7 +1689,7 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
     }
 
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -1825,7 +1825,7 @@ async fn mysql_enum_replication() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -1909,7 +1909,7 @@ async fn mysql_binlog_transaction_compression() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -1971,7 +1971,7 @@ async fn postgresql_ddl_replicate_drop_table_internal(url: &str) {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2019,7 +2019,7 @@ async fn postgresql_ddl_replicate_create_table_internal(url: &str) {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2054,7 +2054,7 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2126,7 +2126,7 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2199,7 +2199,7 @@ async fn snapshot_telemetry_inner(url: &String) {
         TestHandle::start_noria_with_builder(url.to_string(), None, builder)
             .await
             .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2273,7 +2273,7 @@ async fn applies_replication_table_updates_on_restart(url: &str) {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2303,7 +2303,7 @@ async fn applies_replication_table_updates_on_restart(url: &str) {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2359,7 +2359,7 @@ async fn postgresql_replicate_copy_from() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2428,7 +2428,7 @@ async fn postgresql_non_base_offsets() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2474,7 +2474,7 @@ async fn postgresql_orphaned_nodes() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2512,7 +2512,7 @@ async fn postgresql_replicate_citext() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2557,7 +2557,7 @@ async fn postgresql_replicate_citext_array() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2609,7 +2609,7 @@ async fn postgresql_replicate_custom_type() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2661,7 +2661,7 @@ async fn postgresql_replicate_truncate() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2802,7 +2802,7 @@ async fn postgresql_toast_update_unkeyed() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2875,7 +2875,7 @@ async fn postgresql_toast_update_key() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2948,7 +2948,7 @@ async fn postgresql_toast_update_not_key() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -2996,7 +2996,7 @@ async fn pgsql_unsupported() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3045,7 +3045,7 @@ async fn pgsql_delete_from_table_without_pk() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3130,7 +3130,7 @@ async fn pgsql_dont_replicate_partitioned_table() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3224,7 +3224,7 @@ async fn mysql_dont_replicate_unsupported_storage_engine() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3295,7 +3295,7 @@ async fn mysql_dont_enforce_fk_replication() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3356,7 +3356,7 @@ async fn mysql_generated_columns() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3437,7 +3437,7 @@ async fn fk_resnapshot_inner(url: &str) -> ReadySetResult<()> {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3522,7 +3522,7 @@ async fn mysql_handle_dml_in_statement_events() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3587,7 +3587,7 @@ async fn mysql_replicate_json_field() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3692,7 +3692,7 @@ async fn snapshot_rejects_table_with_big_decimal() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3724,7 +3724,7 @@ async fn replicate_rejects_table_with_big_decimal() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3769,7 +3769,7 @@ async fn snapshot_rejects_table_with_big_numeric() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3801,7 +3801,7 @@ async fn replicate_rejects_table_with_big_numeric() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3855,7 +3855,7 @@ async fn alter_readyset_add_table_replication_tables() {
     .await
     .unwrap();
 
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3874,10 +3874,10 @@ async fn alter_readyset_add_table_replication_tables() {
         schema: Some("noria2".into()),
         name: "filter_t4".into(),
     };
-    ctx.controll_channel
+    ctx.replicator_tx
         .as_ref()
         .unwrap()
-        .send(ControllerMessage::AddTables {
+        .send(ReplicatorMessage::AddTables {
             tables: vec![table_2.clone(), table_4.clone()],
         })
         .unwrap();
@@ -3935,7 +3935,7 @@ async fn alter_readyset_add_table_replication_tables_ignore() {
     .await
     .unwrap();
 
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()
@@ -3958,10 +3958,10 @@ async fn alter_readyset_add_table_replication_tables_ignore() {
         schema: Some("noria2".into()),
         name: "filter_t3".into(),
     };
-    ctx.controll_channel
+    ctx.replicator_tx
         .as_ref()
         .unwrap()
-        .send(ControllerMessage::AddTables {
+        .send(ReplicatorMessage::AddTables {
             tables: vec![table_1.clone(), table_2.clone(), table_3.clone()],
         })
         .unwrap();
@@ -4014,7 +4014,7 @@ async fn mysql_minimal_row_based_replication() {
         .await
         .unwrap();
 
-    ctx.notification_channel
+    ctx.controller_rx
         .as_mut()
         .unwrap()
         .snapshot_completed()

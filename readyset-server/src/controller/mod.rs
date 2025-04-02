@@ -199,33 +199,30 @@ impl Worker {
 /// Type alias for "a worker's URI" (as reported in a `RegisterPayload`).
 type WorkerIdentifier = Url;
 
-/// Channel used to notify the controller of replicator events. This channel conveys information on
-/// replicator status and allows us to gracefully kill the controller loop in the event of an
-/// unrecoverable replicator error.
-pub struct ReplicatorChannel {
-    sender: UnboundedSender<ReplicatorMessage>,
-    receiver: UnboundedReceiver<ReplicatorMessage>,
+/// Channel used to notify the controller of events.
+pub struct ControllerChannel {
+    sender: UnboundedSender<ControllerMessage>,
+    receiver: UnboundedReceiver<ControllerMessage>,
 }
 
-impl ReplicatorChannel {
+impl ControllerChannel {
     fn new() -> Self {
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         Self { sender, receiver }
     }
 
-    fn sender(&self) -> UnboundedSender<ReplicatorMessage> {
+    fn sender(&self) -> UnboundedSender<ControllerMessage> {
         self.sender.clone()
     }
 }
 
-/// Channel used to notify the replication about controller events.
-/// This is the other way around communication from Replicator Channel
-pub struct ControllerChannel {
-    sender: UnboundedSender<ControllerMessage>,
-    receiver: Option<UnboundedReceiver<ControllerMessage>>,
+/// Channel used to notify the replicator about events.
+pub struct ReplicatorChannel {
+    sender: UnboundedSender<ReplicatorMessage>,
+    receiver: Option<UnboundedReceiver<ReplicatorMessage>>,
 }
 
-impl ControllerChannel {
+impl ReplicatorChannel {
     fn new() -> Self {
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         Self {
@@ -234,11 +231,11 @@ impl ControllerChannel {
         }
     }
 
-    fn receiver(&mut self) -> UnboundedReceiver<ControllerMessage> {
+    fn receiver(&mut self) -> UnboundedReceiver<ReplicatorMessage> {
         self.receiver.take().unwrap()
     }
 
-    fn sender(&self) -> UnboundedSender<ControllerMessage> {
+    fn sender(&self) -> UnboundedSender<ReplicatorMessage> {
         self.sender.clone()
     }
 }
@@ -386,11 +383,11 @@ pub struct Controller {
     /// Cache ddl statements to re-run after a backwards incompatible upgrade, if relevant
     cache_ddl: Option<Vec<CacheDDLRequest>>,
 
-    /// Channel used to notify the controller of replicator events.
-    replicator_channel: ReplicatorChannel,
-
-    /// Channel used to notify the replicator of controller events.
+    /// Channel used to notify the controller of events.
     controller_channel: ControllerChannel,
+
+    /// Channel used to notify the replicator of events.
+    replicator_channel: ReplicatorChannel,
 
     /// Provides the ability to report metrics to Segment
     telemetry_sender: TelemetrySender,
@@ -430,8 +427,8 @@ impl Controller {
             config,
             leader_ready: Arc::new(AtomicBool::new(false)),
             maintenance_mode: Arc::new(AtomicBool::new(false)),
-            replicator_channel: ReplicatorChannel::new(),
             controller_channel: ControllerChannel::new(),
+            replicator_channel: ReplicatorChannel::new(),
             telemetry_sender,
             permissive_writes,
             shutdown_rx,
@@ -537,15 +534,15 @@ impl Controller {
                     self.config.replicator_config.clone(),
                     self.config.worker_request_timeout,
                     self.config.background_recovery_interval,
-                    self.controller_channel.sender(),
                     self.replicator_channel.sender(),
+                    self.controller_channel.sender(),
                 );
                 self.leader_ready.store(false, Ordering::Release);
 
                 leader
                     .start(
-                        self.replicator_channel.sender(),
-                        self.controller_channel.receiver(),
+                        self.controller_channel.sender(),
+                        self.replicator_channel.receiver(),
                         self.telemetry_sender.clone(),
                         self.shutdown_rx.clone(),
                     )
@@ -691,21 +688,21 @@ impl Controller {
                         }
                     }
                 }
-                req = self.replicator_channel.receiver.recv() => {
+                req = self.controller_channel.receiver.recv() => {
                     fn now() -> u64 {
                         SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
                     }
 
                     match req {
                         Some(msg) => match msg {
-                            ReplicatorMessage::UnrecoverableError(e) => return Err(e),
-                            ReplicatorMessage::EnterMaintenanceMode => {
+                            ControllerMessage::UnrecoverableError(e) => return Err(e),
+                            ControllerMessage::EnterMaintenanceMode => {
                                 self.maintenance_mode.store(true, Ordering::Release);
                             }
-                            ReplicatorMessage::ExitMaintenanceMode => {
+                            ControllerMessage::ExitMaintenanceMode => {
                                 self.maintenance_mode.store(false, Ordering::Release);
                             }
-                            ReplicatorMessage::SnapshotDone => {
+                            ControllerMessage::SnapshotDone => {
                                 self.leader_ready.store(true, Ordering::Release);
 
                                 self.maybe_recreate_caches().await?;
@@ -718,7 +715,7 @@ impl Controller {
                                     error!(%error, "Failed to persist stats in the Authority");
                                 }
                             },
-                            ReplicatorMessage::ReplicationStarted => {
+                            ControllerMessage::ReplicationStarted => {
                                 let now = now();
                                 if let Err(error) = self.authority.update_persistent_stats(|stats| {
                                     let mut stats = stats.unwrap_or_default();
@@ -730,7 +727,7 @@ impl Controller {
                                     error!(%error, "Failed to persist stats in the Authority");
                                 }
                             },
-                            ReplicatorMessage::RecoverableError(e) => {
+                            ControllerMessage::RecoverableError(e) => {
                                 if let Err(error) = self.authority.update_persistent_stats(|stats| {
                                     let mut stats = stats.unwrap_or_default();
                                     let error = if let ReadySetError::ReplicationFailed(msg) = &e {
