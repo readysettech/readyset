@@ -1159,7 +1159,19 @@ impl<'a> NoriaAdapter<'a> {
             table = %table.display(readyset_sql::Dialect::PostgreSQL),
             "Removing table state from readyset"
         );
-        self.noria.replication_offsets().await?;
+
+        // In case of a domain failure, we might be replacing the failed domain.
+        // and at the same time attempting to remove a table from readyset.
+        // We need to wait for the new domain to be ready before removing the table.
+        retry_with_exponential_backoff(
+            || async {
+                let mut noria = self.noria.clone();
+                noria.replication_offsets().await
+            },
+            5,
+            Duration::from_millis(250),
+        )
+        .await?;
         self.replication_offsets.tables.remove(&table);
         self.mutator_map.remove(&table);
         // Dropping the table cleans up any dataflow state that may have been made as well as
