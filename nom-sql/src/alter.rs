@@ -159,8 +159,11 @@ fn rename_column(
     move |i| {
         let (i, _) = tag_no_case("rename")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, _) = tag_no_case("column")(i)?;
-        let (i, _) = whitespace1(i)?;
+
+        let i = match dialect {
+            Dialect::MySQL => terminated(tag_no_case("column"), whitespace1)(i)?.0,
+            Dialect::PostgreSQL => opt(terminated(tag_no_case("column"), whitespace1))(i)?.0,
+        };
 
         let (i, name) = dialect.identifier()(i)?;
 
@@ -1518,6 +1521,24 @@ mod tests {
                 }]
             );
         }
+
+        #[test]
+        fn alter_table_rename_to() {
+            let res = test_parse!(
+                alter_table_statement(Dialect::PostgreSQL),
+                b"ALTER TABLE t RENAME x TO y"
+            );
+
+            assert_eq!(res.table, "t".into());
+            assert_eq!(
+                res.definitions.unwrap(),
+                vec![AlterTableDefinition::RenameColumn {
+                    name: "x".into(),
+                    new_name: "y".into()
+                }]
+            );
+        }
+
         #[test]
         fn alter_table_resnapshot() {
             let qstring = b"ALTER READYSET RESNAPSHOT TABLE t;";

@@ -373,6 +373,14 @@ fn test_empty_insert_fields() {
 }
 
 #[test]
+fn test_alter_table_rename_col() {
+    check_parse_both!("ALTER TABLE t RENAME COLUMN a TO b");
+
+    // COLUMN keyword is optional in psql, but required in mysql
+    check_parse_postgres!("ALTER TABLE t RENAME a TO b");
+}
+
+#[test]
 #[cfg(feature = "sqlparser")]
 #[should_panic(expected = "sqlparser error")]
 /// Invalid postgres syntax, parsed by nom but not by sqlparser
