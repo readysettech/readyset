@@ -49,11 +49,17 @@ fn other_selects(
             whitespace0,
             compound_op,
             whitespace1,
-            opt_delimited(
-                tag("("),
-                delimited(whitespace0, nested_selection(dialect), whitespace0),
-                tag(")"),
-            ),
+            alt((
+                // if wrapped in parens, then it's a normal select, meaning that it can have a
+                // LIMIT and an ORDER BY
+                // else it's a compound select and any LIMIT or ORDER BY belongs to the compound_op
+                delimited(
+                    tag("("),
+                    delimited(whitespace0, nested_selection(dialect, false), whitespace0),
+                    tag(")"),
+                ),
+                nested_selection(dialect, true),
+            )),
         ))(i)?;
 
         Ok((remaining_input, (Some(op), select)))
@@ -73,7 +79,7 @@ pub fn nested_compound_selection(
     move |i| {
         let (remaining_input, (first_select, other_selects, _, order, limit_clause)) =
             tuple((
-                opt_delimited(tag("("), nested_selection(dialect), tag(")")),
+                opt_delimited(tag("("), nested_selection(dialect, false), tag(")")),
                 many0(other_selects(dialect)),
                 whitespace0,
                 opt(order_clause(dialect)),
@@ -276,7 +282,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "nom-sql is incorrect"]
     fn union_order_limit_outer() {
         // This should effectively get parsed like "(SELECT A) UNION (SELECT B) ORDER BY ...", but
         // nom-sql incorrectly interprets it like "(SELECT A) UNION (SELECT B ORDER BY ...)"

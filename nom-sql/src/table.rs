@@ -35,7 +35,7 @@ fn subquery(
     move |i| {
         let (i, _) = tag("(")(i)?;
         let (i, _) = whitespace0(i)?;
-        let (i, stmt) = nested_selection(dialect)(i)?;
+        let (i, stmt) = nested_selection(dialect, false)(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag(")")(i)?;
 

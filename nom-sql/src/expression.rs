@@ -564,7 +564,7 @@ fn exists_expr(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
 
         let (i, _) = char('(')(i)?;
         let (i, _) = whitespace0(i)?;
-        let (i, statement) = nested_selection(dialect)(i)?;
+        let (i, statement) = nested_selection(dialect, false)(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = char(')')(i)?;
 
@@ -702,7 +702,7 @@ fn nested_select(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResul
     move |i| {
         let (i, _) = char('(')(i)?;
         let (i, _) = whitespace0(i)?;
-        let (i, statement) = nested_selection(dialect)(i)?;
+        let (i, statement) = nested_selection(dialect, false)(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = char(')')(i)?;
 

@@ -117,9 +117,9 @@ fn test_union() {
 }
 
 #[test]
-#[ignore = "nom-sql is incorrect"]
 fn test_union_with_limit_offset_precedence() {
     check_parse_both!("SELECT a FROM b UNION SELECT c FROM d LIMIT 1 OFFSET 1;");
+    check_parse_both!("SELECT a FROM b UNION (SELECT c FROM d LIMIT 1 OFFSET 1);");
 }
 
 fn check_mysql_variable_scope(sql: &str, expected_scopes: &[VariableScope]) {

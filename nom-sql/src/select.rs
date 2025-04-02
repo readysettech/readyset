@@ -139,7 +139,7 @@ pub fn where_clause(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlRe
 pub fn selection(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SelectStatement> {
-    move |i| terminated_with_statement_terminator(nested_selection(dialect))(i)
+    move |i| terminated_with_statement_terminator(nested_selection(dialect, false))(i)
 }
 
 /// The semantics of SQL natively represent the FROM clause of a query as a fully nested AST of join
@@ -244,7 +244,7 @@ fn cte(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], C
 
         let (i, _) = tag("(")(i)?;
         let (i, _) = whitespace0(i)?;
-        let (i, statement) = nested_selection(dialect)(i)?;
+        let (i, statement) = nested_selection(dialect, false)(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag(")")(i)?;
 
@@ -267,6 +267,7 @@ fn ctes(
 
 pub fn nested_selection(
     dialect: Dialect,
+    compounded: bool,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SelectStatement> {
     move |i| {
         let (i, ctes) = opt(ctes(dialect))(i)?;
@@ -285,9 +286,17 @@ pub fn nested_selection(
         let (i, where_clause) = opt(where_clause(dialect))(i)?;
         let (i, group_by) = opt(group_by_clause(dialect))(i)?;
         let (i, having) = opt(having_clause(dialect))(i)?;
-        let (i, order) = opt(order_clause(dialect))(i)?;
-        let (i, limit_clause) = opt(limit_offset_clause(dialect))(i)?;
-        let limit_clause = limit_clause.unwrap_or_default();
+
+        // compounded selects (selects used with compound operators like UNION, EXCEPT, INTERSECT)
+        // don't usually have a LIMIT or ORDER BY clause unless parenthesis are used.
+        let (i, order, limit_clause) = if !compounded {
+            let (i, order) = opt(order_clause(dialect))(i)?;
+            let (i, limit_clause) = opt(limit_offset_clause(dialect))(i)?;
+            let limit_clause = limit_clause.unwrap_or_default();
+            (i, order, limit_clause)
+        } else {
+            (i, None, LimitClause::default())
+        };
 
         let (tables, join) = if let Some((from, extra_joins)) = from_clause {
             let (tables, mut join) = from.into_tables_and_joins().map_err(|_| {
