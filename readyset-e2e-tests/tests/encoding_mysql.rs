@@ -17,71 +17,65 @@ macro_rules! check_rows {
     };
 }
 
-/// At present, this tests that snapshotting and streaming replication of a varchar column with the
-/// specified character set results in the same utf8 encoded version of the data in Readyset. This
-/// means that we connect with relevant session variables configured for utf8 (i.e. `SET NAMES
-/// utf8mb4;`) so that MySQL will convert the data to utf8 before returning it to the client. This
-/// causes Readyset to return matching data iff it decodes the replicated (e.g. latin1) data to utf8
-/// before storing it.
-///
-/// In the future, this test can be extended for other boundary interfaces, e.g. also checking that
-/// `HEX(text)` returns the same values on both MySQL and Readyset; or that connecting to Readyset
-/// and requesting the original character set results in it being re-encoded from utf8 to the
-/// original before being returned to the client.
+const CHUNK_SIZE: usize = 1000;
+
+/// Tests snapshotting replication of a varchar column with the specified character set.
+/// Verifies that the same utf8 encoded version of the data is stored in Readyset.
+/// Also tests that updates and deletes work correctly without a primary key.
 #[cfg(test)]
-async fn test_encoding_replication_inner<I>(column_type: &str, collation: &str, range: I)
+async fn test_snapshot_encoding<I>(test_name: &str, column_type: &str, collation: &str, range: I)
 where
     I: IntoIterator<Item = (u32, String)>,
 {
     readyset_tracing::init_test_logging();
+    let db_name = format!("encoding_snapshot_{test_name}");
+    mysql_helpers::recreate_database(&db_name).await;
 
-    mysql_helpers::recreate_database("encoding_test").await;
-
-    let upstream_opts = mysql_helpers::upstream_config().db_name(Some("encoding_test"));
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&db_name));
     let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let values: Vec<_> = range.into_iter().collect();
 
-    let create_snapshot_table = format!(
+    let create_table = format!(
         r#"
             SET NAMES utf8mb4;
-            DROP TABLE IF EXISTS encoding_snapshot;
-            CREATE TABLE encoding_snapshot (
-                id INT NOT NULL PRIMARY KEY,
+            DROP TABLE IF EXISTS encoding_table;
+            CREATE TABLE encoding_table (
+                id INT NOT NULL,
                 hex VARCHAR(255) CHARACTER SET utf8mb4,
-                text {} COLLATE {}
+                text {} COLLATE {},
+                counter INT NOT NULL DEFAULT 0
             );
         "#,
         column_type, collation
     );
-    upstream_conn
-        .query_drop(create_snapshot_table)
-        .await
-        .unwrap();
+    upstream_conn.query_drop(create_table).await.unwrap();
 
-    let values: Vec<_> = range.into_iter().collect();
-
-    for chunk in values.iter().chunks(1000).into_iter() {
+    for chunk in values.iter().chunks(CHUNK_SIZE).into_iter() {
         let insert_values: String = chunk
-            .map(|(i, h)| format!("({i}, '{h}', UNHEX('{h}'))"))
+            .map(|(i, h)| format!("({i}, '{h}', UNHEX('{h}'), 0)"))
             .collect::<Vec<String>>()
             .join(",");
         upstream_conn
             .query_drop(format!(
-                "INSERT INTO encoding_snapshot (id, hex, text) VALUES {insert_values}"
+                "INSERT INTO encoding_table (id, hex, text, counter) VALUES {insert_values}"
             ))
             .await
             .unwrap();
     }
 
     // Verify the data was inserted correctly
-    let my_rows: Vec<(i64, String, Vec<u8>)> = upstream_conn
-        .query("SELECT id, hex, text FROM encoding_snapshot ORDER BY id")
+    let mut my_rows: Vec<(i64, String, Vec<u8>, i32)> = upstream_conn
+        .query("SELECT id, hex, text, counter FROM encoding_table")
         .await
         .unwrap();
+
+    my_rows.sort();
 
     // Test snapshot replication
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .replicate_db("encoding_test".to_string())
+        .replicate_db(db_name.clone())
+        .durability_mode(dataflow_state::DurabilityMode::DeleteOnExit)
         .build::<MySQLAdapter>()
         .await;
 
@@ -90,17 +84,19 @@ where
     // Smoke test to ensure snapshotting has finished
     eventually!(attempts: 5, sleep: Duration::from_secs(5), {
         let count: usize = rs_conn
-            .query_first("SELECT count(*) FROM encoding_snapshot")
+            .query_first("SELECT count(*) FROM encoding_table")
             .await
             .unwrap()
             .unwrap();
         my_rows.len() == count
     });
 
-    let rs_snapshot_rows: Vec<(i64, String, Vec<u8>)> = rs_conn
-        .query("SELECT id, hex, text FROM encoding_snapshot ORDER BY id")
+    let mut rs_snapshot_rows: Vec<(i64, String, Vec<u8>, i32)> = rs_conn
+        .query("SELECT id, hex, text, counter FROM encoding_table")
         .await
         .unwrap();
+
+    rs_snapshot_rows.sort();
 
     check_rows!(
         my_rows,
@@ -108,24 +104,114 @@ where
         "mysql (left) differed from readyset (right) for snapshot replication; column type {column_type}, collation {collation}"
     );
 
+    // Test updating rows to verify encoding consistency in chunks
+    for chunk in values.iter().chunks(CHUNK_SIZE).into_iter() {
+        let chunk: Vec<_> = chunk.collect();
+        let first_id = chunk.first().unwrap().0;
+        let last_id = chunk.last().unwrap().0;
+
+        // Update this chunk
+        upstream_conn
+            .exec_drop(
+                "UPDATE encoding_table SET counter = 1 WHERE id >= ? AND id <= ?",
+                (first_id, last_id),
+            )
+            .await
+            .unwrap();
+
+        // Wait for updates to propagate
+        eventually!(
+            sleep: Duration::from_millis(50),
+            message: format!("snapshot update: waiting for updates to rows {first_id}-{last_id} to propagate"),
+            {
+                let updated_count: usize = rs_conn
+                    .exec_first(
+                        "SELECT COUNT(*) FROM encoding_table WHERE counter = 1 AND id >= ? AND id <= ?",
+                        (first_id, last_id)
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap_or(0);
+
+                updated_count == chunk.len()
+            }
+        );
+
+        // Verify this chunk after updates
+        let mut my_chunk: Vec<(i64, String, Vec<u8>, i32)> = upstream_conn
+            .exec(
+                "SELECT id, hex, text, counter FROM encoding_table WHERE id >= ? AND id <= ?",
+                (first_id, last_id),
+            )
+            .await
+            .unwrap();
+        my_chunk.sort();
+
+        let mut rs_chunk: Vec<(i64, String, Vec<u8>, i32)> = rs_conn
+            .exec(
+                "SELECT id, hex, text, counter FROM encoding_table WHERE id >= ? AND id <= ?",
+                (first_id, last_id),
+            )
+            .await
+            .unwrap();
+        rs_chunk.sort();
+
+        check_rows!(
+                    my_chunk,
+                    rs_chunk,
+                    "mysql (left) differed from readyset (right) after updates for snapshot update chunk {first_id}-{last_id}",
+                );
+    }
+
+    shutdown_tx.shutdown().await;
+
+    upstream_conn
+        .query_drop(format!("DROP DATABASE {db_name}"))
+        .await
+        .unwrap();
+}
+
+/// Tests streaming replication of a varchar column with the specified character set.
+/// Verifies that the same utf8 encoded version of the data is stored in Readyset.
+/// Also tests that updates and deletes work correctly without a primary key.
+#[cfg(test)]
+async fn test_streaming_encoding<I>(test_name: &str, column_type: &str, collation: &str, range: I)
+where
+    I: IntoIterator<Item = (u32, String)>,
+{
+    readyset_tracing::init_test_logging();
+    let db_name = format!("encoding_streaming_{test_name}",);
+    mysql_helpers::recreate_database(&db_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&db_name));
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let values: Vec<_> = range.into_iter().collect();
+
     // Test streaming replication
-    let create_streaming_table = format!(
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .replicate_db(db_name.clone())
+        .durability_mode(dataflow_state::DurabilityMode::DeleteOnExit)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+
+    let create_table = format!(
         r#"
-            DROP TABLE IF EXISTS encoding_streaming;
-            CREATE TABLE encoding_streaming (
-                id INT NOT NULL PRIMARY KEY,
+            SET NAMES utf8mb4;
+            DROP TABLE IF EXISTS encoding_table;
+            CREATE TABLE encoding_table (
+                id INT NOT NULL,
                 hex VARCHAR(255) CHARACTER SET utf8mb4,
                 text {} COLLATE {}
             );
         "#,
         column_type, collation
     );
-    upstream_conn
-        .query_drop(create_streaming_table)
-        .await
-        .unwrap();
+    upstream_conn.query_drop(create_table).await.unwrap();
 
-    for chunk in values.iter().chunks(1000).into_iter() {
+    for chunk in values.iter().chunks(CHUNK_SIZE).into_iter() {
         let chunk: Vec<_> = chunk.collect();
         let first_id = chunk.first().unwrap().0;
         let last_id = chunk.last().unwrap().0;
@@ -136,7 +222,7 @@ where
             .join(",");
         upstream_conn
             .query_drop(format!(
-                "INSERT INTO encoding_streaming (id, hex, text) VALUES {insert_values}"
+                "INSERT INTO encoding_table (id, hex, text) VALUES {insert_values}"
             ))
             .await
             .unwrap();
@@ -144,7 +230,7 @@ where
         // Smoke test to ensure streaming replication has caught up
         eventually!(sleep: Duration::from_millis(50), {
             let count: usize = rs_conn
-                .exec_first("SELECT count(*) FROM encoding_streaming WHERE id >= ? AND id <= ?", (first_id, last_id))
+                .exec_first("SELECT count(*) FROM encoding_table WHERE id >= ? AND id <= ?", (first_id, last_id))
                 .await
                 .unwrap()
                 .unwrap();
@@ -152,32 +238,52 @@ where
         });
 
         let my_streaming_rows_chunk: Vec<(i64, String, Vec<u8>)> = upstream_conn
-            .exec("SELECT id, hex, text FROM encoding_streaming WHERE id >= ? AND id <= ? ORDER BY id", (first_id, last_id))
+            .exec(
+                "SELECT id, hex, text FROM encoding_table WHERE id >= ? AND id <= ? ORDER BY id",
+                (first_id, last_id),
+            )
             .await
             .unwrap();
 
         let rs_streaming_rows_chunk: Vec<(i64, String, Vec<u8>)> = rs_conn
-            .exec("SELECT id, hex, text FROM encoding_streaming WHERE id >= ? AND id <= ? ORDER BY id", (first_id, last_id))
+            .exec(
+                "SELECT id, hex, text FROM encoding_table WHERE id >= ? AND id <= ? ORDER BY id",
+                (first_id, last_id),
+            )
             .await
             .unwrap();
 
         check_rows!(
             my_streaming_rows_chunk,
             rs_streaming_rows_chunk,
-            "mysql (left) differed from readyset (right) for streaming replication; column type {column_type}, collation {collation}"
+            "mysql (left) differed from readyset (right) for streaming replication chunk {first_id}-{last_id}"
         );
     }
 
     shutdown_tx.shutdown().await;
+
+    upstream_conn
+        .query_drop(format!("DROP DATABASE {db_name}"))
+        .await
+        .unwrap();
 }
 
 macro_rules! test_encoding_replication {
     ($name:ident, $coltype:expr, $charset:expr, $range:expr) => {
-        #[tokio::test]
-        #[serial(mysql)]
-        #[slow]
-        async fn $name() {
-            test_encoding_replication_inner($coltype, $charset, $range).await;
+        paste::paste! {
+            #[tokio::test]
+            #[serial(mysql)]
+            #[slow]
+            async fn [<test_ $name _snapshot>]() {
+                test_snapshot_encoding(stringify!($name), $coltype, $charset, $range).await;
+            }
+
+            #[tokio::test]
+            #[serial(mysql)]
+            #[slow]
+            async fn [<test_ $name _streaming>]() {
+                test_streaming_encoding(stringify!($name), $coltype, $charset, $range).await;
+            }
         }
     };
 }
@@ -192,151 +298,146 @@ where
 }
 
 test_encoding_replication!(
-    test_ascii_general_ci_varchar,
+    ascii_general_ci_varchar,
     "VARCHAR(255)",
     "ascii_general_ci",
     format_u32s(2, 0..=127)
 );
 test_encoding_replication!(
-    test_ascii_general_ci_text,
+    ascii_general_ci_text,
     "TEXT",
     "ascii_general_ci",
     format_u32s(2, 0..=127)
 );
 test_encoding_replication!(
-    test_ascii_bin_varchar,
+    ascii_bin_varchar,
     "VARCHAR(255)",
     "ascii_bin",
     format_u32s(2, 0..=127)
 );
+test_encoding_replication!(ascii_bin_text, "TEXT", "ascii_bin", format_u32s(2, 0..=127));
 test_encoding_replication!(
-    test_ascii_bin_text,
-    "TEXT",
-    "ascii_bin",
-    format_u32s(2, 0..=127)
-);
-test_encoding_replication!(
-    test_latin1_german1_ci_varchar,
+    latin1_german1_ci_varchar,
     "VARCHAR(255)",
     "latin1_german1_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_binary_blob,
+    latin1_binary_blob,
     "BLOB",
     "binary",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_german1_ci_text,
+    latin1_german1_ci_text,
     "TEXT",
     "latin1_german1_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_swedish_ci_varchar,
+    latin1_swedish_ci_varchar,
     "VARCHAR(255)",
     "latin1_swedish_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_swedish_ci_text,
+    latin1_swedish_ci_text,
     "TEXT",
     "latin1_swedish_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_danish_ci_varchar,
+    latin1_danish_ci_varchar,
     "VARCHAR(255)",
     "latin1_danish_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_danish_ci_text,
+    latin1_danish_ci_text,
     "TEXT",
     "latin1_danish_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_german2_ci_varchar,
+    latin1_german2_ci_varchar,
     "VARCHAR(255)",
     "latin1_german2_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_german2_ci_text,
+    latin1_german2_ci_text,
     "TEXT",
     "latin1_german2_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_bin_varchar,
+    latin1_bin_varchar,
     "VARCHAR(255)",
     "latin1_bin",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_bin_text,
+    latin1_bin_text,
     "TEXT",
     "latin1_bin",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_general_ci_varchar,
+    latin1_general_ci_varchar,
     "VARCHAR(255)",
     "latin1_general_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_general_ci_text,
+    latin1_general_ci_text,
     "TEXT",
     "latin1_general_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_general_cs_varchar,
+    latin1_general_cs_varchar,
     "VARCHAR(255)",
     "latin1_general_cs",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_general_cs_text,
+    latin1_general_cs_text,
     "TEXT",
     "latin1_general_cs",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_spanish_ci_varchar,
+    latin1_spanish_ci_varchar,
     "VARCHAR(255)",
     "latin1_spanish_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_latin1_spanish_ci_text,
+    latin1_spanish_ci_text,
     "TEXT",
     "latin1_spanish_ci",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_utf8mb4_bin_ascii_varchar,
+    utf8mb4_bin_ascii_varchar,
     "VARCHAR(255)",
     "utf8mb4_bin",
     format_u32s(2, 0..=127)
 );
 test_encoding_replication!(
-    test_utf8mb4_bin_ascii_text,
+    utf8mb4_bin_ascii_text,
     "TEXT",
     "utf8mb4_bin",
     format_u32s(2, 0..=127)
 );
 test_encoding_replication!(
-    test_utf8mb3_bin_ascii_varchar,
+    utf8mb3_bin_ascii_varchar,
     "VARCHAR(255)",
     "utf8mb3_bin",
     format_u32s(2, 0..=127)
 );
 test_encoding_replication!(
-    test_utf8mb3_bin_ascii_text,
+    utf8mb3_bin_ascii_text,
     "TEXT",
     "utf8mb3_bin",
     format_u32s(2, 0..=127)
@@ -358,26 +459,26 @@ where
 }
 
 test_encoding_replication!(
-    test_utf8mb3_bmp_codepoints_varchar,
+    utf8mb3_bmp_codepoints_varchar,
     "VARCHAR(255)",
     "utf8mb3_general_ci",
     format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
 test_encoding_replication!(
-    test_utf8mb3_bmp_codepoints_text,
+    utf8mb3_bmp_codepoints_text,
     "TEXT",
     "utf8mb3_general_ci",
     format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
 
 test_encoding_replication!(
-    test_utf8mb4_bmp_codepoints_varchar,
+    utf8mb4_bmp_codepoints_varchar,
     "VARCHAR(255)",
     "utf8mb4_general_ci",
     format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
 test_encoding_replication!(
-    test_utf8mb4_bmp_codepoints_text,
+    utf8mb4_bmp_codepoints_text,
     "TEXT",
     "utf8mb4_general_ci",
     format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
@@ -386,14 +487,14 @@ test_encoding_replication!(
 // these with a proptest, add a separate CI pipeline, or else just run these manually as needed.
 #[cfg(feature = "utf8mb4_all_codepoints_test")]
 test_encoding_replication!(
-    test_utf8mb4_all_codepoints_varchar,
+    utf8mb4_all_codepoints_varchar,
     "VARCHAR(255)",
     "utf8mb4_general_ci",
     format_utf8_chars(char::MIN..=char::MAX)
 );
 #[cfg(feature = "utf8mb4_all_codepoints_test")]
 test_encoding_replication!(
-    test_utf8mb4_all_codepoints_text,
+    utf8mb4_all_codepoints_text,
     "TEXT",
     "utf8mb4_general_ci",
     format_utf8_chars(char::MIN..=char::MAX)
@@ -401,22 +502,22 @@ test_encoding_replication!(
 
 // Doesn't really do any encoding, obviously, but protects against mistakes in the conversion
 // codepaths where blob and binary string column types overlap with text column types.
-test_encoding_replication!(test_blob, "BLOB", "binary", format_u32s(2, 0..=255));
-test_encoding_replication!(test_binary, "BINARY", "binary", format_u32s(2, 0..=255));
+test_encoding_replication!(blob, "BLOB", "binary", format_u32s(2, 0..=255));
+test_encoding_replication!(binary, "BINARY", "binary", format_u32s(2, 0..=255));
 test_encoding_replication!(
-    test_binary_padded,
+    binary_padded,
     "BINARY(10)",
     "binary",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_char_binary_padded,
+    char_binary_padded,
     "CHAR(10)",
     "binary",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    test_varbinary,
+    varbinary,
     "VARBINARY(255)",
     "binary",
     format_u32s(2, 0..=255)

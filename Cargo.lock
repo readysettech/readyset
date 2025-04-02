@@ -4437,10 +4437,12 @@ name = "readyset-e2e-tests"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "dataflow-state",
  "futures",
  "itertools 0.13.0",
  "mysql_async",
  "mysql_common",
+ "paste",
  "pretty_assertions",
  "proptest",
  "readyset-adapter",

@@ -7,10 +7,12 @@ edition = "2021"
 
 [dev-dependencies]
 chrono = { workspace = true }
+dataflow-state = { path = "../dataflow-state" }
 futures = { workspace = true }
 itertools = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true }
+paste = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 readyset-adapter = { path = "../readyset-adapter" }
