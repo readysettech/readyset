@@ -2200,8 +2200,9 @@ async fn datetime_nanosecond_precision_text_protocol() {
     my_rows.sort();
     rs_rows.sort();
     assert_eq!(rs_rows, my_rows);
-    conn.query_drop("INSERT INTO dt_nano_text_protocol VALUES ('2021-01-02 00:00:00', '2021-01-02 00:00:00.00', '2021-01-02 00:00:00.0000', '2021-01-02 00:00:00.000000');").await.unwrap();
-    conn.query_drop("INSERT INTO dt_nano_text_protocol VALUES ('2021-01-02 00:00:00', '2021-01-02 00:00:00.01', '2021-01-02 00:00:00.0001', '2021-01-02 00:00:00.000001');").await.unwrap();
+
+    direct_mysql.query_drop("INSERT INTO dt_nano_text_protocol VALUES ('2021-01-02 00:00:00', '2021-01-02 00:00:00.00', '2021-01-02 00:00:00.0000', '2021-01-02 00:00:00.000000');").await.unwrap();
+    direct_mysql.query_drop("INSERT INTO dt_nano_text_protocol VALUES ('2021-01-02 00:00:00', '2021-01-02 00:00:00.01', '2021-01-02 00:00:00.0001', '2021-01-02 00:00:00.000001');").await.unwrap();
 
     sleep().await;
 
@@ -2262,8 +2263,8 @@ async fn datetime_nanosecond_precision_binary_protocol() {
         assert_eq!(rs_rows.unwrap_raw(), my_rows.unwrap_raw())
     }
 
-    conn.query_drop("INSERT INTO dt_nano_bin_protocol VALUES (4, '2021-01-02 00:00:00', '2021-01-02 00:00:00.00', '2021-01-02 00:00:00.0000', '2021-01-02 00:00:00.000000');").await.unwrap();
-    conn.query_drop("INSERT INTO dt_nano_bin_protocol VALUES (5, '2021-01-02 00:00:00', '2021-01-02 00:00:00.01', '2021-01-02 00:00:00.0001', '2021-01-02 00:00:00.000001');").await.unwrap();
+    direct_mysql.query_drop("INSERT INTO dt_nano_bin_protocol VALUES (4, '2021-01-02 00:00:00', '2021-01-02 00:00:00.00', '2021-01-02 00:00:00.0000', '2021-01-02 00:00:00.000000');").await.unwrap();
+    direct_mysql.query_drop("INSERT INTO dt_nano_bin_protocol VALUES (5, '2021-01-02 00:00:00', '2021-01-02 00:00:00.01', '2021-01-02 00:00:00.0001', '2021-01-02 00:00:00.000001');").await.unwrap();
 
     sleep().await;
 
@@ -2493,19 +2494,23 @@ async fn date_only_text_protocol() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial(mysql)]
 async fn test_case_expr_then_expr() {
+    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
     let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     sleep().await;
 
-    conn.query_drop("DROP TABLE IF EXISTS test_case_expr_then_expr CASCADE;")
+    direct_mysql
+        .query_drop("DROP TABLE IF EXISTS test_case_expr_then_expr CASCADE;")
         .await
         .unwrap();
-    conn.query_drop(
-        "CREATE TABLE test_case_expr_then_expr (id INT PRIMARY KEY, col1 INT, col2 INT);",
-    )
-    .await
-    .unwrap();
-    conn.query_drop("INSERT INTO test_case_expr_then_expr VALUES (1, 1, 2);")
+    direct_mysql
+        .query_drop(
+            "CREATE TABLE test_case_expr_then_expr (id INT PRIMARY KEY, col1 INT, col2 INT);",
+        )
+        .await
+        .unwrap();
+    direct_mysql
+        .query_drop("INSERT INTO test_case_expr_then_expr VALUES (1, 1, 2);")
         .await
         .unwrap();
     conn.query_drop("CREATE CACHE FROM SELECT CASE col1 WHEN 1 THEN col2 ELSE col1 END AS t FROM test_case_expr_then_expr WHERE id = ?")
@@ -2539,29 +2544,29 @@ async fn populate_all_data_types(
         -- Numeric Data Types (Signed and Unsigned Integers)
         col_tinyint TINYINT NOT NULL,                  -- Signed (-128 to 127)
         col_tinyint_unsigned TINYINT UNSIGNED NOT NULL, -- Unsigned (0 to 255)
-        
+
         col_smallint SMALLINT NOT NULL,                 -- Signed (-32,768 to 32,767)
         col_smallint_unsigned SMALLINT UNSIGNED NOT NULL, -- Unsigned (0 to 65,535)
-        
+
         col_mediumint MEDIUMINT NOT NULL,               -- Signed (-8,388,608 to 8,388,607)
         col_mediumint_unsigned MEDIUMINT UNSIGNED NOT NULL, -- Unsigned (0 to 16,777,215)
-        
+
         col_int INT NOT NULL,                           -- Signed (-2,147,483,648 to 2,147,483,647)
         col_int_unsigned INT UNSIGNED NOT NULL,         -- Unsigned (0 to 4,294,967,295)
-        
+
         col_bigint BIGINT NOT NULL,                     -- Signed (-2^63 to 2^63-1)
         col_bigint_unsigned BIGINT UNSIGNED NOT NULL,   -- Unsigned (0 to 2^64-1)
 
         col_decimal DECIMAL(12,2) NOT NULL,             -- Fixed-point exact decimal (e.g., 99999999.99)
         col_numeric NUMERIC(10,2) NOT NULL,             -- Synonym for DECIMAL
-        
+
         col_float FLOAT NOT NULL,                       -- 32-bit floating point (approximate value)
         col_double DOUBLE NOT NULL,                     -- 64-bit floating point (approximate value)
         col_real REAL NOT NULL,                         -- Synonym for DOUBLE
-        
+
         col_bit BIT(8) NOT NULL,                        -- Bit field (e.g., 8-bit binary)
         col_boolean BOOLEAN NOT NULL,                   -- Alias for TINYINT(1) (0 = false, 1 = true)
-        
+
         -- Date and Time Data Types
         col_date DATE NOT NULL,
         col_datetime DATETIME(2) NOT NULL,

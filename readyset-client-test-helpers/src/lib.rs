@@ -316,7 +316,7 @@ impl TestBuilder {
         let adapter_start_time = SystemTime::now();
 
         let mut backend_shutdown_rx = shutdown_tx.subscribe();
-        let fallback_url = cdc_url_and_db_name.as_ref().map(|(f, _)| f.clone());
+        let cdc_url = cdc_url_and_db_name.as_ref().map(|(f, _)| f.clone());
         tokio::spawn(async move {
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();
             let connection_fut = async move {
@@ -326,33 +326,38 @@ impl TestBuilder {
                     let auto_increments = auto_increments.clone();
 
                     // backend either has upstream or noria writer
-                    let mut upstream_config = UpstreamConfig::default();
-                    let mut upstream = if let Some(f) = &fallback_url {
-                        upstream_config = UpstreamConfig::from_url(f);
+                    let mut cdc_upstream_config = UpstreamConfig::default();
+                    let mut cdc_upstream = if let Some(f) = &cdc_url {
+                        cdc_upstream_config = UpstreamConfig::from_url(f);
                         Some(A::make_upstream(f.clone()).await)
                     } else {
                         None
                     };
 
-                    let mut sys_props = if let Some(upstream) = &mut upstream {
+                    let mut sys_props = if let Some(cdc_upstream) = &mut cdc_upstream {
                         UpstreamSystemProperties {
-                            search_path: upstream.schema_search_path().await.unwrap(),
-                            timezone_name: upstream.timezone_name().await.unwrap(),
-                            lower_case_database_names: upstream
+                            search_path: cdc_upstream.schema_search_path().await.unwrap(),
+                            timezone_name: cdc_upstream.timezone_name().await.unwrap(),
+                            lower_case_database_names: cdc_upstream
                                 .lower_case_database_names()
                                 .await
                                 .unwrap(),
-                            lower_case_table_names: upstream
+                            lower_case_table_names: cdc_upstream
                                 .lower_case_table_names()
                                 .await
                                 .unwrap(),
                         }
                     } else {
                         UpstreamSystemProperties {
-                            search_path: upstream_config.default_schema_search_path(),
-                            timezone_name: upstream_config.default_timezone_name(),
+                            search_path: UpstreamConfig::default().default_schema_search_path(),
+                            timezone_name: UpstreamConfig::default().default_timezone_name(),
                             ..Default::default()
                         }
+                    };
+
+                    let fallback_upstream = match self.fallback {
+                        FallbackBehavior::NoFallback => None,
+                        FallbackBehavior::UseReplicationUpstream => cdc_upstream,
                     };
 
                     if init_system_props(&sys_props).is_err() {
@@ -376,7 +381,7 @@ impl TestBuilder {
                     .await;
 
                     let status_reporter = ReadySetStatusReporter::new(
-                        upstream_config,
+                        cdc_upstream_config,
                         Some(rh),
                         Default::default(),
                         authority.clone(),
@@ -386,7 +391,7 @@ impl TestBuilder {
                         .migration_mode(self.migration_mode)
                         .build(
                             noria,
-                            upstream,
+                            fallback_upstream,
                             query_status_cache,
                             authority.clone(),
                             status_reporter,

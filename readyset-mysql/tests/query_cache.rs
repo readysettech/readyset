@@ -24,6 +24,7 @@ pub async fn setup(
             .unsupported_set_mode(set_mode),
     )
     .replicate(fallback)
+    .fallback(fallback)
     .query_status_cache(query_status_cache)
     .migration_mode(migration_mode)
     .build::<MySQLAdapter>()

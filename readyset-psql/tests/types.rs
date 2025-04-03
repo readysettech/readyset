@@ -8,7 +8,10 @@ mod common;
 use common::connect;
 
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
-    TestBuilder::default().build::<PostgreSQLAdapter>().await
+    TestBuilder::default()
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await
 }
 
 mod types {
