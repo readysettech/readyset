@@ -434,10 +434,12 @@ impl BinaryOperator {
     }
 }
 
-impl From<sqlparser::ast::BinaryOperator> for BinaryOperator {
-    fn from(value: sqlparser::ast::BinaryOperator) -> Self {
+impl TryFrom<sqlparser::ast::BinaryOperator> for BinaryOperator {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::BinaryOperator) -> Result<Self, Self::Error> {
         use sqlparser::ast::BinaryOperator as BinOp;
-        match value {
+        Ok(match value {
             BinOp::And => Self::And,
             BinOp::Arrow => Self::Arrow1,
             BinOp::ArrowAt => Self::AtArrowLeft,
@@ -476,10 +478,10 @@ impl From<sqlparser::ast::BinaryOperator> for BinaryOperator {
             BinOp::PGNotILikeMatch => todo!(),
             BinOp::PGNotLikeMatch => todo!(),
             BinOp::PGOverlap => todo!(),
-            BinOp::PGRegexIMatch => todo!(),
-            BinOp::PGRegexMatch => todo!(),
-            BinOp::PGRegexNotIMatch => todo!(),
-            BinOp::PGRegexNotMatch => todo!(),
+            BinOp::PGRegexIMatch => unsupported!("PGRegexIMatch '~*'")?,
+            BinOp::PGRegexMatch => unsupported!("PGRegexMatch '~'")?,
+            BinOp::PGRegexNotIMatch => unsupported!("PGRegexNotIMatch '!~*'")?,
+            BinOp::PGRegexNotMatch => unsupported!("PGRegexNotMatch '!~'")?,
             BinOp::PGStartsWith => todo!(),
             BinOp::Plus => Self::Add,
             BinOp::Question => todo!(),
@@ -504,7 +506,7 @@ impl From<sqlparser::ast::BinaryOperator> for BinaryOperator {
             BinOp::QuestionDoublePipe => todo!(),
             BinOp::At => todo!(),
             BinOp::TildeEq => todo!(),
-        }
+        })
     }
 }
 
@@ -822,7 +824,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 right,
             } => Ok(Self::OpAll {
                 lhs: left.try_into_dialect(dialect)?,
-                op: compare_op.into(),
+                op: compare_op.try_into()?,
                 rhs: right.try_into_dialect(dialect)?,
             }),
             AnyOp {
@@ -832,7 +834,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 is_some: _,
             } => Ok(Self::OpAny {
                 lhs: left.try_into_dialect(dialect)?,
-                op: compare_op.into(),
+                op: compare_op.try_into()?,
                 rhs: right.try_into_dialect(dialect)?,
             }),
             Array(array) => Ok(Self::Array(array.elem.try_into_dialect(dialect)?)),
@@ -857,7 +859,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             }),
             BinaryOp { left, op, right } => Ok(Self::BinaryOp {
                 lhs: left.try_into_dialect(dialect)?,
-                op: op.into(),
+                op: op.try_into()?,
                 rhs: right.try_into_dialect(dialect)?,
             }),
             Case {

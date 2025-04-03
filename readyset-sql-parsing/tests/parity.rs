@@ -381,6 +381,16 @@ fn test_alter_table_rename_col() {
 }
 
 #[test]
+fn test_unsupported_op() {
+    // Even though the operator is not supported, we store the err
+    // in the CreateCacheStatement. We error when creating the cache/lowering.
+    //
+    // This operator is psql-specific
+    check_parse_postgres!("CREATE CACHE FROM SELECT * FROM t WHERE a ~* 'f.*'");
+    check_parse_postgres!("create cache from selecT * from t where a !~* 'f.*' and a ~ 'g.*'");
+}
+
+#[test]
 #[cfg(feature = "sqlparser")]
 #[should_panic(expected = "sqlparser error")]
 /// Invalid postgres syntax, parsed by nom but not by sqlparser

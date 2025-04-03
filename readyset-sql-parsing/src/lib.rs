@@ -240,11 +240,28 @@ fn parse_create_cache(
     } else {
         None
     };
+
+    // FIXME(sqlparser): Remove this once we deprecate nom-sql and switch to sqlparser
+    // This is here to match the behavior of nom-sql, where it returns the part of
+    // the query that failed to parse.
+    let remaining_query = parser
+        .peek_tokens::<50>()
+        .iter()
+        .filter_map(|t| {
+            if t == &Token::EOF {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
     let query = parse_query_for_create_cache(parser, dialect);
     Ok(SqlQuery::CreateCache(
         readyset_sql::ast::CreateCacheStatement {
             name,
-            inner: query,
+            inner: query.map_err(|_| remaining_query),
             unparsed_create_cache_statement: Some(input.as_ref().trim().to_string()),
             always,
             concurrently,
