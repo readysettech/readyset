@@ -50,7 +50,7 @@ use readyset_client::{
 };
 use readyset_data::{DfValue, Dialect};
 use readyset_errors::{
-    internal, internal_err, invariant_eq, NodeType, ReadySetError, ReadySetResult,
+    internal, internal_err, invariant_eq, ErrorNodeType, ReadySetError, ReadySetResult,
 };
 use readyset_sql::ast::{NonReplicatedRelation, Relation, SqlIdentifier};
 #[cfg(feature = "failure_injection")]
@@ -372,7 +372,7 @@ impl DfState {
         let reader = self.ingredients[reader_node].as_reader().ok_or_else(|| {
             ReadySetError::InvalidNodeType {
                 node_index: self.ingredients[reader_node].local_addr().id(),
-                expected_type: NodeType::Reader,
+                expected_type: ErrorNodeType::Reader,
             }
         })?;
         let returned_cols = reader
@@ -519,7 +519,7 @@ impl DfState {
             .as_reader()
             .ok_or_else(|| ReadySetError::InvalidNodeType {
                 node_index: n.local_addr().id(),
-                expected_type: NodeType::Reader,
+                expected_type: ErrorNodeType::Reader,
             })?;
         let returned_cols = reader
             .reader_processing()
@@ -577,7 +577,7 @@ impl DfState {
             .get_base()
             .ok_or_else(|| ReadySetError::InvalidNodeType {
                 node_index: node.local_addr().id(),
-                expected_type: NodeType::Base,
+                expected_type: ErrorNodeType::Base,
             })?
             .primary_key()
             .map(|k| k.to_owned())

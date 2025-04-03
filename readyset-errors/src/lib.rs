@@ -50,7 +50,7 @@ pub fn wrap_boxed_error(
 /// An (inexhaustive, currently) enumeration of the types of Node in the graph, for use in
 /// [`ReadySetError::InvalidNodeType`]
 #[derive(Eq, PartialEq, Serialize, Deserialize, Debug, Display, Clone)]
-pub enum NodeType {
+pub enum ErrorNodeType {
     /// Base table nodes
     Base,
     /// Egress nodes
@@ -564,7 +564,7 @@ pub enum ReadySetError {
         /// The index of the node in question
         node_index: usize,
         /// The type of node that the operation is supported on
-        expected_type: NodeType,
+        expected_type: ErrorNodeType,
     },
 
     /// A request was sent to a domain with a nonexistent or unknown replay path

@@ -1590,7 +1590,7 @@ impl Domain {
 
         let e = n.as_mut_egress().ok_or(ReadySetError::InvalidNodeType {
             node_index: egress_node.id(),
-            expected_type: NodeType::Egress,
+            expected_type: ErrorNodeType::Egress,
         })?;
 
         e.add_tx(EgressTx::new(
@@ -1619,7 +1619,7 @@ impl Domain {
 
         let e = n.as_mut_egress().ok_or(ReadySetError::InvalidNodeType {
             node_index: egress_node.id(),
-            expected_type: NodeType::Egress,
+            expected_type: ErrorNodeType::Egress,
         })?;
 
         e.add_tag(tag, ingress_node);
@@ -1641,7 +1641,7 @@ impl Domain {
         n.as_mut_egress()
             .ok_or(ReadySetError::InvalidNodeType {
                 node_index: egress_node.id(),
-                expected_type: NodeType::Egress,
+                expected_type: ErrorNodeType::Egress,
             })?
             .add_for_filtering(target_node);
         Ok(None)
@@ -1663,7 +1663,7 @@ impl Domain {
             .as_mut_sharder()
             .ok_or(ReadySetError::InvalidNodeType {
                 node_index: sharder_node.id(),
-                expected_type: NodeType::Sharder,
+                expected_type: ErrorNodeType::Sharder,
             })?
             .add_sharded_child(target_domain, ingress_node, num_shards, replication);
         Ok(None)
@@ -1816,7 +1816,7 @@ impl Domain {
         {
             return Err(ReadySetError::InvalidNodeType {
                 node_index: node.id(),
-                expected_type: NodeType::Reader,
+                expected_type: ErrorNodeType::Reader,
             });
         }
 
@@ -1900,7 +1900,7 @@ impl Domain {
             .as_mut_reader()
             .ok_or_else(|| ReadySetError::InvalidNodeType {
                 node_index: node.id(),
-                expected_type: NodeType::Reader,
+                expected_type: ErrorNodeType::Reader,
             })?;
 
         let (read, write) = backlog::new(
@@ -2833,7 +2833,7 @@ impl Domain {
 
                 let r = n.as_mut_reader().ok_or(ReadySetError::InvalidNodeType {
                     node_index: node.id(),
-                    expected_type: NodeType::Reader,
+                    expected_type: ErrorNodeType::Reader,
                 })?;
 
                 // the reader could have raced with us filling in the key after some
