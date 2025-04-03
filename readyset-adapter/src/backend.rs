@@ -1171,9 +1171,8 @@ where
         let _ = adapter_rewrites::process_query(&mut rewritten, self.noria.rewrite_params())
             .map_err(|e| {
                 warn!(
-                    // FIXME(REA-2168): Use correct dialect.
-                    statement = %Sensitive(&stmt.display(readyset_sql::Dialect::MySQL)),
-                    "This statement could not be rewritten by ReadySet"
+                    statement = %Sensitive(&stmt.display(self.settings.dialect)),
+                    "This statement could not be rewritten by Readyset"
                 );
                 PrepareMeta::FailedToRewrite(e)
             });
@@ -1242,9 +1241,8 @@ where
             Ok(SqlQuery::Set(s)) => PrepareMeta::Set { stmt: s },
             Ok(pq) => {
                 debug!(
-                    // FIXME(REA-2168): Use correct dialect.
-                    statement = %pq.display(readyset_sql::Dialect::MySQL),
-                    "Statement cannot be prepared by ReadySet"
+                    statement = %pq.display(self.settings.dialect),
+                    "Statement cannot be prepared by Readyset"
                 );
                 PrepareMeta::Unimplemented(unsupported_err!(
                     "{} not supported without an upstream",
@@ -1434,7 +1432,12 @@ where
         query_event.query_id = prepared_statement.query_id.into();
         let query_log_sender = self.query_log_sender.clone();
         let slowlog = self.settings.slowlog;
-        log_query(query_log_sender.as_ref(), query_event, slowlog);
+        log_query(
+            query_log_sender.as_ref(),
+            query_event,
+            slowlog,
+            self.settings.dialect,
+        );
 
         Ok(&prepared_statement.prep)
     }
@@ -1826,7 +1829,12 @@ where
                 .map(|e| e.to_string())
                 .unwrap_or_default(),
         });
-        log_query(self.query_log_sender.as_ref(), event, self.settings.slowlog);
+        log_query(
+            self.query_log_sender.as_ref(),
+            event,
+            self.settings.slowlog,
+            self.settings.dialect,
+        );
 
         result
     }
@@ -1952,8 +1960,7 @@ where
         if let Some(name) = name {
             if let Some(view_request) = self.noria.view_create_request_from_name(name).await {
                 warn!(
-                    // FIXME(REA-2168): Use correct dialect.
-                    statement = %Sensitive(&view_request.statement.display(readyset_sql::Dialect::MySQL)),
+                    statement = %Sensitive(&view_request.statement.display(self.settings.dialect)),
                     name = %name.display(readyset_sql::Dialect::MySQL),
                     "Dropping previously cached query",
                 );
@@ -2482,7 +2489,7 @@ where
                         }
                     }
                     error!(
-                        name = %name.unwrap().display_unquoted(),
+                        name = %name.unwrap_or("".into()).display_unquoted(),
                         "Failed to create cache: {}",
                         e
                     );
@@ -2749,7 +2756,7 @@ where
     fn noria_should_try_select(
         &self,
         q: &mut ViewCreateRequest,
-    ) -> ReadySetResult<(bool, QueryStatus, ProcessedQueryParams)> {
+    ) -> (bool, Option<QueryStatus>, Option<ProcessedQueryParams>) {
         match adapter_rewrites::process_query(&mut q.statement, self.noria.rewrite_params()) {
             Ok(processed_query_params) => {
                 let s = self.state.query_status_cache.query_status(q);
@@ -2758,15 +2765,15 @@ where
                 } else {
                     true
                 };
-                Ok((should_try, s, processed_query_params))
+                (should_try, Some(s), Some(processed_query_params))
             }
             Err(e) => {
                 warn!(
-                    // FIXME(REA-2168): Use correct dialect.
-                    statement = %Sensitive(&q.statement.display(readyset_sql::Dialect::MySQL)),
-                    "This statement could not be rewritten by ReadySet"
+                    statement = %Sensitive(&q.statement.display(self.settings.dialect)),
+                    error = e.to_string(),
+                    "This statement could not be rewritten by Readyset",
                 );
-                Err(e)
+                (false, None, None)
             }
         }
     }
@@ -2790,39 +2797,34 @@ where
         event: &mut QueryExecutionEvent,
     ) -> Result<(), DB::Error> {
         match Handler::handle_set_statement(set) {
-            SetBehavior::Unsupported => {
-                match settings.unsupported_set_mode {
-                    UnsupportedSetMode::Error => {
-                        let e = ReadySetError::SetDisallowed {
-                            statement: query.to_string(),
-                        };
-                        if has_upstream {
-                            event.set_noria_error(&e);
-                        }
-                        error!(
-                            // FIXME(REA-2168): Use correct dialect.
-                            set = %set.display(readyset_sql::Dialect::MySQL),
-                            "received unsupported SET statement."
-                        );
-                        return Err(e.into());
+            SetBehavior::Unsupported => match settings.unsupported_set_mode {
+                UnsupportedSetMode::Error => {
+                    let e = ReadySetError::SetDisallowed {
+                        statement: query.to_string(),
+                    };
+                    if has_upstream {
+                        event.set_noria_error(&e);
                     }
-                    UnsupportedSetMode::Proxy => {
-                        warn!(
-                            // FIXME(REA-2168): Use correct dialect.
-                            set = %set.display(readyset_sql::Dialect::MySQL),
-                            "received unsupported SET statement."
-                        );
-                        state.proxy_state = ProxyState::ProxyAlways;
-                    }
-                    UnsupportedSetMode::Allow => {}
+                    error!(
+                        set = %set.display(settings.dialect),
+                        "received unsupported SET statement."
+                    );
+                    return Err(e.into());
                 }
-            }
+                UnsupportedSetMode::Proxy => {
+                    warn!(
+                        set = %set.display(settings.dialect),
+                        "received unsupported SET statement."
+                    );
+                    state.proxy_state = ProxyState::ProxyAlways;
+                }
+                UnsupportedSetMode::Allow => {}
+            },
             SetBehavior::Proxy => { /* Do nothing (the caller will proxy for us) */ }
             SetBehavior::SetAutocommit(enabled) => {
                 if !enabled {
                     warn!(
-                        // FIXME(REA-2168): Use correct dialect.
-                        set = %set.display(readyset_sql::Dialect::MySQL),
+                        set = %set.display(settings.dialect),
                         "Disabling autocommit is an anti-pattern for use with Readyset, as all queries would then be proxied upstream."
                     );
                 }
@@ -3155,8 +3157,9 @@ where
                 event.query_id =
                     QueryIdWrapper::Uncalculated(self.noria.schema_search_path().into());
 
+                // if should_try is true then status and params MUST be Some
                 let (noria_should_try, status, processed_query_params) =
-                    self.noria_should_try_select(&mut view_request)?;
+                    self.noria_should_try_select(&mut view_request);
 
                 if noria_should_try {
                     Self::query_adhoc_select(
@@ -3166,9 +3169,9 @@ where
                         &mut self.state,
                         query,
                         &view_request,
-                        status,
+                        status.unwrap(),
                         &mut event,
-                        processed_query_params,
+                        processed_query_params.unwrap(),
                     )
                     .await
                 } else {
@@ -3202,7 +3205,12 @@ where
                 .unwrap_or_default(),
         });
 
-        log_query(query_log_sender.as_ref(), event, slowlog);
+        log_query(
+            query_log_sender.as_ref(),
+            event,
+            slowlog,
+            self.settings.dialect,
+        );
 
         result
     }
@@ -3319,6 +3327,7 @@ fn log_query(
     sender: Option<&UnboundedSender<QueryExecutionEvent>>,
     event: QueryExecutionEvent,
     slowlog: bool,
+    dialect: Dialect,
 ) {
     const SLOW_DURATION: std::time::Duration = std::time::Duration::from_millis(5);
 
@@ -3334,8 +3343,7 @@ fn log_query(
     {
         if let Some(query) = &event.query {
             warn!(
-                // FIXME(REA-2168): Use correct dialect.
-                query = %Sensitive(&query.display(readyset_sql::Dialect::MySQL)),
+                query = %Sensitive(&query.display(dialect)),
                 readyset_time = ?readyset_duration,
                 upstream_time = ?event.upstream_duration,
                 "slow query"
