@@ -358,28 +358,45 @@ where
 }
 
 test_encoding_replication!(
+    test_utf8mb3_bmp_codepoints_varchar,
+    "VARCHAR(255)",
+    "utf8mb3_general_ci",
+    format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
+);
+test_encoding_replication!(
+    test_utf8mb3_bmp_codepoints_text,
+    "TEXT",
+    "utf8mb3_general_ci",
+    format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
+);
+
+test_encoding_replication!(
+    test_utf8mb4_bmp_codepoints_varchar,
+    "VARCHAR(255)",
+    "utf8mb4_general_ci",
+    format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
+);
+test_encoding_replication!(
+    test_utf8mb4_bmp_codepoints_text,
+    "TEXT",
+    "utf8mb4_general_ci",
+    format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
+);
+// These tests for the *entire* range are excessively long and not that valuable. We could replace
+// these with a proptest, add a separate CI pipeline, or else just run these manually as needed.
+#[cfg(feature = "utf8mb4_all_codepoints_test")]
+test_encoding_replication!(
     test_utf8mb4_all_codepoints_varchar,
     "VARCHAR(255)",
     "utf8mb4_general_ci",
     format_utf8_chars(char::MIN..=char::MAX)
 );
+#[cfg(feature = "utf8mb4_all_codepoints_test")]
 test_encoding_replication!(
     test_utf8mb4_all_codepoints_text,
     "TEXT",
     "utf8mb4_general_ci",
     format_utf8_chars(char::MIN..=char::MAX)
-);
-test_encoding_replication!(
-    test_utf8mb3_all_codepoints_varchar,
-    "VARCHAR(255)",
-    "utf8mb3_general_ci",
-    format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
-);
-test_encoding_replication!(
-    test_utf8mb3_all_codepoints_text,
-    "TEXT",
-    "utf8mb3_general_ci",
-    format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
 
 // Doesn't really do any encoding, obviously, but protects against mistakes in the conversion

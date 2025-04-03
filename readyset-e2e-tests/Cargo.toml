@@ -26,6 +26,9 @@ test-strategy = { workspace = true }
 test-utils = { path = "../test-utils" }
 tokio = { workspace = true, features = ["full"] }
 
+[features]
+utf8mb4_all_codepoints_test = []
+
 [lints.clippy]
 dbg_macro = "warn"
 # In a test crate, we are ok with todo!(); could remove them and just use workspace lints
