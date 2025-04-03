@@ -142,6 +142,15 @@ pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
                 ret.append(&mut map_aggregates(else_expr));
             }
         }
+        Expr::Call(FunctionExpr::Call {
+            name,
+            arguments: exprs,
+        }) if matches!(name.to_lowercase().as_str(), "round") => {
+            let expr = exprs
+                .first_mut()
+                .expect("round should have at least one argument");
+            ret.append(&mut map_aggregates(expr));
+        }
         Expr::Call(_) | Expr::Literal(_) | Expr::Column(_) | Expr::Variable(_) => {}
         Expr::BinaryOp { lhs, rhs, .. }
         | Expr::OpAny { lhs, rhs, .. }

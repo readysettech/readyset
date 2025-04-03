@@ -1,0 +1,28 @@
+statement ok
+CREATE TABLE t (a int, b int);
+
+statement ok
+INSERT INTO t VALUES (1, 2), (4, 5), (8, 9);
+
+query IR
+SELECT COUNT(*), AVG(a) FROM t;
+----
+3
+4.333333333
+
+query IR
+SELECT COUNT(*), ROUND(AVG(a), 3) FROM t;
+----
+3
+4.333
+
+query IR
+SELECT COUNT(*), ROUND(AVG(a) + AVG(b), 2) FROM t;
+----
+3
+9.67
+
+query R
+SELECT ROUND(ROUND(AVG(a), 5) + ROUND(SUM(b), 4), 3) AS rounded_arithmetic_both_sides FROM t;
+----
+20.333
