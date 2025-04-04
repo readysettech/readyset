@@ -519,21 +519,13 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         let mut packet = self.conn.next().await?.ok_or_else(|| {
             // We use the stdlib's "custom" [`io::ErrorKind`] for this expected/benign error that
             // occurs during a Layer 4 network health check, to indicate it can be ignored higher up
-            io::Error::new(
-                io::ErrorKind::Other,
-                "peer terminated connection before sending bytes",
-            )
+            io::Error::other("peer terminated connection before sending bytes")
         })?;
 
         // Peek at the first 4 bytes (the capabilities flags) without consuming them
         let capabilities = &packet.data[..4];
         if commands::is_ssl_request(capabilities)
-            .map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    "invalid client capabilities flags in the handshake",
-                )
-            })?
+            .map_err(|_| io::Error::other("invalid client capabilities flags in the handshake"))?
             .1
         {
             // switch to ssl
@@ -552,8 +544,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             packet = self.conn.next().await?.ok_or_else(|| {
                 // We use the stdlib's "custom" [`io::ErrorKind`] for this expected/benign error that
                 // occurs during a Layer 4 network health check, to indicate it can be ignored higher up
-                io::Error::new(
-                    io::ErrorKind::Other,
+                io::Error::other(
                     "peer terminated connection before sending handshake after TLS connection",
                 )
             })?;

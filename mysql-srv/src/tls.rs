@@ -30,13 +30,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> SwitchableStream<S> {
                     }
                     Err(_) => {
                         // The acceptor consumes the stream, so we can't respond with an error
-                        return Err(io::Error::new(io::ErrorKind::Other, "TLS handshake failed"));
+                        return Err(io::Error::other("TLS handshake failed"));
                     }
                 };
             }
             Some(Stream::Tls(_)) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
+                return Err(io::Error::other(
                     "tls variant found when plain was expected",
                 ))
             }

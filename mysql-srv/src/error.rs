@@ -58,7 +58,7 @@ impl From<MsqlSrvError> for io::Error {
     fn from(e: MsqlSrvError) -> io::Error {
         match e {
             MsqlSrvError::IoError(e) => e,
-            _ => std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)),
+            _ => std::io::Error::other(format!("{:?}", e)),
         }
     }
 }
@@ -95,27 +95,18 @@ pub enum OtherErrorKind {
 /// Generate an io::ErrorKind::Other
 pub fn other_error(err_kind: OtherErrorKind) -> io::Error {
     match err_kind {
-        OtherErrorKind::QueryResultWriterErr => {
-            io::Error::new(io::ErrorKind::Other, "Failed to get QueryResultWriter")
-        }
-        OtherErrorKind::PacketWriterErr => {
-            io::Error::new(io::ErrorKind::Other, "Failed to get PacketWriter")
-        }
+        OtherErrorKind::QueryResultWriterErr => io::Error::other("Failed to get QueryResultWriter"),
+        OtherErrorKind::PacketWriterErr => io::Error::other("Failed to get PacketWriter"),
         OtherErrorKind::IndexErr {
             data,
             index,
             length,
-        } => io::Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "Failed to index into {} (attempted index: {}, length: {})",
-                data, index, length
-            ),
-        ),
-        OtherErrorKind::Unexpected { error } => io::Error::new(io::ErrorKind::Other, error),
-        OtherErrorKind::AuthDataErr => {
-            io::Error::new(io::ErrorKind::Other, "Error generating auth data")
-        }
-        OtherErrorKind::GenericErr { error } => io::Error::new(io::ErrorKind::Other, error),
+        } => io::Error::other(format!(
+            "Failed to index into {} (attempted index: {}, length: {})",
+            data, index, length
+        )),
+        OtherErrorKind::Unexpected { error } => io::Error::other(error),
+        OtherErrorKind::AuthDataErr => io::Error::other("Error generating auth data"),
+        OtherErrorKind::GenericErr { error } => io::Error::other(error),
     }
 }

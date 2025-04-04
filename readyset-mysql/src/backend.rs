@@ -774,7 +774,7 @@ where
         }
         self.change_user(user, password, database)
             .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .map_err(std::io::Error::other)
     }
 
     async fn on_close(&mut self, statement_id: DeallocateId) {
@@ -782,14 +782,13 @@ where
     }
 
     async fn on_ping(&mut self) -> std::io::Result<()> {
-        self.ping()
-            .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        self.ping().await.map_err(std::io::Error::other)
     }
+
     async fn on_reset(&mut self) -> io::Result<()> {
         let _ = match self.reset().await {
             Ok(()) => Ok(()),
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e.to_string())),
+            Err(e) => Err(io::Error::other(e.to_string())),
         };
         Ok(())
     }
