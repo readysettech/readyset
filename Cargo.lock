@@ -696,9 +696,9 @@ dependencies = [
 
 [[package]]
 name = "cloudflare-zlib-sys"
-version = "0.3.3"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3185ff8c69c53ab346d5ac89f418e194b997d48393cae321cb611dd05f83c90"
+checksum = "32b785d676ed9aed12ebbfb77c5e02d4bb888b652a6e88acbf31ab81a84d5983"
 dependencies = [
  "cc",
 ]
