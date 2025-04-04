@@ -15,7 +15,7 @@ use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore}
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::ReadySetHandle;
 use readyset_data::{Collation, DfValue, Dialect, TimestampTz, TinyText};
-use readyset_errors::{internal, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_server::Builder;
 use readyset_sql::ast::{NonReplicatedRelation, Relation};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
@@ -135,13 +135,28 @@ impl TestChannel {
 
     /// Returns after receiving `ControllerMessage::SnapshotDone`. Errors on receiving any other
     /// message, which should not happen if this is called when waiting for snapshotting to
-    /// complete.
+    /// complete. Will timeout after the duration specified by the SNAPSHOT_TIMEOUT_MS
+    /// environment variable (defaults to 60 seconds).
     async fn snapshot_completed(&mut self) -> ReadySetResult<()> {
-        match self.0.recv().await {
-            Some(ControllerMessage::SnapshotDone) => Ok(()),
-            Some(ControllerMessage::UnrecoverableError(e)) => Err(e),
-            _ => internal!(),
-        }
+        let timeout_ms = std::env::var("SNAPSHOT_TIMEOUT_MS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(120000);
+
+        tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), self.0.recv())
+            .await
+            .map_err(|_| {
+                internal_err!(
+                    "Exceeded timeout of SNAPSHOT_TIMEOUT_MS={} waiting for snapshot to complete",
+                    timeout_ms
+                )
+            })?
+            .ok_or_else(|| internal_err!("Did not receive snapshot controller message"))
+            .map(|msg| match msg {
+                ControllerMessage::SnapshotDone => Ok(()),
+                ControllerMessage::UnrecoverableError(e) => Err(e),
+                _ => internal!("Unexpected controller message while waiting for snapshot: {msg:?}"),
+            })?
     }
 }
 

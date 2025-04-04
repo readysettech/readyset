@@ -16,6 +16,7 @@ pub use replication_offset::postgres::PostgresPosition;
 use tracing::info;
 
 /// Event notification sent to the controller.
+#[derive(Debug)]
 pub enum ControllerMessage {
     /// The replicator finished an initial base table snapshot
     SnapshotDone,
