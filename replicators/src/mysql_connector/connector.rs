@@ -21,6 +21,7 @@ use mysql_common::collations::{Collation, CollationId};
 use mysql_common::constants::ColumnType;
 use mysql_common::{binlog, Value};
 use mysql_srv::ColumnFlags;
+use readyset_data::encoding::Encoding;
 use rust_decimal::Decimal;
 use serde_json::Map;
 use tracing::{error, info, warn};
@@ -29,7 +30,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
 use readyset_client::{Modification, TableOperation};
-use readyset_data::{encoding::Encoding, Collation as RsCollation, DfValue, Dialect, TimestampTz};
+use readyset_data::{Collation as RsCollation, DfValue, Dialect, TimestampTz};
 use readyset_errors::{internal, internal_err, unsupported_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
     CollationName, CreateTableOption, NonReplicatedRelation, NotReplicatedReason, Relation,
@@ -1295,40 +1296,39 @@ fn binlog_val_to_noria_val(
         (ColumnType::MYSQL_TYPE_BLOB, _)
         | (ColumnType::MYSQL_TYPE_TINY_BLOB, _)
         | (ColumnType::MYSQL_TYPE_MEDIUM_BLOB, _)
-        | (ColumnType::MYSQL_TYPE_LONG_BLOB, _) => {
+        | (ColumnType::MYSQL_TYPE_LONG_BLOB, _)
+        | (ColumnType::MYSQL_TYPE_VAR_STRING, _)
+        | (ColumnType::MYSQL_TYPE_VARCHAR, _)
+            if binary =>
+        {
             let bytes = match val {
                 mysql_common::value::Value::Bytes(b) => b.to_vec(),
                 _ => {
                     return Err(mysql_async::Error::Other(Box::new(internal_err!(
-                        "Expected a byte array for blob column"
+                        "Expected a byte array for blob or binary string column"
                     ))));
                 }
             };
             Ok(DfValue::from(bytes))
         }
-        (ColumnType::MYSQL_TYPE_VAR_STRING, _) | (ColumnType::MYSQL_TYPE_VARCHAR, _) if binary => {
+        (ColumnType::MYSQL_TYPE_BLOB, _)
+        | (ColumnType::MYSQL_TYPE_TINY_BLOB, _)
+        | (ColumnType::MYSQL_TYPE_MEDIUM_BLOB, _)
+        | (ColumnType::MYSQL_TYPE_LONG_BLOB, _)
+        | (ColumnType::MYSQL_TYPE_VAR_STRING, _)
+        | (ColumnType::MYSQL_TYPE_VARCHAR, _)
+            if !binary =>
+        {
             let bytes = match val {
-                mysql_common::value::Value::Bytes(b) => b.to_vec(),
-                _ => {
-                    return Err(mysql_async::Error::Other(Box::new(internal_err!(
-                        "Expected a byte array for binary string column"
-                    ))));
-                }
-            };
-            Ok(DfValue::from(bytes))
-        }
-        (ColumnType::MYSQL_TYPE_VAR_STRING, _) | (ColumnType::MYSQL_TYPE_VARCHAR, _) if !binary => {
-            let encoding = Encoding::from_mysql_collation_id(collation);
-            let my_collation = Collation::resolve(CollationId::from(collation));
-
-            let bytes = match val {
-                mysql_common::value::Value::Bytes(b) => b,
+                mysql_common::value::Value::Bytes(b) => b.as_ref(),
                 _ => {
                     return Err(mysql_async::Error::Other(Box::new(internal_err!(
                         "Expected a byte array for string"
                     ))));
                 }
             };
+
+            let encoding = Encoding::from_mysql_collation_id(collation);
 
             let utf8_string = encoding.decode(bytes).map_err(|e| {
                 mysql_async::Error::Other(Box::new(internal_err!(
@@ -1337,6 +1337,7 @@ fn binlog_val_to_noria_val(
                 )))
             })?;
 
+            let my_collation = Collation::resolve(CollationId::from(collation));
             let rs_collation =
                 RsCollation::from_mysql_collation(my_collation.collation()).unwrap_or_default();
             Ok(DfValue::from_str_and_collation(&utf8_string, rs_collation))
@@ -1617,6 +1618,8 @@ fn binlog_row_to_noria_row(
                     } else {
                         false
                     };
+                    // `BLOB` columns have `BINARY_FLAG` set in snapshot, but not here. However, the
+                    // collation should be correctly set to binary here, though it's not over there.
                     let binary = col.flags().contains(ColumnFlags::BINARY_FLAG)
                         || collation == CollationId::BINARY as u16
                         || col.character_set() == CollationId::BINARY as u16;

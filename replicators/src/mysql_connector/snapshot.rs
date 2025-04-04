@@ -841,6 +841,9 @@ fn mysql_row_to_noria_row(
         let val = value_to_value(row.as_ref(idx).unwrap());
         let col = row.columns_ref().get(idx).unwrap();
         let flags = col.flags();
+        // `BLOB` columns have `BINARY_FLAG` set here, but so do `TEXT` columns. For those, we have
+        // to look at their collation to determine whether they are actually binary. See also the
+        // slightly different condition in [`crate::mysql_connector::connector::binlog_row_to_noria_row`]
         let binary = flags.contains(ColumnFlags::BINARY_FLAG)
             && (*collation == CollationId::BINARY as u16
                 || col.character_set() == CollationId::BINARY as u16);
@@ -962,7 +965,13 @@ fn mysql_row_to_noria_row(
                 };
                 noria_row.push(df_val);
             }
-            ColumnType::MYSQL_TYPE_VAR_STRING => {
+            ColumnType::MYSQL_TYPE_VAR_STRING
+            | ColumnType::MYSQL_TYPE_BLOB
+            | ColumnType::MYSQL_TYPE_TINY_BLOB
+            | ColumnType::MYSQL_TYPE_MEDIUM_BLOB
+            | ColumnType::MYSQL_TYPE_LONG_BLOB
+                if !binary =>
+            {
                 let df_val = match val {
                     mysql_common::value::Value::Bytes(b) => {
                         if binary {
