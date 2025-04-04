@@ -1,7 +1,7 @@
 use std::fmt::{self, Debug};
 use std::iter::{Enumerate, FromIterator};
 use std::ops::{Index, IndexMut};
-use std::{mem, slice};
+use std::slice;
 
 use common::Len;
 use readyset_client::internal::LocalNodeIndex;
@@ -143,7 +143,7 @@ impl<T> NodeMap<T> {
                 None
             }
             Some(v) => {
-                let old = mem::replace(v, Some(value));
+                let old = v.replace(value);
                 if old.is_none() {
                     self.len += 1;
                 }

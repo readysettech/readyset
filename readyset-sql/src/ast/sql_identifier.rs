@@ -166,7 +166,7 @@ impl PartialOrd for Text {
 
 impl PartialEq for Text {
     fn eq(&self, other: &Self) -> bool {
-        if self.0.as_ptr() == other.0.as_ptr() {
+        if std::ptr::eq(self.0.as_ptr(), other.0.as_ptr()) {
             return true;
         }
 

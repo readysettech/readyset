@@ -781,6 +781,7 @@ impl<DB: UpstreamDatabase> PrepareResult<DB> {
 
 /// The type returned when a query is carried out by `Backend`, through either the `query` or
 /// `execute` functions.
+#[allow(clippy::large_enum_variant)]
 pub enum QueryResult<'a, DB: UpstreamDatabase>
 where
     DB: 'a,

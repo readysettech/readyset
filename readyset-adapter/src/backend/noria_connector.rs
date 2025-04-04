@@ -1180,7 +1180,7 @@ impl NoriaConnector {
                     } else {
                         // The server does not have a view for this query, so we return an error
                         Err(ReadySetError::ViewNotFoundForQuery {
-                            statement: q.clone(),
+                            statement: Box::new(q.clone()),
                         })
                     }
                 }

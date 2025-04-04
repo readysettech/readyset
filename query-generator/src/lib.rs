@@ -227,11 +227,7 @@ pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecifica
     body.fields
         .iter()
         // Look for a column with a PRIMARY KEY constraint on the spec first
-        .find(|f| {
-            f.constraints
-                .iter()
-                .any(|c| *c == ColumnConstraint::PrimaryKey)
-        })
+        .find(|f| f.constraints.contains(&ColumnConstraint::PrimaryKey))
         // otherwise, find a column corresponding to a standalone PRIMARY KEY table constraint
         .or_else(|| {
             body.keys
