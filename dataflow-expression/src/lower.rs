@@ -617,7 +617,7 @@ fn get_text_type_max_length(ty: &DfType) -> Option<u16> {
 }
 
 fn mysql_text_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
-    if left.is_any_text() && right.is_any_text() {
+    if (left.is_any_text() || left.is_binary()) && (right.is_any_text() || right.is_binary()) {
         if matches!(left, DfType::Text(..)) || matches!(right, DfType::Text(..)) {
             Some(DfType::DEFAULT_TEXT)
         } else {
@@ -677,7 +677,6 @@ fn mysql_null_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
     }
 }
 
-/// <https://dev.mysql.com/doc/refman/8.0/en/type-conversion.html>
 fn mysql_type_conversion_body(left_ty: &DfType, right_ty: &DfType) -> DfType {
     if left_ty.is_bool() && right_ty.is_bool() {
         DfType::Bool
@@ -694,6 +693,10 @@ fn mysql_type_conversion_body(left_ty: &DfType, right_ty: &DfType) -> DfType {
     }
 }
 
+/// Our best effort at implementing MySQL's implicit [type conversion] rules. Several scenarios are
+/// not covered correctly or at all, so we will often see erroneous conversions to Double.
+///
+/// [type conversion]: https://dev.mysql.com/doc/refman/8.4/en/type-conversion.html
 fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
     let ty = mysql_type_conversion_body(left_ty, right_ty);
     if let DfType::Unknown = ty {

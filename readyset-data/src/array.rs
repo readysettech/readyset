@@ -416,6 +416,7 @@ mod parse {
     use nom::error::ErrorKind;
     use nom::multi::{many1, separated_list1};
     use nom::sequence::{delimited, pair, preceded, terminated, tuple};
+    use nom::AsBytes;
     use nom_locate::LocatedSpan;
     use nom_sql::{embedded_literal, NomSqlError, NomSqlResult, QuotingStyle};
     use readyset_sql::Dialect;
@@ -585,8 +586,19 @@ mod parse {
     }
 
     fn unquoted_string_literal(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DfValue> {
+        let fail = || {
+            nom::Err::Error(NomSqlError {
+                input: i,
+                kind: ErrorKind::Fail,
+            })
+        };
+
         let (i, _) = not(peek(tag("\"")))(i)?;
-        map(is_not("{},\"\\"), |i: LocatedSpan<_>| DfValue::from(*i))(i)
+        let (i, v) = is_not("{},\"\\")(i)?;
+        // XXX(mvzink): Yes, we only support UTF-8 string literals at this level. To support other
+        // encodings, we should decode queries to UTF-8 before parsing.
+        let s = std::str::from_utf8(v.as_bytes()).map_err(|_| fail())?;
+        Ok((i, DfValue::from_str_and_collation(s, Default::default())))
     }
 }
 

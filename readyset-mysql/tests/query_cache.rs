@@ -868,25 +868,25 @@ async fn test_binary_padding_lookup() {
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
     assert_eq!(last_status.destination, QueryDestination::Readyset);
-    assert_eq!(row[0].1, "0xe0a088");
+    assert_eq!(row[0].1, "ࠈ");
 
     let row: Vec<(u32, String)> = conn
-        .query("SELECT id, b FROM col_pad_bin_lookup WHERE b = '¥'")
+        .query("SELECT id, b FROM col_pad_bin_lookup WHERE b = '¥\\0'")
         .await
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
     assert_eq!(last_status.destination, QueryDestination::Readyset);
-    assert_eq!(row[0].1, "0xc2a500");
+    assert_eq!(row[0].1, "¥\0");
 
     let row: Vec<(u32, String)> = conn
-        .query("SELECT id, b FROM col_pad_bin_lookup WHERE b = 'A'")
+        .query("SELECT id, b FROM col_pad_bin_lookup WHERE b = 'A\\0\\0'")
         .await
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
     assert_eq!(last_status.destination, QueryDestination::Readyset);
-    assert_eq!(row[0].1, "0x410000");
+    assert_eq!(row[0].1, "A\0\0");
 
     let row: Vec<(u32, String)> = conn
         .query("SELECT id, b FROM col_pad_bin_lookup WHERE b = 'A¥'")
@@ -895,7 +895,7 @@ async fn test_binary_padding_lookup() {
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
     assert_eq!(last_status.destination, QueryDestination::Readyset);
-    assert_eq!(row[0].1, "0x41c2a5");
+    assert_eq!(row[0].1, "A¥");
     shutdown_tx.shutdown().await;
 }
 

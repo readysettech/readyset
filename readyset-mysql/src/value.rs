@@ -8,7 +8,7 @@ use readyset_errors::{ReadySetError, ReadySetResult};
 pub(crate) fn mysql_value_to_dataflow_value(value: Value) -> ReadySetResult<DfValue> {
     Ok(match value.into_inner() {
         ValueInner::Null => DfValue::None,
-        ValueInner::Bytes(b) => DfValue::from(b),
+        ValueInner::Bytes(b) => DfValue::from(b.to_vec()),
         ValueInner::Int(i) => i.into(),
         ValueInner::UInt(i) => i.into(),
         ValueInner::Double(f) => DfValue::try_from(f)?,

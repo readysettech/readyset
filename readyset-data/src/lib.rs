@@ -12,7 +12,6 @@ use bit_vec::BitVec;
 use bytes::BytesMut;
 use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use cidr::IpInet;
-use dialect::SqlEngine;
 use enum_kinds::EnumKind;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
@@ -555,7 +554,7 @@ impl DfValue {
         let mk_err = || ReadySetError::DfValueConversionError {
             src_type: from_ty.to_string(),
             target_type: to_ty.to_string(),
-            details: "unsupported".into(),
+            details: format!("unsupported for {}", self.infer_dataflow_type()),
         };
 
         // Returns whether `self` can simply use `Clone` for coercion.
@@ -625,7 +624,54 @@ impl DfValue {
                 DfType::Bit(/* TODO */ _len) => Ok(self.clone()),
                 _ => Err(mk_err()),
             },
-            DfValue::ByteArray(_) | DfValue::Default | DfValue::Max => Err(mk_err()),
+            DfValue::ByteArray(bytes) => match to_ty {
+                DfType::Blob => Ok(self.clone()),
+                DfType::VarBinary(max_size) if bytes.len() <= *max_size as usize => {
+                    Ok(self.clone())
+                }
+                DfType::Binary(len) if bytes.len() <= *len as usize => {
+                    let mut b = bytes.as_ref().to_vec();
+                    b.resize(*len as usize, 0);
+                    Ok(DfValue::ByteArray(Arc::new(b)))
+                }
+                DfType::Bool
+                | DfType::Date
+                | DfType::Int
+                | DfType::UnsignedInt
+                | DfType::BigInt
+                | DfType::UnsignedBigInt
+                | DfType::TinyInt
+                | DfType::UnsignedTinyInt
+                | DfType::SmallInt
+                | DfType::UnsignedSmallInt
+                | DfType::MediumInt
+                | DfType::UnsignedMediumInt
+                | DfType::Float
+                | DfType::Double
+                | DfType::Json
+                | DfType::Jsonb
+                | DfType::MacAddr
+                | DfType::Inet
+                | DfType::Uuid
+                | DfType::Numeric { .. }
+                | DfType::DateTime { .. }
+                | DfType::Time { .. }
+                | DfType::Timestamp { .. }
+                | DfType::TimestampTz { .. }
+                | DfType::Enum { .. }
+                | DfType::Array(..) => {
+                    let s = std::str::from_utf8(bytes.as_ref())?;
+                    DfValue::from_str_and_collation(s, Default::default()).coerce_to(to_ty, from_ty)
+                }
+                DfType::Text(collation)
+                | DfType::Char(_, collation)
+                | DfType::VarChar(_, collation) => {
+                    let s = std::str::from_utf8(bytes.as_ref())?;
+                    DfValue::from_str_and_collation(s, *collation).coerce_to(to_ty, from_ty)
+                }
+                _ => Err(mk_err()),
+            },
+            DfValue::Default | DfValue::Max => Err(mk_err()),
             DfValue::PassThrough(ref p) => Err(ReadySetError::DfValueConversionError {
                 src_type: format!("PassThrough[{}]", p.ty),
                 target_type: to_ty.to_string(),
@@ -636,11 +682,7 @@ impl DfValue {
 
     /// Like [`coerce_to`], but returns an error if the destination type cannot accurately hold the
     /// original value.
-    pub fn coerce_for_comparison(
-        &self,
-        to_ty: &DfType,
-        dialect: Dialect,
-    ) -> ReadySetResult<DfValue> {
+    pub fn coerce_for_comparison(&self, to_ty: &DfType) -> ReadySetResult<DfValue> {
         let err = || {
             let src = format!("{:?}", DfValueKind::from(self));
             let dest = format!("{to_ty:?}");
@@ -669,26 +711,36 @@ impl DfValue {
                     | DfType::UnsignedBigInt
             };
         }
-        if matches!(dialect.engine(), SqlEngine::MySQL | SqlEngine::PostgreSQL) {
-            match (self, to_ty) {
-                (DfValue::Float(v), int_types!()) => {
-                    return_error_if_disallowed_float!(v);
-                }
-                (DfValue::Double(v), int_types!()) => {
-                    return_error_if_disallowed_float!(v);
-                }
-                (DfValue::TinyText(v), int_types!()) => {
-                    if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown)? {
-                        return_error_if_disallowed_float!(v);
-                    }
-                }
-                (DfValue::Text(v), int_types!()) => {
-                    if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown)? {
-                        return_error_if_disallowed_float!(v);
-                    }
-                }
-                _ => {}
+        match (self, to_ty) {
+            (DfValue::Float(v), int_types!()) => {
+                return_error_if_disallowed_float!(v);
             }
+            (DfValue::Double(v), int_types!()) => {
+                return_error_if_disallowed_float!(v);
+            }
+            (DfValue::TinyText(v), int_types!()) => {
+                if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown)? {
+                    return_error_if_disallowed_float!(v);
+                }
+            }
+            (DfValue::Text(v), int_types!()) => {
+                if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown)? {
+                    return_error_if_disallowed_float!(v);
+                }
+            }
+            // All bytes are significant for MySQL binary columns, and they should not be padded to
+            // the column's length for comparisons; we pad them in `coerce_to` for use in e.g.
+            // `apply_table_op_coercions`
+            (DfValue::ByteArray(_), DfType::Binary(_) | DfType::VarBinary(_)) => {
+                return Ok(self.clone())
+            }
+            (DfValue::Text(t), DfType::Binary(_) | DfType::VarBinary(_)) => {
+                return Ok(DfValue::ByteArray(t.as_bytes().to_vec().into()))
+            }
+            (DfValue::TinyText(t), DfType::Binary(_) | DfType::VarBinary(_)) => {
+                return Ok(DfValue::ByteArray(t.as_bytes().to_vec().into()))
+            }
+            _ => {}
         }
         self.coerce_to(to_ty, &DfType::Unknown)
     }
@@ -1426,7 +1478,7 @@ impl<'a> TryFrom<&'a Literal> for DfValue {
                     details: format!("Values out-of-bounds for Numeric type. Error: {}", e),
                 })
                 .map(|d| DfValue::Numeric(Arc::new(d))),
-            Literal::Blob(b) => Ok(DfValue::from(b.as_slice())),
+            Literal::Blob(b) => Ok(DfValue::from(b.to_vec())),
             Literal::ByteArray(b) => Ok(DfValue::ByteArray(Arc::new(b.clone()))),
             Literal::BitVector(b) => Ok(DfValue::from(b)),
             Literal::Placeholder(_) => {
@@ -1791,17 +1843,6 @@ impl<'a> From<&'a str> for DfValue {
     }
 }
 
-impl From<&[u8]> for DfValue {
-    fn from(b: &[u8]) -> Self {
-        // NOTE: should we *really* be converting to Text here?
-        if let Ok(s) = str::from_utf8(b) {
-            s.into()
-        } else {
-            DfValue::ByteArray(b.to_vec().into())
-        }
-    }
-}
-
 impl From<Array> for DfValue {
     fn from(arr: Array) -> Self {
         Self::Array(Arc::new(arr))
@@ -1901,7 +1942,7 @@ impl TryFrom<&mysql_common::value::Value> for DfValue {
 
         match v {
             Value::NULL => Ok(DfValue::None),
-            Value::Bytes(v) => Ok(DfValue::from(&v[..])),
+            Value::Bytes(v) => Ok(DfValue::from(v.to_vec())),
             Value::Int(v) => Ok(DfValue::from(*v)),
             Value::UInt(v) => Ok(DfValue::from(*v)),
             Value::Float(v) => DfValue::try_from(*v),
@@ -2659,9 +2700,15 @@ mod tests {
         ) {
             (DfValue::Float(f1), DfValue::Float(f2)) => assert_eq!(f1, f2),
             (DfValue::Double(f1), DfValue::Double(f2)) => assert_eq!(f1, f2),
+            (DfValue::ByteArray(b), t @ (DfValue::Text(_) | DfValue::TinyText(_))) => {
+                assert_eq!(b.as_ref(), t.as_bytes().unwrap());
+            }
             // Mysql returns Numeric values as Text :(
             (v @ (DfValue::Text(_) | DfValue::TinyText(_)), DfValue::Numeric(n)) => {
                 assert_eq!(<&str>::try_from(&v).unwrap(), n.to_string())
+            }
+            (DfValue::ByteArray(b), DfValue::Numeric(n)) => {
+                assert_eq!(b.as_ref(), n.to_string().as_bytes());
             }
             (dt1, dt2) => assert_eq!(dt1, dt2),
         }
@@ -2730,7 +2777,7 @@ mod tests {
         assert!(a_dt.is_ok());
         assert_eq!(
             a_dt.unwrap(),
-            DfValue::TinyText(TinyText::from_arr(b"abcdef"))
+            DfValue::ByteArray(Arc::new(s.as_bytes().to_vec()))
         );
 
         // Test Value::Int.

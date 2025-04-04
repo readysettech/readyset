@@ -4,6 +4,7 @@ use chrono::DateTime;
 use mysql_async::prelude::Queryable;
 use mysql_async::Params;
 use mysql_common::{Row, Value};
+use pretty_assertions::assert_eq;
 use proptest::arbitrary::any;
 use proptest::collection::vec;
 use proptest::prop_oneof;
@@ -99,7 +100,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
             .unwrap();
         AssertUnwindSafe(move || rs_rows[0][0].clone())
     }, then_assert: |result| {
-        assert_eq!(result(), *upstream_val);
+        assert_eq!(*upstream_val, result());
     });
 
     // Replicate & check result
@@ -126,7 +127,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
         .unwrap();
 
     // snapshot and replicate should match
-    assert_eq!(&replicated_upstream_rows[0][0], upstream_val);
+    assert_eq!(upstream_val, &replicated_upstream_rows[0][0]);
 
     // Check the result of streaming replication on Readyset
     eventually!(attempts: 5, run_test: {
@@ -139,7 +140,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
             .unwrap();
         AssertUnwindSafe(move || replicated_rs_rows[0][0].clone())
     }, then_assert: |result| {
-        assert_eq!(result(), *upstream_val);
+        assert_eq!(*upstream_val, result());
     });
 
     // Check we can match the old row when updating the snapshotted value
@@ -175,7 +176,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
             .unwrap();
         AssertUnwindSafe(move || updated_rs_rows[0][0].clone())
     }, then_assert: |result| {
-        assert_eq!(result(), *updated_upstream_val);
+        assert_eq!(*updated_upstream_val, result());
     });
 
     // Check we can match the replicated value when updating via streaming replication
@@ -211,7 +212,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
             .unwrap();
         AssertUnwindSafe(move || updated_rs_rows[0][0].clone())
     }, then_assert: |result| {
-        assert_eq!(result(), *updated_upstream_val);
+        assert_eq!(*updated_upstream_val, result());
     });
 
     shutdown_tx.shutdown().await;
@@ -263,7 +264,7 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
                     .into()
             })
             .boxed(),
-        SqlType::Binary(len) => vec(any::<u8>(), 0..(len.unwrap_or(255) as usize))
+        SqlType::Binary(len) => vec(any::<u8>(), 0..(len.unwrap_or(1) as usize))
             .prop_map(Value::Bytes)
             .boxed(),
         SqlType::VarBinary(len) => vec(any::<u8>(), 0..(len as usize))
@@ -647,4 +648,59 @@ fn round_trip_mysql_type_regressions_bool_zero_unsigned() {
 #[slow]
 fn round_trip_mysql_type_regressions_bool_zero_signed() {
     round_trip_mysql_type(SqlType::Bool, Value::Int(0), Value::Int(1))
+}
+
+#[serial(mysql)]
+#[test]
+#[slow]
+fn round_trip_mysql_type_regressions_blob_valid_utf8() {
+    round_trip_mysql_type(
+        SqlType::Blob,
+        Value::Bytes(vec![0x00]),
+        Value::Bytes(vec![0x01]),
+    )
+}
+
+#[serial(mysql)]
+#[test]
+#[slow]
+fn round_trip_mysql_type_regressions_blob_invalid_utf8() {
+    round_trip_mysql_type(
+        SqlType::Blob,
+        Value::Bytes(vec![0x80]),
+        Value::Bytes(vec![0xFF]),
+    )
+}
+
+#[serial(mysql)]
+#[test]
+#[slow]
+fn round_trip_mysql_type_regressions_varbinary_valid_utf8() {
+    round_trip_mysql_type(
+        SqlType::VarBinary(255),
+        Value::Bytes(vec![0x00]),
+        Value::Bytes(vec![0x01]),
+    )
+}
+
+#[serial(mysql)]
+#[test]
+#[slow]
+fn round_trip_mysql_type_regressions_varbinary_invalid_utf8() {
+    round_trip_mysql_type(
+        SqlType::VarBinary(255),
+        Value::Bytes(vec![0x80]),
+        Value::Bytes(vec![0xFF]),
+    )
+}
+
+#[serial(mysql)]
+#[test]
+#[slow]
+fn round_trip_mysql_type_regressions_varbinary_invalid_utf8_padded() {
+    round_trip_mysql_type(
+        SqlType::Binary(Some(3)),
+        Value::Bytes(vec![0x80]),
+        Value::Bytes(vec![0xFF]),
+    )
 }

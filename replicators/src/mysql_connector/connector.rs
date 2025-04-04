@@ -20,6 +20,7 @@ use mysql_common::binlog::value::BinlogValue;
 use mysql_common::collations::{Collation, CollationId};
 use mysql_common::constants::ColumnType;
 use mysql_common::{binlog, Value};
+use mysql_srv::ColumnFlags;
 use rust_decimal::Decimal;
 use serde_json::Map;
 use tracing::{error, info, warn};
@@ -1172,6 +1173,7 @@ fn binlog_val_to_noria_val(
     meta: &[u8],
     collation: u16,
     unsigned: bool,
+    binary: bool,
 ) -> mysql::Result<DfValue> {
     // Not all values are coerced to the value expected by ReadySet directly
 
@@ -1290,7 +1292,32 @@ fn binlog_val_to_noria_val(
                 Err(e) => Err(mysql_async::Error::Other(Box::new(internal_err!("{e}")))),
             }
         }
-        (ColumnType::MYSQL_TYPE_VAR_STRING, _) | (ColumnType::MYSQL_TYPE_VARCHAR, _) => {
+        (ColumnType::MYSQL_TYPE_BLOB, _)
+        | (ColumnType::MYSQL_TYPE_TINY_BLOB, _)
+        | (ColumnType::MYSQL_TYPE_MEDIUM_BLOB, _)
+        | (ColumnType::MYSQL_TYPE_LONG_BLOB, _) => {
+            let bytes = match val {
+                mysql_common::value::Value::Bytes(b) => b.to_vec(),
+                _ => {
+                    return Err(mysql_async::Error::Other(Box::new(internal_err!(
+                        "Expected a byte array for blob column"
+                    ))));
+                }
+            };
+            Ok(DfValue::from(bytes))
+        }
+        (ColumnType::MYSQL_TYPE_VAR_STRING, _) | (ColumnType::MYSQL_TYPE_VARCHAR, _) if binary => {
+            let bytes = match val {
+                mysql_common::value::Value::Bytes(b) => b.to_vec(),
+                _ => {
+                    return Err(mysql_async::Error::Other(Box::new(internal_err!(
+                        "Expected a byte array for binary string column"
+                    ))));
+                }
+            };
+            Ok(DfValue::from(bytes))
+        }
+        (ColumnType::MYSQL_TYPE_VAR_STRING, _) | (ColumnType::MYSQL_TYPE_VARCHAR, _) if !binary => {
             let encoding = Encoding::from_mysql_collation_id(collation);
             let my_collation = Collation::resolve(CollationId::from(collation));
 
@@ -1575,7 +1602,7 @@ fn binlog_row_to_noria_row(
                             .unwrap(),
                         tme.get_column_metadata(tme_idx).unwrap(),
                     );
-                    let charset = if kind.is_character_type() {
+                    let collation = if kind.is_character_type() {
                         charset_iter.next().transpose()?.unwrap_or_default()
                     } else if kind.is_enum_or_set_type() {
                         enum_and_set_charset_iter
@@ -1590,7 +1617,10 @@ fn binlog_row_to_noria_row(
                     } else {
                         false
                     };
-                    binlog_val_to_noria_val(val, kind, meta, charset, unsigned)
+                    let binary = col.flags().contains(ColumnFlags::BINARY_FLAG)
+                        || collation == CollationId::BINARY as u16
+                        || col.character_set() == CollationId::BINARY as u16;
+                    binlog_val_to_noria_val(val, kind, meta, collation, unsigned, binary)
                 }
                 BinlogValue::Jsonb(val) => {
                     let json: Result<serde_json::Value, _> = val.clone().try_into(); // urgh no TryFrom impl

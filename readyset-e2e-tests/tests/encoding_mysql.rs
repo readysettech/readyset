@@ -291,3 +291,26 @@ test_encoding_replication!(
     "utf8mb3_general_ci",
     format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
+
+// Doesn't really do any encoding, obviously, but protects against mistakes in the conversion
+// codepaths where blob and binary string column types overlap with text column types.
+test_encoding_replication!(test_blob, "BLOB", "binary", format_u32s(2, 0..=255));
+test_encoding_replication!(test_binary, "BINARY", "binary", format_u32s(2, 0..=255));
+test_encoding_replication!(
+    test_binary_padded,
+    "BINARY(10)",
+    "binary",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    test_char_binary_padded,
+    "CHAR(10)",
+    "binary",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    test_varbinary,
+    "VARBINARY(255)",
+    "binary",
+    format_u32s(2, 0..=255)
+);

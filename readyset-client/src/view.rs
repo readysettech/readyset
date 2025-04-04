@@ -1695,7 +1695,7 @@ impl<'a> KeyComparisonBuilder<'a> {
                 )
             })?,
         };
-        key.coerce_for_comparison(key_type, self.dialect)
+        key.coerce_for_comparison(key_type)
     }
 
     fn build_key(&mut self, raw_key: Cow<'_, [DfValue]>) -> ReadySetResult<Option<KeyComparison>> {

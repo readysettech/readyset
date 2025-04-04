@@ -586,7 +586,7 @@ impl wal::TupleData {
                         // text - we don't have enough information here to actually coerce to the
                         // correct type, but the table will do that for us (albeit this is slightly
                         // less efficient)
-                        DfValue::from(&*text)
+                        DfValue::from(text.to_vec())
                     } else {
                         let pg_type =
                             PGType::from_oid(spec.type_oid).ok_or_else(unsupported_type_err)?;

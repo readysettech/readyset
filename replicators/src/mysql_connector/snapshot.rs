@@ -841,6 +841,10 @@ fn mysql_row_to_noria_row(
         let val = value_to_value(row.as_ref(idx).unwrap());
         let col = row.columns_ref().get(idx).unwrap();
         let flags = col.flags();
+        let binary = flags.contains(ColumnFlags::BINARY_FLAG)
+            && (*collation == CollationId::BINARY as u16
+                || col.character_set() == CollationId::BINARY as u16);
+
         match col.column_type() {
             ColumnType::MYSQL_TYPE_STRING => {
                 // ENUM and SET columns are stored as integers and retrieved as strings. We don't
@@ -863,7 +867,7 @@ fn mysql_row_to_noria_row(
                 };
                 match require_padding {
                     true => {
-                        let collation = match flags.contains(ColumnFlags::BINARY_FLAG) {
+                        let collation = match binary {
                             true => CollationId::BINARY as u16,
                             false => CollationId::from(*collation) as u16,
                         };
@@ -877,13 +881,19 @@ fn mysql_row_to_noria_row(
                             Err(err) => return Err(internal_err!("Error padding column: {}", err)),
                         }
                     }
-                    false => noria_row.push(DfValue::from_str_and_collation(
-                        String::from_utf8_lossy(&bytes).to_string().as_str(),
-                        readyset_data::Collation::from_mysql_collation(
-                            Collation::resolve(CollationId::from(*collation)).collation(),
-                        )
-                        .unwrap_or_default(),
-                    )),
+                    false => {
+                        if binary {
+                            noria_row.push(DfValue::from(bytes))
+                        } else {
+                            noria_row.push(DfValue::from_str_and_collation(
+                                String::from_utf8_lossy(&bytes).to_string().as_str(),
+                                readyset_data::Collation::from_mysql_collation(
+                                    Collation::resolve(CollationId::from(*collation)).collation(),
+                                )
+                                .unwrap_or_default(),
+                            ))
+                        }
+                    }
                 }
             }
             ColumnType::MYSQL_TYPE_TIMESTAMP
@@ -954,13 +964,19 @@ fn mysql_row_to_noria_row(
             }
             ColumnType::MYSQL_TYPE_VAR_STRING => {
                 let df_val = match val {
-                    mysql_common::value::Value::Bytes(b) => DfValue::from_str_and_collation(
-                        String::from_utf8_lossy(&b).to_string().as_str(),
-                        readyset_data::Collation::from_mysql_collation(
-                            Collation::resolve(CollationId::from(*collation)).collation(),
-                        )
-                        .unwrap_or_default(),
-                    ),
+                    mysql_common::value::Value::Bytes(b) => {
+                        if binary {
+                            DfValue::from(b)
+                        } else {
+                            DfValue::from_str_and_collation(
+                                String::from_utf8_lossy(&b).to_string().as_str(),
+                                readyset_data::Collation::from_mysql_collation(
+                                    Collation::resolve(CollationId::from(*collation)).collation(),
+                                )
+                                .unwrap_or_default(),
+                            )
+                        }
+                    }
                     mysql_common::value::Value::NULL => DfValue::None,
                     _ => {
                         return Err(internal_err!(

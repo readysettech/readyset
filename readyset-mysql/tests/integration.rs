@@ -2493,6 +2493,142 @@ async fn date_only_text_protocol() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial(mysql)]
+async fn test_char_column_padding_binary_collation() {
+    readyset_tracing::init_test_logging();
+    let mut my_conn = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    my_conn
+        .query_drop(
+            "DROP TABLE IF EXISTS char_binary_padding CASCADE;
+             CREATE TABLE char_binary_padding (col1 CHAR(5) COLLATE binary);
+             INSERT INTO char_binary_padding VALUES ('foo'), ('¥'), ('');",
+        )
+        .await
+        .unwrap();
+
+    let (rs_opts, _rs_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    sleep().await;
+
+    let vals: Vec<(&str, usize)> = vec![
+        ("foo", 0),
+        ("foo\0\0", 1),
+        ("¥", 0),
+        ("¥\0\0\0", 1),
+        ("", 0),
+        ("\0\0\0\0\0", 1),
+    ];
+    for (i, (val, count)) in vals.into_iter().enumerate() {
+        // Test with binary protocol
+        eventually!(run_test: {
+            let my_rows: Vec<Vec<u8>> = my_conn
+                .exec("SELECT * FROM char_binary_padding WHERE col1 = ?", (val.as_bytes(),))
+                .await
+                .unwrap();
+            let rs_rows: Vec<Vec<u8>> = rs_conn
+                .exec("SELECT * FROM char_binary_padding WHERE col1 = ?", (val.as_bytes(),))
+                .await
+                .unwrap();
+                AssertUnwindSafe(move || (my_rows, rs_rows))
+        }, then_assert: |results| {
+            let (my_rows, rs_rows) = results();
+            assert_eq!(my_rows, rs_rows, "[{i}] Expected {count} row(s) matching {val:?}");
+            assert_eq!(my_rows.len(), count);
+        });
+        // Test with text protocol
+        eventually!(run_test: {
+            let my_rows: Vec<Vec<u8>> = my_conn
+                .query(dbg!(format!("SELECT * FROM char_binary_padding WHERE col1 = '{val}'")))
+                .await
+                .unwrap();
+            let rs_rows: Vec<Vec<u8>> = rs_conn
+                .query(format!("SELECT * FROM char_binary_padding WHERE col1 = '{val}'"))
+                .await
+                .unwrap();
+                AssertUnwindSafe(move || (my_rows, rs_rows))
+        }, then_assert: |results| {
+            let (my_rows, rs_rows) = results();
+            assert_eq!(my_rows, rs_rows, "[{i}] Expected {count} row(s) matching {val:?}");
+            assert_eq!(my_rows.len(), count);
+        });
+    }
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial(mysql)]
+async fn test_binary_column_padding() {
+    readyset_tracing::init_test_logging();
+    let mut my_conn = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    my_conn
+        .query_drop(
+            "DROP TABLE IF EXISTS binary_padding CASCADE;
+             CREATE TABLE binary_padding (col1 BINARY(5));
+             INSERT INTO binary_padding VALUES ('foo'), ('¥'), ('');",
+        )
+        .await
+        .unwrap();
+
+    let (rs_opts, _rs_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    sleep().await;
+
+    let vals: Vec<(&str, usize)> = vec![
+        ("foo", 0),
+        ("foo\0\0", 1),
+        ("¥", 0),
+        ("¥\0\0\0", 1),
+        ("", 0),
+        ("\0\0\0\0\0", 1),
+    ];
+    for (i, (val, count)) in vals.into_iter().enumerate() {
+        // Test with binary protocol
+        eventually!(run_test: {
+            let my_rows: Vec<Vec<u8>> = my_conn
+                .exec("SELECT col1 FROM binary_padding WHERE col1 = ?", (val.as_bytes(),))
+                .await
+                .unwrap();
+            let rs_rows: Vec<Vec<u8>> = rs_conn
+                .exec("SELECT col1 FROM binary_padding WHERE col1 = ?", (val.as_bytes(),))
+                .await
+                .unwrap();
+                AssertUnwindSafe(move || (my_rows, rs_rows))
+        }, then_assert: |results| {
+            let (my_rows, rs_rows) = results();
+            assert_eq!(my_rows, rs_rows, "[{i}] Expected {count} row(s) matching {val:?}");
+            assert_eq!(my_rows.len(), count);
+        });
+        // Test with text protocol
+        eventually!(run_test: {
+            let my_rows: Vec<(Vec<u8>, Option<bool>)> = my_conn
+                .query(format!("SELECT col1, col1 = '{val}' FROM binary_padding WHERE col1 = '{val}'"))
+                .await
+                .unwrap();
+            let rs_rows: Vec<(Vec<u8>, Option<bool>)> = rs_conn
+                .query(format!("SELECT col1, col1 = '{val}' FROM binary_padding WHERE col1 = '{val}'"))
+                .await
+                .unwrap();
+                AssertUnwindSafe(move || (my_rows, rs_rows))
+        }, then_assert: |results| {
+            let (my_rows, rs_rows) = results();
+            assert_eq!(my_rows, rs_rows, "[{i}] Expected {count} row(s) matching {val:?}");
+            assert_eq!(my_rows.len(), count);
+        });
+    }
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial(mysql)]
 async fn test_case_expr_then_expr() {
     let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
     let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;

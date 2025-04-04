@@ -447,6 +447,12 @@ impl Arbitrary for SqlType {
                 Just(TinyText).boxed(),
                 Just(MediumText).boxed(),
                 Just(LongText).boxed(),
+                Just(TinyBlob).boxed(),
+                Just(MediumBlob).boxed(),
+                Just(Blob).boxed(),
+                Just(LongBlob).boxed(),
+                (1..255u16).prop_map(VarBinary).boxed(),
+                option::of(1..255u16).prop_map(Binary).boxed(),
                 option::of(1..=6u16).prop_map(DateTime).boxed(),
             ]);
         }

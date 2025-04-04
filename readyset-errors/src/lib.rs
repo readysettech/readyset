@@ -2,8 +2,8 @@
 
 pub mod rpc;
 
-use std::error::Error;
 use std::io;
+use std::{error::Error, str::Utf8Error};
 
 use derive_more::Display;
 use petgraph::graph::NodeIndex;
@@ -1235,6 +1235,15 @@ impl_from_to_string!(hyper::Error, HttpError);
 impl From<Size0Error> for ReadySetError {
     fn from(_: Size0Error) -> Self {
         ReadySetError::Size0Error
+    }
+}
+
+impl From<Utf8Error> for ReadySetError {
+    fn from(e: Utf8Error) -> Self {
+        ReadySetError::DecodingError {
+            encoding: "unknown".into(),
+            message: e.to_string(),
+        }
     }
 }
 
