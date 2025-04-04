@@ -387,7 +387,7 @@ fn make_base_node(
                                 internal_err!("Failed to convert SQL type to DfType: {}", e)
                             })?;
                     return df.coerce_to(&dftype_to, &df.infer_dataflow_type());
-                } else if let ColumnConstraint::NotNull { .. } = *c {
+                } else if let ColumnConstraint::NotNull = *c {
                     let collation = cs.get_collation().map(|collation| {
                         Collation::from_mysql_collation(collation).unwrap_or(Collation::Utf8)
                     });

@@ -922,7 +922,7 @@ impl DfValue {
                         DfType::Time { .. } => {
                             return DfValue::Time(MySqlTime::default());
                         }
-                        DfType::Date { .. } => {
+                        DfType::Date => {
                             let mut dt = TimestampTz::zero();
                             dt.set_date_only();
                             return DfValue::TimestampTz(dt);
@@ -940,7 +940,7 @@ impl DfValue {
                             Collation::Utf8,
                         );
                     }
-                } else if matches!(dftype, DfType::Json { .. }) {
+                } else if matches!(dftype, DfType::Json) {
                     return DfValue::from_str_and_collation("null", Collation::Utf8);
                 }
                 DfValue::None
