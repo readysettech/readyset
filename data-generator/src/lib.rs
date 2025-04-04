@@ -490,21 +490,17 @@ where
             "a".repeat(length).into()
         }
         SqlType::QuotedChar => rng.gen::<i8>().into(),
+        SqlType::Char(None) => "a".into(),
         SqlType::TinyBlob | SqlType::TinyText => {
             // 2^8 bytes
             let length: usize = rng.gen_range(1..256);
             "a".repeat(length).into()
         }
-        SqlType::Blob
-        | SqlType::Text
-        | SqlType::Citext
-        | SqlType::VarChar(None)
-        | SqlType::Binary(None) => {
+        SqlType::Blob | SqlType::Text | SqlType::Citext | SqlType::VarChar(None) => {
             // 2^16 bytes
             let length: usize = rng.gen_range(1..65536);
             "a".repeat(length).into()
         }
-        SqlType::Char(None) => "a".into(),
         SqlType::MediumBlob | SqlType::MediumText => {
             // 2^24 bytes
             // Currently capped at 65536 as these are generated in memory.
@@ -517,10 +513,13 @@ where
             let length: usize = rng.gen_range(1..65536);
             "a".repeat(length).into()
         }
+        SqlType::Binary(None) => {
+            // 1 byte
+            b"b".to_vec().into()
+        }
         SqlType::Binary(Some(x)) | SqlType::VarBinary(x) => {
-            // Convert to bytes and generate string data to match.
-            let length: usize = rng.gen_range(1..*x / 8).into();
-            "a".repeat(length).into()
+            let length: usize = rng.gen_range(1..*x).into();
+            b"b".repeat(length).to_vec().into()
         }
         SqlType::ByteArray => {
             let length = rng.gen_range(1..10);
@@ -654,9 +653,13 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         | SqlType::LongText
         | SqlType::Text
         | SqlType::Citext
-        | SqlType::Binary(_)
-        | SqlType::VarBinary(_)
         | SqlType::ByteArray => idx.to_string().into(),
+        SqlType::Binary(None) => idx.to_string().as_bytes()[..1].to_vec().into(),
+        SqlType::Binary(Some(len)) | SqlType::VarBinary(len) => {
+            let s = idx.to_string();
+            let b = s.as_bytes();
+            b[..min(b.len(), *len as usize)].to_vec().into()
+        }
         SqlType::VarChar(Some(len)) | SqlType::Char(Some(len)) => {
             let s = idx.to_string();
             (&s[..min(s.len(), *len as usize)]).into()
