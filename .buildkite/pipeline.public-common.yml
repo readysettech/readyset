@@ -59,6 +59,7 @@ steps:
           login: true
           retries: 3
     retry: *retry_on_agent_kill
+    soft_fail: true
 
   - label: ':clippy: Check clippy'
     key: check-clippy
