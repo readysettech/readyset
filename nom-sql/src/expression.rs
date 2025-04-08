@@ -792,6 +792,7 @@ fn row_expr_implicit(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlR
     move |i| {
         // Implicit row exprs must have two or more elements
         let (i, _) = tag("(")(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, first_expr) = expression(dialect)(i)?;
         let (i, _) = ws_sep_comma(i)?;
         let (i, rest_exprs) = separated_list1(
@@ -801,6 +802,7 @@ fn row_expr_implicit(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlR
                 map(bracketed_expr_list(dialect), Expr::Array),
             )),
         )(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag(")")(i)?;
 
         let mut exprs = Vec::with_capacity(rest_exprs.len() + 1);

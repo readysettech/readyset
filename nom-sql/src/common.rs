@@ -107,7 +107,12 @@ fn agg_fx_args(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Expr, bool)> {
     move |i| {
         let (i, _) = whitespace0(i)?;
-        delimited(tag("("), agg_function_arguments(dialect), tag(")"))(i)
+        let (i, _) = tag("(")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, args) = agg_function_arguments(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag(")")(i)?;
+        Ok((i, args))
     }
 }
 
@@ -281,6 +286,7 @@ fn substring(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[
         let (i, _) = alt((tag_no_case("substring"), tag_no_case("substr")))(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag("(")(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, string) = expression(dialect)(i)?;
         let (i, pos) = opt(preceded(
             tuple((whitespace1, tag_no_case("from"), whitespace1)),

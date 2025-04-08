@@ -9,3 +9,8 @@ select x, COALESCE(y, 2) FROM t1;
 ----
 1
 2
+
+query I
+SELECT COUNT ( 1 ) FROM t1;
+----
+1

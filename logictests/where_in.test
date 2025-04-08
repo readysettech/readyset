@@ -21,7 +21,7 @@ select sum(id) from t1 where value in (another, 2);
 3
 
 query I ok
-select max(id) from t1 where id not in (another, 2);
+select max(id) from t1 where id not in ( another, 2 );
 ----
 4
 
