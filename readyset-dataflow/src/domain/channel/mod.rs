@@ -150,6 +150,7 @@ impl DomainConnectionBuilder<Remote> {
         // we must currently write and call flush, because the remote end (currently) does a
         // synchronous read upon accepting a connection.
         let s = self.build_sync()?.into_inner().into_inner()?;
+        s.set_nonblocking(true).expect("couldn't set nonblocking");
 
         tokio::net::TcpStream::from_std(s)
             .map(BufWriter::new)

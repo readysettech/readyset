@@ -227,6 +227,7 @@ where
             let (s, _) = listener.accept().unwrap();
             let s = {
                 let _guard = rt.handle().enter();
+                s.set_nonblocking(true).expect("couldn't set nonblocking");
                 tokio::net::TcpStream::from_std(s).unwrap()
             };
             rt.block_on(MySqlIntermediary::run_on_tcp(

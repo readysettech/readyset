@@ -240,7 +240,7 @@ tikv-jemalloc-sys = "0.5.4"
 tikv-jemallocator = "0.5.4"
 time = "0.3"
 timekeeper = { version = "0.3.2", default-features = false }
-tokio = { version = "1.37", features = ["full"] }
+tokio = { version = "1.44", features = ["full"] }
 tokio-native-tls = "0.3.1"
 tokio-retry = "0.3"
 tokio-scoped = "0.2.0"

@@ -140,6 +140,7 @@
 //!         if let Ok((s, _)) = listener.accept() {
 //!             let s = {
 //!                 let _guard = rt.handle().enter();
+//!                 s.set_nonblocking(true).expect("couldn't set nonblocking");
 //!                 tokio::net::TcpStream::from_std(s).unwrap()
 //!             };
 //!             rt.block_on(MySqlIntermediary::run_on_tcp(Backend, s, false, None, TlsMode::Optional))
