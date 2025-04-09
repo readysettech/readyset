@@ -879,10 +879,25 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 else_expr: else_result.try_into_dialect(dialect)?,
             }),
             Case {
-                operand: Some(expr), // XXX do we really not support the CASE operand?
-                conditions: _,
-                else_result: _,
-            } => not_yet_implemented!("CASE WHEN with operand: {expr:?}"),
+                operand: Some(expr),
+                conditions,
+                else_result,
+            } => Ok(Self::CaseWhen {
+                branches: conditions
+                    .into_iter()
+                    .map(|condition| {
+                        Ok(CaseWhenBranch {
+                            condition: Expr::BinaryOp {
+                                lhs: expr.clone().try_into_dialect(dialect)?,
+                                op: BinaryOperator::Equal,
+                                rhs: Box::new(condition.condition.try_into_dialect(dialect)?),
+                            },
+                            body: condition.result.try_into_dialect(dialect)?,
+                        })
+                    })
+                    .try_collect()?,
+                else_expr: else_result.try_into_dialect(dialect)?,
+            }),
             Cast {
                 kind,
                 expr,
