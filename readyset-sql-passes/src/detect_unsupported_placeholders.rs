@@ -239,9 +239,10 @@ impl DetectUnsupportedPlaceholders for SelectStatement {
 #[cfg(test)]
 mod tests {
     use readyset_errors::{ReadySetError, ReadySetResult};
+    use readyset_sql::Dialect;
+    use readyset_sql_parsing::parse_select;
 
     use super::{Config, DetectUnsupportedPlaceholders};
-    use crate::util::parse_select_statement;
 
     // Takes the result and the list of placeholders that should be detected. If the list is empty,
     // the pass is expected to return Ok(()).
@@ -261,60 +262,84 @@ mod tests {
 
     #[test]
     fn extracts_placeholder_in_fields() {
-        let select = parse_select_statement("SELECT $1, a FROM t WHERE b = $2");
+        let select = parse_select(Dialect::PostgreSQL, "SELECT $1, a FROM t WHERE b = $2").unwrap();
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[1]);
     }
 
     #[test]
     fn extracts_placeholder_expr_comparison() {
-        let select = parse_select_statement("SELECT a FROM t WHERE b + $1 = 1 AND c + 1 = $2");
+        let select = parse_select(
+            Dialect::PostgreSQL,
+            "SELECT a FROM t WHERE b + $1 = 1 AND c + 1 = $2",
+        )
+        .unwrap();
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[1, 2]);
     }
 
     #[test]
     fn extracts_placeholder_having_clause() {
-        let select =
-            parse_select_statement("SELECT a FROM t WHERE b = $1 GROUP BY d HAVING sum(d) = $2");
+        let select = parse_select(
+            Dialect::PostgreSQL,
+            "SELECT a FROM t WHERE b = $1 GROUP BY d HAVING sum(d) = $2",
+        )
+        .unwrap();
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[2]);
     }
 
     #[test]
     fn ignores_nested_subquery() {
-        let select =
-            parse_select_statement("SELECT a FROM t1 WHERE b IN (SELECT c FROM t2 WHERE d = $1)");
+        let select = parse_select(
+            Dialect::PostgreSQL,
+            "SELECT a FROM t1 WHERE b IN (SELECT c FROM t2 WHERE d = $1)",
+        )
+        .unwrap();
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[]);
     }
 
     #[test]
     fn extracts_ordering_placeholders() {
-        let select = parse_select_statement(
+        let select = parse_select(
+            Dialect::PostgreSQL,
             "SELECT a FROM t WHERE b BETWEEN $1 AND $2 AND c = $3 AND d <= $4",
-        );
+        )
+        .unwrap();
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[1, 2, 4]);
     }
 
     #[test]
     fn ignores_supported_between() {
-        let select = parse_select_statement("SELECT a FROM t WHERE b BETWEEN $1 AND $2");
+        let select = parse_select(
+            Dialect::PostgreSQL,
+            "SELECT a FROM t WHERE b BETWEEN $1 AND $2",
+        )
+        .unwrap();
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[]);
     }
 
     #[test]
     fn ignores_supported_limit_offset() {
-        let select = parse_select_statement("SELECT a FROM t WHERE b = $1 LIMIT $2 OFFSET $3");
+        let select = parse_select(
+            Dialect::MySQL,
+            "SELECT a FROM t WHERE b = $1 LIMIT $2 OFFSET $3",
+        )
+        .unwrap();
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[]);
     }
 
     #[test]
     fn ignores_allowed_mixed_comparisons() {
-        let select = parse_select_statement("SELECT a FROM t WHERE b >= $1 AND c < $2 AND d = $3");
+        let select = parse_select(
+            Dialect::PostgreSQL,
+            "SELECT a FROM t WHERE b >= $1 AND c < $2 AND d = $3",
+        )
+        .unwrap();
         let res = select.detect_unsupported_placeholders(Config {
             allow_mixed_comparisons: true,
         });
@@ -323,18 +348,22 @@ mod tests {
 
     #[test]
     fn ignores_supported_placeholder_after_subquery() {
-        let select = parse_select_statement(
+        let select = parse_select(
+            Dialect::PostgreSQL,
             "SELECT a FROM t WHERE b IN (SELECT c FROM t WHERE d = 1) AND e = $1",
-        );
+        )
+        .unwrap();
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[]);
     }
 
     #[test]
     fn ignores_ordering_placeholders_only() {
-        let select = parse_select_statement(
+        let select = parse_select(
+            Dialect::PostgreSQL,
             "SELECT a FROM t WHERE b > $1 AND c BETWEEN $2 AND $3 AND d = '4'",
-        );
+        )
+        .unwrap();
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[]);
     }
@@ -342,7 +371,7 @@ mod tests {
     #[test]
     fn ignores_ordering_comparisons_when_equality_unsupported() {
         let select =
-            parse_select_statement("SELECT a FROM t WHERE b > $1 AND c IN (SELECT d = $2 FROM t) GROUP BY e HAVING sum(e) = $3");
+            parse_select(Dialect::PostgreSQL, "SELECT a FROM t WHERE b > $1 AND c IN (SELECT d = $2 FROM t) GROUP BY e HAVING sum(e) = $3").unwrap();
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[2, 3]);
     }

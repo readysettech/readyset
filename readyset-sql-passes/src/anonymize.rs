@@ -221,7 +221,7 @@ mod tests {
     use super::*;
 
     fn parse_select_statement(q: &str) -> SelectStatement {
-        nom_sql::parse_select_statement(Dialect::MySQL, q).unwrap()
+        readyset_sql_parsing::parse_select(Dialect::MySQL, q).unwrap()
     }
 
     fn parse_create_table_statement(q: &str) -> CreateTableStatement {

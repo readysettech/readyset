@@ -8,7 +8,6 @@ use database_utils::{DatabaseURL, ReplicationServerId, UpstreamConfig as Config}
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use mysql_time::MySqlTime;
-use nom_sql::parse_select_statement;
 use rand::distributions::Alphanumeric;
 use rand::{Rng, SeedableRng};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
@@ -18,6 +17,7 @@ use readyset_data::{Collation, DfValue, Dialect, TimestampTz, TinyText};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_server::Builder;
 use readyset_sql::ast::{NonReplicatedRelation, Relation};
+use readyset_sql_parsing::parse_select;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
@@ -478,11 +478,8 @@ impl TestHandle {
                             name: query_name.clone().into(),
                         }),
                         statement: Box::new(
-                            parse_select_statement(
-                                readyset_sql::Dialect::MySQL,
-                                select_stmt.clone(),
-                            )
-                            .unwrap(),
+                            parse_select(readyset_sql::Dialect::MySQL, select_stmt.clone())
+                                .unwrap(),
                         ),
                         always: false,
                     }),
@@ -2079,7 +2076,7 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
             name: "t2_view_q".into(),
         }),
         statement: Box::new(
-            parse_select_statement(
+            parse_select(
                 readyset_sql::Dialect::PostgreSQL,
                 "SELECT * FROM public.t2_view;",
             )
@@ -2160,11 +2157,11 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
                     name: "t2_view_q".into()
                 }),
                 statement: Box::new(
-                    parse_select_statement(
+                    parse_select(
                         readyset_sql::Dialect::PostgreSQL,
                         "SELECT * FROM public.t2_view;"
                     )
-                    .unwrap()
+                    .unwrap(),
                 ),
                 always: true,
             }),

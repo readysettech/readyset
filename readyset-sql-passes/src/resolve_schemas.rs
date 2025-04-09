@@ -417,7 +417,7 @@ mod tests {
         rewrites_to(
             "select cast(t1.x as abc) from t1",
             "select cast(s1.t1.x as s2.abc) from s1.t1",
-            |s| nom_sql::parse_select_statement(Dialect::PostgreSQL, s).unwrap(),
+            |s| readyset_sql_parsing::parse_select(Dialect::PostgreSQL, s).unwrap(),
             |result| result.display(Dialect::MySQL).to_string(),
         )
     }
@@ -427,7 +427,7 @@ mod tests {
         rewrites_to(
             "select cast(t1.x as abc[][]) from t1",
             "select cast(s1.t1.x as s2.abc[][]) from s1.t1",
-            |s| nom_sql::parse_select_statement(Dialect::PostgreSQL, s).unwrap(),
+            |s| readyset_sql_parsing::parse_select(Dialect::PostgreSQL, s).unwrap(),
             |result| result.display(Dialect::MySQL).to_string(),
         )
     }

@@ -1,7 +1,5 @@
-use readyset_sql::{
-    ast::{Expr, SqlQuery},
-    Dialect,
-};
+use readyset_sql::ast::{Expr, SelectStatement, SqlQuery};
+use readyset_sql::Dialect;
 
 #[cfg(feature = "sqlparser")]
 use readyset_sql::{
@@ -564,7 +562,34 @@ pub fn parse_expr(dialect: Dialect, input: impl AsRef<str>) -> Result<Expr, Stri
     )
 }
 
+#[cfg(feature = "sqlparser")]
+fn parse_readyset_select(
+    parser: &mut Parser,
+    dialect: Dialect,
+    _input: impl AsRef<str>,
+) -> Result<SelectStatement, ReadysetParsingError> {
+    // SQLParser has this weird behaviour where `parse_select` subparser
+    // doesn't parse limits or offsets....
+    Ok(parser.parse_query()?.try_into_dialect(dialect)?)
+}
+
 #[cfg(not(feature = "sqlparser"))]
 pub fn parse_expr(dialect: Dialect, input: impl AsRef<str>) -> Result<Expr, String> {
     nom_sql::parse_expr(dialect, input.as_ref())
+}
+
+#[cfg(not(feature = "sqlparser"))]
+pub fn parse_select(dialect: Dialect, input: impl AsRef<str>) -> Result<SelectStatement, String> {
+    nom_sql::parse_select_statement(dialect, input.as_ref())
+}
+
+/// Parses a single expression; only intended for use in tests.
+#[cfg(feature = "sqlparser")]
+pub fn parse_select(dialect: Dialect, input: impl AsRef<str>) -> Result<SelectStatement, String> {
+    parse_both_inner(
+        dialect,
+        input,
+        |d, s| nom_sql::parse_select_statement(d, s),
+        |p, d, s| parse_readyset_select(p, d, s),
+    )
 }

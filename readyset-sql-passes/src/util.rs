@@ -242,42 +242,45 @@ impl TryFrom<BinaryOperator> for LogicalOp {
 /// [`SelectStatement`]
 #[cfg(test)]
 pub(crate) fn parse_select_statement(q: &str) -> SelectStatement {
-    use nom_sql::parse_query;
-    use readyset_sql::ast::SqlQuery;
     use readyset_sql::Dialect;
+    use readyset_sql_parsing::parse_select;
 
-    let q = parse_query(Dialect::MySQL, q).unwrap();
-    match q {
-        SqlQuery::Select(stmt) => stmt,
-        _ => panic!(),
-    }
+    parse_select(Dialect::MySQL, q).unwrap()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::is_correlated;
+    use readyset_sql_parsing::parse_select;
 
     mod is_correlated {
+        use readyset_sql::Dialect;
+
         use super::*;
 
         #[test]
         fn uncorrelated_query() {
-            let query = parse_select_statement(
+            let query = parse_select(
+                Dialect::MySQL,
                 "SELECT * FROM t JOIN u ON t.w = u.a WHERE t.x = t.y AND t.z = 4",
-            );
+            )
+            .unwrap();
             assert!(!is_correlated(&query));
         }
 
         #[test]
         fn correlated_query() {
-            let query =
-                parse_select_statement("SELECT * FROM t WHERE t.x = t.y AND t.z = 4 AND t.w = u.a");
+            let query = parse_select(
+                Dialect::MySQL,
+                "SELECT * FROM t WHERE t.x = t.y AND t.z = 4 AND t.w = u.a",
+            )
+            .unwrap();
             assert!(is_correlated(&query));
         }
 
         #[test]
         fn correlated_different_schemas() {
-            let query = parse_select_statement("SELECT * FROM a.t WHERE a.t = b.t");
+            let query = parse_select(Dialect::MySQL, "SELECT * FROM a.t WHERE a.t = b.t").unwrap();
             assert!(is_correlated(&query));
         }
     }

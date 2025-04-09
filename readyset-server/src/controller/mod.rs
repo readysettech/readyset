@@ -1357,7 +1357,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use dataflow::DomainIndex;
-    use nom_sql::{parse_create_table, parse_select_statement};
+    use nom_sql::parse_create_table;
     use readyset_client::debug::info::KeyCount;
     use readyset_client::recipe::changelist::{Change, ChangeList};
     use readyset_client::{
@@ -1366,6 +1366,7 @@ mod tests {
     use readyset_data::Dialect as DataDialect;
     use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
     use readyset_sql::Dialect;
+    use readyset_sql_parsing::parse_select;
     use readyset_util::eventually;
     use replication_offset::ReplicationOffset;
     use replicators::MySqlPosition;
@@ -1551,8 +1552,8 @@ mod tests {
     async fn view_names() {
         let (mut noria, shutdown_tx) = start_simple("view_names").await;
 
-        let query1 = parse_select_statement(Dialect::MySQL, "SELECT * FROM t1").unwrap();
-        let query2 = parse_select_statement(Dialect::MySQL, "SELECT * FROM t2").unwrap();
+        let query1 = parse_select(Dialect::MySQL, "SELECT * FROM t1").unwrap();
+        let query2 = parse_select(Dialect::MySQL, "SELECT * FROM t2").unwrap();
 
         let schema_search_path = vec!["s1".into()];
 
@@ -1596,7 +1597,7 @@ mod tests {
         assert!(matches!(&res2[..], [Some(_), None]));
 
         // A syntactically distinct, but semantically equivalent query
-        let query1_equivalent = parse_select_statement(Dialect::MySQL, "SELECT x FROM t1").unwrap();
+        let query1_equivalent = parse_select(Dialect::MySQL, "SELECT x FROM t1").unwrap();
         let res3 = noria
             .view_names(
                 vec![ViewCreateRequest::new(
@@ -1610,7 +1611,7 @@ mod tests {
         assert!(matches!(&res3[..], &[Some(_)]));
 
         // A change in schema_search_path that doesn't change the semantics
-        let query1_equivalent = parse_select_statement(Dialect::MySQL, "SELECT x FROM t1").unwrap();
+        let query1_equivalent = parse_select(Dialect::MySQL, "SELECT x FROM t1").unwrap();
         let res3 = noria
             .view_names(
                 vec![ViewCreateRequest::new(
@@ -1635,7 +1636,7 @@ mod tests {
             .await
             .unwrap();
 
-        let query1_equivalent = parse_select_statement(Dialect::MySQL, "SELECT x FROM t1").unwrap();
+        let query1_equivalent = parse_select(Dialect::MySQL, "SELECT x FROM t1").unwrap();
         let res3 = noria
             .view_names(
                 vec![ViewCreateRequest::new(

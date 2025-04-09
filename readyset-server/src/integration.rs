@@ -26,7 +26,7 @@ use dataflow::{
 };
 use futures::{join, StreamExt};
 use itertools::Itertools;
-use nom_sql::{parse_create_table, parse_create_view, parse_select_statement};
+use nom_sql::{parse_create_table, parse_create_view};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
@@ -34,7 +34,7 @@ use readyset_data::{Bound, DfType, DfValue, Dialect, IntoBoundedRange};
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_sql::ast;
 use readyset_sql::ast::{OrderType, Relation, SqlQuery};
-use readyset_sql_parsing::parse_query;
+use readyset_sql_parsing::{parse_query, parse_select};
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use rust_decimal::prelude::ToPrimitive;
@@ -8773,11 +8773,8 @@ async fn multiple_simultaneous_migrations() {
             Change::CreateCache(CreateCache {
                 name: Some("q1".into()),
                 statement: Box::new(
-                    parse_select_statement(
-                        readyset_sql::Dialect::MySQL,
-                        "SELECT * FROM t WHERE x = ?"
-                    )
-                    .unwrap()
+                    parse_select(readyset_sql::Dialect::MySQL, "SELECT * FROM t WHERE x = ?")
+                        .unwrap()
                 ),
                 always: false,
             }),
@@ -8787,11 +8784,8 @@ async fn multiple_simultaneous_migrations() {
             Change::CreateCache(CreateCache {
                 name: Some("q2".into()),
                 statement: Box::new(
-                    parse_select_statement(
-                        readyset_sql::Dialect::MySQL,
-                        "SELECT * FROM t WHERE y = ?"
-                    )
-                    .unwrap()
+                    parse_select(readyset_sql::Dialect::MySQL, "SELECT * FROM t WHERE y = ?")
+                        .unwrap()
                 ),
                 always: false,
             }),
@@ -9231,7 +9225,7 @@ async fn views_out_of_order() {
     g.extend_recipe(ChangeList::from_change(
         Change::create_cache(
             "q",
-            parse_select_statement(readyset_sql::Dialect::MySQL, "SELECT x FROM v2").unwrap(),
+            parse_select(readyset_sql::Dialect::MySQL, "SELECT x FROM v2").unwrap(),
             false,
         ),
         Dialect::DEFAULT_MYSQL,
@@ -9260,8 +9254,7 @@ async fn evict_single() {
     g.extend_recipe(ChangeList::from_change(
         Change::create_cache(
             "q",
-            parse_select_statement(readyset_sql::Dialect::MySQL, "SELECT x FROM t1 where y = ?")
-                .unwrap(),
+            parse_select(readyset_sql::Dialect::MySQL, "SELECT x FROM t1 where y = ?").unwrap(),
             false,
         ),
         Dialect::DEFAULT_MYSQL,
@@ -9324,7 +9317,7 @@ async fn evict_single_intermediate_state() {
     g.extend_recipe(ChangeList::from_change(
         Change::create_cache(
             "q",
-            parse_select_statement(
+            parse_select(
                 readyset_sql::Dialect::MySQL,
                 "SELECT sum(x) FROM t1 WHERE y = ?",
             )

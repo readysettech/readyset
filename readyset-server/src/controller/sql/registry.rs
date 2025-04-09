@@ -698,7 +698,7 @@ mod tests {
     use super::*;
 
     fn recipe_expr_cache(name: &'static str, query: &'static str) -> RecipeExpr {
-        let statement = nom_sql::parse_select_statement(Dialect::MySQL, query).unwrap();
+        let statement = readyset_sql_parsing::parse_select(Dialect::MySQL, query).unwrap();
 
         RecipeExpr::Cache {
             name: name.into(),
@@ -712,14 +712,15 @@ mod tests {
         RecipeExpr::View {
             name: name.into(),
             definition: SelectSpecification::Simple(
-                nom_sql::parse_select_statement(Dialect::MySQL, query).unwrap(),
+                readyset_sql_parsing::parse_select(Dialect::MySQL, query).unwrap(),
             ),
         }
     }
 
     mod expression {
-        use nom_sql::{parse_create_table, parse_select_statement};
+        use nom_sql::parse_create_table;
         use readyset_sql::Dialect;
+        use readyset_sql_parsing::parse_select;
 
         use super::*;
 
@@ -742,7 +743,7 @@ mod tests {
             let view = RecipeExpr::View {
                 name: view_name.clone(),
                 definition: SelectSpecification::Simple(
-                    parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap(),
+                    parse_select(Dialect::MySQL, "SELECT * FROM test_table;").unwrap(),
                 ),
             };
 
@@ -767,7 +768,7 @@ mod tests {
             let view = RecipeExpr::View {
                 name: "test_view".into(),
                 definition: SelectSpecification::Simple(
-                    parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap(),
+                    parse_select(Dialect::MySQL, "SELECT * FROM test_table;").unwrap(),
                 ),
             };
 
@@ -778,8 +779,9 @@ mod tests {
     }
 
     mod registry {
-        use nom_sql::{parse_create_table, parse_select_statement};
+        use nom_sql::parse_create_table;
         use readyset_sql::Dialect;
+        use readyset_sql_parsing::parse_select;
 
         use super::*;
 
@@ -851,8 +853,7 @@ mod tests {
             let view = RecipeExpr::View {
                 name: view_name.clone(),
                 definition: SelectSpecification::Simple(
-                    parse_select_statement(Dialect::MySQL, "SELECT DISTINCT * FROM test_table;")
-                        .unwrap(),
+                    parse_select(Dialect::MySQL, "SELECT DISTINCT * FROM test_table;").unwrap(),
                 ),
             };
             let num_expressions = registry.expressions.len();
@@ -881,8 +882,7 @@ mod tests {
         #[ignore]
         fn add_existing_view() {
             let mut registry = setup();
-            let select =
-                parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap();
+            let select = parse_select(Dialect::MySQL, "SELECT * FROM test_table;").unwrap();
             let view_name: Relation = "test_view2".into();
             let view = RecipeExpr::View {
                 name: view_name.clone(),
@@ -1013,7 +1013,7 @@ mod tests {
         #[test]
         fn contains() {
             let mut registry = setup();
-            let stmt = parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table").unwrap();
+            let stmt = parse_select(Dialect::MySQL, "SELECT * FROM test_table").unwrap();
             let expr = recipe_expr_cache("test", "SELECT * FROM test_table");
 
             registry.add_query(expr).unwrap();
@@ -1121,8 +1121,7 @@ mod tests {
             registry.add_custom_type(ty.clone());
 
             let statement =
-                parse_select_statement(Dialect::PostgreSQL, "SELECT CAST(x AS public.abc) FROM t")
-                    .unwrap();
+                parse_select(Dialect::PostgreSQL, "SELECT CAST(x AS public.abc) FROM t").unwrap();
             assert!(registry
                 .add_query(RecipeExpr::Cache {
                     name: "foo".into(),
@@ -1150,9 +1149,10 @@ mod tests {
     mod expr_skeleton {
         use std::collections::HashMap;
 
-        use nom_sql::{parse_create_table, parse_select_statement};
+        use nom_sql::parse_create_table;
         use readyset_sql::ast::{ItemPlaceholder, Literal};
         use readyset_sql::Dialect;
+        use readyset_sql_parsing::parse_select;
 
         use super::{recipe_expr_cache, ExprRegistry, ExprSkeletons, MatchedCache, RecipeExpr};
 
@@ -1160,15 +1160,14 @@ mod tests {
         fn equates_literals() {
             let mut skeleton = ExprSkeletons::new();
             skeleton.insert(
-                parse_select_statement(Dialect::MySQL, "SELECT NULL, true, 1 FROM t").unwrap(),
+                parse_select(Dialect::MySQL, "SELECT NULL, true, 1 FROM t").unwrap(),
                 "foo".into(),
             );
             // NULL is considered equivalent to itself in this context
             assert_eq!(
                 skeleton
                     .caches_for_query(
-                        parse_select_statement(Dialect::MySQL, "SELECT NULL, true, $1 FROM t")
-                            .unwrap(),
+                        parse_select(Dialect::MySQL, "SELECT NULL, true, $1 FROM t").unwrap(),
                     )
                     .unwrap(),
                 vec![MatchedCache {
@@ -1181,8 +1180,7 @@ mod tests {
             assert_eq!(
                 skeleton
                     .caches_for_query(
-                        parse_select_statement(Dialect::MySQL, "SELECT NULL, false, $1 FROM t")
-                            .unwrap(),
+                        parse_select(Dialect::MySQL, "SELECT NULL, false, $1 FROM t").unwrap(),
                     )
                     .unwrap(),
                 vec![]
@@ -1192,8 +1190,7 @@ mod tests {
             assert_eq!(
                 skeleton
                     .caches_for_query(
-                        parse_select_statement(Dialect::MySQL, "SELECT NULL, $1, 1.0 from t")
-                            .unwrap()
+                        parse_select(Dialect::MySQL, "SELECT NULL, $1, 1.0 from t").unwrap()
                     )
                     .unwrap(),
                 vec![]
@@ -1204,22 +1201,21 @@ mod tests {
         fn finds_many() {
             let mut skeleton = ExprSkeletons::new();
             skeleton.insert(
-                parse_select_statement(Dialect::MySQL, "SELECT $1, NULL, 1 FROM t").unwrap(),
+                parse_select(Dialect::MySQL, "SELECT $1, NULL, 1 FROM t").unwrap(),
                 "foo".into(),
             );
             skeleton.insert(
-                parse_select_statement(Dialect::MySQL, "SELECT $1, NULL, 2 FROM t").unwrap(),
+                parse_select(Dialect::MySQL, "SELECT $1, NULL, 2 FROM t").unwrap(),
                 "bar".into(),
             );
             skeleton.insert(
-                parse_select_statement(Dialect::MySQL, "SELECT $1, $2, 2 FROM t").unwrap(),
+                parse_select(Dialect::MySQL, "SELECT $1, $2, 2 FROM t").unwrap(),
                 "baz".into(),
             );
 
             let res = skeleton
                 .caches_for_query(
-                    parse_select_statement(Dialect::MySQL, "SELECT \"string\", NULL, $1 FROM t")
-                        .unwrap(),
+                    parse_select(Dialect::MySQL, "SELECT \"string\", NULL, $1 FROM t").unwrap(),
                 )
                 .unwrap();
             let truth = vec![
@@ -1245,9 +1241,7 @@ mod tests {
             assert_eq!(res, truth);
 
             let res = skeleton
-                .caches_for_query(
-                    parse_select_statement(Dialect::MySQL, "SELECT 1, 2, 2 FROM t").unwrap(),
-                )
+                .caches_for_query(parse_select(Dialect::MySQL, "SELECT 1, 2, 2 FROM t").unwrap())
                 .unwrap();
             assert_eq!(
                 res,

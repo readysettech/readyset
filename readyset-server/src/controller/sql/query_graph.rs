@@ -1528,10 +1528,10 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
 #[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
-    use nom_sql::parse_select_statement;
     use readyset_sql::ast::{FunctionExpr, SqlQuery};
     use readyset_sql::Dialect;
     use readyset_sql_parsing::parse_query;
+    use readyset_sql_parsing::parse_select;
 
     use super::*;
 
@@ -1687,7 +1687,7 @@ mod tests {
 
     #[test]
     fn duplicate_subquery_name() {
-        let query = parse_select_statement(
+        let query = parse_select(
             Dialect::MySQL,
             "select * from (select * from t) q1, (select * from t) q1;",
         )
