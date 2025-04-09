@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use deadpool::managed::{Manager, Metrics, Object, Pool, RecycleResult};
 use futures_util::future;
 use hyper::client::HttpConnector;
-use parking_lot::RwLock;
 use petgraph::graph::NodeIndex;
 use readyset_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
@@ -19,7 +19,7 @@ use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use replication_offset::ReplicationOffsets;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tower::ServiceExt;
 use tower_service::Service;
 use tracing::{debug, trace};
@@ -187,7 +187,7 @@ struct Controller {
     client: hyper::Client<hyper::client::HttpConnector>,
     /// The last valid leader URL seen by this service. Used to circumvent requests to Consul in
     /// the happy-path.
-    leader_url: Arc<RwLock<Option<Url>>>,
+    leader_url: Arc<parking_lot::RwLock<Option<Url>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -303,6 +303,68 @@ pub struct GraphvizOptions {
     pub for_query: Option<Relation>,
 }
 
+/// Handles the creation/destruction of controller connections in the connection pool.
+pub struct ControllerConnection {
+    url: Url,
+    timeout: Duration,
+}
+
+impl Manager for ControllerConnection {
+    type Type = ReadySetHandle;
+    type Error = ReadySetError;
+
+    async fn create(&self) -> std::result::Result<ReadySetHandle, ReadySetError> {
+        Ok(ReadySetHandle::make_raw(
+            self.url.clone(),
+            Some(self.timeout),
+            None,
+        ))
+    }
+
+    async fn recycle(&self, _: &mut ReadySetHandle, _: &Metrics) -> RecycleResult<ReadySetError> {
+        Ok(())
+    }
+}
+
+/// Provides access to the current controller via a pool of connections.
+#[derive(Clone)]
+pub struct ControllerConnectionPool {
+    pool: Arc<RwLock<Option<Pool<ControllerConnection>>>>,
+}
+
+impl ControllerConnectionPool {
+    fn new() -> Self {
+        Self {
+            pool: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Set the current controller URL.
+    pub async fn set(&self, url: Url, timeout: Duration) -> ReadySetResult<()> {
+        let mut pool = self.pool.write().await;
+        *pool = Some(
+            Pool::builder(ControllerConnection { url, timeout })
+                .max_size(16)
+                .build()?,
+        );
+        Ok(())
+    }
+
+    /// Pop a connection out of the pool.
+    pub async fn use_connection(&mut self) -> ReadySetResult<Object<ControllerConnection>> {
+        let pool = self.pool.read().await;
+        let pool = match pool.as_ref() {
+            Some(pool) => pool.clone(),
+            None => internal!("Worker controller connection pool not initialized."),
+        };
+        let controller = match pool.get().await {
+            Ok(controller) => controller,
+            Err(err) => internal!("Failed to acquire controller connection: {err}"),
+        };
+        Ok(controller)
+    }
+}
+
 /// A handle to a ReadySet controller.
 ///
 /// This handle is the primary mechanism for interacting with a running ReadySet instance, and lets
@@ -366,7 +428,7 @@ impl ReadySetHandle {
             handle: tower::util::Either::A(Controller {
                 authority,
                 client: make_http_client(request_timeout),
-                leader_url: Arc::new(RwLock::new(None)),
+                leader_url: Arc::new(parking_lot::RwLock::new(None)),
             }),
             request_timeout,
             migration_timeout,
@@ -387,6 +449,11 @@ impl ReadySetHandle {
             request_timeout,
             migration_timeout,
         }
+    }
+
+    /// Make a pool of controller handles for connecting directly to a controller.
+    pub fn make_pool() -> ControllerConnectionPool {
+        ControllerConnectionPool::new()
     }
 
     /// Check that the `ReadySetHandle` can accept another request.

@@ -4729,6 +4729,7 @@ dependencies = [
  "cloudflare-zlib",
  "consulrs",
  "dataflow-expression",
+ "deadpool",
  "derive_more",
  "enum_dispatch",
  "fail",

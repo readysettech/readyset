@@ -58,7 +58,9 @@ use futures_util::future::{Either, TryFutureExt};
 use health_reporter::{HealthReporter, State as ServerState};
 use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::{Authority, WorkerSchedulingConfig};
-use readyset_client::{ControllerDescriptor, WorkerDescriptor};
+use readyset_client::{
+    ControllerConnectionPool, ControllerDescriptor, ReadySetHandle, WorkerDescriptor,
+};
 use readyset_sql::Dialect;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -118,6 +120,7 @@ fn start_worker(
     listen_addr: IpAddr,
     external_addr: SocketAddr,
     url: Url,
+    controller_http: ControllerConnectionPool,
     abort_on_task_failure: bool,
     readers: Readers,
     memory_limit: Option<usize>,
@@ -131,6 +134,7 @@ fn start_worker(
         listen_addr,
         external_addr,
         url.join("worker_request")?,
+        controller_http,
         readers,
         memory_limit,
         memory_check_frequency,
@@ -147,8 +151,8 @@ fn start_controller(
     http_uri: Url,
     reader_addr: SocketAddr,
     config: Config,
-    worker_tx: Sender<WorkerRequest>,
     handle_rx: Receiver<HandleRequest>,
+    controller_http: ControllerConnectionPool,
     controller_rx: Receiver<ControllerRequest>,
     abort_on_task_failure: bool,
     domain_scheduling_config: WorkerSchedulingConfig,
@@ -173,7 +177,7 @@ fn start_controller(
 
     let controller = Controller::new(
         authority,
-        worker_tx,
+        controller_http,
         controller_rx,
         handle_rx,
         our_descriptor.clone(),
@@ -211,7 +215,7 @@ async fn start_request_router(
     let http_server = NoriaServerHttpRouter {
         listen_addr,
         port: external_addr.port(),
-        worker_tx: worker_tx.clone(),
+        worker_tx,
         controller_tx,
         health_reporter: health_reporter.clone(),
         failpoint_channel,
@@ -308,11 +312,13 @@ pub(crate) async fn start_instance_inner(
     // handled.
     maybe_wait_for_failpoint(rx).await;
 
+    let controller_http = ReadySetHandle::make_pool();
     start_worker(
         worker_rx,
         listen_addr,
         external_addr,
         http_uri.clone(),
+        controller_http.clone(),
         abort_on_task_failure,
         readers,
         memory_limit,
@@ -326,8 +332,8 @@ pub(crate) async fn start_instance_inner(
         http_uri,
         reader_addr,
         config,
-        worker_tx,
         handle_rx,
+        controller_http,
         controller_rx,
         abort_on_task_failure,
         domain_scheduling_config,

@@ -9,8 +9,6 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
-use dataflow::payload::{packets::Evict, Eviction};
-use dataflow::{ChannelCoordinator, DomainBuilder, DomainRequest, Packet, Readers};
 use enum_kinds::EnumKind;
 use futures::stream::FuturesUnordered;
 use futures_util::future::TryFutureExt;
@@ -19,13 +17,6 @@ use futures_util::stream::StreamExt;
 use metrics::{counter, gauge, histogram};
 use pin_project::pin_project;
 use rand::Rng;
-use readyset_alloc::StdThreadBuildWrapper;
-use readyset_client::internal::ReplicaAddress;
-use readyset_client::metrics::recorded;
-use readyset_client::ReadySetHandle;
-use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
-use readyset_util::shutdown::ShutdownReceiver;
-use readyset_util::{select, time_scope};
 use serde::{Deserialize, Serialize};
 use tikv_jemalloc_ctl::stats::allocated_mib;
 use tikv_jemalloc_ctl::{epoch, epoch_mib, stats};
@@ -37,17 +28,23 @@ use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use url::Url;
 use vec1::Vec1;
 
-use self::replica::Replica;
 use crate::coordination::{DomainDescriptor, RunDomainResponse};
 use crate::worker::replica::WrappedDomainRequest;
+use dataflow::payload::{packets::Evict, Eviction};
+use dataflow::{ChannelCoordinator, DomainBuilder, DomainRequest, Packet, Readers};
+use readyset_alloc::StdThreadBuildWrapper;
+use readyset_client::internal::ReplicaAddress;
+use readyset_client::metrics::recorded;
+use readyset_client::ControllerConnectionPool;
+use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use readyset_util::shutdown::ShutdownReceiver;
+use readyset_util::{select, time_scope};
+use replica::Replica;
 
 /// Request handlers and utilities for reading from the ReadHandle of a
 /// left-right map associated with a reader node.
 pub mod readers;
 mod replica;
-
-/// Timeout for requests made from the controller to the server
-const CONTROLLER_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Timeout for logging slow `worker_request` handling
 const SLOW_REQUEST_THRESHOLD: Duration = Duration::from_secs(1);
@@ -58,12 +55,6 @@ const SLOW_REQUEST_THRESHOLD: Duration = Duration::from_secs(1);
 #[derive(Clone, Debug, EnumKind, Serialize, Deserialize)]
 #[enum_kind(WorkerRequestType)]
 pub enum WorkerRequestKind {
-    /// A new controller has been elected.
-    NewController {
-        /// The URI of the new controller.
-        controller_uri: Url,
-    },
-
     /// A new domain should be started on this worker.
     RunDomain(DomainBuilder),
 
@@ -119,40 +110,6 @@ pub struct WorkerRequest {
     /// If the request returned a non-`()` response, the result will be sent as a serialized
     /// bincode vector.
     pub done_tx: oneshot::Sender<ReadySetResult<Option<Vec<u8>>>>,
-}
-
-/// Information stored in the worker about what the currently active controller is.
-#[derive(Clone)]
-pub struct WorkerElectionState {
-    /// The URI of the currently active controller.
-    controller_uri: Url,
-    /// A (potentially cached) client for the currently active controller
-    controller: Option<ReadySetHandle>,
-}
-
-impl WorkerElectionState {
-    /// Create a new [`WorkerElectionState`] for the given new controller URL
-    fn new(controller_uri: Url) -> Self {
-        Self {
-            controller_uri,
-            controller: None,
-        }
-    }
-
-    /// Obtain a [`ReadySetHandle`] for the controller we currently know about
-    fn handle(
-        &mut self,
-        request_timeout: Option<Duration>,
-        migration_timeout: Option<Duration>,
-    ) -> &mut ReadySetHandle {
-        self.controller.get_or_insert_with(|| {
-            ReadySetHandle::make_raw(
-                self.controller_uri.clone(),
-                request_timeout,
-                migration_timeout,
-            )
-        })
-    }
 }
 
 /// A handle for sending messages to a domain in-process.
@@ -212,10 +169,8 @@ fn log_domain_result(domain: ReplicaAddress, result: &Result<ReadySetResult<()>,
     }
 }
 
-/// A ReadySet worker, responsible for executing some domains.
+/// A Readyset worker, responsible for executing some domains.
 pub struct Worker {
-    /// The current election state, if it exists (see the `WorkerElectionState` docs).
-    election_state: Option<WorkerElectionState>,
     /// A timer for doing evictions.
     evict_interval: Interval,
     /// A memory limit for state, in bytes.
@@ -230,6 +185,8 @@ pub struct Worker {
     domain_external: IpAddr,
     /// URL at which this worker can be contacted.
     url: Url,
+    /// Connection pool to whichever controller is presently leader.
+    controller_http: ControllerConnectionPool,
     /// A store of the current state size of each domain, used for eviction purposes.
     state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
     /// Read handles.
@@ -238,7 +195,6 @@ pub struct Worker {
     domains: HashMap<ReplicaAddress, DomainHandle>,
     /// Run unqueries after a reader eviction.
     unquery: bool,
-
     memory: MemoryTracker,
     is_evicting: Arc<AtomicBool>,
     domain_wait_queue: FuturesUnordered<FinishedDomain>,
@@ -254,6 +210,7 @@ impl Worker {
         listen_addr: IpAddr,
         external_addr: SocketAddr,
         url: Url,
+        controller_http: ControllerConnectionPool,
         readers: Readers,
         memory_limit: Option<usize>,
         evict_interval: Option<Duration>,
@@ -269,13 +226,13 @@ impl Worker {
             domain_bind: listen_addr,
             domain_external: external_addr.ip(),
             url,
+            controller_http,
             readers,
             memory_limit: memory_limit.unwrap_or(usize::MAX),
             evict_interval,
             shutdown_rx,
             unquery,
             memory: MemoryTracker::new()?,
-            election_state: Default::default(),
             coord: Default::default(),
             state_sizes: Default::default(),
             domains: Default::default(),
@@ -313,11 +270,6 @@ impl Worker {
         let span = info_span!("readyset_server::worker::handle_worker_request", ?req);
         let _time = time_scope(span, SLOW_REQUEST_THRESHOLD);
         match req {
-            WorkerRequestKind::NewController { controller_uri } => {
-                info!(%controller_uri, "worker informed of new controller");
-                self.election_state = Some(WorkerElectionState::new(controller_uri));
-                Ok(None)
-            }
             WorkerRequestKind::ClearDomains => {
                 info!("controller requested that this worker clear its existing domains");
                 self.coord.clear();
@@ -521,12 +473,8 @@ impl Worker {
             return Ok(());
         }
 
-        self.election_state
-            .as_mut()
-            .ok_or_else(|| internal_err!("Domain {addr} failed when controller is unknown!"))?
-            .handle(Some(CONTROLLER_REQUEST_TIMEOUT), None)
-            .domain_died(addr)
-            .await
+        let mut controller = self.controller_http.use_connection().await?;
+        controller.domain_died(addr).await
     }
 
     /// Run the worker continuously, processing worker requests, heartbeats, and domain failures.

@@ -19,7 +19,7 @@ use readyset_client::consensus::{
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
-use readyset_client::ControllerDescriptor;
+use readyset_client::{ControllerConnectionPool, ControllerDescriptor};
 use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::Relation;
@@ -44,7 +44,7 @@ use crate::controller::migrate::Migration;
 use crate::controller::sql::Recipe;
 use crate::controller::state::DfState;
 use crate::materialization::Materializations;
-use crate::worker::{WorkerRequest, WorkerRequestKind};
+use crate::worker::WorkerRequestKind;
 use crate::{Config, VolumeId};
 
 mod domain_handle;
@@ -59,6 +59,9 @@ mod state;
 
 /// Time between leader state change checks without thread parking.
 const LEADER_STATE_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Timeout for HTTP requests made to the controller.
+const CONTROLLER_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// A set of placement restrictions applied to a domain
 /// that a dataflow node is in. Each base table node can have
@@ -373,10 +376,6 @@ pub struct Controller {
     inner: Arc<LeaderHandle>,
     /// The `Authority` structure used for leadership elections & such state.
     authority: Arc<Authority>,
-    /// Channel to the `Worker` running inside this server instance.
-    ///
-    /// This is used to convey changes in leadership state.
-    worker_tx: Sender<WorkerRequest>,
     /// Receives external HTTP requests.
     http_rx: Receiver<ControllerRequest>,
     /// Receives requests from the controller's `Handle`.
@@ -393,32 +392,25 @@ pub struct Controller {
     config: Config,
     /// Whether we are the leader and ready to handle requests.
     leader_ready: Arc<AtomicBool>,
-
     /// Parsing mode for the controller, used in extend_recipe. Not part of the serialized
     /// [`Config`] so it can be changed on restart.
     parsing_preset: ParsingPreset,
-
     /// Whether we are in maintenance mode
     maintenance_mode: Arc<AtomicBool>,
-
     /// Cache ddl statements to re-run after a backwards incompatible upgrade, if relevant
     cache_ddl: Option<Vec<CacheDDLRequest>>,
-
+    /// Connection pool to whichever controller is presently leader.
+    controller_http: ControllerConnectionPool,
     /// Channel used to notify the controller of events.
     controller_channel: ControllerChannel,
-
     /// Channel used to notify the replicator of events.
     replicator_channel: ReplicatorChannel,
-
     /// Provides the ability to report metrics to Segment
     telemetry_sender: TelemetrySender,
-
     /// Whether or not to consider failed writes to base tables as no-ops
     permissive_writes: bool,
-
     /// Explicit dialect to use when creating ControllerState
     dialect: Option<readyset_sql::Dialect>,
-
     /// Handle used to receive a shutdown signal
     shutdown_rx: ShutdownReceiver,
 }
@@ -426,7 +418,7 @@ pub struct Controller {
 impl Controller {
     pub(crate) fn new(
         authority: Arc<Authority>,
-        worker_tx: Sender<WorkerRequest>,
+        controller_http: ControllerConnectionPool,
         controller_rx: Receiver<ControllerRequest>,
         handle_rx: Receiver<HandleRequest>,
         our_descriptor: ControllerDescriptor,
@@ -443,7 +435,6 @@ impl Controller {
         Self {
             inner: Arc::new(LeaderHandle::new()),
             authority,
-            worker_tx,
             http_rx: controller_rx,
             handle_rx,
             background_task_failed_tx,
@@ -454,6 +445,7 @@ impl Controller {
             parsing_preset,
             leader_ready: Arc::new(AtomicBool::new(false)),
             maintenance_mode: Arc::new(AtomicBool::new(false)),
+            controller_http,
             controller_channel: ControllerChannel::new(),
             replicator_channel: ReplicatorChannel::new(),
             telemetry_sender,
@@ -462,20 +454,6 @@ impl Controller {
             shutdown_rx,
             cache_ddl: None,
         }
-    }
-
-    /// Send the provided `WorkerRequestKind` to the worker running in the same server instance as
-    /// this controller wrapper, but don't bother waiting for the response.
-    ///
-    /// Not waiting for the response avoids deadlocking when the controller and worker are in the
-    /// same readyset-server instance.
-    async fn send_worker_request(&self, kind: WorkerRequestKind) -> ReadySetResult<()> {
-        let (tx, _rx) = tokio::sync::oneshot::channel();
-        self.worker_tx
-            .send(WorkerRequest { kind, done_tx: tx })
-            .await
-            .map_err(|e| internal_err!("failed to send to instance worker: {}", e))?;
-        Ok(())
     }
 
     async fn handle_handle_request(&self, req: HandleRequest) -> ReadySetResult<()> {
@@ -539,12 +517,11 @@ impl Controller {
 
     async fn handle_authority_update(&mut self, msg: AuthorityUpdate) -> ReadySetResult<()> {
         match msg {
-            AuthorityUpdate::LeaderChange(descr) => {
+            AuthorityUpdate::LeaderChange(descriptor) => {
                 gauge!(recorded::CONTROLLER_IS_LEADER).set(0f64);
-                self.send_worker_request(WorkerRequestKind::NewController {
-                    controller_uri: descr.controller_uri,
-                })
-                .await?;
+                self.controller_http
+                    .set(descriptor.controller_uri, CONTROLLER_REQUEST_TIMEOUT)
+                    .await?;
             }
             AuthorityUpdate::WonLeaderElection(LeaderElectionResults {
                 controller_state: state,
@@ -578,11 +555,12 @@ impl Controller {
                     .await;
 
                 self.inner.replace(leader).await;
-                self.send_worker_request(WorkerRequestKind::NewController {
-                    controller_uri: self.our_descriptor.controller_uri.clone(),
-                })
-                .await?;
-
+                self.controller_http
+                    .set(
+                        self.our_descriptor.controller_uri.clone(),
+                        CONTROLLER_REQUEST_TIMEOUT,
+                    )
+                    .await?;
                 self.cache_ddl = cache_ddl;
             }
             AuthorityUpdate::NewWorkers(w) => {
