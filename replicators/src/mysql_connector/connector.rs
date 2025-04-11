@@ -2,7 +2,6 @@ use core::str;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
-use std::{io, vec};
 
 use async_trait::async_trait;
 use atoi::atoi;
@@ -49,7 +48,57 @@ use super::utils::get_mysql_version;
 const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;
 const MAX_POSITION_TIME: u64 = 10;
 
+macro_rules! binlog_err {
+    ($connector:expr, $inner:expr) => {
+        binlog_err!($connector, None::<&TableMapEvent>, $inner)
+    };
+    ($connector:expr, $table:expr, $inner:expr) => {{
+        let table: Option<&TableMapEvent> = $table;
+        let table_msg = if let Some(t) = table {
+            format!(" for table {}.{}", t.database_name(), t.table_name())
+        } else {
+            "".to_string()
+        };
+        let gtid_message = if let Some(gtid) = $connector.current_gtid {
+            format!(" at GTID {}", gtid)
+        } else {
+            "".to_string()
+        };
+        ReadySetError::ReplicationFailed(format!(
+            "Binlog error before position {}{}{} at {}:{}:{}: {}",
+            $connector.next_position,
+            gtid_message,
+            table_msg,
+            std::file!(),
+            std::line!(),
+            std::column!(),
+            $inner
+        ))
+    }};
+}
+
+/// Wraps the provided operation with error handling using `binlog_err!` macro.
+///
+/// This convenience macro executes an operation and wraps any generated error with context
+/// information about the current binlog position, and returns the error. It should replace usage of
+/// the `?` operator in this file.
+macro_rules! handle_err {
+    ($connector:expr, $op:expr) => {
+        match $op {
+            Ok(val) => val,
+            Err(e) => return Err(binlog_err!($connector, None, e)),
+        }
+    };
+    ($connector:expr, $table:expr, $op:expr) => {
+        match $op {
+            Ok(val) => val,
+            Err(e) => return Err(binlog_err!($connector, Some($table), e)),
+        }
+    };
+}
+
 type TableMetadata = (Vec<Option<u16>>, Vec<Option<bool>>);
+
 /// A connector that connects to a MySQL server and starts reading binlogs from a given position.
 ///
 /// The server must be configured with `binlog_format` set to `row` and `binlog_row_image` set to
@@ -207,38 +256,39 @@ impl MySqlBinlogConnector {
     }
 
     /// Get the next raw binlog event
-    async fn next_event(&mut self) -> mysql::Result<binlog::events::Event> {
-        let packet = self.connection.read_packet().await?;
+    async fn next_event(&mut self) -> ReadySetResult<binlog::events::Event> {
+        let packet = handle_err!(self, self.connection.read_packet().await);
         if let Some(first_byte) = packet.first() {
             // We should only see EOF/(254) if the mysql upstream has gone away or the
             // NON_BLOCKING SQL flag is set,
             // otherwise the first byte should always be 0
             if *first_byte != 0 && *first_byte != 254 {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Received invalid first byte ({first_byte}) from MySQL server"),
-                )
-                .into());
+                return Err(binlog_err!(
+                    self,
+                    None,
+                    format!("Received invalid first byte ({first_byte}) from MySQL server")
+                ));
             } else if *first_byte == 254 {
-                return Err(io::Error::new(
-                    io::ErrorKind::BrokenPipe,
-                    format!("Received EOF ({first_byte}) from MySQL server"),
-                )
-                .into());
+                return Err(binlog_err!(
+                    self,
+                    None,
+                    format!("Received EOF ({first_byte}) from MySQL server")
+                ));
             }
         }
-        let event = self.reader.read(&packet[1..])?;
-        assert!(Self::validate_event_checksum(&event.clone().unwrap())); // TODO: definitely should never fail a CRC check, but what to do if we do?
-        Ok(event.unwrap())
+        let event = handle_err!(self, self.reader.read(&packet[1..])).unwrap();
+        // TODO: definitely should never fail a CRC check, but what to do if we do?
+        assert!(Self::validate_event_checksum(&event));
+        Ok(event)
     }
 
     /// Maps partial binlog row values to their correct positions in a full row vector.
     ///
     /// When binlog row is partial (minimal row), we receive a binlog row with only
-    /// the columns that have been set, like (col1, col2, col3, col4), might come as
-    /// col[@2,@4] / val [x, y]. This function maps the values to their correct positions
-    /// in the row and leave a `DfValue::Default` for the rest. The replacement of the
-    /// default values is done at readyset-data/src/lib.rs::maybe_apply_default.
+    /// the columns that have been set, like `(col1, col2, col3, col4)`, might come as
+    /// `col[@2,@4] / val [x, y]`. This function maps the values to their correct positions
+    /// in the row and leave a [`DfValue::Default`] for the rest. The replacement of the
+    /// default values is done at [`DfValue::maybe_apply_default`].
     ///
     /// # Arguments
     /// * `row_data` - The binlog row data containing partial column information
@@ -252,10 +302,14 @@ impl MySqlBinlogConnector {
         tme: &binlog::events::TableMapEvent<'static>,
         collation_vec: &[Option<u16>],
         signedness_vec: &[Option<bool>],
-    ) -> mysql::Result<Vec<DfValue>> {
+    ) -> ReadySetResult<Vec<DfValue>> {
         let mut row = vec![DfValue::Default; tme.columns_count() as usize];
-        let mut binlog_iter =
-            binlog_row_to_noria_row(row_data, tme, collation_vec, signedness_vec)?.into_iter();
+        let mut binlog_iter = handle_err!(
+            self,
+            tme,
+            binlog_row_to_noria_row(row_data, tme, collation_vec, signedness_vec)
+        )
+        .into_iter();
 
         for col in row_data.columns_ref() {
             if let Some(idx) = parse_column_index(&col.name_str()) {
@@ -277,30 +331,28 @@ impl MySqlBinlogConnector {
         Ok(row)
     }
 
-    /// Process a single binlog ROTATE_EVENT.
-    /// This occurs when someone issues a FLUSH LOGS statement or the current binary
+    /// Process a single binlog `ROTATE_EVENT`.
+    /// This occurs when someone issues a `FLUSH LOGS` statement or the current binary
     /// log file becomes too large. The maximum size is
-    /// determined by max_binlog_size.
+    /// determined by `max_binlog_size`.
     /// # Arguments
     ///
     /// * `rotate_event` - the rotate event to process
     async fn process_event_rotate(
         &mut self,
-        rotate_event: mysql_common::binlog::events::RotateEvent<'_>,
-    ) -> mysql::Result<ReplicationAction> {
+        rotate_event: binlog::events::RotateEvent<'_>,
+    ) -> ReadySetResult<ReplicationAction> {
         if self.enable_statement_logging {
             info!(target: "replicator_statement", "{:?}", rotate_event);
         }
 
-        let rotate_position = MySqlPosition::from_file_name_and_position(
-            rotate_event.name().to_string(),
-            rotate_event.position(),
-        )
-        .map_err(|e| {
-            mysql_async::Error::Other(Box::new(internal_err!(
-                "Failed to create MySqlPosition: {e}"
-            )))
-        })?;
+        let rotate_position = handle_err!(
+            self,
+            MySqlPosition::from_file_name_and_position(
+                rotate_event.name().to_string(),
+                rotate_event.position(),
+            )
+        );
 
         // We are on this binlog already, no need to do anything
         if self.next_position.binlog_file_suffix == rotate_position.binlog_file_suffix
@@ -322,14 +374,14 @@ impl MySqlBinlogConnector {
     /// * `wr_event` - the write rows event to process
     async fn process_event_write_rows(
         &mut self,
-        wr_event: mysql_common::binlog::events::WriteRowsEvent<'_>,
-    ) -> mysql::Result<ReplicationAction> {
+        wr_event: binlog::events::WriteRowsEvent<'_>,
+    ) -> ReadySetResult<ReplicationAction> {
         if self.enable_statement_logging {
             info!(target: "replicator_statement", "{:?}", wr_event);
         }
         // Retrieve the corresponding TABLE_MAP_EVENT, charset and signedness metadata
         let (tme, (collation_vec, signedness_vec)) =
-            self.get_table_metadata(wr_event.table_id())?;
+            handle_err!(self, self.get_table_metadata(wr_event.table_id()));
 
         if !self
             .table_filter
@@ -340,28 +392,34 @@ impl MySqlBinlogConnector {
 
         let mut inserted_rows = Vec::new();
         for row in wr_event.rows(tme) {
-            let row = &row?;
-            let row_data = row.1.as_ref().ok_or_else(|| {
-                mysql_async::Error::Other(Box::new(internal_err!(
-                    "Missing data in WRITE_ROWS_EVENT"
-                )))
-            })?;
-            inserted_rows.push(readyset_client::TableOperation::Insert(
-                self.map_partial_binlog_row_insert(row_data, tme, &collation_vec, &signedness_vec)?,
-            ));
+            let row = handle_err!(self, tme, &row);
+            let row_data = handle_err!(
+                self,
+                tme,
+                row.1.as_ref().ok_or("Missing data in WRITE_ROWS_EVENT")
+            );
+            inserted_rows.push(TableOperation::Insert(self.map_partial_binlog_row_insert(
+                row_data,
+                tme,
+                &collation_vec,
+                &signedness_vec,
+            )?));
         }
 
         if inserted_rows.is_empty() {
-            inserted_rows.push(readyset_client::TableOperation::Insert(
-                vec![DfValue::Default; tme.columns_count() as usize],
-            ));
+            inserted_rows.push(TableOperation::Insert(vec![
+                DfValue::Default;
+                tme.columns_count() as usize
+            ]));
         }
 
+        let table = Relation {
+            schema: Some(tme.database_name().into()),
+            name: tme.table_name().into(),
+        };
+
         Ok(ReplicationAction::TableAction {
-            table: Relation {
-                schema: Some(tme.database_name().into()),
-                name: tme.table_name().into(),
-            },
+            table,
             actions: inserted_rows,
             txid: self.current_gtid,
         })
@@ -381,9 +439,10 @@ impl MySqlBinlogConnector {
         row: &(Option<BinlogRow>, Option<BinlogRow>),
         collation_vec: &[Option<u16>],
         signedness_vec: &[Option<bool>],
-    ) -> mysql::Result<Vec<readyset_client::TableOperation>> {
+    ) -> ReadySetResult<Vec<TableOperation>> {
         let (before_image, after_image) =
             self.get_before_after_images(tme, row, collation_vec, signedness_vec)?;
+
         if before_image.len() == tme.columns_count() as usize {
             let after_image = if after_image.len() == tme.columns_count() as usize {
                 after_image
@@ -405,13 +464,13 @@ impl MySqlBinlogConnector {
             };
             // Full row update - convert to delete + insert
             Ok(vec![
-                readyset_client::TableOperation::DeleteRow { row: before_image },
-                readyset_client::TableOperation::Insert(after_image),
+                TableOperation::DeleteRow { row: before_image },
+                TableOperation::Insert(after_image),
             ])
         } else {
             // Partial row update
             let update = self.create_partial_update(tme, row, after_image)?;
-            Ok(vec![readyset_client::TableOperation::Update {
+            Ok(vec![TableOperation::Update {
                 key: before_image,
                 update,
             }])
@@ -435,30 +494,32 @@ impl MySqlBinlogConnector {
         row: &(Option<BinlogRow>, Option<BinlogRow>),
         collation_vec: &[Option<u16>],
         signedness_vec: &[Option<bool>],
-    ) -> mysql::Result<(Vec<DfValue>, Vec<DfValue>)> {
-        let before_image = binlog_row_to_noria_row(
-            row.0.as_ref().ok_or_else(|| {
-                mysql_async::Error::Other(Box::new(internal_err!(
-                    "Missing data in DELETE_ROWS_EVENT before image: {:?}",
-                    row.0
-                )))
-            })?,
+    ) -> ReadySetResult<(Vec<DfValue>, Vec<DfValue>)> {
+        let before_row = handle_err!(
+            self,
             tme,
-            collation_vec,
-            signedness_vec,
-        )?;
+            row.0
+                .as_ref()
+                .ok_or("Missing UPDATE_ROWS_EVENT before image")
+        );
+        let before_image = handle_err!(
+            self,
+            tme,
+            binlog_row_to_noria_row(before_row, tme, collation_vec, signedness_vec)
+        );
 
-        let after_image = binlog_row_to_noria_row(
-            row.1.as_ref().ok_or_else(|| {
-                mysql_async::Error::Other(Box::new(internal_err!(
-                    "Missing data in DELETE_ROWS_EVENT after image: {:?}",
-                    row.1
-                )))
-            })?,
+        let after_row = handle_err!(
+            self,
             tme,
-            collation_vec,
-            signedness_vec,
-        )?;
+            row.1
+                .as_ref()
+                .ok_or("Missing UPDATE_ROWS_EVENT after image")
+        );
+        let after_image = handle_err!(
+            self,
+            tme,
+            binlog_row_to_noria_row(after_row, tme, collation_vec, signedness_vec)
+        );
 
         Ok((before_image, after_image))
     }
@@ -480,13 +541,14 @@ impl MySqlBinlogConnector {
         tme: &binlog::events::TableMapEvent<'static>,
         row: &(Option<BinlogRow>, Option<BinlogRow>),
         after_image: Vec<DfValue>,
-    ) -> mysql::Result<Vec<Modification>> {
-        let row_after = row.1.as_ref().ok_or_else(|| {
-            mysql_async::Error::Other(Box::new(internal_err!(
-                "Missing data in UPDATE_ROWS_EVENT after image: {:?}",
-                row.1
-            )))
-        })?;
+    ) -> ReadySetResult<Vec<Modification>> {
+        let row_after = handle_err!(
+            self,
+            tme,
+            row.1
+                .as_ref()
+                .ok_or("Missing data in UPDATE_ROWS_EVENT after image in partial update")
+        );
 
         let mut update = vec![Modification::None; tme.columns_count() as usize];
         let mut taken = 0;
@@ -521,15 +583,15 @@ impl MySqlBinlogConnector {
     /// - Data conversion fails
     async fn process_event_update_rows(
         &mut self,
-        ur_event: mysql_common::binlog::events::UpdateRowsEvent<'_>,
-    ) -> mysql::Result<ReplicationAction> {
+        ur_event: binlog::events::UpdateRowsEvent<'_>,
+    ) -> ReadySetResult<ReplicationAction> {
         if self.enable_statement_logging {
             info!(target: "replicator_statement", "{:?}", ur_event);
         }
 
         // Retrieve the corresponding TABLE_MAP_EVENT, charset and signedness metadata
         let (tme, (collation_vec, signedness_vec)) =
-            self.get_table_metadata(ur_event.table_id())?;
+            handle_err!(self, self.get_table_metadata(ur_event.table_id()));
 
         if !self
             .table_filter
@@ -541,15 +603,18 @@ impl MySqlBinlogConnector {
         let mut updated_rows = Vec::with_capacity(ur_event.rows(tme).count());
         // Process each row update
         for row in ur_event.rows(tme) {
-            let row_ops = self.process_update_row(tme, &row?, &collation_vec, &signedness_vec)?;
+            let row = handle_err!(self, tme, &row);
+            let row_ops = self.process_update_row(tme, row, &collation_vec, &signedness_vec)?;
             updated_rows.extend(row_ops);
         }
 
+        let table = Relation {
+            schema: Some(tme.database_name().into()),
+            name: tme.table_name().into(),
+        };
+
         Ok(ReplicationAction::TableAction {
-            table: Relation {
-                schema: Some(tme.database_name().into()),
-                name: tme.table_name().into(),
-            },
+            table,
             actions: updated_rows,
             txid: self.current_gtid,
         })
@@ -563,14 +628,14 @@ impl MySqlBinlogConnector {
     /// * `dr_event` - the delete rows event to process
     async fn process_event_delete_rows(
         &mut self,
-        dr_event: mysql_common::binlog::events::DeleteRowsEvent<'_>,
-    ) -> mysql::Result<ReplicationAction> {
+        dr_event: binlog::events::DeleteRowsEvent<'_>,
+    ) -> ReadySetResult<ReplicationAction> {
         if self.enable_statement_logging {
             info!(target: "replicator_statement", "{:?}", dr_event);
         }
         // Retrieve the corresponding TABLE_MAP_EVENT, charset and signedness metadata
         let (tme, (collation_vec, signedness_vec)) =
-            self.get_table_metadata(dr_event.table_id())?;
+            handle_err!(self, self.get_table_metadata(dr_event.table_id()));
 
         if !self
             .table_filter
@@ -583,34 +648,34 @@ impl MySqlBinlogConnector {
         for row in dr_event.rows(tme) {
             // For each row in the event we produce a vector of ReadySet types that
             // represent that row
-            let before_row_image = binlog_row_to_noria_row(
-                &row?.0.ok_or_else(|| {
-                    mysql_async::Error::Other(Box::new(internal_err!(
-                        "Missing data in DELETE_ROWS_EVENT"
-                    )))
-                })?,
+            let row = handle_err!(self, tme, row);
+            let before_row =
+                handle_err!(self, tme, row.0.ok_or("Missing data in DELETE_ROWS_EVENT"));
+            let before_row_image = handle_err!(
+                self,
                 tme,
-                &collation_vec,
-                &signedness_vec,
-            )?;
+                binlog_row_to_noria_row(&before_row, tme, &collation_vec, &signedness_vec)
+            );
 
             // Partial Row, Before row image is the PKE
             if tme.columns_count() != before_row_image.len() as u64 {
-                deleted_rows.push(readyset_client::TableOperation::DeleteByKey {
+                deleted_rows.push(TableOperation::DeleteByKey {
                     key: before_row_image,
                 });
             } else {
-                deleted_rows.push(readyset_client::TableOperation::DeleteRow {
+                deleted_rows.push(TableOperation::DeleteRow {
                     row: before_row_image,
                 });
             }
         }
 
+        let table = Relation {
+            schema: Some(tme.database_name().into()),
+            name: tme.table_name().into(),
+        };
+
         Ok(ReplicationAction::TableAction {
-            table: Relation {
-                schema: Some(tme.database_name().into()),
-                name: tme.table_name().into(),
-            },
+            table,
             actions: deleted_rows,
             txid: self.current_gtid,
         })
@@ -659,9 +724,9 @@ impl MySqlBinlogConnector {
     /// affect the schema. This event should be skipped in the parent function.
     async fn process_event_query(
         &mut self,
-        q_event: mysql_common::binlog::events::QueryEvent<'_>,
+        q_event: binlog::events::QueryEvent<'_>,
         is_last: bool,
-    ) -> mysql::Result<ReplicationAction> {
+    ) -> ReadySetResult<ReplicationAction> {
         // Written when an updating statement is done.
         if self.enable_statement_logging {
             info!(target: "replicator_statement", "{:?}", q_event);
@@ -741,16 +806,12 @@ impl MySqlBinlogConnector {
                             .await
                     }
                     Ok(SqlQuery::StartTransaction(_)) => {
-                        return Err(mysql_async::Error::Other(Box::new(
-                            ReadySetError::SkipEvent,
-                        )));
+                        return Err(ReadySetError::SkipEvent);
                     }
                     _ => {
                         warn!(%error, "Error extending recipe, DDL statement will not be used");
                         counter!(recorded::REPLICATOR_FAILURE).increment(1u64);
-                        return Err(mysql_async::Error::Other(Box::new(
-                            ReadySetError::SkipEvent,
-                        )));
+                        return Err(ReadySetError::SkipEvent);
                     }
                 }
             }
@@ -769,9 +830,9 @@ impl MySqlBinlogConnector {
     /// TODO: Transactions begin with `BEGIN` queries, but we do not currently support those.
     fn try_non_ddl_action_from_query(
         &mut self,
-        q_event: mysql_common::binlog::events::QueryEvent<'_>,
+        q_event: binlog::events::QueryEvent<'_>,
         is_last: bool,
-    ) -> mysql::Result<ReplicationAction> {
+    ) -> ReadySetResult<ReplicationAction> {
         use readyset_sql::Dialect;
         use readyset_sql_parsing::parse_query;
 
@@ -791,9 +852,7 @@ impl MySqlBinlogConnector {
                     txid: self.current_gtid,
                 })
             }
-            _ => Err(mysql_async::Error::Other(Box::new(
-                ReadySetError::SkipEvent,
-            ))),
+            _ => Err(ReadySetError::SkipEvent),
         }
     }
 
@@ -850,21 +909,16 @@ impl MySqlBinlogConnector {
     /// This function returns a vector of all actionable inner events
     async fn process_event_transaction_payload(
         &mut self,
-        payload_event: mysql_common::binlog::events::TransactionPayloadEvent<'_>,
+        payload_event: binlog::events::TransactionPayloadEvent<'_>,
         is_last: bool,
-    ) -> mysql::Result<Vec<ReplicationAction>> {
+    ) -> ReadySetResult<Vec<ReplicationAction>> {
         let mut hash_actions: HashMap<Relation, ReplicationAction> = HashMap::new();
         if self.enable_statement_logging {
             info!(target: "replicator_statement", "{:?}", payload_event);
         }
-        let mut buff = payload_event.decompressed()?;
-        while let Some(binlog_ev) = self.reader.read_decompressed(&mut buff)? {
-            match binlog_ev.header().event_type().map_err(|ev| {
-                mysql_async::Error::Other(Box::new(internal_err!(
-                    "Unknown binlog event type {}",
-                    ev
-                )))
-            })? {
+        let mut buff = handle_err!(self, payload_event.decompressed());
+        while let Some(binlog_ev) = handle_err!(self, self.reader.read_decompressed(&mut buff)) {
+            match handle_err!(self, binlog_ev.header().event_type()) {
                 EventType::QUERY_EVENT => {
                     // We only accept query events in the transaction payload that do not affect the
                     // schema. Those are `BEGIN` and `COMMIT`. `BEGIN` will return a
@@ -872,50 +926,54 @@ impl MySqlBinlogConnector {
                     // `ReplicationAction::LogPosition` if necessary. We skip
                     // `ReplicationAction::LogPosition` here because we will report the position
                     // only once at the end.
-                    match self
-                        .process_event_query(binlog_ev.read_event()?, is_last)
-                        .await
-                    {
-                        Err(mysql_async::Error::Other(ref err))
-                            if err.downcast_ref::<ReadySetError>()
-                                == Some(&ReadySetError::SkipEvent) =>
-                        {
+                    let event = handle_err!(self, binlog_ev.read_event());
+                    match self.process_event_query(event, is_last).await {
+                        Err(ReadySetError::SkipEvent) => {
                             continue;
                         }
-                        Err(err) => return Err(err),
+                        Err(err) => {
+                            return Err(binlog_err!(
+                                self,
+                                format!("Could not process query inside transaction: {err}")
+                            ))
+                        }
                         Ok(action) => match action {
                             ReplicationAction::LogPosition => {
                                 continue;
                             }
                             _ => {
-                                return Err(mysql_async::Error::Other(Box::new(internal_err!(
-                                    "Unexpected query event in transaction payload {:?}",
-                                    action
-                                ))));
+                                return Err(binlog_err!(
+                                    self,
+                                    format!(
+                                        "Unexpected query event in transaction payload {:?}",
+                                        action
+                                    )
+                                ));
                             }
                         },
                     };
                 }
                 EventType::WRITE_ROWS_EVENT => {
-                    let binlog_action = self
-                        .process_event_write_rows(binlog_ev.read_event()?)
-                        .await?;
+                    let event = handle_err!(self, binlog_ev.read_event());
+                    let binlog_action =
+                        handle_err!(self, self.process_event_write_rows(event).await);
                     self.merge_table_actions(&mut hash_actions, binlog_action)
                         .await;
                 }
 
                 EventType::UPDATE_ROWS_EVENT => {
-                    let binlog_action = self
-                        .process_event_update_rows(binlog_ev.read_event()?)
-                        .await?;
+                    let event = handle_err!(self, binlog_ev.read_event());
+
+                    let binlog_action =
+                        handle_err!(self, self.process_event_update_rows(event).await);
                     self.merge_table_actions(&mut hash_actions, binlog_action)
                         .await;
                 }
 
                 EventType::DELETE_ROWS_EVENT => {
-                    let binlog_action = self
-                        .process_event_delete_rows(binlog_ev.read_event()?)
-                        .await?;
+                    let event = handle_err!(self, binlog_ev.read_event());
+                    let binlog_action =
+                        handle_err!(self, self.process_event_delete_rows(event).await);
                     self.merge_table_actions(&mut hash_actions, binlog_action)
                         .await;
                 }
@@ -963,11 +1021,11 @@ impl MySqlBinlogConnector {
     pub(crate) async fn next_action_inner(
         &mut self,
         until: Option<&ReplicationOffset>,
-    ) -> mysql::Result<(Vec<ReplicationAction>, &MySqlPosition)> {
+    ) -> ReadySetResult<(Vec<ReplicationAction>, &MySqlPosition)> {
         use mysql_common::binlog::events;
 
         loop {
-            let binlog_event = self.next_event().await?;
+            let binlog_event = handle_err!(self, self.next_event().await);
 
             if u64::from(binlog_event.header().log_pos()) < self.next_position.position
                 && self.next_position.position + u64::from(binlog_event.header().event_size())
@@ -986,35 +1044,21 @@ impl MySqlBinlogConnector {
                 }
                 None => false,
             };
-            match binlog_event.header().event_type().map_err(|ev| {
-                mysql_async::Error::Other(Box::new(internal_err!(
-                    "Unknown binlog event type {}",
-                    ev
-                )))
-            })? {
+            match handle_err!(self, binlog_event.header().event_type()) {
                 EventType::ROTATE_EVENT => {
-                    return Ok((
-                        vec![
-                            self.process_event_rotate(binlog_event.read_event()?)
-                                .await?,
-                        ],
-                        &self.next_position,
-                    ));
+                    let event = handle_err!(self, binlog_event.read_event());
+                    let action = handle_err!(self, self.process_event_rotate(event).await);
+                    return Ok((vec![action], &self.next_position));
                 }
 
                 EventType::QUERY_EVENT => {
-                    let action = match self
-                        .process_event_query(binlog_event.read_event()?, is_last)
-                        .await
-                    {
+                    let event = handle_err!(self, binlog_event.read_event());
+                    let action = match self.process_event_query(event, is_last).await {
                         Ok(action) => action,
-                        Err(mysql_async::Error::Other(ref err))
-                            if err.downcast_ref::<ReadySetError>()
-                                == Some(&ReadySetError::SkipEvent) =>
-                        {
+                        Err(ReadySetError::SkipEvent) => {
                             continue;
                         }
-                        Err(err) => return Err(err),
+                        Err(err) => return Err(binlog_err!(self, None, err)),
                     };
                     return Ok((vec![action], &self.next_position));
                 }
@@ -1036,41 +1080,30 @@ impl MySqlBinlogConnector {
                 }
 
                 EventType::WRITE_ROWS_EVENT => {
-                    return Ok((
-                        vec![
-                            self.process_event_write_rows(binlog_event.read_event()?)
-                                .await?,
-                        ],
-                        &self.next_position,
-                    ));
+                    let event = handle_err!(self, binlog_event.read_event());
+                    let action = self.process_event_write_rows(event).await?;
+                    return Ok((vec![action], &self.next_position));
                 }
 
                 EventType::UPDATE_ROWS_EVENT => {
-                    return Ok((
-                        vec![
-                            self.process_event_update_rows(binlog_event.read_event()?)
-                                .await?,
-                        ],
-                        &self.next_position,
-                    ));
+                    let event = handle_err!(self, binlog_event.read_event());
+                    let action = self.process_event_update_rows(event).await?;
+                    return Ok((vec![action], &self.next_position));
                 }
 
                 EventType::DELETE_ROWS_EVENT => {
-                    return Ok((
-                        vec![
-                            self.process_event_delete_rows(binlog_event.read_event()?)
-                                .await?,
-                        ],
-                        &self.next_position,
-                    ));
+                    let event = handle_err!(self, binlog_event.read_event());
+                    let action = self.process_event_delete_rows(event).await?;
+                    return Ok((vec![action], &self.next_position));
                 }
 
                 EventType::TRANSACTION_PAYLOAD_EVENT => {
-                    return Ok((
-                        self.process_event_transaction_payload(binlog_event.read_event()?, is_last)
-                            .await?,
-                        &self.next_position,
-                    ));
+                    let event = handle_err!(self, binlog_event.read_event());
+                    let actions = handle_err!(
+                        self,
+                        self.process_event_transaction_payload(event, is_last).await
+                    );
+                    return Ok((actions, &self.next_position));
                 }
 
                 EventType::XID_EVENT => {
@@ -1100,7 +1133,7 @@ impl MySqlBinlogConnector {
                     // slave's binary log, the GTID is preserved.  When a slave connects to a
                     // master, the slave uses GTIDs instead of (file, offset)
                     // See also https://dev.mysql.com/doc/refman/8.0/en/replication-mode-change-online-concepts.html
-                    let ev: events::GtidEvent = binlog_event.read_event()?;
+                    let ev: events::GtidEvent = handle_err!(self, binlog_event.read_event());
                     if self.enable_statement_logging {
                         info!(target: "replicator_statement", "{:?}", ev);
                     }
@@ -1232,8 +1265,8 @@ impl MySqlBinlogConnector {
 }
 
 fn binlog_val_to_noria_val(
-    val: &mysql_common::value::Value,
-    col_kind: mysql_common::constants::ColumnType,
+    val: &Value,
+    col_kind: ColumnType,
     meta: &[u8],
     collation: u16,
     unsigned: bool,
@@ -1242,13 +1275,13 @@ fn binlog_val_to_noria_val(
     // Not all values are coerced to the value expected by ReadySet directly
 
     use mysql_common::constants::ColumnType;
-    if let mysql_common::value::Value::NULL = val {
+    if let Value::NULL = val {
         return Ok(DfValue::None);
     }
     match (col_kind, meta) {
         (ColumnType::MYSQL_TYPE_TIMESTAMP2, &[0]) => {
             let buf = match val {
-                mysql_common::value::Value::Bytes(b) => b,
+                Value::Bytes(b) => b,
                 _ => {
                     return Err(mysql_async::Error::Other(Box::new(internal_err!(
                         "Expected a byte array for timestamp"
@@ -1271,7 +1304,7 @@ fn binlog_val_to_noria_val(
         }
         (ColumnType::MYSQL_TYPE_TIMESTAMP2, meta) => {
             let buf = match val {
-                mysql_common::value::Value::Bytes(b) => b,
+                Value::Bytes(b) => b,
                 _ => {
                     return Err(mysql_async::Error::Other(Box::new(internal_err!(
                         "Expected a byte array for timestamp"
@@ -1337,7 +1370,7 @@ fn binlog_val_to_noria_val(
         }
         (ColumnType::MYSQL_TYPE_STRING, meta) => {
             let buf = match val {
-                mysql_common::value::Value::Bytes(b) => b,
+                Value::Bytes(b) => b,
                 _ => {
                     return Err(mysql_async::Error::Other(Box::new(internal_err!(
                         "Expected a byte array for string"
@@ -1370,7 +1403,7 @@ fn binlog_val_to_noria_val(
             if binary =>
         {
             let bytes = match val {
-                mysql_common::value::Value::Bytes(b) => b.to_vec(),
+                Value::Bytes(b) => b.to_vec(),
                 _ => {
                     return Err(mysql_async::Error::Other(Box::new(internal_err!(
                         "Expected a byte array for blob or binary string column"
@@ -1388,7 +1421,7 @@ fn binlog_val_to_noria_val(
             if !binary =>
         {
             let bytes = match val {
-                mysql_common::value::Value::Bytes(b) => b.as_ref(),
+                Value::Bytes(b) => b.as_ref(),
                 _ => {
                     return Err(mysql_async::Error::Other(Box::new(internal_err!(
                         "Expected a byte array for string"
@@ -1411,7 +1444,7 @@ fn binlog_val_to_noria_val(
             Ok(DfValue::from_str_and_collation(&utf8_string, rs_collation))
         }
         (ColumnType::MYSQL_TYPE_DECIMAL, _) | (ColumnType::MYSQL_TYPE_NEWDECIMAL, _) => {
-            if let mysql_common::value::Value::Bytes(b) = val {
+            if let Value::Bytes(b) = val {
                 str::from_utf8(b)
                     .ok()
                     .and_then(|s| Decimal::from_str_exact(s).ok())
@@ -1429,7 +1462,7 @@ fn binlog_val_to_noria_val(
         }
         (ColumnType::MYSQL_TYPE_INT24, _) => {
             match val {
-                mysql_common::value::Value::Int(x) => {
+                Value::Int(x) => {
                     // MySQL can send signed int values even for unsigned columns, so we have to
                     // check whether it's actually signed; if so, we need to sign-extend from 24
                     // bits to 64 bits.
@@ -1445,7 +1478,7 @@ fn binlog_val_to_noria_val(
                         Ok(DfValue::Int(x.wrapping_shl(missing).wrapping_shr(missing)))
                     }
                 }
-                mysql_common::value::Value::UInt(x) => Ok(DfValue::UnsignedInt(*x)),
+                Value::UInt(x) => Ok(DfValue::UnsignedInt(*x)),
                 _ => Err(mysql_async::Error::Other(Box::new(internal_err!(
                     "Expected an integer value for mediumint column"
                 )))),
@@ -1501,7 +1534,7 @@ fn slice_to_8bytes_array(data: &[u8]) -> [u8; 8] {
 /*
  *  This method reads binary opaque value of a temporal type into a packed i64,
  *  which should be unpacked with appropriate binlog::misc::* function into
- *  mysql_common::value::Value::{Date, Time}.
+ *  Value::{Date, Time}.
  *
  *  Note, even there are functions: binlog::misc::{
  *      my_datetime_packed_from_binary,
@@ -1549,7 +1582,7 @@ fn temporal_packed_from_binary(data: &[u8]) -> i64 {
     }
 }
 
-fn mysql_common_value_to_json_string(val: &mysql_common::value::Value) -> String {
+fn mysql_common_value_to_json_string(val: &Value) -> String {
     match *val {
         Value::Date(y, m, d, 0, 0, 0, 0) => format!("\"{:04}-{:02}-{:02}\"", y, m, d),
         Value::Date(year, month, day, hour, minute, second, micros) => format!(
@@ -1570,7 +1603,7 @@ fn mysql_common_value_to_json_string(val: &mysql_common::value::Value) -> String
 
 fn binary_temporal_to_serde_value(
     data: &[u8],
-    temporal_from_packed_func: fn(i64) -> mysql_common::value::Value,
+    temporal_from_packed_func: fn(i64) -> Value,
 ) -> mysql::Result<serde_json::Value> {
     let packed = temporal_packed_from_binary(data);
     let val = temporal_from_packed_func(packed);
