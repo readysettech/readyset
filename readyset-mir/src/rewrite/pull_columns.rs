@@ -152,7 +152,7 @@ mod tests {
                     ProjectExpr::Expr {
                         alias: "c0".into(),
                         expr: Expr::Call(FunctionExpr::Call {
-                            name: "ifnull".into(),
+                            name: "IFNULL".into(),
                             arguments: vec![Expr::Column("c".into()), Expr::Literal(0.into())],
                         }),
                     },

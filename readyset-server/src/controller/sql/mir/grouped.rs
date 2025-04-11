@@ -121,9 +121,9 @@ pub(super) fn make_expressions_above_grouped(
                     SqlIdentifier::from("__json_objects__".to_string()),
                     Expr::Call(FunctionExpr::Call {
                         name: if *allow_duplicate_keys {
-                            "json_build_object"
+                            "JSON_BUILD_OBJECT"
                         } else {
-                            "jsonb_build_object"
+                            "JSONB_BUILD_OBJECT"
                         }
                         .into(),
                         arguments: vec![*key.clone(), *value.clone()],

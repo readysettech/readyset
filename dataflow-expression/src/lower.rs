@@ -178,8 +178,8 @@ impl BuiltinFunction {
             null_on_failure: true,
         };
 
-        let result = match name.to_lowercase().as_str() {
-            "convert_tz" => {
+        let result = match name {
+            "CONVERT_TZ" => {
                 // Type is inferred from input argument
                 let input = next_arg()?;
                 let ty = input.ty().clone();
@@ -199,26 +199,26 @@ impl BuiltinFunction {
                     ty,
                 )
             }
-            "dayofweek" => {
+            "DAYOFWEEK" => {
                 (
                     Self::DayOfWeek(try_cast(next_arg()?, DfType::Date)),
                     DfType::Int, // Day of week is always an int
                 )
             }
-            "ifnull" => {
+            "IFNULL" => {
                 let expr = next_arg()?;
                 let val = next_arg()?;
                 // Type is inferred from the value provided
                 let ty = val.ty().clone();
                 (Self::IfNull(expr, val), ty)
             }
-            "month" => {
+            "MONTH" => {
                 (
                     Self::Month(try_cast(next_arg()?, DfType::Date)),
                     DfType::Int, // Month is always an int
                 )
             }
-            "timediff" => {
+            "TIMEDIFF" => {
                 (
                     Self::Timediff(next_arg()?, next_arg()?),
                     // type is always time
@@ -227,16 +227,16 @@ impl BuiltinFunction {
                     },
                 )
             }
-            "addtime" => {
+            "ADDTIME" => {
                 let base_time = next_arg()?;
                 let ty = base_time.ty().clone();
                 (Self::Addtime(base_time, next_arg()?), ty)
             }
-            "date_format" => (
+            "DATE_FORMAT" => (
                 Self::DateFormat(next_arg()?, next_arg()?),
                 DfType::DEFAULT_TEXT,
             ),
-            "round" => {
+            "ROUND" => {
                 let expr = next_arg()?;
                 let prec = args.next().unwrap_or(Expr::Literal {
                     val: DfValue::Int(0),
@@ -245,16 +245,16 @@ impl BuiltinFunction {
                 let ty = type_for_round(&expr, &prec);
                 (Self::Round(expr, prec), ty)
             }
-            "json_depth" => (Self::JsonDepth(next_arg()?), DfType::Int),
-            "json_valid" => (Self::JsonValid(next_arg()?), DfType::BigInt),
-            "json_overlaps" => (Self::JsonOverlaps(next_arg()?, next_arg()?), DfType::BigInt),
-            "json_quote" => (Self::JsonQuote(next_arg()?), DfType::DEFAULT_TEXT),
-            "json_typeof" | "jsonb_typeof" => (
+            "JSON_DEPTH" => (Self::JsonDepth(next_arg()?), DfType::Int),
+            "JSON_VALID" => (Self::JsonValid(next_arg()?), DfType::BigInt),
+            "JSON_OVERLAPS" => (Self::JsonOverlaps(next_arg()?, next_arg()?), DfType::BigInt),
+            "JSON_QUOTE" => (Self::JsonQuote(next_arg()?), DfType::DEFAULT_TEXT),
+            "JSON_TYPEOF" | "JSONB_TYPEOF" => (
                 Self::JsonTypeof(next_arg()?),
                 // Always returns text containing the JSON type.
                 DfType::DEFAULT_TEXT,
             ),
-            "json_object" => match dialect.engine() {
+            "JSON_OBJECT" => match dialect.engine() {
                 // TODO(ENG-1536): https://dev.mysql.com/doc/refman/8.0/en/json-creation-functions.html#function_json-object
                 SqlEngine::MySQL => {
                     let exprs: Vec<_> = args.by_ref().collect();
@@ -280,7 +280,7 @@ impl BuiltinFunction {
                     DfType::Json,
                 ),
             },
-            "json_build_object" => {
+            "JSON_BUILD_OBJECT" => {
                 let exprs: Vec<_> = args.by_ref().collect();
 
                 if exprs.is_empty() || exprs.len() % 2 != 0 {
@@ -295,7 +295,7 @@ impl BuiltinFunction {
                     DfType::Json,
                 )
             }
-            "jsonb_build_object" => {
+            "JSONB_BUILD_OBJECT" => {
                 let exprs: Vec<_> = args.by_ref().collect();
 
                 if exprs.is_empty() || exprs.len() % 2 != 0 {
@@ -310,7 +310,7 @@ impl BuiltinFunction {
                     DfType::Json,
                 )
             }
-            "jsonb_object" => (
+            "JSONB_OBJECT" => (
                 Self::JsonObject {
                     arg1: next_arg()?,
                     arg2: args.next(),
@@ -318,37 +318,37 @@ impl BuiltinFunction {
                 },
                 DfType::Jsonb,
             ),
-            "json_array_length" | "jsonb_array_length" => {
+            "JSON_ARRAY_LENGTH" | "JSONB_ARRAY_LENGTH" => {
                 (Self::JsonArrayLength(next_arg()?), DfType::Int)
             }
-            "json_strip_nulls" => (Self::JsonStripNulls(next_arg()?), DfType::Json),
-            "jsonb_strip_nulls" => (Self::JsonStripNulls(next_arg()?), DfType::Jsonb),
-            "json_extract_path" => (
+            "JSON_STRIP_NULLS" => (Self::JsonStripNulls(next_arg()?), DfType::Json),
+            "JSONB_STRIP_NULLS" => (Self::JsonStripNulls(next_arg()?), DfType::Jsonb),
+            "JSON_EXTRACT_PATH" => (
                 Self::JsonExtractPath {
                     json: next_arg()?,
                     keys: Vec1::try_from_vec(args.by_ref().collect()).map_err(|_| arity_error())?,
                 },
                 DfType::Json,
             ),
-            "jsonb_extract_path" => (
+            "JSONB_EXTRACT_PATH" => (
                 Self::JsonExtractPath {
                     json: next_arg()?,
                     keys: Vec1::try_from_vec(args.by_ref().collect()).map_err(|_| arity_error())?,
                 },
                 DfType::Jsonb,
             ),
-            "json_extract_path_text" | "jsonb_extract_path_text" => (
+            "JSON_EXTRACT_PATH_TEXT" | "JSONB_EXTRACT_PATH_TEXT" => (
                 Self::JsonExtractPath {
                     json: next_arg()?,
                     keys: Vec1::try_from_vec(args.by_ref().collect()).map_err(|_| arity_error())?,
                 },
                 DfType::DEFAULT_TEXT,
             ),
-            "jsonb_insert" => (
+            "JSONB_INSERT" => (
                 Self::JsonbInsert(next_arg()?, next_arg()?, next_arg()?, args.next()),
                 DfType::Jsonb,
             ),
-            "jsonb_set" => (
+            "JSONB_SET" => (
                 Self::JsonbSet(
                     next_arg()?,
                     next_arg()?,
@@ -358,7 +358,7 @@ impl BuiltinFunction {
                 ),
                 DfType::Jsonb,
             ),
-            "jsonb_set_lax" => (
+            "JSONB_SET_LAX" => (
                 Self::JsonbSet(
                     next_arg()?,
                     next_arg()?,
@@ -368,13 +368,13 @@ impl BuiltinFunction {
                 ),
                 DfType::Jsonb,
             ),
-            "jsonb_pretty" => (Self::JsonbPretty(next_arg()?), DfType::DEFAULT_TEXT),
-            "coalesce" => {
+            "JSONB_PRETTY" => (Self::JsonbPretty(next_arg()?), DfType::DEFAULT_TEXT),
+            "COALESCE" => {
                 let arg1 = next_arg()?;
                 let ty = arg1.ty().clone();
                 (Self::Coalesce(arg1, args.by_ref().collect()), ty)
             }
-            "concat" => {
+            "CONCAT" => {
                 let arg1 = next_arg()?;
                 let rest_args = args.by_ref().collect::<Vec<_>>();
                 let collation = iter::once(&arg1)
@@ -396,7 +396,7 @@ impl BuiltinFunction {
                     ty,
                 )
             }
-            "substring" | "substr" => {
+            "SUBSTRING" | "SUBSTR" => {
                 let string = next_arg()?;
                 let ty = if string.ty().is_any_text() {
                     string.ty().clone()
@@ -413,7 +413,7 @@ impl BuiltinFunction {
                     ty,
                 )
             }
-            "split_part" => (
+            "SPLIT_PART" => (
                 Self::SplitPart(
                     cast(next_arg()?, DfType::DEFAULT_TEXT),
                     cast(next_arg()?, DfType::DEFAULT_TEXT),
@@ -421,7 +421,7 @@ impl BuiltinFunction {
                 ),
                 DfType::DEFAULT_TEXT,
             ),
-            "greatest" | "least" => {
+            "GREATEST" | "LEAST" => {
                 // The type inference rules for GREATEST and LEAST are the same, so this block
                 // covers both then dispatches for the actual function construction at the end
                 let arg1 = next_arg()?;
@@ -453,7 +453,7 @@ impl BuiltinFunction {
                 args.extend(rest_args);
 
                 (
-                    if name == "greatest" {
+                    if name == "GREATEST" {
                         Self::Greatest { args, compare_as }
                     } else {
                         Self::Least { args, compare_as }
@@ -461,7 +461,7 @@ impl BuiltinFunction {
                     ty,
                 )
             }
-            "array_to_string" => {
+            "ARRAY_TO_STRING" => {
                 let array_arg = next_arg()?;
                 let elem_ty = match array_arg.ty() {
                     DfType::Array(t) => (**t).clone(),
@@ -476,7 +476,7 @@ impl BuiltinFunction {
                     DfType::DEFAULT_TEXT,
                 )
             }
-            "date_trunc" => {
+            "DATE_TRUNC" => {
                 // this is the time unit (precision) to truncate by ('hour', 'minute', and so on).
                 // called 'field' in the postgres docs.
                 let precision = next_arg()?;
@@ -495,7 +495,7 @@ impl BuiltinFunction {
 
                 (Self::DateTrunc(precision, source), ret_type)
             }
-            "length" | "octet_length" | "char_length" | "character_length" => {
+            "LENGTH" | "OCTET_LENGTH" | "CHAR_LENGTH" | "CHARACTER_LENGTH" => {
                 // MySQL - `LENGTH()`, `OCTET_LENGTH()` = in bytes | `CHAR_LENGTH()`, `CHARACTER_LENGTH()` = in characters
                 // PostgreSQL - `OCTET_LENGTH()` = in bytes | `LENGTH()`, `CHAR_LENGTH()`, `CHARACTER_LENGTH()` = in characters
                 let expr = next_arg()?;
@@ -504,8 +504,8 @@ impl BuiltinFunction {
                 } else {
                     DfType::Int
                 };
-                let in_bytes = (matches!(dialect.engine(), SqlEngine::MySQL) && name == "length")
-                    || name == "octet_length";
+                let in_bytes = (matches!(dialect.engine(), SqlEngine::MySQL) && name == "LENGTH")
+                    || name == "OCTET_LENGTH";
                 (
                     Self::Length {
                         expr,
@@ -515,11 +515,11 @@ impl BuiltinFunction {
                     ty,
                 )
             }
-            "ascii" => {
+            "ASCII" => {
                 let expr = next_arg()?;
                 (Self::Ascii { expr, dialect }, DfType::UnsignedInt)
             }
-            "hex" => {
+            "HEX" => {
                 if dialect.engine() != SqlEngine::MySQL {
                     unsupported!("Function {name} does not exist in {}", dialect.engine());
                 }
@@ -1627,7 +1627,7 @@ pub(crate) mod tests {
     #[test]
     fn call_coalesce() {
         let input = AstExpr::Call(FunctionExpr::Call {
-            name: "coalesce".into(),
+            name: "COALESCE".into(),
             arguments: vec![AstExpr::Column("t.x".into()), AstExpr::Literal(2.into())],
         });
 
@@ -1905,7 +1905,7 @@ pub(crate) mod tests {
         #[track_caller]
         fn infers_type(args: Vec<Literal>, dialect: Dialect, expected_ty: DfType) {
             let input = AstExpr::Call(FunctionExpr::Call {
-                name: "greatest".into(),
+                name: "GREATEST".into(),
                 arguments: args.into_iter().map(AstExpr::Literal).collect(),
             });
             let result = Expr::lower(input, dialect, &no_op_lower_context()).unwrap();
@@ -1990,7 +1990,7 @@ pub(crate) mod tests {
         #[track_caller]
         fn compares_as(args: Vec<Literal>, dialect: Dialect, expected_ty: DfType) {
             let input = AstExpr::Call(FunctionExpr::Call {
-                name: "greatest".into(),
+                name: "GREATEST".into(),
                 arguments: args.into_iter().map(AstExpr::Literal).collect(),
             });
             let result = Expr::lower(input, dialect, &no_op_lower_context()).unwrap();
