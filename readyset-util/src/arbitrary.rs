@@ -44,6 +44,11 @@ pub fn arbitrary_positive_naive_date() -> impl Strategy<Value = NaiveDate> {
     (0i32..3000, 1u32..365).prop_map(|(y, doy)| NaiveDate::from_yo_opt(y, doy).unwrap())
 }
 
+/// Generate an arbitrary [`NaiveDate`] with a valid MySQL DATE value
+pub fn arbitrary_mysql_date() -> impl Strategy<Value = NaiveDate> {
+    (1000i32..9999, 1u32..365).prop_map(|(y, doy)| NaiveDate::from_yo_opt(y, doy).unwrap())
+}
+
 /// Generate an arbitrary [`NaiveTime`]
 pub fn arbitrary_naive_time() -> impl Strategy<Value = NaiveTime> {
     (0u32..23, 0u32..59, 0u32..59)
@@ -60,6 +65,23 @@ pub fn arbitrary_naive_time_with_seconds_fraction() -> impl Strategy<Value = Nai
 /// Generate an arbitrary [`Duration`] within a MySQL TIME valid range.
 pub fn arbitrary_duration() -> impl Strategy<Value = Duration> {
     (-3020399i64..3020399i64).prop_map(Duration::microseconds)
+}
+
+///Generate an arbitrary [`Duration`] within a MySQL TIME provided hour range. without microseconds.
+pub fn arbitrary_duration_without_microseconds_in_range(
+    hours: RangeInclusive<i32>,
+) -> impl Strategy<Value = Duration> {
+    (hours, 0u32..=59, 0u32..=59).prop_map(|(hours, minutes, seconds)| {
+        Duration::hours(hours as i64)
+            + Duration::minutes(minutes as i64)
+            + Duration::seconds(seconds as i64)
+    })
+}
+
+///Generate an arbitrary [`Duration`] within a MySQL TIME valid range. without microseconds.
+pub fn arbitrary_duration_without_microseconds() -> impl Strategy<Value = Duration> {
+    // range from '-838:59:59.000000' to '838:59:59.000000'.
+    arbitrary_duration_without_microseconds_in_range(-838i32..=838)
 }
 
 /// Generate an arbitrary [`Decimal`]
@@ -147,7 +169,7 @@ pub fn arbitrary_timestamp_naive_date_time() -> impl Strategy<Value = NaiveDateT
     let to_time = |(hour, min, sec)| NaiveTime::from_hms_opt(hour, min, sec).unwrap();
     let dates = (1970i32..2037, 1u32..365).prop_map(to_date);
     let times = (0u32..23, 0u32..59, 0u32..59).prop_map(to_time);
-    let last_dates = (2038i32..2039, 1u32..20).prop_map(to_date);
+    let last_dates = (2038i32..2039, 1u32..19).prop_map(to_date);
     let last_times = (0u32..4, 0u32..15, 0u32..8).prop_map(to_time);
     (dates, times)
         .prop_union((last_dates, last_times))

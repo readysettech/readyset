@@ -746,7 +746,7 @@ impl Arbitrary for EnumVariants {
         // NOTE: We are required to provide a regex for Arbitrary, otherwise we would just get empty
         // strings.
         // Using hashset to ensure that all variants are unique.
-        proptest::collection::hash_set(any_with::<String>(regex.into()), len)
+        proptest::collection::btree_set(any_with::<String>(regex.into()), len)
             .prop_map(EnumVariants::from)
             .boxed()
     }
