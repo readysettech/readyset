@@ -12,6 +12,7 @@ use mysql::binlog::events::{OptionalMetaExtractor, StatusVarVal};
 use mysql::binlog::jsonb::{self, JsonbToJsonError};
 use mysql::prelude::Queryable;
 use mysql_async as mysql;
+use mysql_async::binlog::events::TableMapEvent;
 use mysql_common::binlog::jsonb::{
     Array, ComplexValue, Large, Object, OpaqueValue, Small, StorageFormat,
 };
@@ -48,6 +49,7 @@ use super::utils::get_mysql_version;
 const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;
 const MAX_POSITION_TIME: u64 = 10;
 
+type TableMetadata = (Vec<Option<u16>>, Vec<Option<bool>>);
 /// A connector that connects to a MySQL server and starts reading binlogs from a given position.
 ///
 /// The server must be configured with `binlog_format` set to `row` and `binlog_row_image` set to
@@ -248,9 +250,12 @@ impl MySqlBinlogConnector {
         &self,
         row_data: &BinlogRow,
         tme: &binlog::events::TableMapEvent<'static>,
+        collation_vec: &[Option<u16>],
+        signedness_vec: &[Option<bool>],
     ) -> mysql::Result<Vec<DfValue>> {
         let mut row = vec![DfValue::Default; tme.columns_count() as usize];
-        let mut binlog_iter = binlog_row_to_noria_row(row_data, tme)?.into_iter();
+        let mut binlog_iter =
+            binlog_row_to_noria_row(row_data, tme, collation_vec, signedness_vec)?.into_iter();
 
         for col in row_data.columns_ref() {
             if let Some(idx) = parse_column_index(&col.name_str()) {
@@ -322,12 +327,9 @@ impl MySqlBinlogConnector {
         if self.enable_statement_logging {
             info!(target: "replicator_statement", "{:?}", wr_event);
         }
-        // Retrieve the corresponding TABLE_MAP_EVENT
-        let tme = self.reader.get_tme(wr_event.table_id()).ok_or_else(|| {
-            mysql_async::Error::Other(Box::new(internal_err!(
-                "TME not found for WRITE_ROWS_EVENT"
-            )))
-        })?;
+        // Retrieve the corresponding TABLE_MAP_EVENT, charset and signedness metadata
+        let (tme, (collation_vec, signedness_vec)) =
+            self.get_table_metadata(wr_event.table_id())?;
 
         if !self
             .table_filter
@@ -337,7 +339,6 @@ impl MySqlBinlogConnector {
         }
 
         let mut inserted_rows = Vec::new();
-
         for row in wr_event.rows(tme) {
             let row = &row?;
             let row_data = row.1.as_ref().ok_or_else(|| {
@@ -346,7 +347,7 @@ impl MySqlBinlogConnector {
                 )))
             })?;
             inserted_rows.push(readyset_client::TableOperation::Insert(
-                self.map_partial_binlog_row_insert(row_data, tme)?,
+                self.map_partial_binlog_row_insert(row_data, tme, &collation_vec, &signedness_vec)?,
             ));
         }
 
@@ -378,9 +379,11 @@ impl MySqlBinlogConnector {
         &self,
         tme: &binlog::events::TableMapEvent<'static>,
         row: &(Option<BinlogRow>, Option<BinlogRow>),
+        collation_vec: &[Option<u16>],
+        signedness_vec: &[Option<bool>],
     ) -> mysql::Result<Vec<readyset_client::TableOperation>> {
-        let (before_image, after_image) = self.get_before_after_images(tme, row)?;
-
+        let (before_image, after_image) =
+            self.get_before_after_images(tme, row, collation_vec, signedness_vec)?;
         if before_image.len() == tme.columns_count() as usize {
             let after_image = if after_image.len() == tme.columns_count() as usize {
                 after_image
@@ -430,6 +433,8 @@ impl MySqlBinlogConnector {
         &self,
         tme: &binlog::events::TableMapEvent<'static>,
         row: &(Option<BinlogRow>, Option<BinlogRow>),
+        collation_vec: &[Option<u16>],
+        signedness_vec: &[Option<bool>],
     ) -> mysql::Result<(Vec<DfValue>, Vec<DfValue>)> {
         let before_image = binlog_row_to_noria_row(
             row.0.as_ref().ok_or_else(|| {
@@ -439,6 +444,8 @@ impl MySqlBinlogConnector {
                 )))
             })?,
             tme,
+            collation_vec,
+            signedness_vec,
         )?;
 
         let after_image = binlog_row_to_noria_row(
@@ -449,6 +456,8 @@ impl MySqlBinlogConnector {
                 )))
             })?,
             tme,
+            collation_vec,
+            signedness_vec,
         )?;
 
         Ok((before_image, after_image))
@@ -518,13 +527,9 @@ impl MySqlBinlogConnector {
             info!(target: "replicator_statement", "{:?}", ur_event);
         }
 
-        // Retrieve the corresponding TABLE_MAP_EVENT
-        let tme = self.reader.get_tme(ur_event.table_id()).ok_or_else(|| {
-            mysql_async::Error::Other(Box::new(internal_err!(
-                "TME not found for UPDATE_ROWS_EVENT {:?}",
-                ur_event
-            )))
-        })?;
+        // Retrieve the corresponding TABLE_MAP_EVENT, charset and signedness metadata
+        let (tme, (collation_vec, signedness_vec)) =
+            self.get_table_metadata(ur_event.table_id())?;
 
         if !self
             .table_filter
@@ -534,10 +539,9 @@ impl MySqlBinlogConnector {
         }
 
         let mut updated_rows = Vec::with_capacity(ur_event.rows(tme).count());
-
         // Process each row update
         for row in ur_event.rows(tme) {
-            let row_ops = self.process_update_row(tme, &row?)?;
+            let row_ops = self.process_update_row(tme, &row?, &collation_vec, &signedness_vec)?;
             updated_rows.extend(row_ops);
         }
 
@@ -564,13 +568,9 @@ impl MySqlBinlogConnector {
         if self.enable_statement_logging {
             info!(target: "replicator_statement", "{:?}", dr_event);
         }
-        // Retrieve the corresponding TABLE_MAP_EVENT
-        let tme = self.reader.get_tme(dr_event.table_id()).ok_or_else(|| {
-            mysql_async::Error::Other(Box::new(internal_err!(
-                "TME not found for UPDATE_ROWS_EVENT {:?}",
-                dr_event
-            )))
-        })?;
+        // Retrieve the corresponding TABLE_MAP_EVENT, charset and signedness metadata
+        let (tme, (collation_vec, signedness_vec)) =
+            self.get_table_metadata(dr_event.table_id())?;
 
         if !self
             .table_filter
@@ -580,7 +580,6 @@ impl MySqlBinlogConnector {
         }
 
         let mut deleted_rows = Vec::new();
-
         for row in dr_event.rows(tme) {
             // For each row in the event we produce a vector of ReadySet types that
             // represent that row
@@ -591,6 +590,8 @@ impl MySqlBinlogConnector {
                     )))
                 })?,
                 tme,
+                &collation_vec,
+                &signedness_vec,
             )?;
 
             // Partial Row, Before row image is the PKE
@@ -1166,6 +1167,68 @@ impl MySqlBinlogConnector {
             }
         }
     }
+
+    /// Get the table map event, charset and signedness metadata for a table map event.
+    ///
+    /// # Arguments
+    /// * `table_id` - The table id
+    ///
+    /// # Returns
+    /// * `(&TableMapEvent<'static>, TableMetadata)` - The table map event, charset and signedness metadata
+    fn get_table_metadata(
+        &self,
+        table_id: u64,
+    ) -> mysql::Result<(&TableMapEvent<'static>, TableMetadata)> {
+        let tme = self.reader.get_tme(table_id).ok_or_else(|| {
+            mysql_async::Error::Other(Box::new(internal_err!(
+                "Table map event not found for table id {}",
+                table_id
+            )))
+        })?;
+        /*
+         * TME iterators are only populated for the types that make sense.
+         * For example, for a table with col1 CHAR(1) collate utf8mb4_0900_ai_ci, col2 int, col3 unsigned int, col4 char(1) collate binary
+         * the iterators will be:
+         * charset_iter: [255, 63]
+         * enum_and_set_charset_iter: []
+         * signedness_iter: [true, false]
+         *
+         * For MRBR - where we receive the row event with only the list of columns that are set
+         * we need to advance the iterators even for columns that are not present in the event. In the event above, if we do an UPDATE table SET col4 = 'A'
+         * the row event will come as {@3: Value(Bytes("A"))}, making it difficult to retrive the charset 63 for col4.
+         */
+        let opt_meta_extractor = OptionalMetaExtractor::new(tme.iter_optional_meta()).unwrap();
+
+        let mut charset_iter = opt_meta_extractor.iter_charset();
+        let mut enum_and_set_charset_iter = opt_meta_extractor.iter_enum_and_set_charset();
+        let mut signedness_iter = opt_meta_extractor.iter_signedness();
+        let mut collation_vec = vec![None; tme.columns_count() as usize];
+        let mut signedness_vec = vec![None; tme.columns_count() as usize];
+        for id in 0..tme.columns_count() as usize {
+            let kind = tme
+                .get_column_type(id)
+                .map_err(|e| {
+                    mysql_async::Error::Other(Box::new(internal_err!(
+                        "Unable to get column type {}",
+                        e
+                    )))
+                })?
+                .unwrap();
+            if kind.is_character_type() {
+                collation_vec[id] = Some(charset_iter.next().transpose()?.unwrap_or_default());
+            } else if kind.is_enum_or_set_type() {
+                collation_vec[id] = Some(
+                    enum_and_set_charset_iter
+                        .next()
+                        .transpose()?
+                        .unwrap_or_default(),
+                );
+            } else if kind.is_numeric_type() {
+                signedness_vec[id] = Some(signedness_iter.next().unwrap_or(false));
+            }
+        }
+        Ok((tme, (collation_vec, signedness_vec)))
+    }
 }
 
 fn binlog_val_to_noria_val(
@@ -1584,11 +1647,9 @@ fn parse_column_index(col_name: &str) -> Option<usize> {
 fn binlog_row_to_noria_row(
     binlog_row: &BinlogRow,
     tme: &binlog::events::TableMapEvent<'static>,
+    collation_vec: &[Option<u16>],
+    signedness_vec: &[Option<bool>],
 ) -> mysql::Result<Vec<DfValue>> {
-    let opt_meta_extractor = OptionalMetaExtractor::new(tme.iter_optional_meta()).unwrap();
-    let mut charset_iter = opt_meta_extractor.iter_charset();
-    let mut enum_and_set_charset_iter = opt_meta_extractor.iter_enum_and_set_charset();
-    let mut signedness_iter = opt_meta_extractor.iter_signedness();
     binlog_row
         .columns()
         .iter()
@@ -1608,21 +1669,9 @@ fn binlog_row_to_noria_row(
                             .unwrap(),
                         tme.get_column_metadata(tme_idx).unwrap(),
                     );
-                    let collation = if kind.is_character_type() {
-                        charset_iter.next().transpose()?.unwrap_or_default()
-                    } else if kind.is_enum_or_set_type() {
-                        enum_and_set_charset_iter
-                            .next()
-                            .transpose()?
-                            .unwrap_or_default()
-                    } else {
-                        Default::default()
-                    };
-                    let unsigned = if kind.is_numeric_type() {
-                        signedness_iter.next().unwrap_or(false)
-                    } else {
-                        false
-                    };
+                    debug_assert!(!kind.is_character_type() || collation_vec[tme_idx].is_some());
+                    let collation = collation_vec[tme_idx].unwrap_or(0);
+                    let unsigned = signedness_vec[tme_idx].unwrap_or(false);
                     // `BLOB` columns have `BINARY_FLAG` set in snapshot, but not here. However, the
                     // collation should be correctly set to binary here, though it's not over there.
                     let binary = col.flags().contains(ColumnFlags::BINARY_FLAG)

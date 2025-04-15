@@ -4094,3 +4094,51 @@ async fn mysql_minimal_row_based_replication_empty_row() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial(mysql)]
+#[slow]
+async fn mysql_minimal_row_based_collation_and_signedness() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query("SET binlog_row_image = minimal;")
+        .await
+        .unwrap();
+    client
+        .query("DROP TABLE IF EXISTS mrbr_collation_and_signedness;")
+        .await
+        .unwrap();
+    client.query("CREATE TABLE `mrbr_collation_and_signedness` (`col_1` int NOT NULL, `col_2` blob, `col_3` char(2) DEFAULT NULL, PRIMARY KEY (`col_1`));").await.unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    client
+        .query("INSERT INTO `mrbr_collation_and_signedness` (`col_1`, `col_3`) VALUES (0, 'a');")
+        .await
+        .unwrap();
+
+    check_results!(
+        ctx,
+        "mrbr_collation_and_signedness",
+        "mrbr_collation_and_signedness_insert",
+        &[&[
+            DfValue::Int(0),
+            DfValue::None,
+            DfValue::from_str_and_collation("a ", Collation::Citext)
+        ]]
+    );
+
+    shutdown_tx.shutdown().await;
+}
