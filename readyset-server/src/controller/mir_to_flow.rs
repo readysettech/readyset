@@ -31,7 +31,7 @@ use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
 };
-use readyset_sql::ast::{self, ColumnConstraint, ColumnSpecification, Expr, OrderType, Relation};
+use readyset_sql::ast::{self, ColumnSpecification, Expr, OrderType, Relation};
 
 use crate::controller::Migration;
 use crate::manual::ops::grouped::aggregate::Aggregation;
@@ -373,41 +373,36 @@ fn make_base_node(
     let default_values = column_specs
         .iter()
         .map(|cs| {
-            for c in &cs.constraints {
-                if let ColumnConstraint::DefaultValue(Expr::Literal(ref dv)) = *c {
-                    let df: DfValue = dv
-                        .try_into()
-                        .map_err(|e| internal_err!("Failed to convert default value: {}", e))?;
-                    let collation = cs.get_collation().map(|collation| {
-                        Collation::from_mysql_collation(collation).unwrap_or(Collation::Utf8)
-                    });
-                    let dftype_to =
-                        DfType::from_sql_type(&cs.sql_type, mig.dialect, |_| None, collation)
-                            .map_err(|e| {
-                                internal_err!("Failed to convert SQL type to DfType: {}", e)
-                            })?;
-                    return df.coerce_to(&dftype_to, &df.infer_dataflow_type());
-                } else if let ColumnConstraint::NotNull = *c {
-                    let collation = cs.get_collation().map(|collation| {
-                        Collation::from_mysql_collation(collation).unwrap_or(Collation::Utf8)
-                    });
-                    let dftype_to =
-                        DfType::from_sql_type(&cs.sql_type, mig.dialect, |_| None, collation)
-                            .map_err(|e| {
-                                internal_err!("Failed to convert SQL type to DfType: {}", e)
-                            })?;
+            if let Some(dv) = cs.get_default_value() {
+                let df: DfValue = dv
+                    .try_into()
+                    .map_err(|e| internal_err!("Failed to convert default value: {}", e))?;
+                let collation = cs.get_collation().map(|collation| {
+                    Collation::from_mysql_collation(collation).unwrap_or(Collation::Utf8)
+                });
+                let dftype_to =
+                    DfType::from_sql_type(&cs.sql_type, mig.dialect, |_| None, collation).map_err(
+                        |e| internal_err!("Failed to convert SQL type to DfType: {}", e),
+                    )?;
+                return df.coerce_to(&dftype_to, &df.infer_dataflow_type());
+            } else if cs.is_not_null() {
+                let collation = cs.get_collation().map(|collation| {
+                    Collation::from_mysql_collation(collation).unwrap_or(Collation::Utf8)
+                });
+                let dftype_to =
+                    DfType::from_sql_type(&cs.sql_type, mig.dialect, |_| None, collation).map_err(
+                        |e| internal_err!("Failed to convert SQL type to DfType: {}", e),
+                    )?;
 
-                    return Ok(DfValue::implicit_default(
-                        collation.unwrap_or(Collation::Utf8),
-                        dftype_to,
-                        mig.dialect,
-                    ));
-                }
+                return Ok(DfValue::implicit_default(
+                    collation.unwrap_or(Collation::Utf8),
+                    dftype_to,
+                    mig.dialect,
+                ));
             }
             Ok(DfValue::None)
         })
         .collect::<Result<Vec<DfValue>, _>>()?;
-
     let cols_from_spec = |cols: &[Column]| -> ReadySetResult<Vec<usize>> {
         cols.iter()
             .map(|col| {

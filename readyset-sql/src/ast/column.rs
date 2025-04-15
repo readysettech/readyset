@@ -388,6 +388,13 @@ impl ColumnSpecification {
             _ => None,
         })
     }
+
+    pub fn get_default_value(&self) -> Option<&Literal> {
+        self.constraints.iter().find_map(|c| match c {
+            ColumnConstraint::DefaultValue(Expr::Literal(ref l)) => Some(l),
+            _ => None,
+        })
+    }
 }
 
 impl DialectDisplay for ColumnSpecification {
