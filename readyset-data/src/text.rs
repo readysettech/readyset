@@ -117,7 +117,7 @@ impl TinyText {
     ///
     /// Panics if not valid UTF-8.
     #[inline]
-    pub fn from_slice(v: &[u8]) -> Result<Self, &'static str> {
+    pub fn from_slice(v: &[u8], collation: Collation) -> Result<Self, &'static str> {
         if v.len() > TINYTEXT_WIDTH {
             return Err("slice too long");
         }
@@ -131,7 +131,7 @@ impl TinyText {
         let mut t: [u8; TINYTEXT_WIDTH] = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
         t[..v.len()].copy_from_slice(v);
         Ok(TinyText {
-            len_and_collation: LenAndCollation::from_len(v.len() as _),
+            len_and_collation: LenAndCollation::new(v.len() as _, collation),
             t,
         })
     }
@@ -716,7 +716,7 @@ mod tests {
     #[should_panic]
     fn tiny_text_panics_non_utf8() {
         let s = [255, 255, 255, 255];
-        TinyText::from_slice(&s).expect("ok");
+        TinyText::from_slice(&s, Collation::Utf8).expect("ok");
     }
 
     #[test]

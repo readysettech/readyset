@@ -46,7 +46,7 @@ impl DfValue {
             DfValue::Double(0.0),
             DfValue::Double(f64::MIN),
             DfValue::Text("aaaaaaaaaaaaaaaaaa".into()),
-            DfValue::TinyText(TinyText::from_slice(b"a").unwrap()),
+            DfValue::TinyText(TinyText::from_slice(b"a", Collation::Utf8).unwrap()),
             DfValue::TimestampTz("2023-12-16 17:44:00".parse().unwrap()),
             DfValue::Time(MySqlTime::from_bytes(b"1112").unwrap()),
             DfValue::ByteArray(Arc::new(b"aaaaaaaaaaaa".to_vec())),
@@ -342,11 +342,8 @@ impl<'de> Deserialize<'de> for TextOrTinyText {
                             bytes.push(b);
                         }
 
-                        match TinyText::from_slice(&bytes) {
-                            Ok(mut tt) => {
-                                tt.set_collation(self.0);
-                                Ok(TextOrTinyText::TinyText(tt))
-                            }
+                        match TinyText::from_slice(&bytes, self.0) {
+                            Ok(tt) => Ok(TextOrTinyText::TinyText(tt)),
                             _ => Ok(TextOrTinyText::Text(Text::from_slice_with_collation(
                                 &bytes, self.0,
                             ))),
@@ -357,11 +354,8 @@ impl<'de> Deserialize<'de> for TextOrTinyText {
                     where
                         E: serde::de::Error,
                     {
-                        match TinyText::from_slice(v) {
-                            Ok(mut tt) => {
-                                tt.set_collation(self.0);
-                                Ok(TextOrTinyText::TinyText(tt))
-                            }
+                        match TinyText::from_slice(v, self.0) {
+                            Ok(tt) => Ok(TextOrTinyText::TinyText(tt)),
                             _ => Ok(TextOrTinyText::Text(Text::from_slice_with_collation(
                                 v, self.0,
                             ))),

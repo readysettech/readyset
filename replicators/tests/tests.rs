@@ -864,8 +864,11 @@ async fn mysql_char_collation_padding_inner() {
                 DfValue::Int(1),
                 // 'ࠈࠈ ' is the UTF-8 encoding of U+E0A088 U+E0A088 U+20
                 DfValue::TinyText(
-                    TinyText::from_slice(vec![0xE0, 0xA0, 0x88, 0xE0, 0xA0, 0x88, 0x20].as_slice())
-                        .unwrap_or_else(|_| TinyText::from_arr(b"")),
+                    TinyText::from_slice(
+                        vec![0xE0, 0xA0, 0x88, 0xE0, 0xA0, 0x88, 0x20].as_slice(),
+                        Collation::Utf8
+                    )
+                    .unwrap_or_else(|_| TinyText::from_arr(b"")),
                 ),
             ],
             &[
@@ -901,8 +904,11 @@ async fn mysql_char_collation_padding_inner() {
                 DfValue::Int(1),
                 // 'ࠈࠈ ' is the UTF-8 encoding of U+E0A088 U+E0A088 U+20
                 DfValue::TinyText(
-                    TinyText::from_slice(vec![0xE0, 0xA0, 0x88, 0xE0, 0xA0, 0x88, 0x20].as_slice())
-                        .unwrap_or_else(|_| TinyText::from_arr(b"")),
+                    TinyText::from_slice(
+                        vec![0xE0, 0xA0, 0x88, 0xE0, 0xA0, 0x88, 0x20].as_slice(),
+                        Collation::Utf8
+                    )
+                    .unwrap_or_else(|_| TinyText::from_arr(b"")),
                 ),
             ],
             &[
@@ -918,8 +924,11 @@ async fn mysql_char_collation_padding_inner() {
                 DfValue::Int(5),
                 // 'Bࠉ ' is the UTF-8 encoding of U+E42 U+E0A089 U+20
                 DfValue::TinyText(
-                    TinyText::from_slice(vec![0x42, 0xE0, 0xA0, 0x89, 0x20].as_slice())
-                        .unwrap_or_else(|_| TinyText::from_arr(b"")),
+                    TinyText::from_slice(
+                        vec![0x42, 0xE0, 0xA0, 0x89, 0x20].as_slice(),
+                        Collation::Utf8
+                    )
+                    .unwrap_or_else(|_| TinyText::from_arr(b"")),
                 ),
             ],
             &[
