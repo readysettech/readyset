@@ -68,6 +68,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
             // TODO: use the right CITEXT type
             Ok(Type::VARCHAR)
         }
+        DfType::VarChar(_, Collation::Utf8AiCi) => unreachable!("not used by Postgres"),
         DfType::Int => Ok(Type::INT4),
         DfType::BigInt => Ok(Type::INT8),
         DfType::SmallInt => Ok(Type::INT2),
@@ -75,6 +76,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         DfType::Double => Ok(Type::FLOAT8),
         DfType::Text(Collation::Utf8) => Ok(Type::TEXT),
         DfType::Text(Collation::Citext) => Ok(Type::TEXT), // TODO: use the right CITEXT type
+        DfType::Text(Collation::Utf8AiCi) => unreachable!("not used by Postgres"),
         DfType::Timestamp { .. } => Ok(Type::TIMESTAMP),
         DfType::TimestampTz { .. } => Ok(Type::TIMESTAMPTZ),
         DfType::Json => Ok(Type::JSON),
@@ -128,6 +130,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                     // TODO: use the right CITEXT type
                     Ok(Type::VARCHAR_ARRAY)
                 }
+                DfType::VarChar(_, Collation::Utf8AiCi) => unreachable!("not used by Postgres"),
                 DfType::Int => Ok(Type::INT4_ARRAY),
                 DfType::BigInt => Ok(Type::INT8_ARRAY),
                 DfType::SmallInt => Ok(Type::INT2_ARRAY),
@@ -138,6 +141,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                     // TODO: use the right CITEXT_ARRAY type
                     Ok(Type::TEXT_ARRAY)
                 }
+                DfType::Text(Collation::Utf8AiCi) => unreachable!("not used by Postgres"),
                 DfType::Timestamp { .. } => Ok(Type::TIMESTAMP_ARRAY),
                 DfType::TimestampTz { .. } => Ok(Type::TIMESTAMPTZ_ARRAY),
                 DfType::Json => Ok(Type::JSON_ARRAY),

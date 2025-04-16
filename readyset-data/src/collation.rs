@@ -4,6 +4,7 @@ use std::fmt::Display;
 use std::hash::Hash;
 
 use icu::collator::{Collator, CollatorOptions, Strength};
+use icu::normalizer::ComposingNormalizer;
 use serde::{Deserialize, Serialize};
 use strum::{EnumCount, FromRepr};
 use test_strategy::Arbitrary;
@@ -14,6 +15,13 @@ thread_local! {
         collator_options(Some(Strength::Tertiary))
     )
     .expect("cannot create default collator!");
+    static UTF8_AI_CI: Collator = Collator::try_new(
+        &Default::default(),
+        collator_options(Some(Strength::Primary))
+    )
+    .expect("cannot create default collator!");
+
+    static NORMALIZER: ComposingNormalizer = const { ComposingNormalizer::new_nfc() };
 }
 
 /// Description for how string values should be compared against each other for ordering and
@@ -53,6 +61,9 @@ pub enum Collation {
     /// [PostgreSQL `CITEXT` type](https://www.postgresql.org/docs/current/citext.html) with the
     /// locale set to `en_US.utf8`.
     Citext,
+
+    /// UTF-8, accent-insensitive, case-insensitive
+    Utf8AiCi,
 }
 
 impl Display for Collation {
@@ -60,6 +71,7 @@ impl Display for Collation {
         match self {
             Self::Utf8 => write!(f, "utf8"),
             Self::Citext => write!(f, "citext"),
+            Self::Utf8AiCi => write!(f, "utf8_ai_ci"),
         }
     }
 }
@@ -70,6 +82,7 @@ impl Collation {
         match self {
             Self::Utf8 => s.into(),
             Self::Citext => s.to_lowercase().into(),
+            Self::Utf8AiCi => s.to_lowercase().into(),
         }
     }
 
@@ -85,13 +98,14 @@ impl Collation {
         match self {
             Self::Utf8 => UTF8.with(cmp),
             Self::Citext => UTF8.with(cmp),
+            Self::Utf8AiCi => UTF8_AI_CI.with(cmp),
         }
     }
 
     /// Create a Readyset collation from a MySQL collation.
     pub fn from_mysql_collation(database_collation: &str) -> Option<Self> {
         match database_collation.ends_with("_ci") {
-            true => Some(Self::Citext),
+            true => Some(Self::Utf8AiCi),
             false => Some(Self::Utf8),
         }
     }
@@ -168,5 +182,14 @@ mod tests {
         citext_strings_less("a", "b");
         citext_strings_less("A", "b");
         citext_strings_less("a", "B");
+    }
+
+    #[test]
+    fn utf8_ai_ci_ordering() {
+        let col = Collation::Utf8AiCi;
+        assert_eq!(col.compare("e", "E"), Ordering::Equal);
+        assert_eq!(col.compare("e", "é"), Ordering::Equal);
+        assert_eq!(col.compare("é", "é"), Ordering::Equal); // second has combining accent
+        assert_eq!(col.compare("é", "f"), Ordering::Less);
     }
 }
