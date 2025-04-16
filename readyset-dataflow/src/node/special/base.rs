@@ -1197,7 +1197,7 @@ mod tests {
                 schema: None,
             };
 
-            let tt_with_utf8_collation = TinyText::try_from("hello").unwrap();
+            let tt_with_utf8_collation = TinyText::try_new("hello", Collation::Utf8).unwrap();
             let BaseWrite { records, .. } = b
                 .process_ops(
                     ni,

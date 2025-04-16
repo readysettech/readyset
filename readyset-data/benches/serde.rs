@@ -1,5 +1,3 @@
-use std::convert::TryInto;
-
 use criterion::{criterion_group, criterion_main, Criterion};
 use mysql_time::MySqlTime;
 
@@ -8,7 +6,7 @@ criterion_main!(benches);
 
 fn serde(c: &mut Criterion) {
     use bincode::Options;
-    use readyset_data::DfValue;
+    use readyset_data::{Collation, DfValue, TinyText};
 
     let mut group = c.benchmark_group("Serde");
 
@@ -16,7 +14,7 @@ fn serde(c: &mut Criterion) {
     let string = "This text is a big longer than TinyText";
     let long_string = string.repeat(4); // Four times as long as short string
 
-    let tiny_text = DfValue::TinyText(tiny_string.try_into().unwrap());
+    let tiny_text = DfValue::TinyText(TinyText::try_new(tiny_string, Collation::Utf8).unwrap());
     let text = DfValue::Text(string.into());
     let long_text = DfValue::Text(long_string.as_str().into());
     let short_bytes = DfValue::ByteArray(string.as_bytes().to_vec().into());

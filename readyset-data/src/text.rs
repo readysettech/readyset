@@ -29,11 +29,6 @@ impl LenAndCollation {
     }
 
     #[inline(always)]
-    fn from_len(len: u8) -> Self {
-        Self::new(len, Collation::default())
-    }
-
-    #[inline(always)]
     const fn len(self) -> u8 {
         self.0 & 0b00001111
     }
@@ -70,6 +65,24 @@ pub struct Text {
 }
 
 impl TinyText {
+    /// If a str can fit inside a `TinyText` returns new `TinyText` with that str.
+    pub fn try_new(s: &str, collation: Collation) -> Result<Self, &'static str> {
+        if s.len() > TINYTEXT_WIDTH {
+            return Err("slice too long");
+        }
+
+        // For reasons I can't say using MaybeUninit::zeroed() is much faster
+        // than assigning an array of zeroes (which uses memset instead). Don't remove
+        // this without benchmarking (or at least looking at godbolt first).
+        // SAFETY: it is safe because u8 is a zeroable type
+        let mut t: [u8; TINYTEXT_WIDTH] = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
+        t[..s.len()].copy_from_slice(s.as_bytes());
+        Ok(TinyText {
+            len_and_collation: LenAndCollation::new(s.len() as _, collation),
+            t,
+        })
+    }
+
     #[allow(clippy::len_without_is_empty)]
     pub const fn len(&self) -> u8 {
         self.len_and_collation.len()
@@ -171,28 +184,6 @@ impl PartialOrd for TinyText {
 impl Ord for TinyText {
     fn cmp(&self, other: &Self) -> Ordering {
         self.collation().compare(self, other)
-    }
-}
-
-impl TryFrom<&str> for TinyText {
-    type Error = &'static str;
-
-    /// If an str can fit inside a `TinyText` returns new `TinyText` with that str
-    fn try_from(s: &str) -> Result<Self, &'static str> {
-        if s.len() > TINYTEXT_WIDTH {
-            return Err("slice too long");
-        }
-
-        // For reasons I can't say using MaybeUninit::zeroed() is much faster
-        // than assigning an array of zeroes (which uses memset instead). Don't remove
-        // this without benchmarking (or at least looking at godbolt first).
-        // SAFETY: it is safe because u8 is a zeroable type
-        let mut t: [u8; TINYTEXT_WIDTH] = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
-        t[..s.len()].copy_from_slice(s.as_bytes());
-        Ok(TinyText {
-            len_and_collation: LenAndCollation::from_len(s.len() as _),
-            t,
-        })
     }
 }
 
@@ -648,7 +639,7 @@ mod tests {
         #[proptest]
         fn len_round_trip(mut len: u8) {
             len &= 0b00001111;
-            let lc = LenAndCollation::from_len(len);
+            let lc = LenAndCollation::new(len, Collation::Utf8);
             assert_eq!(lc.len(), len);
         }
 
@@ -665,7 +656,7 @@ mod tests {
         #[proptest]
         fn set_collation_round_trip(mut len: u8, collation: Collation) {
             len &= 0b00001111;
-            let mut lc = LenAndCollation::from_len(len);
+            let mut lc = LenAndCollation::new(len, Collation::Utf8);
             assert_eq!(lc.len(), len);
 
             lc.set_collation(collation);
@@ -677,7 +668,7 @@ mod tests {
     #[tags(no_retry)]
     #[proptest]
     fn tiny_str_round_trip(#[strategy("[a-bA-B0-9]{0,14}")] s: String) {
-        let tt: TinyText = s.as_str().try_into().unwrap();
+        let tt = TinyText::try_new(s.as_str(), Collation::Utf8).unwrap();
         assert_eq!(tt.as_str(), s);
     }
 

@@ -10,7 +10,7 @@ use std::{fmt, io, str};
 use ::serde::{Deserialize, Serialize};
 use bit_vec::BitVec;
 use bytes::BytesMut;
-use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
+use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use cidr::IpInet;
 use enum_kinds::EnumKind;
 use eui48::{MacAddress, MacAddressFormat};
@@ -61,11 +61,6 @@ pub use crate::text::{Text, TinyText};
 pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT, TIMESTAMP_PARSE_FORMAT};
 
 type JsonObject = serde_json::Map<String, JsonValue>;
-
-/// DateTime offsets must be bigger than -86_000 seconds and smaller than 86_000 (not inclusive in
-/// either case), and we don't care about seconds, so our maximum offset is gonna be
-/// 86_000 - 60 = 85_940.
-const MAX_SECONDS_DATETIME_OFFSET: i32 = 85_940;
 
 /// This is the byte representation of NaN for Postgres' Numeric
 /// Which sets `NUMERIC_SPECIAL` and `NUMERIC_NAN`
@@ -238,8 +233,7 @@ impl DfValue {
     /// Construct a new `DfValue` from the given string value and [`Collation`]
     #[inline]
     pub fn from_str_and_collation(s: &str, collation: Collation) -> Self {
-        if let Ok(mut tt) = TinyText::try_from(s) {
-            tt.set_collation(collation);
+        if let Ok(tt) = TinyText::try_new(s, collation) {
             Self::TinyText(tt)
         } else {
             Self::Text(Text::from_str_with_collation(s, collation))
@@ -254,67 +248,6 @@ impl DfValue {
             DfValue::Text(t) => Some(t.collation()),
             DfValue::TinyText(tt) => Some(tt.collation()),
             _ => None,
-        }
-    }
-
-    /// Generates the minimum DfValue corresponding to the type of a given DfValue.
-    pub fn min_value(other: &Self) -> Self {
-        match other {
-            DfValue::None => DfValue::None,
-            DfValue::Text(_) | DfValue::TinyText(_) => DfValue::TinyText("".try_into().unwrap()), /* Safe because fits in length */
-            DfValue::TimestampTz(_) => DfValue::from(
-                FixedOffset::west_opt(-MAX_SECONDS_DATETIME_OFFSET)
-                    .unwrap()
-                    .from_utc_datetime(&NaiveDateTime::new(
-                        NaiveDate::MIN,
-                        NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
-                    )),
-            ),
-            DfValue::Float(..) => DfValue::Float(f32::MIN),
-            DfValue::Double(..) => DfValue::Double(f64::MIN),
-            DfValue::Int(_) => DfValue::Int(i64::MIN),
-            DfValue::UnsignedInt(_) => DfValue::UnsignedInt(0),
-            DfValue::Time(_) => DfValue::Time(MySqlTime::MIN),
-            DfValue::ByteArray(_) => DfValue::ByteArray(Arc::new(Vec::new())),
-            DfValue::Numeric(_) => DfValue::from(Decimal::MIN),
-            DfValue::BitVector(_) => DfValue::from(BitVec::new()),
-            DfValue::Array(_) => DfValue::empty_array(),
-            DfValue::PassThrough(p) => DfValue::PassThrough(Arc::new(PassThrough {
-                ty: p.ty.clone(),
-                format: PassThroughFormat::Binary,
-                data: [].into(),
-            })),
-            DfValue::Default => DfValue::None,
-            DfValue::Max => DfValue::None,
-        }
-    }
-
-    /// Generates the maximum DfValue corresponding to the type of a given DfValue.
-    pub fn max_value(other: &Self) -> Self {
-        match other {
-            DfValue::None => DfValue::None,
-            DfValue::TimestampTz(_) => DfValue::from(
-                FixedOffset::east_opt(MAX_SECONDS_DATETIME_OFFSET)
-                    .unwrap()
-                    .from_utc_datetime(&NaiveDateTime::new(
-                        NaiveDate::MAX,
-                        NaiveTime::from_hms_opt(23, 59, 59).unwrap(),
-                    )),
-            ),
-            DfValue::Float(..) => DfValue::Float(f32::MAX),
-            DfValue::Double(..) => DfValue::Double(f64::MIN),
-            DfValue::Int(_) => DfValue::Int(i64::MAX),
-            DfValue::UnsignedInt(_) => DfValue::UnsignedInt(u64::MAX),
-            DfValue::Time(_) => DfValue::Time(MySqlTime::MAX),
-            DfValue::Numeric(_) => DfValue::from(Decimal::MAX),
-            DfValue::TinyText(_)
-            | DfValue::Text(_)
-            | DfValue::ByteArray(_)
-            | DfValue::BitVector(_)
-            | DfValue::Array(_)
-            | DfValue::PassThrough(_)
-            | DfValue::Default
-            | DfValue::Max => DfValue::Max,
         }
     }
 
@@ -2559,6 +2492,7 @@ mod arbitrary {
 
 #[cfg(test)]
 mod tests {
+    use chrono::TimeZone;
     use derive_more::{From, Into};
     use readyset_util::{eq_laws, hash_laws, ord_laws};
     use test_strategy::proptest;
