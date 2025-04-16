@@ -2789,6 +2789,8 @@ CURRENT_TIMESTAMP,
             .await
             .unwrap();
     }
+
+    sleep().await;
 }
 
 async fn test_column_definition_verify(
