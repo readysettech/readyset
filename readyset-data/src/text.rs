@@ -217,21 +217,12 @@ impl Text {
         }
     }
 
-    /// Create a new `Text` by copying a byte slice.
-    ///
-    /// This function does not check if the slice contains valid UTF-8 text, and may panic later if
-    /// `as_str` is called and it does not.
-    #[inline]
-    pub fn from_slice(v: &[u8]) -> Self {
-        Self::from_slice_with_collation(v, Default::default())
-    }
-
     /// Create a new `Text` with the given collation by copying a byte slice
     ///
     /// This function does not check if the slice contains valid UTF-8 text, and may panic later if
     /// `as_str` is called and it does not.
     #[inline]
-    pub fn from_slice_with_collation(v: &[u8], collation: Collation) -> Self {
+    pub fn from_slice(v: &[u8], collation: Collation) -> Self {
         // SAFETY: passing `false` to `valid`, which means we will validate later (eg during
         // `as_str`)
         unsafe { Self::new(false, collation, v) }
@@ -708,7 +699,7 @@ mod tests {
     #[should_panic]
     fn text_panics_non_utf8() {
         let s = [255, 255, 255, 255];
-        let t = Text::from_slice(&s);
+        let t = Text::from_slice(&s, Collation::Utf8);
         t.as_str();
     }
 
