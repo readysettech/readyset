@@ -25,7 +25,7 @@ impl DfValue {
     // make_serialized_row`, every time we make a backwards incompatible change to deserialization
     // of DfValue! Hopefully `test::deserialize_backwards_compatibility` will automatically catch
     // that, but it's worth being extra careful, as that test is not perfect.
-    pub const SERDE_VERSION: u8 = 2;
+    pub const SERDE_VERSION: u8 = 3;
 
     /// Reference example "row" of `DfValue`s to check against for backwards compatible
     /// deserialization.

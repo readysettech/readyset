@@ -842,13 +842,7 @@ impl fmt::Display for DfType {
             | Self::Jsonb
             | Self::Row => write!(f, "{kind:?}"),
 
-            Self::Text(collation) => {
-                write!(f, "Text")?;
-                if !collation.is_utf8() {
-                    write!(f, "({collation})")?;
-                }
-                Ok(())
-            }
+            Self::Text(collation) => write!(f, "Text_{collation}"),
 
             Self::Array(ref ty) => write!(f, "{ty}[]"),
 

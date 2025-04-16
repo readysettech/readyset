@@ -51,7 +51,7 @@ impl LenAndCollation {
 }
 
 /// An optimized storage for very short strings
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Eq)]
 pub struct TinyText {
     len_and_collation: LenAndCollation,
     t: [u8; TINYTEXT_WIDTH],
@@ -153,6 +153,31 @@ impl TinyText {
     #[inline]
     pub fn collation(&self) -> Collation {
         self.len_and_collation.collation()
+    }
+}
+
+impl AsRef<str> for TinyText {
+    fn as_ref(&self) -> &str {
+        // SAFETY: It got in here, so it's valid.
+        unsafe { std::str::from_utf8_unchecked(&self.t) }
+    }
+}
+
+impl PartialEq for TinyText {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl PartialOrd for TinyText {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TinyText {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.collation().compare(self, other)
     }
 }
 

@@ -1025,24 +1025,7 @@ impl PartialEq for DfValue {
             (&DfValue::Text(..), &DfValue::Text(..))
             | (&DfValue::TinyText(..), &DfValue::TinyText(..))
             | (&DfValue::Text(..), &DfValue::TinyText(..))
-            | (&DfValue::TinyText(..), &DfValue::Text(..)) => {
-                // this unwrap should be safe because no error path in try_from for &str on Text or
-                // TinyText
-                #[allow(clippy::unwrap_used)]
-                let a: &str = <&str>::try_from(self).unwrap();
-                // this unwrap should be safe because no error path in try_from for &str on Text or
-                // TinyText
-                #[allow(clippy::unwrap_used)]
-                let b: &str = <&str>::try_from(other).unwrap();
-                #[allow(clippy::unwrap_used)] // All text values have a collation
-                let collation = self.collation().unwrap();
-
-                // [note: heterogenous-collations]
-                // we use the collation of the lhs here because we have to use *something*, but in
-                // practice we will never actually be comparing heterogenously-collated values (both
-                // upstreams forbid it)
-                collation.compare_strs(a, b) == Ordering::Equal
-            }
+            | (&DfValue::TinyText(..), &DfValue::Text(..)) => self.cmp(other) == Ordering::Equal,
             (&DfValue::Text(..) | &DfValue::TinyText(..), DfValue::TimestampTz(dt)) => {
                 // this unwrap should be safe because no error path in try_from for &str on Text or
                 // TinyText
@@ -1140,19 +1123,10 @@ impl Ord for DfValue {
             | (&DfValue::TinyText(..), &DfValue::TinyText(..))
             | (&DfValue::Text(..), &DfValue::TinyText(..))
             | (&DfValue::TinyText(..), &DfValue::Text(..)) => {
-                // this unwrap should be safe because no error path in try_from for &str on Text or
-                // TinyText
-                #[allow(clippy::unwrap_used)]
-                let a: &str = <&str>::try_from(self).unwrap();
-                // this unwrap should be safe because no error path in try_from for &str on Text or
-                // TinyText
-                #[allow(clippy::unwrap_used)]
-                let b: &str = <&str>::try_from(other).unwrap();
-                #[allow(clippy::unwrap_used)] // All text values have a collation
                 let collation = self.collation().unwrap();
-
-                // See [note: heterogenous-collations]
-                collation.compare_strs(a, b)
+                let a = <&str>::try_from(self).unwrap();
+                let b = <&str>::try_from(other).unwrap();
+                collation.compare(a, b)
             }
             (&DfValue::Text(..) | &DfValue::TinyText(..), DfValue::TimestampTz(other_dt)) => {
                 // this unwrap should be safe because no error path in try_from for &str on Text or
@@ -1292,13 +1266,9 @@ impl Hash for DfValue {
             DfValue::Float(f) => (f as f64).to_bits().hash(state),
             DfValue::Double(f) => f.to_bits().hash(state),
             DfValue::Text(..) | DfValue::TinyText(..) => {
-                // this unwrap should be safe because no error path in try_from for &str on Text or
-                // TinyText
-                #[allow(clippy::unwrap_used)]
-                let t: &str = <&str>::try_from(self).unwrap();
-                #[allow(clippy::unwrap_used)] // All text values have a collation
                 let collation = self.collation().unwrap();
-                collation.hash_str(t, state)
+                let s = <&str>::try_from(self).unwrap();
+                collation.normalize(s).hash(state);
             }
             DfValue::TimestampTz(ts) => ts.hash(state),
             DfValue::Time(ref t) => t.hash(state),

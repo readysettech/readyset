@@ -1,12 +1,20 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Display;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
-use readyset_util::iter::cmp_by;
+use icu::collator::{Collator, CollatorOptions, Strength};
 use serde::{Deserialize, Serialize};
 use strum::{EnumCount, FromRepr};
 use test_strategy::Arbitrary;
+
+thread_local! {
+    static UTF8: Collator = Collator::try_new(
+        &Default::default(),
+        collator_options(Some(Strength::Tertiary))
+    )
+    .expect("cannot create default collator!");
+}
 
 /// Description for how string values should be compared against each other for ordering and
 /// equality.
@@ -50,7 +58,7 @@ pub enum Collation {
 impl Display for Collation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Utf8 => write!(f, "utf-8"),
+            Self::Utf8 => write!(f, "utf8"),
             Self::Citext => write!(f, "citext"),
         }
     }
@@ -58,47 +66,26 @@ impl Display for Collation {
 
 impl Collation {
     /// Normalize the given string according to this collation.
-    ///
-    /// It will always be the case that two normalized strings compare in the same way as
-    /// [`compare_strs`][]
-    ///
-    /// [`compare_strs`]: Collation::compare_strs
     pub(crate) fn normalize(self, s: &str) -> Cow<str> {
         match self {
-            Collation::Utf8 => s.into(),
-            Collation::Citext => s.to_lowercase().into(),
-        }
-    }
-
-    /// Hash the given string according to this collation
-    pub(crate) fn hash_str<H>(self, s: &str, state: &mut H)
-    where
-        H: Hasher,
-    {
-        match self {
-            Collation::Utf8 => s.hash(state),
-            Collation::Citext => s.to_lowercase().hash(state),
+            Self::Utf8 => s.into(),
+            Self::Citext => s.to_lowercase().into(),
         }
     }
 
     /// Compare the given strings according to this collation
-    pub(crate) fn compare_strs(self, s1: &str, s2: &str) -> Ordering {
+    pub(crate) fn compare<A, B>(&self, a: A, b: B) -> Ordering
+    where
+        A: AsRef<str>,
+        B: AsRef<str>,
+    {
+        let a = self.normalize(a.as_ref());
+        let b = self.normalize(b.as_ref());
+        let cmp = |c: &Collator| c.compare(&a, &b);
         match self {
-            Collation::Utf8 => s1.cmp(s2),
-            Collation::Citext => cmp_by(
-                s1.chars().map(|c| c.to_lowercase()),
-                s2.chars().map(|c| c.to_lowercase()),
-                |c1, c2| c1.cmp(c2),
-            ),
+            Self::Utf8 => UTF8.with(cmp),
+            Self::Citext => UTF8.with(cmp),
         }
-    }
-
-    /// Returns `true` if the collation is [`Utf8`].
-    ///
-    /// [`Utf8`]: Collation::Utf8
-    #[must_use]
-    pub fn is_utf8(&self) -> bool {
-        matches!(self, Self::Utf8)
     }
 
     /// Create a Readyset collation from a MySQL collation.
@@ -110,9 +97,16 @@ impl Collation {
     }
 }
 
+fn collator_options(strength: Option<Strength>) -> CollatorOptions {
+    let mut options = CollatorOptions::new();
+    options.strength = strength;
+    options
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hasher;
 
     use strum::EnumCount;
     use test_strategy::proptest;
@@ -131,10 +125,10 @@ mod tests {
     #[tags(no_retry)]
     #[proptest]
     fn hash_matches_eq(collation: Collation, s1: String, s2: String) {
-        if collation.compare_strs(&s1, &s2) == Ordering::Equal {
+        if collation.compare(&s1, &s2) == Ordering::Equal {
             let [h1, h2] = [&s1, &s2].map(|s| {
                 let mut hasher = DefaultHasher::new();
-                collation.hash_str(s, &mut hasher);
+                collation.normalize(s).hash(&mut hasher);
                 hasher.finish()
             });
 
@@ -142,25 +136,16 @@ mod tests {
         }
     }
 
-    #[tags(no_retry)]
-    #[proptest]
-    fn normalize_matches_cmp(collation: Collation, s1: String, s2: String) {
-        assert_eq!(
-            collation.compare_strs(&s1, &s2),
-            collation.normalize(&s1).cmp(&collation.normalize(&s2))
-        )
-    }
-
     #[test]
     fn citext_equal() {
         #[track_caller]
         fn citext_strings_equal(s1: &str, s2: &str) {
-            assert_eq!(Collation::Citext.compare_strs(s1, s2), Ordering::Equal)
+            assert_eq!(Collation::Citext.compare(s1, s2), Ordering::Equal)
         }
 
         #[track_caller]
         fn citext_strings_inequal(s1: &str, s2: &str) {
-            assert_ne!(Collation::Citext.compare_strs(s1, s2), Ordering::Equal)
+            assert_ne!(Collation::Citext.compare(s1, s2), Ordering::Equal)
         }
 
         citext_strings_equal("abcdef", "abcdef");
@@ -177,7 +162,7 @@ mod tests {
     fn citext_ordering() {
         #[track_caller]
         fn citext_strings_less(s1: &str, s2: &str) {
-            assert_eq!(Collation::Citext.compare_strs(s1, s2), Ordering::Less)
+            assert_eq!(Collation::Citext.compare(s1, s2), Ordering::Less)
         }
 
         citext_strings_less("a", "b");

@@ -12,6 +12,7 @@ bytes = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 chrono-tz = { workspace = true, features = ["serde"] }
 eui48 = { workspace = true }
+icu = { workspace = true }
 itertools = { workspace = true }
 lazy_static = { workspace = true }
 once_cell = { workspace = true }
@@ -31,6 +32,7 @@ serde_json = { workspace = true, features = [
 serde_stacker = { workspace = true }
 strum = { workspace = true }
 test-strategy = { workspace = true }
+tracing = { workspace = true }
 triomphe = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 enum-kinds = { workspace = true }
