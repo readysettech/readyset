@@ -142,13 +142,6 @@ impl TinyText {
         self.len_and_collation.set_collation(collation);
     }
 
-    /// Returns a version of `self` with the given collation
-    #[inline]
-    pub fn with_collation(mut self, collation: Collation) -> Self {
-        self.set_collation(collation);
-        self
-    }
-
     /// Returns the configured collation for this [`TinyText`].
     #[inline]
     pub fn collation(&self) -> Collation {
