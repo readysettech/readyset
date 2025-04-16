@@ -57,7 +57,6 @@ allow = [
     "BSL-1.0",
     "Zlib",
     "Unicode-DFS-2016",
-    "OpenSSL",
     "Unicode-3.0",
 ]
 # The confidence threshold for detecting a license from license text.
@@ -168,7 +167,6 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
     "git+https://github.com/apache/datafusion-sqlparser-rs",
-    "git+https://github.com/mvzink/datafusion-sqlparser-rs",
 ]
 
 [sources.allow-org]
