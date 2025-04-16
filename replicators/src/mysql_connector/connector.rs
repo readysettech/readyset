@@ -1271,7 +1271,7 @@ fn binlog_val_to_noria_val(
     collation: u16,
     unsigned: bool,
     binary: bool,
-) -> mysql::Result<DfValue> {
+) -> ReadySetResult<DfValue> {
     // Not all values are coerced to the value expected by ReadySet directly
 
     use mysql_common::constants::ColumnType;
@@ -1282,11 +1282,7 @@ fn binlog_val_to_noria_val(
         (ColumnType::MYSQL_TYPE_TIMESTAMP2, &[0]) => {
             let buf = match val {
                 Value::Bytes(b) => b,
-                _ => {
-                    return Err(mysql_async::Error::Other(Box::new(internal_err!(
-                        "Expected a byte array for timestamp"
-                    ))));
-                }
+                _ => internal!("Expected a byte array for timestamp"),
             };
             // https://github.com/blackbeam/rust_mysql_common/blob/408effed435c059d80a9e708bcfa5d974527f476/src/binlog/value.rs#L144
             // When meta is 0, `mysql_common` encodes this value as number of seconds (since UNIX
@@ -1305,11 +1301,7 @@ fn binlog_val_to_noria_val(
         (ColumnType::MYSQL_TYPE_TIMESTAMP2, meta) => {
             let buf = match val {
                 Value::Bytes(b) => b,
-                _ => {
-                    return Err(mysql_async::Error::Other(Box::new(internal_err!(
-                        "Expected a byte array for timestamp"
-                    ))));
-                }
+                _ => internal!("Expected a byte array for timestamp"),
             };
             // When meta is anything else, `mysql_common` encodes this value as number of
             // seconds.microseconds (since UNIX EPOCH)
@@ -1327,55 +1319,30 @@ fn binlog_val_to_noria_val(
         }
         (ColumnType::MYSQL_TYPE_DATETIME2, meta) => {
             //meta[0] is the fractional seconds precision
-            let df_val: DfValue = val
-                .try_into()
-                .map_err(|e| {
-                    mysql_async::Error::Other(Box::new(internal_err!(
-                        "Unable to coerce value {}",
-                        e
-                    )))
-                })
-                .and_then(|val| match val {
-                    DfValue::TimestampTz(mut ts) => {
-                        ts.set_subsecond_digits(meta[0]);
-                        Ok(DfValue::TimestampTz(ts))
-                    }
-                    DfValue::None => Ok(DfValue::None), // NULL
-                    _ => Err(mysql_async::Error::Other(Box::new(internal_err!(
-                        "Expected a timestamp"
-                    )))),
-                })?;
-            Ok(df_val)
+            val.try_into().and_then(|val| match val {
+                DfValue::TimestampTz(mut ts) => {
+                    ts.set_subsecond_digits(meta[0]);
+                    Ok(DfValue::TimestampTz(ts))
+                }
+                DfValue::None => Ok(DfValue::None), // NULL
+                _ => internal!("Expected a timestamp"),
+            })
         }
         (ColumnType::MYSQL_TYPE_DATE, _) | (ColumnType::MYSQL_TYPE_NEWDATE, _) => {
-            let df_val: DfValue = val
-                .try_into()
-                .map_err(|e| {
-                    mysql_async::Error::Other(Box::new(internal_err!(
-                        "Unable to coerce value {}",
-                        e
-                    )))
-                })
-                .and_then(|val| match val {
-                    DfValue::TimestampTz(mut ts) => {
-                        ts.set_date_only();
-                        Ok(DfValue::TimestampTz(ts))
-                    }
-                    DfValue::None => Ok(DfValue::None), // NULL
-                    _ => Err(mysql_async::Error::Other(Box::new(internal_err!(
-                        "Expected a timestamp"
-                    )))),
-                })?;
+            let df_val: DfValue = val.try_into().and_then(|val| match val {
+                DfValue::TimestampTz(mut ts) => {
+                    ts.set_date_only();
+                    Ok(DfValue::TimestampTz(ts))
+                }
+                DfValue::None => Ok(DfValue::None), // NULL
+                _ => internal!("Expected a timestamp"),
+            })?;
             Ok(df_val)
         }
         (ColumnType::MYSQL_TYPE_STRING, meta) => {
             let buf = match val {
                 Value::Bytes(b) => b,
-                _ => {
-                    return Err(mysql_async::Error::Other(Box::new(internal_err!(
-                        "Expected a byte array for string"
-                    ))));
-                }
+                _ => internal!("Expected a byte array for string"),
             };
             // Check for special encoding when length is greater than 255 (as happens with multibyte
             // encodings such as utf8mb4). cf https://bugs.mysql.com/bug.php?id=37426
@@ -1384,14 +1351,10 @@ fn binlog_val_to_noria_val(
             } else {
                 meta[1] as usize
             };
-            let res = if binary {
+            if binary {
                 mysql_pad_binary_column(buf.to_owned(), length)
             } else {
                 mysql_pad_char_column(buf, collation, length, false)
-            };
-            match res {
-                Ok(s) => Ok(s),
-                Err(e) => Err(mysql_async::Error::Other(Box::new(internal_err!("{e}")))),
             }
         }
         (ColumnType::MYSQL_TYPE_BLOB, _)
@@ -1404,11 +1367,7 @@ fn binlog_val_to_noria_val(
         {
             let bytes = match val {
                 Value::Bytes(b) => b.to_vec(),
-                _ => {
-                    return Err(mysql_async::Error::Other(Box::new(internal_err!(
-                        "Expected a byte array for blob or binary string column"
-                    ))));
-                }
+                _ => internal!("Expected a byte array for blob or binary string column"),
             };
             Ok(DfValue::from(bytes))
         }
@@ -1422,21 +1381,12 @@ fn binlog_val_to_noria_val(
         {
             let bytes = match val {
                 Value::Bytes(b) => b.as_ref(),
-                _ => {
-                    return Err(mysql_async::Error::Other(Box::new(internal_err!(
-                        "Expected a byte array for string"
-                    ))));
-                }
+                _ => internal!("Expected a byte array for string"),
             };
 
             let encoding = Encoding::from_mysql_collation_id(collation);
 
-            let utf8_string = encoding.decode(bytes).map_err(|e| {
-                mysql_async::Error::Other(Box::new(internal_err!(
-                    "Failed to decode string value: {}",
-                    e
-                )))
-            })?;
+            let utf8_string = encoding.decode(bytes)?;
 
             let my_collation = Collation::resolve(CollationId::from(collation));
             let rs_collation =
@@ -1449,15 +1399,9 @@ fn binlog_val_to_noria_val(
                     .ok()
                     .and_then(|s| Decimal::from_str_exact(s).ok())
                     .map(|d| DfValue::Numeric(Arc::new(d)))
-                    .ok_or_else(|| {
-                        mysql_async::Error::Other(Box::new(internal_err!(
-                            "Failed to parse decimal value"
-                        )))
-                    })
+                    .ok_or_else(|| internal_err!("Failed to parse decimal value"))
             } else {
-                Err(mysql_async::Error::Other(Box::new(internal_err!(
-                    "Expected a bytes value for decimal column"
-                ))))
+                internal!("Expected a bytes value for decimal column")
             }
         }
         (ColumnType::MYSQL_TYPE_INT24, _) => {
@@ -1468,10 +1412,9 @@ fn binlog_val_to_noria_val(
                     // bits to 64 bits.
                     if unsigned {
                         Ok(DfValue::UnsignedInt((*x).try_into().map_err(|e| {
-                            mysql_async::Error::Other(Box::new(internal_err!(
-                                "Could not convert signed to unsigned mediumint column: {}",
-                                e
-                            )))
+                            internal_err!(
+                                "Could not convert signed to unsigned mediumint column: {e}"
+                            )
                         })?))
                     } else {
                         let missing = size_of::<i64>() as u32 * 8 - 24;
@@ -1479,18 +1422,14 @@ fn binlog_val_to_noria_val(
                     }
                 }
                 Value::UInt(x) => Ok(DfValue::UnsignedInt(*x)),
-                _ => Err(mysql_async::Error::Other(Box::new(internal_err!(
-                    "Expected an integer value for mediumint column"
-                )))),
+                _ => internal!("Expected an integer value for mediumint column"),
             }
         }
-        (_, _) => Ok(val.try_into().map_err(|e| {
-            mysql_async::Error::Other(Box::new(internal_err!("Unable to coerce value {}", e)))
-        })?),
+        (_, _) => Ok(val.try_into()?),
     }
 }
 
-fn binlog_to_serde_object<T>(v: &ComplexValue<T, Object>) -> mysql::Result<serde_json::Value>
+fn binlog_to_serde_object<T>(v: &ComplexValue<T, Object>) -> ReadySetResult<serde_json::Value>
 where
     T: StorageFormat,
 {
@@ -1503,7 +1442,7 @@ where
     Ok(serde_json::Value::Object(serde_map))
 }
 
-fn binlog_to_serde_array<T>(v: &ComplexValue<T, Array>) -> mysql::Result<serde_json::Value>
+fn binlog_to_serde_array<T>(v: &ComplexValue<T, Array>) -> ReadySetResult<serde_json::Value>
 where
     T: StorageFormat,
 {
@@ -1515,9 +1454,8 @@ where
     Ok(serde_json::Value::Array(serde_array))
 }
 
-fn string_to_serde_value(s: &str) -> mysql::Result<serde_json::Value> {
-    serde_json::from_str::<serde_json::Value>(s)
-        .map_err(|e| mysql_async::Error::Other(Box::new(internal_err!("{e}"))))
+fn string_to_serde_value(s: &str) -> ReadySetResult<serde_json::Value> {
+    serde_json::from_str::<serde_json::Value>(s).map_err(|e| internal_err!("{e}"))
 }
 
 fn slice_to_8bytes_array(data: &[u8]) -> [u8; 8] {
@@ -1604,13 +1542,13 @@ fn mysql_common_value_to_json_string(val: &Value) -> String {
 fn binary_temporal_to_serde_value(
     data: &[u8],
     temporal_from_packed_func: fn(i64) -> Value,
-) -> mysql::Result<serde_json::Value> {
+) -> ReadySetResult<serde_json::Value> {
     let packed = temporal_packed_from_binary(data);
     let val = temporal_from_packed_func(packed);
     string_to_serde_value(&mysql_common_value_to_json_string(&val)[..])
 }
 
-fn binlog_opaque_to_serde_value(v: &OpaqueValue) -> mysql::Result<serde_json::Value> {
+fn binlog_opaque_to_serde_value(v: &OpaqueValue) -> ReadySetResult<serde_json::Value> {
     match v.value_type() {
         ColumnType::MYSQL_TYPE_NEWDECIMAL => {
             let data = v.data_raw();
@@ -1633,14 +1571,14 @@ fn binlog_opaque_to_serde_value(v: &OpaqueValue) -> mysql::Result<serde_json::Va
             binary_temporal_to_serde_value(v.data_raw(), binlog::misc::datetime_from_packed)
         }
 
-        _ => Err(mysql_async::Error::Other(Box::new(unsupported_err!(
+        _ => Err(unsupported_err!(
             "Can not handle opaque value for column type {:?}",
             v.value_type()
-        )))),
+        )),
     }
 }
 
-fn binlog_to_serde_jsonb_value(binlog_val: &jsonb::Value) -> mysql::Result<serde_json::Value> {
+fn binlog_to_serde_jsonb_value(binlog_val: &jsonb::Value) -> ReadySetResult<serde_json::Value> {
     match binlog_val {
         jsonb::Value::Null => Ok(serde_json::Value::Null),
         jsonb::Value::Bool(x) => Ok(serde_json::Value::Bool(*x)),
@@ -1682,7 +1620,7 @@ fn binlog_row_to_noria_row(
     tme: &binlog::events::TableMapEvent<'static>,
     collation_vec: &[Option<u16>],
     signedness_vec: &[Option<bool>],
-) -> mysql::Result<Vec<DfValue>> {
+) -> ReadySetResult<Vec<DfValue>> {
     binlog_row
         .columns()
         .iter()
@@ -1693,12 +1631,7 @@ fn binlog_row_to_noria_row(
                 BinlogValue::Value(val) => {
                     let (kind, meta) = (
                         tme.get_column_type(tme_idx)
-                            .map_err(|e| {
-                                mysql_async::Error::Other(Box::new(internal_err!(
-                                    "Unable to get column type {}",
-                                    e
-                                )))
-                            })?
+                            .map_err(|e| internal_err!("Unable to get column type {}", e))?
                             .unwrap(),
                         tme.get_column_metadata(tme_idx).unwrap(),
                     );
@@ -1719,15 +1652,11 @@ fn binlog_row_to_noria_row(
                         Err(JsonbToJsonError::Opaque) => {
                             Ok(DfValue::from(&binlog_to_serde_jsonb_value(val)?))
                         }
-                        Err(JsonbToJsonError::InvalidUtf8(err)) => {
-                            Err(mysql_async::Error::Other(Box::new(internal_err!("{err}"))))
-                        }
+                        Err(JsonbToJsonError::InvalidUtf8(e)) => Err(e.into()),
                         Err(JsonbToJsonError::InvalidJsonb(e)) => Err(e.into()),
                     }
                 }
-                _ => Err(mysql_async::Error::Other(Box::new(internal_err!(
-                    "Expected a value in WRITE_ROWS_EVENT",
-                )))),
+                _ => Err(internal_err!("Expected a value in WRITE_ROWS_EVENT")),
             }
         })
         .collect()
