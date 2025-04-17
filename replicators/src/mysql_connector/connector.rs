@@ -1503,7 +1503,7 @@ fn binlog_val_to_noria_val(
 
             let my_collation = Collation::resolve(CollationId::from(collation));
             let rs_collation =
-                RsCollation::from_mysql_collation(my_collation.collation()).unwrap_or_default();
+                RsCollation::get_or_default(Dialect::DEFAULT_MYSQL, my_collation.collation());
             Ok(DfValue::from_str_and_collation(&utf8_string, rs_collation))
         }
         (ColumnType::MYSQL_TYPE_DECIMAL, _) | (ColumnType::MYSQL_TYPE_NEWDECIMAL, _) => {

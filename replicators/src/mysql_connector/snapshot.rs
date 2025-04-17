@@ -894,10 +894,10 @@ fn mysql_row_to_noria_row(
                         } else {
                             noria_row.push(DfValue::from_str_and_collation(
                                 String::from_utf8_lossy(&bytes).to_string().as_str(),
-                                readyset_data::Collation::from_mysql_collation(
+                                readyset_data::Collation::get_or_default(
+                                    Dialect::DEFAULT_MYSQL,
                                     Collation::resolve(CollationId::from(*collation)).collation(),
-                                )
-                                .unwrap_or_default(),
+                                ),
                             ))
                         }
                     }
@@ -983,10 +983,10 @@ fn mysql_row_to_noria_row(
                         } else {
                             DfValue::from_str_and_collation(
                                 String::from_utf8_lossy(&b).to_string().as_str(),
-                                readyset_data::Collation::from_mysql_collation(
+                                readyset_data::Collation::get_or_default(
+                                    Dialect::DEFAULT_MYSQL,
                                     Collation::resolve(CollationId::from(*collation)).collation(),
-                                )
-                                .unwrap_or_default(),
+                                ),
                             )
                         }
                     }

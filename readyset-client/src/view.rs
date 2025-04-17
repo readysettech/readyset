@@ -192,7 +192,9 @@ impl ColumnSchema {
         table: Relation,
         dialect: Dialect,
     ) -> ReadySetResult<Self> {
-        let collation = Collation::from_mysql_collation(spec.clone().get_collation().unwrap_or(""));
+        let collation = spec
+            .get_collation()
+            .map(|name| Collation::get_or_default(dialect, name));
         Ok(Self {
             base: Some(ColumnBase {
                 column: spec.column.name.clone(),

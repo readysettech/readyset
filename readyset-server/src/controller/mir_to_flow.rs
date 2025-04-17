@@ -368,27 +368,24 @@ fn make_base_node(
         .map(|cs| DfColumn::from_spec(cs.clone(), mig.dialect, |ty| custom_types.get(&ty).cloned()))
         .collect::<Result<Vec<_>, _>>()?;
 
-    // note that this defaults to a "None" (= NULL) default value for columns that don't have a default value
-    // or we cannot infer a default value from the SQL type
+    // note that this defaults to a "None" (= NULL) default value for columns that don't have a
+    // default value or we cannot infer a default value from the SQL type
     let default_values = column_specs
         .iter()
         .map(|cs| {
+            let collation = cs
+                .get_collation()
+                .map(|collation| Collation::get_or_default(mig.dialect, collation));
             if let Some(dv) = cs.get_default_value() {
                 let df: DfValue = dv
                     .try_into()
                     .map_err(|e| internal_err!("Failed to convert default value: {}", e))?;
-                let collation = cs.get_collation().map(|collation| {
-                    Collation::from_mysql_collation(collation).unwrap_or(Collation::Utf8)
-                });
                 let dftype_to =
                     DfType::from_sql_type(&cs.sql_type, mig.dialect, |_| None, collation).map_err(
                         |e| internal_err!("Failed to convert SQL type to DfType: {}", e),
                     )?;
                 return df.coerce_to(&dftype_to, &df.infer_dataflow_type());
             } else if cs.is_not_null() {
-                let collation = cs.get_collation().map(|collation| {
-                    Collation::from_mysql_collation(collation).unwrap_or(Collation::Utf8)
-                });
                 let dftype_to =
                     DfType::from_sql_type(&cs.sql_type, mig.dialect, |_| None, collation).map_err(
                         |e| internal_err!("Failed to convert SQL type to DfType: {}", e),

@@ -8,6 +8,9 @@ use icu::normalizer::ComposingNormalizer;
 use serde::{Deserialize, Serialize};
 use strum::{EnumCount, FromRepr};
 use test_strategy::Arbitrary;
+use tracing::error;
+
+use crate::{Dialect, SqlEngine};
 
 thread_local! {
     static UTF8: Collator = Collator::try_new(
@@ -102,12 +105,30 @@ impl Collation {
         }
     }
 
-    /// Create a Readyset collation from a MySQL collation.
-    pub fn from_mysql_collation(database_collation: &str) -> Option<Self> {
-        match database_collation.ends_with("_ci") {
-            true => Some(Self::Utf8AiCi),
-            false => Some(Self::Utf8),
+    /// The default collation for a dialect.
+    fn default_for(dialect: Dialect) -> Self {
+        match dialect.engine() {
+            SqlEngine::PostgreSQL => Self::Utf8,
+            SqlEngine::MySQL => Self::Utf8AiCi,
         }
+    }
+
+    /// Map a dialect's collation name to our internal collation if a mapping exists.
+    fn try_get(dialect: Dialect, collation: &str) -> Option<Self> {
+        match (dialect.engine(), collation) {
+            (SqlEngine::MySQL, "utf8mb4_0900_ai_ci") => Some(Collation::Utf8AiCi),
+            (SqlEngine::MySQL, "utf8mb4_0900_as_cs") => Some(Collation::Utf8),
+            (_, _) => None,
+        }
+    }
+
+    /// Attempt to map a collation name to our internal collation.  If no mapping exists,
+    /// return a reasonable default for the dialect.
+    pub fn get_or_default(dialect: Dialect, collation: &str) -> Self {
+        Self::try_get(dialect, collation).unwrap_or_else(|| {
+            error!("Unknown {} collation {}", dialect.engine(), collation);
+            Self::default_for(dialect)
+        })
     }
 }
 

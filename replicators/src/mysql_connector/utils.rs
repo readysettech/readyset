@@ -1,7 +1,7 @@
 use mysql_async::{self as mysql, prelude::Queryable};
 use mysql_common::collations::{Collation as MyCollation, CollationId};
 use readyset_data::encoding::Encoding;
-use readyset_data::{Collation as RsCollation, DfValue};
+use readyset_data::{Collation as RsCollation, DfValue, Dialect};
 use readyset_errors::{internal, ReadySetResult};
 use std::sync::Arc;
 
@@ -46,7 +46,10 @@ pub(crate) fn mysql_pad_char_column(
     };
     let mut str = encoding.decode(val)?;
     let str_len = str.chars().count();
-    let rs_collation = RsCollation::from_mysql_collation(collation.collation()).unwrap_or_default();
+    let rs_collation = RsCollation::get_or_default(
+        Dialect::DEFAULT_MYSQL,
+        MyCollation::resolve(collation.id()).collation(),
+    );
     if str_len < column_length_characters {
         str.extend(std::iter::repeat_n(' ', column_length_characters - str_len));
     }

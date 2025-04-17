@@ -53,7 +53,7 @@ use proptest::prelude::*;
 
 pub use crate::array::Array;
 pub use crate::collation::Collation;
-pub use crate::dialect::Dialect;
+pub use crate::dialect::{Dialect, SqlEngine};
 pub use crate::r#type::{DfType, PgEnumMetadata, PgTypeCategory};
 pub use crate::ranges::{Bound, BoundedRange, IntoBoundedRange, RangeBounds};
 pub use crate::serde::TextRef;

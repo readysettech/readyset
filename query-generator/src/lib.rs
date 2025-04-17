@@ -282,9 +282,9 @@ impl From<CreateTableStatement> for TableSpec {
                 .iter()
                 .map(|field| {
                     let sql_type = field.sql_type.clone();
-                    let collation = Collation::from_mysql_collation(
-                        field.clone().get_collation().unwrap_or(""),
-                    );
+                    let collation = field
+                        .get_collation()
+                        .map(|name| Collation::get_or_default(Dialect::DEFAULT_MYSQL, name));
                     let df_type = DfType::from_sql_type(
                         &sql_type,
                         Dialect::DEFAULT_MYSQL,

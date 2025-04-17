@@ -1356,8 +1356,9 @@ impl NoriaConnector {
                             ReadySetError::NoSuchColumn(c.name.to_string()),
                         )
                     })?;
-                let collation =
-                    Collation::from_mysql_collation(field.get_collation().unwrap_or(""));
+                let collation = field
+                    .get_collation()
+                    .map(|name| Collation::get_or_default(self.dialect, name));
                 let target_type =
                     DfType::from_sql_type(&field.sql_type, self.dialect, |_| None, collation)?;
 

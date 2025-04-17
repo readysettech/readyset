@@ -64,7 +64,8 @@ impl Column {
                 &spec.sql_type,
                 dialect,
                 resolve_type,
-                Collation::from_mysql_collation(spec.get_collation().unwrap_or("")),
+                spec.get_collation()
+                    .map(|name| Collation::get_or_default(dialect, name)),
             )?,
             spec.column.table,
         ))
