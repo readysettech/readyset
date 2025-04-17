@@ -59,16 +59,16 @@ impl FunctionProcessor<'_> {
                 if matches!(
                     name.as_str(),
                     // TODO: Support more ?
-                    "ASCII"
-                        | "SUBSTRING"
-                        | "SUBSTR"
-                        | "LOWER"
-                        | "UPPER"
-                        | "LENGTH"
-                        | "OCTET_LENGTH"
-                        | "CHAR_LENGTH"
-                        | "CHARACTER_LENGTH"
-                        | "HEX"
+                    "ascii"
+                        | "substring"
+                        | "substr"
+                        | "lower"
+                        | "upper"
+                        | "length"
+                        | "octet_length"
+                        | "char_length"
+                        | "character_length"
+                        | "hex"
                 ) =>
             {
                 arguments.first().ok_or_else(|| {

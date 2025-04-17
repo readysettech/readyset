@@ -1517,7 +1517,7 @@ mod tests {
             let qs = b"f(foo, bar) between 1 and 2";
             let expected = Expr::Between {
                 operand: Box::new(Expr::Call(FunctionExpr::Call {
-                    name: "F".into(),
+                    name: "f".into(),
                     arguments: vec![
                         Expr::Column(Column::from("foo")),
                         Expr::Column(Column::from("bar")),

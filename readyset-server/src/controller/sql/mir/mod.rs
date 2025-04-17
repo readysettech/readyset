@@ -799,7 +799,7 @@ impl SqlToMirConverter {
                 parent,
                 vec![ProjectExpr::Expr {
                     expr: Expr::Call(Call {
-                        name: "COALESCE".into(),
+                        name: "coalesce".into(),
                         arguments: vec![
                             Expr::Column(ast::Column {
                                 table: over_col.table.clone(),

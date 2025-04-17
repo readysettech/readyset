@@ -1249,7 +1249,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
         // TODO: handle null treatment and other stuff
         let sqlparser::ast::Function { args, name, .. } = value;
 
-        let sqlparser::ast::ObjectNamePart::Identifier(mut ident) = name
+        let sqlparser::ast::ObjectNamePart::Identifier(ident) = name
             .0
             .into_iter()
             .exactly_one()
@@ -1362,7 +1362,6 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
         } else if ident.value.eq_ignore_ascii_case("EXTRACT") {
             return failed!("{ident} should have been converted earlier");
         } else {
-            ident.value = ident.value.to_uppercase();
             Self::Call(FunctionExpr::Call {
                 name: ident.into_dialect(dialect),
                 arguments: exprs.try_collect()?,

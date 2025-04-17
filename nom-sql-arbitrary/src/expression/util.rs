@@ -105,7 +105,7 @@ where
         // This guarantees that the final element is not null
         arguments.push(expr);
         Expr::Call(FunctionExpr::Call {
-            name: "COALESCE".into(),
+            name: "coalesce".into(),
             arguments,
         })
     })

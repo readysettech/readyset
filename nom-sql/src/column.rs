@@ -279,7 +279,7 @@ mod tests {
                     constraints: vec![
                         ColumnConstraint::NotNull,
                         ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
-                            name: "CURRENT_TIMESTAMP".into(),
+                            name: "current_timestamp".into(),
                             arguments: vec![]
                         })),
                     ]
@@ -406,7 +406,7 @@ mod tests {
                     constraints: vec![
                         ColumnConstraint::NotNull,
                         ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
-                            name: "CURRENT_TIMESTAMP".into(),
+                            name: "current_timestamp".into(),
                             arguments: vec![]
                         })),
                     ]
@@ -434,7 +434,7 @@ mod tests {
                     constraints: vec![
                         ColumnConstraint::NotNull,
                         ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
-                            name: "NOW".into(),
+                            name: "now".into(),
                             arguments: vec![]
                         })),
                     ]

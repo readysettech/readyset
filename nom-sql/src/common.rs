@@ -132,7 +132,7 @@ fn delim_fx_args(
 }
 
 fn function_call_without_parens(
-    _dialect: Dialect,
+    dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
     move |i| {
         // Some functions can be called without parentheses, in both mysql and postgres
@@ -146,10 +146,11 @@ fn function_call_without_parens(
                 tag_no_case("localtime"),
             )),
             |n: LocatedSpan<&[u8]>| {
-                String::from_utf8(n.to_vec())
-                    .expect("Only constant string literals")
-                    .to_uppercase()
-                    .into()
+                let s = String::from_utf8(n.to_vec()).expect("Only constant string literals");
+                match dialect {
+                    Dialect::MySQL => s.into(),
+                    Dialect::PostgreSQL => s.to_lowercase().into(),
+                }
             },
         )(i)?;
 
@@ -316,13 +317,7 @@ fn function_call(
         let (i, name) = dialect.function_identifier()(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, arguments) = delim_fx_args(dialect)(i)?;
-        Ok((
-            i,
-            FunctionExpr::Call {
-                name: name.to_uppercase().into(),
-                arguments,
-            },
-        ))
+        Ok((i, FunctionExpr::Call { name, arguments }))
     }
 }
 
@@ -769,7 +764,7 @@ mod tests {
         for q in qlist.iter() {
             let res = to_nom_result(function_expr(Dialect::MySQL)(LocatedSpan::new(q)));
             let expected = FunctionExpr::Call {
-                name: "COALESCE".into(),
+                name: "coalesce".into(),
                 arguments: vec![
                     Expr::Column(Column::from("a")),
                     Expr::Column(Column::from("b")),
@@ -810,7 +805,7 @@ mod tests {
         assert_eq!(
             res,
             FunctionExpr::Call {
-                name: "IFNULL".into(),
+                name: "ifnull".into(),
                 arguments: vec![
                     Expr::Column(Column::from("x")),
                     Expr::Literal(Literal::Integer(0))
@@ -898,7 +893,7 @@ mod tests {
         assert_eq!(
             res,
             FunctionExpr::Call {
-                name: "SUBSTRING".into(),
+                name: "substring".into(),
                 arguments: vec![
                     Expr::Column("a".into()),
                     Expr::Literal(1.into()),
@@ -988,7 +983,7 @@ mod tests {
             for q in qlist.iter() {
                 let res = to_nom_result(function_expr(Dialect::MySQL)(LocatedSpan::new(q)));
                 let expected = FunctionExpr::Call {
-                    name: "COALESCE".into(),
+                    name: "coalesce".into(),
                     arguments: vec![
                         Expr::Literal(Literal::String("a".to_owned())),
                         Expr::Column(Column::from("b")),
@@ -1088,7 +1083,7 @@ mod tests {
             for q in qlist.iter() {
                 let res = to_nom_result(function_expr(Dialect::PostgreSQL)(LocatedSpan::new(q)));
                 let expected = FunctionExpr::Call {
-                    name: "COALESCE".into(),
+                    name: "coalesce".into(),
                     arguments: vec![
                         Expr::Literal(Literal::String("a".to_owned())),
                         Expr::Column(Column::from("b")),
