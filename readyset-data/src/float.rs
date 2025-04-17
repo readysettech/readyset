@@ -455,14 +455,14 @@ mod tests {
 
         assert_eq!(
             DfValue::Double(1e4)
-                .coerce_to(&DfType::VarChar(2, Collation::default()), &DfType::Unknown)
+                .coerce_to(&DfType::VarChar(2, Collation::Utf8), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("10")
         );
 
         assert_eq!(
             DfValue::Double(1e4)
-                .coerce_to(&DfType::Char(8, Collation::default()), &DfType::Unknown)
+                .coerce_to(&DfType::Char(8, Collation::Utf8), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("10000   ")
         );

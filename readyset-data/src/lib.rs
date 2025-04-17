@@ -3861,8 +3861,7 @@ mod tests {
         #[proptest]
         fn char_equal_length(#[strategy("a{1,30}")] text: String) {
             let input = DfValue::from(text.as_str());
-            let intermediate =
-                DfType::Char(u16::try_from(text.len()).unwrap(), Collation::default());
+            let intermediate = DfType::Char(u16::try_from(text.len()).unwrap(), Collation::Utf8);
             let result = input.coerce_to(&intermediate, &DfType::Unknown).unwrap();
             assert_eq!(String::try_from(&result).unwrap().as_str(), text.as_str());
         }
@@ -3902,13 +3901,13 @@ mod tests {
             );
             assert_eq!(
                 DfValue::from(20070523i64)
-                    .coerce_to(&DfType::VarChar(2, Collation::default()), &DfType::Unknown)
+                    .coerce_to(&DfType::VarChar(2, Collation::Utf8), &DfType::Unknown)
                     .unwrap(),
                 DfValue::from("20"),
             );
             assert_eq!(
                 DfValue::from(20070523i64)
-                    .coerce_to(&DfType::Char(10, Collation::default()), &DfType::Unknown)
+                    .coerce_to(&DfType::Char(10, Collation::Utf8), &DfType::Unknown)
                     .unwrap(),
                 DfValue::from("20070523  "),
             );
@@ -4151,24 +4150,24 @@ mod tests {
             // Test coercion from enum to text types with length limits
 
             let result = DfValue::Int(2)
-                .coerce_to(&DfType::Char(3, Collation::default()), &enum_ty)
+                .coerce_to(&DfType::Char(3, Collation::Utf8), &enum_ty)
                 .unwrap();
             assert_eq!("yel", result.to_string());
 
             let result = DfValue::Int(2)
-                .coerce_to(&DfType::VarChar(3, Collation::default()), &enum_ty)
+                .coerce_to(&DfType::VarChar(3, Collation::Utf8), &enum_ty)
                 .unwrap();
             assert_eq!("yel", result.to_string());
 
             let result = DfValue::Int(2)
-                .coerce_to(&DfType::Char(10, Collation::default()), &enum_ty)
+                .coerce_to(&DfType::Char(10, Collation::Utf8), &enum_ty)
                 .unwrap();
             assert_eq!("yellow    ", result.to_string());
 
             let no_change_tys = [
-                DfType::VarChar(10, Collation::default()),
+                DfType::VarChar(10, Collation::Utf8),
                 // FIXME(ENG-1839)
-                // DfType::Char(None, Collation::default(), Dialect::DEFAULT_MYSQL),
+                // DfType::Char(None, Collation::Utf8, Dialect::DEFAULT_MYSQL),
                 DfType::DEFAULT_TEXT,
             ];
 

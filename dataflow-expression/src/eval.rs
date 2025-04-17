@@ -475,7 +475,7 @@ mod tests {
     fn eval_json_exists() {
         let expr = Op {
             left: Box::new(column_with_type(0, DfType::Jsonb)),
-            right: Box::new(column_with_type(1, DfType::Text(Collation::default()))),
+            right: Box::new(column_with_type(1, DfType::Text(Collation::Utf8))),
             op: BinaryOperator::JsonExists,
             ty: DfType::Bool,
         };
@@ -505,7 +505,7 @@ mod tests {
     fn eval_json_exists_bad_types() {
         let expr = Op {
             left: Box::new(column_with_type(0, DfType::Jsonb)),
-            right: Box::new(column_with_type(1, DfType::Text(Collation::default()))),
+            right: Box::new(column_with_type(1, DfType::Text(Collation::Utf8))),
             op: BinaryOperator::JsonExists,
             ty: DfType::Bool,
         };
@@ -521,7 +521,7 @@ mod tests {
             left: Box::new(column_with_type(0, DfType::Jsonb)),
             right: Box::new(column_with_type(
                 1,
-                DfType::Array(Box::new(DfType::Text(Collation::default()))),
+                DfType::Array(Box::new(DfType::Text(Collation::Utf8))),
             )),
             op: BinaryOperator::JsonAnyExists,
             ty: DfType::Bool,
@@ -566,7 +566,7 @@ mod tests {
             left: Box::new(column_with_type(0, DfType::Jsonb)),
             right: Box::new(column_with_type(
                 1,
-                DfType::Array(Box::new(DfType::Text(Collation::default()))),
+                DfType::Array(Box::new(DfType::Text(Collation::Utf8))),
             )),
             op: BinaryOperator::JsonAnyExists,
             ty: DfType::Bool,
@@ -583,7 +583,7 @@ mod tests {
             left: Box::new(column_with_type(0, DfType::Jsonb)),
             right: Box::new(column_with_type(
                 1,
-                DfType::Array(Box::new(DfType::Text(Collation::default()))),
+                DfType::Array(Box::new(DfType::Text(Collation::Utf8))),
             )),
             op: BinaryOperator::JsonAllExists,
             ty: DfType::Bool,
@@ -684,7 +684,7 @@ mod tests {
             left: Box::new(column_with_type(0, DfType::Jsonb)),
             right: Box::new(column_with_type(
                 1,
-                DfType::Array(Box::new(DfType::Text(Collation::default()))),
+                DfType::Array(Box::new(DfType::Text(Collation::Utf8))),
             )),
             op: BinaryOperator::JsonAllExists,
             ty: DfType::Bool,

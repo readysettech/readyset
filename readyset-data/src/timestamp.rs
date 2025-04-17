@@ -710,7 +710,7 @@ mod tests {
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&DfType::VarChar(6, Collation::default()), &DfType::Unknown)
+                ts.coerce_to(&DfType::VarChar(6, Collation::Utf8), &DfType::Unknown)
                     .unwrap()
             ),
             "2022-0"

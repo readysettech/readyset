@@ -706,22 +706,22 @@ mod tests {
         // TEXT to TEXT coercions
         let text = DfValue::from("abcdefgh");
         assert_eq!(
-            text.coerce_to(&DfType::Char(10, Collation::default()), &DfType::Unknown)
+            text.coerce_to(&DfType::Char(10, Collation::Utf8), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("abcdefgh  ")
         );
         assert_eq!(
-            text.coerce_to(&DfType::Char(4, Collation::default()), &DfType::Unknown)
+            text.coerce_to(&DfType::Char(4, Collation::Utf8), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("abcd")
         );
         assert_eq!(
-            text.coerce_to(&DfType::VarChar(10, Collation::default()), &DfType::Unknown)
+            text.coerce_to(&DfType::VarChar(10, Collation::Utf8), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("abcdefgh")
         );
         assert_eq!(
-            text.coerce_to(&DfType::VarChar(4, Collation::default()), &DfType::Unknown)
+            text.coerce_to(&DfType::VarChar(4, Collation::Utf8), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("abcd")
         );
