@@ -47,10 +47,10 @@ select a.id, c.other from a join (select * from b) as c where a.b_id = c.id;
 50
 
 statement ok
-create table c(id int, name text);
+create table c(id int, name text collate utf8mb4_0900_as_cs);
 
 statement ok
-create table d(id int, name text);
+create table d(id int, name text collate utf8mb4_0900_as_cs);
 
 statement ok
 insert into c values (1, 'hello'), (2, 'WORLD'), (3, 'HELLO');

@@ -77,8 +77,8 @@ impl Aggregation {
                     DfType::DEFAULT_NUMERIC
                 }
             }
-            Aggregation::GroupConcat { .. } => DfType::Text(/* TODO */ Collation::default()),
-            Aggregation::JsonObjectAgg { .. } => DfType::Text(Collation::default()),
+            Aggregation::GroupConcat { .. } => DfType::Text(/* TODO */ Collation::Utf8),
+            Aggregation::JsonObjectAgg { .. } => DfType::Text(Collation::Utf8),
         };
 
         Ok(GroupedOperator::new(

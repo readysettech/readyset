@@ -93,7 +93,7 @@ impl Serialize for TextRef<'_> {
         serialize_variant(
             serializer,
             Variant::Text,
-            &(Collation::default(), Bytes::new(self.0.as_bytes())),
+            &(Collation::Utf8, Bytes::new(self.0.as_bytes())),
         )
     }
 }

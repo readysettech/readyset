@@ -597,7 +597,7 @@ impl DfValue {
                 | DfType::Enum { .. }
                 | DfType::Array(..) => {
                     let s = std::str::from_utf8(bytes.as_ref())?;
-                    DfValue::from_str_and_collation(s, Default::default()).coerce_to(to_ty, from_ty)
+                    DfValue::from_str_and_collation(s, Collation::Utf8).coerce_to(to_ty, from_ty)
                 }
                 DfType::Text(collation)
                 | DfType::Char(_, collation)
@@ -1759,7 +1759,7 @@ impl TryFrom<DfValue> for String {
 
 impl<'a> From<&'a str> for DfValue {
     fn from(s: &'a str) -> Self {
-        Self::from_str_and_collation(s, Default::default())
+        Self::from_str_and_collation(s, Collation::Utf8)
     }
 }
 

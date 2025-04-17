@@ -201,7 +201,7 @@ impl GroupedOperation for GroupConcat {
     }
 
     fn output_col_type(&self) -> DfType {
-        DfType::Text(/* TODO */ Collation::default())
+        DfType::Text(/* TODO */ Collation::Utf8)
     }
 
     fn empty_value(&self) -> Option<DfValue> {

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use database_utils::{DatabaseURL, QueryableConnection};
 use readyset_client::status::CurrentStatus;
-use readyset_data::DfValue;
+use readyset_data::{Collation, DfValue, Dialect};
 use readyset_sql::{ast::ShowStatement, DialectDisplay};
 use tracing::info;
 
@@ -47,7 +47,7 @@ pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
             let snapshot_status = rows.into_iter().find(|r| r[0] == b"Status".to_vec().into());
             let snapshot_status: String = if let Some(s) = snapshot_status {
                 s[1].coerce_to(
-                    &readyset_data::DfType::Text(Default::default()),
+                    &readyset_data::DfType::Text(Collation::default_for(Dialect::DEFAULT_MYSQL)),
                     &readyset_data::DfType::Unknown,
                 )
                 .unwrap()

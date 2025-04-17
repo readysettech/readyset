@@ -226,16 +226,6 @@ impl Text {
         unsafe { Self::new(true, collation, s.as_bytes()) }
     }
 
-    /// Create a new `Text` by copying a byte slice, which must contain valid UTF-8
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure that the argument passed to this function contains valid UTF-8
-    #[inline]
-    pub unsafe fn from_slice_unchecked(v: &[u8]) -> Self {
-        Self::new(true, Default::default(), v)
-    }
-
     /// SAFETY: If `header.valid` is true, `v` must contain valid UTF-8
     unsafe fn new(valid: bool, collation: Collation, v: &[u8]) -> Self {
         Self {
@@ -266,7 +256,7 @@ impl TryFrom<&[u8]> for Text {
 impl From<&str> for Text {
     fn from(t: &str) -> Self {
         // SAFETY: `t` is guaranteed to contain valid UTF-8
-        unsafe { Self::new(true, Default::default(), t.as_bytes()) }
+        unsafe { Self::new(true, Collation::Utf8, t.as_bytes()) }
     }
 }
 
@@ -293,11 +283,7 @@ impl Eq for Text {}
 impl fmt::Debug for Text {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.as_str())?;
-
-        if self.collation() != Collation::default() {
-            write!(f, " ({:?})", self.collation())?;
-        }
-
+        write!(f, " ({:?})", self.collation())?;
         Ok(())
     }
 }
@@ -305,11 +291,7 @@ impl fmt::Debug for Text {
 impl fmt::Debug for TinyText {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.as_str())?;
-
-        if self.collation() != Collation::default() {
-            write!(f, " ({:?})", self.collation())?;
-        }
-
+        write!(f, " ({:?})", self.collation())?;
         Ok(())
     }
 }

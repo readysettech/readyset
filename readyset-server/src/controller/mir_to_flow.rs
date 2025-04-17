@@ -602,7 +602,7 @@ fn make_grouped_node(
         // aggregation before we pattern match for a generic aggregation.
         GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator: sep }) => {
             let gc = GroupConcat::new(parent_na.address(), over_col_indx, group_col_indx, sep)?;
-            let agg_col = make_agg_col(DfType::Text(/* TODO */ Collation::default()));
+            let agg_col = make_agg_col(DfType::Text(/* TODO */ Collation::Utf8));
             cols.push(agg_col);
             set_names(&column_names(columns), &mut cols)?;
             mig.add_ingredient(name, cols, gc)

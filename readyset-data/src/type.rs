@@ -303,10 +303,15 @@ impl DfType {
             //
             // `varchar` by itself is an error in MySQL but synonymous with `text` in PostgreSQL.
             Text | TinyText | MediumText | LongText | VarChar(None) => {
-                Self::Text(collation.unwrap_or_default())
+                Self::Text(Collation::unwrap_or_default(collation, dialect))
             }
-            VarChar(Some(len)) => Self::VarChar(len, collation.unwrap_or_default()),
-            Char(len) => Self::Char(len.unwrap_or(1), collation.unwrap_or_default()),
+            VarChar(Some(len)) => {
+                Self::VarChar(len, Collation::unwrap_or_default(collation, dialect))
+            }
+            Char(len) => Self::Char(
+                len.unwrap_or(1),
+                Collation::unwrap_or_default(collation, dialect),
+            ),
             QuotedChar => Self::TinyInt,
             Blob | TinyBlob | MediumBlob | LongBlob | ByteArray => Self::Blob,
             VarBinary(len) => Self::VarBinary(len),
@@ -761,7 +766,7 @@ impl TryFrom<&PGType> for DfType {
     fn try_from(value: &PGType) -> Result<Self, Self::Error> {
         match value {
             &PGType::BOOL => Ok(Self::Bool),
-            &PGType::CHAR => Ok(Self::Char(1, Collation::default())),
+            &PGType::CHAR => Ok(Self::Char(1, Collation::Utf8)),
             &PGType::TEXT | &PGType::VARCHAR => Ok(Self::DEFAULT_TEXT),
             &PGType::INT2 => Ok(Self::SmallInt),
             &PGType::INT4 => Ok(Self::Int),

@@ -29,7 +29,7 @@ use itertools::Itertools;
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
-use readyset_data::{Bound, DfType, DfValue, Dialect, IntoBoundedRange};
+use readyset_data::{Bound, Collation, DfType, DfValue, Dialect, IntoBoundedRange};
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_sql::ast;
 use readyset_sql::ast::{OrderType, Relation, SqlQuery};
@@ -4196,7 +4196,7 @@ async fn correct_nested_view_schema() {
 
     let expected_schema = vec![
         ("swvc.id".into(), DfType::Int),
-        ("swvc.content".into(), DfType::DEFAULT_TEXT),
+        ("swvc.content".into(), DfType::Text(Collation::Utf8AiCi)),
         ("swvc.vc".into(), DfType::BigInt),
         ("swvc.story".into(), DfType::Int),
     ];

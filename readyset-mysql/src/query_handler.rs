@@ -900,7 +900,7 @@ impl QueryHandler for MySqlQueryHandler {
                                 name: field_name.clone(),
                                 table: None,
                             },
-                            column_type: DfType::Char(8_u16, Collation::default()),
+                            column_type: DfType::Char(8_u16, Collation::Utf8),
                             base: None,
                         }]),
                         columns: Cow::Owned(vec![field_name]),

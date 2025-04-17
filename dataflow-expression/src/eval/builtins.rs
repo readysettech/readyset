@@ -12,7 +12,7 @@ use chrono_tz::Tz;
 use itertools::Either;
 use mysql_time::MySqlTime;
 use readyset_data::dialect::SqlEngine;
-use readyset_data::{Array, DfType, DfValue, TimestampTz};
+use readyset_data::{Array, Collation, DfType, DfValue, TimestampTz};
 use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::TimestampField;
 use readyset_util::math::integer_rnd;
@@ -1034,7 +1034,7 @@ impl BuiltinFunction {
                     if i % 2 == 0 {
                         keys.push(
                             arg.eval(record)?
-                                .coerce_to(&DfType::Text(Default::default()), &DfType::Unknown)?,
+                                .coerce_to(&DfType::Text(Collation::Utf8), &DfType::Unknown)?,
                         );
                     } else {
                         values.push(arg.eval(record)?);

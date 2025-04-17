@@ -377,13 +377,15 @@ impl BuiltinFunction {
             "concat" => {
                 let arg1 = next_arg()?;
                 let rest_args = args.by_ref().collect::<Vec<_>>();
-                let collation = iter::once(&arg1)
-                    .chain(&rest_args)
-                    .find_map(|expr| match expr.ty() {
-                        DfType::Text(c) => Some(*c),
-                        _ => None,
-                    })
-                    .unwrap_or_default();
+                let collation = Collation::unwrap_or_default(
+                    iter::once(&arg1)
+                        .chain(&rest_args)
+                        .find_map(|expr| match expr.ty() {
+                            DfType::Text(c) => Some(*c),
+                            _ => None,
+                        }),
+                    dialect,
+                );
                 let ty = DfType::Text(collation);
                 (
                     Self::Concat(
@@ -524,14 +526,14 @@ impl BuiltinFunction {
                     unsupported!("Function {name} does not exist in {}", dialect.engine());
                 }
                 let expr = next_arg()?;
-                (Self::Hex(expr), DfType::Text(Default::default()))
+                (Self::Hex(expr), DfType::Text(Collation::Utf8))
             }
             "st_astext" => {
                 // Note: `ST_AsText` is supported by both MySQL and PostGIS,
                 let expr = next_arg()?;
                 (
                     Self::SpatialAsText { expr, dialect },
-                    DfType::Text(Default::default()),
+                    DfType::Text(Collation::Utf8),
                 )
             }
             "st_aswkt" => {
@@ -541,7 +543,7 @@ impl BuiltinFunction {
                         let expr = next_arg()?;
                         (
                             Self::SpatialAsText { expr, dialect },
-                            DfType::Text(Default::default()),
+                            DfType::Text(Collation::Utf8),
                         )
                     }
                     SqlEngine::PostgreSQL => {
@@ -554,10 +556,7 @@ impl BuiltinFunction {
                 match dialect.engine() {
                     SqlEngine::PostgreSQL => {
                         let expr = next_arg()?;
-                        (
-                            Self::SpatialAsEWKT { expr },
-                            DfType::Text(Default::default()),
-                        )
+                        (Self::SpatialAsEWKT { expr }, DfType::Text(Collation::Utf8))
                     }
                     SqlEngine::MySQL => {
                         unsupported!("Function {name} does not exist in {}", dialect.engine());
@@ -656,21 +655,26 @@ fn get_text_type_max_length(ty: &DfType) -> Option<u16> {
 
 fn mysql_text_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
     if (left.is_any_text() || left.is_binary()) && (right.is_any_text() || right.is_binary()) {
-        if matches!(left, DfType::Text(..)) || matches!(right, DfType::Text(..)) {
-            Some(DfType::DEFAULT_TEXT)
-        } else {
-            let left_len = get_text_type_max_length(left)?;
-            let right_len = get_text_type_max_length(right)?;
-            match (left, right) {
-                (DfType::Char(..), DfType::Char(..)) => Some(DfType::Char(
-                    cmp::max(left_len, right_len),
-                    Collation::default(),
-                )),
-                (_, _) => Some(DfType::VarChar(
-                    cmp::max(left_len, right_len),
-                    Collation::default(),
-                )),
+        match (left, right) {
+            (DfType::Text(collation), _) | (_, DfType::Text(collation)) => {
+                return Some(DfType::Text(*collation));
             }
+            _ => (),
+        }
+
+        let left_len = get_text_type_max_length(left)?;
+        let right_len = get_text_type_max_length(right)?;
+        match (left, right) {
+            (DfType::Char(_, collation), DfType::Char(..)) => {
+                Some(DfType::Char(cmp::max(left_len, right_len), *collation))
+            }
+            (DfType::VarChar(_, collation), _) | (_, DfType::VarChar(_, collation)) => {
+                Some(DfType::VarChar(cmp::max(left_len, right_len), *collation))
+            }
+            (_, _) => Some(DfType::VarChar(
+                cmp::max(left_len, right_len),
+                Collation::Utf8,
+            )),
         }
     } else {
         None

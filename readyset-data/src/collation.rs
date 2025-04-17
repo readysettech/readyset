@@ -36,18 +36,7 @@ thread_local! {
 /// [mysql]: https://dev.mysql.com/doc/refman/8.0/en/charset-mysql.html
 /// [postgres]: https://www.postgresql.org/docs/current/collation.html
 #[derive(
-    Clone,
-    Copy,
-    Default,
-    Hash,
-    Serialize,
-    Deserialize,
-    Debug,
-    PartialEq,
-    Eq,
-    EnumCount,
-    FromRepr,
-    Arbitrary,
+    Clone, Copy, Hash, Serialize, Deserialize, Debug, PartialEq, Eq, EnumCount, FromRepr, Arbitrary,
 )]
 #[repr(u8)]
 pub enum Collation {
@@ -55,7 +44,6 @@ pub enum Collation {
     ///
     /// This collation, which is the default for PostgreSQL (and the [`Default`] for this type),
     /// corresponds to the *default* behavior of rust's [`String`] type.
-    #[default]
     Utf8,
 
     /// The case-insensitive text collation.
@@ -106,7 +94,7 @@ impl Collation {
     }
 
     /// The default collation for a dialect.
-    fn default_for(dialect: Dialect) -> Self {
+    pub fn default_for(dialect: Dialect) -> Self {
         match dialect.engine() {
             SqlEngine::PostgreSQL => Self::Utf8,
             SqlEngine::MySQL => Self::Utf8AiCi,
@@ -129,6 +117,11 @@ impl Collation {
             error!("Unknown {} collation {}", dialect.engine(), collation);
             Self::default_for(dialect)
         })
+    }
+
+    /// Analogous to [`Option::unwrap_or_default`], but specific to the dialect.
+    pub fn unwrap_or_default(collation: Option<Collation>, dialect: Dialect) -> Collation {
+        collation.unwrap_or_else(|| Self::default_for(dialect))
     }
 }
 

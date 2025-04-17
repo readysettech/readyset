@@ -588,7 +588,7 @@ mod parse {
                     // SAFETY: The input was a valid utf8 `str` when passed into `Array::from_str`, and
                     // we aren't slicing a string on any bytes that are used as combining characters.
                     let s = unsafe { str::from_utf8_unchecked(v.as_bytes()) };
-                    DfValue::from_str_and_collation(s, Collation::default())
+                    DfValue::from_str_and_collation(s, Collation::Utf8)
                 },
             ),
         ))(i)
