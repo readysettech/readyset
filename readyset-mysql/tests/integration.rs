@@ -75,6 +75,24 @@ fn mysql_url() -> String {
     )
 }
 
+async fn query_one(conn: &mut Conn, query: &str) -> Vec<Vec<Value>> {
+    conn.query(query)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|x: Row| x.unwrap())
+        .collect()
+}
+
+#[allow(dead_code)] // no idea why rust says this is unused
+async fn query_both(
+    c1: &mut Conn,
+    c2: &mut Conn,
+    query: &str,
+) -> (Vec<Vec<Value>>, Vec<Vec<Value>>) {
+    (query_one(c1, query).await, query_one(c2, query).await)
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn duplicate_join_key() {
     // This used to trigger a bug involving weak indexes. See issue #179 for more info.
@@ -3010,4 +3028,42 @@ async fn create_duplicate_caches() {
     assert_eq!(caches.len(), 1, "unexpected caches: {caches:?}");
 
     shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, mysql_upstream)]
+async fn test_utf8_ai_ci() {
+    readyset_tracing::init_test_logging();
+    let (rs_opts, _rs_handle, tx) = setup_with_mysql().await;
+    sleep().await;
+    let mut mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut rs = Conn::new(rs_opts).await.unwrap();
+
+    mysql
+        .query_drop("create table utf8_ai_ci (a int primary key, b varchar(10))")
+        .await
+        .unwrap();
+
+    // 6 is a combining accent
+    mysql
+        .query_drop(
+            "insert into utf8_ai_ci values (1, 'e'), (2, 'é'), (3, 'E'), (4, 'e'),
+             (5, 'f'), (6, 'é')",
+        )
+        .await
+        .unwrap();
+    rs.query_drop("create cache from select * from utf8_ai_ci order by b, a")
+        .await
+        .unwrap();
+    sleep().await;
+
+    let (m, r) = query_both(
+        &mut mysql,
+        &mut rs,
+        "select * from utf8_ai_ci order by b, a",
+    )
+    .await;
+    assert_eq!(m, r);
+
+    tx.shutdown().await;
 }
