@@ -61,7 +61,6 @@ members = [
     "support",
     "system-benchmarks",
     "test-utils",
-    "timestamp-service",
     "tinylb",
     "tournament-kway"
 ]

@@ -103,7 +103,7 @@ pub enum ReadysetExecutionEvent {
         /// How long the execute request took to run on ReadySet
         duration: Duration,
     },
-    /// A SQL extension, prepare, write (in RYW mode)
+    /// A SQL extension, prepare, write
     Other {
         /// How long the execute request took to run on ReadySet
         duration: Duration,

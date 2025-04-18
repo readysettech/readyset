@@ -4129,7 +4129,6 @@ dependencies = [
  "slab",
  "sqlformat",
  "test-strategy",
- "timestamp-service",
  "tokio",
  "tokio-stream",
  "tower",
@@ -6115,14 +6114,6 @@ checksum = "f4a19b83bcf885daecae78ed5cb800edd3f0f1833c5d949b9df56685fa381062"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "timestamp-service"
-version = "0.7.0"
-dependencies = [
- "anyhow",
- "readyset-client",
 ]
 
 [[package]]

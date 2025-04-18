@@ -6,7 +6,6 @@ use std::sync::{atomic, Arc};
 use std::time::Instant;
 
 use itertools::Itertools;
-use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
@@ -1558,7 +1557,6 @@ impl NoriaConnector {
     pub(crate) async fn execute_select(
         &mut self,
         ctx: ExecuteSelectContext<'_>,
-        ticket: Option<Timestamp>,
         event: &mut readyset_client_metrics::QueryExecutionEvent,
     ) -> ReadySetResult<QueryResult<'_>> {
         let start = Instant::now();
@@ -1602,7 +1600,6 @@ impl NoriaConnector {
             getter,
             processed_query_params.as_ref(),
             params,
-            ticket,
             self.read_behavior,
             self.read_request_handler.as_mut(),
             self.dialect,
@@ -1694,7 +1691,6 @@ fn build_view_query<'a>(
     getter: &'a mut View,
     processed_query_params: &ProcessedQueryParams,
     params: &[DfValue],
-    ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
     dialect: Dialect,
 ) -> ReadySetResult<Option<(&'a mut ReaderHandle, ViewQuery)>> {
@@ -1705,7 +1701,6 @@ fn build_view_query<'a>(
         raw_keys,
         limit,
         offset,
-        ticket,
         read_behavior.is_blocking(),
         dialect,
     )
@@ -1725,7 +1720,6 @@ async fn do_read<'a>(
     getter: &'a mut View,
     processed_query_params: &ProcessedQueryParams,
     params: &[DfValue],
-    ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
     read_request_handler: Option<&'a mut ReadRequestHandler>,
     dialect: Dialect,
@@ -1734,7 +1728,6 @@ async fn do_read<'a>(
         getter,
         processed_query_params,
         params,
-        ticket,
         read_behavior,
         dialect,
     )? {

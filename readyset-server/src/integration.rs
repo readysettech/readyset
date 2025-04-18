@@ -28,8 +28,6 @@ use futures::{join, StreamExt};
 use itertools::Itertools;
 use nom_sql::{parse_create_table, parse_create_view, parse_select_statement};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
-use readyset_client::consistency::Timestamp;
-use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
 use readyset_data::{Bound, DfType, DfValue, Dialect, IntoBoundedRange};
@@ -121,179 +119,6 @@ async fn it_completes() {
             assert_eq!(results, vec![vec![1.into(), 4.into()]])
         }
     );
-
-    shutdown_tx.shutdown().await;
-}
-
-fn timestamp(pairs: Vec<(u32, u64)>) -> Timestamp {
-    let mut t = Timestamp::default();
-    for p in pairs {
-        t.map.insert(LocalNodeIndex::make(p.0), p.1);
-    }
-
-    t
-}
-
-// Tests that a write to a single base table accompanied by a timestamp
-// update propagates to the reader nodes. Tests that a read with a timestamp
-// that can be satisfied by the reader node succeeds and that a timestamp
-// that cannot be satisfied does not. If the reader node had not received
-// a timestamp, the read would not be satisfied, unless there is a bug with
-// timestamp satisfiability.
-#[tokio::test(flavor = "multi_thread")]
-async fn test_timestamp_propagation_simple() {
-    let (mut g, shutdown_tx) = start_simple_unsharded("test_timestamp_propagation_simple").await;
-
-    // Create a base table "a" with columns "a", and "b".
-    let a = g
-        .migrate(|mig| {
-            // Adds a base table with fields "a", "b".
-            let a = mig.add_base(
-                "a",
-                make_columns(&["a", "b"]),
-                Base::new().with_primary_key([0]),
-            );
-
-            let mut emits = HashMap::new();
-            emits.insert(a, vec![0, 1]);
-            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
-            let c = mig.add_ingredient("c", make_columns(&["a"]), u);
-            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
-            a
-        })
-        .await;
-
-    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
-    let mut muta = g.table_by_index(a).await.unwrap();
-
-    // Insert <1, 2> into table "a".
-    let id: DfValue = 1.into();
-    let value: DfValue = 2.into();
-    muta.insert(vec![id.clone(), value.clone()]).await.unwrap();
-
-    // Create and pass the timestamp to the base table node.
-    let t = timestamp(vec![(0, 1)]);
-    muta.update_timestamp(t.clone()).await.unwrap();
-
-    // Successful read with a timestamp that the reader node timestamp
-    // satisfies. We begin with a blocking read as the data is not
-    // materialized at the reader.
-    let res = cq
-        .raw_lookup(ViewQuery::from((
-            vec![KeyComparison::Equal(vec1![id.clone()])],
-            true,
-            Some(t.clone()),
-        )))
-        .await
-        .unwrap()
-        .into_vec();
-
-    assert_eq!(res, vec![vec![id.clone(), value.clone()]]);
-
-    // Perform a read with a timestamp the reader cannot satisfy.
-    assert!(matches!(
-        cq.raw_lookup(ViewQuery::from((
-            vec![KeyComparison::Equal(vec1![id.clone()])],
-            false,
-            // The timestamp at the reader node { 0: 4 }, does not
-            // satisfy this timestamp.
-            Some(timestamp(vec![(1, 4)]))
-        )))
-        .await,
-        Err(ReadySetError::ReaderMissingKey)
-    ));
-
-    shutdown_tx.shutdown().await;
-}
-
-// Simulate writes from two clients.
-#[tokio::test(flavor = "multi_thread")]
-async fn test_timestamp_propagation_multitable() {
-    let (mut g, shutdown_tx) =
-        start_simple_unsharded("test_timestamp_propagation_multitable").await;
-
-    // Create two base tables "a" and "b" with columns "a", and "b".
-    let (a, b) = g
-        .migrate(|mig| {
-            let a = mig.add_base(
-                "a",
-                make_columns(&["a", "b"]),
-                Base::new().with_primary_key([0]),
-            );
-            let b = mig.add_base(
-                "b",
-                make_columns(&["a", "b"]),
-                Base::new().with_primary_key([0]),
-            );
-
-            let mut emits = HashMap::new();
-            emits.insert(a, vec![0, 1]);
-            emits.insert(b, vec![0, 1]);
-            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
-            let c = mig.add_ingredient("c", make_columns(&["a", "b"]), u);
-            mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
-            (a, b)
-        })
-        .await;
-
-    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
-    let mut muta = g.table_by_index(a).await.unwrap();
-    let mut mutb = g.table_by_index(b).await.unwrap();
-
-    // Insert some data into table a.
-    muta.insert(vec![DfValue::Int(1), DfValue::Int(2)])
-        .await
-        .unwrap();
-
-    // Update timestamps to simulate two clients performing writes
-    // to two base tables at the same time.
-    //
-    // Client 1's update timestamp calls.
-    muta.update_timestamp(timestamp(vec![(0, 6)]))
-        .await
-        .unwrap();
-    mutb.update_timestamp(timestamp(vec![(1, 5)]))
-        .await
-        .unwrap();
-
-    // Client 2's update timestamp calls.
-    muta.update_timestamp(timestamp(vec![(0, 5)]))
-        .await
-        .unwrap();
-    mutb.update_timestamp(timestamp(vec![(1, 6)]))
-        .await
-        .unwrap();
-
-    // Successful read with a timestamp that the reader node timestamp
-    // satisfies. We begin with a blocking read as the data is not
-    // materialized at the reader. In order for the timestamp to satisfy
-    // the timestamp { 0: 6, 1: 6 }, each dataflow node will have to had
-    // calculated the max over the timestamp entries they had seen for
-    // each table.
-    let res = cq
-        .raw_lookup(ViewQuery::from((
-            vec![KeyComparison::Equal(vec1![DfValue::Int(1)])],
-            true,
-            Some(timestamp(vec![(0, 6), (1, 6)])),
-        )))
-        .await
-        .unwrap()
-        .into_vec();
-
-    assert_eq!(res, vec![vec![DfValue::Int(1), DfValue::Int(2)]]);
-
-    // Perform a non-blocking read with a timestamp that the reader should not
-    // be able to satisfy. A non-blocking read of a satisfiable timestamp would
-    // succeed here due to the previous read materializing the data.
-    assert!(matches!(
-        cq.raw_lookup(ViewQuery::from((
-            vec![KeyComparison::Equal(vec1![DfValue::Int(1)])],
-            false,
-            Some(timestamp(vec![(0, 6), (1, 7)])),
-        )))
-        .await,
-        Err(ReadySetError::ReaderMissingKey)
-    ));
 
     shutdown_tx.shutdown().await;
 }
@@ -5294,7 +5119,6 @@ async fn post_read_ilike() {
                 }),
                 ty: DfType::Bool,
             }),
-            timestamp: None,
             limit: None,
             offset: None,
         })

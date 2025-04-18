@@ -194,16 +194,6 @@ pub trait UpstreamDatabase: Sized + Send {
         query: &'a str,
     ) -> Result<Self::QueryResult<'a>, Self::Error>;
 
-    /// Execute a raw, un-prepared write query, constructing and returning a RYW ticket for the
-    /// write
-    // TODO: newtype RYW ticket, not just String
-    async fn handle_ryw_write<'a, S>(
-        &'a mut self,
-        query: S,
-    ) -> Result<(Self::QueryResult<'a>, String), Self::Error>
-    where
-        S: AsRef<str> + Send + Sync + 'a;
-
     /// Handle starting a transaction with the upstream database.
     async fn start_tx<'a>(
         &'a mut self,
@@ -394,17 +384,6 @@ where
         query: &'a str,
     ) -> Result<Self::QueryResult<'a>, Self::Error> {
         self.upstream().await?.simple_query(query).await
-    }
-
-    // TODO: newtype RYW ticket, not just String
-    async fn handle_ryw_write<'a, S>(
-        &'a mut self,
-        query: S,
-    ) -> Result<(Self::QueryResult<'a>, String), Self::Error>
-    where
-        S: AsRef<str> + Send + Sync + 'a,
-    {
-        self.upstream().await?.handle_ryw_write(query).await
     }
 
     async fn start_tx<'a>(

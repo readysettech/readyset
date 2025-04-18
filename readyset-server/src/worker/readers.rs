@@ -18,7 +18,6 @@ use failpoint_macros::set_failpoint;
 use futures::pin_mut;
 use futures_util::future::TryFutureExt;
 use pin_project::pin_project;
-use readyset_client::consistency::Timestamp;
 use readyset_client::metrics::recorded;
 use readyset_client::results::ResultIterator;
 use readyset_client::{
@@ -177,7 +176,6 @@ impl ReadRequestHandler {
         let ViewQuery {
             key_comparisons,
             block,
-            timestamp,
             filter,
             limit,
             offset,
@@ -207,18 +205,14 @@ impl ReadRequestHandler {
             Err(e) => reply_with_error!(e),
         };
 
-        let consistency_miss = !has_sufficient_timestamp(reader, &timestamp);
-
         let (keys_to_replay, receiver) = match reader.get_multi_with_notifier(&key_comparisons) {
             Err(LookupError::NotReady) => reply_with_error!(ReadySetError::ViewNotYetAvailable),
             Err(LookupError::Destroyed) => reply_with_error!(ReadySetError::ViewDestroyed),
             Err(LookupError::Error(e)) => reply_with_error!(e),
             // We missed some keys
-            Err(LookupError::Miss((misses, _))) if consistency_miss => (misses, None),
             Err(LookupError::Miss((misses, notifier))) => (misses, Some(notifier)),
             // We hit on all keys, but there is a consistency miss. This just counts as a miss,
             // but no keys needs triggering.
-            Ok(_) if consistency_miss => (vec![], None),
             Ok(hit) => {
                 // We hit on all keys, and there is no consistency miss, can return results
                 // immediately
@@ -256,7 +250,6 @@ impl ReadRequestHandler {
             limit,
             offset,
             filter,
-            timestamp,
             upquery_timeout: self.upquery_timeout,
             raw_result,
             receiver,
@@ -435,24 +428,6 @@ pub(crate) async fn listen(
     }
 }
 
-/// Verifies that the timestamp in the reader node associated with the read handle, `reader`,
-/// has a greater timestamp than `timestamp`. A greater reader timestamp indicates the writes
-/// in the node include all of the writes associated with `timestamp`.
-fn has_sufficient_timestamp(reader: &SingleReadHandle, timestamp: &Option<Timestamp>) -> bool {
-    if timestamp.is_none() {
-        return true;
-    }
-
-    let dataflow_timestamp = reader.timestamp();
-    if dataflow_timestamp.is_none() {
-        return false;
-    }
-
-    dataflow_timestamp
-        .unwrap()
-        .satisfies(timestamp.as_ref().unwrap())
-}
-
 /// Issues a blocking read against a reader. This can be repeatedly polled via `check` for
 /// completion.
 #[pin_project]
@@ -466,7 +441,6 @@ pub struct BlockingRead {
     filter: Option<DfExpr>,
     first: time::Instant,
     warned: bool,
-    timestamp: Option<Timestamp>,
     upquery_timeout: Duration,
     raw_result: bool,
     receiver: Option<ReaderUpdatedNotifier>,
@@ -480,7 +454,6 @@ impl std::fmt::Debug for BlockingRead {
             .field("target", &self.target)
             .field("key_comparisons", &self.key_comparisons)
             .field("first", &self.first)
-            .field("timestamp", &self.timestamp)
             .field("eviction_epoch", &self.eviction_epoch)
             .finish()
     }
@@ -496,12 +469,9 @@ impl BlockingRead {
             readers.get(target).unwrap().clone()
         });
 
-        let consistency_miss = !has_sufficient_timestamp(reader, &self.timestamp);
-
         let still_waiting = match reader.get_multi(&self.key_comparisons) {
             // We hit on all keys, but there is a consistency miss. This just counts as a miss,
             // but no keys needs triggering.
-            Ok(_) if consistency_miss => vec![],
             Err(LookupError::Miss((misses, _))) => misses,
             Err(_) => return Poll::Ready(Err(ReadySetError::ServerShuttingDown)),
             Ok(hit) => {

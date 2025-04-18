@@ -54,7 +54,6 @@ use vec1::{vec1, Vec1};
 pub(crate) mod results;
 
 use self::results::{ResultIterator, Results};
-use crate::consistency::Timestamp;
 use crate::{ReaderAddress, Tagged, Tagger};
 
 type Transport = AsyncBincodeStream<
@@ -1158,28 +1157,6 @@ pub struct ViewQuery {
     pub limit: Option<usize>,
     /// An optional offset to skip the given number of rows from the beginning of the result set
     pub offset: Option<usize>,
-    /// Timestamp to compare against for reads, if a timestamp is passed into the
-    /// view query, a read will only return once the timestamp is less than
-    /// the timestamp associated with the data.
-    // TODO(justin): Verify reads block on timestamps once timestamps have a definition
-    // with Ord.
-    pub timestamp: Option<Timestamp>,
-}
-
-// TODO(andrew): consolidate From impls once RYW fully adopted
-impl From<(Vec<KeyComparison>, bool, Option<Timestamp>)> for ViewQuery {
-    fn from(
-        (key_comparisons, block, ticket): (Vec<KeyComparison>, bool, Option<Timestamp>),
-    ) -> Self {
-        Self {
-            key_comparisons,
-            block,
-            limit: None,
-            offset: None,
-            filter: None,
-            timestamp: ticket,
-        }
-    }
 }
 
 impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
@@ -1190,7 +1167,6 @@ impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
             filter: None,
             limit: None,
             offset: None,
-            timestamp: None,
         }
     }
 }
@@ -1311,7 +1287,6 @@ impl Service<ViewQuery> for ReaderHandle {
                             filter: query.filter.clone(),
                             limit: query.limit,
                             offset: query.offset,
-                            timestamp: query.timestamp.clone(),
                         },
                     }));
 
@@ -1478,10 +1453,6 @@ impl ReaderHandle {
         Ok(vec)
     }
 
-    // TODO(andrew): consolidate RYW and normal reads into cohesive API once API design is settled.
-    // RYW functionality currently added as duplicate methods so as not to disrupt current
-    // reader usage until RYW is fully adopted
-
     /// Issue a raw `ViewQuery` against this view, and return the results.
     ///
     /// The method will block if the results are not yet available only when `block` is `true`.
@@ -1499,7 +1470,10 @@ impl ReaderHandle {
     ///
     /// The method will block if the results are not yet available only when `block` is `true`.
     pub async fn lookup(&mut self, key: &[DfValue], block: bool) -> ReadySetResult<ResultIterator> {
-        self.lookup_ryw(key, block, None).await
+        let key = Vec1::try_from_vec(key.into())
+            .map_err(|_| view_err(self.node, ReadySetError::EmptyKey))?;
+        self.multi_lookup(vec![KeyComparison::Equal(key)], block)
+            .await
     }
 
     /// Retrieve the query results for the given parameter values.
@@ -1512,42 +1486,7 @@ impl ReaderHandle {
         key_comparisons: Vec<KeyComparison>,
         block: bool,
     ) -> ReadySetResult<ResultIterator> {
-        self.raw_lookup((key_comparisons, block, None).into()).await
-    }
-
-    /// Retrieve the query results for the given parameter value.
-    ///
-    /// The method will block if the results are not yet available or do not have a timestamp
-    /// satisfying the `ticket ` requirement only when `block` is `true`.
-    /// If `block` is false, misses will be returned as empty results. Any requested keys that have
-    /// missing state will be backfilled (asynchronously if `block` is `false`).
-    pub async fn lookup_ryw(
-        &mut self,
-        key: &[DfValue],
-        block: bool,
-        ticket: Option<Timestamp>,
-    ) -> ReadySetResult<ResultIterator> {
-        // TODO: Optimized version of this function?
-        let key = Vec1::try_from_vec(key.into())
-            .map_err(|_| view_err(self.node, ReadySetError::EmptyKey))?;
-        self.multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
-            .await
-    }
-
-    /// Retrieve the query results for the given parameter values
-    ///
-    /// The method will block if the results are not yet available or do not have a timestamp
-    /// satisfying the `ticket ` requirement only when `block` is `true`.
-    /// If `block` is false, misses will be returned as empty results. Any requested keys that have
-    /// missing state will be backfilled (asynchronously if `block` is `false`).
-    pub async fn multi_lookup_ryw(
-        &mut self,
-        key_comparisons: Vec<KeyComparison>,
-        block: bool,
-        ticket: Option<Timestamp>,
-    ) -> ReadySetResult<ResultIterator> {
-        self.raw_lookup((key_comparisons, block, ticket).into())
-            .await
+        self.raw_lookup((key_comparisons, block).into()).await
     }
 
     /// Build a [`ViewQuery`] for performing a lookup against this [`ReaderHandle`]
@@ -1558,7 +1497,6 @@ impl ReaderHandle {
         raw_keys: Vec<Cow<'_, [DfValue]>>,
         limit: Option<usize>,
         offset: Option<usize>,
-        ticket: Option<Timestamp>,
         blocking_read: bool,
         dialect: Dialect,
     ) -> ReadySetResult<ViewQuery> {
@@ -1591,7 +1529,6 @@ impl ReaderHandle {
             }),
             limit,
             offset,
-            timestamp: ticket,
         })
     }
 }
@@ -1885,7 +1822,6 @@ impl ReusedReaderHandle {
         raw_keys: Vec<Cow<'_, [DfValue]>>,
         limit: Option<usize>,
         offset: Option<usize>,
-        ticket: Option<Timestamp>,
         blocking_read: bool,
         dialect: Dialect,
     ) -> ReadySetResult<Option<ViewQuery>> {
@@ -1919,7 +1855,6 @@ impl ReusedReaderHandle {
                 raw_keys,
                 limit,
                 offset,
-                ticket,
                 blocking_read,
                 dialect,
             )
@@ -1938,7 +1873,6 @@ impl View {
         raw_keys: Vec<Cow<'_, [DfValue]>>,
         limit: Option<usize>,
         offset: Option<usize>,
-        ticket: Option<Timestamp>,
         blocking_read: bool,
         dialect: Dialect,
     ) -> ReadySetResult<Option<(&mut ReaderHandle, ViewQuery)>> {
@@ -1946,15 +1880,7 @@ impl View {
         // verify that we are executing our query with these values.
         match self {
             View::Single(handle) => handle
-                .build_view_query(
-                    None,
-                    raw_keys,
-                    limit,
-                    offset,
-                    ticket,
-                    blocking_read,
-                    dialect,
-                )
+                .build_view_query(None, raw_keys, limit, offset, blocking_read, dialect)
                 .map(|vq| Some((handle, vq))),
             View::MultipleReused(handles) => {
                 let mut last_error = None;
@@ -1963,7 +1889,6 @@ impl View {
                         raw_keys.clone(),
                         limit,
                         offset,
-                        ticket.clone(),
                         blocking_read,
                         dialect,
                     ) {
@@ -2222,7 +2147,7 @@ mod tests {
                 Dialect::PostgreSQL => DfDialect::DEFAULT_POSTGRESQL,
             };
             let mut view = View::Single(reader_handle);
-            view.build_view_query(raw_keys, limit, offset, None, true, dataflow_dialect)
+            view.build_view_query(raw_keys, limit, offset, true, dataflow_dialect)
                 .unwrap()
                 .unwrap()
                 .1

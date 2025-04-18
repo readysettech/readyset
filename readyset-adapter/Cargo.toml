@@ -44,7 +44,6 @@ readyset-client = { path = "../readyset-client/" }
 readyset-errors = { path = "../readyset-errors/" }
 readyset-data = { path = "../readyset-data/" }
 readyset-server = { path = "../readyset-server" }
-timestamp-service = { path = "../timestamp-service/" }
 dataflow-expression = { path = "../dataflow-expression" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
@@ -75,7 +74,6 @@ name = "hash"
 harness = false
 
 [features]
-ryw = []
 failure_injection = ["fail/failpoints"]
 
 [lints]

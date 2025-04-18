@@ -394,16 +394,6 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         Ok(QueryResult::SimpleQuery(res))
     }
 
-    async fn handle_ryw_write<'a, S>(
-        &'a mut self,
-        _query: S,
-    ) -> Result<(Self::QueryResult<'a>, String), Error>
-    where
-        S: AsRef<str> + Send + Sync + 'a,
-    {
-        unsupported!("Read-Your-Write not yet implemented for PostgreSQL")
-    }
-
     async fn execute<'a>(
         &'a mut self,
         statement_id: &UpstreamStatementId,

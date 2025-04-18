@@ -4,11 +4,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_util::Stream;
-use mysql_async::consts::{CapabilityFlags, Command, StatusFlags};
+use mysql_async::consts::{Command, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{
-    ChangeUserOpts, Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, SslOpts, TxOpts,
-    UrlError,
+    ChangeUserOpts, Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, SslOpts, UrlError,
 };
 use pin_project::pin_project;
 use readyset_adapter::upstream_database::{UpstreamDestination, UpstreamStatementId};
@@ -17,7 +16,7 @@ use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::{recorded, QueryDestination};
 use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfValue;
-use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_util::redacted::RedactedString;
 use tokio::runtime::RuntimeFlavor;
@@ -168,8 +167,6 @@ impl MySqlUpstream {
         username: Option<String>,
         password: Option<String>,
     ) -> Result<(Conn, HashMap<StatementID, mysql_async::Statement>), Error> {
-        // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
-        // GTID information is used for RYW
         let url = upstream_config
             .upstream_db_url
             .as_deref()
@@ -201,17 +198,9 @@ impl MySqlUpstream {
             user = %opts.user().unwrap_or("<NO USER>"),
         );
         span.in_scope(|| debug!("Establishing connection"));
-        let conn = if cfg!(feature = "ryw") {
-            Conn::new(
-                OptsBuilder::from_opts(opts).add_capability(CapabilityFlags::CLIENT_SESSION_TRACK),
-            )
+        let conn = Conn::new(OptsBuilder::from_opts(opts))
             .instrument(span.clone())
-            .await?
-        } else {
-            Conn::new(OptsBuilder::from_opts(opts))
-                .instrument(span.clone())
-                .await?
-        };
+            .await?;
 
         // Check that the server version is supported.
         let (major, minor, _) = conn.server_version();
@@ -398,39 +387,6 @@ impl UpstreamDatabase for MySqlUpstream {
         _query: &'a str,
     ) -> Result<Self::QueryResult<'a>, Error> {
         unsupported!("MySQL does not have a simple_query protocol");
-    }
-
-    /// Executes the given query on the mysql backend.
-    async fn handle_ryw_write<'a, S>(
-        &'a mut self,
-        query: S,
-    ) -> Result<(Self::QueryResult<'a>, String), Error>
-    where
-        S: AsRef<str> + Send + Sync + 'a,
-    {
-        let mut transaction = self.conn.start_transaction(TxOpts::default()).await?;
-        transaction.query_drop(query.as_ref()).await.map_err(|e| {
-            error!("Could not execute query in mysql : {:?}", e);
-            e
-        })?;
-
-        let affected_rows = transaction.affected_rows();
-        let last_insert_id = transaction.last_insert_id();
-        let status_flags = transaction.status();
-        let txid = transaction.commit_returning_gtid().await.map_err(|e| {
-            internal_err!(
-                "Error obtaining GTID from MySQL for RYW-enabled commit: {}",
-                e
-            )
-        })?;
-        Ok((
-            QueryResult::WriteResult {
-                num_rows_affected: affected_rows,
-                last_inserted_id: last_insert_id.unwrap_or(0),
-                status_flags,
-            },
-            txid,
-        ))
     }
 
     async fn start_tx<'a>(

@@ -83,7 +83,6 @@ use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use readyset_adapter_types::{DeallocateId, ParsedCommand, PreparedStatementType};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
-use readyset_client::consistency::Timestamp;
 use readyset_client::query::*;
 use readyset_client::results::Results;
 use readyset_client::utils::retry_with_exponential_backoff;
@@ -98,9 +97,8 @@ use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
 use readyset_sql::ast::{
     self, AlterReadysetStatement, CacheInner, CreateCacheStatement, DeallocateStatement,
-    DeleteStatement, DropCacheStatement, ExplainStatement, InsertStatement, Relation,
-    SelectStatement, SetStatement, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier,
-    UpdateStatement, UseStatement,
+    DropCacheStatement, ExplainStatement, Relation, SelectStatement, SetStatement, ShowStatement,
+    SqlIdentifier, SqlQuery, StatementIdentifier, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::adapter_rewrites::{self, ProcessedQueryParams};
@@ -108,7 +106,6 @@ use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySen
 use readyset_util::redacted::{RedactedString, Sensitive};
 use readyset_version::READYSET_VERSION;
 use slab::Slab;
-use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error, trace, warn};
 use vec1::Vec1;
@@ -283,8 +280,6 @@ pub struct BackendBuilder {
     dialect: Dialect,
     users: HashMap<String, String>,
     require_authentication: bool,
-    ticket: Option<Timestamp>,
-    timestamp_client: Option<TimestampClient>,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
     query_log_mode: Option<QueryLogMode>,
     unsupported_set_mode: UnsupportedSetMode,
@@ -306,8 +301,6 @@ impl Default for BackendBuilder {
             dialect: Dialect::MySQL,
             users: Default::default(),
             require_authentication: true,
-            ticket: None,
-            timestamp_client: None,
             query_log_sender: None,
             query_log_mode: None,
             unsupported_set_mode: UnsupportedSetMode::Error,
@@ -364,8 +357,6 @@ impl BackendBuilder {
                 prepared_statements: Default::default(),
                 unnamed_prepared_statements: Default::default(),
                 query_status_cache,
-                ticket: self.ticket,
-                timestamp_client: self.timestamp_client,
             },
             settings: BackendSettings {
                 slowlog: self.slowlog,
@@ -431,17 +422,6 @@ impl BackendBuilder {
     /// their caches.
     pub fn allow_cache_ddl(mut self, allow_cache_ddl: bool) -> Self {
         self.allow_cache_ddl = allow_cache_ddl;
-        self
-    }
-
-    /// Specifies whether RYW consistency should be enabled. If true, RYW consistency
-    /// constraints will be enforced on all reads.
-    pub fn enable_ryw(mut self, enable_ryw: bool) -> Self {
-        if enable_ryw {
-            // initialize with an empty timestamp, which will be satisfied by any data version
-            self.ticket = Some(Timestamp::default());
-            self.timestamp_client = Some(TimestampClient::default())
-        }
         self
     }
 
@@ -621,15 +601,6 @@ where
     /// any metadata we've previously prepared and cached. Thus this map is a link from the query
     /// to the index of the prepared statement in `prepared_statements`.
     unnamed_prepared_statements: HashMap<String, usize>,
-    /// Current RYW ticket. `None` if RYW is not enabled. This `ticket` will
-    /// be updated as the client makes writes so as to be an accurate low watermark timestamp
-    /// required to make RYW-consistent reads. On reads, the client will pass in this ticket to be
-    /// checked by noria view nodes.
-    ticket: Option<Timestamp>,
-    /// `timestamp_client` is the Backends connection to the TimestampService. The TimestampService
-    /// is responsible for creating accurate RYW timestamps/tickets based on writes made by the
-    /// Backend client.
-    timestamp_client: Option<TimestampClient>,
 }
 
 /// Settings that have no state and are constant for a given [`Backend`]
@@ -1447,7 +1418,6 @@ where
         noria: &'a mut NoriaConnector,
         prep: &noria_connector::PrepareResult,
         params: &[DfValue],
-        ticket: Option<Timestamp>,
         event: &mut QueryExecutionEvent,
     ) -> ReadySetResult<QueryResult<'a, DB>> {
         use noria_connector::PrepareResult::*;
@@ -1460,7 +1430,7 @@ where
                     ps: statement,
                     params,
                 };
-                noria.execute_select(ctx, ticket, event).await
+                noria.execute_select(ctx, event).await
             }
             Insert { statement, .. } => noria.execute_prepared_insert(statement, params).await,
             Update { statement, .. } => noria.execute_prepared_update(statement, params).await,
@@ -1514,10 +1484,9 @@ where
         params: &[DfValue],
         exec_meta: DB::ExecMeta<'_>,
         ex_info: Option<&mut ExecutionInfo>,
-        ticket: Option<Timestamp>,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let noria_res = Self::execute_noria(noria, noria_prep, params, ticket, event).await;
+        let noria_res = Self::execute_noria(noria, noria_prep, params, event).await;
         match noria_res {
             Ok(noria_ok) => {
                 if let Some(info) = ex_info {
@@ -1651,7 +1620,6 @@ where
     /// `params`.
     /// A [`QueryExecutionEvent`], is used to track metrics and behavior scoped to the
     /// execute operation.
-    // TODO(andrew, justin): add RYW support for executing prepared queries
     #[inline]
     pub async fn execute(
         &mut self,
@@ -1672,7 +1640,6 @@ where
 
         let upstream = &mut self.upstream;
         let noria = &mut self.noria;
-        let ticket = self.state.ticket.clone();
 
         // If the query is pending, check the query status cache to see if it is now successful.
         //
@@ -1760,11 +1727,9 @@ where
         };
 
         let result = match &cached_statement.prep.inner {
-            PrepareResultInner::Noria(prep) => {
-                Self::execute_noria(noria, prep, params, ticket, &mut event)
-                    .await
-                    .map_err(Into::into)
-            }
+            PrepareResultInner::Noria(prep) => Self::execute_noria(noria, prep, params, &mut event)
+                .await
+                .map_err(Into::into),
             PrepareResultInner::Upstream(prep) => {
                 // No inlined caches for this query exist if we are only prepared on upstream.
                 if cached_statement.migration_state.is_inlined() {
@@ -1792,7 +1757,6 @@ where
                     params,
                     exec_meta,
                     cached_statement.execution_info.as_mut(),
-                    ticket,
                     &mut event,
                 )
                 .await
@@ -2687,7 +2651,7 @@ where
                 create_if_missing: settings.migration_mode == MigrationMode::InRequestPath,
                 processed_query_params,
             };
-            noria.execute_select(ctx, state.ticket.clone(), event).await
+            noria.execute_select(ctx, event).await
         };
 
         if status.execution_info.is_none() {
@@ -2895,49 +2859,15 @@ where
             if let Some(upstream) = upstream {
                 match query {
                     SqlQuery::Select(_) => unreachable!("read path returns prior"),
-                    SqlQuery::Insert(InsertStatement { table: t, .. })
-                    | SqlQuery::Update(UpdateStatement { table: t, .. })
-                    | SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
+                    SqlQuery::Insert(_) | SqlQuery::Update(_) | SqlQuery::Delete(_) => {
                         event.sql_type = SqlQueryType::Write;
                         event.destination = Some(QueryDestination::Upstream);
                         let _t = event.start_upstream_timer();
 
-                        // Update ticket if RYW enabled
-                        let query_result = if cfg!(feature = "ryw") {
-                            if let Some(timestamp_service) = &mut state.timestamp_client {
-                                let (query_result, identifier) =
-                                    upstream.handle_ryw_write(raw_query).await?;
-
-                                // TODO(andrew): Move table name to table index conversion to
-                                // timestamp service https://app.clubhouse.io/readysettech/story/331
-                                let index = noria.node_index_of(t.name.as_str()).await?;
-                                let affected_tables = vec![WriteKey::TableIndex(index)];
-
-                                let new_timestamp = timestamp_service
-                                    .append_write(WriteId::MySqlGtid(identifier), affected_tables)
-                                    .map_err(|e| internal_err!("{e}"))?;
-
-                                // TODO(andrew, justin): solidify error handling in client
-                                // https://app.clubhouse.io/readysettech/story/366
-                                let current_ticket = state.ticket.as_ref().ok_or_else(|| {
-                                    internal_err!("RYW enabled backends must have a current ticket")
-                                })?;
-
-                                state.ticket =
-                                    Some(Timestamp::join(current_ticket, &new_timestamp));
-                                Ok(query_result)
-                            } else {
-                                upstream.query(raw_query).await
-                            }
-                        } else {
-                            upstream.query(raw_query).await
-                        };
-
+                        let query_result = upstream.query(raw_query).await;
                         query_result.map(QueryResult::Upstream)
                     }
 
-                    // Table Create / Drop (RYW not supported)
-                    // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
                     SqlQuery::CreateDatabase(_)
                     | SqlQuery::CreateView(_)
                     | SqlQuery::CreateTable(_)
@@ -2968,6 +2898,7 @@ where
                         )
                         .await
                     }
+
                     SqlQuery::CreateCache(_)
                     | SqlQuery::Deallocate(_)
                     | SqlQuery::DropCache(_)
@@ -2981,11 +2912,6 @@ where
                     }
                 }
             } else {
-                // Interacting directly with ReadySet writer (No RYW support)
-                //
-                // TODO(andrew, justin): Do we want RYW support with the NoriaConnector?
-                // Currently, no. TODO: Implement event execution metrics for
-                // ReadySet without upstream.
                 event.destination = Some(QueryDestination::Readyset);
                 let start = Instant::now();
 
@@ -3233,11 +3159,6 @@ where
             Some(db) => db.database(),
             None => None,
         }
-    }
-
-    // For debugging purposes
-    pub fn ticket(&self) -> &Option<Timestamp> {
-        &self.state.ticket
     }
 
     fn parse_query(&mut self, query: &str) -> ReadySetResult<SqlQuery> {
