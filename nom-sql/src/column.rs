@@ -322,7 +322,7 @@ mod tests {
 
         #[test]
         fn on_update_current_timestamp_no_precision() {
-            let input = b"`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP";
+            let input = b"`lastModified` DATETIME(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE CURRENT_TIMESTAMP";
             let (_, res) = column_specification(Dialect::MySQL)(LocatedSpan::new(input)).unwrap();
             let cspec = ColumnSpecification {
                 column: Column {
@@ -335,7 +335,7 @@ mod tests {
                 constraints: vec![
                     ColumnConstraint::NotNull,
                     ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
-                        name: "CURRENT_TIMESTAMP".into(),
+                        name: "current_timestamp".into(),
                         arguments: vec![Expr::Literal(Literal::Integer(6))],
                     })),
                     ColumnConstraint::OnUpdateCurrentTimestamp(None),
@@ -348,7 +348,7 @@ mod tests {
 
         #[test]
         fn on_update_current_timestamp_precision() {
-            let canonical = "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)";
+            let canonical = "`lastModified` DATETIME(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE CURRENT_TIMESTAMP(6)";
             let inputs = vec![
                 canonical,
                 "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP (6) ",
@@ -371,7 +371,7 @@ mod tests {
                     constraints: vec![
                         ColumnConstraint::NotNull,
                         ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
-                            name: "CURRENT_TIMESTAMP".into(),
+                            name: "current_timestamp".into(),
                             arguments: vec![Expr::Literal(Literal::Integer(6))],
                         })),
                         ColumnConstraint::OnUpdateCurrentTimestamp(Some(Literal::Integer(6))),

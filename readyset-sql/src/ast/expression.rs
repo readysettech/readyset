@@ -273,17 +273,17 @@ impl DialectDisplay for FunctionExpr {
                 )
             }
             FunctionExpr::Extract { field, expr } => {
-                write!(f, "EXTRACT({field} FROM {})", expr.display(dialect))
+                write!(f, "extract({field} FROM {})", expr.display(dialect))
             }
             FunctionExpr::Lower { expr, collation } => {
-                write!(f, "LOWER({}", expr.display(dialect))?;
+                write!(f, "lower({}", expr.display(dialect))?;
                 if let Some(c) = collation {
                     write!(f, " COLLATE \"{}\"", c)?;
                 }
                 write!(f, ")")
             }
             FunctionExpr::Upper { expr, collation } => {
-                write!(f, "UPPER({}", expr.display(dialect))?;
+                write!(f, "upper({}", expr.display(dialect))?;
                 if let Some(c) = collation {
                     write!(f, " COLLATE \"{}\"", c)?;
                 }
@@ -1138,9 +1138,9 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 // XXX: Unfortunately, we have lost the original casing by now. This will cause some
                 // spurious mismatches with nom-sql.
                 let name = if shorthand {
-                    "SUBSTR".into_dialect(dialect)
+                    "substr".into_dialect(dialect)
                 } else {
-                    "SUBSTRING".into_dialect(dialect)
+                    "substring".into_dialect(dialect)
                 };
                 Ok(Self::Call(FunctionExpr::Call { name, arguments }))
             }
@@ -1249,7 +1249,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
         // TODO: handle null treatment and other stuff
         let sqlparser::ast::Function { args, name, .. } = value;
 
-        let sqlparser::ast::ObjectNamePart::Identifier(ident) = name
+        let sqlparser::ast::ObjectNamePart::Identifier(mut ident) = name
             .0
             .into_iter()
             .exactly_one()
@@ -1362,6 +1362,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
         } else if ident.value.eq_ignore_ascii_case("EXTRACT") {
             return failed!("{ident} should have been converted earlier");
         } else {
+            ident.value = ident.value.to_lowercase();
             Self::Call(FunctionExpr::Call {
                 name: ident.into_dialect(dialect),
                 arguments: exprs.try_collect()?,

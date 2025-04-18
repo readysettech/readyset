@@ -149,7 +149,7 @@ mod tests {
                         Expr::Literal("test".into()),
                         Expr::Literal("test".into()),
                         Expr::Call(FunctionExpr::Call {
-                            name: "CURRENT_TIMESTAMP".into(),
+                            name: "current_timestamp".into(),
                             arguments: vec![]
                         }),
                     ],],

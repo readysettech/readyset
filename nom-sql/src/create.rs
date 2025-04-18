@@ -2718,7 +2718,7 @@ PRIMARY KEY (`id`));";
     #[test]
     fn on_update_current_timestamp_precision() {
         let qstring = b"CREATE TABLE foo (
-          `lastModified` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
+          `lastModified` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE CURRENT_TIMESTAMP(6)
         );";
         let res = test_parse!(create_table(Dialect::MySQL), qstring);
         assert_eq!(res.table.name, "foo");
@@ -2734,7 +2734,7 @@ PRIMARY KEY (`id`));";
                         vec![
                             ColumnConstraint::NotNull,
                             ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
-                                name: "CURRENT_TIMESTAMP".into(),
+                                name: "current_timestamp".into(),
                                 arguments: vec![Expr::Literal(Literal::Integer(6,),),],
                             },),),
                             ColumnConstraint::OnUpdateCurrentTimestamp(Some(Literal::Integer(6)),),

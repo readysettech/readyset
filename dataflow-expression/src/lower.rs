@@ -178,7 +178,7 @@ impl BuiltinFunction {
             null_on_failure: true,
         };
 
-        let result = match name.to_lowercase().as_str() {
+        let result = match name {
             "convert_tz" => {
                 // Type is inferred from input argument
                 let input = next_arg()?;
@@ -1628,44 +1628,6 @@ pub(crate) mod tests {
     fn call_coalesce() {
         let input = AstExpr::Call(FunctionExpr::Call {
             name: "coalesce".into(),
-            arguments: vec![AstExpr::Column("t.x".into()), AstExpr::Literal(2.into())],
-        });
-
-        let result = Expr::lower(
-            input,
-            Dialect::DEFAULT_MYSQL,
-            &resolve_columns(|c| {
-                if c == "t.x".into() {
-                    Ok((0, DfType::Int))
-                } else {
-                    internal!("what's this column!?")
-                }
-            }),
-        )
-        .unwrap();
-
-        assert_eq!(
-            result,
-            Expr::Call {
-                func: Box::new(BuiltinFunction::Coalesce(
-                    Expr::Column {
-                        index: 0,
-                        ty: DfType::Int
-                    },
-                    vec![Expr::Literal {
-                        val: 2.into(),
-                        ty: DfType::BigInt
-                    }]
-                )),
-                ty: DfType::Int
-            }
-        );
-    }
-
-    #[test]
-    fn call_coalesce_uppercase() {
-        let input = AstExpr::Call(FunctionExpr::Call {
-            name: "COALESCE".into(),
             arguments: vec![AstExpr::Column("t.x".into()), AstExpr::Literal(2.into())],
         });
 

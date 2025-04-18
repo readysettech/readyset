@@ -132,7 +132,7 @@ fn delim_fx_args(
 }
 
 fn function_call_without_parens(
-    dialect: Dialect,
+    _dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
     move |i| {
         // Some functions can be called without parentheses, in both mysql and postgres
@@ -146,11 +146,10 @@ fn function_call_without_parens(
                 tag_no_case("localtime"),
             )),
             |n: LocatedSpan<&[u8]>| {
-                let s = String::from_utf8(n.to_vec()).expect("Only constant string literals");
-                match dialect {
-                    Dialect::MySQL => s.into(),
-                    Dialect::PostgreSQL => s.to_lowercase().into(),
-                }
+                String::from_utf8(n.to_vec())
+                    .expect("Only constant string literals")
+                    .to_lowercase()
+                    .into()
             },
         )(i)?;
 
@@ -317,7 +316,13 @@ fn function_call(
         let (i, name) = dialect.function_identifier()(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, arguments) = delim_fx_args(dialect)(i)?;
-        Ok((i, FunctionExpr::Call { name, arguments }))
+        Ok((
+            i,
+            FunctionExpr::Call {
+                name: name.to_lowercase().into(),
+                arguments,
+            },
+        ))
     }
 }
 
@@ -1027,7 +1032,7 @@ mod tests {
             assert_eq!(
                 res,
                 FunctionExpr::Call {
-                    name: "NOW".into(),
+                    name: "now".into(),
                     arguments: vec![]
                 }
             );
@@ -1138,7 +1143,7 @@ mod tests {
 
                     #[test]
                     fn parse_extract_expr() {
-                        let expr = format!("EXTRACT({} FROM \"col\")", $field_expr);
+                        let expr = format!("extract({} FROM \"col\")", $field_expr);
                         assert_eq!(
                             test_parse!(extract(Dialect::PostgreSQL), expr.as_bytes()),
                             FunctionExpr::Extract {
@@ -1153,7 +1158,7 @@ mod tests {
 
                     #[test]
                     fn format_round_trip() {
-                        let expected = format!("EXTRACT({} FROM \"col\")", $field_expr);
+                        let expected = format!("extract({} FROM \"col\")", $field_expr);
                         let actual = test_parse!(extract(Dialect::PostgreSQL), expected.as_bytes())
                             .display(Dialect::PostgreSQL)
                             .to_string();
@@ -1194,7 +1199,7 @@ mod tests {
             fn test(dialect: Dialect, func_name: &str, val: &str, collate: Option<&str>) {
                 let expected = format!(
                     "{}(\'{}\'{})",
-                    func_name.to_uppercase(),
+                    func_name,
                     val,
                     if let Some(collation_name) = collate {
                         format!(" COLLATE \"{}\"", collation_name)
@@ -1209,7 +1214,7 @@ mod tests {
                 }
                 .display(dialect)
                 .to_string();
-                assert_eq!(expected, actual);
+                assert_eq!(expected, actual, "dialect: {}", dialect);
             }
 
             test(Dialect::PostgreSQL, "lower", "AbC", Some("es_ES"));
