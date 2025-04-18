@@ -23,19 +23,25 @@ use readyset_util::shutdown::ShutdownSender;
 use regex::Regex;
 use test_utils::{skip_flaky_finder, tags};
 
-async fn setup_with_mysql(recreate_db: bool) -> (mysql_async::Opts, Handle, ShutdownSender) {
+async fn setup_with_mysql_flags<F>(set: F) -> (mysql_async::Opts, Handle, ShutdownSender)
+where
+    F: Fn(TestBuilder) -> TestBuilder,
+{
     readyset_tracing::init_test_logging();
     let mut users = std::collections::HashMap::new();
     users.insert("root".to_string(), "noria".to_string());
 
-    TestBuilder::new(
+    let builder = TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(false)
             .users(users),
-    )
-    .recreate_database(recreate_db)
-    .build::<MySQLAdapter>()
-    .await
+    );
+
+    set(builder).build::<MySQLAdapter>().await
+}
+
+async fn setup_with_mysql() -> (mysql_async::Opts, Handle, ShutdownSender) {
+    setup_with_mysql_flags(std::convert::identity).await
 }
 
 async fn setup() -> (mysql_async::Opts, Handle, ShutdownSender) {
@@ -1864,7 +1870,7 @@ async fn show_caches_with_always() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, mysql_upstream)]
 async fn show_readyset_status() {
-    let (opts, _handle, shutdown_tx) = setup_with_mysql(true).await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql().await;
     let mut conn = Conn::new(opts).await.unwrap();
     let mut ret: Vec<Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
 
@@ -2178,7 +2184,7 @@ async fn datetime_nanosecond_precision_text_protocol() {
              INSERT INTO dt_nano_text_protocol VALUES ('0000-00-00 00:00:00', '0000-00-00 00:00:00.00', '0000-00-00 00:00:00.0000', '0000-00-00 00:00:00.000000');")
         .await
         .unwrap();
-    let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
@@ -2238,7 +2244,7 @@ async fn datetime_nanosecond_precision_binary_protocol() {
              INSERT INTO dt_nano_bin_protocol VALUES (3, '0000-00-00 00:00:00', '0000-00-00 00:00:00.00', '0000-00-00 00:00:00.0000', '0000-00-00 00:00:00.000000');")
         .await
         .unwrap();
-    let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
@@ -2290,7 +2296,7 @@ async fn datetime_nanosecond_precision_binary_protocol() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, mysql_upstream)]
 async fn datetime_binary_protocol() {
-    let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql.query_drop("SET sql_mode='';").await.unwrap();
@@ -2338,7 +2344,7 @@ async fn timestamp_binary_protocol() {
              INSERT INTO ts_bin_protocol VALUES (2, '2021-01-01 00:00:00', '2021-01-01 00:00:00.01', '2021-01-01 00:00:00.0001', '2021-01-01 00:00:00.000001');")
         .await
         .unwrap();
-    let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
@@ -2387,7 +2393,7 @@ async fn timestamp_text_protocol() {
              INSERT INTO ts_text_protocol VALUES (2, '2021-01-01 00:00:00', '2021-01-01 00:00:00.01', '2021-01-01 00:00:00.0001', '2021-01-01 00:00:00.000001');")
         .await
         .unwrap();
-    let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
@@ -2629,7 +2635,7 @@ async fn test_binary_column_padding() {
 #[tags(serial, mysql_upstream)]
 async fn test_case_expr_then_expr() {
     let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
-    let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
