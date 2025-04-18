@@ -23,23 +23,18 @@ macro_rules! assert_match {
 ///
 /// Use the [`Options`](./struct.Options.html) builder for more control over initialization.
 #[allow(clippy::type_complexity)]
-fn with_meta_and_timestamp<K, V, M, T>(
+fn with_meta<K, V, M>(
     meta: M,
-    timestamp: T,
 ) -> (
-    WriteHandle<K, V, DefaultInsertionOrder, M, T, RandomState>,
-    ReadHandle<K, V, DefaultInsertionOrder, M, T, RandomState>,
+    WriteHandle<K, V, DefaultInsertionOrder, M, RandomState>,
+    ReadHandle<K, V, DefaultInsertionOrder, M, RandomState>,
 )
 where
     K: Ord + Clone + Hash,
     V: Ord + Clone,
     M: 'static + Clone,
-    T: Clone,
 {
-    Options::default()
-        .with_meta(meta)
-        .with_timestamp(timestamp)
-        .construct()
+    Options::default().with_meta(meta).construct()
 }
 
 #[test]
@@ -533,8 +528,8 @@ fn clear() {
 }
 
 #[test]
-fn with_meta() {
-    let (mut w, r) = with_meta_and_timestamp::<usize, usize, usize, usize>(42, 12);
+fn test_with_meta() {
+    let (mut w, r) = with_meta::<usize, usize, usize>(42);
     assert_eq!(
         r.meta_get(&1).map(|(rs, m)| (rs.map(|rs| rs.len()), m)),
         Err(NotPublished)
@@ -875,22 +870,6 @@ fn contains_range_works() {
         assert!(m.contains_range(&(3..4)));
         assert!(!m.contains_range(&(6..usize::MAX)));
     }
-}
-
-#[test]
-fn timestamp_changes_on_publish() {
-    let (mut w, r) = with_meta_and_timestamp::<usize, usize, usize, usize>(42, 12);
-    // Map is uninitialized before first publish, therefore the timestamp should not
-    // return a value.
-    assert_eq!(r.timestamp(), Err(NotPublished));
-    w.publish();
-    // Set timestamp after publish, it should not be visible until the next
-    // publish.
-    w.set_timestamp(4);
-    assert_eq!(r.timestamp(), Ok(12));
-    // Publish that includes the timestamp of 4, it will now be visible.
-    w.publish();
-    assert_eq!(r.timestamp(), Ok(4));
 }
 
 #[test]

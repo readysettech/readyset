@@ -6,7 +6,6 @@ use ahash::RandomState;
 use common::SizeOf;
 use dataflow_expression::{PostLookup, ReaderProcessing};
 use reader_map::{EvictionQuantity, EvictionStrategy};
-use readyset_client::consistency::Timestamp;
 use readyset_client::results::SharedResults;
 use readyset_client::KeyComparison;
 use readyset_data::Bound;
@@ -121,7 +120,6 @@ fn new_inner(
             let (mut w, r) = reader_map::Options::default()
                 .with_meta(-1)
                 .with_node_index(node_index)
-                .with_timestamp(Timestamp::default())
                 .with_hasher(RandomState::default())
                 .with_index_type(index.index_type)
                 .with_eviction_strategy(eviction_strategy)
@@ -319,9 +317,6 @@ impl WriteHandle {
             }
             _ => {}
         }
-    }
-    pub(crate) fn set_timestamp(&mut self, t: Timestamp) {
-        self.handle.set_timestamp(t);
     }
 
     pub(crate) fn is_partial(&self) -> bool {
@@ -576,10 +571,6 @@ impl SingleReadHandle {
 
     pub fn keys(&self) -> Vec<Vec<DfValue>> {
         self.handle.keys()
-    }
-
-    pub fn timestamp(&self) -> Option<Timestamp> {
-        self.handle.timestamp()
     }
 
     /// Returns true if the corresponding write handle to our read handle has been dropped

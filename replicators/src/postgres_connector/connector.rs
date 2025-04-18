@@ -638,7 +638,6 @@ impl Connector for PostgresWalConnector {
                         vec![ReplicationAction::TableAction {
                             table: cur_table,
                             actions,
-                            txid: None,
                         }],
                         cur_pos.into(),
                     ));
@@ -683,7 +682,6 @@ impl Connector for PostgresWalConnector {
                         vec![ReplicationAction::TableAction {
                             table: cur_table,
                             actions,
-                            txid: None,
                         }],
                         cur_pos.into(),
                     ));
@@ -731,7 +729,6 @@ impl Connector for PostgresWalConnector {
                                         name: name.into(),
                                     },
                                     actions,
-                                    txid: None,
                                 }],
                                 cur_pos.with_lsn(*lsn).into(),
                             ));
@@ -755,7 +752,6 @@ impl Connector for PostgresWalConnector {
                             vec![ReplicationAction::TableAction {
                                 table: cur_table,
                                 actions,
-                                txid: None,
                             }],
                             cur_pos.into(),
                         ));
@@ -775,7 +771,6 @@ impl Connector for PostgresWalConnector {
                             vec![ReplicationAction::TableAction {
                                 table: cur_table,
                                 actions,
-                                txid: None,
                             }],
                             cur_pos.into(),
                         ));
@@ -805,7 +800,6 @@ impl Connector for PostgresWalConnector {
                             vec![ReplicationAction::TableAction {
                                 table: cur_table,
                                 actions,
-                                txid: None,
                             }],
                             cur_pos.into(),
                         ));
@@ -861,7 +855,6 @@ impl Connector for PostgresWalConnector {
                             vec![ReplicationAction::TableAction {
                                 table: cur_table,
                                 actions,
-                                txid: None,
                             }],
                             position.into(),
                         ));

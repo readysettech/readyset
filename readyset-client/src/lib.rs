@@ -242,7 +242,6 @@ use readyset_tracing::propagation::Instrumented;
 use replication_offset::ReplicationOffset;
 use tokio_tower::multiplex;
 
-pub mod consistency;
 mod controller;
 pub mod metrics;
 pub mod query;

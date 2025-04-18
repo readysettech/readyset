@@ -273,9 +273,8 @@ pub mod refs {
 /// In particular, the options dictate the hashing function, meta type, and initial capacity of the
 /// map.
 #[must_use]
-pub struct Options<M, T, S, I> {
+pub struct Options<M, S, I> {
     meta: M,
-    timestamp: T,
     hasher: S,
     index_type: IndexType,
     capacity: Option<usize>,
@@ -286,16 +285,15 @@ pub struct Options<M, T, S, I> {
     node_index: Option<NodeIndex>,
 }
 
-impl<M, T, S, I> fmt::Debug for Options<M, T, S, I>
+impl<M, S, I> fmt::Debug for Options<M, S, I>
 where
     M: fmt::Debug,
-    T: fmt::Debug,
+    S: fmt::Debug,
     I: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Options")
             .field("meta", &self.meta)
-            .field("timestamp", &self.timestamp)
             .field("capacity", &self.capacity)
             .field("order", &self.order)
             .field("node_index", &self.node_index)
@@ -303,11 +301,10 @@ where
     }
 }
 
-impl Default for Options<(), (), RandomState, DefaultInsertionOrder> {
+impl Default for Options<(), RandomState, DefaultInsertionOrder> {
     fn default() -> Self {
         Options {
             meta: (),
-            timestamp: (),
             hasher: RandomState::default(),
             index_type: IndexType::BTreeMap,
             capacity: None,
@@ -318,12 +315,11 @@ impl Default for Options<(), (), RandomState, DefaultInsertionOrder> {
     }
 }
 
-impl<M, T, S, I> Options<M, T, S, I> {
+impl<M, S, I> Options<M, S, I> {
     /// Set the initial meta value for the map.
-    pub fn with_meta<M2>(self, meta: M2) -> Options<M2, T, S, I> {
+    pub fn with_meta<M2>(self, meta: M2) -> Options<M2, S, I> {
         Options {
             meta,
-            timestamp: self.timestamp,
             index_type: self.index_type,
             hasher: self.hasher,
             capacity: self.capacity,
@@ -334,10 +330,9 @@ impl<M, T, S, I> Options<M, T, S, I> {
     }
 
     /// Set the hasher used for the map.
-    pub fn with_hasher<S2>(self, hash_builder: S2) -> Options<M, T, S2, I> {
+    pub fn with_hasher<S2>(self, hash_builder: S2) -> Options<M, S2, I> {
         Options {
             meta: self.meta,
-            timestamp: self.timestamp,
             index_type: self.index_type,
             hasher: hash_builder,
             capacity: self.capacity,
@@ -348,10 +343,9 @@ impl<M, T, S, I> Options<M, T, S, I> {
     }
 
     /// Set the initial capacity for the map.
-    pub fn with_capacity(self, capacity: usize) -> Options<M, T, S, I> {
+    pub fn with_capacity(self, capacity: usize) -> Options<M, S, I> {
         Options {
             meta: self.meta,
-            timestamp: self.timestamp,
             index_type: self.index_type,
             hasher: self.hasher,
             capacity: Some(capacity),
@@ -361,25 +355,10 @@ impl<M, T, S, I> Options<M, T, S, I> {
         }
     }
 
-    /// Sets the initial timestamp of the map.
-    pub fn with_timestamp<T2>(self, timestamp: T2) -> Options<M, T2, S, I> {
-        Options {
-            meta: self.meta,
-            timestamp,
-            index_type: self.index_type,
-            hasher: self.hasher,
-            capacity: self.capacity,
-            eviction_strategy: self.eviction_strategy,
-            order: self.order,
-            node_index: self.node_index,
-        }
-    }
-
     /// Sets the desired [`InsertionOrder`] for the map
-    pub fn with_insertion_order<I2>(self, order: Option<I2>) -> Options<M, T, S, I2> {
+    pub fn with_insertion_order<I2>(self, order: Option<I2>) -> Options<M, S, I2> {
         Options {
             meta: self.meta,
-            timestamp: self.timestamp,
             index_type: self.index_type,
             hasher: self.hasher,
             capacity: self.capacity,
@@ -409,19 +388,17 @@ impl<M, T, S, I> Options<M, T, S, I> {
 
     /// Create the map, and construct the read and write handles used to access it.
     #[allow(clippy::type_complexity)]
-    pub fn construct<K, V>(self) -> (WriteHandle<K, V, I, M, T, S>, ReadHandle<K, V, I, M, T, S>)
+    pub fn construct<K, V>(self) -> (WriteHandle<K, V, I, M, S>, ReadHandle<K, V, I, M, S>)
     where
         K: Ord + Clone + Hash,
         S: BuildHasher + Clone,
         V: Ord + Clone,
         M: 'static + Clone,
-        T: Clone,
         I: partial_map::InsertionOrder<V> + Clone,
     {
         let inner = Inner::with_index_type_and_hasher(
             self.index_type,
             self.meta,
-            self.timestamp,
             self.hasher,
             self.eviction_strategy,
             self.order.unwrap_or_default(),
@@ -454,8 +431,8 @@ where
 /// Use the [`Options`](./struct.Options.html) builder for more control over initialization.
 #[allow(clippy::type_complexity)]
 pub fn new<K, V>() -> (
-    WriteHandle<K, V, DefaultInsertionOrder, (), (), RandomState>,
-    ReadHandle<K, V, DefaultInsertionOrder, (), (), RandomState>,
+    WriteHandle<K, V, DefaultInsertionOrder, (), RandomState>,
+    ReadHandle<K, V, DefaultInsertionOrder, (), RandomState>,
 )
 where
     K: Ord + Clone + Hash,

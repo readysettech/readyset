@@ -111,7 +111,7 @@ fn arbitrary_range<T: Arbitrary + Ord + Clone + 'static>(
 
 fn do_ops<K, V, S>(
     ops: &[Op<K, V>],
-    reader_map: &mut WriteHandle<K, V, DefaultInsertionOrder, (), (), S>,
+    reader_map: &mut WriteHandle<K, V, DefaultInsertionOrder, (), S>,
     write_ref: &mut BTreeMap<K, Vec<V>>,
     read_ref: &mut BTreeMap<K, Vec<V>>,
 ) where
@@ -151,7 +151,7 @@ fn do_ops<K, V, S>(
 }
 
 fn assert_maps_equivalent<K, V, S>(
-    a: &ReadHandle<K, V, DefaultInsertionOrder, (), (), S>,
+    a: &ReadHandle<K, V, DefaultInsertionOrder, (), S>,
     b: &BTreeMap<K, Vec<V>>,
 ) -> bool
 where

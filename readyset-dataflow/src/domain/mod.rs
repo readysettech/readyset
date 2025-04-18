@@ -1406,58 +1406,6 @@ impl Domain {
         Ok(())
     }
 
-    fn handle_timestamp(
-        &mut self,
-        message: Timestamp,
-        executor: &mut dyn Executor,
-    ) -> ReadySetResult<()> {
-        let me = message.dst();
-
-        let message = {
-            let mut n = self
-                .nodes
-                .get(me)
-                .ok_or_else(|| ReadySetError::NoSuchNode(me.id()))?
-                .borrow_mut();
-            n.process_timestamp(
-                message,
-                self.shard,
-                self.replica,
-                &mut self.reader_write_handles,
-                executor,
-            )?
-        };
-
-        let message = if let Some(m) = message {
-            m
-        } else {
-            // no message to send, so no need to run through children
-            return Ok(());
-        };
-
-        let nchildren = self.nodes[me].borrow().children().len();
-        for i in 0..nchildren {
-            let mut p = message.clone();
-
-            let childi = self.nodes[me].borrow().children()[i];
-
-            // we know the child exists since we got it from the node
-            let child_is_merger = self.nodes[childi].borrow().is_shard_merger();
-
-            // The packet `m` must have a link by this point as `link_mut` calls
-            // unwrap on the option.
-            if child_is_merger {
-                // we need to preserve the egress src (which includes shard identifier)
-            } else {
-                p.link_mut().src = me;
-            }
-            p.link_mut().dst = childi;
-
-            self.handle_packet(p, executor)?;
-        }
-        Ok(())
-    }
-
     #[inline(always)]
     fn handle_add_node(
         &mut self,
@@ -2808,14 +2756,6 @@ impl Domain {
                     e.credits
                 );
                 self.handle_eviction(e.req, executor, e.done, e.barrier, e.credits)?;
-            }
-            Packet::Timestamp(m) => {
-                // TODO(justinmiron): Handle timestamp packets at data flow nodes. The
-                // ack should be moved to the base table node's handling of the packet.
-                // As the packet is not propagated or mutated before reaching the
-                // domain, we still have a source channel identifier that we can use
-                // to ack the packet.
-                self.handle_timestamp(m, executor)?;
             }
             Packet::RequestReaderReplay(RequestReaderReplay {
                 mut keys,

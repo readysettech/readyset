@@ -421,7 +421,6 @@ impl MySqlBinlogConnector {
         Ok(ReplicationAction::TableAction {
             table,
             actions: inserted_rows,
-            txid: self.current_gtid,
         })
     }
 
@@ -616,7 +615,6 @@ impl MySqlBinlogConnector {
         Ok(ReplicationAction::TableAction {
             table,
             actions: updated_rows,
-            txid: self.current_gtid,
         })
     }
 
@@ -677,7 +675,6 @@ impl MySqlBinlogConnector {
         Ok(ReplicationAction::TableAction {
             table,
             actions: deleted_rows,
-            txid: self.current_gtid,
         })
     }
 
@@ -849,7 +846,6 @@ impl MySqlBinlogConnector {
                 Ok(ReplicationAction::TableAction {
                     table: relation,
                     actions: vec![TableOperation::Truncate],
-                    txid: self.current_gtid,
                 })
             }
             _ => Err(ReadySetError::SkipEvent),
@@ -875,19 +871,16 @@ impl MySqlBinlogConnector {
             ReplicationAction::TableAction {
                 table,
                 actions: incoming_actions,
-                txid: incoming_txid,
             } => {
                 map.entry(table.clone())
                     .and_modify(|e| {
-                        if let ReplicationAction::TableAction { actions, txid, .. } = e {
+                        if let ReplicationAction::TableAction { actions, .. } = e {
                             actions.extend(incoming_actions.clone());
-                            *txid = incoming_txid.or(*txid);
                         }
                     })
                     .or_insert(ReplicationAction::TableAction {
                         table,
                         actions: incoming_actions,
-                        txid: incoming_txid,
                     });
             }
             ReplicationAction::Empty => {}

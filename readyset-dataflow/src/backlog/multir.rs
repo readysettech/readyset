@@ -6,7 +6,6 @@ use ahash::RandomState;
 use common::DfValue;
 use dataflow_expression::PreInsertion;
 use reader_map::refs::Miss;
-use readyset_client::consistency::Timestamp;
 use readyset_client::results::{SharedResults, SharedRows};
 use readyset_client::KeyComparison;
 use readyset_errors::ReadySetError;
@@ -17,24 +16,12 @@ use vec1::{vec1, Vec1};
 
 /// A [`ReadHandle`] to a map whose key is a single [`DfValue`], for faster lookup (compared to a
 /// Vec with len == 1)
-type HandleSingle = reader_map::handles::ReadHandle<
-    DfValue,
-    Box<[DfValue]>,
-    PreInsertion,
-    i64,
-    Timestamp,
-    RandomState,
->;
+type HandleSingle =
+    reader_map::handles::ReadHandle<DfValue, Box<[DfValue]>, PreInsertion, i64, RandomState>;
 
 /// A [`ReadHandle`] to a map whose key is a [`Vec<DfValue>`]
-type HandleMany = reader_map::handles::ReadHandle<
-    Vec<DfValue>,
-    Box<[DfValue]>,
-    PreInsertion,
-    i64,
-    Timestamp,
-    RandomState,
->;
+type HandleMany =
+    reader_map::handles::ReadHandle<Vec<DfValue>, Box<[DfValue]>, PreInsertion, i64, RandomState>;
 
 #[derive(Clone, Debug)]
 pub(super) enum Handle {
@@ -88,13 +75,6 @@ impl<'a, T> LookupError<'a, T> {
 }
 
 impl Handle {
-    pub(super) fn timestamp(&self) -> Option<Timestamp> {
-        match *self {
-            Handle::Single(ref h) => h.timestamp().ok(),
-            Handle::Many(ref h) => h.timestamp().ok(),
-        }
-    }
-
     pub(super) fn len(&self) -> usize {
         match *self {
             Handle::Single(ref h) => h.len(),
@@ -367,12 +347,11 @@ mod tests {
 
     #[allow(clippy::type_complexity)]
     fn make_single() -> (
-        WriteHandle<DfValue, Box<[DfValue]>, PreInsertion, i64, Timestamp, RandomState>,
+        WriteHandle<DfValue, Box<[DfValue]>, PreInsertion, i64, RandomState>,
         Handle,
     ) {
         let (w, r) = reader_map::Options::default()
             .with_meta(-1)
-            .with_timestamp(Timestamp::default())
             .with_hasher(RandomState::default())
             .with_insertion_order(None)
             .construct();
@@ -381,12 +360,11 @@ mod tests {
 
     #[allow(clippy::type_complexity)]
     fn make_many() -> (
-        WriteHandle<Vec<DfValue>, Box<[DfValue]>, PreInsertion, i64, Timestamp, RandomState>,
+        WriteHandle<Vec<DfValue>, Box<[DfValue]>, PreInsertion, i64, RandomState>,
         Handle,
     ) {
         let (w, r) = reader_map::Options::default()
             .with_meta(-1)
-            .with_timestamp(Timestamp::default())
             .with_hasher(RandomState::default())
             .with_insertion_order(None)
             .construct();

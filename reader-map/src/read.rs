@@ -21,21 +21,19 @@ pub use crate::inner::Miss;
 /// Note that any changes made to the map will not be made visible until the writer calls
 /// [`publish`](crate::WriteHandle::publish). In other words, all operations performed on a
 /// `ReadHandle` will *only* see writes to the map that preceeded the last call to `publish`.
-pub struct ReadHandle<K, V, I, M = (), T = (), S = RandomState>
+pub struct ReadHandle<K, V, I, M = (), S = RandomState>
 where
     K: Ord + Clone,
     S: BuildHasher,
-    T: Clone,
 {
-    pub(crate) handle: left_right::ReadHandle<Inner<K, V, M, T, S, I>>,
+    pub(crate) handle: left_right::ReadHandle<Inner<K, V, M, S, I>>,
 }
 
-impl<K, V, I, M, T, S> fmt::Debug for ReadHandle<K, V, I, M, T, S>
+impl<K, V, I, M, S> fmt::Debug for ReadHandle<K, V, I, M, S>
 where
     K: Ord + Clone + fmt::Debug,
     S: BuildHasher,
     M: fmt::Debug,
-    T: Clone + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ReadHandle")
@@ -44,11 +42,10 @@ where
     }
 }
 
-impl<K, V, I, M, T, S> Clone for ReadHandle<K, V, I, M, T, S>
+impl<K, V, I, M, S> Clone for ReadHandle<K, V, I, M, S>
 where
     K: Ord + Clone,
     S: BuildHasher,
-    T: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -57,27 +54,25 @@ where
     }
 }
 
-impl<K, V, I, M, T, S> ReadHandle<K, V, I, M, T, S>
+impl<K, V, I, M, S> ReadHandle<K, V, I, M, S>
 where
     K: Ord + Clone,
     S: BuildHasher,
-    T: Clone,
 {
-    pub(crate) fn new(handle: left_right::ReadHandle<Inner<K, V, M, T, S, I>>) -> Self {
+    pub(crate) fn new(handle: left_right::ReadHandle<Inner<K, V, M, S, I>>) -> Self {
         Self { handle }
     }
 }
 
-impl<K, V, I, M, T, S> ReadHandle<K, V, I, M, T, S>
+impl<K, V, I, M, S> ReadHandle<K, V, I, M, S>
 where
     K: Ord + Clone + Hash,
     V: Eq + Hash,
     I: InsertionOrder<V>,
     S: BuildHasher,
     M: Clone,
-    T: Clone,
 {
-    fn enter_inner(&self) -> Result<ReadGuard<'_, Inner<K, V, M, T, S, I>>> {
+    fn enter_inner(&self) -> Result<ReadGuard<'_, Inner<K, V, M, S, I>>> {
         self.handle.enter().ok_or(Error::Destroyed)
     }
 
@@ -90,7 +85,7 @@ where
     /// If no publish has happened, or the map has been destroyed, this function returns `None`.
     ///
     /// See [`MapReadRef`].
-    pub fn enter(&self) -> Result<MapReadRef<'_, K, V, I, M, T, S>> {
+    pub fn enter(&self) -> Result<MapReadRef<'_, K, V, I, M, S>> {
         let guard = self.enter_inner()?;
         if !guard.ready {
             return Err(Error::NotPublished);
@@ -248,17 +243,6 @@ where
             .flatten()
             .map(|(k, v)| f(k, v))
             .collect()
-    }
-
-    /// Returns the timestamp associated with the last write.
-    ///
-    /// Note that as this function does not return a read guard, the map may be mutated after
-    /// reading the timestamp.
-    ///
-    /// If a guarded reference cannot be acquired to read the timestamp, an [`Error`] is returned.
-    pub fn timestamp(&self) -> Result<T> {
-        let MapReadRef { guard } = self.enter()?;
-        Ok(guard.timestamp.clone())
     }
 
     /// Returns the index type of the underlying map, or None if no writes have been performed yet

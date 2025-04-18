@@ -34,7 +34,7 @@ use tracing::{debug_span, error, trace, trace_span, Span};
 use vec_map::VecMap;
 
 use crate::internal::*;
-use crate::{consistency, Tagged, Tagger, CONNECTION_FROM_BASE};
+use crate::{Tagged, Tagger, CONNECTION_FROM_BASE};
 
 // TODO(justin): Make write propagation sample rate configurable.
 const TRACE_SAMPLE_RATE: Duration = Duration::from_secs(1);
@@ -259,8 +259,6 @@ pub struct PacketData {
 pub enum PacketPayload {
     /// An input update to a base table.
     Input(Vec<TableOperation>),
-    /// A new timestamp to update the base table.
-    Timestamp(consistency::Timestamp),
 }
 
 impl fmt::Debug for PacketData {
@@ -585,63 +583,12 @@ impl Table {
             }
         })
     }
-
-    /// Sends the timestamp `PacketData` to each base table shard associated with
-    /// `self`.
-    fn timestamp(
-        &mut self,
-        t: PacketData,
-    ) -> impl Future<Output = Result<Tagged<()>, ReadySetError>> + Send {
-        let nshards = self.shards.len();
-        match self.shards.first_mut() {
-            Some(table_rpc) if nshards == 1 => {
-                let request = Tagged::from(t);
-                future::Either::Left(table_rpc.call(request).map_err(rpc_err!(
-                    "Table::timestamp",
-                    multiplex::MultiplexTransport<Transport, Tagger>,
-                    Tagged<PacketData>,
-                )))
-            }
-            _ => {
-                if self.key.is_empty() {
-                    return future::Either::Right(future::Either::Left(future::Either::Left(
-                        async move { internal!("sharded base without a key?") },
-                    )));
-                }
-                if self.key.len() != 1 {
-                    // base sharded by complex key
-                    return future::Either::Right(future::Either::Left(future::Either::Right(
-                        async move { internal!("sharded base without a key?") },
-                    )));
-                }
-
-                // We create a request to each base table shard with the new timestamp.
-                let wait_for = FuturesUnordered::new();
-                for s in &mut self.shards {
-                    let request = Tagged::from(t.clone());
-                    wait_for.push(s.call(request));
-                }
-                future::Either::Right(future::Either::Right(
-                    wait_for
-                        .try_for_each(|_| async { Ok(()) })
-                        .map_err(rpc_err!(
-                            "Table::timestamp",
-                            multiplex::MultiplexTransport<Transport, Tagger>,
-                            Tagged<PacketData>,
-                        ))
-                        .map_ok(Tagged::from),
-                ))
-            }
-        }
-    }
 }
 
 /// A request to the table service.
 pub enum TableRequest {
     /// A set of operations to apply on the table.
     TableOperations(Vec<TableOperation>),
-    /// A timestamp to propagate along the data flow from the base table.
-    Timestamp(consistency::Timestamp),
 }
 
 impl Service<TableRequest> for Table {
@@ -659,23 +606,12 @@ impl Service<TableRequest> for Table {
     }
 
     fn call(&mut self, req: TableRequest) -> Self::Future {
-        // TODO(eta): error handling impl adds overhead
         let table = self.table_name.clone();
         Box::pin(match req {
             TableRequest::TableOperations(ops) => match self.prep_records(ops) {
-                Ok(i) => future::Either::Left(future::Either::Left(
-                    self.input(i).map_err(|e| table_err(table, e)),
-                )),
-                Err(e) => future::Either::Left(future::Either::Right(async move { Err(e) })),
+                Ok(i) => future::Either::Left(self.input(i).map_err(move |e| table_err(table, e))),
+                Err(e) => future::Either::Right(future::ready(Err(e))),
             },
-            TableRequest::Timestamp(t) => {
-                let p = PacketData {
-                    dst: self.node,
-                    data: PacketPayload::Timestamp(t),
-                    trace: None,
-                };
-                future::Either::Right(self.timestamp(p).map_err(|e| table_err(table, e)))
-            }
         })
     }
 }
@@ -970,11 +906,6 @@ impl Table {
             TableOperation::Truncate,
         ]))
         .await
-    }
-
-    /// Updates the timestamp of the base table in the data flow graph.
-    pub async fn update_timestamp(&mut self, t: consistency::Timestamp) -> ReadySetResult<()> {
-        self.request_with_timeout(TableRequest::Timestamp(t)).await
     }
 
     /// Set the replication offset for this table to the given value.

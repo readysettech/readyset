@@ -23,16 +23,15 @@ use crate::WriteHandle;
 ///
 /// Since the map remains immutable while this lives, the methods on this type all give you
 /// unguarded references to types contained in the map.
-pub struct MapReadRef<'rh, K, V, I, M = (), T = (), S = RandomState>
+pub struct MapReadRef<'rh, K, V, I, M = (), S = RandomState>
 where
     K: Ord + Clone,
     V: Eq + Hash,
-    T: Clone,
 {
-    pub(super) guard: ReadGuard<'rh, Inner<K, V, M, T, S, I>>,
+    pub(super) guard: ReadGuard<'rh, Inner<K, V, M, S, I>>,
 }
 
-impl<K, V, I, M, T, S> fmt::Debug for MapReadRef<'_, K, V, I, M, T, S>
+impl<K, V, I, M, S> fmt::Debug for MapReadRef<'_, K, V, I, M, S>
 where
     K: Ord + Clone,
     V: Eq + Hash,
@@ -40,7 +39,6 @@ where
     K: fmt::Debug,
     M: fmt::Debug,
     V: fmt::Debug,
-    T: fmt::Debug + Clone,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MapReadRef")
@@ -49,13 +47,12 @@ where
     }
 }
 
-impl<K, V, I, M, T, S> MapReadRef<'_, K, V, I, M, T, S>
+impl<K, V, I, M, S> MapReadRef<'_, K, V, I, M, S>
 where
     K: Ord + Clone + Hash,
     V: Eq + Hash,
     I: InsertionOrder<V>,
     S: BuildHasher,
-    T: Clone,
 {
     /// Iterate over all key + valuesets in the map.
     ///
@@ -191,14 +188,13 @@ where
     }
 }
 
-impl<K, Q, V, M, T, S, I> std::ops::Index<&'_ Q> for MapReadRef<'_, K, V, I, M, T, S>
+impl<K, Q, V, M, S, I> std::ops::Index<&'_ Q> for MapReadRef<'_, K, V, I, M, S>
 where
     K: Ord + Clone + Borrow<Q> + Hash,
     V: Eq + Hash + Default,
     I: InsertionOrder<V>,
     Q: Ord + ?Sized + Hash + ToOwned<Owned = K>,
     S: BuildHasher,
-    T: Clone,
 {
     type Output = Values<V, I>;
 
@@ -207,13 +203,12 @@ where
     }
 }
 
-impl<'rg, K, V, M, T, S, I> IntoIterator for &'rg MapReadRef<'_, K, V, I, M, T, S>
+impl<'rg, K, V, M, S, I> IntoIterator for &'rg MapReadRef<'_, K, V, I, M, S>
 where
     K: Ord + Clone + Hash,
     V: Eq + Hash,
     I: InsertionOrder<V>,
     S: BuildHasher,
-    T: Clone,
 {
     type Item = (&'rg K, &'rg Values<V, I>);
     type IntoIter = ReadGuardIter<'rg, K, V, I>;

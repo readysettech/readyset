@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use readyset_client::consistency::Timestamp;
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_sql::ast::{ColumnSpecification, Relation, SqlIdentifier};
 use serde::{Deserialize, Serialize};
@@ -112,15 +111,6 @@ pub struct Node {
     pub purge: bool,
 
     sharded_by: Sharding,
-
-    // Tracks each up stream nodes timestamp.
-    // Used to maintain read-your-write consistency when reading data
-    // in the data flow graph.
-    // Wrapped in a RefCell as this map will be mutated while using
-    // immutable references to fields in Node.
-    // We skip serde since we don't want the state of the node, just the configuration.
-    #[serde(skip)]
-    timestamps: HashMap<LocalNodeIndex, Timestamp>,
 }
 
 // constructors
@@ -145,7 +135,6 @@ impl Node {
             purge: false,
 
             sharded_by: Sharding::None,
-            timestamps: HashMap::new(),
         }
     }
 
@@ -163,7 +152,6 @@ impl Node {
         Self {
             index: None,
             taken: false,
-            timestamps: HashMap::new(),
             ..self.clone()
         }
     }

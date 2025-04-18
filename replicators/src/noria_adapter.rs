@@ -12,7 +12,6 @@ use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, PoolConstraints, PoolOpts, SslOpts};
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
-use readyset_client::consistency::Timestamp;
 use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::utils::retry_with_exponential_backoff;
@@ -50,11 +49,6 @@ pub(crate) enum ReplicationAction {
     TableAction {
         table: Relation,
         actions: Vec<TableOperation>,
-        /// The transaction id of a table write operation. Each
-        /// table write operation within a transaction should be assigned
-        /// the same transaction id. These id's should be monotonically
-        /// increasing across transactions.
-        txid: Option<u64>,
     },
     DdlChange {
         schema: String,
@@ -889,7 +883,6 @@ impl<'a> NoriaAdapter<'a> {
         &mut self,
         table: Relation,
         mut actions: Vec<TableOperation>,
-        txid: Option<u64>,
         pos: &ReplicationOffset,
     ) -> ReadySetResult<()> {
         // Send the rows as are
@@ -914,17 +907,6 @@ impl<'a> NoriaAdapter<'a> {
         };
         actions.push(TableOperation::SetReplicationOffset(pos.clone()));
         table_mutator.perform_all(actions).await?;
-
-        // If there was a transaction id associated, propagate the timestamp with that transaction
-        // id.
-        // TODO(justin): Make this operation atomic with the table actions being pushed above.
-        // TODO(vlad): We have to propagate txid to every table or else we won't be able to ensure
-        // proper read after write
-        if let Some(tx) = txid {
-            let mut timestamp = Timestamp::default();
-            timestamp.map.insert(table_mutator.node, tx);
-            table_mutator.update_timestamp(timestamp).await?;
-        }
 
         self.replication_offsets
             .tables
@@ -960,11 +942,7 @@ impl<'a> NoriaAdapter<'a> {
                         }
                     }
                 }
-                ReplicationAction::TableAction {
-                    table,
-                    actions,
-                    txid,
-                } => {
+                ReplicationAction::TableAction { table, actions } => {
                     match self.replication_offsets.tables.get(&table) {
                         Some(Some(cur)) if pos <= *cur => {
                             if !catchup {
@@ -994,11 +972,7 @@ impl<'a> NoriaAdapter<'a> {
                         })?,
                         &table.name,
                     ) {
-                        actionables.push(ReplicationAction::TableAction {
-                            table,
-                            actions,
-                            txid,
-                        });
+                        actionables.push(ReplicationAction::TableAction { table, actions });
                     }
                 }
                 ReplicationAction::Empty => {}
@@ -1010,13 +984,8 @@ impl<'a> NoriaAdapter<'a> {
                 ReplicationAction::DdlChange { schema, changes } => {
                     self.handle_ddl_change(schema, changes, &pos).await?
                 }
-                ReplicationAction::TableAction {
-                    table,
-                    actions,
-                    txid,
-                } => {
-                    self.handle_table_actions(table, actions, txid, &pos)
-                        .await?
+                ReplicationAction::TableAction { table, actions } => {
+                    self.handle_table_actions(table, actions, &pos).await?
                 }
                 ReplicationAction::LogPosition => self.handle_log_position(&pos).await?,
                 ReplicationAction::Empty => unreachable!("Should not have an empty action"),

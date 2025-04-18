@@ -15,7 +15,6 @@ pub(crate) type Edge = ();
 
 // dataflow types
 pub(crate) use dataflow_state::{LookupResult, MemoryState, PersistentState, RecordResult, State};
-pub(crate) use readyset_client::PacketPayload;
 
 // domain local state
 pub use crate::node_map::NodeMap;

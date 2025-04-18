@@ -1,7 +1,6 @@
 use ahash::RandomState;
 use dataflow_expression::PreInsertion;
 use reader_map::EvictionQuantity;
-use readyset_client::consistency::Timestamp;
 use readyset_data::Bound;
 use readyset_util::ranges::RangeBounds;
 
@@ -10,14 +9,7 @@ use crate::prelude::*;
 
 pub(super) enum Handle {
     Single(
-        reader_map::handles::WriteHandle<
-            DfValue,
-            Box<[DfValue]>,
-            PreInsertion,
-            i64,
-            Timestamp,
-            RandomState,
-        >,
+        reader_map::handles::WriteHandle<DfValue, Box<[DfValue]>, PreInsertion, i64, RandomState>,
     ),
     Many(
         reader_map::handles::WriteHandle<
@@ -25,7 +17,6 @@ pub(super) enum Handle {
             Box<[DfValue]>,
             PreInsertion,
             i64,
-            Timestamp,
             RandomState,
         >,
     ),
@@ -177,13 +168,6 @@ impl Handle {
             }
         }
         memory_delta
-    }
-
-    pub fn set_timestamp(&mut self, t: Timestamp) {
-        match self {
-            Handle::Single(ref mut h) => h.set_timestamp(t),
-            Handle::Many(ref mut h) => h.set_timestamp(t),
-        }
     }
 
     pub fn insert_range<R>(&mut self, range: R)

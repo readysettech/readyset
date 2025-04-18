@@ -619,26 +619,6 @@ pub mod packets {
             &mut self.data
         }
     }
-
-    impl Timestamp {
-        pub(crate) fn src(&self) -> LocalNodeIndex {
-            // If link is not specified, then we are at a base table node. Use the packet data
-            // to get the src (which is the base table node).
-            match self.link {
-                Some(l) => l.src,
-                None => self.timestamp.dst,
-            }
-        }
-
-        pub(crate) fn dst(&self) -> LocalNodeIndex {
-            // If link is not specified, then we are at a base table node. Use the packet data
-            // to get the dst (which is the base table node).
-            match self.link {
-                Some(l) => l.dst,
-                None => self.timestamp.dst,
-            }
-        }
-    }
 }
 
 /// The primary unit of communication between nodes in the dataflow graph.
@@ -677,9 +657,6 @@ pub enum Packet {
 
     /// A packet used solely to drive the event loop forward.
     Spin,
-
-    /// Propagate updated timestamps for the set of base tables.
-    Timestamp(Timestamp),
 }
 
 // Getting rid of the various unreachables on the accessor functions in this impl requires
@@ -692,7 +669,6 @@ impl Packet {
             Packet::Input(x) => x.dst(),
             Packet::Update(x) => x.src(),
             Packet::ReplayPiece(x) => x.src(),
-            Packet::Timestamp(x) => x.src(),
             _ => unreachable!(),
         }
     }
@@ -702,7 +678,6 @@ impl Packet {
             Packet::Input(x) => x.dst(),
             Packet::Update(x) => x.dst(),
             Packet::ReplayPiece(x) => x.dst(),
-            Packet::Timestamp(x) => x.dst(),
             _ => unreachable!(),
         }
     }
@@ -715,7 +690,6 @@ impl Packet {
                 req: Eviction::Keys { link, .. },
                 ..
             }) => link,
-            Packet::Timestamp(x) => x.link.as_mut().unwrap(),
             _ => unreachable!(),
         }
     }
@@ -780,7 +754,6 @@ impl fmt::Display for Packet {
             Packet::RequestReaderReplay(_) => write!(f, "RequestReaderReplay"),
             Packet::RequestPartialReplay(_) => write!(f, "RequestPartialReplay"),
             Packet::ReplayPiece(_) => write!(f, "ReplayPiece"),
-            Packet::Timestamp(_) => write!(f, "Timestamp"),
             Packet::Finish(_) => write!(f, "Finish"),
             Packet::Spin => write!(f, "Spin"),
             Packet::Evict(_) => write!(f, "Evict"),
@@ -812,7 +785,6 @@ impl fmt::Debug for Packet {
                 x.tag,
                 x.data.len()
             ),
-            Packet::Timestamp(_) => write!(f, "Timestamp"),
             Packet::Finish(_) => write!(f, "Finish"),
             Packet::Spin => write!(f, "Spin"),
             Packet::Evict(_) => write!(f, "Evict"),

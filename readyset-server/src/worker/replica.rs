@@ -163,12 +163,6 @@ impl Replica {
                         inner: input,
                         src: SourceChannelIdentifier { token, tag },
                     }),
-                    PacketPayload::Timestamp(_) => Packet::Timestamp(Timestamp {
-                        // The link values propagated to the base table are not used.
-                        link: None,
-                        src: SourceChannelIdentifier { token, tag },
-                        timestamp: input,
-                    }),
                 }
             })
         } else {
@@ -395,11 +389,7 @@ impl Replica {
         let _time = time_scope(span, SLOW_LOOP_THRESHOLD);
 
         let ack = match &mut packet {
-            Packet::Timestamp(Timestamp {
-                src: SourceChannelIdentifier { token, tag },
-                ..
-            })
-            | Packet::Input(Input {
+            Packet::Input(Input {
                 src: SourceChannelIdentifier { token, tag },
                 ..
             }) => {

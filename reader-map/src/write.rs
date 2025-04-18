@@ -64,26 +64,24 @@ pub enum EvictionQuantity {
 ///     Some(true)
 /// );
 /// ```
-pub struct WriteHandle<K, V, I, M = (), T = (), S = RandomState>
+pub struct WriteHandle<K, V, I, M = (), S = RandomState>
 where
     K: Ord + Hash + Clone,
     S: BuildHasher + Clone,
     V: Ord + Clone,
     M: 'static + Clone,
-    T: Clone,
     I: InsertionOrder<V>,
 {
-    handle: left_right::WriteHandle<Inner<K, V, M, T, S, I>, Operation<K, V, M, T>>,
-    r_handle: ReadHandle<K, V, I, M, T, S>,
+    handle: left_right::WriteHandle<Inner<K, V, M, S, I>, Operation<K, V, M>>,
+    r_handle: ReadHandle<K, V, I, M, S>,
 }
 
-impl<K, V, I, M, T, S> fmt::Debug for WriteHandle<K, V, I, M, T, S>
+impl<K, V, I, M, S> fmt::Debug for WriteHandle<K, V, I, M, S>
 where
     K: Ord + Hash + Clone + fmt::Debug,
     S: BuildHasher + Clone + fmt::Debug,
     V: Ord + Clone + fmt::Debug,
     M: 'static + Clone + fmt::Debug,
-    T: Clone + fmt::Debug,
     I: InsertionOrder<V>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -93,17 +91,16 @@ where
     }
 }
 
-impl<K, V, I, M, T, S> WriteHandle<K, V, I, M, T, S>
+impl<K, V, I, M, S> WriteHandle<K, V, I, M, S>
 where
     K: Ord + Hash + Clone,
     S: BuildHasher + Clone,
     V: Ord + Clone,
     M: 'static + Clone,
-    T: Clone,
     I: InsertionOrder<V>,
 {
     pub(crate) fn new(
-        handle: left_right::WriteHandle<Inner<K, V, M, T, S, I>, Operation<K, V, M, T>>,
+        handle: left_right::WriteHandle<Inner<K, V, M, S, I>, Operation<K, V, M>>,
     ) -> Self {
         let r_handle = ReadHandle::new(left_right::ReadHandle::clone(&*handle));
         Self { handle, r_handle }
@@ -135,22 +132,15 @@ where
         self.add_op(Operation::SetMeta(meta));
     }
 
-    /// Set the timestamp
-    ///
-    /// Will only be visible to readesr after the next call to ['publish']
-    pub fn set_timestamp(&mut self, timestamp: T) {
-        self.add_op(Operation::SetTimestamp(timestamp));
-    }
-
     fn add_ops<IT>(&mut self, ops: IT) -> &mut Self
     where
-        IT: IntoIterator<Item = Operation<K, V, M, T>>,
+        IT: IntoIterator<Item = Operation<K, V, M>>,
     {
         self.handle.extend(ops);
         self
     }
 
-    fn add_op(&mut self, op: Operation<K, V, M, T>) -> &mut Self {
+    fn add_op(&mut self, op: Operation<K, V, M>) -> &mut Self {
         self.add_ops(vec![op])
     }
 
@@ -267,8 +257,8 @@ where
             .expect("WriteHandle has not been dropped");
         // safety: the writer cannot publish until 'a ends, so we know that reading from the read
         // map is safe for the duration of 'a.
-        let inner: &'a Inner<K, V, M, T, S, I> =
-            unsafe { std::mem::transmute::<&Inner<K, V, M, T, S, I>, _>(inner.as_ref()) };
+        let inner: &'a Inner<K, V, M, S, I> =
+            unsafe { std::mem::transmute::<&Inner<K, V, M, S, I>, _>(inner.as_ref()) };
 
         let keys_to_evict = match request {
             EvictionQuantity::Ratio(ratio) => (inner.data.len() as f64 * ratio) as usize,
@@ -337,17 +327,16 @@ where
     }
 }
 
-impl<K, V, M, T, S, I> Absorb<Operation<K, V, M, T>> for Inner<K, V, M, T, S, I>
+impl<K, V, M, S, I> Absorb<Operation<K, V, M>> for Inner<K, V, M, S, I>
 where
     K: Ord + Hash + Clone,
     S: BuildHasher + Clone,
     V: Ord + Clone,
     M: 'static + Clone,
-    T: Clone,
     I: InsertionOrder<V>,
 {
     /// Apply ops in such a way that no values are dropped, only forgotten
-    fn absorb_first(&mut self, op: &mut Operation<K, V, M, T>, _other: &Self) {
+    fn absorb_first(&mut self, op: &mut Operation<K, V, M>, _other: &Self) {
         match op {
             Operation::Add {
                 key,
@@ -403,14 +392,11 @@ where
             Operation::SetMeta(m) => {
                 self.meta = m.clone();
             }
-            Operation::SetTimestamp(t) => {
-                self.timestamp = t.clone();
-            }
         }
     }
 
     /// Apply operations while allowing dropping of values
-    fn absorb_second(&mut self, op: Operation<K, V, M, T>, _other: &Self) {
+    fn absorb_second(&mut self, op: Operation<K, V, M>, _other: &Self) {
         match op {
             Operation::Add {
                 key,
@@ -448,9 +434,6 @@ where
             Operation::SetMeta(m) => {
                 self.meta = m;
             }
-            Operation::SetTimestamp(t) => {
-                self.timestamp = t;
-            }
         }
     }
 
@@ -461,16 +444,15 @@ where
 }
 
 // allow using write handle for reads
-impl<K, V, I, M, T, S> Deref for WriteHandle<K, V, I, M, T, S>
+impl<K, V, I, M, S> Deref for WriteHandle<K, V, I, M, S>
 where
     K: Ord + Clone + Hash,
     S: BuildHasher + Clone,
     V: Ord + Clone,
     M: 'static + Clone,
-    T: Clone,
     I: InsertionOrder<V>,
 {
-    type Target = ReadHandle<K, V, I, M, T, S>;
+    type Target = ReadHandle<K, V, I, M, S>;
 
     fn deref(&self) -> &Self::Target {
         &self.r_handle
@@ -479,7 +461,7 @@ where
 
 /// A pending map operation.
 #[non_exhaustive]
-pub(super) enum Operation<K, V, M, T> {
+pub(super) enum Operation<K, V, M> {
     /// Add this value to the set of entries for this key.
     Add {
         key: K,
@@ -517,16 +499,13 @@ pub(super) enum Operation<K, V, M, T> {
     MarkReady,
     /// Set the value of the map meta.
     SetMeta(M),
-    /// Set the value of the timestamp of the current values in the map.
-    SetTimestamp(T),
 }
 
-impl<K, V, M, T> fmt::Debug for Operation<K, V, M, T>
+impl<K, V, M> fmt::Debug for Operation<K, V, M>
 where
     K: fmt::Debug,
     V: fmt::Debug,
     M: fmt::Debug,
-    T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -560,7 +539,6 @@ where
             Operation::Purge => f.debug_tuple("Purge").finish(),
             Operation::MarkReady => f.debug_tuple("MarkReady").finish(),
             Operation::SetMeta(a) => f.debug_tuple("SetMeta").field(a).finish(),
-            Operation::SetTimestamp(a) => f.debug_tuple("SetTimestamp").field(a).finish(),
         }
     }
 }

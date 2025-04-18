@@ -388,10 +388,9 @@ impl WriteMetrics {
     }
 }
 
-pub(crate) struct Inner<K, V, M, T, S, I> {
+pub(crate) struct Inner<K, V, M, S, I> {
     pub(crate) data: Data<K, V, I, S>,
     pub(crate) meta: M,
-    pub(crate) timestamp: T,
     pub(crate) ready: bool,
     pub(crate) hasher: S,
     pub(crate) eviction_strategy: EvictionStrategy,
@@ -399,30 +398,27 @@ pub(crate) struct Inner<K, V, M, T, S, I> {
     pub(crate) metrics: WriteMetrics,
 }
 
-impl<K, V, M, T, S, I> fmt::Debug for Inner<K, V, M, T, S, I>
+impl<K, V, M, S, I> fmt::Debug for Inner<K, V, M, S, I>
 where
     K: Ord + Clone + fmt::Debug,
     S: BuildHasher,
     V: fmt::Debug,
     M: fmt::Debug,
-    T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Inner")
             .field("data", &self.data)
             .field("meta", &self.meta)
             .field("ready", &self.ready)
-            .field("timestamp", &self.timestamp)
             .finish()
     }
 }
 
-impl<K, V, M, T, S, I> Clone for Inner<K, V, M, T, S, I>
+impl<K, V, M, S, I> Clone for Inner<K, V, M, S, I>
 where
     K: Ord + Clone,
     S: BuildHasher + Clone,
     M: Clone,
-    T: Clone,
     I: InsertionOrder<V>,
 {
     fn clone(&self) -> Self {
@@ -430,7 +426,6 @@ where
         Inner {
             data: self.data.empty(),
             meta: self.meta.clone(),
-            timestamp: self.timestamp.clone(),
             ready: self.ready,
             hasher: self.hasher.clone(),
             eviction_strategy: self.eviction_strategy.clone(),
@@ -440,17 +435,15 @@ where
     }
 }
 
-impl<K, V, M, T, S, I> Inner<K, V, M, T, S, I>
+impl<K, V, M, S, I> Inner<K, V, M, S, I>
 where
     K: Ord + Clone + Hash,
     S: BuildHasher + Clone,
-    T: Clone,
     I: InsertionOrder<V>,
 {
     pub(crate) fn with_index_type_and_hasher(
         index_type: IndexType,
         meta: M,
-        timestamp: T,
         hasher: S,
         eviction_strategy: EvictionStrategy,
         order: I,
@@ -459,7 +452,6 @@ where
         Inner {
             data: Data::with_index_type_and_hasher(index_type, hasher.clone()),
             meta,
-            timestamp,
             ready: false,
             hasher,
             eviction_strategy,
