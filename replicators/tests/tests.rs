@@ -4098,6 +4098,7 @@ async fn mysql_minimal_row_based_replication_empty_row() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial(mysql)]
 #[slow]
+#[ignore = "Upstream driver bug (REA-5656)"]
 async fn mysql_minimal_row_based_collation_and_signedness() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
