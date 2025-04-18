@@ -5,7 +5,7 @@ use anyhow::bail;
 use benchmarks::benchmark::{Benchmark, BenchmarkControl, DeploymentParameters};
 use benchmarks::reporting::ReportMode;
 use benchmarks::utils::readyset_ready;
-use benchmarks::{benchmark_histogram, QUANTILES};
+use benchmarks::QUANTILES;
 use clap::builder::ArgPredicate;
 use clap::{Parser, ValueHint};
 use readyset_server::Handle;
@@ -206,12 +206,6 @@ impl BenchmarkRunner {
             let start_time = Instant::now();
             let result = benchmark_cmd.benchmark(&self.deployment_params).await?;
             let duration = start_time.elapsed();
-            benchmark_histogram!(
-                "benchmark_duration",
-                Microseconds,
-                "Time, in microseconds, that it took to run the benchmark.".into(),
-                duration.as_micros() as f64
-            );
 
             if let Some(report_mode) = self.report_mode {
                 let session = benchmarks::reporting::BenchSession {

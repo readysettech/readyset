@@ -8,7 +8,6 @@
 //!
 //! use anyhow::Result;
 //! use benchmarks::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
-//! use benchmarks::benchmark_gauge;
 //! use benchmarks::utils::generate::DataGenerator;
 //! use database_utils::QueryableConnection;
 //! use itertools::{Itertools, Tuples};
@@ -47,12 +46,6 @@
 //!         for _ in 0..10_000_000 {
 //!             conn.execute(&stmt, [self.where_value]).await?;
 //!         }
-//!         benchmark_gauge!(
-//!             "my_benchmark.number_of_queries",
-//!             Count,
-//!             "Number of queries executed in this benchmark run".into(),
-//!             self.row_count as f64
-//!         );
 //!         Ok(BenchmarkResults::new())
 //!     }
 //!

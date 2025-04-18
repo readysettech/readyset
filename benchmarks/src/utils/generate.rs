@@ -7,7 +7,7 @@ use std::convert::TryInto;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use clap::{Parser, ValueHint};
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use futures::StreamExt;
@@ -27,7 +27,6 @@ use serde_json::json;
 use tracing::warn;
 
 use super::spec::{DatabaseGenerationSpec, DatabaseSchema, SchemaKind, TableGenerationSpec};
-use crate::utils::backend::Backend;
 use crate::utils::path::benchmark_path;
 
 const MAX_BATCH_ROWS: usize = 500;
@@ -374,40 +373,6 @@ pub async fn parallel_load(db: DatabaseURL, spec: DatabaseGenerationSpec) -> Res
 
     while let Some(task) = table_tasks.next().await {
         task?;
-    }
-
-    Ok(())
-}
-
-pub async fn load_to_backend(db: &mut Backend, mut spec: DatabaseGenerationSpec) -> Result<()> {
-    // Iterate over the set of tables in the database for each, generate random
-    // data.
-    for (table_name, table_spec) in spec.tables.iter_mut() {
-        if table_spec.num_rows == 0 {
-            continue;
-        }
-
-        let data = table_spec.table.generate_data(table_spec.num_rows, false);
-        let columns = table_spec.table.columns.keys().collect::<Vec<_>>();
-        let insert = InsertStatement {
-            table: table_name.clone().into(),
-            fields: columns.iter().map(|cn| (*cn).clone().into()).collect(),
-            data: data
-                .into_iter()
-                .map(|mut row| {
-                    columns
-                        .iter()
-                        .map(|col| Expr::Literal(row.remove(col).unwrap().try_into().unwrap()))
-                        .collect()
-                })
-                .collect(),
-            ignore: false,
-            on_duplicate: None,
-        };
-
-        db.query(&insert.display(db.dialect()).to_string())
-            .await
-            .with_context(|| format!("Inserting row into database for {}", table_name))?;
     }
 
     Ok(())
