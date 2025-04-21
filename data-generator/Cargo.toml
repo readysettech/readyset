@@ -15,7 +15,7 @@ rand = { workspace = true }
 rand_regex = { workspace = true }
 rust_decimal = { workspace = true }
 uuid = { workspace = true }
-zipf = { workspace = true }
+rand_distr = { workspace = true }
 
 readyset-sql = { path = "../readyset-sql" }
 readyset-data = { path = "../readyset-data/" }

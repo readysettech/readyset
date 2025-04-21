@@ -10,10 +10,10 @@ use rand::distributions::Standard;
 use rand::prelude::Distribution;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng, RngCore};
+use rand_distr::Zipf;
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_sql::ast::SqlType;
 use rust_decimal::Decimal;
-use zipf::ZipfDistribution;
 
 mod distribution_annotation;
 
@@ -301,7 +301,7 @@ pub struct ZipfianGenerator {
     min: DfValue,
     max: DfValue,
     alpha: f64,
-    dist: ZipfDistribution,
+    dist: Zipf<f64>,
     mapping: Vec<DfValue>,
 }
 
@@ -325,7 +325,7 @@ impl ZipfianGenerator {
             min,
             max,
             alpha,
-            dist: ZipfDistribution::new(num_elements as usize, alpha).unwrap(),
+            dist: Zipf::new(num_elements as _, alpha).unwrap(),
             mapping,
         }
     }
@@ -333,7 +333,7 @@ impl ZipfianGenerator {
     pub fn gen(&mut self) -> DfValue {
         let mut rng = rand::thread_rng();
         let offset = self.dist.sample(&mut rng);
-        self.mapping.get(offset).unwrap().clone()
+        self.mapping.get(offset.round() as usize).unwrap().clone()
     }
 }
 

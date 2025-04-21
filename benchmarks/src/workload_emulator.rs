@@ -17,13 +17,12 @@ use hdrhistogram::Histogram;
 use metrics::Unit;
 use rand::distributions::Uniform;
 use rand_distr::weighted_alias::WeightedAliasIndex;
-use rand_distr::Distribution;
+use rand_distr::{Distribution, Zipf};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_sql::ast::SqlType;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
-use zipf::ZipfDistribution;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::spec::WorkloadSpec;
@@ -128,7 +127,7 @@ pub(crate) struct WorkloadThreadParams {
 }
 
 pub enum Sampler {
-    Zipf(ZipfDistribution),
+    Zipf(Zipf<f64>),
     Uniform(Uniform<usize>),
 }
 
@@ -259,7 +258,7 @@ impl BenchmarkControl for WorkloadEmulator {
 impl Sampler {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> usize {
         match self {
-            Sampler::Zipf(z) => z.sample(rng),
+            Sampler::Zipf(z) => z.sample(rng).round() as _,
             Sampler::Uniform(u) => u.sample(rng),
         }
     }

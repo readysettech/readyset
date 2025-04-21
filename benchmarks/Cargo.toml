@@ -31,7 +31,6 @@ tokio-postgres = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
 walkdir = { workspace = true }
-zipf = { workspace = true }
 
 # local dependencies
 data-generator = { path = "../data-generator" }

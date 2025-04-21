@@ -338,7 +338,6 @@ dependencies = [
  "tracing",
  "url",
  "walkdir",
- "zipf",
 ]
 
 [[package]]
@@ -1084,6 +1083,7 @@ dependencies = [
  "mysql_async",
  "proptest",
  "rand 0.8.5",
+ "rand_distr",
  "rand_regex",
  "readyset-data",
  "readyset-sql",
@@ -1093,7 +1093,6 @@ dependencies = [
  "test-utils",
  "tokio",
  "uuid 0.8.2",
- "zipf",
 ]
 
 [[package]]
@@ -7172,15 +7171,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.87",
-]
-
-[[package]]
-name = "zipf"
-version = "7.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "390e51da0ed8cc3ade001d15fa5ba6f966b99c858fb466ec6b06d1682f1f94dd"
-dependencies = [
- "rand 0.8.5",
 ]
 
 [[package]]

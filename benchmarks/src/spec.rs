@@ -94,13 +94,12 @@ use std::sync::Arc;
 
 use database_utils::{DatabaseConnection, QueryableConnection};
 use rand::Rng;
-use rand_distr::{Uniform, WeightedAliasIndex};
+use rand_distr::{Uniform, WeightedAliasIndex, Zipf};
 use readyset_data::DfValue;
 use readyset_sql::{ast::*, Dialect, DialectDisplay};
 use readyset_sql_parsing::parse_query;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tracing::info;
-use zipf::ZipfDistribution;
 
 use crate::workload_emulator::{ColGenerator, Distributions, Query, QuerySet, Sampler};
 
@@ -237,7 +236,7 @@ impl WorkloadSpec {
                     Sampler::Uniform(Uniform::new(0, data.len() - 1))
                 }
                 WorkloadDistributionKind::Zipf { zipf } => {
-                    Sampler::Zipf(ZipfDistribution::new(data.len() - 1, *zipf).unwrap())
+                    Sampler::Zipf(Zipf::new((data.len() - 1) as _, *zipf).unwrap())
                 }
             };
 
