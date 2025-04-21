@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 pub use metrics::Key;
-use metrics_util::Histogram;
+use metrics_util::storage::Histogram;
 use serde::{Deserialize, Serialize};
 
 /// A client for accessing readyset metrics for a deployment.

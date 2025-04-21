@@ -17,7 +17,7 @@ use metrics_exporter_prometheus::formatting::{
 use metrics_exporter_prometheus::{BuildError, Distribution, DistributionBuilder};
 use metrics_util::registry::{Recency, Registry};
 use metrics_util::MetricKindMask;
-use metrics_util::{registry::GenerationalStorage, AtomicBucket};
+use metrics_util::{registry::GenerationalStorage, storage::AtomicBucket};
 use quanta::Instant;
 use tracing::error;
 
@@ -276,7 +276,15 @@ impl Inner {
 
             write_type_line(&mut output, name.as_str(), "counter");
             for (labels, value) in by_labels.drain() {
-                write_metric_line::<&str, u64>(&mut output, &name, None, &labels, None, value);
+                write_metric_line::<&str, u64>(
+                    &mut output,
+                    &name,
+                    None,
+                    &labels,
+                    None,
+                    value,
+                    None,
+                );
             }
             output.push('\n');
         }
@@ -288,7 +296,15 @@ impl Inner {
 
             write_type_line(&mut output, name.as_str(), "gauge");
             for (labels, value) in by_labels.drain() {
-                write_metric_line::<&str, f64>(&mut output, &name, None, &labels, None, value);
+                write_metric_line::<&str, f64>(
+                    &mut output,
+                    &name,
+                    None,
+                    &labels,
+                    None,
+                    value,
+                    None,
+                );
             }
             output.push('\n');
         }
@@ -315,6 +331,7 @@ impl Inner {
                                 &labels,
                                 Some(("quantile", quantile.value())),
                                 value,
+                                None,
                             );
                         }
 
@@ -329,6 +346,7 @@ impl Inner {
                                 &labels,
                                 Some(("le", le)),
                                 count,
+                                None,
                             );
                         }
                         write_metric_line(
@@ -338,13 +356,22 @@ impl Inner {
                             &labels,
                             Some(("le", "+Inf")),
                             histogram.count(),
+                            None,
                         );
 
                         (histogram.sum(), histogram.count())
                     }
                 };
 
-                write_metric_line::<&str, f64>(&mut output, &name, Some("sum"), &labels, None, sum);
+                write_metric_line::<&str, f64>(
+                    &mut output,
+                    &name,
+                    Some("sum"),
+                    &labels,
+                    None,
+                    sum,
+                    None,
+                );
                 write_metric_line::<&str, u64>(
                     &mut output,
                     &name,
@@ -352,6 +379,7 @@ impl Inner {
                     &labels,
                     None,
                     count,
+                    None,
                 );
             }
 

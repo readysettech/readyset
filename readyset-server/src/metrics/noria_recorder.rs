@@ -24,19 +24,21 @@ impl NoriaMetricsRecorder {
     }
 }
 
-struct NoriaHistogram(Mutex<metrics_util::Histogram>);
+struct NoriaHistogram(Mutex<metrics_util::storage::Histogram>);
 
 impl NoriaHistogram {
     fn new() -> Self {
         // Define the buckets for the histogram to be power of 2s up to
         // 2^20.
         let bounds: Vec<f64> = (1..20).map(|v| 2u32.pow(v) as f64).collect();
-        NoriaHistogram(Mutex::new(metrics_util::Histogram::new(&bounds).unwrap()))
+        NoriaHistogram(Mutex::new(
+            metrics_util::storage::Histogram::new(&bounds).unwrap(),
+        ))
     }
 
     fn clear(&self) {
         let bounds: Vec<f64> = (1..20).map(|v| 2u32.pow(v) as f64).collect();
-        *self.0.lock() = metrics_util::Histogram::new(&bounds).unwrap();
+        *self.0.lock() = metrics_util::storage::Histogram::new(&bounds).unwrap();
     }
 }
 
