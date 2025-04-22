@@ -214,9 +214,7 @@ impl Benchmark {
                     .map(|d| std::fs::canonicalize(d.unwrap().path()).unwrap())
                 {
                     if let Some(ext) = file.extension() {
-                        if ext == "sql" && schema.replace(file.clone()).is_some() {
-                            panic!("More than one schema for benchmark {name}");
-                        } else if ext == "yaml"
+                        if ext == "yaml"
                             && filter.is_match(&format!(
                                 "{}/{}",
                                 name,
@@ -224,6 +222,12 @@ impl Benchmark {
                             ))
                         {
                             workloads.push(file);
+                        } else if ext == "sql" && schema.replace(file.clone()).is_some() {
+                            println!(
+                                "Warning: More than one schema for benchmark {}; using {}",
+                                name,
+                                schema.as_ref().unwrap().display()
+                            );
                         }
                     }
                 }
