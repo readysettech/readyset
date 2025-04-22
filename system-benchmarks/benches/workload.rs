@@ -639,6 +639,12 @@ async fn prepare_db<P: Into<PathBuf>>(path: P, args: &SystemBenchArgs) -> anyhow
     };
 
     let mut conn = DatabaseURL::from_str(&url)?.connect(None).await?;
+    if args.skip_prepare_db {
+        // Will error if the DB doesn't actually exist
+        conn.query_drop(format!("USE {}", args.database_name))
+            .await?;
+        return Ok(());
+    }
     conn.query_drop(format!("DROP DATABASE IF EXISTS {}", args.database_name))
         .await?;
     conn.query_drop(format!("CREATE DATABASE {}", args.database_name))
@@ -873,6 +879,9 @@ struct SystemBenchArgs {
     /// rather than remain in memory.
     #[arg(long)]
     materialization_persistence: bool,
+    /// If specified, does not drop and recreate the database to re-populate the data.
+    #[arg(long)]
+    skip_prepare_db: bool,
 
     #[arg(long, hide(true))]
     /// Is present when executed with `cargo bench`
