@@ -41,8 +41,6 @@ use tokio::sync::Mutex;
 const BENCHMARK_DATA_PATH: &str = "./bench_data";
 /// The ReadySet adapter listen port
 const BENCHMARK_PORT: u16 = 50000;
-/// The upstream database name where benchmark schemas are installed
-const DB_NAME: &str = "rs_bench";
 /// The batch size (number of queries) ] per benchmark iteration
 const BENCH_BATCH_SIZE: u64 = 8192;
 /// The duration of the data collection step of criterion
@@ -51,10 +49,12 @@ const WORKLOAD_DURATION: Duration = Duration::from_secs(30);
 const LEADER_URI: &str = "http://127.0.0.1:6033";
 
 /// The ReadySet adapter url
-fn readyset_url(database_type: DatabaseType) -> String {
+fn readyset_url(database_name: &str, database_type: DatabaseType) -> String {
     match database_type {
-        DatabaseType::PostgreSQL => format!("postgres://127.0.0.1:{BENCHMARK_PORT}/{DB_NAME}"),
-        DatabaseType::MySQL => format!("mysql://127.0.0.1:{BENCHMARK_PORT}/{DB_NAME}"),
+        DatabaseType::PostgreSQL => {
+            format!("postgres://127.0.0.1:{BENCHMARK_PORT}/{database_name}")
+        }
+        DatabaseType::MySQL => format!("mysql://127.0.0.1:{BENCHMARK_PORT}/{database_name}"),
     }
 }
 
@@ -110,11 +110,12 @@ impl PreparedPool {
         upstream_url: &str,
         database_type: DatabaseType,
     ) -> anyhow::Result<QuerySet> {
+        let url = DatabaseURL::from_str(upstream_url)?;
         let distributions = workload
-            .load_distributions(&mut DatabaseURL::from_str(upstream_url)?.connect(None).await?)
+            .load_distributions(&mut url.connect(None).await?)
             .await?;
 
-        let mut conn = DatabaseURL::from_str(&readyset_url(database_type))?
+        let mut conn = DatabaseURL::from_str(&readyset_url(url.db_name().unwrap(), database_type))?
             .connect(None)
             .await?;
 
@@ -256,7 +257,7 @@ impl Benchmark {
         let database_type = DatabaseURL::from_str(&upstream_url)?.database_type();
         let mut readyset_pool = rt.block_on(PreparedPool::try_new(
             pool_size,
-            &readyset_url(database_type),
+            &readyset_url(&args.database_name, database_type),
         ))?;
         let mut upstream_pool = args
             .compare_upstream
@@ -373,10 +374,14 @@ impl Benchmark {
             }
 
             if args.graphviz {
-                rt.block_on(dump_graphviz(workload_name.to_string(), database_type))?;
+                rt.block_on(dump_graphviz(
+                    workload_name.to_string(),
+                    &args.database_name,
+                    database_type,
+                ))?;
             }
 
-            rt.block_on(drop_cached_queries(database_type))?;
+            rt.block_on(drop_cached_queries(&args.database_name, database_type))?;
         }
 
         group.finish();
@@ -390,8 +395,12 @@ impl Benchmark {
     }
 }
 
-async fn dump_graphviz(name: String, database_type: DatabaseType) -> anyhow::Result<()> {
-    let mut conn = DatabaseURL::from_str(&readyset_url(database_type))?
+async fn dump_graphviz(
+    name: String,
+    database_name: &str,
+    database_type: DatabaseType,
+) -> anyhow::Result<()> {
+    let mut conn = DatabaseURL::from_str(&readyset_url(database_name, database_type))?
         .connect(None)
         .await?;
     match conn.query("explain graphviz").await {
@@ -568,6 +577,7 @@ impl AdapterHandle {
                     DatabaseURL::from_str(&args.upstream_url_with_db_name())?.database_type();
 
                 rt.block_on(benchmarks::utils::readyset_ready(&readyset_url(
+                    &args.database_name,
                     database_type,
                 )))?;
                 Ok(AdapterHandle {
@@ -629,9 +639,9 @@ async fn prepare_db<P: Into<PathBuf>>(path: P, args: &SystemBenchArgs) -> anyhow
     };
 
     let mut conn = DatabaseURL::from_str(&url)?.connect(None).await?;
-    conn.query_drop(format!("DROP DATABASE IF EXISTS {DB_NAME}"))
+    conn.query_drop(format!("DROP DATABASE IF EXISTS {}", args.database_name))
         .await?;
-    conn.query_drop(format!("CREATE DATABASE {DB_NAME}"))
+    conn.query_drop(format!("CREATE DATABASE {}", args.database_name))
         .await?;
     drop(conn);
 
@@ -655,7 +665,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
     let mut options = vec![
         "bench", // This is equivalent to the program name in argv, ignored
         "--deployment",
-        DB_NAME,
+        &args.database_name,
         "--deployment-mode",
         "standalone",
         "--allow-unauthenticated-connections",
@@ -730,8 +740,11 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
 }
 
 /// Drop all currently cached queries
-async fn drop_cached_queries(database_type: DatabaseType) -> anyhow::Result<()> {
-    let mut conn = DatabaseURL::from_str(&readyset_url(database_type))?
+async fn drop_cached_queries(
+    database_name: &str,
+    database_type: DatabaseType,
+) -> anyhow::Result<()> {
+    let mut conn = DatabaseURL::from_str(&readyset_url(database_name, database_type))?
         .connect(None)
         .await?;
     conn.query_drop(DropAllCachesStatement {}.to_string())
