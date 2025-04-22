@@ -44,6 +44,16 @@ impl FromStr for DistributionAnnotation {
                 let regex = chunks.next().unwrap().trim_matches('"');
                 ColumnGenerationSpec::RandomString(regex.to_owned())
             }
+            "chars" => {
+                let min_length: usize = chunks.next().unwrap().parse().unwrap();
+                let max_length: usize = chunks.next().unwrap().parse().unwrap();
+                let charset = chunks.next().unwrap().to_owned();
+                ColumnGenerationSpec::RandomChar {
+                    min_length,
+                    max_length,
+                    charset,
+                }
+            }
             // Creates unique groups of size `num`.
             "group" => {
                 let num: u32 = chunks.next().unwrap().parse().unwrap();

@@ -571,6 +571,7 @@ impl TableSpec {
                         ColumnGenerator::Uniform(u) => u.gen(),
                         ColumnGenerator::Random(r) => r.gen(),
                         ColumnGenerator::RandomString(r) => r.gen(),
+                        ColumnGenerator::RandomChars(r) => r.gen(),
                         ColumnGenerator::Zipfian(z) => z.gen(),
                         ColumnGenerator::NonRepeating(r) => r.gen(),
                     };

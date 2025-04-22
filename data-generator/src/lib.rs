@@ -6,12 +6,13 @@ use std::sync::Arc;
 use bit_vec::BitVec;
 use chrono::{Duration, FixedOffset, NaiveDate, NaiveTime, TimeZone};
 use eui48::{MacAddress, MacAddressFormat};
-use rand::distributions::Standard;
+use rand::distributions::uniform::SampleRange as _;
+use rand::distributions::{Standard, Uniform};
 use rand::prelude::Distribution;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng, RngCore};
 use rand_distr::Zipf;
-use readyset_data::{DfType, DfValue, Dialect};
+use readyset_data::{encoding::Encoding, DfType, DfValue, Dialect};
 use readyset_sql::ast::SqlType;
 use rust_decimal::Decimal;
 
@@ -46,6 +47,12 @@ pub enum ColumnGenerationSpec {
     Random,
     /// Generate a random string from a regex
     RandomString(String),
+    /// Generate random characters of a specified max length and a specified charset
+    RandomChar {
+        min_length: usize,
+        max_length: usize,
+        charset: String,
+    },
     /// Generates an integer in the specified range. Cannot be used for
     /// non discrete integer DfValues.
     Zipfian {
@@ -87,6 +94,15 @@ impl ColumnGenerationSpec {
             }),
             ColumnGenerationSpec::Random => ColumnGenerator::Random(col_type.into()),
             ColumnGenerationSpec::RandomString(r) => ColumnGenerator::RandomString(r.into()),
+            ColumnGenerationSpec::RandomChar {
+                min_length,
+                max_length,
+                charset,
+            } => ColumnGenerator::RandomChars(RandomCharsGenerator::new(
+                *min_length,
+                *max_length,
+                charset,
+            )),
             ColumnGenerationSpec::Zipfian { min, max, alpha } => {
                 ColumnGenerator::Zipfian(ZipfianGenerator::new(min.clone(), max.clone(), *alpha))
             }
@@ -116,6 +132,8 @@ pub enum ColumnGenerator {
     Random(RandomGenerator),
     /// Returns a random string from a regex
     RandomString(RandomStringGenerator),
+    /// Returns random characters that are valid in a given charset
+    RandomChars(RandomCharsGenerator),
     /// Returns a value generated from a zipfian distribution.
     Zipfian(ZipfianGenerator),
     /// Generate a unique value for every row from a non unique generator
@@ -130,6 +148,7 @@ impl ColumnGenerator {
             ColumnGenerator::Uniform(g) => g.gen(),
             ColumnGenerator::Random(g) => g.gen(),
             ColumnGenerator::RandomString(g) => g.gen(),
+            ColumnGenerator::RandomChars(g) => g.gen(),
             ColumnGenerator::Zipfian(g) => g.gen(),
             ColumnGenerator::NonRepeating(g) => g.gen(),
         }
@@ -144,7 +163,8 @@ impl ColumnGenerator {
             u @ ColumnGenerator::Uniform(_)
             | u @ ColumnGenerator::Zipfian(_)
             | u @ ColumnGenerator::Random(_)
-            | u @ ColumnGenerator::RandomString(_) => {
+            | u @ ColumnGenerator::RandomString(_)
+            | u @ ColumnGenerator::RandomChars(_) => {
                 ColumnGenerator::NonRepeating(NonRepeatingGenerator {
                     generator: Box::new(u),
                     generated: growable_bloom_filter::GrowableBloom::new(0.01, 1_000_000),
@@ -385,6 +405,7 @@ impl NonRepeatingGenerator {
                 ColumnGenerator::Zipfian(z) => z.gen(),
                 ColumnGenerator::Random(r) => r.gen(),
                 ColumnGenerator::RandomString(r) => r.gen(),
+                ColumnGenerator::RandomChars(r) => r.gen(),
                 ColumnGenerator::Unique(_) => panic!("Non repeating over Unique"),
                 ColumnGenerator::Constant(_) => panic!("Non repeating over Constant"),
                 ColumnGenerator::NonRepeating(_) => panic!("Nested NonRepeating"),
@@ -401,6 +422,53 @@ impl NonRepeatingGenerator {
                     self.generator
                 )
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RandomCharsGenerator {
+    min_length: usize,
+    max_length: usize,
+    low: u8,
+    high: u8,
+    encoding: Encoding,
+}
+
+impl RandomCharsGenerator {
+    pub fn new(min_length: usize, max_length: usize, charset_name: &str) -> Self {
+        let (low, high, encoding) = match charset_name {
+            "ascii" => (0, 127, Encoding::Utf8),
+            "utf8" => (0, 255, Encoding::Utf8),
+            "latin1" => (0, 255, Encoding::Latin1),
+            "binary" => (0, 255, Encoding::Binary),
+            _ => panic!("Invalid charset"),
+        };
+        Self {
+            min_length,
+            max_length,
+            low,
+            high,
+            encoding,
+        }
+    }
+
+    pub fn gen(&self) -> DfValue {
+        let mut rng = rand::thread_rng();
+        let len = (self.min_length..self.max_length).sample_single(&mut rng);
+        let sampler = Uniform::new_inclusive(self.low, self.high);
+        let bytes: Vec<u8> = (0..len).map(|_| sampler.sample(&mut rng)).collect();
+
+        // XXX: Hack alert! This goes through [`benchmarks::utils::generate::load_table_part`] as a
+        // prepared statement parameter, which means it will be interpreted according to the client
+        // connection, which will be utf8mb4. So until or unless we reorganize that part of the code
+        // to accept arbitrary bytes with (for example in MySQL) either a `_binary` introducer or
+        // using `UNHEX(...)` in the INSERT statement, we will translate this to the equivalent
+        // UTF-8 so that the database re-converts it to the intended character set for storage.
+        if let Encoding::Binary = &self.encoding {
+            bytes.into()
+        } else {
+            self.encoding.decode(&bytes).unwrap().into()
         }
     }
 }
