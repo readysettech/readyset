@@ -1,14 +1,13 @@
 use readyset_sql::ast::{AlterTableStatement, Expr, SelectStatement, SqlQuery};
 use readyset_sql::Dialect;
 
-#[cfg(feature = "sqlparser")]
-use readyset_sql::{
-    ast::{
-        AddTablesStatement, AlterReadysetStatement, CacheInner, DropCacheStatement,
-        ResnapshotTableStatement,
-    },
-    IntoDialect, TryIntoDialect,
+use readyset_sql::ast::{
+    AddTablesStatement, AlterReadysetStatement, CacheInner, CreateTableStatement,
+    DropCacheStatement, ResnapshotTableStatement,
 };
+use readyset_sql::IntoDialect;
+#[cfg(feature = "sqlparser")]
+use readyset_sql::TryIntoDialect;
 #[cfg(feature = "sqlparser")]
 use sqlparser::{
     keywords::Keyword,
@@ -481,6 +480,22 @@ fn parse_readyset_expr(
 }
 
 #[cfg(feature = "sqlparser")]
+fn parse_readyset_create_table(
+    parser: &mut Parser,
+    dialect: Dialect,
+    _input: impl AsRef<str>,
+) -> Result<CreateTableStatement, ReadysetParsingError> {
+    // parse_create expects CREATE keyword to be parsed already
+    if parser.parse_keyword(Keyword::CREATE) {
+        Ok(parser.parse_create()?.try_into_dialect(dialect)?)
+    } else {
+        Err(ReadysetParsingError::ReadysetParsingError(
+            "expected a CREATE statement".into(),
+        ))
+    }
+}
+
+#[cfg(feature = "sqlparser")]
 fn parse_both_inner<S, T, NP, SP>(
     dialect: Dialect,
     input: S,
@@ -629,4 +644,25 @@ pub fn parse_alter_table(
     input: impl AsRef<str>,
 ) -> Result<AlterTableStatement, String> {
     nom_sql::parse_alter_table(dialect, input.as_ref())
+}
+
+#[cfg(not(feature = "sqlparser"))]
+pub fn parse_create_table(
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<CreateTableStatement, String> {
+    nom_sql::parse_create_table(dialect, input.as_ref())
+}
+
+#[cfg(feature = "sqlparser")]
+pub fn parse_create_table(
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<CreateTableStatement, String> {
+    parse_both_inner(
+        dialect,
+        input,
+        |d, s| nom_sql::parse_create_table(d, s),
+        |p, d, s| parse_readyset_create_table(p, d, s),
+    )
 }

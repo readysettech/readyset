@@ -718,9 +718,8 @@ mod tests {
     }
 
     mod expression {
-        use nom_sql::parse_create_table;
         use readyset_sql::Dialect;
-        use readyset_sql_parsing::parse_select;
+        use readyset_sql_parsing::{parse_create_table, parse_select};
 
         use super::*;
 
@@ -779,9 +778,8 @@ mod tests {
     }
 
     mod registry {
-        use nom_sql::parse_create_table;
         use readyset_sql::Dialect;
-        use readyset_sql_parsing::parse_select;
+        use readyset_sql_parsing::{parse_create_table, parse_select};
 
         use super::*;
 
@@ -1149,10 +1147,9 @@ mod tests {
     mod expr_skeleton {
         use std::collections::HashMap;
 
-        use nom_sql::parse_create_table;
         use readyset_sql::ast::{ItemPlaceholder, Literal};
         use readyset_sql::Dialect;
-        use readyset_sql_parsing::parse_select;
+        use readyset_sql_parsing::{parse_create_table, parse_select};
 
         use super::{recipe_expr_cache, ExprRegistry, ExprSkeletons, MatchedCache, RecipeExpr};
 

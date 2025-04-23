@@ -26,7 +26,7 @@ use dataflow::{
 };
 use futures::{join, StreamExt};
 use itertools::Itertools;
-use nom_sql::{parse_create_table, parse_create_view};
+use nom_sql::parse_create_view;
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
@@ -34,7 +34,7 @@ use readyset_data::{Bound, DfType, DfValue, Dialect, IntoBoundedRange};
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_sql::ast;
 use readyset_sql::ast::{OrderType, Relation, SqlQuery};
-use readyset_sql_parsing::{parse_query, parse_select};
+use readyset_sql_parsing::{parse_create_table, parse_query, parse_select};
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use rust_decimal::prelude::ToPrimitive;

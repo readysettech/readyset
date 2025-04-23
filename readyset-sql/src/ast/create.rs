@@ -8,7 +8,7 @@ use itertools::Itertools;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
-    CreateTableOptions, Ident, NamedParenthesizedList, SqlOption, Value, ValueWithSpan,
+    CommentDef, CreateTableOptions, Ident, NamedParenthesizedList, SqlOption, Value, ValueWithSpan,
 };
 use test_strategy::Arbitrary;
 
@@ -179,6 +179,18 @@ pub struct CreateTableStatement {
     pub options: Result<Vec<CreateTableOption>, String>,
 }
 
+impl TryFromDialect<sqlparser::ast::Statement> for CreateTableStatement {
+    fn try_from_dialect(
+        value: sqlparser::ast::Statement,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        match value {
+            sqlparser::ast::Statement::CreateTable(stmt) => stmt.try_into_dialect(dialect),
+            _ => panic!("Should only be called on a CREATE TABLE statement"),
+        }
+    }
+}
+
 impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
     fn try_from_dialect(
         value: sqlparser::ast::CreateTable,
@@ -262,6 +274,9 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                             options.push(CreateTableOption::Engine(value.map(|v| v.value)));
                         }
                     }
+                    SqlOption::Comment(
+                        CommentDef::WithEq(comment) | CommentDef::WithoutEq(comment),
+                    ) => options.push(CreateTableOption::Comment(comment)),
                     e => {
                         return Err(AstConversionError::Failed(format!(
                             "Unsupported table option {e}"
@@ -270,13 +285,7 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                 }
             }
         }
-        if let Some(
-            sqlparser::ast::CommentDef::WithEq(comment)
-            | sqlparser::ast::CommentDef::WithoutEq(comment),
-        ) = value.comment_after_column_def
-        {
-            options.push(CreateTableOption::Comment(comment));
-        }
+
         let mut create_table = Self {
             if_not_exists: value.if_not_exists,
             table: value.name.into_dialect(dialect),

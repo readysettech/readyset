@@ -225,7 +225,7 @@ mod tests {
     }
 
     fn parse_create_table_statement(q: &str) -> CreateTableStatement {
-        nom_sql::parse_create_table(Dialect::MySQL, q).unwrap()
+        readyset_sql_parsing::parse_create_table(Dialect::MySQL, q).unwrap()
     }
 
     fn parse_create_view_statement(q: &str) -> CreateViewStatement {

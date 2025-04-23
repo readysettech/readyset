@@ -635,8 +635,8 @@ macro_rules! create_dummy_schema {
 #[cfg(test)]
 mod tests {
 
-    use nom_sql::{self, parse_create_table};
     use readyset_sql::{ast::SqlQuery, Dialect};
+    use readyset_sql_parsing::parse_create_table;
 
     use super::*;
 

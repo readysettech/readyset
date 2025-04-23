@@ -1357,7 +1357,6 @@ mod tests {
     use std::collections::BTreeMap;
 
     use dataflow::DomainIndex;
-    use nom_sql::parse_create_table;
     use readyset_client::debug::info::KeyCount;
     use readyset_client::recipe::changelist::{Change, ChangeList};
     use readyset_client::{
@@ -1366,6 +1365,7 @@ mod tests {
     use readyset_data::Dialect as DataDialect;
     use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
     use readyset_sql::Dialect;
+    use readyset_sql_parsing::parse_create_table;
     use readyset_sql_parsing::parse_select;
     use readyset_util::eventually;
     use replication_offset::ReplicationOffset;

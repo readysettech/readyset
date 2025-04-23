@@ -114,7 +114,7 @@ impl CreateSchema {
                 // until we handle formatting by dialect correctly
                 strip_backticks(table);
             }
-            *table = match nom_sql::parse_create_table(self.dialect, table.clone()) {
+            *table = match readyset_sql_parsing::parse_create_table(self.dialect, table.clone()) {
                 Ok(mut parsed_table) => {
                     parsed_table.anonymize(anonymizer);
                     // FIXME(ENG-1860): Use correct dialect.

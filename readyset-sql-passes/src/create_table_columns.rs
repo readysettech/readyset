@@ -41,8 +41,8 @@ impl CreateTableColumns for CreateTableStatement {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::parse_create_table;
-    use readyset_sql::Dialect;
+    use readyset_sql::{Dialect, DialectDisplay};
+    use readyset_sql_parsing::parse_create_table;
 
     use super::*;
 
@@ -53,11 +53,14 @@ mod tests {
             "CREATE TABLE x.t (a int, b int, unique (a))",
         )
         .unwrap();
-        let expected = parse_create_table(
-            Dialect::MySQL,
-            "CREATE TABLE x.t (x.t.a int, x.t.b int, unique (x.t.a))",
-        )
-        .unwrap();
-        assert_eq!(orig.normalize_create_table_columns(), expected);
+        let expected = "CREATE TABLE `x`.`t` (`a` INT, `b` INT, UNIQUE KEY (`x`.`t`.`a`))";
+        assert_eq!(
+            format!(
+                "{}",
+                orig.normalize_create_table_columns()
+                    .display(Dialect::MySQL)
+            ),
+            expected
+        );
     }
 }
