@@ -43,12 +43,16 @@ pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
             .await;
 
         if let Ok(data) = res {
-            let snapshot_status = Vec::<Vec<DfValue>>::try_from(data)
-                .unwrap()
-                .into_iter()
-                .find(|r| r[0] == "Status".into());
+            let rows = Vec::<Vec<DfValue>>::try_from(data).unwrap();
+            let snapshot_status = rows.into_iter().find(|r| r[0] == b"Status".to_vec().into());
             let snapshot_status: String = if let Some(s) = snapshot_status {
-                s[1].clone().try_into().unwrap()
+                s[1].coerce_to(
+                    &readyset_data::DfType::Text(Default::default()),
+                    &readyset_data::DfType::Unknown,
+                )
+                .unwrap()
+                .try_into()
+                .unwrap()
             } else {
                 continue;
             };
