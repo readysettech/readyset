@@ -6,7 +6,7 @@ use std::time::Duration;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql::Row;
 use mysql_async::prelude::Queryable;
-use mysql_async::OptsBuilder;
+use mysql_async::{Conn, OptsBuilder};
 use readyset_adapter::backend::noria_connector::ReadBehavior;
 use readyset_adapter::backend::{MigrationMode, QueryInfo};
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
@@ -76,7 +76,7 @@ async fn duplicate_join_key() {
     // This used to trigger a bug involving weak indexes. See issue #179 for more info.
 
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE a (id int, PRIMARY KEY(id))")
         .await
@@ -105,7 +105,7 @@ async fn duplicate_join_key() {
 #[tokio::test(flavor = "multi_thread")]
 async fn two_columns_with_same_name() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("create table t1 (x int);").await.unwrap();
 
@@ -141,7 +141,7 @@ async fn two_columns_with_same_name() {
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_basic() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .await
         .unwrap();
@@ -179,7 +179,7 @@ async fn delete_basic() {
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_only_constraint() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     // Note that this doesn't have `id int PRIMARY KEY` like the other tests:
     conn.query_drop("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .await
@@ -212,7 +212,7 @@ async fn delete_only_constraint() {
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_multiple() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY)")
         .await
         .unwrap();
@@ -252,7 +252,7 @@ async fn delete_multiple() {
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_bogus() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY)")
         .await
         .unwrap();
@@ -271,7 +271,7 @@ async fn delete_bogus() {
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_bogus_valid_and() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY)")
         .await
         .unwrap();
@@ -310,7 +310,7 @@ async fn delete_bogus_valid_and() {
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_bogus_valid_or() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .await
         .unwrap();
@@ -349,7 +349,7 @@ async fn delete_bogus_valid_or() {
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_other_column() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .await
         .unwrap();
@@ -365,7 +365,7 @@ async fn delete_other_column() {
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_no_keys() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .await
         .unwrap();
@@ -381,7 +381,7 @@ async fn delete_no_keys() {
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_compound_primary_key() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop(
         "CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))",
     )
@@ -419,7 +419,7 @@ async fn delete_compound_primary_key() {
 #[ignore]
 async fn delete_multi_compound_primary_key() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop(
         "CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))",
     )
@@ -454,7 +454,7 @@ async fn delete_multi_compound_primary_key() {
 #[tokio::test(flavor = "multi_thread")]
 async fn update_basic() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .await
         .unwrap();
@@ -487,7 +487,7 @@ async fn update_basic() {
 #[tokio::test(flavor = "multi_thread")]
 async fn update_basic_prepared() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .await
         .unwrap();
@@ -542,7 +542,7 @@ async fn update_basic_prepared() {
 #[tokio::test(flavor = "multi_thread")]
 async fn update_compound_primary_key() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop(
         "CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))",
     )
@@ -579,7 +579,7 @@ async fn update_compound_primary_key() {
 #[tokio::test(flavor = "multi_thread")]
 async fn update_only_constraint() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     // Note that this doesn't have `id int PRIMARY KEY` like the other tests:
     conn.query_drop("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .await
@@ -613,7 +613,7 @@ async fn update_only_constraint() {
 #[tokio::test(flavor = "multi_thread")]
 async fn update_pkey() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .await
         .unwrap();
@@ -649,7 +649,7 @@ async fn update_pkey() {
 #[tokio::test(flavor = "multi_thread")]
 async fn update_separate() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .await
         .unwrap();
@@ -691,7 +691,7 @@ async fn update_separate() {
 #[tokio::test(flavor = "multi_thread")]
 async fn update_no_keys() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .await
         .unwrap();
@@ -706,7 +706,7 @@ async fn update_no_keys() {
 #[tokio::test(flavor = "multi_thread")]
 async fn update_other_column() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .await
         .unwrap();
@@ -723,7 +723,7 @@ async fn update_other_column() {
 async fn update_no_changes() {
     // ignored because we currently *always* return 1 row(s) affected.
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255), PRIMARY KEY(id))")
         .await
         .unwrap();
@@ -746,7 +746,7 @@ async fn update_no_changes() {
 #[tokio::test(flavor = "multi_thread")]
 async fn update_bogus() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .await
         .unwrap();
@@ -767,7 +767,7 @@ async fn update_bogus() {
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_pkey() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .await
         .unwrap();
@@ -797,7 +797,7 @@ async fn delete_pkey() {
 #[tokio::test(flavor = "multi_thread")]
 async fn select_collapse_where_in() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .await
         .unwrap();
@@ -889,7 +889,7 @@ async fn select_collapse_where_in() {
 #[tokio::test(flavor = "multi_thread")]
 async fn multiple_in() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int, name VARCHAR(255))")
         .await
         .unwrap();
@@ -925,7 +925,7 @@ async fn multiple_in() {
 #[tokio::test(flavor = "multi_thread")]
 async fn basic_select() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -951,7 +951,7 @@ async fn basic_select() {
 #[tokio::test(flavor = "multi_thread")]
 async fn strings() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x TEXT)").await.unwrap();
     sleep().await;
 
@@ -970,7 +970,7 @@ async fn strings() {
 #[tokio::test(flavor = "multi_thread")]
 async fn prepared_select() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -998,7 +998,7 @@ async fn prepared_select() {
 #[tokio::test(flavor = "multi_thread")]
 async fn create_view() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -1039,7 +1039,7 @@ async fn create_view() {
 #[ignore]
 async fn create_view_rev() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -1072,7 +1072,7 @@ async fn prepare_ranged_query_non_partial() {
         .partial(false)
         .build::<MySQLAdapter>()
         .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -1104,7 +1104,7 @@ async fn prepare_conflicting_ranged_query() {
         .partial(false)
         .build::<MySQLAdapter>()
         .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -1131,7 +1131,7 @@ async fn prepare_conflicting_ranged_query() {
 #[ignore]
 async fn prepare_ranged_query_partial() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -1157,7 +1157,7 @@ async fn prepare_ranged_query_partial() {
 #[tokio::test(flavor = "multi_thread")]
 async fn absurdly_simple_select() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -1184,7 +1184,7 @@ async fn absurdly_simple_select() {
 #[tokio::test(flavor = "multi_thread")]
 async fn ad_hoc_unparameterized_select() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -1225,7 +1225,7 @@ async fn ad_hoc_unparameterized_select() {
 #[tokio::test(flavor = "multi_thread")]
 async fn ad_hoc_unparameterized_where_in() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -1260,7 +1260,7 @@ async fn ad_hoc_unparameterized_where_in() {
 #[tokio::test(flavor = "multi_thread")]
 async fn prepared_unparameterized_select() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -1295,7 +1295,7 @@ async fn prepared_unparameterized_select() {
 #[tokio::test(flavor = "multi_thread")]
 async fn order_by_basic() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -1337,7 +1337,7 @@ async fn order_by_basic() {
 #[tokio::test(flavor = "multi_thread")]
 async fn order_by_limit_basic() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -1370,7 +1370,7 @@ async fn order_by_limit_basic() {
 #[ignore] // why doesn't this work?
 async fn exec_insert() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE posts (id int, number int)")
         .await
         .unwrap();
@@ -1386,7 +1386,7 @@ async fn exec_insert() {
 #[tokio::test(flavor = "multi_thread")]
 async fn exec_insert_multiple() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     sleep().await;
 
@@ -1404,7 +1404,7 @@ async fn exec_insert_multiple() {
 #[ignore]
 async fn design_doc_topk_with_preload() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE posts (id int, number int)")
         .await
         .unwrap();
@@ -1458,7 +1458,7 @@ async fn design_doc_topk_with_preload() {
 #[ignore]
 async fn design_doc_topk() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE posts (id int, number int)")
         .await
         .unwrap();
@@ -1496,7 +1496,7 @@ async fn design_doc_topk() {
 #[ignore]
 async fn ilike() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE notes(id INTEGER PRIMARY KEY, title TEXT)")
         .await
         .unwrap();
@@ -1550,7 +1550,7 @@ async fn ilike() {
 #[tokio::test(flavor = "multi_thread")]
 async fn key_type_coercion() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE posts (id int, title TEXT)")
         .await
         .unwrap();
@@ -1578,7 +1578,7 @@ async fn key_type_coercion() {
 #[tokio::test(flavor = "multi_thread")]
 async fn write_timestamps() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE posts (id int primary key, created_at TIMESTAMP)")
         .await
         .unwrap();
@@ -1624,7 +1624,7 @@ async fn write_timestamps() {
 #[tokio::test(flavor = "multi_thread")]
 async fn round_trip_time_type() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE daily_events (start_time time, end_time time)")
         .await
         .unwrap();
@@ -1670,7 +1670,7 @@ async fn round_trip_time_type() {
 #[tokio::test(flavor = "multi_thread")]
 async fn multi_keyed_state() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (id int, a int, b int, c int, d int, e int, f int, g int)")
         .await
         .unwrap();
@@ -1690,7 +1690,7 @@ async fn multi_keyed_state() {
 async fn reuse_similar_query() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -1721,7 +1721,7 @@ async fn reuse_similar_query() {
 #[tokio::test(flavor = "multi_thread")]
 async fn insert_quoted_string() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, data TEXT)")
         .await
         .unwrap();
@@ -1748,7 +1748,7 @@ async fn insert_quoted_string() {
 #[ignore = "REA-4099"]
 async fn json_column_insert_read() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, data JSON)")
         .await
         .unwrap();
@@ -1774,7 +1774,7 @@ async fn json_column_insert_read() {
 #[tokio::test(flavor = "multi_thread")]
 async fn explain_graphviz() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     let res: mysql_async::Row = conn
         .query_first("EXPLAIN GRAPHVIZ;")
         .await
@@ -1792,7 +1792,7 @@ async fn explain_graphviz() {
 #[tokio::test(flavor = "multi_thread")]
 async fn explain_last_statement() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -1819,7 +1819,7 @@ async fn explain_last_statement() {
 #[tokio::test(flavor = "multi_thread")]
 async fn create_query_cache_where_in() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (id INT);").await.unwrap();
     sleep().await;
 
@@ -1847,7 +1847,7 @@ async fn create_query_cache_where_in() {
 #[tokio::test(flavor = "multi_thread")]
 async fn show_caches_with_always() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (id INT);").await.unwrap();
     sleep().await;
 
@@ -1867,7 +1867,7 @@ async fn show_caches_with_always() {
 #[serial(mysql)]
 async fn show_readyset_status() {
     let (opts, _handle, shutdown_tx) = setup_with_mysql(true).await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     let mut ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
 
     let valid_timestamp = |s: String| {
@@ -1927,7 +1927,7 @@ async fn show_readyset_status() {
     shutdown_tx.shutdown().await;
 }
 
-async fn readyset_maintenance_mode(conn: &mut mysql_async::Conn) {
+async fn readyset_maintenance_mode(conn: &mut Conn) {
     conn.query_drop("ALTER READYSET ENTER MAINTENANCE MODE;")
         .await
         .unwrap();
@@ -1962,7 +1962,7 @@ async fn readyset_maintenance_mode(conn: &mut mysql_async::Conn) {
 #[tokio::test(flavor = "multi_thread")]
 async fn show_readyset_version() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("SHOW READYSET VERSION;")
         .await
         .expect("should be OK");
@@ -1977,7 +1977,7 @@ async fn simple_nonblocking_select() {
         .read_behavior(ReadBehavior::NonBlocking)
         .build::<MySQLAdapter>()
         .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
         .unwrap();
@@ -2009,7 +2009,7 @@ async fn simple_nonblocking_select() {
 #[tokio::test(flavor = "multi_thread")]
 async fn switch_database_with_use() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE s1.t (a int)").await.unwrap();
     conn.query_drop("CREATE TABLE s2.t (b int)").await.unwrap();
@@ -2030,7 +2030,7 @@ async fn non_default_db_in_connection_opts() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let opts = OptsBuilder::from_opts(opts).db_name(Some("s1"));
 
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE t (a int)").await.unwrap();
     conn.query_drop("SELECT a from s1.t").await.unwrap();
@@ -2044,7 +2044,7 @@ async fn test_show_proxied_queries_telemetry() {
     readyset_tracing::init_test_logging();
     let (mut reporter, opts, _handle, shutdown_tx) = setup_telemetry().await;
 
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     assert!(reporter
         .check_event(TelemetryEvent::ShowProxiedQueries)
@@ -2072,7 +2072,7 @@ async fn test_show_caches_queries_telemetry() {
     readyset_tracing::init_test_logging();
     let (mut reporter, opts, _handle, shutdown_tx) = setup_telemetry().await;
 
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     assert!(reporter
         .check_event(TelemetryEvent::ShowCaches)
@@ -2122,7 +2122,7 @@ async fn test_proxied_queries_telemetry() {
         (reporter, opts, handle, shutdown_tx)
     };
 
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     assert!(reporter
         .check_event(TelemetryEvent::ProxiedQuery)
         .await
@@ -2171,7 +2171,7 @@ async fn test_proxied_queries_telemetry() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial(mysql)]
 async fn datetime_nanosecond_precision_text_protocol() {
-    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql.query_drop("SET sql_mode='';
              DROP TABLE IF EXISTS dt_nano_text_protocol CASCADE;
              CREATE TABLE dt_nano_text_protocol (col1 DATETIME, col2 DATETIME(2), col3 DATETIME(4), col4 DATETIME(6));
@@ -2181,7 +2181,7 @@ async fn datetime_nanosecond_precision_text_protocol() {
         .await
         .unwrap();
     let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
     conn.query_drop("CREATE CACHE FROM SELECT * FROM dt_nano_text_protocol")
@@ -2231,7 +2231,7 @@ async fn datetime_nanosecond_precision_text_protocol() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial(mysql)]
 async fn datetime_nanosecond_precision_binary_protocol() {
-    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql.query_drop("SET sql_mode='';
              DROP TABLE IF EXISTS dt_nano_bin_protocol CASCADE;
              CREATE TABLE dt_nano_bin_protocol (ID INT PRIMARY KEY, col1 DATETIME, col2 DATETIME(2), col3 DATETIME(4), col4 DATETIME(6));
@@ -2241,7 +2241,7 @@ async fn datetime_nanosecond_precision_binary_protocol() {
         .await
         .unwrap();
     let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
     conn.query_drop("CREATE CACHE FROM SELECT * FROM dt_nano_bin_protocol WHERE ID = ?")
@@ -2293,8 +2293,8 @@ async fn datetime_nanosecond_precision_binary_protocol() {
 #[serial(mysql)]
 async fn datetime_binary_protocol() {
     let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
-    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
+    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql.query_drop("SET sql_mode='';").await.unwrap();
     direct_mysql
         .query_drop("DROP TABLE IF EXISTS dt_bin_protocol CASCADE;")
@@ -2331,7 +2331,7 @@ async fn datetime_binary_protocol() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial(mysql)]
 async fn timestamp_binary_protocol() {
-    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql.query_drop("
              SET SESSION time_zone = '+05:00';
              DROP TABLE IF EXISTS ts_bin_protocol CASCADE;
@@ -2341,7 +2341,7 @@ async fn timestamp_binary_protocol() {
         .await
         .unwrap();
     let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
     direct_mysql.query_drop("INSERT INTO ts_bin_protocol VALUES (3, '2021-01-02 00:00:00', '2021-01-02 00:00:00.00', '2021-01-02 00:00:00.0000', '2021-01-02 00:00:00.000000');").await.unwrap();
@@ -2380,7 +2380,7 @@ async fn timestamp_binary_protocol() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial(mysql)]
 async fn timestamp_text_protocol() {
-    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql.query_drop("
              SET SESSION time_zone = '+05:00';
              DROP TABLE IF EXISTS ts_text_protocol CASCADE;
@@ -2390,7 +2390,7 @@ async fn timestamp_text_protocol() {
         .await
         .unwrap();
     let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
     direct_mysql.query_drop("INSERT INTO ts_text_protocol VALUES (3, '2021-01-02 00:00:00', '2021-01-02 00:00:00.00', '2021-01-02 00:00:00.0000', '2021-01-02 00:00:00.000000');").await.unwrap();
@@ -2429,7 +2429,7 @@ async fn timestamp_text_protocol() {
 #[serial(mysql)]
 async fn date_only_text_protocol() {
     readyset_tracing::init_test_logging();
-    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql
         .query_drop(
             "DROP TABLE IF EXISTS date_text_protocol CASCADE;
@@ -2445,7 +2445,7 @@ async fn date_only_text_protocol() {
         .build::<MySQLAdapter>()
         .await;
 
-    let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    let mut conn = Conn::new(rs_opts).await.unwrap();
     sleep().await;
 
     conn.query_drop("CREATE CACHE FROM SELECT * FROM date_text_protocol WHERE col1 = ?")
@@ -2495,7 +2495,7 @@ async fn date_only_text_protocol() {
 #[serial(mysql)]
 async fn test_char_column_padding_binary_collation() {
     readyset_tracing::init_test_logging();
-    let mut my_conn = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    let mut my_conn = Conn::from_url(mysql_url()).await.unwrap();
     my_conn
         .query_drop(
             "DROP TABLE IF EXISTS char_binary_padding CASCADE;
@@ -2510,7 +2510,7 @@ async fn test_char_column_padding_binary_collation() {
         .build::<MySQLAdapter>()
         .await;
 
-    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    let mut rs_conn = Conn::new(rs_opts).await.unwrap();
     sleep().await;
 
     let vals: Vec<(&str, usize)> = vec![
@@ -2563,7 +2563,7 @@ async fn test_char_column_padding_binary_collation() {
 #[serial(mysql)]
 async fn test_binary_column_padding() {
     readyset_tracing::init_test_logging();
-    let mut my_conn = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    let mut my_conn = Conn::from_url(mysql_url()).await.unwrap();
     my_conn
         .query_drop(
             "DROP TABLE IF EXISTS binary_padding CASCADE;
@@ -2578,7 +2578,7 @@ async fn test_binary_column_padding() {
         .build::<MySQLAdapter>()
         .await;
 
-    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    let mut rs_conn = Conn::new(rs_opts).await.unwrap();
     sleep().await;
 
     let vals: Vec<(&str, usize)> = vec![
@@ -2630,9 +2630,9 @@ async fn test_binary_column_padding() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial(mysql)]
 async fn test_case_expr_then_expr() {
-    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
     let (opts, _handle, shutdown_tx) = setup_with_mysql(false).await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
     direct_mysql
@@ -2663,11 +2663,7 @@ async fn test_case_expr_then_expr() {
     shutdown_tx.shutdown().await;
 }
 
-async fn populate_all_data_types(
-    direct_mysql: &mut mysql_async::Conn,
-    table_name: &str,
-    add_sample_data: bool,
-) {
+async fn populate_all_data_types(direct_mysql: &mut Conn, table_name: &str, add_sample_data: bool) {
     // Drop existing table if any
     direct_mysql
         .query_drop(format!("DROP TABLE IF EXISTS {} CASCADE;", table_name))
@@ -2799,8 +2795,8 @@ CURRENT_TIMESTAMP,
 }
 
 async fn test_column_definition_verify(
-    direct_mysql: &mut mysql_async::Conn,
-    rs_conn: &mut mysql_async::Conn,
+    direct_mysql: &mut Conn,
+    rs_conn: &mut Conn,
     table_name: &str,
 ) {
     // Verify results
@@ -2862,7 +2858,7 @@ async fn test_column_definition_verify(
 #[serial(mysql)]
 async fn test_column_definition_upstream_readyset_snapshot() {
     readyset_tracing::init_test_logging();
-    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
     populate_all_data_types(&mut direct_mysql, "all_data_types", true).await;
 
     // Setup ReadySet connection after table creation
@@ -2870,7 +2866,7 @@ async fn test_column_definition_upstream_readyset_snapshot() {
         .recreate_database(false)
         .build::<MySQLAdapter>()
         .await;
-    let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    let mut conn = Conn::new(rs_opts).await.unwrap();
 
     test_column_definition_verify(&mut direct_mysql, &mut conn, "all_data_types").await;
     tx.shutdown().await;
@@ -2880,14 +2876,14 @@ async fn test_column_definition_upstream_readyset_snapshot() {
 #[serial(mysql)]
 async fn test_column_definition_upstream_readyset_replication() {
     readyset_tracing::init_test_logging();
-    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
 
     // Setup ReadySet connection before table creation
     let (rs_opts, _rs_handle, tx) = TestBuilder::default()
         .recreate_database(false)
         .build::<MySQLAdapter>()
         .await;
-    let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    let mut conn = Conn::new(rs_opts).await.unwrap();
 
     populate_all_data_types(&mut direct_mysql, "all_data_types", true).await;
     test_column_definition_verify(&mut direct_mysql, &mut conn, "all_data_types").await;
@@ -2898,7 +2894,7 @@ async fn test_column_definition_upstream_readyset_replication() {
 #[serial(mysql)]
 async fn text_citext_default_coercion_minimal_row_base_replication() {
     readyset_tracing::init_test_logging();
-    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
 
     direct_mysql
         .query_drop("DROP TABLE IF EXISTS text_citext_default_coercion CASCADE;")
@@ -2914,7 +2910,7 @@ async fn text_citext_default_coercion_minimal_row_base_replication() {
         .build::<MySQLAdapter>()
         .await;
     sleep().await;
-    let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    let mut conn = Conn::new(rs_opts).await.unwrap();
     direct_mysql
         .query_drop("SET SESSION binlog_row_image = MINIMAL;")
         .await
@@ -2953,7 +2949,7 @@ async fn test_default_value_not_null_for_replication() {
         .build::<MySQLAdapter>()
         .await;
     sleep().await;
-    let mut direct_mysql = mysql_async::Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql
         .query_drop("SET SESSION binlog_row_image = MINIMAL; SET SESSION sql_mode = '';")
         .await
@@ -2964,7 +2960,7 @@ async fn test_default_value_not_null_for_replication() {
         .await
         .unwrap();
 
-    let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    let mut conn = Conn::new(rs_opts).await.unwrap();
     conn.query_drop("CREATE CACHE FROM SELECT * FROM all_data_types_not_null")
         .await
         .unwrap();
@@ -2989,4 +2985,30 @@ async fn test_default_value_not_null_for_replication() {
         );
     }
     tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_duplicate_caches() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let mut conn = Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE foo (a INT, b INT)")
+        .await
+        .unwrap();
+
+    conn.query_drop("CREATE CACHE FROM SELECT b FROM foo WHERE a = ?")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE CACHE FROM SELECT b FROM foo WHERE a = ?")
+        .await
+        .unwrap();
+    conn.query_drop("DROP ALL CACHES").await.unwrap();
+    conn.query_drop("CREATE CACHE FROM SELECT b FROM foo WHERE a = ?")
+        .await
+        .unwrap();
+
+    let caches: Vec<(String, String, String, String)> = conn.query("SHOW CACHES").await.unwrap();
+    assert_eq!(caches.len(), 1, "unexpected caches: {caches:?}");
+
+    shutdown_tx.shutdown().await;
 }

@@ -175,7 +175,7 @@ impl MigrationHandler {
                 let _ = self
                     .noria
                     .handle_create_cached_query(
-                        &mut None,
+                        None,
                         &query.query().statement,
                         Some(query.query().schema_search_path.clone()),
                         /* always */ false,
@@ -301,7 +301,7 @@ impl MigrationHandler {
 
         self.noria
             .handle_create_cached_query(
-                &mut None,
+                None,
                 &inlined_query,
                 Some(view_request.schema_search_path.clone()),
                 false,

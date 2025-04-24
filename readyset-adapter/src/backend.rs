@@ -1956,23 +1956,28 @@ where
         always: bool,
         concurrently: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        // If we have another query with the same name, drop that query first
-        if let Some(name) = name {
-            if let Some(view_request) = self.noria.view_create_request_from_name(name).await {
-                warn!(
-                    statement = %Sensitive(&view_request.statement.display(self.settings.dialect)),
-                    name = %name.display(readyset_sql::Dialect::MySQL),
-                    "Dropping previously cached query",
-                );
-                self.drop_cached_query(name).await?;
+        adapter_rewrites::process_query(&mut stmt, self.noria.rewrite_params())?;
+        let name = match name {
+            Some(name) => &*name,
+            None => {
+                *name = Some(QueryId::from_select(&stmt, self.noria.schema_search_path()).into());
+                name.as_ref().unwrap()
             }
+        };
+        // If we have another query with the same name, drop that query first
+        if let Some(view_request) = self.noria.view_create_request_from_name(name).await {
+            warn!(
+                statement = %Sensitive(&view_request.statement.display(self.settings.dialect)),
+                name = %name.display(readyset_sql::Dialect::MySQL),
+                "Dropping previously cached query",
+            );
+            self.drop_cached_query(name).await?;
         }
         // Now migrate the new query
-        adapter_rewrites::process_query(&mut stmt, self.noria.rewrite_params())?;
         let migration_state = match self
             .noria
             .handle_create_cached_query(
-                name,
+                Some(name),
                 &stmt,
                 override_schema_search_path,
                 always,
