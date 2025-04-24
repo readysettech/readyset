@@ -543,6 +543,9 @@ impl AdapterHandle {
                 set_cpu_affinity(false);
                 drop(sock1);
 
+                // Set up separately here because the adapter will set up its own tracing
+                readyset_tracing::init_test_logging();
+
                 let rt = tokio::runtime::Runtime::new()?;
                 rt.block_on(prepare_db(schema, args))?;
 

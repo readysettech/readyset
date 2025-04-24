@@ -5888,6 +5888,7 @@ dependencies = [
  "readyset-psql",
  "readyset-server",
  "readyset-sql",
+ "readyset-tracing",
  "readyset-util",
  "regex",
  "reqwest",
