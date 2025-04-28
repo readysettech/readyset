@@ -67,6 +67,26 @@ impl Encoding {
         }
     }
 
+    /// Get a supported encoding (or `None` if unsupported) for the given mysql character set name.
+    /// This is not a collation name (e.g. we expect `latin1` not `latin1_swedish_ci`). The name
+    /// must be lowercased.
+    pub fn from_mysql_character_set_name(character_set_name: &str) -> Option<Self> {
+        // This is mostly because we already lowercase this for use in metrics at the caller.
+        debug_assert!(
+            character_set_name
+                .chars()
+                .all(|c| c.is_ascii() && !c.is_uppercase()),
+            "character set names should be lowercase ascii, got {character_set_name:?}"
+        );
+        match character_set_name {
+            "utf8" | "utf8mb3" | "utf8mb4" => Some(Self::Utf8),
+            "latin1" => Some(Self::Latin1),
+            "cp850" => Some(Self::Cp850),
+            "binary" => Some(Self::Binary),
+            _ => None,
+        }
+    }
+
     pub fn decode(&self, bytes: &[u8]) -> ReadySetResult<String> {
         match self {
             Self::Utf8 => core::str::from_utf8(bytes)

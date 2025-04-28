@@ -120,3 +120,18 @@ pub const VIEWS_SYNCHRONIZER_VIEWS_CHECKED_SIZE: &str =
 /// Gauge: The size of the query status cache's pending inlined migrations
 pub const QUERY_STATUS_CACHE_PENDING_INLINE_MIGRATIONS: &str =
     "readyset_query_status_cache_pending_inline_migrations";
+
+/// Counter: The number of times a given character set has been seen in SET statements
+///
+/// - type: The type of usage of the character set
+///     - `SET <variable>` maps to the variable name, should be one of:
+///         - `character_set_client`
+///         - `character_set_server`
+///         - `character_set_results`
+///         - `character_set_connection`
+///         - `collation_connection`
+///         - `collation_server`
+///     - `SET CHARACTER SET` maps to `character_set`
+///     - `SET NAMES` maps to `names`
+/// - charset: The lowercased name of the character set
+pub const CHARACTER_SET_USAGE: &str = "readyset_mysql_character_set_usage";

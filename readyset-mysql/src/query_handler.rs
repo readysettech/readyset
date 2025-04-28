@@ -209,12 +209,8 @@ lazy_static! {
         "binlog_transaction_dependency_tracking",
         "block_encryption_mode",
         "bulk_insert_buffer_size",
-        "character_set_client",
-        "character_set_connection",
         "character_set_database",
         "character_set_filesystem",
-        "character_set_results",
-        "character_set_server",
         "check_proxy_users",
         "clone_autotune_concurrency",
         "clone_block_ddl",
@@ -230,9 +226,7 @@ lazy_static! {
         "clone_ssl_cert",
         "clone_ssl_key",
         "clone_valid_donor_list",
-        "collation_connection",
         "collation_database",
-        "collation_server",
         "completion_type",
         "concurrent_insert",
         "connect_timeout",
@@ -927,7 +921,8 @@ impl QueryHandler for MySqlQueryHandler {
         match stmt {
             SetStatement::Variable(set) => {
                 for (variable, value) in &set.variables {
-                    behavior = match variable.name.to_ascii_lowercase().as_str() {
+                    let var_name = variable.name.to_ascii_lowercase();
+                    behavior = match var_name.as_str() {
                         "autocommit" => behavior.set_autocommit(
                             matches!(value, Expr::Literal(Literal::Integer(i)) if *i == 1),
                         ),
@@ -953,27 +948,38 @@ impl QueryHandler for MySqlQueryHandler {
                             };
                             behavior.unsupported(!supported)
                         }
-                        "names" => {
-                            let supported = if let Expr::Literal(Literal::String(ref s)) = value {
-                                ["latin1", "utf8", "utf8mb4"]
-                                    .iter()
-                                    .any(|charset| s.eq_ignore_ascii_case(charset))
-                            } else {
-                                false
-                            };
-                            behavior.unsupported(!supported)
+                        "character_set_results" => {
+                            let encoding = get_encoding_for_charset(value, var_name);
+                            behavior.set_results_encoding(encoding)
+                        }
+                        "character_set_client" // TODO(mvzink): Remove and support reencoding queries before parsing
+                        | "character_set_connection" // TODO(mvzink): Remove and support plumbing collation through expression lowering
+                        | "character_set_server"
+                        | "collation_connection"
+                        | "collation_server" => {
+                            let _ = get_encoding_for_charset(value, var_name);
+                            behavior
                         }
                         p => behavior.unsupported(!ALLOWED_PARAMETERS_ANY_VALUE.contains(p)),
                     };
                 }
             }
+            // TODO(mvzink): Handle `SET CHARACTER SET`
             SetStatement::Names(names) => {
-                behavior = behavior.unsupported(
-                    names.collation.is_some()
-                        || !["latin1", "utf8", "utf8mb4"]
-                            .iter()
-                            .any(|charset| names.charset.eq_ignore_ascii_case(charset)),
+                let encoding_name = names.charset.to_ascii_lowercase();
+                let encoding = readyset_data::encoding::Encoding::from_mysql_character_set_name(
+                    encoding_name.as_str(),
                 );
+                metrics::counter!(
+                    readyset_client_metrics::recorded::CHARACTER_SET_USAGE,
+                    "type" => "names",
+                    "charset" => encoding_name,
+                )
+                .increment(1);
+
+                behavior = behavior
+                    .set_results_encoding(encoding)
+                    .unsupported(names.collation.is_some());
             }
             SetStatement::PostgresParameter(_) => {
                 behavior = behavior.unsupported(true);
@@ -983,9 +989,36 @@ impl QueryHandler for MySqlQueryHandler {
     }
 }
 
+fn get_encoding_for_charset(
+    value: &Expr,
+    var_name: String,
+) -> Option<readyset_data::encoding::Encoding> {
+    let encoding_name = match value {
+        Expr::Literal(Literal::String(ref s)) => Some(s.as_str()),
+        Expr::Column(Column { name, .. }) => Some(name.as_str()),
+        Expr::Literal(Literal::Null) => Some("null"),
+        _ => None,
+    };
+    let encoding_name = encoding_name.map(|s| s.to_ascii_lowercase());
+    let encoding = encoding_name
+        .as_ref()
+        .and_then(|s| readyset_data::encoding::Encoding::from_mysql_character_set_name(s.as_str()));
+
+    if let Some(encoding_name) = encoding_name {
+        metrics::counter!(
+            readyset_client_metrics::recorded::CHARACTER_SET_USAGE,
+            "type" => var_name,
+            "charset" => encoding_name,
+        )
+        .increment(1);
+    }
+    encoding
+}
+
 #[cfg(test)]
 mod tests {
-    use readyset_sql::ast::{SetStatement, SetVariables, Variable, VariableScope};
+    use readyset_data::encoding::Encoding;
+    use readyset_sql::ast::{SetNames, SetStatement, SetVariables, Variable, VariableScope};
 
     use super::*;
 
@@ -1110,5 +1143,92 @@ mod tests {
             MySqlQueryHandler::handle_set_statement(&stmt),
             SetBehavior::default().set_autocommit(true)
         );
+    }
+
+    #[test]
+    fn set_character_set_results_string_literal_supported() {
+        for (charset, encoding) in [
+            ("latin1", Encoding::Latin1),
+            ("utf8", Encoding::Utf8),
+            ("utf8mb4", Encoding::Utf8),
+            ("utf8mb3", Encoding::Utf8),
+        ] {
+            let stmt = SetStatement::Variable(SetVariables {
+                variables: vec![(
+                    Variable {
+                        scope: VariableScope::Session,
+                        name: "character_set_results".into(),
+                    },
+                    Expr::Literal(Literal::String(charset.into())),
+                )],
+            });
+            assert_eq!(
+                MySqlQueryHandler::handle_set_statement(&stmt),
+                SetBehavior::default().set_results_encoding(Some(encoding))
+            )
+        }
+    }
+
+    #[test]
+    fn set_character_set_results_string_literal_unsupported() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                Variable {
+                    scope: VariableScope::Session,
+                    name: "character_set_results".into(),
+                },
+                Expr::Literal("armscii".into()),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().unsupported(true)
+        )
+    }
+
+    #[test]
+    fn set_character_set_results_bare_name_supported() {
+        for (charset, encoding) in [
+            ("latin1", Encoding::Latin1),
+            ("utf8", Encoding::Utf8),
+            ("utf8mb4", Encoding::Utf8),
+            ("utf8mb3", Encoding::Utf8),
+        ] {
+            let stmt = SetStatement::Variable(SetVariables {
+                variables: vec![(
+                    Variable {
+                        scope: VariableScope::Session,
+                        name: "character_set_results".into(),
+                    },
+                    Expr::Column(Column {
+                        name: charset.into(),
+                        table: None,
+                    }),
+                )],
+            });
+            assert_eq!(
+                MySqlQueryHandler::handle_set_statement(&stmt),
+                SetBehavior::default().set_results_encoding(Some(encoding))
+            )
+        }
+    }
+
+    #[test]
+    fn set_names_supported() {
+        for (charset, encoding) in [
+            ("latin1", Encoding::Latin1),
+            ("utf8", Encoding::Utf8),
+            ("utf8mb4", Encoding::Utf8),
+            ("utf8mb3", Encoding::Utf8),
+        ] {
+            let stmt = SetStatement::Names(SetNames {
+                charset: charset.to_owned(),
+                collation: None,
+            });
+            assert_eq!(
+                MySqlQueryHandler::handle_set_statement(&stmt),
+                SetBehavior::default().set_results_encoding(Some(encoding))
+            )
+        }
     }
 }

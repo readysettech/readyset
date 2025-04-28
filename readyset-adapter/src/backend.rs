@@ -2769,7 +2769,9 @@ where
             proxy: _, // Basically ignored, caller will proxy unless we return an error
             set_autocommit,
             set_search_path,
+            set_results_encoding,
         } = Handler::handle_set_statement(set);
+
         if unsupported {
             match settings.unsupported_set_mode {
                 UnsupportedSetMode::Error => {
@@ -2827,6 +2829,9 @@ where
         if let Some(search_path) = set_search_path {
             trace!(?search_path, "Setting search_path");
             noria.set_schema_search_path(search_path);
+        }
+        if let Some(encoding) = set_results_encoding {
+            trace!(?encoding, "Setting results_encoding");
         }
 
         Ok(())
