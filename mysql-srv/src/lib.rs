@@ -14,8 +14,8 @@
 //!
 //! ```
 //! # extern crate mysql_srv;
-//! extern crate mysql;
 //! extern crate mysql_common as myc;
+//! use mysql_async::prelude::Queryable;
 //! # use std::io;
 //! # use std::net;
 //! # use std::thread;
@@ -24,7 +24,6 @@
 //!
 //! use readyset_util::redacted::RedactedString;
 //! use database_utils::TlsMode;
-//! use mysql::prelude::*;
 //! use mysql_srv::*;
 //! use readyset_adapter_types::DeallocateId;
 //! use tokio::io::{AsyncRead, AsyncWrite};
@@ -131,7 +130,8 @@
 //!     }
 //! }
 //!
-//! fn main() {
+//! #[tokio::main]
+//! async fn main() {
 //!     let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
 //!     let port = listener.local_addr().unwrap().port();
 //!     let mut rt = tokio::runtime::Runtime::new().unwrap();
@@ -148,13 +148,15 @@
 //!         }
 //!     });
 //!
-//!     let mut db = mysql::Conn::new(
-//!         mysql::Opts::from_url(&format!("mysql://root:password@127.0.0.1:{}", port)).unwrap(),
+//!     let mut db = mysql_async::Conn::new(
+//!         mysql_async::Opts::from_url(&format!("mysql://root:password@127.0.0.1:{}", port)).unwrap(),
 //!     )
+//!     .await
 //!     .unwrap();
-//!     assert!(db.ping().is_ok());
+//!     assert!(db.ping().await.is_ok());
 //!     assert_eq!(
-//!         db.query::<mysql::Row, _>("SELECT a, b FROM foo")
+//!         db.query::<mysql_async::Row, _>("SELECT a, b FROM foo")
+//!             .await
 //!             .unwrap()
 //!             .len(),
 //!         1

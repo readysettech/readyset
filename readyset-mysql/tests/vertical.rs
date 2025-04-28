@@ -521,7 +521,7 @@ impl OperationResult {
     }
 }
 
-fn compare_rows(r1: &mysql_async::Row, r2: &mysql::Row) -> Ordering {
+fn compare_rows(r1: &mysql_async::Row, r2: &mysql_async::Row) -> Ordering {
     let l = cmp::min(r1.len(), r2.len());
     for i in 0..l {
         match r1.as_ref(i).unwrap().partial_cmp(r2.as_ref(i).unwrap()) {
@@ -556,8 +556,8 @@ impl PartialEq for OperationResult {
     }
 }
 
-impl From<mysql_async::Result<Vec<mysql::Row>>> for OperationResult {
-    fn from(res: mysql_async::Result<Vec<mysql::Row>>) -> Self {
+impl From<mysql_async::Result<Vec<mysql_async::Row>>> for OperationResult {
+    fn from(res: mysql_async::Result<Vec<mysql_async::Row>>) -> Self {
         match res {
             Ok(rows) => Self::Rows(rows),
             Err(e) => Self::Err(e),
@@ -596,7 +596,10 @@ impl Operation {
 
         match self {
             Operation::Query { key } => Ok(conn
-                .exec::<mysql_async::Row, _, _>(query, mysql::Params::Positional(to_values(key)?))
+                .exec::<mysql_async::Row, _, _>(
+                    query,
+                    mysql_async::Params::Positional(to_values(key)?),
+                )
                 .await
                 .into()),
             Operation::Insert { table, row } => Ok(conn

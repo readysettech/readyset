@@ -35,7 +35,6 @@ readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
 tokio-postgres = { workspace = true }
-mysql = { workspace = true }
 
 slab = { workspace = true }
 futures = { workspace = true }

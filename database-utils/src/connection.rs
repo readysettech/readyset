@@ -3,11 +3,11 @@ use std::hash::{Hash, Hasher};
 use std::marker::{Send, Sync};
 use std::str;
 
-use ::mysql::consts::ColumnFlags;
 use derive_more::From;
 use futures::TryStreamExt;
 use mysql::prelude::AsQuery;
 use mysql::PoolConstraints;
+use mysql_async::consts::ColumnFlags;
 use mysql_async::prelude::Queryable;
 use readyset_errors::ReadySetError;
 use readyset_sql::{ast::SqlType, Dialect};

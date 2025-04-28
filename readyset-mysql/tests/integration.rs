@@ -4,9 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use mysql::Row;
 use mysql_async::prelude::Queryable;
-use mysql_async::{Conn, OptsBuilder};
+use mysql_async::{Conn, OptsBuilder, Row, Value};
 use readyset_adapter::backend::noria_connector::ReadBehavior;
 use readyset_adapter::backend::{MigrationMode, QueryInfo};
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
@@ -153,7 +152,7 @@ async fn delete_basic() {
     sleep().await;
 
     let row = conn
-        .query_first::<mysql::Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+        .query_first::<Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .await
         .unwrap();
     assert!(row.is_some());
@@ -168,7 +167,7 @@ async fn delete_basic() {
     }
 
     let row = conn
-        .query_first::<mysql::Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+        .query_first::<Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .await
         .unwrap();
     assert!(row.is_none());
@@ -201,7 +200,7 @@ async fn delete_only_constraint() {
     }
 
     let row = conn
-        .query_first::<mysql::Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+        .query_first::<Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .await
         .unwrap();
     assert!(row.is_none());
@@ -236,12 +235,12 @@ async fn delete_multiple() {
 
     for i in 1..3 {
         let query = format!("SELECT Cats.id FROM Cats WHERE Cats.id = {}", i);
-        let row = conn.query_first::<mysql::Row, _>(query).await.unwrap();
+        let row = conn.query_first::<Row, _>(query).await.unwrap();
         assert!(row.is_none());
     }
 
     let row = conn
-        .query_first::<mysql::Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 3")
+        .query_first::<Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 3")
         .await
         .unwrap();
     assert!(row.is_some());
@@ -283,7 +282,7 @@ async fn delete_bogus_valid_and() {
     sleep().await;
 
     let row = conn
-        .query_first::<mysql::Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+        .query_first::<Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .await
         .unwrap();
     assert!(row.is_some());
@@ -299,7 +298,7 @@ async fn delete_bogus_valid_and() {
     }
 
     let row = conn
-        .query_first::<mysql::Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+        .query_first::<Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .await
         .unwrap();
     assert!(row.is_none());
@@ -322,7 +321,7 @@ async fn delete_bogus_valid_or() {
     sleep().await;
 
     let row = conn
-        .query_first::<mysql::Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+        .query_first::<Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .await
         .unwrap();
     assert!(row.is_some());
@@ -338,7 +337,7 @@ async fn delete_bogus_valid_or() {
     }
 
     let row = conn
-        .query_first::<mysql::Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
+        .query_first::<Row, _>("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .await
         .unwrap();
     assert!(row.is_none());
@@ -405,7 +404,7 @@ async fn delete_compound_primary_key() {
     }
 
     let q = "SELECT Vote.uid FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 2";
-    let row = conn.query_first::<mysql::Row, _>(q).await.unwrap();
+    let row = conn.query_first::<Row, _>(q).await.unwrap();
     assert!(row.is_none());
 
     let q = "SELECT Vote.uid FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 3";
@@ -444,7 +443,7 @@ async fn delete_multi_compound_primary_key() {
 
     for _ in 2..4 {
         let q = "SELECT Vote.uid FROM Vote WHERE Vote.aid = 1 AND Vote.uid = 2";
-        let row = conn.query_first::<mysql::Row, _>(q).await.unwrap();
+        let row = conn.query_first::<Row, _>(q).await.unwrap();
         assert!(row.is_none());
     }
 
@@ -638,7 +637,7 @@ async fn update_pkey() {
         .unwrap();
     assert_eq!(name, String::from("Rusty"));
     let old_row = conn
-        .query_first::<mysql::Row, _>("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
+        .query_first::<Row, _>("SELECT Cats.name FROM Cats WHERE Cats.id = 1")
         .await
         .unwrap();
     assert!(old_row.is_none());
@@ -816,7 +815,7 @@ async fn select_collapse_where_in() {
         .await
         .unwrap()
         .into_iter()
-        .map(|mut row: mysql::Row| row.take::<String, _>(0).unwrap())
+        .map(|mut row: Row| row.take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 2);
     assert!(names.iter().any(|s| s == "Bob"));
@@ -827,7 +826,7 @@ async fn select_collapse_where_in() {
         .await
         .unwrap()
         .into_iter()
-        .map(|mut row: mysql::Row| row.take::<String, _>(0).unwrap())
+        .map(|mut row: Row| row.take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 2);
     assert!(names.iter().any(|s| s == "Bob"));
@@ -839,7 +838,7 @@ async fn select_collapse_where_in() {
         .await
         .unwrap()
         .into_iter()
-        .map(|mut row: mysql::Row| row.take::<String, _>(0).unwrap())
+        .map(|mut row: Row| row.take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 2);
     assert!(names.iter().any(|s| s == "Bob"));
@@ -853,7 +852,7 @@ async fn select_collapse_where_in() {
         .await
         .unwrap()
         .into_iter()
-        .map(|mut row: mysql::Row| row.take::<String, _>(0).unwrap())
+        .map(|mut row: Row| row.take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 2);
     assert!(names.iter().any(|s| s == "Bob"));
@@ -865,7 +864,7 @@ async fn select_collapse_where_in() {
         .await
         .unwrap()
         .into_iter()
-        .map(|mut row: mysql::Row| row.take::<String, _>(0).unwrap())
+        .map(|mut row: Row| row.take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 1);
     assert!(names.iter().any(|s| s == "Bob"));
@@ -878,7 +877,7 @@ async fn select_collapse_where_in() {
         .await
         .unwrap()
         .into_iter()
-        .map(|mut row: mysql::Row| row.take::<String, _>(0).unwrap())
+        .map(|mut row: Row| row.take::<String, _>(0).unwrap())
         .collect();
     assert_eq!(names.len(), 1);
     assert!(names.iter().any(|s| s == "Bob"));
@@ -936,7 +935,7 @@ async fn basic_select() {
         .unwrap();
     sleep().await;
 
-    let rows: Vec<mysql::Row> = conn.query("SELECT test.* FROM test").await.unwrap();
+    let rows: Vec<Row> = conn.query("SELECT test.* FROM test").await.unwrap();
     assert_eq!(rows.len(), 1);
     // NOTE(malte): the row contains strings (!) because non-prepared statements are executed via
     // the MySQL text protocol, and we receive the result as `Bytes`.
@@ -981,7 +980,7 @@ async fn prepared_select() {
         .unwrap();
     sleep().await;
 
-    let rows: Vec<mysql::Row> = conn
+    let rows: Vec<Row> = conn
         .exec("SELECT test.* FROM test WHERE x = ?", (4,))
         .await
         .unwrap();
@@ -1014,7 +1013,7 @@ async fn create_view() {
         .unwrap();
     sleep().await;
 
-    let rows: Vec<mysql::Row> = conn.query("SELECT testview.* FROM testview").await.unwrap();
+    let rows: Vec<Row> = conn.query("SELECT testview.* FROM testview").await.unwrap();
     assert_eq!(rows.len(), 1);
     // NOTE(malte): the row contains strings (!) because non-prepared statements are executed via
     // the MySQL text protocol, and we receive the result as `Bytes`.
@@ -1023,7 +1022,7 @@ async fn create_view() {
         vec![vec!["4".into(), "2".into()]]
     );
 
-    let rows: Vec<mysql::Row> = conn.query("SELECT test.* FROM test").await.unwrap();
+    let rows: Vec<Row> = conn.query("SELECT test.* FROM test").await.unwrap();
     assert_eq!(rows.len(), 1);
     // NOTE(malte): the row contains strings (!) because non-prepared statements are executed via
     // the MySQL text protocol, and we receive the result as `Bytes`.
@@ -1054,7 +1053,7 @@ async fn create_view_rev() {
     sleep().await;
 
     assert_eq!(
-        conn.query::<mysql::Row, _>("SELECT testview.* FROM testview")
+        conn.query::<Row, _>("SELECT testview.* FROM testview")
             .await
             .unwrap()
             .len(),
@@ -1868,7 +1867,7 @@ async fn show_caches_with_always() {
 async fn show_readyset_status() {
     let (opts, _handle, shutdown_tx) = setup_with_mysql(true).await;
     let mut conn = Conn::new(opts).await.unwrap();
-    let mut ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
+    let mut ret: Vec<Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
 
     let valid_timestamp = |s: String| {
         if s == "NULL" {
@@ -1932,7 +1931,7 @@ async fn readyset_maintenance_mode(conn: &mut Conn) {
         .await
         .unwrap();
     sleep().await;
-    let ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
+    let ret: Vec<Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
     assert_eq!(ret.len(), 8);
     // find the row with "Status"
     let row = ret
@@ -1947,7 +1946,7 @@ async fn readyset_maintenance_mode(conn: &mut Conn) {
         .await
         .unwrap();
     sleep().await;
-    let ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
+    let ret: Vec<Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
     assert_eq!(ret.len(), 8);
     let row = ret
         .iter()
@@ -2318,11 +2317,11 @@ async fn datetime_binary_protocol() {
     assert_eq!(
         rs_rows.unwrap_raw(),
         vec![
-            Some(mysql::Value::Int(1)),
-            Some(mysql::Value::Date(0, 0, 0, 0, 0, 0, 0)),
-            Some(mysql::Value::Date(2021, 1, 1, 0, 0, 0, 0)),
-            Some(mysql::Value::Date(2021, 1, 1, 0, 0, 1, 0)),
-            Some(mysql::Value::Date(2021, 1, 1, 0, 0, 1, 1))
+            Some(Value::Int(1)),
+            Some(Value::Date(0, 0, 0, 0, 0, 0, 0)),
+            Some(Value::Date(2021, 1, 1, 0, 0, 0, 0)),
+            Some(Value::Date(2021, 1, 1, 0, 0, 1, 0)),
+            Some(Value::Date(2021, 1, 1, 0, 0, 1, 1))
         ]
     );
     shutdown_tx.shutdown().await;

@@ -44,7 +44,7 @@ async fn test(
     .unwrap();
 
     let row = conn
-        .query_first::<mysql::Row, _>("show create table t3")
+        .query_first::<mysql_async::Row, _>("show create table t3")
         .await
         .unwrap()
         .unwrap()

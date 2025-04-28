@@ -879,7 +879,7 @@ async fn switch_database_with_use() {
 #[slow]
 async fn replication_failure_ignores_table() {
     readyset_tracing::init_test_logging();
-    use mysql::serde_json;
+    use mysql_common::serde_json;
     use readyset_adapter::backend::MigrationMode;
     use readyset_errors::ReadySetError;
     use readyset_sql::ast::Relation;

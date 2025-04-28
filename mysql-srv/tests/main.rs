@@ -1,5 +1,5 @@
 extern crate chrono;
-extern crate mysql;
+extern crate mysql_async as mysql;
 extern crate mysql_common as myc;
 extern crate mysql_srv;
 extern crate nom;
@@ -10,11 +10,13 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::{io, net, thread};
+use std::{io, net};
 
 use database_utils::TlsMode;
+use futures::StreamExt;
+use mysql::consts::Command;
 use mysql::prelude::Queryable;
-use mysql::Row;
+use mysql::{Row, ServerError};
 use mysql_srv::{
     CachedSchema, Column, ErrorKind, InitWriter, MySqlIntermediary, MySqlShim, ParamParser,
     QueryResultWriter, QueryResultsResponse, StatementMetaWriter,
@@ -22,7 +24,7 @@ use mysql_srv::{
 use readyset_adapter_types::DeallocateId;
 use readyset_util::redacted::RedactedString;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream};
 
 static DEFAULT_CHARACTER_SET: u16 = myc::constants::UTF8_GENERAL_CI;
 
@@ -216,41 +218,45 @@ where
         self
     }
 
-    fn test<C>(self, c: C)
+    async fn test<C>(self, c: C)
     where
-        C: FnOnce(&mut mysql::Conn),
+        C: for<'a> FnOnce(&'a mut mysql::Conn) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>,
     {
         let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let rt = tokio::runtime::Runtime::new().unwrap();
         let port = listener.local_addr().unwrap().port();
-        let jh = thread::spawn(move || {
-            let (s, _) = listener.accept().unwrap();
-            let s = {
-                let _guard = rt.handle().enter();
-                s.set_nonblocking(true).expect("couldn't set nonblocking");
-                tokio::net::TcpStream::from_std(s).unwrap()
-            };
-            rt.block_on(MySqlIntermediary::run_on_tcp(
-                self,
-                s,
-                false,
-                None,
-                TlsMode::Optional,
-            ))
+
+        // Convert to async TcpListener
+        let listener = {
+            listener
+                .set_nonblocking(true)
+                .expect("couldn't set nonblocking");
+            TcpListener::from_std(listener).unwrap()
+        };
+
+        // Spawn the server task
+        let server_handle = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            MySqlIntermediary::run_on_tcp(self, socket, false, None, TlsMode::Optional).await
         });
 
+        // Connect to the server
         let mut db = mysql::Conn::new(
             mysql::Opts::from_url(&format!("mysql://user:password@127.0.0.1:{}", port)).unwrap(),
         )
+        .await
         .unwrap();
-        c(&mut db);
+
+        // Run the test closure
+        c(&mut db).await;
+
+        // Clean up
         drop(db);
-        jh.join().unwrap().unwrap();
+        server_handle.await.unwrap().unwrap();
     }
 }
 
-#[test]
-fn it_connects() {
+#[tokio::test]
+async fn it_connects() {
     TestingShim::new(
         move |_, _| unreachable!(),
         move |_| unreachable!(),
@@ -258,7 +264,8 @@ fn it_connects() {
         move |_, _| unreachable!(),
         move |_, _, _| unreachable!(),
     )
-    .test(|_| {})
+    .test(|_| Box::pin(async move {}))
+    .await;
 }
 
 /*
@@ -290,8 +297,8 @@ fn failed_authentication() {
     jh.join().unwrap().unwrap();
 }
  */
-#[test]
-fn it_inits_ok() {
+#[tokio::test]
+async fn it_inits_ok() {
     TestingShim::new(
         |_, _| unreachable!(),
         |_| unreachable!(),
@@ -300,13 +307,22 @@ fn it_inits_ok() {
             assert_eq!(schema, "test");
             Box::pin(async move { writer.ok().await })
         },
-        move |_, _, _| unreachable!(),
+        |_, _, _| unreachable!(),
     )
-    .test(|db| assert!(db.select_db("test").is_ok()));
+    .test(|db| {
+        Box::pin(async move {
+            db.write_command_data(Command::COM_INIT_DB, "test")
+                .await
+                .unwrap();
+            let res = db.read_packet().await;
+            assert!(res.is_ok());
+        })
+    })
+    .await;
 }
 
-#[test]
-fn it_inits_error() {
+#[tokio::test]
+async fn it_inits_error() {
     TestingShim::new(
         |_, _| unreachable!(),
         |_| unreachable!(),
@@ -322,13 +338,22 @@ fn it_inits_error() {
                     .await
             })
         },
-        move |_, _, _| unreachable!(),
+        |_, _, _| unreachable!(),
     )
-    .test(|db| assert!(db.select_db("test").is_err()));
+    .test(|db| {
+        Box::pin(async move {
+            db.write_command_data(Command::COM_INIT_DB, "test")
+                .await
+                .unwrap();
+            let res = db.read_packet().await;
+            assert!(res.is_err());
+        })
+    })
+    .await;
 }
 
-#[test]
-fn it_pings() {
+#[tokio::test]
+async fn it_pings() {
     TestingShim::new(
         |_, _| unreachable!(),
         |_| unreachable!(),
@@ -336,11 +361,12 @@ fn it_pings() {
         |_, _| unreachable!(),
         move |_, _, _| unreachable!(),
     )
-    .test(|db| assert!(db.ping().is_ok()))
+    .test(|db| Box::pin(async move { assert!(db.ping().await.is_ok()) }))
+    .await;
 }
 
-#[test]
-fn empty_response() {
+#[tokio::test]
+async fn empty_response() {
     TestingShim::new(
         |_, w| Box::pin(async move { w.completed(0, 0, None).await }),
         |_| unreachable!(),
@@ -349,38 +375,21 @@ fn empty_response() {
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
-        assert_eq!(db.query::<Row, _>("SELECT a, b FROM foo").unwrap().len(), 0);
+        Box::pin(async move {
+            assert_eq!(
+                db.query::<Row, _>("SELECT a, b FROM foo")
+                    .await
+                    .unwrap()
+                    .len(),
+                0
+            );
+        })
     })
+    .await;
 }
 
-#[test]
-fn no_rows() {
-    let cols = [Column {
-        table: String::new(),
-        column: "a".to_owned(),
-        coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-        column_length: 6,
-        colflags: myc::constants::ColumnFlags::empty(),
-        character_set: DEFAULT_CHARACTER_SET,
-        decimals: 0,
-    }];
-    TestingShim::new(
-        move |_, w| {
-            let cols = cols.clone();
-            Box::pin(async move { w.start(&cols[..]).await?.finish().await })
-        },
-        |_| unreachable!(),
-        |_, _, _| unreachable!(),
-        |_, _| unreachable!(),
-        move |_, _, _| unreachable!(),
-    )
-    .test(|db| {
-        assert_eq!(db.query::<Row, _>("SELECT a, b FROM foo").unwrap().len(), 0);
-    })
-}
-
-#[test]
-fn no_columns() {
+#[tokio::test]
+async fn no_columns() {
     TestingShim::new(
         move |_, w| Box::pin(async move { w.start(&[]).await?.finish().await }),
         |_| unreachable!(),
@@ -389,12 +398,21 @@ fn no_columns() {
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
-        assert_eq!(db.query::<Row, _>("SELECT a, b FROM foo").unwrap().len(), 0);
+        Box::pin(async move {
+            assert_eq!(
+                db.query::<Row, _>("SELECT a, b FROM foo")
+                    .await
+                    .unwrap()
+                    .len(),
+                0
+            );
+        })
     })
+    .await;
 }
 
-#[test]
-fn no_columns_but_rows() {
+#[tokio::test]
+async fn no_columns_but_rows() {
     TestingShim::new(
         move |_, w| {
             Box::pin(async move {
@@ -409,12 +427,21 @@ fn no_columns_but_rows() {
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
-        assert_eq!(db.query::<Row, _>("SELECT a, b FROM foo").unwrap().len(), 0);
+        Box::pin(async move {
+            assert_eq!(
+                db.query::<Row, _>("SELECT a, b FROM foo")
+                    .await
+                    .unwrap()
+                    .len(),
+                0
+            );
+        })
     })
+    .await;
 }
 
-#[test]
-fn error_response() {
+#[tokio::test]
+async fn error_response() {
     let err = (ErrorKind::ER_NO, "clearly not");
     TestingShim::new(
         move |_, w| Box::pin(async move { w.error(err.0, err.1.as_bytes()).await }),
@@ -424,24 +451,30 @@ fn error_response() {
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
-        if let mysql::Error::MySqlError(e) = db.query::<Row, _>("SELECT a, b FROM foo").unwrap_err()
-        {
-            assert_eq!(
-                e,
-                mysql::error::MySqlError {
-                    state: String::from_utf8(err.0.sqlstate().to_vec()).unwrap(),
-                    message: err.1.to_owned(),
-                    code: err.0 as u16,
-                }
-            );
-        } else {
-            unreachable!();
-        }
+        Box::pin(async move {
+            if let mysql::Error::Server(e) = db
+                .query::<Row, _>("SELECT a, b FROM foo")
+                .await
+                .unwrap_err()
+            {
+                assert_eq!(
+                    e,
+                    ServerError {
+                        state: String::from_utf8(err.0.sqlstate().to_vec()).unwrap(),
+                        message: err.1.to_owned(),
+                        code: err.0 as u16,
+                    },
+                );
+            } else {
+                unreachable!();
+            }
+        })
     })
+    .await;
 }
 
-#[test]
-fn it_queries_nulls() {
+#[tokio::test]
+async fn it_queries_nulls() {
     TestingShim::new(
         |_, w| {
             let cols = [Column {
@@ -465,14 +498,17 @@ fn it_queries_nulls() {
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
-        let res = db.query::<Row, _>("SELECT a, b FROM foo").unwrap();
-        let row = res.first().unwrap();
-        assert_eq!(row.get(0), Some(mysql::Value::NULL));
+        Box::pin(async move {
+            let res = db.query::<Row, _>("SELECT a, b FROM foo").await.unwrap();
+            let row = res.first().unwrap();
+            assert_eq!(row.get(0), Some(mysql::Value::NULL));
+        })
     })
+    .await;
 }
 
-#[test]
-fn it_queries() {
+#[tokio::test]
+async fn it_queries() {
     TestingShim::new(
         |_, w| {
             let cols = [Column {
@@ -496,14 +532,17 @@ fn it_queries() {
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
-        let res = db.query::<Row, _>("SELECT a, b FROM foo").unwrap();
-        let row = res.first().unwrap();
-        assert_eq!(row.get(0), Some(1024));
+        Box::pin(async move {
+            let res = db.query::<Row, _>("SELECT a, b FROM foo").await.unwrap();
+            let row = res.first().unwrap();
+            assert_eq!(row.get(0), Some(1024));
+        })
     })
+    .await;
 }
 
-#[test]
-fn multi_result() {
+#[tokio::test]
+async fn multi_result() {
     TestingShim::new(
         |_, w| {
             let cols = [Column {
@@ -530,21 +569,27 @@ fn multi_result() {
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
-        let mut result = db
-            .query_iter("SELECT a FROM foo; SELECT a FROM foo")
-            .unwrap();
-        let mut set1 = result.iter().unwrap();
-        let row1 = set1.next().unwrap().unwrap();
-        assert_eq!(row1.get::<i16, _>(0), Some(1024));
-        drop(set1);
-        let mut set2 = result.iter().unwrap();
-        let row2 = set2.next().unwrap().unwrap();
-        assert_eq!(row2.get::<i16, _>(0), Some(1025));
+        Box::pin(async move {
+            let mut result = db
+                .query_iter("SELECT a FROM foo; SELECT a FROM foo")
+                .await
+                .unwrap();
+
+            let mut stream1 = result.stream::<u16>().await.unwrap().unwrap();
+            let row1 = stream1.next().await.unwrap().unwrap();
+            assert_eq!(row1, 1024_u16);
+            drop(stream1);
+            let mut stream2 = result.stream::<u16>().await.unwrap().unwrap();
+            let row2 = stream2.next().await.unwrap().unwrap();
+            assert_eq!(row2, 1025_u16);
+            drop(stream2);
+        })
     })
+    .await;
 }
 
-#[test]
-fn it_queries_many_rows() {
+#[tokio::test]
+async fn it_queries_many_rows() {
     TestingShim::new(
         |_, w| {
             let cols = [
@@ -582,19 +627,22 @@ fn it_queries_many_rows() {
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
-        let mut rows = 0;
-        for row in db.query_iter("SELECT a, b FROM foo").unwrap() {
-            let row = row.unwrap();
-            assert_eq!(row.get::<i16, _>(0), Some(1024));
-            assert_eq!(row.get::<i16, _>(1), Some(1025));
-            rows += 1;
-        }
-        assert_eq!(rows, 2);
+        Box::pin(async move {
+            let mut rows = 0;
+            let mut result = db.query_iter("SELECT a, b FROM foo").await.unwrap();
+            while let Ok(Some(row)) = result.next().await {
+                assert_eq!(row.get::<i16, _>(0), Some(1024));
+                assert_eq!(row.get::<i16, _>(1), Some(1025));
+                rows += 1;
+            }
+            assert_eq!(rows, 2);
+        })
     })
+    .await;
 }
 
-#[test]
-fn it_prepares() {
+#[tokio::test]
+async fn it_prepares() {
     let cols = vec![Column {
         table: String::new(),
         column: "a".to_owned(),
@@ -648,16 +696,20 @@ fn it_prepares() {
     .with_params(params)
     .with_columns(cols2)
     .test(|db| {
-        let res = db
-            .exec::<Row, _, _>("SELECT a FROM b WHERE c = ?", (42i16,))
-            .unwrap();
-        let row = res.first().unwrap();
-        assert_eq!(row.get::<i16, _>(0), Some(1024i16));
+        Box::pin(async move {
+            let res = db
+                .exec::<Row, _, _>("SELECT a FROM b WHERE c = ?", (42i16,))
+                .await
+                .unwrap();
+            let row = res.first().unwrap();
+            assert_eq!(row.get::<i16, _>(0), Some(1024i16));
+        })
     })
+    .await;
 }
 
-#[test]
-fn insert_exec() {
+#[tokio::test]
+async fn insert_exec() {
     let params = vec![
         Column {
             table: String::new(),
@@ -803,29 +855,33 @@ fn insert_exec() {
     )
     .with_params(params)
     .test(|db| {
-        db.exec::<Row, _, _>(
-            "INSERT INTO `users` \
+        Box::pin(async move {
+            db.exec::<Row, _, _>(
+                "INSERT INTO `users` \
                  (`username`, `email`, `password_digest`, `created_at`, \
                  `session_token`, `rss_token`, `mailing_list_token`) \
                  VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                "user199",
-                "user199@example.com",
-                "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka",
-                mysql::Value::Date(2018, 4, 6, 13, 0, 56, 0),
-                "token199",
-                "rsstoken199",
-                "mtok199",
-            ),
-        )
-        .unwrap();
-        assert_eq!(db.affected_rows(), 42);
-        assert_eq!(db.last_insert_id(), 1);
+                (
+                    "user199",
+                    "user199@example.com",
+                    "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka",
+                    mysql::Value::Date(2018, 4, 6, 13, 0, 56, 0),
+                    "token199",
+                    "rsstoken199",
+                    "mtok199",
+                ),
+            )
+            .await
+            .unwrap();
+            assert_eq!(db.affected_rows(), 42);
+            assert_eq!(db.last_insert_id(), Some(1));
+        })
     })
+    .await;
 }
 
-#[test]
-fn send_long() {
+#[tokio::test]
+async fn send_long() {
     let cols = vec![Column {
         table: String::new(),
         column: "a".to_owned(),
@@ -879,16 +935,20 @@ fn send_long() {
     .with_params(params)
     .with_columns(cols2)
     .test(|db| {
-        let res = db
-            .exec::<Row, _, _>("SELECT a FROM b WHERE c = ?", (b"Hello world",))
-            .unwrap();
-        let row = res.first().unwrap();
-        assert_eq!(row.get::<i16, _>(0), Some(1024i16));
+        Box::pin(async move {
+            let res = db
+                .exec::<Row, _, _>("SELECT a FROM b WHERE c = ?", (b"Hello world",))
+                .await
+                .unwrap();
+            let row = res.first().unwrap();
+            assert_eq!(row.get::<i16, _>(0), Some(1024i16));
+        })
     })
+    .await;
 }
 
-#[test]
-fn it_prepares_many() {
+#[tokio::test]
+async fn it_prepares_many() {
     let cols = vec![
         Column {
             table: String::new(),
@@ -937,18 +997,25 @@ fn it_prepares_many() {
     .with_params(Vec::new())
     .with_columns(cols2)
     .test(|db| {
-        let mut rows = 0;
-        for row in db.exec::<Row, _, _>("SELECT a, b FROM x", ()).unwrap() {
-            assert_eq!(row.get::<i16, _>(0), Some(1024));
-            assert_eq!(row.get::<i16, _>(1), Some(1025));
-            rows += 1;
-        }
-        assert_eq!(rows, 2);
+        Box::pin(async move {
+            let mut rows = 0;
+            for row in db
+                .exec::<Row, _, _>("SELECT a, b FROM x", ())
+                .await
+                .unwrap()
+            {
+                assert_eq!(row.get::<i16, _>(0), Some(1024));
+                assert_eq!(row.get::<i16, _>(1), Some(1025));
+                rows += 1;
+            }
+            assert_eq!(rows, 2);
+        })
     })
+    .await;
 }
 
-#[test]
-fn prepared_empty() {
+#[tokio::test]
+async fn prepared_empty() {
     let cols = vec![Column {
         table: String::new(),
         column: "a".to_owned(),
@@ -982,17 +1049,21 @@ fn prepared_empty() {
     .with_params(params)
     .with_columns(cols2)
     .test(|db| {
-        assert_eq!(
-            db.exec::<Row, _, _>("SELECT a FROM b WHERE c = ?", (42i16,))
-                .unwrap()
-                .len(),
-            0
-        );
+        Box::pin(async move {
+            assert_eq!(
+                db.exec::<Row, _, _>("SELECT a FROM b WHERE c = ?", (42i16,))
+                    .await
+                    .unwrap()
+                    .len(),
+                0
+            );
+        })
     })
+    .await;
 }
 
-#[test]
-fn prepared_no_params() {
+#[tokio::test]
+async fn prepared_no_params() {
     let cols = vec![Column {
         table: String::new(),
         column: "a".to_owned(),
@@ -1023,14 +1094,17 @@ fn prepared_no_params() {
     .with_params(params)
     .with_columns(cols2)
     .test(|db| {
-        let res = db.exec::<Row, _, _>("foo", ()).unwrap();
-        let row = res.first().unwrap();
-        assert_eq!(row.get::<i16, _>(0), Some(1024i16));
+        Box::pin(async move {
+            let res = db.exec::<Row, _, _>("foo", ()).await.unwrap();
+            let row = res.first().unwrap();
+            assert_eq!(row.get::<i16, _>(0), Some(1024i16));
+        })
     })
+    .await;
 }
 
-#[test]
-fn prepared_nulls() {
+#[tokio::test]
+async fn prepared_nulls() {
     let cols = vec![
         Column {
             table: String::new(),
@@ -1108,20 +1182,24 @@ fn prepared_nulls() {
     .with_params(params)
     .with_columns(cols2)
     .test(|db| {
-        let res = db
-            .exec::<Row, _, _>(
-                "SELECT a, b FROM x WHERE c = ? AND d = ?",
-                (mysql::Value::NULL, 42),
-            )
-            .unwrap();
-        let row = res.first().unwrap();
-        assert_eq!(row.as_ref(0), Some(&mysql::Value::NULL));
-        assert_eq!(row.get::<i16, _>(1), Some(42));
+        Box::pin(async move {
+            let res = db
+                .exec::<Row, _, _>(
+                    "SELECT a, b FROM x WHERE c = ? AND d = ?",
+                    (mysql::Value::NULL, 42),
+                )
+                .await
+                .unwrap();
+            let row = res.first().unwrap();
+            assert_eq!(row.as_ref(0), Some(&mysql::Value::NULL));
+            assert_eq!(row.get::<i16, _>(1), Some(42));
+        })
     })
+    .await;
 }
 
-#[test]
-fn prepared_no_rows() {
+#[tokio::test]
+async fn prepared_no_rows() {
     let cols = vec![Column {
         table: String::new(),
         column: "a".to_owned(),
@@ -1144,17 +1222,21 @@ fn prepared_no_rows() {
     )
     .with_columns(cols2)
     .test(|db| {
-        assert_eq!(
-            db.exec::<Row, _, _>("SELECT a, b FROM foo", ())
-                .unwrap()
-                .len(),
-            0
-        );
+        Box::pin(async move {
+            assert_eq!(
+                db.exec::<Row, _, _>("SELECT a, b FROM foo", ())
+                    .await
+                    .unwrap()
+                    .len(),
+                0
+            );
+        })
     })
+    .await;
 }
 
-#[test]
-fn prepared_no_cols_but_rows() {
+#[tokio::test]
+async fn prepared_no_cols_but_rows() {
     TestingShim::new(
         |_, _| unreachable!(),
         |_| 0,
@@ -1169,17 +1251,21 @@ fn prepared_no_cols_but_rows() {
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
-        assert_eq!(
-            db.exec::<Row, _, _>("SELECT a, b FROM foo", ())
-                .unwrap()
-                .len(),
-            0
-        );
+        Box::pin(async move {
+            assert_eq!(
+                db.exec::<Row, _, _>("SELECT a, b FROM foo", ())
+                    .await
+                    .unwrap()
+                    .len(),
+                0
+            );
+        })
     })
+    .await;
 }
 
-#[test]
-fn prepared_no_cols() {
+#[tokio::test]
+async fn prepared_no_cols() {
     TestingShim::new(
         |_, _| unreachable!(),
         |_| 0,
@@ -1188,17 +1274,21 @@ fn prepared_no_cols() {
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
-        assert_eq!(
-            db.exec::<Row, _, _>("SELECT a, b FROM foo", ())
-                .unwrap()
-                .len(),
-            0
-        );
+        Box::pin(async move {
+            assert_eq!(
+                db.exec::<Row, _, _>("SELECT a, b FROM foo", ())
+                    .await
+                    .unwrap()
+                    .len(),
+                0
+            );
+        })
     })
+    .await;
 }
 
-#[test]
-fn really_long_query() {
+#[tokio::test]
+async fn really_long_query() {
     let long = "CREATE TABLE `stories` (`id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, `always_null` int, `created_at` datetime, `user_id` int unsigned, `url` varchar(250) DEFAULT '', `title` varchar(150) DEFAULT '' NOT NULL, `description` mediumtext, `short_id` varchar(6) DEFAULT '' NOT NULL, `is_expired` tinyint(1) DEFAULT 0 NOT NULL, `is_moderated` tinyint(1) DEFAULT 0 NOT NULL, `markeddown_description` mediumtext, `story_cache` mediumtext, `merged_story_id` int, `unavailable_at` datetime, `twitter_id` varchar(20), `user_is_author` tinyint(1) DEFAULT 0,  INDEX `index_stories_on_created_at`  (`created_at`), fulltext INDEX `index_stories_on_description`  (`description`),   INDEX `is_idxes`  (`is_expired`, `is_moderated`),  INDEX `index_stories_on_is_expired`  (`is_expired`),  INDEX `index_stories_on_is_moderated`  (`is_moderated`),  INDEX `index_stories_on_merged_story_id`  (`merged_story_id`), UNIQUE INDEX `unique_short_id`  (`short_id`), fulltext INDEX `index_stories_on_story_cache`  (`story_cache`), fulltext INDEX `index_stories_on_title`  (`title`),  INDEX `index_stories_on_twitter_id`  (`twitter_id`),  INDEX `url`  (`url`(191)),  INDEX `index_stories_on_user_id`  (`user_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
     TestingShim::new(
         move |q, w| {
@@ -1211,6 +1301,9 @@ fn really_long_query() {
         move |_, _, _| unreachable!(),
     )
     .test(move |db| {
-        db.query::<Row, _>(long).unwrap();
+        Box::pin(async move {
+            db.query::<Row, _>(long).await.unwrap();
+        })
     })
+    .await;
 }

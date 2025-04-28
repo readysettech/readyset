@@ -44,7 +44,6 @@ serial_test = { workspace = true }
 test-utils = { path = "../test-utils" }
 chrono = { workspace = true }
 futures = { workspace = true }
-mysql = { workspace = true }
 paste = { workspace = true }
 proptest = { workspace = true }
 proptest-stateful = { path = "../proptest-stateful" }

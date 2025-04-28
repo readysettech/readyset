@@ -1113,7 +1113,6 @@ dependencies = [
  "deadpool-postgres",
  "derive_more",
  "futures",
- "mysql",
  "mysql_async",
  "native-tls",
  "num_cpus",
@@ -2373,15 +2372,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "io-enum"
-version = "1.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53b53d712d99a73eec59ee5e4fe6057f8052142d38eeafbbffcb06b36d738a6e"
-dependencies = [
- "derive_utils",
-]
-
-[[package]]
 name = "ipnet"
 version = "2.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2798,31 +2788,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mysql"
-version = "25.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6ad644efb545e459029b1ffa7c969d830975bd76906820913247620df10050b"
-dependencies = [
- "bufstream",
- "bytes",
- "crossbeam",
- "flate2",
- "io-enum",
- "libc",
- "lru",
- "mysql_common",
- "named_pipe",
- "native-tls",
- "pem",
- "percent-encoding",
- "serde",
- "serde_json",
- "socket2",
- "twox-hash",
- "url",
-]
-
-[[package]]
 name = "mysql-common-derive"
 version = "0.31.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2851,7 +2816,6 @@ dependencies = [
  "futures",
  "getrandom",
  "itoa",
- "mysql",
  "mysql-time",
  "mysql_async",
  "mysql_common",
@@ -2955,15 +2919,6 @@ dependencies = [
  "time",
  "uuid 1.11.0",
  "zstd",
-]
-
-[[package]]
-name = "named_pipe"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad9c443cce91fc3e12f017290db75dde490d685cdaaf508d7159d7cf41f0eb2b"
-dependencies = [
- "winapi",
 ]
 
 [[package]]
@@ -4567,7 +4522,6 @@ dependencies = [
  "itertools 0.13.0",
  "lazy_static",
  "metrics",
- "mysql",
  "mysql-srv",
  "mysql_async",
  "mysql_common",
@@ -4697,7 +4651,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
- "mysql",
+ "mysql_async",
  "nom-sql",
  "parking_lot",
  "petgraph",
