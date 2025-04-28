@@ -7,11 +7,10 @@ use async_trait::async_trait;
 use atoi::atoi;
 use binlog::consts::{BinlogChecksumAlg, EventType};
 use metrics::counter;
-use mysql::binlog::events::{OptionalMetaExtractor, StatusVarVal};
-use mysql::binlog::jsonb::{self, JsonbToJsonError};
 use mysql::prelude::Queryable;
 use mysql_async as mysql;
-use mysql_async::binlog::events::TableMapEvent;
+use mysql_common::binlog::events::{OptionalMetaExtractor, StatusVarVal, TableMapEvent};
+use mysql_common::binlog::jsonb::{self, JsonbToJsonError};
 use mysql_common::binlog::jsonb::{
     Array, ComplexValue, Large, Object, OpaqueValue, Small, StorageFormat,
 };

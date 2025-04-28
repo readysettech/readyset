@@ -76,7 +76,7 @@ resolver = "2"
 consulrs = { git = "https://github.com/readysettech/consulrs.git", branch = "allow-disabling-rustls-tls-2" }
 
 # overridden in the patch section above
-mysql_async = "0.34.0"
+mysql_async = "0.36.0"
 
 # some of these are overridden in the patch section above
 postgres = "0.19.9"
@@ -157,13 +157,13 @@ itoa = "1.0"
 lazy_static = "1.4.0"
 left-right = "0.11"
 libc = "0.2"
-lru = "0.12.3"
+lru = "0.14.0"
 machine-uid = "0.5"
 md5 = "0.7.0"
 metrics = "0.24.0"
 metrics-exporter-prometheus = { version = "0.16.0", default-features = false }
 metrics-util = "0.18.0"
-mysql_common = "0.32"
+mysql_common = "0.35"
 native-tls = "0.2.11"
 ndarray = "0.16.1"
 nom = "7.1.3"

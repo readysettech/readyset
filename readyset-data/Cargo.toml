@@ -16,7 +16,7 @@ eui48 = { workspace = true }
 itertools = { workspace = true }
 lazy_static = { workspace = true }
 once_cell = { workspace = true }
-mysql_common = { workspace = true, features = ["chrono"] }
+mysql_common = { workspace = true, features = ["chrono", "rust_decimal"] }
 proptest = { workspace = true }
 regex = { workspace = true }
 rust_decimal = { workspace = true, features = [

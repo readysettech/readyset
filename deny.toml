@@ -142,13 +142,12 @@ skip-tree = [
     { name = "rusty-fork", version = "0.3.0" },
     { name = "fail", version = "0.5.0" },
     { name = "rust_decimal", version = "1.17.0" },
-    { name = "mysql_common", version = "0.32" },
     { name = "consulrs", version = "0.1.0" },
-    { name = "mysql", version = "25" },
     { name = "hashbrown", version = "0.12.3" },
     { name = "unicode-width", version = "0.1.14" },
     { name = "web-time", version = "0.2.4" },
     { name = "itertools", version = "0.10.5" },
+    { name = "itertools", version = "0.12.1" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
