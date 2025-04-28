@@ -367,24 +367,28 @@ impl QueryHandler for PostgreSqlQueryHandler {
     }
 
     fn handle_set_statement(stmt: &SetStatement) -> SetBehavior {
+        let behavior = SetBehavior::default();
         match stmt {
             SetStatement::PostgresParameter(SetPostgresParameter { name, .. })
                 if ALLOWED_PARAMETERS_ANY_VALUE.contains(name.to_ascii_lowercase().as_str()) =>
             {
-                SetBehavior::Proxy
+                behavior.unsupported(false)
             }
             SetStatement::PostgresParameter(SetPostgresParameter { name, value, .. }) => match name
                 .as_str()
             {
-                "autocommit" => SetBehavior::SetAutocommit(match value {
-                    SetPostgresParameterValue::Default => true,
-                    SetPostgresParameterValue::Value(val) => ![
-                        PostgresParameterValue::literal(0),
-                        PostgresParameterValue::literal(false),
-                        PostgresParameterValue::identifier("off"),
-                    ]
-                    .contains(val),
-                }),
+                "autocommit" => {
+                    let enabled = match value {
+                        SetPostgresParameterValue::Default => true,
+                        SetPostgresParameterValue::Value(val) => ![
+                            PostgresParameterValue::literal(0),
+                            PostgresParameterValue::literal(false),
+                            PostgresParameterValue::identifier("off"),
+                        ]
+                        .contains(val),
+                    };
+                    behavior.set_autocommit(enabled)
+                }
                 "search_path" => {
                     let value_to_string = |value: &PostgresParameterValueInner| match value {
                         PostgresParameterValueInner::Identifier(id) => id.clone(),
@@ -405,20 +409,21 @@ impl QueryHandler for PostgreSqlQueryHandler {
                         }
                     };
 
-                    SetBehavior::SetSearchPath(search_path)
+                    behavior.set_search_path(search_path)
                 }
                 _ => {
                     if let Some(allowed_value) = ALLOWED_PARAMETERS_WITH_VALUE.get(name.as_str()) {
-                        SetBehavior::proxy_if(allowed_value.set_value_is_allowed(value))
+                        behavior.unsupported(!allowed_value.set_value_is_allowed(value))
                     } else {
-                        SetBehavior::Unsupported
+                        behavior.unsupported(true)
                     }
                 }
             },
-            SetStatement::Names(SetNames { charset, .. }) => SetBehavior::proxy_if(
-                charset.to_lowercase() == "utf8" || charset.to_lowercase() == "utf-8",
-            ),
-            _ => SetBehavior::Unsupported,
+            SetStatement::Names(SetNames { charset, .. }) => {
+                let charset = charset.to_ascii_lowercase();
+                behavior.unsupported(!["utf8", "utf-8"].contains(&charset.as_str()))
+            }
+            _ => behavior.unsupported(true),
         }
     }
 }
@@ -440,7 +445,7 @@ mod tests {
     fn is_proxy(statement: &str) {
         assert_eq!(
             PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(statement)),
-            SetBehavior::Proxy
+            SetBehavior::default()
         )
     }
 
@@ -470,14 +475,14 @@ mod tests {
             PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(
                 "SET autocommit = off"
             )),
-            SetBehavior::SetAutocommit(false),
+            SetBehavior::default().set_autocommit(false),
         );
 
         assert_eq!(
             PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(
                 "SET autocommit = on"
             )),
-            SetBehavior::SetAutocommit(true),
+            SetBehavior::default().set_autocommit(true),
         );
     }
 
@@ -487,7 +492,8 @@ mod tests {
         fn sets_search_path(stmt: &str, search_path: Vec<&str>) {
             assert_eq!(
                 PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(stmt)),
-                SetBehavior::SetSearchPath(search_path.into_iter().map(Into::into).collect())
+                SetBehavior::default()
+                    .set_search_path(search_path.into_iter().map(Into::into).collect())
             );
         }
 

@@ -12,7 +12,6 @@ use readyset_data::{Collation, DfType, DfValue, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
     Column, Expr, FieldDefinitionExpr, Literal, SetStatement, SqlIdentifier, SqlQuery,
-    VariableScope,
 };
 use tracing::warn;
 
@@ -923,33 +922,21 @@ impl QueryHandler for MySqlQueryHandler {
     }
 
     fn handle_set_statement(stmt: &SetStatement) -> SetBehavior {
-        use SetBehavior::*;
+        let mut behavior = SetBehavior::default();
 
         match stmt {
             SetStatement::Variable(set) => {
-                if let Some(val) = set.variables.iter().find_map(|(var, val)| {
-                    if var.name.as_str().eq_ignore_ascii_case("autocommit") {
-                        Some(val)
-                    } else {
-                        None
-                    }
-                }) {
-                    return SetAutocommit(
-                        matches!(val, Expr::Literal(Literal::Integer(i)) if *i == 1),
-                    );
-                }
-
-                SetBehavior::proxy_if(set.variables.iter().all(|(variable, value)| {
-                    if variable.scope == VariableScope::User {
-                        return false;
-                    }
-                    match variable.name.to_ascii_lowercase().as_str() {
-                        "time_zone" => {
-                            matches!(value, Expr::Literal(Literal::String(ref s)) if s == "+00:00")
-                        }
+                for (variable, value) in &set.variables {
+                    behavior = match variable.name.to_ascii_lowercase().as_str() {
+                        "autocommit" => behavior.set_autocommit(
+                            matches!(value, Expr::Literal(Literal::Integer(i)) if *i == 1),
+                        ),
+                        "time_zone" => behavior.unsupported(
+                            !matches!(value, Expr::Literal(Literal::String(s)) if s == "+00:00"),
+                        ),
                         "sql_mode" => {
-                            if let Expr::Literal(Literal::String(ref s)) = value {
-                                match raw_sql_modes_to_list(&s[..]) {
+                            let supported = if let Expr::Literal(Literal::String(s)) = value {
+                                match raw_sql_modes_to_list(s) {
                                     Ok(sql_modes) => {
                                         REQUIRED_SQL_MODES.iter().all(|m| sql_modes.contains(m))
                                             && sql_modes.iter().all(|sql_mode| {
@@ -963,31 +950,42 @@ impl QueryHandler for MySqlQueryHandler {
                                 }
                             } else {
                                 false
-                            }
+                            };
+                            behavior.unsupported(!supported)
                         }
                         "names" => {
-                            if let Expr::Literal(Literal::String(ref s)) = value {
-                                matches!(&s[..], "latin1" | "utf8" | "utf8mb4")
+                            let supported = if let Expr::Literal(Literal::String(ref s)) = value {
+                                ["latin1", "utf8", "utf8mb4"]
+                                    .iter()
+                                    .any(|charset| s.eq_ignore_ascii_case(charset))
                             } else {
                                 false
-                            }
+                            };
+                            behavior.unsupported(!supported)
                         }
-                        p => ALLOWED_PARAMETERS_ANY_VALUE.contains(p),
-                    }
-                }))
+                        p => behavior.unsupported(!ALLOWED_PARAMETERS_ANY_VALUE.contains(p)),
+                    };
+                }
             }
-            SetStatement::Names(names) => SetBehavior::proxy_if(
-                names.collation.is_none()
-                    && matches!(&names.charset[..], "latin1" | "utf8" | "utf8mb4"),
-            ),
-            SetStatement::PostgresParameter(_) => Unsupported,
+            SetStatement::Names(names) => {
+                behavior = behavior.unsupported(
+                    names.collation.is_some()
+                        || !["latin1", "utf8", "utf8mb4"]
+                            .iter()
+                            .any(|charset| names.charset.eq_ignore_ascii_case(charset)),
+                );
+            }
+            SetStatement::PostgresParameter(_) => {
+                behavior = behavior.unsupported(true);
+            }
         }
+        behavior
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use readyset_sql::ast::{SetStatement, SetVariables, Variable};
+    use readyset_sql::ast::{SetStatement, SetVariables, Variable, VariableScope};
 
     use super::*;
 
@@ -1005,7 +1003,7 @@ mod tests {
         });
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
-            SetBehavior::Proxy
+            SetBehavior::default()
         );
     }
 
@@ -1023,7 +1021,7 @@ mod tests {
         });
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
-            SetBehavior::Unsupported
+            SetBehavior::default().unsupported(true)
         );
     }
 
@@ -1032,5 +1030,85 @@ mod tests {
         for mode in REQUIRED_SQL_MODES {
             assert!(ALLOWED_SQL_MODES.contains(&mode))
         }
+    }
+
+    #[test]
+    fn multiple_allowed_variables() {
+        let variables: Vec<_> = ALLOWED_PARAMETERS_ANY_VALUE
+            .iter()
+            .map(|name| {
+                (
+                    Variable {
+                        scope: VariableScope::Session,
+                        name: name.into(),
+                    },
+                    Expr::Literal(Literal::Null),
+                )
+            })
+            .collect();
+        let stmt = SetStatement::Variable(SetVariables { variables });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().set_autocommit(false)
+        );
+    }
+
+    #[test]
+    fn multiple_variables_one_disallowed() {
+        let mut variables: Vec<_> = ALLOWED_PARAMETERS_ANY_VALUE
+            .iter()
+            .map(|name| {
+                (
+                    Variable {
+                        scope: VariableScope::Session,
+                        name: name.into(),
+                    },
+                    Expr::Literal(Literal::Null),
+                )
+            })
+            .collect();
+        variables.push((
+            Variable {
+                scope: VariableScope::Session,
+                name: "foobar".into(),
+            },
+            Expr::Literal(Literal::Null),
+        ));
+        let stmt = SetStatement::Variable(SetVariables { variables });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default()
+                .set_autocommit(false)
+                .unsupported(true)
+        );
+    }
+
+    #[test]
+    fn multiple_allowed_variables_with_duplicate_overriding() {
+        let mut variables: Vec<_> = ALLOWED_PARAMETERS_ANY_VALUE
+            .iter()
+            .map(|name| {
+                (
+                    Variable {
+                        scope: VariableScope::Session,
+                        name: name.into(),
+                    },
+                    Expr::Literal(Literal::Null),
+                )
+            })
+            .collect();
+        variables.push((
+            Variable {
+                scope: VariableScope::Session,
+                name: "autocommit".into(),
+            },
+            Expr::Literal(Literal::Integer(1)),
+        ));
+
+        let stmt = SetStatement::Variable(SetVariables { variables });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().set_autocommit(true)
+        );
     }
 }

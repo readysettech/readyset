@@ -3,27 +3,44 @@ use readyset_sql::ast::{SetStatement, SqlIdentifier, SqlQuery};
 
 use crate::backend::noria_connector;
 
-/// Classification for how we should be handling a SQL `SET` statement.
+/// How we should be handling a SQL `SET` statement.
+#[must_use]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SetBehavior {
-    /// This `SET` statement is unsupported.
-    Unsupported,
-    /// This `SET` statement is meaningless to ReadySet, so should be proxied upstream verbatim.
-    Proxy,
-    /// This `SET` statement represents the `autocommit` flag being set either on or off.
-    SetAutocommit(bool),
-    /// This `SET` statement represents the current schema search path being changed
-    SetSearchPath(Vec<SqlIdentifier>),
+pub struct SetBehavior {
+    /// This `SET` statement is unsupported and should error.
+    pub unsupported: bool,
+    /// This `SET` statement should be proxied upstream verbatim.
+    pub proxy: bool,
+    /// This `SET` statement turns `autocommit` flag being set either on or off.
+    pub set_autocommit: Option<bool>,
+    /// This `SET` statement changes the current schema search path.
+    pub set_search_path: Option<Vec<SqlIdentifier>>,
 }
 
 impl SetBehavior {
-    /// Return a [`SetBehavior`] specifying that a statement should be proxied if the argument is
-    /// `true`, or unsupported if the argument is `false`
-    pub fn proxy_if(b: bool) -> Self {
-        if b {
-            Self::Proxy
-        } else {
-            Self::Unsupported
+    pub fn unsupported(mut self, unsupported: bool) -> Self {
+        self.unsupported = self.unsupported || unsupported;
+        self
+    }
+
+    pub fn set_autocommit(mut self, autocommit: bool) -> Self {
+        self.set_autocommit = Some(autocommit);
+        self
+    }
+
+    pub fn set_search_path(mut self, search_path: Vec<SqlIdentifier>) -> Self {
+        self.set_search_path = Some(search_path);
+        self
+    }
+}
+
+impl Default for SetBehavior {
+    fn default() -> Self {
+        Self {
+            unsupported: false,
+            proxy: true,
+            set_autocommit: None,
+            set_search_path: None,
         }
     }
 }

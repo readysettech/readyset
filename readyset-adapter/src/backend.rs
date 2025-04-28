@@ -2747,15 +2747,14 @@ where
         }
     }
 
-    /// Handles a parsed set statement.
+    /// Handles a parsed set statement by deferring to `Handler::handle_set_statement` and
+    /// respecting `BackendSettings::unsupported_set_mode`. When the search path is changed
+    /// (SetBehavior::SetSearchPath) or other sets need to be handled (certain variables being
+    /// changed), the `noria` instance gets updated accordingly.
     ///
-    /// If we have an upstream then we will pass valid set statements across to that upstream.
-    /// If no upstream is present we will ignore the statement
-    /// Disallowed set statements always produce an error
-    ///
-    /// Additionally, if the SetStatement changes the schema search path
-    /// (SetBevaior::SetSearchPath), this function has the side effect of updating
-    /// the `noria` instance.
+    /// - If upstream exists, valid set statements are forwarded to it.
+    /// - If no upstream is present, statements are typically ignored.
+    /// - Disallowed set statements always produce an error.
     fn handle_set(
         noria: &mut NoriaConnector,
         has_upstream: bool,
@@ -2765,8 +2764,14 @@ where
         set: &SetStatement,
         event: &mut QueryExecutionEvent,
     ) -> Result<(), DB::Error> {
-        match Handler::handle_set_statement(set) {
-            SetBehavior::Unsupported => match settings.unsupported_set_mode {
+        let SetBehavior {
+            unsupported,
+            proxy: _, // Basically ignored, caller will proxy unless we return an error
+            set_autocommit,
+            set_search_path,
+        } = Handler::handle_set_statement(set);
+        if unsupported {
+            match settings.unsupported_set_mode {
                 UnsupportedSetMode::Error => {
                     let e = ReadySetError::SetDisallowed {
                         statement: query.to_string(),
@@ -2788,41 +2793,40 @@ where
                     state.proxy_state = ProxyState::ProxyAlways;
                 }
                 UnsupportedSetMode::Allow => {}
-            },
-            SetBehavior::Proxy => { /* Do nothing (the caller will proxy for us) */ }
-            SetBehavior::SetAutocommit(enabled) => {
-                if !enabled {
-                    warn!(
-                        set = %set.display(settings.dialect),
-                        "Disabling autocommit is an anti-pattern for use with Readyset, as all queries would then be proxied upstream."
-                    );
-                }
+            }
+        }
+        if let Some(enabled) = set_autocommit {
+            if !enabled {
+                warn!(
+                    set = %set.display(settings.dialect),
+                    "Disabling autocommit is an anti-pattern for use with Readyset, as all queries would then be proxied upstream."
+                );
+            }
 
-                match settings.unsupported_set_mode {
-                    UnsupportedSetMode::Error => {
-                        if enabled {
-                            state.proxy_state.set_autocommit(enabled);
-                        } else {
-                            let e = ReadySetError::SetDisallowed {
-                                statement: query.to_string(),
-                            };
-                            if has_upstream {
-                                event.set_noria_error(&e);
-                            }
-                            return Err(e.into());
-                        }
-                    }
-                    UnsupportedSetMode::Proxy => {
+            match settings.unsupported_set_mode {
+                UnsupportedSetMode::Error => {
+                    if enabled {
                         state.proxy_state.set_autocommit(enabled);
+                    } else {
+                        let e = ReadySetError::SetDisallowed {
+                            statement: query.to_string(),
+                        };
+                        if has_upstream {
+                            event.set_noria_error(&e);
+                        }
+                        return Err(e.into());
                     }
-                    // TODO: I'm not sure this is correct ....
-                    UnsupportedSetMode::Allow => {}
                 }
+                UnsupportedSetMode::Proxy => {
+                    state.proxy_state.set_autocommit(enabled);
+                }
+                // TODO: I'm not sure this is correct ....
+                UnsupportedSetMode::Allow => {}
             }
-            SetBehavior::SetSearchPath(search_path) => {
-                trace!(?search_path, "Setting search_path");
-                noria.set_schema_search_path(search_path);
-            }
+        }
+        if let Some(search_path) = set_search_path {
+            trace!(?search_path, "Setting search_path");
+            noria.set_schema_search_path(search_path);
         }
 
         Ok(())
@@ -3039,7 +3043,7 @@ where
             // SET autocommit=1 needs to be handled explicitly or it will end up getting proxied in
             // most cases.
             Ok(SqlQuery::Set(s))
-                if Handler::handle_set_statement(&s) == SetBehavior::SetAutocommit(true) =>
+                if Handler::handle_set_statement(&s).set_autocommit == Some(true) =>
             {
                 Self::query_adhoc_non_select(
                     &mut self.noria,
