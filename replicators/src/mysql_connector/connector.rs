@@ -54,10 +54,13 @@ macro_rules! binlog_err {
     };
     ($connector:expr, $table:expr, $inner:expr) => {{
         let table: Option<&TableMapEvent> = $table;
-        let table_msg = if let Some(t) = table {
-            format!(" for table {}.{}", t.database_name(), t.table_name())
+        let (table_name_msg, tme_msg) = if let Some(tme) = table {
+            (
+                format!(" for table {}.{}", tme.database_name(), tme.table_name()),
+                format!("; {tme:?}"),
+            )
         } else {
-            "".to_string()
+            ("".to_string(), "".to_string())
         };
         let gtid_message = if let Some(gtid) = $connector.current_gtid {
             format!(" at GTID {}", gtid)
@@ -65,14 +68,15 @@ macro_rules! binlog_err {
             "".to_string()
         };
         ReadySetError::ReplicationFailed(format!(
-            "Binlog error before position {}{}{} at {}:{}:{}: {}",
+            "Binlog error before position {}{}{} at {}:{}:{}: {}{}",
             $connector.next_position,
             gtid_message,
-            table_msg,
+            table_name_msg,
             std::file!(),
             std::line!(),
             std::column!(),
-            $inner
+            $inner,
+            tme_msg
         ))
     }};
 }
