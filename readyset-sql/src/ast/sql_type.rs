@@ -114,6 +114,7 @@ pub enum SqlType {
     Serial,
     BigSerial,
     Array(Box<SqlType>),
+    Point,
 
     /// Any other named type
     Other(Relation),
@@ -240,6 +241,8 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
                             Ok(Self::MacAddr)
                         } else if name.eq_ignore_ascii_case("serial") {
                             Ok(Self::Serial)
+                        } else if name.eq_ignore_ascii_case("point") {
+                            Ok(Self::Point)
                         } else {
                             Ok(Self::Other(name.into()))
                         }
@@ -654,6 +657,7 @@ impl DialectDisplay for SqlType {
                 SqlType::Unsigned => write!(f, "UNSIGNED"),
                 SqlType::SignedInteger => write!(f, "SIGNED INTEGER"),
                 SqlType::UnsignedInteger => write!(f, "UNSIGNED INTEGER"),
+                SqlType::Point => write!(f, "POINT"),
             }
         })
     }

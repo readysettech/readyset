@@ -1,0 +1,43 @@
+statement ok
+create table locations (id int primary key, loc point);
+
+statement ok
+insert into locations values
+  (1, ST_PointFromText('POINT(1 2)')),
+  (2, ST_PointFromText('POINT(8.123 9.3145732)'));
+
+query B nosort
+select loc from locations where id = ?
+? = 1
+----
+0x000000000101000000000000000000F03F0000000000000040
+
+query B nosort
+select loc from locations where id = ?
+? = 2
+----
+0x000000000101000000E5D022DBF93E204069650CBD0FA12240
+
+
+
+# now test tables that explicitly set the SRID
+
+statement ok
+create table locations2 (id int primary key, loc point srid 4326);
+
+statement ok
+insert into locations2 values
+  (1, ST_PointFromText('POINT(1 2)', 4326)),
+  (2, ST_PointFromText('POINT(8.123 9.3145732)', 4326));
+
+query B nosort
+select loc from locations2 where id = ?
+? = 1
+----
+0xE610000001010000000000000000000040000000000000F03F
+
+query B nosort
+select loc from locations2 where id = ?
+? = 2
+----
+0xE6100000010100000069650CBD0FA12240E5D022DBF93E2040

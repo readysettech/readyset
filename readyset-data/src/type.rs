@@ -204,6 +204,11 @@ pub enum DfType {
 
     /// [PostgreSQL `jsonb`](https://www.postgresql.org/docs/current/datatype-json.html).
     Jsonb,
+
+    /// [MySQL `point`](https://dev.mysql.com/doc/refman/8.4/en/gis-class-point.html)
+    /// Note: We aren't supporting the old, legacy `point`/geometry data types that
+    /// are native to postgres. Instead, we'll support the postgis spatial types.
+    Point,
 }
 
 /// Defaults.
@@ -317,6 +322,7 @@ impl DfType {
             MacAddr => unsupported!("Unsupported type: MacAddr"),
             Inet => unsupported!("Unsupported type: Inet"),
             Citext => Self::Text(Collation::Citext),
+            Point => Self::Point,
             Other(ref id) => resolve_custom_type(id.clone()).ok_or_else(|| {
                 let id_upper = format!("{}", id.display_unquoted()).to_uppercase();
                 unsupported_err!("Unsupported type: {}", id_upper)
@@ -373,9 +379,11 @@ impl DfType {
             | DfType::Timestamp { .. }
             | DfType::TimestampTz { .. } => PgTypeCategory::DateTime,
             DfType::MacAddr | DfType::Inet => PgTypeCategory::NetworkAddress,
-            DfType::Uuid | DfType::Enum { .. } | DfType::Json | DfType::Jsonb => {
-                PgTypeCategory::UserDefined
-            }
+            DfType::Uuid
+            | DfType::Enum { .. }
+            | DfType::Json
+            | DfType::Jsonb
+            | DfType::Point => PgTypeCategory::UserDefined,
         }
     }
 
@@ -820,6 +828,7 @@ impl fmt::Display for DfType {
                 write!(f, "({})", variants.iter().join(", "))
             }
             Self::Numeric { prec, scale } => write!(f, "{kind:?}({prec}, {scale})"),
+            Self::Point => write!(f, "Point"),
         }
     }
 }

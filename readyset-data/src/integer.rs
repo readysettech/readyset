@@ -205,7 +205,8 @@ where
         | DfType::Uuid
         | DfType::VarBit(_)
         | DfType::Array(_)
-        | DfType::Row => Err(ReadySetError::DfValueConversionError {
+        | DfType::Row
+        | DfType::Point => Err(ReadySetError::DfValueConversionError {
             src_type: from_ty.to_string(),
             target_type: to_ty.to_string(),
             details: "Not allowed".to_string(),

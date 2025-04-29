@@ -2579,7 +2579,8 @@ mod arbitrary {
             | Some(DfType::MacAddr)
             | Some(DfType::Uuid)
             | Some(DfType::Inet)
-            | Some(DfType::Row) => Just(DfValue::None).boxed(),
+            | Some(DfType::Row)
+            | Some(DfType::Point) => Just(DfValue::None).boxed(),
         }
     }
 }

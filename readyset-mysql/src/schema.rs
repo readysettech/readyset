@@ -281,6 +281,20 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
         DfType::Array(_) => unsupported!("MySQL does not support arrays"),
         DfType::Row => unsupported!("MySQL does not support rows"),
 
+        // Geometric types - point
+        DfType::Point => {
+            // this matches what mysql itself returns for the length, wtf?!?
+            let length = 4294967295;
+            colflags |= mysql_srv::ColumnFlags::BLOB_FLAG;
+            colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
+            (
+                MYSQL_TYPE_GEOMETRY,
+                DEFAULT_CHARACTER_SET_NUMERIC,
+                0,
+                length,
+            )
+        }
+
         // Fallback
         DfType::Unknown => (MYSQL_TYPE_UNKNOWN, DEFAULT_CHARACTER_SET, 0, 1024),
     };

@@ -413,3 +413,14 @@ fn test_empty_insert_fields_fails_in_postgres() {
     // Invalid because of empty cols list, accepted by mysql though
     check_parse_postgres!("INSERT INTO t () VALUES ()");
 }
+
+#[test]
+fn test_point_columns() {
+    check_parse_mysql!("CREATE TABLE t (p POINT)");
+}
+
+#[test]
+#[ignore = "issue: REA-5723"]
+fn test_point_columns_srid() {
+    check_parse_mysql!("CREATE TABLE t (p POINT SRID 4326)");
+}

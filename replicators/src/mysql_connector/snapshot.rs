@@ -1000,6 +1000,9 @@ fn mysql_row_to_noria_row(
                 };
                 noria_row.push(df_val);
             }
+            ColumnType::MYSQL_TYPE_GEOMETRY => {
+                noria_row.push(readyset_data::DfValue::try_from(val)?);
+            }
             _ => noria_row.push(readyset_data::DfValue::try_from(val)?),
         }
     }

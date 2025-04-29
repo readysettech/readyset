@@ -111,6 +111,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         DfType::Uuid => Ok(Type::UUID),
         DfType::Bit(_) => Ok(Type::BIT),
         DfType::VarBit(_) => Ok(Type::VARBIT),
+        DfType::Point => Ok(Type::POINT),
         DfType::Array(elem) => {
             match elem.as_ref() {
                 DfType::Unknown => {
@@ -180,6 +181,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                 DfType::Bit(_) => Ok(Type::BIT_ARRAY),
                 DfType::VarBit(_) => Ok(Type::VARBIT_ARRAY),
                 DfType::Array(_) | DfType::Row => unsupported_type!(),
+                DfType::Point => Ok(Type::POINT_ARRAY),
             }
         }
         DfType::Row => Ok(Type::RECORD),

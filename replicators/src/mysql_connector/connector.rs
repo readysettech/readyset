@@ -1421,6 +1421,10 @@ fn binlog_val_to_noria_val(
                 _ => internal!("Expected an integer value for mediumint column"),
             }
         }
+        (ColumnType::MYSQL_TYPE_GEOMETRY, _) => match val {
+            Value::Bytes(b) => Ok(DfValue::ByteArray(Arc::new(b.to_vec()))),
+            _ => internal!("Expected a byte array for geometry column"),
+        },
         (_, _) => Ok(val.try_into()?),
     }
 }

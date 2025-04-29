@@ -475,6 +475,7 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
         SqlType::Interval { .. } => unimplemented!(),
         SqlType::Array(_) => unimplemented!(),
         SqlType::Other(_) => unimplemented!(),
+        SqlType::Point => unimplemented!(),
     }
 }
 
@@ -614,6 +615,7 @@ where
         SqlType::Interval { .. } => unimplemented!(),
         SqlType::Array(_) => unimplemented!(),
         SqlType::Other(_) => unimplemented!(),
+        SqlType::Point => unimplemented!(),
     }
 }
 
@@ -758,5 +760,6 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         SqlType::Interval { .. } => unimplemented!(),
         SqlType::Array(_) => unimplemented!(),
         SqlType::Other(_) => unimplemented!(),
+        SqlType::Point => unimplemented!(),
     }
 }

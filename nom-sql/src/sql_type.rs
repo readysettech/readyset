@@ -454,6 +454,18 @@ fn type_identifier_part3(
             map(tag_no_case("bigserial"), |_| SqlType::BigSerial),
             map(tag_no_case("citext"), |_| SqlType::Citext),
             map(tag("\"char\""), |_| SqlType::QuotedChar),
+            // if a point is followed by an optional srid attribute, we need to ignore it but
+            // we need to parse it out.
+            map(
+                tuple((
+                    tag_no_case("point"),
+                    opt(preceded(
+                        tuple((whitespace1, tag_no_case("srid"), whitespace1)),
+                        digit1,
+                    )),
+                )),
+                |_| SqlType::Point,
+            ),
             map(other_type(dialect), SqlType::Other),
         ))(i)
     }
@@ -765,6 +777,18 @@ mod tests {
         fn jsonb_type() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"jsonb");
             assert_eq!(res, SqlType::Jsonb);
+        }
+
+        #[test]
+        fn point_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"point");
+            assert_eq!(res, SqlType::Point);
+        }
+
+        #[test]
+        fn point_type_with_srid() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"point srid 4326");
+            assert_eq!(res, SqlType::Point);
         }
 
         #[test]
