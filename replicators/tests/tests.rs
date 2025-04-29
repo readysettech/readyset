@@ -4140,3 +4140,62 @@ async fn mysql_minimal_row_based_collation_and_signedness() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial(mysql)]
+#[slow]
+async fn mysql_minimal_row_based_char_padding() {
+    // REA-5699
+    // This test will create a table without PK. The insert will ommit column n, since we are using MRBR it will be deferred to Readyset to fill in the default value.
+    // Then we will update the column and ensure that the update is replicated correctly. Because the table has no PK, this will be a full row delete followed by an insert.
+    // If we did not chose the right default value, the delete will fail.
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query("SET binlog_row_image = minimal;")
+        .await
+        .unwrap();
+    client.query("SET sql_mode = '';").await.unwrap();
+    client
+        .query("DROP TABLE IF EXISTS mrbr_char_padding;")
+        .await
+        .unwrap();
+    client
+        .query("CREATE TABLE `mrbr_char_padding` (ID INT, n CHAR(10) NOT NULL);")
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    client
+        .query("INSERT INTO `mrbr_char_padding` (ID) VALUES (0);")
+        .await
+        .unwrap();
+    client
+        .query("UPDATE `mrbr_char_padding` SET n = 'a' WHERE ID = 0;")
+        .await
+        .unwrap();
+
+    check_results!(
+        ctx,
+        "mrbr_char_padding",
+        "mrbr_char_padding_insert",
+        &[&[
+            DfValue::Int(0),
+            DfValue::from_str_and_collation("a         ", Collation::Citext),
+        ]]
+    );
+
+    shutdown_tx.shutdown().await;
+}

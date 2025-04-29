@@ -954,7 +954,13 @@ impl DfValue {
                     // TODO: Fix this to return ByteArray(Vec::new().into())
                     return DfValue::from_str_and_collation("", collation);
                 } else if dftype.is_any_text() {
-                    return DfValue::from_str_and_collation("", collation);
+                    return match dftype {
+                        // For char columns, we return a space repeated to the length of the column
+                        DfType::Char(len, _) => {
+                            DfValue::from_str_and_collation(&" ".repeat(len.into()), collation)
+                        }
+                        _ => DfValue::from_str_and_collation("", collation),
+                    };
                 } else if dftype.is_any_int() || dftype.is_bool() {
                     return DfValue::Int(0);
                 } else if dftype.is_any_float() {
