@@ -4199,3 +4199,57 @@ async fn mysql_minimal_row_based_char_padding() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial(mysql)]
+#[slow]
+async fn mysql_minimal_row_based_binary() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query("SET binlog_row_image = minimal;")
+        .await
+        .unwrap();
+    client.query("SET sql_mode = '';").await.unwrap();
+    client
+        .query("DROP TABLE IF EXISTS mrbr_binary;")
+        .await
+        .unwrap();
+    client
+        .query(
+            "CREATE TABLE mrbr_binary (id INT, b BINARY(10) NOT NULL, vb VARBINARY(10) NOT NULL);",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    client
+        .query("INSERT INTO mrbr_binary (id) VALUES (0);")
+        .await
+        .unwrap();
+
+    check_results!(
+        ctx,
+        "mrbr_binary",
+        "mrbr_binary_insert",
+        &[&[
+            DfValue::Int(0),
+            DfValue::ByteArray(vec![0; 10].into()),
+            DfValue::ByteArray(vec![0; 0].into())
+        ]]
+    );
+
+    shutdown_tx.shutdown().await;
+}

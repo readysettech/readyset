@@ -1000,6 +1000,15 @@ impl DfValue {
                     }
                 } else if matches!(dftype, DfType::Json) {
                     return DfValue::from_str_and_collation("null", Collation::Utf8);
+                } else if dftype.is_binary() {
+                    match dftype {
+                        DfType::Binary(len) => {
+                            return DfValue::ByteArray(vec![0; len as usize].into());
+                        }
+                        _ => {
+                            return DfValue::ByteArray(vec![0; 0].into());
+                        }
+                    }
                 }
                 DfValue::None
             }
