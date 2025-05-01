@@ -18,6 +18,30 @@ select loc from locations where id = ?
 ----
 0x000000000101000000E5D022DBF93E204069650CBD0FA12240
 
+query T nosort
+select ST_AsText(loc) from locations where id = ?
+? = 1
+----
+POINT(1 2)
+
+query T nosort
+select ST_AsWKT(loc) from locations where id = ?
+? = 1
+----
+POINT(1 2)
+
+query T nosort
+select ST_AsText(loc) from locations where id = ?
+? = 2
+----
+POINT(8.123 9.3145732)
+
+query T nosort
+select ST_AsWKT(loc) from locations where id = ?
+? = 2
+----
+POINT(8.123 9.3145732)
+
 
 
 # now test tables that explicitly set the SRID
@@ -41,3 +65,28 @@ select loc from locations2 where id = ?
 ? = 2
 ----
 0xE6100000010100000069650CBD0FA12240E5D022DBF93E2040
+
+query T nosort
+select ST_AsText(loc) from locations2 where id = ?
+? = 1
+----
+POINT(1 2)
+
+query T nosort
+select ST_AsWKT(loc) from locations2 where id = ?
+? = 1
+----
+POINT(1 2)
+
+query T nosort
+select ST_AsText(loc) from locations2 where id = ?
+? = 2
+----
+POINT(8.123 9.3145732)
+
+query T nosort
+select ST_AsWKT(loc) from locations2 where id = ?
+? = 2
+----
+POINT(8.123 9.3145732)
+

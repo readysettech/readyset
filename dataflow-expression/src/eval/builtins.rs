@@ -24,6 +24,8 @@ use vec1::Vec1;
 
 use crate::{BuiltinFunction, Dialect, Expr};
 
+use super::spatial::Point;
+
 const MICROS_IN_SECOND: u32 = 1_000_000;
 const MILLIS_IN_SECOND: u32 = 1_000;
 const NANOS_IN_MICRO: u32 = 1_000;
@@ -1424,6 +1426,20 @@ impl BuiltinFunction {
                     }
                     _ => Err(invalid_query_err!(
                         "HEX function requires a numeric or string argument"
+                    )),
+                }
+            }
+            BuiltinFunction::SpatialAsText { expr, dialect } => {
+                let df_val = non_null!(expr.eval(record)?);
+                match df_val {
+                    DfValue::ByteArray(bytes) => {
+                        let point = Point::try_from_bytes(&bytes, dialect.engine())?;
+                        Ok(DfValue::Text(
+                            point.format(dialect.engine()).unwrap().as_str().into(),
+                        ))
+                    }
+                    _ => Err(invalid_query_err!(
+                        "SpatialAsText requires a point argument (in the form of a byte array)"
                     )),
                 }
             }

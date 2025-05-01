@@ -20,6 +20,7 @@ macro_rules! non_null {
 
 pub(crate) mod builtins;
 pub mod json;
+pub(crate) mod spatial;
 
 fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadySetResult<DfValue> {
     use BinaryOperator::*;

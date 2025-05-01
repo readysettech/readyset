@@ -156,6 +156,18 @@ pub enum BuiltinFunction {
     },
 
     Hex(Expr),
+
+    /// Implementation of the `ST_AsText` spatial function.  Returns the OGC Well-Known Text (WKT) representation of the geometry value.
+    ///
+    /// In MySQL, `ST_AsWKT()` is an alias for this function.
+    /// We currently do not support the (seemingly rarely used) second parameter of this function, `options`.
+    ///
+    /// * [MySQL](https://dev.mysql.com/doc/refman/8.0/en/spatial-convenience-functions.html#function_st-astext)
+    /// * [PostGIS](https://postgis.net/docs/manual-3.5/ST_AsText.html)
+    SpatialAsText {
+        expr: Expr,
+        dialect: Dialect,
+    },
 }
 
 impl BuiltinFunction {
@@ -198,6 +210,7 @@ impl BuiltinFunction {
             Hex { .. } => "hex",
             // TODO: name differs based on dialect
             JsonBuildObject { .. } => "json_build_object",
+            SpatialAsText { .. } => "st_astext",
         }
     }
 }
@@ -331,6 +344,7 @@ impl Display for BuiltinFunction {
                 write!(f, "({})", expr)
             }
             JsonBuildObject { args, .. } => write!(f, "({})", args.iter().join(", ")),
+            SpatialAsText { .. } => write!(f, "st_astext"),
         }
     }
 }

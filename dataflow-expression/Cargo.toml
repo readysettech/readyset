@@ -8,15 +8,16 @@ edition = "2021"
 [dependencies]
 chrono = { workspace = true, features = ["serde"] }
 chrono-tz = { workspace = true, features = ["serde"] }
+itertools = { workspace = true }
+lazy_static = { workspace = true }
+proptest = { workspace = true }
+regex = { workspace = true }
+rust_decimal = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-rust_decimal = { workspace = true }
-lazy_static = { workspace = true }
-regex = { workspace = true }
-itertools = { workspace = true }
-vec1 = { workspace = true }
-proptest = { workspace = true }
 test-strategy = { workspace = true }
+tracing = { workspace = true }
+vec1 = { workspace = true }
 
 # Local deps
 readyset-sql = { path = "../readyset-sql" }

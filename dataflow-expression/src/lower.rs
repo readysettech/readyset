@@ -526,6 +526,22 @@ impl BuiltinFunction {
                 let expr = next_arg()?;
                 (Self::Hex(expr), DfType::Text(Default::default()))
             }
+            "st_astext" | "st_aswkt" => {
+                // Note: `ST_AsText` is supported by both MySQL and PostGIS,
+                // but `ST_AsWKT` is only supported by MySQL.
+                match dialect.engine() {
+                    SqlEngine::MySQL => {
+                        let expr = next_arg()?;
+                        (
+                            Self::SpatialAsText { expr, dialect },
+                            DfType::Text(Default::default()),
+                        )
+                    }
+                    SqlEngine::PostgreSQL => {
+                        unsupported!("Function {name} does not exist in {}", dialect.engine());
+                    }
+                }
+            }
             _ => unsupported!("Function {name} does not exist"),
         };
 
