@@ -1,5 +1,6 @@
 use readyset_sql::ast::{
-    AlterTableStatement, CreateTableStatement, CreateViewStatement, Expr, SelectStatement, SqlQuery,
+    AlterTableStatement, CreateTableStatement, CreateViewStatement, Expr, SelectStatement,
+    SqlQuery, SqlType,
 };
 use readyset_sql::Dialect;
 
@@ -704,5 +705,30 @@ pub fn parse_create_view(
         input,
         |d, s| nom_sql::parse_create_view(d, s),
         |p, d, s| parse_readyset_create_view(p, d, s),
+    )
+}
+
+#[cfg(not(feature = "sqlparser"))]
+pub fn parse_sql_type(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlType, String> {
+    nom_sql::parse_sql_type(dialect, input.as_ref())
+}
+
+#[cfg(feature = "sqlparser")]
+fn parse_readyset_sql_type(
+    parser: &mut Parser,
+    dialect: Dialect,
+    _input: impl AsRef<str>,
+) -> Result<SqlType, ReadysetParsingError> {
+    // parse_create expects CREATE keyword to be parsed already
+    Ok(parser.parse_data_type()?.try_into_dialect(dialect)?)
+}
+
+#[cfg(feature = "sqlparser")]
+pub fn parse_sql_type(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlType, String> {
+    parse_both_inner(
+        dialect,
+        input,
+        |d, s| nom_sql::parse_sql_type(d, s),
+        |p, d, s| parse_readyset_sql_type(p, d, s),
     )
 }

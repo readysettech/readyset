@@ -9,7 +9,7 @@ use failpoint_macros::set_failpoint;
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use nom_sql::{parse_key_specification_string, parse_sql_type};
+use nom_sql::parse_key_specification_string;
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset_client::recipe::changelist::{Change, ChangeList, PostgresTableMetadata};
 use readyset_client::TableOperation;
@@ -21,6 +21,7 @@ use readyset_sql::ast::{
 };
 use readyset_sql::Dialect;
 use readyset_sql::DialectDisplay;
+use readyset_sql_parsing::parse_sql_type;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use replication_offset::postgres::PostgresPosition;

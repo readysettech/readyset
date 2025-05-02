@@ -2,8 +2,8 @@ use std::env;
 
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, Opts, OptsBuilder, Row};
-use nom_sql::parse_sql_type;
 use readyset_data::{DfType, DfValue};
+use readyset_sql_parsing::parse_sql_type;
 use test_utils::serial;
 
 use self::common::parse_lower_eval;

@@ -86,7 +86,7 @@ impl TryFromDialect<sqlparser::ast::Set> for SetStatement {
                 collation: collation_name,
             })),
             Set::SetNamesDefault {} => Ok(Self::Names(SetNames {
-                charset: "DEFAULT".to_string(),
+                charset: "default".to_string(),
                 collation: None,
             })),
             set => unsupported!("SET statement kind: {set}"),

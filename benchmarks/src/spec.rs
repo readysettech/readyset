@@ -189,7 +189,7 @@ fn deserialize_sql_type<'de, D>(deserializer: D) -> Result<SqlType, D::Error>
 where
     D: Deserializer<'de>,
 {
-    nom_sql::parse_sql_type(Dialect::MySQL, String::deserialize(deserializer)?)
+    readyset_sql_parsing::parse_sql_type(Dialect::MySQL, String::deserialize(deserializer)?)
         .map_err(serde::de::Error::custom)
 }
 
