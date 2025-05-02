@@ -1,4 +1,4 @@
-use readyset_sql::ast::{Expr, SelectStatement, SqlQuery};
+use readyset_sql::ast::{AlterTableStatement, Expr, SelectStatement, SqlQuery};
 use readyset_sql::Dialect;
 
 #[cfg(feature = "sqlparser")]
@@ -592,4 +592,41 @@ pub fn parse_select(dialect: Dialect, input: impl AsRef<str>) -> Result<SelectSt
         |d, s| nom_sql::parse_select_statement(d, s),
         |p, d, s| parse_readyset_select(p, d, s),
     )
+}
+
+#[cfg(feature = "sqlparser")]
+pub fn parse_alter_table(
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<AlterTableStatement, String> {
+    parse_both_inner(
+        dialect,
+        input,
+        |d, s| nom_sql::parse_alter_table(d, s),
+        |p, d, s| parse_readyset_alter_table(p, d, s),
+    )
+}
+
+#[cfg(feature = "sqlparser")]
+fn parse_readyset_alter_table(
+    parser: &mut Parser,
+    dialect: Dialect,
+    _input: impl AsRef<str>,
+) -> Result<AlterTableStatement, ReadysetParsingError> {
+    // parse_alter expects ALTER keyword to be parsed already
+    if parser.parse_keyword(Keyword::ALTER) {
+        Ok(parser.parse_alter()?.try_into_dialect(dialect)?)
+    } else {
+        Err(ReadysetParsingError::ReadysetParsingError(
+            "expected an ALTER statement".into(),
+        ))
+    }
+}
+
+#[cfg(not(feature = "sqlparser"))]
+pub fn parse_alter_table(
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<AlterTableStatement, String> {
+    nom_sql::parse_alter_table(dialect, input.as_ref())
 }

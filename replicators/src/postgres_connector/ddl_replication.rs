@@ -126,6 +126,8 @@ macro_rules! make_fallible_parse_deserialize_with {
             D: Deserializer<'de>,
         {
             let ty = String::deserialize(deserializer)?;
+            // TODO: This should use the wrapped subparsers
+            // in readyset-sql-parsing
             Ok(nom_sql::$parser(Dialect::PostgreSQL, ty))
         }
     };
