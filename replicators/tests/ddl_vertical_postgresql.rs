@@ -437,6 +437,15 @@ enum TestViewDef {
     Join { table_a: String, table_b: String },
 }
 
+impl TestViewDef {
+    fn tables(&self) -> Vec<&str> {
+        match self {
+            TestViewDef::Simple(table) => vec![table],
+            TestViewDef::Join { table_a, table_b } => vec![table_a, table_b],
+        }
+    }
+}
+
 struct DDLTestRunContext {
     rs_host: String,
     rs_conn: Client,
@@ -763,7 +772,13 @@ impl ModelState for DDLModelState {
                         _ => true,
                     })
             }
-            Operation::DropTable(name) => self.tables.contains_key(name),
+            Operation::DropTable(name) => {
+                self.tables.contains_key(name)
+                    && !self
+                        .views
+                        .iter()
+                        .any(|(_view_name, view_def)| view_def.tables().contains(&name.as_str()))
+            }
             Operation::WriteRow {
                 table,
                 pkey,
