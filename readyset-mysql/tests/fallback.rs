@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use mysql_async::prelude::*;
-use mysql_async::ChangeUserOpts;
+use mysql_async::{ChangeUserOpts, Conn};
 use readyset_adapter::backend::UnsupportedSetMode;
 use readyset_adapter::BackendBuilder;
 use readyset_client::query::QueryId;
@@ -33,7 +33,7 @@ async fn setup() -> (mysql_async::Opts, Handle, ShutdownSender) {
 #[slow]
 async fn create_table() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .await
@@ -59,7 +59,7 @@ async fn create_table() {
 #[slow]
 async fn add_column() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .await
@@ -100,7 +100,7 @@ async fn add_column() {
 #[ignore = "REA-4099"]
 async fn json_column_insert_read() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, data JSON)")
         .await
@@ -130,7 +130,7 @@ async fn json_column_insert_read() {
 #[slow]
 async fn json_column_partial_update() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, data JSON)")
         .await
@@ -160,7 +160,7 @@ async fn json_column_partial_update() {
 #[slow]
 async fn range_query() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE cats (id int PRIMARY KEY, cuteness int)")
         .await
@@ -185,7 +185,7 @@ async fn range_query() {
 #[slow]
 async fn aggregate_in() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE cats (id int PRIMARY KEY, cuteness int)")
         .await
         .unwrap();
@@ -211,7 +211,7 @@ async fn aggregate_in() {
 #[slow]
 async fn set_autocommit() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     // We do not support SET autocommit = 0;
     conn.query_drop("SET @@SESSION.autocommit = 1;")
         .await
@@ -239,7 +239,7 @@ async fn proxy_unsupported_sets() {
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
@@ -282,7 +282,7 @@ async fn proxy_unsupported_sets_prep_exec() {
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
@@ -315,7 +315,7 @@ async fn prepare_in_tx_select_out() {
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
@@ -346,7 +346,7 @@ async fn prep_and_select_in_tx() {
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
@@ -378,7 +378,7 @@ async fn prep_then_select_in_tx() {
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
@@ -410,7 +410,7 @@ async fn prep_then_always_select_in_tx() {
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
@@ -445,7 +445,7 @@ async fn always_should_bypass_tx() {
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
@@ -481,7 +481,7 @@ async fn prep_select() {
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
@@ -509,7 +509,7 @@ async fn set_then_prep_and_select() {
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
@@ -537,7 +537,7 @@ async fn always_should_never_proxy() {
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
@@ -565,7 +565,7 @@ async fn always_should_never_proxy_exec() {
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
@@ -602,7 +602,7 @@ async fn prep_then_set_then_select_proxy() {
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
@@ -630,7 +630,7 @@ async fn proxy_mode_should_allow_commands() {
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
@@ -672,7 +672,7 @@ async fn proxy_mode_should_allow_commands() {
 #[slow]
 async fn drop_then_recreate_table_with_query() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     sleep().await;
@@ -707,7 +707,7 @@ async fn drop_then_recreate_table_with_query() {
 #[skip_flaky_finder]
 async fn transaction_proxies() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     sleep().await;
@@ -740,7 +740,7 @@ async fn transaction_proxies() {
 #[slow]
 async fn show_caches_index_hints() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     let _ = conn.query_drop("CREATE TABLE t_idx_hnt (a INT PRIMARY KEY, b INT, c INT, KEY `idx_1`(b), KEY `idx_2`(c))")
         .await;
@@ -798,7 +798,7 @@ async fn show_caches_index_hints() {
 #[slow]
 async fn valid_sql_parsing_failed_shows_proxied() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     // This query needs to be valid SQL but fail to parse. The current query is one known to not be
     // supported by the parser, but if this test is failing, that may no longer be the case and
     // this the query should be replaced with another one that isn't supported, or a more
@@ -829,7 +829,7 @@ async fn valid_sql_parsing_failed_shows_proxied() {
 #[slow]
 async fn invalid_sql_parsing_failed_doesnt_show_proxied() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     let q = "this isn't valid SQL".to_string();
     let _ = conn.query_drop(q.clone()).await;
@@ -849,7 +849,7 @@ async fn invalid_sql_parsing_failed_doesnt_show_proxied() {
 #[skip_flaky_finder]
 async fn switch_database_with_use() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("DROP DATABASE IF EXISTS s1;")
         .await
@@ -893,7 +893,7 @@ async fn replication_failure_ignores_table() {
 
     // Tests that if a table fails replication due to a TableError, it is dropped and we stop
     // replicating it going forward
-    let mut client = mysql_async::Conn::new(config).await.unwrap();
+    let mut client = Conn::new(config).await.unwrap();
 
     client
         .query_drop("DROP TABLE IF EXISTS cats CASCADE")
@@ -921,7 +921,7 @@ async fn replication_failure_ignores_table() {
     sleep().await;
     sleep().await;
 
-    assert!(last_statement_matches("upstream", "ok", &mut client).await);
+    assert_last_statement_matches("cats", "upstream", "ok", &mut client).await;
     client
         .query_drop("CREATE CACHE FROM SELECT * FROM cats")
         .await
@@ -975,6 +975,10 @@ async fn replication_failure_ignores_table() {
         .query_drop("CREATE CACHE FROM SELECT * FROM cats")
         .await
         .expect_err("should fail to create cache now that table is ignored");
+    client
+        .query_drop("CREATE CACHE FROM SELECT * FROM cats_view")
+        .await
+        .expect_err("should fail to create cache now that table is ignored");
 
     for source in ["cats", "cats_view"] {
         let mut results: Vec<i32> = client
@@ -983,9 +987,7 @@ async fn replication_failure_ignores_table() {
             .unwrap();
         results.sort();
         assert_eq!(results, vec![1, 2]);
-        assert!(
-            last_statement_matches("readyset_then_upstream", "view destroyed", &mut client).await
-        );
+        assert_last_statement_matches(source, "upstream", "ok", &mut client).await;
     }
 
     shutdown_tx.shutdown().await;
@@ -995,7 +997,7 @@ async fn replication_failure_ignores_table() {
 #[serial(mysql)]
 async fn reset_user() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TEMPORARY TABLE t (id INT)")
         .await
         .unwrap();
@@ -1023,7 +1025,7 @@ async fn reset_user() {
 async fn show_proxied_queries_show_caches_query_text_matches() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE t (id INT)").await.unwrap();
     conn.query_drop("SELECT id FROM t").await.unwrap();
@@ -1047,14 +1049,35 @@ async fn show_proxied_queries_show_caches_query_text_matches() {
 }
 
 #[allow(dead_code)]
-async fn last_statement_matches(dest: &str, status: &str, client: &mut mysql_async::Conn) -> bool {
+async fn last_statement_matches(dest: &str, status: &str, client: &mut Conn) -> (bool, String) {
     let rows: Vec<(String, String)> = client
         .query("EXPLAIN LAST STATEMENT")
         .await
         .expect("explain query failed");
     let dest_col = rows[0].0.clone();
     let status_col = rows[0].1.clone();
-    dest_col.contains(dest) && status_col.contains(status)
+    if !dest_col.contains(dest) {
+        return (
+            false,
+            format!(r#"dest column was expected to contain "{dest}", but was: "{dest_col}""#),
+        );
+    }
+    if !status_col.contains(status) {
+        return (
+            false,
+            format!(r#"status column was expected to contain "{status}", but was: "{status_col}""#),
+        );
+    }
+    (true, "".to_string())
+}
+
+#[allow(dead_code)]
+async fn assert_last_statement_matches(table: &str, dest: &str, status: &str, client: &mut Conn) {
+    let (matches, err) = last_statement_matches(dest, status, client).await;
+    assert!(
+        matches,
+        "EXPLAIN LAST STATEMENT mismatch for query involving table {table}: {err}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1068,7 +1091,7 @@ async fn it_change_user() {
             .users(users),
     )
     .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TEMPORARY TABLE t (id INT)")
         .await
         .unwrap();
@@ -1114,7 +1137,7 @@ async fn it_change_user() {
 #[serial(mysql)]
 async fn select_version_comment() {
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     let row: String = conn
         .query_first("SELECT @@version_comment")
         .await
@@ -1143,7 +1166,7 @@ async fn resnapshot_table_command() {
     }
 
     let (opts, mut handle, shutdown_tx) = setup().await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (id INT)").await.unwrap();
     sleep().await;
 

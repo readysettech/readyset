@@ -373,7 +373,7 @@ async fn schema_resolution_with_unreplicated_tables() {
         .get::<_, i32>(0);
     assert_eq!(result, 2);
 
-    assert!(last_statement_matches("readyset", "ok", &client).await);
+    assert_last_statement_matches("t", "readyset", "ok", &client).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -785,7 +785,7 @@ async fn rename_column_then_create_view() {
             .map(|r| r.get::<_, i32>(0))
             .collect::<Vec<_>>();
 
-        last_statement_matches("readyset", "ok", &client).await
+        last_statement_matches("readyset", "ok", &client).await.0
             && res == vec![1]
     }
 
@@ -950,7 +950,7 @@ async fn insert_array_of_enum_value_appended_after_create_table() {
 }
 
 #[allow(dead_code)]
-async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> bool {
+async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> (bool, String) {
     match &client
         .simple_query("EXPLAIN LAST STATEMENT")
         .await
@@ -959,10 +959,35 @@ async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> bo
         SimpleQueryMessage::Row(row) => {
             let dest_col = row.get(0).expect("should have 2 cols");
             let status_col = row.get(1).expect("should have 2 cols");
-            dest_col.contains(dest) && status_col.contains(status)
+            if !dest_col.contains(dest) {
+                return (
+                    false,
+                    format!(
+                        r#"dest column was expected to contain "{dest}", but was: "{dest_col}""#
+                    ),
+                );
+            }
+            if !status_col.contains(status) {
+                return (
+                    false,
+                    format!(
+                        r#"status column was expected to contain "{status}", but was: "{status_col}""#
+                    ),
+                );
+            }
+            (true, "".to_string())
         }
         _ => panic!("should have 1 row"),
     }
+}
+
+#[allow(dead_code)]
+async fn assert_last_statement_matches(table: &str, dest: &str, status: &str, client: &Client) {
+    let (matches, err) = last_statement_matches(dest, status, client).await;
+    assert!(
+        matches,
+        "EXPLAIN LAST STATEMENT mismatch for query involving table {table}: {err}"
+    );
 }
 
 #[cfg(feature = "failure_injection")]
@@ -989,7 +1014,7 @@ async fn setup_for_replication_failure(client: &Client) {
     sleep().await;
     sleep().await;
 
-    assert!(last_statement_matches("upstream", "ok", client).await);
+    assert_last_statement_matches("cats", "upstream", "ok", client).await;
     client
         .simple_query("CREATE CACHE FROM SELECT * FROM cats")
         .await
@@ -1020,6 +1045,10 @@ async fn assert_table_ignored(client: &Client) {
         .simple_query("CREATE CACHE FROM SELECT * FROM cats")
         .await
         .expect_err("should fail to create cache now that table is ignored");
+    client
+        .simple_query("CREATE CACHE FROM SELECT * FROM cats_view")
+        .await
+        .expect_err("should fail to create cache now that table is ignored");
 
     for source in ["cats", "cats_view"] {
         let result = client
@@ -1038,7 +1067,7 @@ async fn assert_table_ignored(client: &Client) {
         let mut results = vec![c1, c2];
         results.sort();
         assert_eq!(results, vec!["1", "2"]);
-        assert!(last_statement_matches("readyset_then_upstream", "view destroyed", client).await);
+        assert_last_statement_matches(source, "upstream", "ok", client).await;
     }
 }
 
@@ -1356,13 +1385,13 @@ async fn drop_cache_implicit_caching() {
             .await
             .unwrap();
 
-        last_statement_matches("readyset", "ok", &client).await
+        last_statement_matches("readyset", "ok", &client).await.0
     }
 
     eventually! {
         let _ = client.query("SELECT id FROM cats;", &[]).await.unwrap();
 
-        last_statement_matches("readyset", "ok", &client).await
+        last_statement_matches("readyset", "ok", &client).await.0
     }
 
     // Obtain both cache names
@@ -1395,13 +1424,13 @@ async fn drop_cache_implicit_caching() {
             .await
             .unwrap();
 
-        last_statement_matches("upstream", "ok", &client).await
+        last_statement_matches("upstream", "ok", &client).await.0
     }
 
     eventually! {
         let _ = client.query("SELECT id FROM cats;", &[]).await.unwrap();
 
-        last_statement_matches("upstream", "ok", &client).await
+        last_statement_matches("upstream", "ok", &client).await.0
     }
 
     // Let's make sure we can re-cache the queries
@@ -1420,13 +1449,13 @@ async fn drop_cache_implicit_caching() {
             .await
             .unwrap();
 
-        last_statement_matches("readyset", "ok", &client).await
+        last_statement_matches("readyset", "ok", &client).await.0
     }
 
     eventually! {
         let _ = client.query("SELECT id FROM cats;", &[]).await.unwrap();
 
-        last_statement_matches("readyset", "ok", &client).await
+        last_statement_matches("readyset", "ok", &client).await.0
     }
 
     shutdown_tx.shutdown().await;
