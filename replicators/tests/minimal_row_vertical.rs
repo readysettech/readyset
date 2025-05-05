@@ -866,7 +866,7 @@ fn rows_to_dfvalue_vec(rows: Vec<Row>) -> Vec<Vec<DfValue>> {
 }
 
 #[test]
-#[cfg_attr(not(feature = "minimal_row_vertical_tests"), ignore)]
+#[cfg_attr(not(feature = "vertical_tests"), ignore)]
 fn run_cases() {
     std::env::set_var("RUST_BACKTRACE", "0");
     let config = ProptestStatefulConfig {

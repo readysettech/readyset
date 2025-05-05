@@ -1255,7 +1255,7 @@ async fn recreate_caches_using_type(
 }
 
 #[test]
-#[cfg_attr(not(feature = "ddl_vertical_tests"), ignore)]
+#[cfg_attr(not(feature = "vertical_tests"), ignore)]
 fn run_cases() {
     let config = ProptestStatefulConfig {
         min_ops: 10,

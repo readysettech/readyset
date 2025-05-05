@@ -76,8 +76,7 @@ bincode = { workspace = true }
 reqwest = { workspace = true }
 
 [features]
-ddl_vertical_tests = []
-minimal_row_vertical_tests = []
+vertical_tests = []
 failure_injection = ["fail/failpoints", "readyset-util/failure_injection"]
 
 [lints]
