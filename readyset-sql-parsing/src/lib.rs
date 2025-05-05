@@ -1,13 +1,14 @@
 use readyset_sql::ast::{AlterTableStatement, Expr, SelectStatement, SqlQuery};
 use readyset_sql::Dialect;
 
-use readyset_sql::ast::{
-    AddTablesStatement, AlterReadysetStatement, CacheInner, CreateTableStatement,
-    DropCacheStatement, ResnapshotTableStatement,
-};
-use readyset_sql::IntoDialect;
+use readyset_sql::ast::CreateTableStatement;
 #[cfg(feature = "sqlparser")]
-use readyset_sql::TryIntoDialect;
+use readyset_sql::ast::{
+    AddTablesStatement, AlterReadysetStatement, CacheInner, DropCacheStatement,
+    ResnapshotTableStatement,
+};
+#[cfg(feature = "sqlparser")]
+use readyset_sql::{IntoDialect, TryIntoDialect};
 #[cfg(feature = "sqlparser")]
 use sqlparser::{
     keywords::Keyword,
