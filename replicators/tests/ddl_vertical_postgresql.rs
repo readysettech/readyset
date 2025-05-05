@@ -826,8 +826,7 @@ impl ModelState for DDLModelState {
             } => {
                 self.tables.contains_key(table_a)
                     && self.tables.contains_key(table_b)
-                    && !self.tables.contains_key(name)
-                    && !self.views.contains_key(name)
+                    && !self.name_in_use(name)
             }
             Operation::DropView(name) => self.views.contains_key(name),
             Operation::CreateEnum(name, _values) => !self.name_in_use(name),
