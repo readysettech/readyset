@@ -507,6 +507,8 @@ impl TryFrom<sqlparser::ast::BinaryOperator> for BinaryOperator {
             BinOp::At => todo!(),
             BinOp::TildeEq => todo!(),
             BinOp::Assignment => todo!(),
+            BinOp::Match => todo!(),
+            BinOp::Regexp => todo!(),
         })
     }
 }

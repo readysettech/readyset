@@ -1,6 +1,6 @@
 use readyset_sql::ast::{
     AlterTableStatement, CreateTableStatement, CreateViewStatement, Expr, SelectStatement,
-    SqlQuery, SqlType,
+    SqlQuery, SqlType, TableKey,
 };
 use readyset_sql::Dialect;
 
@@ -730,5 +730,40 @@ pub fn parse_sql_type(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlTyp
         input,
         |d, s| nom_sql::parse_sql_type(d, s),
         |p, d, s| parse_readyset_sql_type(p, d, s),
+    )
+}
+
+#[cfg(not(feature = "sqlparser"))]
+pub fn parse_key_specification(
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<TableKey, String> {
+    nom_sql::parse_key_specification_string(dialect, input.as_ref())
+}
+
+#[cfg(feature = "sqlparser")]
+fn parse_readyset_key_specification(
+    parser: &mut Parser,
+    dialect: Dialect,
+    _input: impl AsRef<str>,
+) -> Result<TableKey, ReadysetParsingError> {
+    Ok(parser
+        .parse_optional_table_constraint()?
+        .ok_or_else(|| {
+            ReadysetParsingError::ReadysetParsingError("expected a table constraint".into())
+        })?
+        .try_into_dialect(dialect)?)
+}
+
+#[cfg(feature = "sqlparser")]
+pub fn parse_key_specification(
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<TableKey, String> {
+    parse_both_inner(
+        dialect,
+        input,
+        |d, s| nom_sql::parse_key_specification_string(d, s),
+        |p, d, s| parse_readyset_key_specification(p, d, s),
     )
 }

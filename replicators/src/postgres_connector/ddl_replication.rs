@@ -126,15 +126,13 @@ macro_rules! make_fallible_parse_deserialize_with {
             D: Deserializer<'de>,
         {
             let ty = String::deserialize(deserializer)?;
-            // TODO: This should use the wrapped subparsers
-            // in readyset-sql-parsing
-            Ok(nom_sql::$parser(Dialect::PostgreSQL, ty))
+            Ok(readyset_sql_parsing::$parser(Dialect::PostgreSQL, ty))
         }
     };
 }
 
 make_fallible_parse_deserialize_with!(parse_sql_type -> SqlType);
-make_fallible_parse_deserialize_with!(parse_table_key -> TableKey, parse_key_specification_string);
+make_fallible_parse_deserialize_with!(parse_table_key -> TableKey, parse_key_specification);
 make_fallible_parse_deserialize_with!(parse_alter_table_statement -> AlterTableStatement, parse_alter_table);
 make_parse_deserialize_with!(parse_create_view_statement -> CreateViewStatement, parse_create_view);
 

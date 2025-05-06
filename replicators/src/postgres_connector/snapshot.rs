@@ -9,7 +9,6 @@ use failpoint_macros::set_failpoint;
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use nom_sql::parse_key_specification_string;
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset_client::recipe::changelist::{Change, ChangeList, PostgresTableMetadata};
 use readyset_client::TableOperation;
@@ -21,6 +20,7 @@ use readyset_sql::ast::{
 };
 use readyset_sql::Dialect;
 use readyset_sql::DialectDisplay;
+use readyset_sql_parsing::parse_key_specification;
 use readyset_sql_parsing::parse_sql_type;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
@@ -127,7 +127,7 @@ struct ConstraintDefinition(TableKey);
 impl<'a> FromSql<'a> for ConstraintDefinition {
     fn from_sql(ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn Error + Sync + Send>> {
         let s = String::from_sql(ty, raw)?;
-        Ok(ConstraintDefinition(parse_key_specification_string(
+        Ok(ConstraintDefinition(parse_key_specification(
             Dialect::PostgreSQL,
             s,
         )?))
