@@ -1,7 +1,8 @@
-use readyset_sql::ast::{AlterTableStatement, Expr, SelectStatement, SqlQuery};
+use readyset_sql::ast::{
+    AlterTableStatement, CreateTableStatement, CreateViewStatement, Expr, SelectStatement, SqlQuery,
+};
 use readyset_sql::Dialect;
 
-use readyset_sql::ast::CreateTableStatement;
 #[cfg(feature = "sqlparser")]
 use readyset_sql::ast::{
     AddTablesStatement, AlterReadysetStatement, CacheInner, DropCacheStatement,
@@ -487,6 +488,7 @@ fn parse_readyset_create_table(
     _input: impl AsRef<str>,
 ) -> Result<CreateTableStatement, ReadysetParsingError> {
     // parse_create expects CREATE keyword to be parsed already
+
     if parser.parse_keyword(Keyword::CREATE) {
         Ok(parser.parse_create()?.try_into_dialect(dialect)?)
     } else {
@@ -548,7 +550,7 @@ where
         (Err(nom_error), Err(sqlparser_error)) => {
             tracing::warn!(%nom_error, %sqlparser_error, "both nom-sql and sqlparser-rs failed");
         }
-    }
+    };
     nom_result
 }
 
@@ -665,5 +667,42 @@ pub fn parse_create_table(
         input,
         |d, s| nom_sql::parse_create_table(d, s),
         |p, d, s| parse_readyset_create_table(p, d, s),
+    )
+}
+
+#[cfg(not(feature = "sqlparser"))]
+pub fn parse_create_view(
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<CreateViewStatement, String> {
+    nom_sql::parse_create_view(dialect, input.as_ref())
+}
+
+#[cfg(feature = "sqlparser")]
+fn parse_readyset_create_view(
+    parser: &mut Parser,
+    dialect: Dialect,
+    _input: impl AsRef<str>,
+) -> Result<CreateViewStatement, ReadysetParsingError> {
+    // parse_create expects CREATE keyword to be parsed already
+    if parser.parse_keyword(Keyword::CREATE) {
+        Ok(parser.parse_create()?.try_into_dialect(dialect)?)
+    } else {
+        Err(ReadysetParsingError::ReadysetParsingError(
+            "expected a CREATE statement".into(),
+        ))
+    }
+}
+
+#[cfg(feature = "sqlparser")]
+pub fn parse_create_view(
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<CreateViewStatement, String> {
+    parse_both_inner(
+        dialect,
+        input,
+        |d, s| nom_sql::parse_create_view(d, s),
+        |p, d, s| parse_readyset_create_view(p, d, s),
     )
 }

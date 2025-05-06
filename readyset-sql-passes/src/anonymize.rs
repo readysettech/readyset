@@ -229,7 +229,7 @@ mod tests {
     }
 
     fn parse_create_view_statement(q: &str) -> CreateViewStatement {
-        nom_sql::parse_create_view(Dialect::MySQL, q).unwrap()
+        readyset_sql_parsing::parse_create_view(Dialect::MySQL, q).unwrap()
     }
 
     #[test]

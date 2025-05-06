@@ -276,7 +276,13 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
             GeometricType(geometric_type_kind) => {
                 unsupported!("geometric type {geometric_type_kind}")
             }
+            // TODO(mohamed): Are these supported?
             TimestampNtz => todo!(),
+            UTinyInt => todo!(),
+            USmallInt => todo!(),
+            HugeInt => todo!(),
+            UHugeInt => todo!(),
+            UBigInt => todo!(),
         }
     }
 }

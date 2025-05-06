@@ -266,12 +266,11 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                     },
 
                     SqlOption::NamedParenthesizedList(NamedParenthesizedList {
-                        key,
-                        value,
-                        ..
+                        key, name, ..
                     }) => {
                         if key.value == "ENGINE" {
-                            options.push(CreateTableOption::Engine(value.map(|v| v.value)));
+                            options
+                                .push(CreateTableOption::Engine(name.map(|n| n.value.to_string())));
                         }
                     }
                     SqlOption::Comment(

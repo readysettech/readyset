@@ -481,6 +481,37 @@ impl TryFromDialect<Box<sqlparser::ast::Query>> for SelectStatement {
     }
 }
 
+impl TryFromDialect<Box<sqlparser::ast::SetExpr>> for SelectStatement {
+    fn try_from_dialect(
+        value: Box<sqlparser::ast::SetExpr>,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        (*value).try_into_dialect(dialect)
+    }
+}
+
+impl TryFromDialect<sqlparser::ast::SetExpr> for SelectStatement {
+    fn try_from_dialect(
+        value: sqlparser::ast::SetExpr,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        match value {
+            sqlparser::ast::SetExpr::Query(query) => (*query).try_into_dialect(dialect),
+            sqlparser::ast::SetExpr::Select(select) => (*select).try_into_dialect(dialect),
+            _ => failed!("Should only be called on a SELECT query, got: {value:?}"),
+        }
+    }
+}
+
+impl TryFromDialect<Box<sqlparser::ast::SetExpr>> for Box<SelectStatement> {
+    fn try_from_dialect(
+        value: Box<sqlparser::ast::SetExpr>,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        Ok(Box::new(value.try_into_dialect(dialect)?))
+    }
+}
+
 impl TryFromDialect<Box<sqlparser::ast::Query>> for Box<SelectStatement> {
     fn try_from_dialect(
         value: Box<sqlparser::ast::Query>,

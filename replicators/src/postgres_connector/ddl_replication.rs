@@ -111,7 +111,7 @@ macro_rules! make_parse_deserialize_with {
             D: Deserializer<'de>,
         {
             let ty = String::deserialize(deserializer)?;
-            nom_sql::$parser(Dialect::PostgreSQL, ty).map_err(serde::de::Error::custom)
+            readyset_sql_parsing::$parser(Dialect::PostgreSQL, ty).map_err(serde::de::Error::custom)
         }
     };
 }

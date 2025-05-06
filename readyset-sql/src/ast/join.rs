@@ -122,6 +122,7 @@ impl TryFromDialect<sqlparser::ast::JoinOperator> for JoinConstraint {
             | JoinOp::RightAnti(constraint)
             | JoinOp::Semi(constraint)
             | JoinOp::Anti(constraint)
+            | JoinOp::StraightJoin(constraint)
             | JoinOp::AsOf { constraint, .. } => constraint.try_into_dialect(dialect),
             JoinOp::CrossJoin | JoinOp::CrossApply | JoinOp::OuterApply => Ok(Self::Empty),
         }

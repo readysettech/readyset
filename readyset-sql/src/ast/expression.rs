@@ -978,10 +978,6 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 negated,
             }),
             Interval(_interval) => not_yet_implemented!("INTERVAL"),
-            IntroducedString {
-                introducer: _,
-                value: _,
-            } => not_yet_implemented!("IntroducedString"),
             InUnnest {
                 expr: _,
                 array_expr: _,
@@ -1188,6 +1184,8 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             }
             Wildcard(_token) => todo!("wildcard expression"),
             IsNormalized { .. } => unsupported!("IS NORMALIZED"),
+            // TODO(mohamed): no idea what this is, check if this is supported
+            Prefixed { .. } => todo!(),
         }
     }
 }

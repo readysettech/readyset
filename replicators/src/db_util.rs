@@ -131,7 +131,7 @@ impl CreateSchema {
     fn anonymize_views(&mut self, anonymizer: &mut Anonymizer) {
         for (_, view) in self.view_creates.iter_mut() {
             tracing::trace!("create view: {view:?}");
-            *view = match nom_sql::parse_create_view(self.dialect, view.clone()) {
+            *view = match readyset_sql_parsing::parse_create_view(self.dialect, view.clone()) {
                 Ok(mut parsed_view) => {
                     parsed_view.anonymize(anonymizer);
                     parsed_view
