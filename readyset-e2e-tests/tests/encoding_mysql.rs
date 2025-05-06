@@ -473,6 +473,24 @@ test_encoding_replication!(
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
+    cp850_general_ci_varchar,
+    "VARCHAR(255)",
+    "cp850_general_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    cp850_general_ci_char,
+    "CHAR(10)",
+    "cp850_general_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    cp850_general_ci_text,
+    "TEXT",
+    "cp850_general_ci",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
     utf8mb4_bin_ascii_varchar,
     "VARCHAR(255)",
     "utf8mb4_bin",

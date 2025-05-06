@@ -62,7 +62,7 @@ members = [
     "system-benchmarks",
     "test-utils",
     "tinylb",
-    "tournament-kway"
+    "tournament-kway",
 ]
 resolver = "2"
 
@@ -264,6 +264,7 @@ vec_map = "0.8.2"
 walkdir = "2.5.0"
 xxhash-rust = { version = "0.8.10", features = ["xxh3"] }
 jobserver = "0.1.32"
+yore = "1.1.0"
 
 [profile.release]
 debug = true

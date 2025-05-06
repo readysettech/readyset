@@ -1,6 +1,6 @@
+use std::borrow::Cow;
 use std::fmt;
 
-use encoding_rs::{UTF_8, WINDOWS_1252};
 use readyset_errors::ReadySetError;
 use readyset_errors::ReadySetResult;
 
@@ -32,6 +32,8 @@ pub enum Encoding {
     Utf8,
     /// latin1 (CP1252/ISO-8859-1)
     Latin1,
+    /// cp850
+    Cp850,
     /// Binary data (not interpreted as text)
     Binary,
     /// Unsupported encoding
@@ -43,6 +45,7 @@ impl fmt::Display for Encoding {
         match self {
             Encoding::Utf8 => write!(f, "utf8"),
             Encoding::Latin1 => write!(f, "latin1"),
+            Encoding::Cp850 => write!(f, "cp850"),
             Encoding::Binary => write!(f, "binary"),
             Encoding::OtherMySql(id) => write!(f, "unsupported MySQL collation {}", id),
         }
@@ -55,9 +58,8 @@ impl Encoding {
         match collation_id {
             // ascii, utf8mb3, utf8mb4
             11 | 33 | 45 | 46 | 65 | 76 | 83 | 192..=247 | 255..=323 => Self::Utf8,
-            // latin1
             5 | 8 | 15 | 31 | 47 | 48 | 49 | 94 => Self::Latin1,
-            // binary
+            4 | 80 => Self::Cp850,
             63 => Self::Binary,
 
             // Default to UTF-8 for other collations
@@ -65,12 +67,12 @@ impl Encoding {
         }
     }
 
-    fn get_encoding_rs(&self) -> Option<&'static encoding_rs::Encoding> {
+    pub fn decode(&self, bytes: &[u8]) -> ReadySetResult<String> {
         match self {
-            Self::Utf8 => Some(UTF_8),
-            Self::Latin1 => Some(WINDOWS_1252),
-            Self::Binary => None,
-            Self::OtherMySql(_) => None,
+            Self::Utf8 => self.decode_encoding_rs(bytes, encoding_rs::UTF_8),
+            Self::Latin1 => self.decode_encoding_rs(bytes, encoding_rs::WINDOWS_1252),
+            Self::Cp850 => Ok(yore::code_pages::CP850.decode(bytes).into_owned()),
+            Self::Binary | Self::OtherMySql(_) => Err(decoding_err!(self, "Unsupported encoding")),
         }
     }
 
@@ -81,10 +83,11 @@ impl Encoding {
     /// representation of the original character. MySQL by contrast uses ? as a replacement
     /// character, and we will likely want to implement such custom replacement to match MySQL in
     /// the future.
-    pub fn decode(&self, bytes: &[u8]) -> ReadySetResult<String> {
-        let Some(encoding) = self.get_encoding_rs() else {
-            return Err(decoding_err!(self, "Unsupported encoding"));
-        };
+    fn decode_encoding_rs(
+        &self,
+        bytes: &[u8],
+        encoding: &'static encoding_rs::Encoding,
+    ) -> Result<String, ReadySetError> {
         // XXX(mvzink): We ignore BOMs. This is only relevant for UTF-16, UTF-32, and UCS-2,
         // and the [MySQL docs] indicate there won't be a BOM. This may need to be adjusted
         // for handling those encodings on Postgres.
@@ -132,16 +135,28 @@ impl Encoding {
         }
     }
 
+    pub fn encode<'a>(&self, string: &'a str) -> ReadySetResult<Cow<'a, [u8]>> {
+        match self {
+            Self::Utf8 => Ok(string.as_bytes().into()),
+            Self::Latin1 => Ok(self
+                .encode_encoding_rs(string, encoding_rs::WINDOWS_1252)?
+                .into()),
+            Self::Cp850 => Ok(yore::code_pages::CP850.encode_lossy(string, b"?"[0])),
+            Self::Binary | Self::OtherMySql(_) => Err(decoding_err!(self, "Unsupported encoding")),
+        }
+    }
+
     /// Encode a UTF-8 string to bytes in this encoding
     ///
     /// As with [`Encoding::decode`], we use the more involved non-replacing method in order to try
     /// to surface a useful error message with the invalid bytes included.
-    pub fn encode(&self, string: &str) -> ReadySetResult<Vec<u8>> {
-        let Some(encoding) = self.get_encoding_rs() else {
-            return Err(encoding_err!(self, "Unsupported encoding"));
-        };
+    fn encode_encoding_rs(
+        &self,
+        string: &str,
+        encoding: &'static encoding_rs::Encoding,
+    ) -> ReadySetResult<Vec<u8>> {
         let mut encoder = encoding.new_encoder();
-        let Some(max_len) = encoder.max_buffer_length_from_utf8_without_replacement(string.len())
+        let Some(max_len) = encoder.max_buffer_length_from_utf8_if_no_unmappables(string.len())
         else {
             // According to docs, only happens if it would overflow usize
             return Err(decoding_err!(self, "Worst case output too long"));
@@ -196,12 +211,12 @@ mod tests {
         // Test with ASCII (should work fine)
         let utf8_str = "Hello World";
         let result = Encoding::Latin1.encode(utf8_str).unwrap();
-        assert_eq!(result, b"Hello World");
+        assert_eq!(result, &b"Hello World"[..]);
 
         // Test with Latin1 characters
         let utf8_str = "Hello é";
         let result = Encoding::Latin1.encode(utf8_str).unwrap();
-        assert_eq!(result, &[0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, 0xE9]);
+        assert_eq!(result, &[0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, 0xE9][..]);
 
         // Test with characters outside Latin1 range (should fail)
         let utf8_str = "Hello 😊"; // Emoji is outside Latin1 range

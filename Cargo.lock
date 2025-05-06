@@ -4386,6 +4386,7 @@ dependencies = [
  "triomphe",
  "uuid 0.8.2",
  "vec1",
+ "yore",
 ]
 
 [[package]]
@@ -7324,6 +7325,15 @@ dependencies = [
  "quote",
  "syn 2.0.101",
  "synstructure 0.13.2",
+]
+
+[[package]]
+name = "yore"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f58c7ce1b7faa85a5c5a8b45b428c89cabdcd097bb472b7668037b291a8a20b"
+dependencies = [
+ "thiserror 1.0.69",
 ]
 
 [[package]]
