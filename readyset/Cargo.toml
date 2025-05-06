@@ -84,6 +84,16 @@ assets = [
 #post_uninstall_script = ...
 
 
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/readyset", dest = "/usr/bin/readyset", mode = "755" },
+    { source = "debian/readyset.conf", dest = "/etc/readyset/readyset.conf", mode = "644" },
+    { source = "debian/systemd/readyset.service", dest = "/lib/systemd/system/readyset.service", mode = "644" },
+]
+license = "BSL"
+description = """\
+A real-time SQL caching engine for Postgres and MySQL."""
+
 [package.metadata.deb]
 maintainer = "Readyset Technology <info@readyset.io>"
 copyright = "2024, Readyset Technology, Inc."
