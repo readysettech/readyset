@@ -951,8 +951,7 @@ impl DfValue {
             Dialect::DEFAULT_MYSQL => {
                 // Yay, MySQL has implicit defaults if you omit a column that is not null and has no default
                 if matches!(dftype, DfType::Blob) {
-                    // TODO: Fix this to return ByteArray(Vec::new().into())
-                    return DfValue::from_str_and_collation("", collation);
+                    return DfValue::ByteArray(vec![].into());
                 } else if dftype.is_any_text() {
                     return match dftype {
                         // For char columns, we return a space repeated to the length of the column

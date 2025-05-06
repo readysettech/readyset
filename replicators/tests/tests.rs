@@ -4252,3 +4252,51 @@ async fn mysql_minimal_row_based_binary() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial(mysql)]
+#[slow]
+async fn mysql_minimal_row_based_blob() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query("SET binlog_row_image = minimal;")
+        .await
+        .unwrap();
+    client.query("SET sql_mode = '';").await.unwrap();
+    client
+        .query("DROP TABLE IF EXISTS mrbr_blob;")
+        .await
+        .unwrap();
+    client
+        .query("CREATE TABLE mrbr_blob (id INT, b BLOB NOT NULL);")
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    client
+        .query("INSERT INTO mrbr_blob (id) VALUES (0);")
+        .await
+        .unwrap();
+
+    check_results!(
+        ctx,
+        "mrbr_blob",
+        "mrbr_blob_insert",
+        &[&[DfValue::Int(0), DfValue::ByteArray(vec![].into())]]
+    );
+
+    shutdown_tx.shutdown().await;
+}
