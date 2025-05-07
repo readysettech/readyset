@@ -46,10 +46,10 @@ steps:
       - export RUST_BACKTRACE=full
       - cargo --locked deny check
     depends_on:
-      - cargo-deny-image
+      - build-image
     plugins:
       - docker#${DOCKER_PLUGIN_VERSION}:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-deny:${BUILDKITE_COMMIT}'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           environment:
             - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
             - SCCACHE_REGION=us-east-2

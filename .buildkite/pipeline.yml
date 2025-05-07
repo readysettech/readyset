@@ -36,18 +36,6 @@ steps:
         retries: 3
     retry: *retry_on_agent_kill
 
-  - label: ':docker: Build cargo-deny image'
-    key: cargo-deny-image
-    commands:
-      - '.buildkite/build-image.sh build/Dockerfile.cargo-deny cargo-deny .'
-    env:
-      VERSION: "${BUILDKITE_COMMIT}"
-    plugins:
-      ecr#${ECR_PLUGIN_VERSION}:
-        login: true
-        retries: 3
-    retry: *retry_on_agent_kill
-
   - label: ':pipeline: Upload public-common pipeline'
     commands:
       - buildkite-agent pipeline upload .buildkite/pipeline.public-common.yml
