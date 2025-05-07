@@ -235,13 +235,11 @@ fn test_set_names() {
 }
 
 #[test]
-#[ignore = "nom-sql doesn't support SET NAMES DEFAULT"]
 fn test_set_names_default() {
     check_parse_both!("SET NAMES DEFAULT");
 }
 
 #[test]
-#[ignore = "nom-sql doesn't support unquoted SET NAMES"]
 fn test_set_names_unquoted() {
     check_parse_mysql!("SET NAMES utf8mb4 COLLATE utf8_general_ci");
 }

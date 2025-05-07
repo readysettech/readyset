@@ -164,12 +164,23 @@ fn set_names(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[
     move |i| {
         let (i, _) = tag_no_case("names")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, charset) = dialect.utf8_string_literal()(i)?;
+        let (i, charset) = alt((
+            dialect.utf8_string_literal(),
+            map(dialect.identifier(), |sql_identifier| {
+                sql_identifier.to_string()
+            }),
+            map(tag_no_case("default"), |_| "default".to_string()),
+        ))(i)?;
         let (i, collation) = opt(move |i| {
             let (i, _) = whitespace1(i)?;
             let (i, _) = tag_no_case("collate")(i)?;
             let (i, _) = whitespace1(i)?;
-            let (i, collation) = dialect.utf8_string_literal()(i)?;
+            let (i, collation) = alt((
+                dialect.utf8_string_literal(),
+                map(dialect.identifier(), |sql_identifier| {
+                    sql_identifier.to_string()
+                }),
+            ))(i)?;
             Ok((i, collation))
         })(i)?;
 
@@ -293,6 +304,32 @@ mod tests {
     fn set_names() {
         let qstring1 = "SET NAMES 'iso8660'";
         let qstring2 = "set names 'utf8mb4' collate 'utf8mb4_unicode_ci'";
+        let res1 = set(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
+            .unwrap()
+            .1;
+        let res2 = set(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
+            .unwrap()
+            .1;
+        assert_eq!(
+            res1,
+            SetStatement::Names(SetNames {
+                charset: "iso8660".to_string(),
+                collation: None
+            })
+        );
+        assert_eq!(
+            res2,
+            SetStatement::Names(SetNames {
+                charset: "utf8mb4".to_string(),
+                collation: Some("utf8mb4_unicode_ci".to_string())
+            })
+        );
+    }
+
+    #[test]
+    fn set_names_no_quotes() {
+        let qstring1 = "SET NAMES iso8660";
+        let qstring2 = "set names utf8mb4 collate utf8mb4_unicode_ci";
         let res1 = set(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
             .unwrap()
             .1;
