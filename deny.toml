@@ -56,7 +56,6 @@ allow = [
     "ISC",
     "BSL-1.0",
     "Zlib",
-    "Unicode-DFS-2016",
     "Unicode-3.0",
 ]
 # The confidence threshold for detecting a license from license text.
@@ -133,7 +132,7 @@ deny = [
     #{ name = "ansi_term", version = "=0.11.0", wrappers = [] },
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
-skip = [{ name = "encode_unicode", version = "0.3.6" }]
+skip = []
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
 # dependencies starting at the specified crate, up to a certain depth, which is
@@ -148,6 +147,9 @@ skip-tree = [
     { name = "web-time", version = "0.2.4" },
     { name = "itertools", version = "0.10.5" },
     { name = "itertools", version = "0.12.1" },
+    { name = "winnow", version = "0.6.26" },
+    { name = "regex-automata", version = "0.1.10" },
+    { name = "hermit-abi", version = "0.3.9" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
