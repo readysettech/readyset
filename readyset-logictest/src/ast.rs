@@ -223,9 +223,13 @@ impl TryFrom<mysql_async::Value> for Value {
         use mysql_async::Value::*;
         match value {
             NULL => Ok(Self::Null),
-            Bytes(bs) => Ok(Self::Text(
-                String::from_utf8(bs).map_err(|e| ValueConversionError(e.to_string()))?,
-            )),
+            // return UTF-8 string for binary data, else return a hex string
+            Bytes(bs) => Ok(Self::Text(String::from_utf8(bs.clone()).or_else(|_| {
+                Ok(format!(
+                    "0x{}",
+                    bs.iter().map(|b| format!("{:02X}", b)).join("")
+                ))
+            })?)),
             Int(i) => Ok(Self::Integer(i)),
             UInt(i) => Ok(Self::UnsignedInteger(i)),
             Float(f) => Self::try_from(Double(f as f64)),

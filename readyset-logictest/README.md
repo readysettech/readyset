@@ -24,5 +24,5 @@ We have found that to be mostly sufficient, but we've added support to
 The following types have partial support; YMMV as of this writing:
 
 - `F` - numeric, a fixed-point number
-- `B` - byte array
+- `B` - byte array, attempts to coerce a result set value to a UTF-8 string, else a hex string
 
