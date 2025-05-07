@@ -1,4 +1,4 @@
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rustlang/rust:nightly
+FROM public.ecr.aws/docker/library/rust:1.86.0
 
 WORKDIR /tmp
 
