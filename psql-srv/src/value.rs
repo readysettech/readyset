@@ -6,6 +6,7 @@ use cidr::IpInet;
 use eui48::MacAddress;
 use postgres_types::{FromSql, Kind, Type};
 use readyset_data::{Array, PassThroughFormat, Text, TinyText};
+use readyset_util::NUMERIC_MAX_SCALE;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -81,10 +82,10 @@ impl<'a> FromSql<'a> for PsqlValue {
                     // Postgres binary format NUMERIC values with scales in [0, 255], but it will
                     // panic when serializing them to bincode if they are outside [0, 28].
                     let d = Decimal::from_sql(ty, raw)?;
-                    if d.scale() > 28 {
+                    if d.scale() > NUMERIC_MAX_SCALE as u32 {
                         Err(format!(
                             "Unsupported scale {} on NUMERIC value - \
-                             max supported by ReadySet is 28",
+                             max supported by ReadySet is {NUMERIC_MAX_SCALE}",
                             d.scale(),
                         )
                         .into())

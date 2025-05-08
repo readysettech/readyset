@@ -10,10 +10,10 @@ use readyset_client_test_helpers::psql_helpers::{upstream_config, PostgreSQLAdap
 use readyset_client_test_helpers::{sleep, Adapter, TestBuilder};
 use readyset_data::DfValue;
 use readyset_server::Handle;
-use readyset_util::eventually;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use readyset_util::shutdown::ShutdownSender;
+use readyset_util::{eventually, NUMERIC_MAX_SCALE};
 use test_utils::serial;
 use test_utils::slow;
 
@@ -486,8 +486,8 @@ async fn generated_columns() {
 #[serial(postgres)]
 #[slow]
 async fn unsupported_numeric_scale() {
-    // Tests that we handle tables that have NUMERIC values with scales > 28
-    // by not snapshotting them and falling back to upstream
+    // Tests that we handle tables that have NUMERIC values with scales > NUMERIC_MAX_SCALE by not
+    // snapshotting them and falling back to upstream
     readyset_tracing::init_test_logging();
 
     let mut upstream_config = upstream_config();
@@ -505,8 +505,9 @@ async fn unsupported_numeric_scale() {
         .expect("create failed");
     assert!(matches!(res[0], SimpleQueryMessage::CommandComplete(_)));
 
+    let invalid = format!("0.{:0digits$}", 1, digits = NUMERIC_MAX_SCALE as usize + 1);
     let res = fallback_conn
-        .simple_query("INSERT INTO t VALUES(0.00000000000000000000000000001)") // scale=29
+        .simple_query(&format!("INSERT INTO t VALUES({invalid})"))
         .await
         .expect("populate failed");
     assert!(matches!(

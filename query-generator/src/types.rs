@@ -1,6 +1,7 @@
 use proptest::strategy::{Just, Strategy};
 use proptest::{option, prop_oneof};
 use readyset_sql::{ast::SqlType, Dialect};
+use readyset_util::NUMERIC_MAX_SCALE;
 use SqlType::*;
 
 /// Returns a proptest strategy to generate *numeric* [`SqlType`]s, optionally filtering to only
@@ -43,7 +44,7 @@ pub fn arbitrary_postgres_min_max_arg_type() -> impl Strategy<Value = SqlType> {
         option::of((1..=65u16).prop_flat_map(|n| {
             (
                 Just(n),
-                if n > 28 {
+                if n > NUMERIC_MAX_SCALE as u16 {
                     Just(None).boxed()
                 } else {
                     option::of(0..=(n as u8)).boxed()
@@ -51,7 +52,8 @@ pub fn arbitrary_postgres_min_max_arg_type() -> impl Strategy<Value = SqlType> {
             )
         }))
         .prop_map(Numeric),
-        (1..=28u8).prop_flat_map(|prec| (1..=prec).prop_map(move |scale| Decimal(prec, scale))),
+        (1..=NUMERIC_MAX_SCALE)
+            .prop_flat_map(|prec| (1..=prec).prop_map(move |scale| Decimal(prec, scale))),
         // string...
         option::of(1..255u16).prop_map(Char).boxed(),
         option::of(1..255u16).prop_map(VarChar),

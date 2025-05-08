@@ -6,7 +6,7 @@ use proptest::{
     prelude::{any_with, Arbitrary, BoxedStrategy, Strategy},
     sample::SizeRange,
 };
-use readyset_util::fmt::fmt_with;
+use readyset_util::{fmt::fmt_with, NUMERIC_MAX_SCALE};
 use serde::{Deserialize, Serialize};
 use triomphe::ThinArc;
 
@@ -403,10 +403,13 @@ impl Arbitrary for SqlType {
             Just(Date).boxed(),
             Just(Time).boxed(),
             Just(Timestamp).boxed(),
-            option::of((1..=28u16).prop_flat_map(|n| (Just(n), option::of(0..=(n as u8)).boxed())))
-                .prop_map(Numeric)
-                .boxed(),
-            (1..=28u8)
+            option::of(
+                (1..=NUMERIC_MAX_SCALE as u16)
+                    .prop_flat_map(|n| (Just(n), option::of(0..=(n as u8)).boxed())),
+            )
+            .prop_map(Numeric)
+            .boxed(),
+            (1..=NUMERIC_MAX_SCALE)
                 .prop_flat_map(|prec| (1..=prec).prop_map(move |scale| Decimal(prec, scale)))
                 .boxed(),
         ];

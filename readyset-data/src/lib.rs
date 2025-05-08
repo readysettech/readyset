@@ -20,8 +20,11 @@ use postgres_types::Format;
 use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{Double, Float, Literal, SqlType};
 use readyset_sql::DialectDisplay;
-use readyset_util::arbitrary::{arbitrary_decimal, arbitrary_duration};
-use readyset_util::redacted::Sensitive;
+use readyset_util::{
+    arbitrary::{arbitrary_decimal, arbitrary_duration},
+    redacted::Sensitive,
+    NUMERIC_MAX_SCALE,
+};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
@@ -2137,8 +2140,12 @@ impl<'a> FromSql<'a> for DfValue {
                         unsupported!("Numeric NaN is not supported");
                     }
                     let d = Decimal::from_sql(ty, raw)?;
-                    if d.scale() > 28 {
-                        Err(format!("Could not convert Postgres type {ty} into a DfValue. Error: scale > 28").into())
+                    if d.scale() > NUMERIC_MAX_SCALE as u32 {
+                        Err(format!(
+                            "Could not convert Postgres type {ty} into a DfValue. Error: \
+                             scale > {NUMERIC_MAX_SCALE}"
+                        )
+                        .into())
                     } else {
                         Ok(DfValue::from(d))
                     }
