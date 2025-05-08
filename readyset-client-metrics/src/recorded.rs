@@ -133,5 +133,6 @@ pub const QUERY_STATUS_CACHE_PENDING_INLINE_MIGRATIONS: &str =
 ///         - `collation_server`
 ///     - `SET CHARACTER SET` maps to `character_set`
 ///     - `SET NAMES` maps to `names`
-/// - charset: The lowercased name of the character set
+///     - Connection handshake and `COM_CHANGE_USER` map to `protocol`
+/// - charset: The lowercased name of the character set/collation, or the u16 numeric id
 pub const CHARACTER_SET_USAGE: &str = "readyset_mysql_character_set_usage";

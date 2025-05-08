@@ -84,6 +84,10 @@ where
         Ok(())
     }
 
+    async fn set_charset(&mut self, _charset: u16) -> io::Result<()> {
+        Ok(())
+    }
+
     async fn on_execute(
         &mut self,
         id: u32,

@@ -737,6 +737,16 @@ where
         Ok(())
     }
 
+    async fn set_charset(&mut self, charset: u16) -> io::Result<()> {
+        metrics::counter!(
+            readyset_client_metrics::recorded::CHARACTER_SET_USAGE,
+            "type" => "protocol",
+            "charset" => charset.to_string(),
+        )
+        .increment(1);
+        Ok(())
+    }
+
     async fn on_init(&mut self, database: &str, w: Option<InitWriter<'_, S>>) -> io::Result<()> {
         if self.enable_statement_logging {
             info!(target: "client_statement", "database: {database}");

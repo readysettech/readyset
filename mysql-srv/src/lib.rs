@@ -68,6 +68,10 @@
 //!         Ok(())
 //!     }
 //!
+//!     async fn set_charset(&mut self, _: u16) -> io::Result<()> {
+//!         Ok(())
+//!     }
+//!
 //!     async fn on_query(
 //!         &mut self,
 //!         query: &str,
@@ -272,6 +276,32 @@ pub enum QueryResultsResponse {
     Command(ParsedCommand),
 }
 
+/// Represents the result of the initial handshake with the client.
+struct InitResult {
+    /// Whether the authentication was successful.
+    auth_success: bool,
+    /// The username provided by the client.
+    username: String,
+    /// The plain text password provided by the client.
+    plain_password: Option<RedactedString>,
+    /// The database name provided by the client.
+    database: Option<String>,
+    /// The default character set specified by the client.
+    charset: u16,
+}
+
+impl InitResult {
+    fn failed() -> Self {
+        InitResult {
+            auth_success: false,
+            username: String::new(),
+            plain_password: None,
+            database: None,
+            charset: 0,
+        }
+    }
+}
+
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
 // Only used internally
 #[allow(async_fn_in_trait)]
@@ -330,6 +360,9 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
 
     /// Called when client authenticates to inform which users we should use.
     async fn set_auth_info(&mut self, _: &str, _: Option<RedactedString>) -> io::Result<()>;
+
+    /// Called when default character set changes after handshake or client switches user.
+    async fn set_charset(&mut self, _: u16) -> io::Result<()>;
 
     /// Retrieve the password for the user with the given username, if any.
     ///
@@ -457,8 +490,16 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             tls_acceptor,
             tls_mode,
         };
-        if let (true, username, password, database) = mi.init().await? {
-            mi.shim.set_auth_info(&username, password).await?;
+        if let InitResult {
+            auth_success: true,
+            username,
+            plain_password,
+            database,
+            charset,
+        } = mi.init().await?
+        {
+            mi.shim.set_auth_info(&username, plain_password).await?;
+            mi.shim.set_charset(charset).await?;
             if let Some(database) = database {
                 mi.shim.on_init(&database, None).await?;
             }
@@ -477,9 +518,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
     /// If no errors are encountered, the return value contains a tuple of a boolean to indicate
     /// whether authentication was successful, the username, the plaintext password if one was
     /// provided, and a database name if one was specified by the client in the handshake response.
-    async fn init(
-        &mut self,
-    ) -> Result<(bool, String, Option<RedactedString>, Option<String>), io::Error> {
+    async fn init(&mut self) -> Result<InitResult, io::Error> {
         let auth_data =
             generate_auth_data().map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
         self.auth_data = auth_data;
@@ -559,7 +598,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 )
                 .await?;
                 self.conn.flush().await?;
-                return Ok((false, "".to_string(), None, None));
+                return Ok(InitResult::failed());
             }
         }
 
@@ -589,6 +628,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         self.conn.set_seq(packet.seq + 1);
 
         self.client_capabilities = handshake.capabilities;
+        let charset = handshake.charset;
         let username = handshake.username.to_owned();
         let password = handshake.password.to_vec();
         let database = handshake.database.map(String::from);
@@ -614,7 +654,10 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     &mut self.conn,
                 )
                 .await?;
-                return Ok((false, "".to_string(), None, database));
+                return Ok(InitResult {
+                    database,
+                    ..InitResult::failed()
+                });
             }
 
             debug!(
@@ -676,7 +719,13 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             .await?;
         }
         self.conn.flush().await?;
-        Ok((auth_success, username, plain_password, database))
+        Ok(InitResult {
+            auth_success,
+            username,
+            plain_password,
+            database,
+            charset,
+        })
     }
 
     async fn run(mut self) -> Result<(), io::Error> {
@@ -756,6 +805,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                             .await
                         {
                             Ok(()) => {
+                                self.shim.set_charset(change_user.charset).await?;
                                 writers::write_ok_packet(
                                     &mut self.conn,
                                     0,
