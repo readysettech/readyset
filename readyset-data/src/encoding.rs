@@ -69,110 +69,21 @@ impl Encoding {
 
     pub fn decode(&self, bytes: &[u8]) -> ReadySetResult<String> {
         match self {
-            Self::Utf8 => self.decode_encoding_rs(bytes, encoding_rs::UTF_8),
-            Self::Latin1 => self.decode_encoding_rs(bytes, encoding_rs::WINDOWS_1252),
+            Self::Utf8 => core::str::from_utf8(bytes)
+                .map(|s| s.to_string())
+                .map_err(|e| decoding_err!(self, "Invalid bytes: {e}")),
+            Self::Latin1 => Ok(yore::code_pages::CP1252.decode(bytes).into_owned()),
             Self::Cp850 => Ok(yore::code_pages::CP850.decode(bytes).into_owned()),
             Self::Binary | Self::OtherMySql(_) => Err(decoding_err!(self, "Unsupported encoding")),
-        }
-    }
-
-    /// Decode bytes from this encoding to a UTF-8 String
-    ///
-    /// To detect errors we use a method which doesn't do replacement. By default, `encoding_rs`
-    /// uses the WHATWG Encoding Standard's replacement character, which is the HTML decimal
-    /// representation of the original character. MySQL by contrast uses ? as a replacement
-    /// character, and we will likely want to implement such custom replacement to match MySQL in
-    /// the future.
-    fn decode_encoding_rs(
-        &self,
-        bytes: &[u8],
-        encoding: &'static encoding_rs::Encoding,
-    ) -> Result<String, ReadySetError> {
-        // XXX(mvzink): We ignore BOMs. This is only relevant for UTF-16, UTF-32, and UCS-2,
-        // and the [MySQL docs] indicate there won't be a BOM. This may need to be adjusted
-        // for handling those encodings on Postgres.
-        //
-        // [MySQL docs]: https://dev.mysql.com/doc/refman/8.4/en/charset-unicode.html
-        let mut decoder = encoding.new_decoder_without_bom_handling();
-        let Some(max_len) = decoder.max_utf8_buffer_length_without_replacement(bytes.len()) else {
-            // According to docs, only happens if it would overflow usize
-            return Err(decoding_err!(self, "Worst case output too long"));
-        };
-        let mut out = String::with_capacity(max_len);
-        let (result, bytes_read) =
-            decoder.decode_to_string_without_replacement(bytes, &mut out, true);
-        match result {
-            encoding_rs::DecoderResult::InputEmpty => Ok(out),
-            encoding_rs::DecoderResult::OutputFull => {
-                Err(decoding_err!(self, "Not enough space for output"))
-            }
-            encoding_rs::DecoderResult::Malformed(len, overage) => {
-                let start = bytes_read
-                            .checked_sub(overage as usize)
-                            .ok_or_else(|| decoding_err!(self, "Malformed sequence overage {overage} is greater than bytes read {bytes_read}"))?
-                            .checked_sub(len as usize)
-                            .ok_or_else(|| decoding_err!(self, "Malformed sequence length {len} is greater than bytes read {bytes_read}"))?;
-                let end = start.checked_add(len as usize).ok_or_else(|| {
-                    decoding_err!(self, "Malformed sequence length {len} overflows")
-                })?;
-                if end > bytes.len() {
-                    Err(decoding_err!(
-                        self,
-                        "Malformed sequence length {} is past end of input length {}",
-                        len,
-                        bytes.len()
-                    ))
-                } else {
-                    Err(decoding_err!(
-                        self,
-                        "Malformed input from {} to {}: {:?}",
-                        start,
-                        end,
-                        &bytes[start..end]
-                    ))
-                }
-            }
         }
     }
 
     pub fn encode<'a>(&self, string: &'a str) -> ReadySetResult<Cow<'a, [u8]>> {
         match self {
             Self::Utf8 => Ok(string.as_bytes().into()),
-            Self::Latin1 => Ok(self
-                .encode_encoding_rs(string, encoding_rs::WINDOWS_1252)?
-                .into()),
+            Self::Latin1 => Ok(yore::code_pages::CP1252.encode_lossy(string, b"?"[0])),
             Self::Cp850 => Ok(yore::code_pages::CP850.encode_lossy(string, b"?"[0])),
-            Self::Binary | Self::OtherMySql(_) => Err(decoding_err!(self, "Unsupported encoding")),
-        }
-    }
-
-    /// Encode a UTF-8 string to bytes in this encoding
-    ///
-    /// As with [`Encoding::decode`], we use the more involved non-replacing method in order to try
-    /// to surface a useful error message with the invalid bytes included.
-    fn encode_encoding_rs(
-        &self,
-        string: &str,
-        encoding: &'static encoding_rs::Encoding,
-    ) -> ReadySetResult<Vec<u8>> {
-        let mut encoder = encoding.new_encoder();
-        let Some(max_len) = encoder.max_buffer_length_from_utf8_if_no_unmappables(string.len())
-        else {
-            // According to docs, only happens if it would overflow usize
-            return Err(decoding_err!(self, "Worst case output too long"));
-        };
-        let mut out = Vec::with_capacity(max_len);
-        let (result, _bytes_read) =
-            encoder.encode_from_utf8_to_vec_without_replacement(string, &mut out, true);
-
-        match result {
-            encoding_rs::EncoderResult::InputEmpty => Ok(out),
-            encoding_rs::EncoderResult::OutputFull => {
-                Err(encoding_err!(self, "Not enough space for output"))
-            }
-            encoding_rs::EncoderResult::Unmappable(ch) => {
-                Err(encoding_err!(self, "Unmappable character: {}", ch))
-            }
+            Self::Binary | Self::OtherMySql(_) => Err(encoding_err!(self, "Unsupported encoding")),
         }
     }
 }
@@ -220,15 +131,8 @@ mod tests {
 
         // Test with characters outside Latin1 range (should fail)
         let utf8_str = "Hello 😊"; // Emoji is outside Latin1 range
-        let result = Encoding::Latin1.encode(utf8_str);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            ReadySetError::EncodingError { encoding, message } => {
-                assert_eq!(encoding, "latin1");
-                assert!(message.contains("Unmappable character: 😊"), "{}", message);
-            }
-            e => panic!("Unexpected error type: {:?}", e),
-        }
+        let result = Encoding::Latin1.encode(utf8_str).unwrap();
+        assert_eq!(*result, b"Hello ?"[..]);
     }
 
     #[test]
@@ -239,7 +143,10 @@ mod tests {
         match result.unwrap_err() {
             ReadySetError::DecodingError { encoding, message } => {
                 assert_eq!(encoding, "utf8");
-                assert!(message.contains("6 to 7"), "{}", message)
+                assert!(
+                    message.contains("index 6"),
+                    "expected utf8 error message to mention index 6. Message '{message}'"
+                )
             }
             e => panic!("Unexpected error type: {:?}", e),
         }

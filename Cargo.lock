@@ -4350,7 +4350,6 @@ dependencies = [
  "cidr",
  "criterion",
  "derive_more",
- "encoding_rs",
  "enum-kinds",
  "eui48",
  "fallible-iterator",
