@@ -537,7 +537,7 @@ where
     /// Remote socket address of a connected client
     client_addr: SocketAddr,
     /// ReadySet connector used for reads, and writes when no upstream DB is present
-    noria: NoriaConnector,
+    pub noria: NoriaConnector,
     /// Optional connector to the upstream DB. Used for fallback reads and all writes if it exists
     upstream: Option<DB>,
     /// Map from username to password for all users allowed to connect to the db
@@ -2833,6 +2833,7 @@ where
         }
         if let Some(encoding) = set_results_encoding {
             trace!(?encoding, "Setting results_encoding");
+            noria.set_results_encoding(encoding);
         }
 
         Ok(())

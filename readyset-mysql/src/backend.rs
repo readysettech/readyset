@@ -21,6 +21,7 @@ use readyset_adapter::backend::{
 };
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
+use readyset_data::encoding::Encoding;
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
 use readyset_util::redacted::{RedactedString, Sensitive};
@@ -58,6 +59,7 @@ async fn write_column<S: AsyncRead + AsyncWrite + Unpin>(
     c: &DfValue,
     cs: &mysql_srv::Column,
     ty: &DfType,
+    encoding: Encoding,
 ) -> Result<(), Error> {
     let conv_error = || ReadySetError::DfValueConversionError {
         src_type: format!("{:?}", DfValueKind::from(c)),
@@ -97,7 +99,8 @@ async fn write_column<S: AsyncRead + AsyncWrite + Unpin>(
                 } else {
                     t.as_str()
                 };
-                rw.write_col(s)
+                let b = encoding.encode(s)?;
+                rw.write_col(&*b)
             }
         }
         DfValue::TinyText(ref t) => {
@@ -109,7 +112,8 @@ async fn write_column<S: AsyncRead + AsyncWrite + Unpin>(
                 } else {
                     t.as_str()
                 };
-                rw.write_col(s)
+                let b = encoding.encode(s)?;
+                rw.write_col(&*b)
             }
         }
         ref dt @ (DfValue::Float(..) | DfValue::Double(..)) => match cs.coltype {
@@ -387,6 +391,7 @@ macro_rules! handle_error {
 async fn handle_readyset_result<S>(
     result: noria_connector::QueryResult<'_>,
     writer: QueryResultWriter<'_, S>,
+    results_encoding: Encoding,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -440,7 +445,7 @@ where
                         None => &DfType::Unknown,
                     };
 
-                    if let Err(e) = write_column(&mut rw, val, c, ty).await {
+                    if let Err(e) = write_column(&mut rw, val, c, ty, results_encoding).await {
                         return handle_column_write_err(e, rw).await;
                     }
                 }
@@ -505,12 +510,15 @@ where
 async fn handle_execute_result<S>(
     result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
     writer: QueryResultWriter<'_, S>,
+    results_encoding: Encoding,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     match result {
-        Ok(QueryResult::Noria(result)) => handle_readyset_result(result, writer).await,
+        Ok(QueryResult::Noria(result)) => {
+            handle_readyset_result(result, writer, results_encoding).await
+        }
         Ok(QueryResult::Upstream(result)) => handle_upstream_result(result, writer).await,
         Ok(QueryResult::UpstreamBufferedInMemory(..)) => handle_error!(
             Error::ReadySet(readyset_errors::unsupported_err!(
@@ -531,13 +539,16 @@ where
 async fn handle_query_result<S>(
     result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
     writer: QueryResultWriter<'_, S>,
+    results_encoding: Encoding,
 ) -> QueryResultsResponse
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     match result {
         Ok(QueryResult::Parser(command)) => QueryResultsResponse::Command(command),
-        res => QueryResultsResponse::IoResult(handle_execute_result(res, writer).await),
+        res => QueryResultsResponse::IoResult(
+            handle_execute_result(res, writer, results_encoding).await,
+        ),
     }
 }
 
@@ -680,6 +691,8 @@ where
             info!(target: "client_statement", "Execute: {{id: {id}, params: {:?}}}", value_params)
         }
 
+        let results_encoding = self.noria.noria.results_encoding();
+
         match self.execute(id, &value_params, ()).await {
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select { mut rows, schema })) => {
                 let CachedSchema {
@@ -714,7 +727,7 @@ where
                 while let Some(row) = rows.next() {
                     for (c, ty, val) in izip!(mysql_schema.iter(), column_types.iter(), row.iter())
                     {
-                        if let Err(e) = write_column(&mut rw, val, c, ty).await {
+                        if let Err(e) = write_column(&mut rw, val, c, ty, results_encoding).await {
                             return handle_column_write_err(e, rw).await;
                         };
                     }
@@ -722,7 +735,9 @@ where
                 }
                 rw.finish().await
             }
-            execute_result => handle_execute_result(execute_result, results).await,
+            execute_result => {
+                handle_execute_result(execute_result, results, results_encoding).await
+            }
         }
     }
 
@@ -744,6 +759,8 @@ where
             "charset" => charset.to_string(),
         )
         .increment(1);
+        let encoding = readyset_data::encoding::Encoding::from_mysql_collation_id(charset);
+        self.noria.noria.set_results_encoding(encoding);
         Ok(())
     }
 
@@ -812,8 +829,9 @@ where
             info!(target: "client_statement", "Query: {query}");
         }
 
+        let results_encoding = self.noria.noria.results_encoding();
         let query_result = self.query(query).await;
-        handle_query_result(query_result, results).await
+        handle_query_result(query_result, results, results_encoding).await
     }
 
     fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {

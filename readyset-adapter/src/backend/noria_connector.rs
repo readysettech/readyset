@@ -15,6 +15,7 @@ use readyset_client::{
     ColumnSchema, GraphvizOptions, ReadQuery, ReaderAddress, ReaderHandle, ReadySetHandle,
     SchemaType, Table, TableOperation, View, ViewCreateRequest, ViewQuery,
 };
+use readyset_data::encoding::Encoding;
 use readyset_data::{Collation, DfType, DfValue, Dialect};
 use readyset_errors::{
     internal_err, invariant_eq, table_err, unsupported, unsupported_err, ReadySetError,
@@ -300,6 +301,10 @@ pub struct NoriaConnector {
     /// supports a multi-element schema search path, the concept of "currently connected database"
     /// in MySQL can be thought of as a schema search path that only has one element.
     schema_search_path: Vec<SqlIdentifier>,
+
+    /// The encoding in which to return text results. Corresponds to `character_set_results` in
+    /// MySQL and `SET NAMES` in both MySQL and Postgres.
+    results_encoding: Encoding,
 }
 
 mod request_handler {
@@ -417,6 +422,7 @@ impl NoriaConnector {
             dialect,
             parse_dialect,
             schema_search_path,
+            results_encoding: Encoding::Utf8,
         }
     }
 
@@ -955,6 +961,16 @@ impl NoriaConnector {
     /// Returns a reference to the currently configured schema search path
     pub fn schema_search_path(&self) -> &[SqlIdentifier] {
         self.schema_search_path.as_ref()
+    }
+
+    /// Set the encoding for result sets
+    pub fn set_results_encoding(&mut self, encoding: Encoding) {
+        self.results_encoding = encoding;
+    }
+
+    /// Returns the encoding for result sets
+    pub fn results_encoding(&self) -> Encoding {
+        self.results_encoding
     }
 
     pub(crate) async fn resnapshot_table(

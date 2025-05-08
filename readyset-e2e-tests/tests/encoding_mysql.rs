@@ -18,6 +18,7 @@ macro_rules! check_rows {
 }
 
 const CHUNK_SIZE: usize = 1000;
+const CHARACTER_SETS: [&str; 4] = ["latin1", "cp850", "utf8mb3", "utf8mb4"];
 
 /// Tests snapshotting replication of a varchar column with the specified character set.
 /// Verifies that the same utf8 encoded version of the data is stored in Readyset.
@@ -142,30 +143,46 @@ where
             }
         );
 
-        // Verify this chunk after updates
-        let mut my_chunk: Vec<(i64, String, Vec<u8>, i32)> = upstream_conn
-            .exec(
-                "SELECT id, hex, text, counter FROM encoding_table WHERE id >= ? AND id <= ?",
-                (first_id, last_id),
-            )
-            .await
-            .unwrap();
-        my_chunk.sort();
+        // Verify this chunk after updates in all supported character sets
+        for character_set in CHARACTER_SETS {
+            upstream_conn
+                .query_drop(format!(
+                    "SET @@session.character_set_results = {character_set}"
+                ))
+                .await
+                .unwrap();
 
-        let mut rs_chunk: Vec<(i64, String, Vec<u8>, i32)> = rs_conn
-            .exec(
-                "SELECT id, hex, text, counter FROM encoding_table WHERE id >= ? AND id <= ?",
-                (first_id, last_id),
-            )
-            .await
-            .unwrap();
-        rs_chunk.sort();
+            let mut my_chunk: Vec<(i64, String, Vec<u8>, i32)> = upstream_conn
+                .exec(
+                    "SELECT id, hex, text, counter FROM encoding_table WHERE id >= ? AND id <= ?",
+                    (first_id, last_id),
+                )
+                .await
+                .unwrap();
+            my_chunk.sort();
 
-        check_rows!(
-                    my_chunk,
-                    rs_chunk,
-                    "mysql (left) differed from readyset (right) after updates for snapshot update chunk {first_id}-{last_id}",
-                );
+            rs_conn
+                .query_drop(format!(
+                    "SET @@session.character_set_results = {character_set}"
+                ))
+                .await
+                .unwrap();
+
+            let mut rs_chunk: Vec<(i64, String, Vec<u8>, i32)> = rs_conn
+                .exec(
+                    "SELECT id, hex, text, counter FROM encoding_table WHERE id >= ? AND id <= ?",
+                    (first_id, last_id),
+                )
+                .await
+                .unwrap();
+            rs_chunk.sort();
+
+            check_rows!(
+                my_chunk,
+                rs_chunk,
+                "mysql (left) differed from readyset (right) after updates for snapshot update chunk {first_id}-{last_id} with character set {character_set}",
+            );
+        }
     }
 
     shutdown_tx.shutdown().await;
@@ -247,27 +264,45 @@ where
             count == chunk.len()
         });
 
-        let my_streaming_rows_chunk: Vec<(i64, String, Vec<u8>)> = upstream_conn
-            .exec(
-                "SELECT id, hex, text FROM encoding_table WHERE id >= ? AND id <= ? ORDER BY id",
-                (first_id, last_id),
-            )
-            .await
-            .unwrap();
+        for character_set in CHARACTER_SETS {
+            upstream_conn
+                .query_drop(format!(
+                    "SET @@session.character_set_results = {character_set}"
+                ))
+                .await
+                .unwrap();
 
-        let rs_streaming_rows_chunk: Vec<(i64, String, Vec<u8>)> = rs_conn
-            .exec(
-                "SELECT id, hex, text FROM encoding_table WHERE id >= ? AND id <= ? ORDER BY id",
-                (first_id, last_id),
-            )
-            .await
-            .unwrap();
+            let mut my_chunk: Vec<(i64, String, Vec<u8>)> = upstream_conn
+                .exec(
+                    "SELECT id, hex, text FROM encoding_table WHERE id >= ? AND id <= ?",
+                    (first_id, last_id),
+                )
+                .await
+                .unwrap();
+            my_chunk.sort();
 
-        check_rows!(
-            my_streaming_rows_chunk,
-            rs_streaming_rows_chunk,
-            "mysql (left) differed from readyset (right) for streaming replication chunk {first_id}-{last_id}"
-        );
+            rs_conn
+                .query_drop(format!(
+                    "SET @@session.character_set_results = {character_set}"
+                ))
+                .await
+                .unwrap();
+
+            let mut rs_chunk: Vec<(i64, String, Vec<u8>)> = rs_conn
+                .exec(
+                    "SELECT id, hex, text FROM encoding_table WHERE id >= ? AND id <= ?",
+                    (first_id, last_id),
+                )
+                .await
+                .unwrap();
+            rs_chunk.sort();
+
+            check_rows!(
+                my_chunk,
+                rs_chunk,
+                "mysql (left) differed from readyset (right) for streaming replication chunk {first_id}-{last_id} with character set {character_set}",
+            );
+        }
     }
 
     shutdown_tx.shutdown().await;
