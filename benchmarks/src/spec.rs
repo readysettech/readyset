@@ -88,6 +88,14 @@
 //!     weight: 500000
 //!     migrate: true
 //! ```
+//!
+//! * `setup` - A list of SQL statements to run on the connection before the workload is started
+//!
+//! Example:
+//! ```yaml
+//! setup:
+//!   - SET NAMES latin1
+//! ```
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
@@ -109,6 +117,7 @@ use crate::workload_emulator::{ColGenerator, Distributions, Query, QuerySet, Sam
 pub struct WorkloadSpec {
     pub distributions: Vec<WorkloadDistribution>,
     pub queries: Vec<WorkloadQuery>,
+    pub setup: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -363,6 +372,9 @@ queries:
           distribution: ids
       weight: 10000
       migrate: false
+setup:
+    - SET NAMES latin1
+    - SET @@character_set_results = utf8mb4
 "#;
 
         let _: WorkloadSpec = serde_yaml_ng::from_str(spec).unwrap();
@@ -407,6 +419,11 @@ queries:
                 weight: 200_000,
             }]
             .into(),
+
+            setup: vec![
+                "SET NAMES latin1".into(),
+                "SET @@character_set_results = utf8mb4".into(),
+            ],
         };
 
         let s = serde_yaml_ng::to_string(&spec).unwrap();

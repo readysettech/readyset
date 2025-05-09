@@ -88,8 +88,15 @@ impl PreparedPool {
     }
 
     /// Prepare the given set of queries on every connection in the pool
-    async fn prepare_pool(&mut self, query_set: &QuerySet) -> anyhow::Result<()> {
+    async fn prepare_pool(
+        &mut self,
+        query_set: &QuerySet,
+        setup: &Vec<String>,
+    ) -> anyhow::Result<()> {
         for conn in self.conns.iter_mut() {
+            for query in setup {
+                conn.conn.query_drop(query).await?;
+            }
             conn.statements = query_set.prepare_all(&mut conn.conn).await?;
         }
         Ok(())
@@ -107,16 +114,17 @@ impl PreparedPool {
             .load_distributions(&mut DatabaseURL::from_str(upstream_url)?.connect(None).await?)
             .await?;
 
-        let query_set = workload
-            .load_queries(
-                &distributions,
-                &mut DatabaseURL::from_str(&readyset_url(database_type))?
-                    .connect(None)
-                    .await?,
-            )
+        let mut conn = DatabaseURL::from_str(&readyset_url(database_type))?
+            .connect(None)
             .await?;
 
-        self.prepare_pool(&query_set).await?;
+        for query in &workload.setup {
+            conn.query_drop(query).await?;
+        }
+
+        let query_set = workload.load_queries(&distributions, &mut conn).await?;
+
+        self.prepare_pool(&query_set, &workload.setup).await?;
 
         // Make sure *everything* is in cache
         for query in query_set.queries() {
