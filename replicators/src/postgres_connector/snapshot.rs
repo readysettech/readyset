@@ -669,6 +669,51 @@ impl<'a> PostgresReplicator<'a> {
             })
     }
 
+    /// Handle a table snapshot error by removing the table from the set of tables and adding it as
+    /// a non-replicated relation. If the error is not a TableError, propagate it.
+    ///
+    /// # Arguments
+    ///
+    /// * `error` - The error that occurred while snapshotting the table.
+    /// * `tables` - A mutable reference to the set of tables to snapshot.
+    ///
+    /// # Returns
+    ///
+    /// Returns the error if it is not a TableError, otherwise returns Ok(()).
+    async fn handle_table_snapshot_error(
+        &mut self,
+        error: ReadySetError,
+        tables: &mut Vec<TableDescription>,
+    ) -> ReadySetResult<()> {
+        // Remove from the set of tables any that failed to snapshot,
+        // and add them as non-replicated relations.
+        // Propagate any non-TableErrors.
+
+        match error {
+            ReadySetError::TableError { ref table, .. } => {
+                warn!(%error, table=%table.display(Dialect::PostgreSQL), "Error snapshotting, table will not be used");
+                tables.retain(|t| t.name != *table);
+                self.noria
+                    .extend_recipe_no_leader_ready(ChangeList::from_changes(
+                        vec![
+                            Change::Drop {
+                                name: table.clone(),
+                                if_exists: false,
+                            },
+                            Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                                name: table.clone(),
+                                reason: NotReplicatedReason::from_string(&format!("{:?}", error)),
+                            }),
+                        ],
+                        DataDialect::DEFAULT_POSTGRESQL,
+                    ))
+                    .await?;
+            }
+            _ => Err(error)?,
+        }
+        Ok(())
+    }
+
     /// Snapshot the contents of the upstream database to ReadySet, starting with the DDL, followed
     /// by each table's contents.
     ///
@@ -919,11 +964,10 @@ impl<'a> PostgresReplicator<'a> {
         // Commit the transaction we were using to snapshot the schema. This is important since that
         // transaction holds onto locks for tables which we now need to load data from.
         self.transaction.take().unwrap().commit().await?;
-
         // Finally copy each table into noria
         info!(tables=%tables.len(), %max_parallel_snapshot_tables, "Snapshotting tables");
         let mut snapshotting_tables = FuturesUnordered::new();
-        for table in &tables {
+        for table in &tables.clone() {
             set_failpoint!(failpoints::POSTGRES_SNAPSHOT_TABLE);
             let span =
                 info_span!("Snapshotting table", table = %table.name.display(Dialect::PostgreSQL));
@@ -942,7 +986,11 @@ impl<'a> PostgresReplicator<'a> {
             let snapshot_name = replication_slot.snapshot_name.clone();
             let table = table.clone();
             if snapshotting_tables.len() >= max_parallel_snapshot_tables {
-                snapshotting_tables.next().await;
+                // If we're already at the max number of parallel snapshots, wait for one to finish
+                // before adding another.
+                if let Some(Err(error)) = snapshotting_tables.next().await {
+                    self.handle_table_snapshot_error(error, &mut tables).await?;
+                }
             }
             snapshotting_tables.push(Self::snapshot_table(
                 pool,
@@ -955,36 +1003,10 @@ impl<'a> PostgresReplicator<'a> {
             ))
         }
 
-        // Remove from the set of tables any that failed to snapshot,
-        // and add them as non-replicated relations.
-        // Propagate any non-TableErrors.
+        // Wait for all tables to finish snapshotting
         while let Some(res) = snapshotting_tables.next().await {
-            if let Err(e) = res {
-                match e {
-                    ReadySetError::TableError { ref table, .. } => {
-                        warn!(%e, table=%table.display(Dialect::PostgreSQL), "Error snapshotting, table will not be used");
-                        tables.retain(|t| t.name != *table);
-                        self.noria
-                            .extend_recipe_no_leader_ready(ChangeList::from_changes(
-                                vec![
-                                    Change::Drop {
-                                        name: table.clone(),
-                                        if_exists: false,
-                                    },
-                                    Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                                        name: table.clone(),
-                                        reason: NotReplicatedReason::from_string(&format!(
-                                            "{:?}",
-                                            e
-                                        )),
-                                    }),
-                                ],
-                                DataDialect::DEFAULT_POSTGRESQL,
-                            ))
-                            .await?;
-                    }
-                    _ => Err(e)?,
-                }
+            if let Err(error) = res {
+                self.handle_table_snapshot_error(error, &mut tables).await?;
             }
         }
 
