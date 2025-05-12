@@ -1107,7 +1107,7 @@ fn make_paginate_or_topk_node(
     name: Relation,
     parent: MirNodeIndex,
     columns: &[Column],
-    order: &Option<Vec<(Column, OrderType)>>,
+    order: &[(Column, OrderType)],
     group_by: &[Column],
     limit: usize,
     is_topk: bool,
@@ -1145,24 +1145,20 @@ fn make_paginate_or_topk_node(
         .map(|c| graph.column_id_for_column(parent, c))
         .collect::<ReadySetResult<Vec<_>>>()?;
 
-    let cmp_rows = match *order {
-        Some(ref o) => {
-            o.iter()
-                .map(|(c, order_type)| {
-                    // SQL and Readyset disagree on what ascending and descending order means, so do the
-                    // conversion here.
-                    let reversed_order_type = match *order_type {
-                        OrderType::OrderAscending => OrderType::OrderDescending,
-                        OrderType::OrderDescending => OrderType::OrderAscending,
-                    };
-                    graph
-                        .column_id_for_column(parent, c)
-                        .map(|id| (id, reversed_order_type))
-                })
-                .collect::<ReadySetResult<Vec<_>>>()?
-        }
-        None => Vec::new(),
-    };
+    let cmp_rows = order
+        .iter()
+        .map(|(c, order_type)| {
+            // SQL and Readyset disagree on what ascending and descending order means, so do the
+            // conversion here.
+            let reversed_order_type = match *order_type {
+                OrderType::OrderAscending => OrderType::OrderDescending,
+                OrderType::OrderDescending => OrderType::OrderAscending,
+            };
+            graph
+                .column_id_for_column(parent, c)
+                .map(|id| (id, reversed_order_type))
+        })
+        .collect::<ReadySetResult<Vec<_>>>()?;
 
     // make the new operator and record its metadata
     let na = if is_topk {

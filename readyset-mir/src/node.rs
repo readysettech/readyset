@@ -368,10 +368,7 @@ mod tests {
         #[test]
         fn topk() {
             same_columns_as_parent(MirNodeInner::TopK {
-                order: Some(vec![(
-                    Column::new(Some("base"), "a"),
-                    OrderType::OrderAscending,
-                )]),
+                order: vec![(Column::new(Some("base"), "a"), OrderType::OrderAscending)],
                 group_by: vec![Column::new(Some("base"), "b")],
                 limit: 3,
             })
@@ -381,10 +378,7 @@ mod tests {
         fn paginate() {
             has_columns_single_parent(
                 MirNodeInner::Paginate {
-                    order: Some(vec![(
-                        Column::new(Some("base"), "a"),
-                        OrderType::OrderAscending,
-                    )]),
+                    order: vec![(Column::new(Some("base"), "a"), OrderType::OrderAscending)],
                     group_by: vec![Column::new(Some("base"), "b")],
                     limit: 3,
                 },

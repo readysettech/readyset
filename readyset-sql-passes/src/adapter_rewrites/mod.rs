@@ -56,8 +56,6 @@ fn use_fallback_pagination(
     }
 
     if server_supports_pagination &&
-        // Can't handle parameterized LIMIT even if support is enabled
-        !matches!(limit_clause.limit(), Some(Literal::Placeholder(_))) &&
         // Can't handle bare OFFSET
         !(limit_clause.limit().is_none() && limit_clause.offset().is_some())
     {

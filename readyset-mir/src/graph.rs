@@ -246,6 +246,17 @@ impl MirGraph {
                 }
                 columns
             }
+            MirNodeInner::TopK {
+                order, group_by, ..
+            } => {
+                let mut columns = self.columns(node);
+                columns.extend(order.iter().map(|(c, _)| c.clone()));
+                // group by cols are pulled through by default; however, there are some cases
+                // where a group by wouldn't be specified, in these cases a bogokey is used
+                // which needs to be pulled through
+                columns.extend(group_by.clone());
+                columns
+            }
             _ => self.columns(node),
         }
     }

@@ -334,14 +334,10 @@ impl GraphViz for MirNodeInner {
                 ..
             } => {
                 let order = order
-                    .as_ref()
-                    .map(|v| {
-                        v.iter()
-                            .map(|(c, o)| format!("{}: {}", c.name.as_str(), o))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or_else(|| "".into());
+                    .iter()
+                    .map(|(c, o)| format!("{}: {}", c.name.as_str(), o))
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 write!(f, "Paginate [limit: {}; {}]", limit, order)
             }
             MirNodeInner::TopK {
@@ -350,14 +346,10 @@ impl GraphViz for MirNodeInner {
                 ..
             } => {
                 let order = order
-                    .as_ref()
-                    .map(|v| {
-                        v.iter()
-                            .map(|(c, o)| format!("{}: {}", c.name.as_str(), o))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or_else(|| "".into());
+                    .iter()
+                    .map(|(c, o)| format!("{}: {}", c.name.as_str(), o))
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 write!(f, "TopK [k: {}; {}]", limit, order)
             }
             MirNodeInner::Union {

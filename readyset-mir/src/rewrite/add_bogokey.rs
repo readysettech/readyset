@@ -79,7 +79,10 @@ fn add_bogokey_leaf(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
     if let MirNodeInner::TopK { group_by, .. } =
         &mut query.get_node_mut(node_to_insert_above).unwrap().inner
     {
-        group_by.push(Column::named("bogokey"))
+        // TODO: Move this up once the if-let chains are stabilized in Rust
+        if group_by.is_empty() {
+            group_by.push(Column::named("bogokey"))
+        }
     };
 
     Ok(())
@@ -274,7 +277,7 @@ mod tests {
         let topk = mir_graph.add_node(MirNode::new(
             "topk".into(),
             MirNodeInner::TopK {
-                order: None,
+                order: vec![],
                 group_by: vec![],
                 limit: 3,
             },

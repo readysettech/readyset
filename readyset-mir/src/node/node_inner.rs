@@ -255,7 +255,7 @@ pub enum MirNodeInner {
     /// [`Paginate`]: dataflow::ops::paginate::Paginate
     Paginate {
         /// Set of columns used for ordering the results
-        order: Option<Vec<(Column, OrderType)>>,
+        order: Vec<(Column, OrderType)>,
         /// Set of columns that are indexed to form a unique grouping of results
         group_by: Vec<Column>,
         /// How many rows per page
@@ -268,7 +268,7 @@ pub enum MirNodeInner {
     /// [`TopK`]: dataflow::ops::topk::TopK
     TopK {
         /// Set of columns used for ordering the results
-        order: Option<Vec<(Column, OrderType)>>,
+        order: Vec<(Column, OrderType)>,
         /// Set of columns that are indexed to form a unique grouping of results
         group_by: Vec<Column>,
         /// Numeric literal that determines the number of results stored per group. Taken from the

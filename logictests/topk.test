@@ -76,3 +76,40 @@ LIMIT 2
 ----
 5
 4
+
+# test expressions in order by clause
+query I nosort
+select column_2 from table_1 order by column_2 + 1 limit 3
+----
+4
+5
+6
+
+# test aliases in order by clause
+query I nosort
+select column_2 + 1 as alias from table_1 order by alias limit 3
+----
+5
+6
+7
+
+# test aliased aggreagates in order by clause
+query I nosort
+select count(*) as total from table_1 group by column_1 order by total limit 3
+----
+3
+
+statement ok
+INSERT INTO table_1 (column_1, column_2) VALUES (2, 7), (2, 8), (2, 9), (2, 10), (2, 11);
+
+query I nosort
+select min(column_2) as minimum from table_1 group by column_1 order by minimum desc limit 3
+----
+7
+4
+
+query I nosort
+select count(column_2) as total from table_1 group by column_1 order by total desc limit 3
+----
+5
+3

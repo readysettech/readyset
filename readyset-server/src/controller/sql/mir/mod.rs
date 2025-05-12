@@ -332,6 +332,8 @@ impl SqlToMirConverter {
                         .transpose()?,
                     limit,
                     make_topk,
+                    // TODO: we should have access to the output cols even if this is a compound query
+                    None,
                 )?
                 .last()
                 .unwrap();
@@ -1305,6 +1307,7 @@ impl SqlToMirConverter {
         order: &Option<Vec<(Expr, OrderType)>>,
         limit: usize,
         is_topk: bool,
+        outputs: Option<&Vec<OutputColumn>>,
     ) -> ReadySetResult<Vec<NodeIndex>> {
         if !self.config.allow_topk && is_topk {
             unsupported!("TopK is not supported");
@@ -1314,37 +1317,78 @@ impl SqlToMirConverter {
 
         // Gather a list of expressions we need to evaluate before the paginate node
         let mut exprs_to_project = vec![];
-        let order = order.as_ref().map(|oc| {
-            oc.iter()
-                .map(|(expr, ot)| {
-                    (
-                        match expr {
-                            Expr::Column(col) => Column::from(col),
-                            expr => {
-                                let col = Column::named(
-                                    // FIXME(REA-2168+2502): Use correct dialect.
-                                    expr.display(readyset_sql::Dialect::MySQL).to_string(),
-                                );
-                                if self
-                                    .mir_graph
-                                    .column_id_for_column(parent, &col)
-                                    .err()
+
+        let order = order
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .map(|(expr, ot)| {
+                let col = match expr {
+                    Expr::Column(col) => {
+                        let col = Column::from(col);
+                        match self.mir_graph.column_id_for_column(parent, &col) {
+                            Ok(_) => Ok(col),
+                            Err(ReadySetError::NonExistentColumn { .. }) => {
+                                // we couldn't find this column in the parent, this means
+                                // that either:
+                                // 1. the col is referencing an alias
+                                // 2. the col is referencing a col that doesn't even exist
+                                // We pass the list of output cols to check their aliases,
+                                // if we couldn't find the outputs then mark the column
+                                // as non-existent
+                                let outputs =
+                                    outputs.ok_or_else(|| ReadySetError::NonExistentColumn {
+                                        column: col.name.to_string(),
+                                        node: self.mir_graph[parent]
+                                            .name()
+                                            .display_unquoted()
+                                            .to_string(),
+                                    })?;
+                                let resolved_expr = outputs
                                     .iter()
-                                    .any(|err| {
-                                        matches!(err, ReadySetError::NonExistentColumn { .. })
+                                    .find_map(|o| {
+                                        if *o.name() == *col.name {
+                                            Some(o.clone().into_expr())
+                                        } else {
+                                            None
+                                        }
                                     })
-                                {
-                                    // Only project the expression if we haven't already
-                                    exprs_to_project.push(expr.clone());
-                                }
-                                col
+                                    .ok_or_else(|| ReadySetError::NonExistentColumn {
+                                        column: col.name.to_string(),
+                                        node: self.mir_graph[parent]
+                                            .name()
+                                            .display_unquoted()
+                                            .to_string(),
+                                    })?;
+
+                                exprs_to_project.push((resolved_expr, Some(col.name.clone())));
+                                Ok(col)
                             }
-                        },
-                        *ot,
-                    )
-                })
-                .collect()
-        });
+                            Err(e) => Err(e),
+                        }
+                    }
+                    expr => {
+                        let col = Column::named(
+                            // FIXME(REA-2168+2502): Use correct dialect.
+                            expr.display(readyset_sql::Dialect::MySQL).to_string(),
+                        );
+                        if self
+                            .mir_graph
+                            .column_id_for_column(parent, &col)
+                            .err()
+                            .iter()
+                            .any(|err| matches!(err, ReadySetError::NonExistentColumn { .. }))
+                        {
+                            // Only project the expression if we haven't already
+                            exprs_to_project.push((expr.clone(), None));
+                        }
+                        Ok(col)
+                    }
+                }?;
+
+                Ok((col, *ot))
+            })
+            .collect::<ReadySetResult<Vec<_>>>()?;
 
         let mut nodes = vec![];
 
@@ -1358,12 +1402,13 @@ impl SqlToMirConverter {
                 parent_columns
                     .into_iter()
                     .map(ProjectExpr::Column)
-                    .chain(exprs_to_project.into_iter().map(|expr| {
+                    .chain(exprs_to_project.into_iter().map(|(expr, name)| {
                         // FIXME(ENG-2502): Use correct dialect.
-                        let alias = expr
-                            .display(readyset_sql::Dialect::MySQL)
-                            .to_string()
-                            .into();
+                        let alias = name.unwrap_or_else(|| {
+                            expr.display(readyset_sql::Dialect::MySQL)
+                                .to_string()
+                                .into()
+                        });
                         ProjectExpr::Expr { alias, expr }
                     }))
                     .collect(),
@@ -2367,7 +2412,7 @@ impl SqlToMirConverter {
                 let make_topk = offset.is_none();
                 // view key will have the offset parameter if it exists. We must filter it out
                 // of the group by, because the column originates at this node
-                let group_by = view_key
+                let mut group_by: Vec<Column> = view_key
                     .columns
                     .iter()
                     .filter_map(|(col, _)| {
@@ -2378,6 +2423,14 @@ impl SqlToMirConverter {
                         }
                     })
                     .collect();
+
+                group_by.extend(query_graph.group_by.iter().filter_map(|expr| {
+                    if let Expr::Column(col) = expr {
+                        Some(Column::from(col.clone()))
+                    } else {
+                        None
+                    }
+                }));
 
                 // Order by expression projections and either a topk or paginate node
                 let paginate_nodes = self.make_paginate_node(
@@ -2393,6 +2446,7 @@ impl SqlToMirConverter {
                     order,
                     *limit,
                     make_topk,
+                    Some(&query_graph.columns),
                 )?;
                 func_nodes.extend(paginate_nodes.clone());
                 final_node = *paginate_nodes.last().unwrap();
