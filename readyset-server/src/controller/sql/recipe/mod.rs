@@ -220,9 +220,10 @@ impl Recipe {
         self.inc.registry.reused_caches(name)
     }
 
-    /// Returns true only if this recipe supports pagination.
+    /// Returns the adapter rewrite params stored in the config
     pub(crate) fn adapter_rewrite_params(&self) -> AdapterRewriteParams {
         AdapterRewriteParams {
+            server_supports_topk: self.mir_config().allow_topk,
             server_supports_mixed_comparisons: self.mir_config().allow_mixed_comparisons,
             server_supports_pagination: self.mir_config().allow_paginate
                 && self.mir_config().allow_topk,

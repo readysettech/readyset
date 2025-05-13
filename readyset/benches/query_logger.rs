@@ -72,10 +72,8 @@ fn create_event(
 }
 
 fn event_logging_bench(c: &mut Criterion, mode: QueryLogMode) {
-    let adapter_rewrite_params = AdapterRewriteParams {
-        server_supports_pagination: false,
-        server_supports_mixed_comparisons: false,
-    };
+    let adapter_rewrite_params = AdapterRewriteParams::default();
+
     let mut logger = QueryLogger::new(mode, DIALECT, adapter_rewrite_params);
 
     let test_cases = vec![

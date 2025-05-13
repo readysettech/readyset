@@ -17,7 +17,7 @@ use readyset_sql::ast::{
 };
 use readyset_sql::DialectDisplay;
 use serde::{Deserialize, Serialize};
-use tracing::trace;
+use tracing::info;
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
 /// provides support for converting a user-supplied parameter list into a set of lookup keys to pass
@@ -44,7 +44,17 @@ struct AdapterPaginationParams {
 /// This method checks if readyset-server is configured to handle LIMIT/OFFSET queries at the
 /// dataflow level. If not then LIMIT and OFFSET will be stripped and executed in the
 /// post-processing path.
-fn use_fallback_pagination(server_supports_pagination: bool, limit_clause: &LimitClause) -> bool {
+fn use_fallback_pagination(
+    server_supports_pagination: bool,
+    server_supports_topk: bool,
+    limit_clause: &LimitClause,
+) -> bool {
+    // TopK doesn't support Placeholders in Limit, so we have to fallback else topk will throw an
+    // error
+    if server_supports_topk && matches!(limit_clause.limit(), Some(Literal::Placeholder(_))) {
+        return true;
+    }
+
     if server_supports_pagination &&
         // Can't handle parameterized LIMIT even if support is enabled
         !matches!(limit_clause.limit(), Some(Literal::Placeholder(_))) &&
@@ -54,14 +64,16 @@ fn use_fallback_pagination(server_supports_pagination: bool, limit_clause: &Limi
         return false;
     }
 
-    trace!("Will use fallback LIMIT/OFFSET for query");
-
     true
 }
 
 /// Parameters to be passed to [`process_query`].
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Default)]
 pub struct AdapterRewriteParams {
+    /// The server can create TopK nodes, efficient lookup for non-parameterized
+    /// limit and order by. Parameterized limits are done by the reader and therefore
+    /// doesn't require TopK
+    pub server_supports_topk: bool,
     /// The server can handle (non-parameterized) LIMITs and (parameterized) OFFSETs in the
     /// dataflow graph
     pub server_supports_pagination: bool,
@@ -84,15 +96,18 @@ pub fn process_query(
 ) -> ReadySetResult<ProcessedQueryParams> {
     let reordered_placeholders = reorder_numbered_placeholders(query);
 
-    let limit_clause = mem::take(&mut query.limit_clause);
+    let force_paginate_in_adapter = use_fallback_pagination(
+        params.server_supports_pagination,
+        params.server_supports_topk,
+        &query.limit_clause,
+    );
 
-    let force_paginate_in_adapter =
-        use_fallback_pagination(params.server_supports_pagination, &query.limit_clause);
-
-    if !force_paginate_in_adapter {
-        // If adapter pagination shouldn't be used reinstate the limit clause
-        query.limit_clause.clone_from(&limit_clause);
-    }
+    let limit_clause = if force_paginate_in_adapter {
+        info!("Will use fallback LIMIT/OFFSET for query");
+        mem::take(&mut query.limit_clause)
+    } else {
+        query.limit_clause.clone()
+    };
 
     let auto_parameters =
         autoparameterize::auto_parameterize_query(query, params.server_supports_mixed_comparisons);
@@ -1082,7 +1097,9 @@ mod tests {
 
         use super::*;
 
+        // impls Default, but default is not const fn and therefore can't be used here
         const PARAMS: AdapterRewriteParams = AdapterRewriteParams {
+            server_supports_topk: false,
             server_supports_pagination: false,
             server_supports_mixed_comparisons: false,
         };

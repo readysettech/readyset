@@ -560,10 +560,7 @@ impl NoriaConnector {
             .inner
             .as_ref()
             .map(|v| v.rewrite_params)
-            .unwrap_or_else(|| AdapterRewriteParams {
-                server_supports_pagination: false,
-                server_supports_mixed_comparisons: false,
-            })
+            .unwrap_or_default()
     }
 
     // TODO(andrew): Allow client to map table names to NodeIndexes without having to query ReadySet
