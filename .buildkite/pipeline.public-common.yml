@@ -84,12 +84,11 @@ steps:
           retries: 3
     retry: *retry_on_agent_kill
 
-  - label: ':rust: Run tests'
+  - label: ':rust: Run tests: {{matrix}}'
     key: rust-tests
-    parallelism: 3
     commands:
       - '[ -d public ] && cd public'
-      - '.buildkite/run-tests.sh'
+      - 'MATRIX_VALUE={{matrix}} .buildkite/run-tests.sh'
     timeout_in_minutes: 60
     depends_on:
       - build-image
@@ -120,6 +119,10 @@ steps:
           retries: 3
     agents:
       queue: c6a-4xlarge
+    matrix:
+      - "nextest"
+      - "doctest"
+      - "MRBR"
     retry: *retry_on_agent_kill
 
   - label: 'Run logictest'
