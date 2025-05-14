@@ -27,6 +27,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fmt::{Debug, Display, Formatter, Result};
 use std::iter::once;
 use std::panic::AssertUnwindSafe;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -48,6 +49,8 @@ use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use tokio_postgres::config::Host;
 use tokio_postgres::{Client, Config, NoTls, Row};
+
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 const SQL_NAME_REGEX: &str = "[a-zA-Z_][a-zA-Z0-9_]*";
 
@@ -1091,10 +1094,9 @@ impl ModelState for DDLModelState {
                 recreate_caches_using_type(type_name, &self.tables, rs_conn).await;
             }
             Operation::Evict { inner } => {
-                let client = reqwest::Client::new();
                 let body =
                     bincode::serialize::<Option<SingleKeyEviction>>(&*inner.borrow()).unwrap();
-                let res = client
+                let res = CLIENT
                     .post(format!("http://{}:6033/evict_single", ctxt.rs_host))
                     .body(body)
                     .send()

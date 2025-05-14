@@ -31,6 +31,7 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::panic::AssertUnwindSafe;
+use std::sync::LazyLock;
 use std::time::Duration;
 use std::{cmp, env};
 
@@ -53,6 +54,8 @@ use readyset_server::Handle;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use test_utils::serial;
+
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Operation {
@@ -670,9 +673,8 @@ impl Operation {
             Operation::Evict { inner } => {
                 // Call the /evict_random Controller RPC. We don't care about the result.
                 let host = conn.opts().ip_or_hostname();
-                let client = reqwest::Client::new();
                 let body = bincode::serialize::<Option<SingleKeyEviction>>(&*inner.borrow())?;
-                let res = client
+                let res = CLIENT
                     .post(format!("http://{host}:6033/evict_single"))
                     .body(body)
                     .send()

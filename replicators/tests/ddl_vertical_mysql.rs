@@ -27,6 +27,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fmt::{Debug, Formatter, Result};
 use std::iter::once;
 use std::panic::AssertUnwindSafe;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -49,6 +50,8 @@ use readyset_sql::DialectDisplay;
 use readyset_util::arbitrary::arbitrary_timestamp_naive_date_time;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
+
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 // Disabling update case while REA-4432 is being worked on
 //const SQL_NAME_REGEX: &str = "[a-zA-Z_][a-zA-Z0-9_]*";
@@ -810,10 +813,9 @@ impl ModelState for DDLModelState {
                 mysql_conn.query_drop(&query).await.unwrap();
             }
             Operation::Evict { inner } => {
-                let client = reqwest::Client::new();
                 let body =
                     bincode::serialize::<Option<SingleKeyEviction>>(&*inner.borrow()).unwrap();
-                let res = client
+                let res = CLIENT
                     .post(format!("http://{}:6033/evict_single", ctxt.rs_host))
                     .body(body)
                     .send()
