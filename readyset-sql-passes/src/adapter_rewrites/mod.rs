@@ -17,7 +17,7 @@ use readyset_sql::ast::{
 };
 use readyset_sql::DialectDisplay;
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::trace;
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
 /// provides support for converting a user-supplied parameter list into a set of lookup keys to pass
@@ -101,7 +101,7 @@ pub fn process_query(
     );
 
     let limit_clause = if force_paginate_in_adapter {
-        info!("Will use fallback LIMIT/OFFSET for query");
+        trace!("Will use fallback LIMIT/OFFSET for query");
         mem::take(&mut query.limit_clause)
     } else {
         query.limit_clause.clone()
