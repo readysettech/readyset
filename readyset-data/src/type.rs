@@ -206,9 +206,13 @@ pub enum DfType {
     Jsonb,
 
     /// [MySQL `point`](https://dev.mysql.com/doc/refman/8.4/en/gis-class-point.html)
-    /// Note: We aren't supporting the old, legacy `point`/geometry data types that
-    /// are native to postgres. Instead, we'll support the postgis spatial types.
     Point,
+
+    /// [PostGIS `point`](https://postgis.net/docs/manual-3.5/using_postgis_dbmanagement.html#Point)
+    ///
+    /// This "postgis"-specific type is meant to distinguish it from the native `point` type in
+    /// PostgreSQL.
+    PostgisPoint,
 }
 
 /// Defaults.
@@ -323,6 +327,7 @@ impl DfType {
             Inet => unsupported!("Unsupported type: Inet"),
             Citext => Self::Text(Collation::Citext),
             Point => Self::Point,
+            PostgisPoint => Self::PostgisPoint,
             Other(ref id) => resolve_custom_type(id.clone()).ok_or_else(|| {
                 let id_upper = format!("{}", id.display_unquoted()).to_uppercase();
                 unsupported_err!("Unsupported type: {}", id_upper)
@@ -383,7 +388,8 @@ impl DfType {
             | DfType::Enum { .. }
             | DfType::Json
             | DfType::Jsonb
-            | DfType::Point => PgTypeCategory::UserDefined,
+            | DfType::Point
+            | DfType::PostgisPoint => PgTypeCategory::UserDefined,
         }
     }
 
@@ -829,6 +835,7 @@ impl fmt::Display for DfType {
             }
             Self::Numeric { prec, scale } => write!(f, "{kind:?}({prec}, {scale})"),
             Self::Point => write!(f, "Point"),
+            Self::PostgisPoint => write!(f, "Postgis Geometry(Point)"),
         }
     }
 }

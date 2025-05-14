@@ -568,7 +568,8 @@ impl TimestampTz {
             | DfType::VarBit(_)
             | DfType::Array(_)
             | DfType::Row
-            | DfType::Point => Err(ReadySetError::DfValueConversionError {
+            | DfType::Point
+            | DfType::PostgisPoint => Err(ReadySetError::DfValueConversionError {
                 src_type: "DfValue::TimestampTz".to_string(),
                 target_type: format!("{:?}", to_ty),
                 details: "Not allowed".to_string(),

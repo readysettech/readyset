@@ -544,6 +544,7 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
         SqlType::Array(_) => unimplemented!(),
         SqlType::Other(_) => unimplemented!(),
         SqlType::Point => unimplemented!(),
+        SqlType::PostgisPoint => unimplemented!(),
     }
 }
 
@@ -684,6 +685,7 @@ where
         SqlType::Array(_) => unimplemented!(),
         SqlType::Other(_) => unimplemented!(),
         SqlType::Point => unimplemented!(),
+        SqlType::PostgisPoint => unimplemented!(),
     }
 }
 
@@ -829,5 +831,6 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         SqlType::Array(_) => unimplemented!(),
         SqlType::Other(_) => unimplemented!(),
         SqlType::Point => unimplemented!(),
+        SqlType::PostgisPoint => unimplemented!(),
     }
 }

@@ -1,0 +1,44 @@
+statement ok
+create extension postgis;
+
+statement ok
+create table locations (id int primary key, loc geometry(point));
+
+statement ok
+insert into locations values
+  (1, ST_PointFromText('POINT(1 2)')),
+  (2, ST_PointFromText('POINT(8.123 9.3145732)'));
+
+sleep 1000
+
+query B nosort
+select loc from locations where id = 1
+----
+0x0101000000000000000000F03F0000000000000040
+
+query B nosort
+select loc from locations where id = 2
+----
+0x0101000000E5D022DBF93E204069650CBD0FA12240
+
+
+
+# now test tables that explicitly set the SRID
+
+statement ok
+create table locations2 (id int primary key, loc geometry(point, 4326));
+
+statement ok
+insert into locations2 values
+  (1, ST_PointFromText('POINT(1 2)', 4326)),
+  (2, ST_PointFromText('POINT(8.123 9.3145732)', 4326));
+
+query B nosort
+select loc from locations2 where id = 1
+----
+0x0101000020E6100000000000000000F03F0000000000000040
+
+query B nosort
+select loc from locations2 where id = 2
+----
+0x0101000020E6100000E5D022DBF93E204069650CBD0FA12240

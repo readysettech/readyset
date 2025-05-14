@@ -597,9 +597,11 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 }
             }
 
-            DfType::Bit(_) | DfType::VarBit(_) | DfType::Row | DfType::Point => {
-                Err(Self::coerce_err(to_ty, "Not allowed"))
-            }
+            DfType::Bit(_)
+            | DfType::VarBit(_)
+            | DfType::Row
+            | DfType::Point
+            | DfType::PostgisPoint => Err(Self::coerce_err(to_ty, "Not allowed")),
         }
     }
 }

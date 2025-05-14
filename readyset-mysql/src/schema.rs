@@ -294,6 +294,9 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
                 length,
             )
         }
+        DfType::PostgisPoint => {
+            unsupported!("MySQL does not support the postgres/postgis point type")
+        }
 
         // Fallback
         DfType::Unknown => (MYSQL_TYPE_UNKNOWN, DEFAULT_CHARACTER_SET, 0, 1024),

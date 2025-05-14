@@ -514,7 +514,9 @@ impl Literal {
             | SqlType::UnsignedInteger => unimplemented!(
                 "This type is only valid in `CAST` and can't be used as a Column Def"
             ),
-            SqlType::Point => unimplemented!("Points aren't implemented yet"),
+            SqlType::Point | SqlType::PostgisPoint => {
+                unimplemented!("Points aren't implemented yet")
+            }
         }
     }
 

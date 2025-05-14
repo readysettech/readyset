@@ -2213,6 +2213,8 @@ impl<'a> FromSql<'a> for DfValue {
                     <&str>::from_sql(ty, raw)?,
                     Collation::Citext,
                 )),
+                // catch the postgis geometry types, and just pass through
+                ref ty if ty.name() == "geometry" => mk_from_sql!(Vec<u8>),
                 ref ty => Ok(DfValue::PassThrough(Arc::new(PassThrough {
                     ty: ty.clone(),
                     format: PassThroughFormat::Binary,
@@ -2580,7 +2582,8 @@ mod arbitrary {
             | Some(DfType::Uuid)
             | Some(DfType::Inet)
             | Some(DfType::Row)
-            | Some(DfType::Point) => Just(DfValue::None).boxed(),
+            | Some(DfType::Point)
+            | Some(DfType::PostgisPoint) => Just(DfValue::None).boxed(),
         }
     }
 }

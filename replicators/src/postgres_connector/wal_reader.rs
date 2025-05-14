@@ -582,12 +582,21 @@ impl wal::TupleData {
                         table: relation.relation_name_lossy(),
                     };
 
-                    let val = if custom_types.contains_key(&spec.type_oid) {
+                    let custom_type = custom_types.get(&spec.type_oid);
+                    let val = if let Some(custom_type) = custom_type {
                         // For custom types (or arrays of custom types), just leave the value as
                         // text - we don't have enough information here to actually coerce to the
                         // correct type, but the table will do that for us (albeit this is slightly
-                        // less efficient)
-                        DfValue::from(text.to_vec())
+                        // less efficient). However, we do need to handle the geometry type
+                        // specially, as it is represented as a hex string.
+
+                        if custom_type == "geometry" {
+                            // 'str' is a hex string, get the Vec<u8>
+                            let hex_bytes = hex::decode(str.as_bytes()).unwrap();
+                            DfValue::ByteArray(Arc::new(hex_bytes))
+                        } else {
+                            DfValue::from(text.to_vec())
+                        }
                     } else {
                         let pg_type =
                             PGType::from_oid(spec.type_oid).ok_or_else(unsupported_type_err)?;

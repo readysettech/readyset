@@ -466,6 +466,22 @@ fn type_identifier_part3(
                 )),
                 |_| SqlType::Point,
             ),
+            // look for the postgis syntax of "geometry(point, 4326)"
+            map(
+                tuple((
+                    tag_no_case("geometry"),
+                    tuple((
+                        whitespace0,
+                        tag("("),
+                        whitespace0,
+                        tag_no_case("point"),
+                        opt(tuple((tag(","), whitespace0, digit1))),
+                        whitespace0,
+                        tag(")"),
+                    )),
+                )),
+                |_| SqlType::PostgisPoint,
+            ),
             map(other_type(dialect), SqlType::Other),
         ))(i)
     }
@@ -714,6 +730,17 @@ mod tests {
                 SqlType::MediumInt(None)
             );
         }
+        #[test]
+        fn point_type() {
+            let res = test_parse!(type_identifier(Dialect::MySQL), b"point");
+            assert_eq!(res, SqlType::Point);
+        }
+
+        #[test]
+        fn point_type_with_srid() {
+            let res = test_parse!(type_identifier(Dialect::MySQL), b"point srid 4326");
+            assert_eq!(res, SqlType::Point);
+        }
     }
 
     mod postgres {
@@ -780,15 +807,17 @@ mod tests {
         }
 
         #[test]
-        fn point_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"point");
-            assert_eq!(res, SqlType::Point);
+        fn geometry_point_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"geometry(point)");
+            assert_eq!(res, SqlType::PostgisPoint);
         }
-
         #[test]
-        fn point_type_with_srid() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"point srid 4326");
-            assert_eq!(res, SqlType::Point);
+        fn geometry_point_type_with_srid() {
+            let res = test_parse!(
+                type_identifier(Dialect::PostgreSQL),
+                b"geometry(point, 4326)"
+            );
+            assert_eq!(res, SqlType::PostgisPoint);
         }
 
         #[test]
