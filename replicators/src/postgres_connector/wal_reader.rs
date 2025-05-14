@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
 
@@ -44,8 +44,8 @@ pub struct WalReader {
     wal: pgsql::client::Responses,
     /// Keeps track of the relation mappings that we had
     relations: HashMap<i32, Relation>,
-    /// Keeps track of the OIDs of all custom types we've seen
-    custom_types: HashSet<u32>,
+    /// Keeps track of the OIDs (and their names) of all custom types we've seen
+    custom_types: HashMap<u32, String>,
     /// Table Filter
     table_filter: TableFilter,
 }
@@ -500,8 +500,9 @@ impl WalReader {
                 WalRecord::Message { prefix, .. } => {
                     debug!("Message with ignored prefix {prefix:?}")
                 }
-                WalRecord::Type { id, .. } => {
-                    custom_types.insert(id as _);
+                WalRecord::Type { id, name, .. } => {
+                    let name = String::from_utf8_lossy(&name);
+                    custom_types.insert(id as _, name.to_string());
                 }
                 WalRecord::Truncate {
                     n_relations,
@@ -538,7 +539,7 @@ impl wal::TupleData {
     pub(crate) fn into_noria_vec(
         self,
         relation: &RelationMapping,
-        custom_types: &HashSet<u32>,
+        custom_types: &HashMap<u32, String>,
         is_key: bool,
     ) -> Result<Vec<Option<DfValue>>, WalError> {
         use postgres_types::Type as PGType;
@@ -581,7 +582,7 @@ impl wal::TupleData {
                         table: relation.relation_name_lossy(),
                     };
 
-                    let val = if custom_types.contains(&spec.type_oid) {
+                    let val = if custom_types.contains_key(&spec.type_oid) {
                         // For custom types (or arrays of custom types), just leave the value as
                         // text - we don't have enough information here to actually coerce to the
                         // correct type, but the table will do that for us (albeit this is slightly
