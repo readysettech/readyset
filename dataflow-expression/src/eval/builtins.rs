@@ -1435,11 +1435,33 @@ impl BuiltinFunction {
                     DfValue::ByteArray(bytes) => {
                         let point = Point::try_from_bytes(&bytes, dialect.engine())?;
                         Ok(DfValue::Text(
-                            point.format(dialect.engine()).unwrap().as_str().into(),
+                            point
+                                .format(dialect.engine(), false)
+                                .unwrap()
+                                .as_str()
+                                .into(),
                         ))
                     }
                     _ => Err(invalid_query_err!(
                         "SpatialAsText requires a point argument (in the form of a byte array)"
+                    )),
+                }
+            }
+            BuiltinFunction::SpatialAsEWKT { expr } => {
+                let df_val = non_null!(expr.eval(record)?);
+                match df_val {
+                    DfValue::ByteArray(bytes) => {
+                        let point = Point::try_from_postgis_bytes(&bytes)?;
+                        Ok(DfValue::Text(
+                            point
+                                .format(SqlEngine::PostgreSQL, true)
+                                .unwrap()
+                                .as_str()
+                                .into(),
+                        ))
+                    }
+                    _ => Err(invalid_query_err!(
+                        "SpatialAsEWKT requires a point argument (in the form of a byte array)"
                     )),
                 }
             }

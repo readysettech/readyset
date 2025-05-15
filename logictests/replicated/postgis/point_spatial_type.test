@@ -21,6 +21,25 @@ select loc from locations where id = 2
 ----
 0x0101000000E5D022DBF93E204069650CBD0FA12240
 
+query T nosort
+select ST_AsText(loc) from locations where id = 1
+----
+POINT(1 2)
+
+query T nosort
+select ST_AsEWKT(loc) from locations where id = 1
+----
+POINT(1 2)
+
+query T nosort
+select ST_AsText(loc) from locations where id = 2
+----
+POINT(8.123 9.3145732)
+
+query T nosort
+select ST_AsEWKT(loc) from locations where id = 2
+----
+POINT(8.123 9.3145732)
 
 
 # now test tables that explicitly set the SRID
@@ -42,3 +61,23 @@ query B nosort
 select loc from locations2 where id = 2
 ----
 0x0101000020E6100000E5D022DBF93E204069650CBD0FA12240
+
+query T nosort
+select ST_AsText(loc) from locations2 where id = 1
+----
+POINT(1 2)
+
+query T nosort
+select ST_AsEWKT(loc) from locations2 where id = 1
+----
+SRID=4326;POINT(1 2)
+
+query T nosort
+select ST_AsText(loc) from locations2 where id = 2
+----
+POINT(8.123 9.3145732)
+
+query T nosort
+select ST_AsEWKT(loc) from locations2 where id = 2
+----
+SRID=4326;POINT(8.123 9.3145732)

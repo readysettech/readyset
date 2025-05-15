@@ -168,6 +168,18 @@ pub enum BuiltinFunction {
         expr: Expr,
         dialect: Dialect,
     },
+
+    /// Implementation of the `ST_AsEWKT` spatial function.  Returns postgis's extended variant of the OGC Well-Known Text (WKT)
+    /// representation of the geometry value. The only difference is the SRID prepended to the output.
+    ///
+    /// This function is not supported in MySQL, nor in the built-ins for the standeard postgres
+    /// spatial data types
+    /// We currently do not support the (seemingly rarely used) second parameter of this function, `options`.
+    ///
+    /// * [PostGIS](https://postgis.net/docs/manual-3.5/ST_AsEWKT.html)
+    SpatialAsEWKT {
+        expr: Expr,
+    },
 }
 
 impl BuiltinFunction {
@@ -211,6 +223,7 @@ impl BuiltinFunction {
             // TODO: name differs based on dialect
             JsonBuildObject { .. } => "json_build_object",
             SpatialAsText { .. } => "st_astext",
+            SpatialAsEWKT { .. } => "st_asewkt",
         }
     }
 }
@@ -345,6 +358,7 @@ impl Display for BuiltinFunction {
             }
             JsonBuildObject { args, .. } => write!(f, "({})", args.iter().join(", ")),
             SpatialAsText { .. } => write!(f, "st_astext"),
+            SpatialAsEWKT { .. } => write!(f, "st_asewkt"),
         }
     }
 }
