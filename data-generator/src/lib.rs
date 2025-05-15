@@ -587,7 +587,7 @@ where
             b"b".to_vec().into()
         }
         SqlType::Binary(Some(x)) | SqlType::VarBinary(x) => {
-            let length: usize = rng.gen_range(1..*x).into();
+            let length: usize = rng.gen_range(1..=*x).into();
             b"b".repeat(length).to_vec().into()
         }
         SqlType::ByteArray => {

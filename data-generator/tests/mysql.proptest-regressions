@@ -11,3 +11,4 @@ cc e36a1e3e39b2d3127a686d74ace75c73ffb8ec9a0b0c759796dd531e93be590e # shrinks to
 cc 503d3de2a8892cbea1e7ee142573e9ecac6fc6f448f3d8087d43efee37829087 # shrinks to input = _UniqueValueOfTypeAlwaysValidArgs { ty: Decimal(10, 1), idx: 0 }
 cc 6f65c73f4ef8e0a11b4979a0c43b37371c31f71aa6302cbde45f45814cd46246 # shrinks to input = _ValueOfTypeAlwaysValidArgs { ty: Numeric(Some((8, Some(8)))) }
 cc 5bbebb23c6d1ecdacaac9ef5671842e58984d4f2d25f14d00d35de209f2a26ca # shrinks to input = _UniqueValueOfTypeAlwaysValidArgs { ty: VarChar(Some(1)), idx: 10 }
+cc 77c38d14e0333a5b20b723221424f4a09c6b66f35f2bd0c050e8009d36353370 # shrinks to input = _RandomValueOfTypeAlwaysValidSerialMysqlArgs { ty: VarBinary(1), seed: 14232057104241766386 }
