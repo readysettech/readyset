@@ -6,7 +6,7 @@ use readyset_data::{DfValue, Dialect};
 use readyset_util::{eventually, failpoints};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
-use test_utils::serial;
+use test_utils::tags;
 use tracing::{debug, info};
 
 use crate::readyset_mysql::PROPAGATION_DELAY_TIMEOUT;

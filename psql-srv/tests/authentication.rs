@@ -15,7 +15,7 @@ use psql_srv::{
 };
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_util::redacted::RedactedString;
-use test_utils::serial;
+use test_utils::tags;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_native_tls::{native_tls, TlsAcceptor};
@@ -111,7 +111,7 @@ async fn run_server(backend: ScramSha256Backend) -> u16 {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[serial]
+#[tags(serial)]
 async fn connect_scram_sha256_valid_password() {
     readyset_tracing::init_test_logging();
     let username = "user";
@@ -130,7 +130,7 @@ async fn connect_scram_sha256_valid_password() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[serial]
+#[tags(serial)]
 async fn connect_scram_sha256_invalid_password() {
     readyset_tracing::init_test_logging();
     let username = "user";
@@ -150,7 +150,7 @@ async fn connect_scram_sha256_invalid_password() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[serial]
+#[tags(serial)]
 async fn connect_scram_sha256_with_escapes_in_username_and_password() {
     readyset_tracing::init_test_logging();
     let username = "user=,=,=,user";
@@ -169,7 +169,7 @@ async fn connect_scram_sha256_with_escapes_in_username_and_password() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[serial]
+#[tags(serial)]
 async fn connect_scram_sha256_over_tls_with_channel_binding_required() {
     readyset_tracing::init_test_logging();
     let username = "user";

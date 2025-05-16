@@ -62,7 +62,7 @@ elif [[ "$MATRIX_VALUE" == "MRBR" ]]; then
     cargo --locked nextest run --profile ci --hide-progress-bar \
         --workspace --features failure_injection \
         --exclude readyset-clustertest --exclude benchmarks \
-        --ignore-default-filter -E 'test(~serial_mysql)' \
+        --ignore-default-filter -E 'test(/:mysql_upstream:/)' \
         || upload_artifacts
 else
     echo "No test defined for MATRIX_VALUE=${MATRIX_VALUE}."

@@ -30,6 +30,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 test-strategy = { workspace = true }
+test-utils = { path = "../test-utils" }
 rand = { workspace = true }
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 postgres = { workspace = true, features = [

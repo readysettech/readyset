@@ -7,8 +7,7 @@ use proptest::prop_assume;
 use rand::{rngs::SmallRng, SeedableRng};
 use readyset_sql::{ast::SqlType, Dialect, DialectDisplay};
 use test_strategy::proptest;
-use test_utils::serial;
-use test_utils::slow;
+use test_utils::{slow, tags};
 
 async fn mysql_connection() -> mysql_async::Conn {
     mysql_async::Conn::new(
@@ -34,7 +33,7 @@ async fn mysql_connection() -> mysql_async::Conn {
     .unwrap()
 }
 
-#[serial(mysql)]
+#[tags(serial, mysql_upstream)]
 #[proptest]
 #[slow]
 fn value_of_type_always_valid(
@@ -62,7 +61,7 @@ fn value_of_type_always_valid(
     .unwrap();
 }
 
-#[serial(mysql)]
+#[tags(serial, mysql_upstream)]
 #[proptest]
 #[slow]
 fn unique_value_of_type_always_valid(
@@ -93,7 +92,7 @@ fn unique_value_of_type_always_valid(
     .unwrap();
 }
 
-#[serial(mysql)]
+#[tags(serial, mysql_upstream)]
 #[proptest]
 #[slow]
 fn random_value_of_type_always_valid(

@@ -137,7 +137,7 @@
 //! ### `#[clustertest]`
 //!
 //! Clustertests begin with the clustertest attribute: `#[clustertest]`. This creates clustertests
-//! as a multi-threaded tokio test, that is run serially with other tests (`#[serial]`).
+//! as a multi-threaded tokio test, that is run serially with other tests (`#[tags(serial)]`).
 //!
 //! ### [`DeploymentBuilder`]
 //!
@@ -1751,7 +1751,7 @@ impl PortAllocator {
 #[cfg(test)]
 mod tests {
     use readyset_util::failpoints;
-    use test_utils::serial;
+    use test_utils::tags;
 
     use super::*;
     // Verifies that the wrappers that create and teardown the deployment.
@@ -1828,7 +1828,7 @@ mod tests {
 
     /// Test that setting a failpoint triggers a panic on RPC.
     #[tokio::test(flavor = "multi_thread")]
-    #[serial(mysql)]
+    #[tags(serial, mysql_upstream)]
     async fn clustertest_with_set_failpoint() {
         let cluster_name = "ct_with_set_failpoint";
         let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, cluster_name)
@@ -1857,7 +1857,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial(mysql)]
+    #[tags(serial, mysql_upstream)]
     async fn start_adapter_running_deployment() {
         let cluster_name = "ct_start_adapter_running_deployment";
         let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, cluster_name)

@@ -2,7 +2,7 @@ use database_utils::{QueryableConnection, SimpleQueryResults};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_util::{eventually, failpoints};
-use test_utils::serial;
+use test_utils::tags;
 
 use crate::*;
 

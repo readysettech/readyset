@@ -7,8 +7,7 @@ use readyset_adapter::backend::QueryInfo;
 use readyset_client_metrics::QueryDestination;
 use readyset_sql::ast::SqlQuery;
 use readyset_util::{eventually, failpoints};
-use test_utils::serial;
-use test_utils::slow;
+use test_utils::{slow, tags};
 use tokio::time::{sleep, timeout};
 
 use crate::utils::*;

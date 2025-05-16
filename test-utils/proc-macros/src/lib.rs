@@ -1,10 +1,11 @@
 extern crate proc_macro;
 
+use std::mem;
+
 use proc_macro::TokenStream;
-use quote::{format_ident, ToTokens};
-use syn::punctuated::Punctuated;
-use syn::spanned::Spanned;
-use syn::{parse_macro_input, parse_quote, Attribute, Ident, ItemFn, Path};
+use proc_macro2::{Span, TokenTree};
+use quote::{quote, ToTokens};
+use syn::{parse_macro_input, parse_quote, Ident, ItemFn};
 
 /// Mark the given test as a "slow" test, meaning it won't be run if slow tests should not be run.
 ///
@@ -74,41 +75,95 @@ pub fn skip_flaky_finder(_args: TokenStream, item: TokenStream) -> TokenStream {
     result.into_token_stream().into()
 }
 
-// XXX `quote::ToTokens` turns the output into `proc_macro2::TokenStream`, which requires a further
-// conversion to `proc_macro::TokenStream`. Unfortunately, clippy thinks these are the same thing
-// and complains that there's a reduntant `.into()` call, so we ignore it.
-#[allow(clippy::useless_conversion)]
+/// "Tag" a test by moving it into a module. This is a lightweight version of the [test-tag] crate
+/// with special support for the `serial` tag.
+///
+/// ```rust,ignore
+/// // This:
+/// #[tags(serial, mysql80_upstream)]
+/// #[test]
+/// fn test_foobar() {
+///     // Test code here
+/// }
+///
+/// // Will turn into this:
+/// pub mod test_foobar {
+///     pub mod serial {
+///         pub mod mysql80_upstream {
+///             #[test]
+///             fn test() {
+///                 // Test code here
+///             }
+///         }
+///     }
+/// }
+/// ```
+///
+/// This allows test runs to target specific tags using the `:tag:` pattern, like so:
+///
+/// ```sh
+/// cargo test -- :mysql80_upstream:
+/// cargo nextest run -E 'test(/:mysql80_upstream:/)'
+/// ```
+///
+/// If one of the tags is `serial`, we add the [`serial_test::serial`] attribute so this can be run
+/// with `cargo test` using `serial_test`'s in-process mutual exclusion. Nextest's filter-based
+/// groups can be used for mutual exclusion by adding a `test(/:serial:/)` filter to the group
+/// definition.
+///
+/// Note that we rename the test function itself to `test` and put all the tag modules into an outer
+/// module with the original test name primarily so that regardless of the ordering of the tags,
+/// they will always be identifiable as `:tag:`, not requiring `:tag` for the last or `tag:` for the
+/// first.
+///
+/// [test-tag]: https://crates.io/crates/test-tag
 #[proc_macro_attribute]
-pub fn serial(args: TokenStream, item: TokenStream) -> TokenStream {
-    let group = parse_macro_input!(args as Option<Ident>);
-    let mut item = parse_macro_input!(item as ItemFn);
-    let name = item.sig.ident;
-    item.sig.ident = if let Some(ref group) = group {
-        format_ident!("{}_serial_{}", name, group)
+pub fn tags(args: TokenStream, item: TokenStream) -> TokenStream {
+    let groups = parse_macro_input!(args as proc_macro2::TokenStream);
+    let serial_groups = if groups.is_empty() {
+        parse_quote! { serial }
     } else {
-        format_ident!("{}_serial", name)
+        groups.clone()
     };
-    item.attrs.push(Attribute {
-        pound_token: syn::token::Pound(group.span()),
-        style: syn::AttrStyle::Outer,
-        bracket_token: syn::token::Bracket(group.span()),
-        meta: syn::Meta::List(syn::MetaList {
-            path: Path {
-                leading_colon: None,
-                segments: Punctuated::from_iter(vec![
-                    syn::PathSegment {
-                        ident: Ident::new("serial_test", group.span()),
-                        arguments: syn::PathArguments::None,
-                    },
-                    syn::PathSegment {
-                        ident: Ident::new("serial", group.span()),
-                        arguments: syn::PathArguments::None,
-                    },
-                ]),
-            },
-            delimiter: syn::MacroDelimiter::Paren(syn::token::Paren(group.span())),
-            tokens: group.into_token_stream().into(),
-        }),
-    });
-    item.into_token_stream().into()
+
+    let mut item = parse_macro_input!(item as ItemFn);
+
+    let mut tags: Vec<_> = groups
+        .into_iter()
+        .filter_map(|tt| match tt {
+            TokenTree::Ident(ident) => Some(ident),
+            _ => None,
+        })
+        .collect();
+
+    if tags.iter().any(|tag| tag == "serial") {
+        let serial_attr = parse_quote! {
+            #[serial_test::serial(#serial_groups)]
+        };
+        item.attrs.push(serial_attr);
+    }
+
+    let test_name = mem::replace(&mut item.sig.ident, Ident::new("test", Span::call_site()));
+    tags.insert(0, test_name);
+
+    let mut out = quote! {
+        #item
+    };
+
+    for group in tags.into_iter().rev() {
+        out = quote! {
+            pub mod #group {
+                use super::*;
+                #out
+            }
+        };
+    }
+
+    // XXX(mvzink): If anybody gets annoyed that their test fn name is becoming a module instead, we
+    // might want to do, as a final step, the same thing test-tag does here:
+    //
+    // ```
+    // use example_exprs_eval_same_as_mysql::serial::mysql_upstream::test as example_exprs_eval_same_as_mysql;
+    // ```
+    out.into_token_stream().into()
 }

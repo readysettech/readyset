@@ -984,7 +984,7 @@ mod tests {
     use rand::{thread_rng, Rng};
     use readyset_data::Dialect;
     use reqwest::Url;
-    use test_utils::serial;
+    use test_utils::tags;
 
     use super::*;
     use crate::consensus::CacheDDLRequest;
@@ -998,7 +998,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn read_write_operations() {
         let authority_address = test_authority_address("leader_election");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
@@ -1022,7 +1022,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn read_modify_write_in_parallel() {
         let authority_address = test_authority_address("read_modify_write_in_parallel");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
@@ -1052,7 +1052,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn overwrite_controller_state() {
         let authority_address = test_authority_address("overwrite_controller_state");
         let authority = ConsulAuthority::new(&authority_address).unwrap();
@@ -1096,7 +1096,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn leader_election_operations() {
         let authority_address = test_authority_address("leader_election");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
@@ -1153,7 +1153,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn retrieve_workers() {
         let authority_address = test_authority_address("retrieve_workers");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
@@ -1208,7 +1208,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn leader_indexes() {
         let authority_address = test_authority_address("leader_indexes");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
@@ -1245,7 +1245,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn only_leader_can_update_state() {
         let authority_address = test_authority_address("leader_updates_state");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
@@ -1338,7 +1338,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn state_value_roundtrip() {
         let authority_address = test_authority_address("state_version_roundtrip");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
@@ -1362,7 +1362,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn small_state_roundtrip() {
         let authority_address = test_authority_address("small_state_roundtrip");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
@@ -1396,7 +1396,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn multichunk_state_roundtrip() {
         let authority_address = test_authority_address("multichunk_state_roundtrip");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
@@ -1441,7 +1441,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn multichunk_shrinks_roundtrip() {
         let authority_address = test_authority_address("multichunk_shrinks_roundtrip");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
@@ -1486,7 +1486,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn multichunk_grows_roundtrip() {
         let authority_address = test_authority_address("multichunk_grows_roundtrip");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
@@ -1531,7 +1531,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn update_chunked_controller_state() {
         let authority_address = test_authority_address("update_chunked_controller_state");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
@@ -1584,7 +1584,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn create_cache_statements() {
         let authority_address = test_authority_address("create_cache_statements");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
@@ -1623,7 +1623,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
+    #[tags(consul)]
     async fn update_controller_state_replication_offsets() {
         let authority_address = test_authority_address("create_cache_statements");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());

@@ -3,10 +3,9 @@ use mysql_async::prelude::Queryable;
 use mysql_common::Value;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
-use test_utils::serial;
-use test_utils::slow;
+use test_utils::{slow, tags};
 
-#[serial(mysql)]
+#[tags(serial, mysql_upstream)]
 #[test]
 #[slow]
 fn mysql_send_long_data() {

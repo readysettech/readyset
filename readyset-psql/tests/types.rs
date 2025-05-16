@@ -2,7 +2,7 @@ use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_server::Handle;
 use readyset_util::shutdown::ShutdownSender;
-use test_utils::serial;
+use test_utils::tags;
 
 mod common;
 use common::connect;
@@ -123,7 +123,7 @@ mod types {
         };
 
         (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr, $rust_type: ty, $strategy: expr) => {
-            #[serial(postgres)]
+            #[tags(serial, postgres_upstream)]
             // these are pretty slow, so we only run a few cases at a time
             #[test_strategy::proptest(ProptestConfig {
                 cases: 5,
@@ -182,7 +182,7 @@ mod types {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial(postgres)]
+    #[tags(serial, postgres_upstream)]
     async fn regclass() {
         let (config, _handle, shutdown_tx) = setup().await;
         let client = connect(config).await;
@@ -202,7 +202,7 @@ mod types {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial(postgres)]
+    #[tags(serial, postgres_upstream)]
     async fn regproc() {
         let (upstream, upstream_conn) = upstream_config()
             .dbname("postgres")
@@ -241,7 +241,7 @@ mod types {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial(postgres)]
+    #[tags(serial, postgres_upstream)]
     async fn enums() {
         readyset_tracing::init_test_logging();
         let (config, _handle, shutdown_tx) = setup().await;
@@ -752,7 +752,7 @@ mod types {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial(postgres)]
+    #[tags(serial, postgres_upstream)]
     async fn enum_as_pk() {
         readyset_tracing::init_test_logging();
         let (config, _handle, shutdown_tx) = setup().await;
@@ -825,7 +825,7 @@ mod types {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial(postgres)]
+    #[tags(serial, postgres_upstream)]
     async fn alter_enum_complex_variant_changes() {
         readyset_tracing::init_test_logging();
         let (config, _handle, shutdown_tx) = setup().await;
@@ -908,7 +908,7 @@ mod types {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial(postgres)]
+    #[tags(serial, postgres_upstream)]
     async fn citext() {
         readyset_tracing::init_test_logging();
         let (config, _handle, shutdown_tx) = setup().await;
@@ -963,7 +963,7 @@ mod types {
     // Tests that even if a hole is filled in a reader node before we issue any writes, a
     // subsequent write for the same key still makes it to the reader
     #[tokio::test(flavor = "multi_thread")]
-    #[serial(postgres)]
+    #[tags(serial, postgres_upstream)]
     async fn citext_read_before_write() {
         readyset_tracing::init_test_logging();
         let (config, _handle, shutdown_tx) = setup().await;
@@ -1022,7 +1022,7 @@ mod types {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial(postgres)]
+    #[tags(serial, postgres_upstream)]
     async fn date_only() {
         readyset_tracing::init_test_logging();
         PostgreSQLAdapter::recreate_database("psql_date_only_test").await;

@@ -190,8 +190,11 @@ mod tests {
     use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
     use chrono_tz::{OffsetComponents, Tz};
 
+    use test_utils::tags;
+
     use crate::fmt::FastEncode;
 
+    #[tags(postgres_upstream)]
     #[test]
     fn test_write_time_fractional_round_up() {
         let time = NaiveTime::from_hms_nano_opt(0, 0, 0, 500).unwrap();
@@ -201,6 +204,7 @@ mod tests {
         assert_eq!("00:00:00.000001", actual);
     }
 
+    #[tags(postgres_upstream)]
     #[test]
     fn test_write_time_fractional_round_down() {
         let time = NaiveTime::from_hms_nano_opt(0, 0, 0, 499).unwrap();
@@ -210,6 +214,7 @@ mod tests {
         assert_eq!("00:00:00", actual);
     }
 
+    #[tags(postgres_upstream)]
     #[test]
     fn test_write_time_round_up_to_whole_second() {
         let time = NaiveTime::from_hms_nano_opt(0, 0, 0, 999_999_900).unwrap();
@@ -219,6 +224,7 @@ mod tests {
         assert_eq!("00:00:01", actual);
     }
 
+    #[tags(postgres_upstream)]
     #[test]
     fn test_write_time_round_down_to_zero() {
         let time = NaiveTime::from_hms_nano_opt(0, 0, 0, 100).unwrap();
@@ -228,6 +234,7 @@ mod tests {
         assert_eq!("00:00:00", actual);
     }
 
+    #[tags(postgres_upstream)]
     #[test]
     fn test_write_time_round_up_to_24() {
         let time = NaiveTime::from_hms_nano_opt(23, 59, 59, 999_999_900).unwrap();
@@ -237,6 +244,7 @@ mod tests {
         assert_eq!("24:00:00", actual);
     }
 
+    #[tags(postgres_upstream)]
     #[test]
     fn test_write_timestamp_round_up_to_next_day() {
         let dt = NaiveDate::from_ymd_opt(1, 1, 1)
@@ -377,6 +385,7 @@ mod tests {
             assert_eq!(expected, actual);
         }
 
+        #[tags(postgres_upstream)]
         #[test]
         fn test_dates_same_as_postgres() {
             let mut client = config().connect(NoTls).unwrap();
@@ -390,6 +399,7 @@ mod tests {
             }
         }
 
+        #[tags(postgres_upstream)]
         #[test]
         fn test_times_same_as_postgres() {
             let mut client = config().connect(NoTls).unwrap();
@@ -402,6 +412,7 @@ mod tests {
             }
         }
 
+        #[tags(postgres_upstream)]
         #[test]
         fn test_timestamps_same_as_postgres() {
             let mut client = config().connect(NoTls).unwrap();
@@ -420,6 +431,7 @@ mod tests {
             }
         }
 
+        #[tags(postgres_upstream)]
         #[test]
         fn test_timestamptzs_same_as_postgres() {
             let mut client = config().connect(NoTls).unwrap();
@@ -466,6 +478,7 @@ mod tests {
                     .prop_map(|(date, time)| NaiveDateTime::new(date, time))
             }
 
+            #[tags(postgres_upstream)]
             #[test]
             fn test_write_date() {
                 let client = RefCell::new(config().connect(NoTls).unwrap());
@@ -475,6 +488,7 @@ mod tests {
                 })
             }
 
+            #[tags(postgres_upstream)]
             #[test]
             fn test_write_time() {
                 let client = RefCell::new(config().connect(NoTls).unwrap());
@@ -493,6 +507,7 @@ mod tests {
             ///
             /// See the documentation for [`write_timestamp`] for more information about these
             /// discrepancies.
+            #[tags(postgres_upstream)]
             #[test]
             fn test_write_timestamp() {
                 let client = RefCell::new(config().connect(NoTls).unwrap());
@@ -514,6 +529,7 @@ mod tests {
             ///
             /// See the documentation for [`write_timestamp_tz`] for more information about these
             /// discrepancies.
+            #[tags(postgres_upstream)]
             #[test]
             fn test_write_timestamp_tz() {
                 fn arbitrary_stable_timezone() -> impl Strategy<Value = Tz> {

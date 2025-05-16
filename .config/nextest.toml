@@ -12,21 +12,16 @@ failure-output = "immediate-final"
 [test-groups]
 serial = { max-threads = 1 }
 serial-postgres = { max-threads = 1 }
-serial-postgres13 = { max-threads = 1 }
 serial-mysql = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'test(/_serial$/)'
+filter = 'test(/:serial:/) and not (test(/:postgres\d*_upstream:/) or test(/:mysql\d*_upstream:/))'
 test-group = 'serial'
 
 [[profile.default.overrides]]
-filter = 'test(/_serial_postgres$/)'
+filter = 'test(/:serial:/) and test(/:postgres\d*_upstream:/)'
 test-group = 'serial-postgres'
 
 [[profile.default.overrides]]
-filter = 'test(/_serial_postgres13$/)'
-test-group = 'serial-postgres13'
-
-[[profile.default.overrides]]
-filter = 'test(/_serial_mysql$/)'
+filter = 'test(/:serial:/) and test(/:mysql\d*_upstream:/)'
 test-group = 'serial-mysql'

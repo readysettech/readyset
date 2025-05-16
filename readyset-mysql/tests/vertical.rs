@@ -53,7 +53,7 @@ use readyset_data::DfValue;
 use readyset_server::Handle;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
-use test_utils::serial;
+use test_utils::tags;
 
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
@@ -723,7 +723,7 @@ macro_rules! vertical_tests {
                 }
             }
 
-            #[serial(mysql)]
+            #[tags(serial, mysql_upstream)]
             #[test]
             #[cfg_attr(not(feature = "vertical_tests"), ignore)]
             fn $name() {

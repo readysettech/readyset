@@ -8,7 +8,7 @@ use readyset::{NoriaAdapter, Options};
 use readyset_adapter::ReadySetStatus;
 use readyset_psql::AuthenticationMethod;
 use readyset_util::eventually;
-use test_utils::serial;
+use test_utils::tags;
 
 const TEST_METRICS_ADDRESS: &str = "127.0.0.1:6035";
 
@@ -58,7 +58,7 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial(postgres)]
+#[tags(serial, postgres_upstream)]
 async fn http_tests() {
     let _jh = std::thread::spawn(|| start_adapter("http_tests"));
 
