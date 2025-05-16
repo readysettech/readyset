@@ -77,7 +77,7 @@ impl Builder {
             builder.disable_partial();
         }
         if opts.feature_full_materialization {
-            builder.enable_full_materialization();
+            builder.set_full_materialization(true);
 
             builder.set_materialization_persistence(opts.feature_materialization_persistence);
         }
@@ -129,7 +129,7 @@ impl Builder {
     pub fn for_tests() -> Self {
         let mut builder = Self::default();
         builder.set_abort_on_task_failure(false);
-        builder.enable_full_materialization();
+        builder.set_full_materialization(true);
         builder.set_post_lookup(true);
         builder
     }
@@ -160,24 +160,14 @@ impl Builder {
         self.config.materialization_config.frontier_strategy = f;
     }
 
-    /// Allow the creation of all fully materialized nodes.
+    /// Allow the creation of all fully materialized nodes
     ///
-    /// Unless this is called, any migrations that add fully materialized nodes will return
-    /// [`ReadySetError::Unsupported`]
-    pub fn enable_full_materialization(&mut self) {
+    /// Unless this is called with `true`, any migrations that add fully
+    /// materialized nodes will return [`ReadySetError::Unsupported`]
+    pub fn set_full_materialization(&mut self, enabled: bool) {
         self.config
             .materialization_config
-            .allow_full_materialization = true;
-    }
-
-    /// Forbid the creation of all fully materialized nodes.
-    ///
-    /// After this is called, any migrations that add fully materialized nodes will return
-    /// [`ReadySetError::Unsupported`]
-    pub fn forbid_full_materialization(&mut self) {
-        self.config
-            .materialization_config
-            .allow_full_materialization = false;
+            .allow_full_materialization = enabled;
     }
 
     /// Set sharding policy for all subsequent migrations; `None` or `Some(x)` where x <= 1 disables
