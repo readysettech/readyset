@@ -42,7 +42,7 @@ where
             CREATE TABLE encoding_table (
                 id INT NOT NULL,
                 hex VARCHAR(255) CHARACTER SET utf8mb4,
-                text {} COLLATE {},
+                text {} COLLATE '{}',
                 counter INT NOT NULL DEFAULT 0
             );
         "#,
@@ -204,7 +204,7 @@ where
             CREATE TABLE encoding_table (
                 id INT NOT NULL,
                 hex VARCHAR(255) CHARACTER SET utf8mb4,
-                text {} COLLATE {}
+                text {} COLLATE '{}'
             );
         "#,
         column_type, collation

@@ -20,7 +20,7 @@ use mysql_common::collations::{Collation, CollationId};
 use mysql_common::constants::ColumnType;
 use mysql_common::{binlog, Value};
 use mysql_srv::ColumnFlags;
-use readyset_data::encoding::Encoding;
+use readyset_data::encoding::{mysql_character_set_name_to_collation_id, Encoding};
 use rust_decimal::Decimal;
 use serde_json::Map;
 use tracing::{error, info, warn};
@@ -28,12 +28,12 @@ use tracing::{error, info, warn};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
-use readyset_client::{Modification, TableOperation};
+use readyset_client::{Modification, ReadySetHandle, TableOperation};
 use readyset_data::{Collation as RsCollation, DfValue, Dialect, TimestampTz};
 use readyset_errors::{internal, internal_err, unsupported_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
-    CollationName, CreateTableOption, NonReplicatedRelation, NotReplicatedReason, Relation,
-    SqlIdentifier, SqlQuery,
+    AlterTableStatement, CollationName, CreateTableBody, CreateTableOption, NonReplicatedRelation,
+    NotReplicatedReason, Relation, SqlIdentifier, SqlQuery,
 };
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::ReplicationOffset;
@@ -117,6 +117,8 @@ type TableMetadata = (Vec<Option<u16>>, Vec<Option<bool>>);
 ///
 /// The connector must also be assigned a unique `server_id` value
 pub(crate) struct MySqlBinlogConnector {
+    /// A handle to the Readyset instance; used for retrieving schemas in MySQL 5.7. See [`MySqlBinlogConnector::table_schemas`].
+    noria: ReadySetHandle,
     /// This is the underlying (regular) MySQL connection
     connection: mysql::Conn,
     /// Reader is a decoder for binlog events
@@ -136,6 +138,10 @@ pub(crate) struct MySqlBinlogConnector {
     last_reported_pos_ts: std::time::Instant,
     /// Table filter
     table_filter: TableFilter,
+    /// A cache of `CREATE TABLE` statements retrieved from the controller. This is only populated
+    /// and referenced if it is not otherwise possible to determine the character set for a text
+    /// column, which happens in MySQL 5.7.
+    table_schemas: HashMap<Relation, CreateTableBody>,
 }
 
 impl MySqlBinlogConnector {
@@ -214,6 +220,7 @@ impl MySqlBinlogConnector {
 
     /// Connect to a given MySQL database and subscribe to the binlog
     pub(crate) async fn connect<O: Into<mysql::Opts>>(
+        noria: ReadySetHandle,
         mysql_opts: O,
         next_position: MySqlPosition,
         server_id: Option<u32>,
@@ -221,6 +228,7 @@ impl MySqlBinlogConnector {
         table_filter: TableFilter,
     ) -> ReadySetResult<Self> {
         let mut connector = MySqlBinlogConnector {
+            noria,
             connection: mysql::Conn::new(mysql_opts).await?,
             reader: binlog::EventStreamReader::new(binlog::consts::BinlogVersion::Version4),
             server_id,
@@ -230,6 +238,7 @@ impl MySqlBinlogConnector {
             last_reported_pos_ts: std::time::Instant::now()
                 - std::time::Duration::from_secs(MAX_POSITION_TIME),
             table_filter,
+            table_schemas: Default::default(),
         };
 
         connector.register_as_replica().await?;
@@ -383,8 +392,17 @@ impl MySqlBinlogConnector {
             info!(target: "replicator_statement", "{:?}", wr_event);
         }
         // Retrieve the corresponding TABLE_MAP_EVENT, charset and signedness metadata
-        let (tme, (collation_vec, signedness_vec)) =
-            handle_err!(self, self.get_table_metadata(wr_event.table_id()));
+        let table_id = wr_event.table_id();
+        let tme = handle_err!(
+            self,
+            self.reader
+                .get_tme(table_id)
+                .ok_or_else(|| format!("TME not found for table ID {}", table_id))
+        );
+        let (collation_vec, signedness_vec) = handle_err!(
+            self,
+            Self::get_table_metadata(&mut self.noria, &mut self.table_schemas, tme).await
+        );
 
         if !self
             .table_filter
@@ -592,8 +610,17 @@ impl MySqlBinlogConnector {
         }
 
         // Retrieve the corresponding TABLE_MAP_EVENT, charset and signedness metadata
-        let (tme, (collation_vec, signedness_vec)) =
-            handle_err!(self, self.get_table_metadata(ur_event.table_id()));
+        let table_id = ur_event.table_id();
+        let tme = handle_err!(
+            self,
+            self.reader
+                .get_tme(table_id)
+                .ok_or_else(|| format!("TME not found for table ID {}", table_id))
+        );
+        let (collation_vec, signedness_vec) = handle_err!(
+            self,
+            Self::get_table_metadata(&mut self.noria, &mut self.table_schemas, tme).await
+        );
 
         if !self
             .table_filter
@@ -635,8 +662,17 @@ impl MySqlBinlogConnector {
             info!(target: "replicator_statement", "{:?}", dr_event);
         }
         // Retrieve the corresponding TABLE_MAP_EVENT, charset and signedness metadata
-        let (tme, (collation_vec, signedness_vec)) =
-            handle_err!(self, self.get_table_metadata(dr_event.table_id()));
+        let table_id = dr_event.table_id();
+        let tme = handle_err!(
+            self,
+            self.reader
+                .get_tme(table_id)
+                .ok_or_else(|| format!("TME not found for table ID {}", table_id))
+        );
+        let (collation_vec, signedness_vec) = handle_err!(
+            self,
+            Self::get_table_metadata(&mut self.noria, &mut self.table_schemas, tme).await
+        );
 
         if !self
             .table_filter
@@ -769,20 +805,36 @@ impl MySqlBinlogConnector {
                     };
 
                     for change in changelist.changes_mut() {
-                        if let Change::CreateTable { statement, .. } = change {
-                            let default_table_collation = statement.get_collation();
-                            if default_table_collation.is_none() {
-                                let collation =
-                                    Collation::resolve(CollationId::from(default_server_charset));
-                                let options = match statement.options.as_mut() {
-                                    Ok(opts) => opts,
-                                    Err(_) => &mut Vec::new(),
-                                };
-                                options.push(CreateTableOption::Collate(CollationName::Quoted(
-                                    SqlIdentifier::from(collation.collation()),
-                                )));
+                        match change {
+                            Change::CreateTable { statement, .. } => {
+                                let default_table_collation = statement.get_collation();
+                                if default_table_collation.is_none() {
+                                    let collation = Collation::resolve(CollationId::from(
+                                        default_server_charset,
+                                    ));
+                                    let options = match statement.options.as_mut() {
+                                        Ok(opts) => opts,
+                                        Err(_) => &mut Vec::new(),
+                                    };
+                                    options.push(CreateTableOption::Collate(
+                                        CollationName::Quoted(SqlIdentifier::from(
+                                            collation.collation(),
+                                        )),
+                                    ));
+                                }
+                                statement.propagate_default_charset(readyset_sql::Dialect::MySQL);
+                                if let Ok(body) = &statement.body {
+                                    self.table_schemas
+                                        .insert(statement.table.clone(), body.clone());
+                                }
                             }
-                            statement.propagate_default_charset(readyset_sql::Dialect::MySQL);
+                            Change::Drop { name, .. } => {
+                                self.table_schemas.remove(name);
+                            }
+                            Change::AlterTable(AlterTableStatement { table, .. }) => {
+                                self.table_schemas.remove(table);
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -1199,21 +1251,16 @@ impl MySqlBinlogConnector {
 
     /// Get the table map event, charset and signedness metadata for a table map event.
     ///
-    /// # Arguments
-    /// * `table_id` - The table id
+    /// If there is no charset metadata for a text column, we attempt to retrieve it from DDL we have seen via
+    /// [`MySqlBinlogConnector::get_table_schema`].
     ///
-    /// # Returns
-    /// * `(&TableMapEvent<'static>, TableMetadata)` - The table map event, charset and signedness metadata
-    fn get_table_metadata(
-        &self,
-        table_id: u64,
-    ) -> mysql::Result<(&TableMapEvent<'static>, TableMetadata)> {
-        let tme = self.reader.get_tme(table_id).ok_or_else(|| {
-            mysql_async::Error::Other(Box::new(internal_err!(
-                "Table map event not found for table id {}",
-                table_id
-            )))
-        })?;
+    /// Note that this is a static method on the type because we otherwise can't partially borrow
+    /// these fields as mutable in calling methods which are also borrowing `self` as immutable.
+    async fn get_table_metadata(
+        noria: &mut ReadySetHandle,
+        table_schemas: &mut HashMap<Relation, CreateTableBody>,
+        tme: &TableMapEvent<'static>,
+    ) -> ReadySetResult<TableMetadata> {
         /*
          * TME iterators are only populated for the types that make sense.
          * For example, for a table with col1 CHAR(1) collate utf8mb4_0900_ai_ci, col2 int, col3 unsigned int, col4 char(1) collate binary
@@ -1228,35 +1275,102 @@ impl MySqlBinlogConnector {
          */
         let opt_meta_extractor = OptionalMetaExtractor::new(tme.iter_optional_meta()).unwrap();
 
-        let mut charset_iter = opt_meta_extractor.iter_charset();
-        let mut enum_and_set_charset_iter = opt_meta_extractor.iter_enum_and_set_charset();
-        let mut signedness_iter = opt_meta_extractor.iter_signedness();
+        let mut missing_col_charsets = vec![];
         let mut collation_vec = vec![None; tme.columns_count() as usize];
         let mut signedness_vec = vec![None; tme.columns_count() as usize];
-        for id in 0..tme.columns_count() as usize {
-            let kind = tme
-                .get_column_type(id)
-                .map_err(|e| {
-                    mysql_async::Error::Other(Box::new(internal_err!(
-                        "Unable to get column type {}",
-                        e
-                    )))
-                })?
-                .unwrap();
-            if kind.is_character_type() {
-                collation_vec[id] = Some(charset_iter.next().transpose()?.unwrap_or_default());
-            } else if kind.is_enum_or_set_type() {
-                collation_vec[id] = Some(
-                    enum_and_set_charset_iter
-                        .next()
-                        .transpose()?
-                        .unwrap_or_default(),
-                );
-            } else if kind.is_numeric_type() {
-                signedness_vec[id] = Some(signedness_iter.next().unwrap_or(false));
+        {
+            // This is in a block to capture these iterators, which are not `Send`, so that we can
+            // `.await` later and not get a "this value may be used later" error.
+            let mut charset_iter = opt_meta_extractor.iter_charset();
+            let mut enum_and_set_charset_iter = opt_meta_extractor.iter_enum_and_set_charset();
+            let mut signedness_iter = opt_meta_extractor.iter_signedness();
+            for id in 0..tme.columns_count() as usize {
+                let kind = tme
+                    .get_column_type(id)
+                    .map_err(|e| {
+                        mysql_async::Error::Other(Box::new(internal_err!(
+                            "Unable to get column type {}",
+                            e
+                        )))
+                    })?
+                    .unwrap();
+                if kind.is_character_type() {
+                    collation_vec[id] = match charset_iter.next().transpose()? {
+                        None => {
+                            missing_col_charsets.push(id);
+                            None
+                        }
+                        charset => charset,
+                    };
+                } else if kind.is_enum_or_set_type() {
+                    collation_vec[id] = Some(
+                        enum_and_set_charset_iter
+                            .next()
+                            .transpose()?
+                            .unwrap_or_default(),
+                    );
+                } else if kind.is_numeric_type() {
+                    signedness_vec[id] = Some(signedness_iter.next().unwrap_or(false));
+                }
             }
         }
-        Ok((tme, (collation_vec, signedness_vec)))
+
+        // These character column did not have a charset available in the column metadata,
+        // presumably because this is coming from MySQL 5.7 which does not send charsets with table
+        // map events; so we need to fallback to the table schema definition.
+        for col_id in missing_col_charsets {
+            collation_vec[col_id] =
+                Self::get_charset_for_column(noria, table_schemas, tme, col_id).await?;
+        }
+
+        Ok((collation_vec, signedness_vec))
+    }
+
+    /// Retrieves the charset for the given column based on the DDL schema of the table.
+    ///
+    /// If the table was created during streaming replication, we should have already stored its
+    /// schema in [`MySqlBinlogConnector::process_query_event`]. Otherwise, if it was encountered
+    /// during snapshotting or during a previous run of the readyset binary, we consult the
+    /// controller's `Recipe`. This will slow us down because we have to communicate with the
+    /// server, but we do retain it until/unless it becomes invalidated in
+    /// [`MySqlBinlogConnector::process_event_query`].
+    ///
+    /// Note that this relies on already having called
+    /// [`readyset_sql::ast::CreateTableStatement::propagate_default_charset`] on the table when it
+    /// was snapshotted or replicated.
+    async fn get_charset_for_column(
+        noria: &mut ReadySetHandle,
+        table_schemas: &mut HashMap<Relation, CreateTableBody>,
+        tme: &TableMapEvent<'static>,
+        column_id: usize,
+    ) -> ReadySetResult<Option<u16>> {
+        let table = Relation {
+            schema: Some(tme.database_name().into()),
+            name: tme.table_name().into(),
+        };
+        let exists = table_schemas.contains_key(&table);
+        if !exists {
+            if let Some(schema) = noria.table(table.clone()).await?.schema().cloned() {
+                table_schemas.insert(table.clone(), schema);
+            }
+        }
+
+        if let Some(column) = table_schemas
+            .get(&table)
+            .and_then(|schema| schema.fields.get(column_id))
+        {
+            if let Some(charset) = column.get_charset() {
+                Ok(Some(mysql_character_set_name_to_collation_id(charset)))
+            } else if let Some(collation) = column.get_collation() {
+                Ok(Some(CollationId::from(collation) as u16))
+            } else if column.sql_type.is_any_binary() {
+                Ok(Some(CollationId::BINARY as u16))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -1635,7 +1749,10 @@ fn binlog_row_to_noria_row(
                             .unwrap(),
                         tme.get_column_metadata(tme_idx).unwrap(),
                     );
-                    debug_assert!(!kind.is_character_type() || collation_vec[tme_idx].is_some());
+                    debug_assert!(
+                        !kind.is_character_type() || collation_vec[tme_idx].is_some(),
+                        "Unexpected column type {kind:?} has no collation; val={val:?}, meta={meta:?}, col={col:?}",
+                    );
                     let collation = collation_vec[tme_idx].unwrap_or(0);
                     let unsigned = signedness_vec[tme_idx].unwrap_or(false);
                     // `BLOB` columns have `BINARY_FLAG` set in snapshot, but not here. However, the

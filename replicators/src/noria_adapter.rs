@@ -301,11 +301,12 @@ impl<'a> NoriaAdapter<'a> {
         )
         .await?;
 
-        let mut db_schemas = DatabaseSchemas::new();
-
         let pos = match (replication_offsets.min_present_offset()?, resnapshot) {
             (None, _) | (_, true) => {
                 let span = info_span!("taking database snapshot");
+
+                let mut db_schemas = DatabaseSchemas::new();
+
                 // The default min is already 10, so we keep that the same to reduce complexity
                 // overhead of too many flags.
                 // The only way PoolConstraints::new() can panic on unwrap is if min is not less
@@ -423,6 +424,7 @@ impl<'a> NoriaAdapter<'a> {
 
         let connector = Box::new(
             MySqlBinlogConnector::connect(
+                noria.clone(),
                 mysql_opts_builder,
                 pos.clone(),
                 server_id,

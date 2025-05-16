@@ -2,7 +2,7 @@ use mysql_async::{self as mysql, prelude::Queryable};
 use mysql_common::collations::{Collation as MyCollation, CollationId};
 use readyset_data::encoding::Encoding;
 use readyset_data::{Collation as RsCollation, DfValue};
-use readyset_errors::ReadySetResult;
+use readyset_errors::{internal, ReadySetResult};
 use std::sync::Arc;
 
 //TODO(marce): Make this a configuration parameter or dynamically adjust based on the table size
@@ -25,7 +25,10 @@ pub(crate) fn mysql_pad_char_column(
     col_len: usize,
     already_utf8_encoded: bool,
 ) -> ReadySetResult<DfValue> {
-    let collation: MyCollation = CollationId::from(collation).into();
+    let collation: MyCollation = match CollationId::from(collation) {
+        CollationId::UNKNOWN_COLLATION_ID => internal!("Unknown collation id {collation}"),
+        collation_id => collation_id.into(),
+    };
     // We calculate the length *in characters* to pad to based on the column length; but this is
     // given in terms of bytes in the result set encoding (collation). In snapshot, the `collation`
     // we have here is the stored collation of the column, but `val` is encoded as utf8mb4. When

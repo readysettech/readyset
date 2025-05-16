@@ -512,6 +512,17 @@ impl SqlType {
         )
     }
 
+    /// Returns whether `self` is any binary type. (Note: this doesn't account for character/text
+    /// types which use the binary character set.)
+    #[inline]
+    pub fn is_any_binary(&self) -> bool {
+        use SqlType::*;
+        matches!(
+            self,
+            TinyBlob | MediumBlob | LongBlob | Blob | Binary(_) | VarBinary(_)
+        )
+    }
+
     /// Returns the deepest nested type in [`SqlType::Array`], otherwise returns `self`.
     #[inline]
     pub fn innermost_array_type(&self) -> &Self {
