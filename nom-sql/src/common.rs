@@ -13,7 +13,6 @@ use nom::{IResult, InputLength, InputTake};
 use nom_locate::LocatedSpan;
 use readyset_sql::{ast::*, Dialect};
 
-use crate::create::collation_name;
 use crate::dialect::DialectParser;
 use crate::expression::expression;
 use crate::whitespace::{whitespace0, whitespace1};
@@ -680,6 +679,32 @@ pub fn field_reference_list(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<FieldReference>> {
     move |i| separated_list0(ws_sep_comma, field_reference(dialect))(i)
+}
+
+pub(crate) fn charset_name(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CharsetName> {
+    move |i| {
+        alt((
+            map(dialect.identifier(), CharsetName::Unquoted),
+            map(map_res(dialect.string_literal(), String::from_utf8), |s| {
+                CharsetName::Quoted(SqlIdentifier::from(s))
+            }),
+        ))(i)
+    }
+}
+
+pub(crate) fn collation_name(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CollationName> {
+    move |i| {
+        alt((
+            map(dialect.identifier(), CollationName::Unquoted),
+            map(map_res(dialect.string_literal(), String::from_utf8), |s| {
+                CollationName::Quoted(SqlIdentifier::from(s))
+            }),
+        ))(i)
+    }
 }
 
 #[cfg(test)]

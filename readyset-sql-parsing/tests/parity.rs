@@ -424,3 +424,10 @@ fn test_point_columns() {
 fn test_point_columns_srid() {
     check_parse_mysql!("CREATE TABLE t (p POINT SRID 4326)");
 }
+
+#[test]
+fn test_column_spec_charset_collation_quotation() {
+    check_parse_mysql!(
+        "CREATE TABLE t (a VARCHAR(10) CHARACTER SET 'utf8mb4' COLLATE 'utf8mb4_unicode_ci')"
+    );
+}

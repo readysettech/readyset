@@ -6,8 +6,7 @@ use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use readyset_sql::{ast::*, Dialect};
 
-use crate::common::{column_identifier_no_alias, parse_comment};
-use crate::dialect::DialectParser;
+use crate::common::{charset_name, collation_name, column_identifier_no_alias, parse_comment};
 use crate::expression::expression;
 use crate::sql_type::type_identifier;
 use crate::whitespace::{whitespace0, whitespace1};
@@ -82,7 +81,7 @@ pub fn column_constraint(
         let character_set = map(
             preceded(
                 delimited(whitespace0, tag_no_case("character set"), whitespace1),
-                dialect.identifier(),
+                charset_name(dialect),
             ),
             |cs| {
                 let char_set = cs.to_string();
@@ -92,7 +91,7 @@ pub fn column_constraint(
         let collate = map(
             preceded(
                 delimited(whitespace0, tag_no_case("collate"), whitespace1),
-                dialect.identifier(),
+                collation_name(dialect),
             ),
             |c| {
                 let collation = c.to_string();
@@ -381,6 +380,30 @@ mod tests {
                 let res = cspec.display(Dialect::MySQL).to_string();
                 assert_eq!(res, canonical);
             }
+        }
+
+        #[test]
+        fn charset_collation_quotation() {
+            let (_, res) = column_specification(Dialect::MySQL)(LocatedSpan::new(
+                b"c varchar(255) CHARACTER SET 'utf8mb4' COLLATE 'utf8mb4_unicode_ci'",
+            ))
+            .unwrap();
+            assert_eq!(
+                res,
+                ColumnSpecification {
+                    column: Column {
+                        name: "c".into(),
+                        table: None,
+                    },
+                    sql_type: SqlType::VarChar(Some(255)),
+                    generated: None,
+                    comment: None,
+                    constraints: vec![
+                        ColumnConstraint::CharacterSet("utf8mb4".into()),
+                        ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
+                    ],
+                }
+            );
         }
     }
 

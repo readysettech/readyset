@@ -29,6 +29,7 @@ assert_approx_eq = { workspace = true }
 pretty_assertions = { workspace = true }
 bincode = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
+test-utils = { path = "../test-utils" }
 
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 sqlparser = { workspace = true }

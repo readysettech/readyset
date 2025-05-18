@@ -14,8 +14,8 @@ use readyset_sql::{ast::*, Dialect};
 
 use crate::column::column_specification;
 use crate::common::{
-    column_identifier_no_alias, debug_print, if_not_exists, parse_fallible, statement_terminator,
-    until_statement_terminator, ws_sep_comma,
+    charset_name, collation_name, column_identifier_no_alias, debug_print, if_not_exists,
+    parse_fallible, statement_terminator, until_statement_terminator, ws_sep_comma,
 };
 use crate::compound_select::nested_compound_selection;
 use crate::create_table_options::{
@@ -552,32 +552,6 @@ pub fn create_table(
         };
         create_table.propagate_default_charset(dialect);
         Ok((i, create_table))
-    }
-}
-
-pub(crate) fn charset_name(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CharsetName> {
-    move |i| {
-        alt((
-            map(dialect.identifier(), CharsetName::Unquoted),
-            map(map_res(dialect.string_literal(), String::from_utf8), |s| {
-                CharsetName::Quoted(SqlIdentifier::from(s))
-            }),
-        ))(i)
-    }
-}
-
-pub(crate) fn collation_name(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CollationName> {
-    move |i| {
-        alt((
-            map(dialect.identifier(), CollationName::Unquoted),
-            map(map_res(dialect.string_literal(), String::from_utf8), |s| {
-                CollationName::Quoted(SqlIdentifier::from(s))
-            }),
-        ))(i)
     }
 }
 

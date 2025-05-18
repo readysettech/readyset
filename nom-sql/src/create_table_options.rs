@@ -10,8 +10,7 @@ use nom::sequence::{separated_pair, tuple};
 use nom_locate::LocatedSpan;
 use readyset_sql::{ast::*, Dialect};
 
-use crate::common::{ws_sep_comma, ws_sep_equals};
-use crate::create::{charset_name, collation_name};
+use crate::common::{charset_name, collation_name, ws_sep_comma, ws_sep_equals};
 use crate::dialect::DialectParser;
 use crate::literal::integer_literal;
 use crate::whitespace::{whitespace0, whitespace1};
