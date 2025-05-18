@@ -1,0 +1,14 @@
+services:
+  mysql:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/mysql:5.7
+    environment:
+      - MYSQL_ROOT_PASSWORD=noria
+      - MYSQL_DATABASE=noria
+    command: mysqld --server-id=1 --log_bin=/var/lib/mysql/binlog --binlog-format=ROW
+  app:
+    depends_on:
+      - mysql
+    environment:
+      - AUTHORITY=standalone
+      - ALLOW_UNAUTHENTICATED_CONNECTIONS=true
+      - MYSQL_HOST=mysql

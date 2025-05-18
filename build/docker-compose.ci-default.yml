@@ -1,28 +1,27 @@
-# Depends on `docker-compose.yml` from the root of the repository.
-# As such, context is now at root.
+# Depends on `docker-compose.yml` from build/
 
 services:
   consul-server:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/consul:1.15
     expose:
-      - '8500'
-      - '8600'
+      - "8500"
+      - "8600"
   mysql:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/mysql:8.0
     expose:
-      - '3306'
+      - "3306"
   postgres:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/postgres:15
     expose:
-      - '5432'
+      - "5432"
   postgres13:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/postgres:13
     expose:
-      - '5433'
+      - "5433"
   redis:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/redis:6.2
     expose:
-      - '6379'
+      - "6379"
   app:
     image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}"
     ulimits:
@@ -31,27 +30,27 @@ services:
         hard: "65536"
     working_dir: /workdir
     volumes:
-    - 'target:/workdir/target'
-    - 'cargo-registry:/usr/local/cargo/registry'
-    - '/tmp/orchestrator-state:/tmp/orchestrator-state'
-    - "${BUILDKITE_BUILD_CHECKOUT_PATH}:/workdir"
-      # Needed for the installer to send commands to the host when run via expect_test.rs:
-    - '/var/run/docker.sock:/var/run/docker.sock'
+      - "target:/workdir/target"
+      - "cargo-registry:/usr/local/cargo/registry"
+      - "/tmp/orchestrator-state:/tmp/orchestrator-state"
+      - "${BUILDKITE_BUILD_CHECKOUT_PATH}:/workdir"
+        # Needed for the installer to send commands to the host when run via expect_test.rs:
+      - "/var/run/docker.sock:/var/run/docker.sock"
     environment:
-    - AUTHORITY_ADDRESS=consul-server:8500
-    - AUTHORITY=consul
-    - REDIS_URL=redis://redis:6379/
-    - MYSQL_HOST=mysql
-    - POSTGRESQL_HOST=postgres
-    - PGHOST=postgres
-    - PGHOST13=postgres13
-    - ALLOW_UNAUTHENTICATED_CONNECTIONS=true
+      - AUTHORITY_ADDRESS=consul-server:8500
+      - AUTHORITY=consul
+      - REDIS_URL=redis://redis:6379/
+      - MYSQL_HOST=mysql
+      - POSTGRESQL_HOST=postgres
+      - PGHOST=postgres
+      - PGHOST13=postgres13
+      - ALLOW_UNAUTHENTICATED_CONNECTIONS=true
     depends_on:
-    - redis
-    - mysql
-    - postgres
-    - postgres13
-    - consul-server
+      - redis
+      - mysql
+      - postgres
+      - postgres13
+      - consul-server
 
 volumes:
   target:

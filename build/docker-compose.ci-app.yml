@@ -1,0 +1,27 @@
+# Depends on `docker-compose.yml` from the root of the repository.
+# As such, context is now at root.
+
+services:
+  app:
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}"
+    ulimits:
+      nofile:
+        soft: "65536"
+        hard: "65536"
+    working_dir: /workdir
+    volumes:
+      - "target:/workdir/target"
+      - "cargo-registry:/usr/local/cargo/registry"
+      - "/tmp/orchestrator-state:/tmp/orchestrator-state"
+      - "${BUILDKITE_BUILD_CHECKOUT_PATH}:/workdir"
+      # Needed for the installer to send commands to the host when run via expect_test.rs:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    environment:
+      - AUTHORITY=standalone
+      - ALLOW_UNAUTHENTICATED_CONNECTIONS=true
+
+volumes:
+  target:
+    external: true
+  cargo-registry:
+    external: true

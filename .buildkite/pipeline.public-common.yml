@@ -84,7 +84,7 @@ steps:
           retries: 3
     retry: *retry_on_agent_kill
 
-  - label: ':rust: Run tests: {{matrix}}'
+  - label: ':rust: Run tests (nextest, default upstreams, MRBR off)'
     key: rust-tests
     command: |
       [ -d public ] && cd public
@@ -112,7 +112,7 @@ steps:
             - 'target:/workdir/target'
           config:
             - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
+            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-default.yml"
           mount-buildkite-agent: true
           quiet-pull: true    # don't log all the image pulls
           pull-retries: 3
@@ -121,13 +121,87 @@ steps:
           retries: 3
     agents:
       queue: c6a-4xlarge
-    matrix:
-      - "nextest"
-      - "doctest"
-      - "MRBR"
+    retry: *retry_on_agent_kill
+    
+  - label: ':rust: Run tests (nextest, mysql80 upstream, MRBR on)'
+    key: rust-tests-mrbr
+    command: |
+      [ -d public ] && cd public
+      TEST_CATEGORY=nextest UPSTREAM_CONFIG=mysql80 MYSQL_MRBR=on .buildkite/run-tests.sh
+      echo "~~~ Show sccache stats"
+      sccache --show-stats
+    timeout_in_minutes: 60
+    depends_on:
+      - build-image
+    plugins:
+      - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
+          run: app
+          tty: true           # nextest makes colored output if we use tty
+          env:
+            - BUILDKITE_PARALLEL_JOB
+            - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
+            - SCCACHE_REGION=us-east-2
+            - CARGO_INCREMENTAL=0
+            - RUST_BACKTRACE=full
+            - MYSQL_HOST=mysql
+            - MYSQL_PWD=noria
+            - MYSQL_DB=noria
+            - CARGO_TERM_PROGRESS_WHEN=never     # disable progress bars if tty=true
+          volumes:
+            - 'target:/workdir/target'
+          config:
+            - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
+            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-default.yml"
+          mount-buildkite-agent: true
+          quiet-pull: true    # don't log all the image pulls
+          pull-retries: 3
+      - ecr#${ECR_PLUGIN_VERSION}:
+          login: true
+          retries: 3
+    agents:
+      queue: c6a-4xlarge
+    retry: *retry_on_agent_kill
+    
+  - label: ':rust: Run doctests :books:'
+    key: rust-dectests
+    command: |
+      [ -d public ] && cd public
+      TEST_CATEGORY=doctest .buildkite/run-tests.sh
+      echo "~~~ Show sccache stats"
+      sccache --show-stats
+    timeout_in_minutes: 60
+    depends_on:
+      - build-image
+    plugins:
+      - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
+          run: app
+          tty: true           # nextest makes colored output if we use tty
+          env:
+            - BUILDKITE_PARALLEL_JOB
+            - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
+            - SCCACHE_REGION=us-east-2
+            - CARGO_INCREMENTAL=0
+            - RUST_BACKTRACE=full
+            - MYSQL_HOST=mysql
+            - MYSQL_PWD=noria
+            - MYSQL_DB=noria
+            - CARGO_TERM_PROGRESS_WHEN=never     # disable progress bars if tty=true
+          volumes:
+            - 'target:/workdir/target'
+          config:
+            - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
+            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-default.yml"
+          mount-buildkite-agent: true
+          quiet-pull: true    # don't log all the image pulls
+          pull-retries: 3
+      - ecr#${ECR_PLUGIN_VERSION}:
+          login: true
+          retries: 3
+    agents:
+      queue: c6a-4xlarge
     retry: *retry_on_agent_kill
 
-  - label: 'Run logictest'
+  - label: ':sqlite: Run logictest'
     key: logictest
     command:
       - 'echo +++ Running readyset-logictest'
@@ -154,7 +228,7 @@ steps:
             - CARGO_TERM_PROGRESS_WHEN=never     # disable progress bars if tty=true
           config:
             - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-test.yml"
+            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-default.yml"
           quiet-pull: true    # don't log all the image pulls
           pull-retries: 3
       - ecr#${ECR_PLUGIN_VERSION}:
