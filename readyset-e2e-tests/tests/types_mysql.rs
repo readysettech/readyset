@@ -322,7 +322,7 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
     }
 }
 
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 #[proptest(ProptestConfig::default(), max_shrink_time = 120_000)]
 #[slow]
 fn round_trip_mysql_type_arbitrary(
@@ -402,7 +402,7 @@ fn round_trip_mysql_type_regressions_mediumint_negative() {
     round_trip_mysql_type(SqlType::MediumInt(None), Value::Int(-1), Value::Int(-2));
 }
 
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 #[test]
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_signed() {
@@ -413,7 +413,7 @@ fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_s
     );
 }
 
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 #[test]
 #[slow]
 fn round_trip_mysql_type_regressions_mediumint_unsigned_positive_large_sending_unsigned() {
@@ -545,7 +545,7 @@ fn round_trip_mysql_type_regressions_char_255_length_nonempty() {
     )
 }
 
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 #[test]
 #[slow]
 fn round_trip_mysql_type_regressions_bigint_high() {

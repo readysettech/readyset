@@ -1878,7 +1878,7 @@ async fn mysql_enum_replication() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 #[slow]
 async fn mysql_binlog_transaction_compression() {
     readyset_tracing::init_test_logging();

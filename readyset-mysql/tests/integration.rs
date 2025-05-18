@@ -2327,7 +2327,7 @@ async fn datetime_binary_protocol() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 async fn timestamp_binary_protocol() {
     let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql.query_drop("
@@ -2376,7 +2376,7 @@ async fn timestamp_binary_protocol() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 async fn timestamp_text_protocol() {
     let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
     direct_mysql.query_drop("
@@ -2853,7 +2853,7 @@ async fn test_column_definition_verify(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 async fn test_column_definition_upstream_readyset_snapshot() {
     readyset_tracing::init_test_logging();
     let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
@@ -2871,7 +2871,7 @@ async fn test_column_definition_upstream_readyset_snapshot() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 async fn test_column_definition_upstream_readyset_replication() {
     readyset_tracing::init_test_logging();
     let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();

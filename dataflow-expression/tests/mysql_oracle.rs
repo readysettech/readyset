@@ -139,12 +139,6 @@ async fn example_exprs_eval_same_as_mysql() {
         "null != null",
         "1 = null",
         "null != 1",
-        "json_overlaps(null, null)",
-        "json_overlaps(null, '[]')",
-        "json_overlaps('[]', null)",
-        "json_overlaps('[]', '[]')",
-        "json_overlaps('true', 'true')",
-        "json_overlaps('[42]', '[0, 42, 0]')",
         "substring('abcdef', 3)",
         "substring('abcdef', 3, 2)",
         "substring('abcdef', 1, 3)",
@@ -167,6 +161,23 @@ async fn example_exprs_eval_same_as_mysql() {
         r"'a\b' like 'a\\b'",
         r"CAST(-1 AS signed)",
         r"CAST(2 AS unsigned integer)",
+    ] {
+        compare_eval(expr, &mut conn).await;
+    }
+}
+
+#[tokio::test]
+#[tags(serial, mysql8_upstream)]
+async fn example_exprs_eval_same_as_mysql8() {
+    let mut conn = Conn::new(opts()).await.unwrap();
+
+    for expr in [
+        "json_overlaps(null, null)",
+        "json_overlaps(null, '[]')",
+        "json_overlaps('[]', null)",
+        "json_overlaps('[]', '[]')",
+        "json_overlaps('true', 'true')",
+        "json_overlaps('[42]', '[0, 42, 0]')",
     ] {
         compare_eval(expr, &mut conn).await;
     }

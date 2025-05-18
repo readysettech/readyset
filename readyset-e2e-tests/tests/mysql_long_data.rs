@@ -5,7 +5,7 @@ use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use test_utils::{slow, tags};
 
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 #[test]
 #[slow]
 fn mysql_send_long_data() {

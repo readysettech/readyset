@@ -1011,7 +1011,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
     assert_eq!(row[0].1, key_upper);
 }
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 async fn test_sensitiveness_lookup() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, mut handle, shutdown_tx) = setup(
