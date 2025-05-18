@@ -426,7 +426,7 @@ where
 
         mysql
             .query_drop(
-                "ALTER DATABASE vertical DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_0900_bin",
+                "ALTER DATABASE vertical DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_bin",
             )
             .await
             .unwrap();

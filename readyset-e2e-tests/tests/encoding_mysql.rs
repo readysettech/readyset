@@ -35,6 +35,12 @@ where
     let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
     let values: Vec<_> = range.into_iter().collect();
 
+    let collation_clause = if collation.is_empty() {
+        String::new()
+    } else {
+        format!(" COLLATE '{}'", collation)
+    };
+
     let create_table = format!(
         r#"
             SET NAMES utf8mb4;
@@ -42,11 +48,11 @@ where
             CREATE TABLE encoding_table (
                 id INT NOT NULL,
                 hex VARCHAR(255) CHARACTER SET utf8mb4,
-                text {} COLLATE '{}',
+                text {} {},
                 counter INT NOT NULL DEFAULT 0
             );
         "#,
-        column_type, collation
+        column_type, collation_clause
     );
     upstream_conn.query_drop(create_table).await.unwrap();
 
@@ -197,6 +203,12 @@ where
 
     let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
 
+    let collation_clause = if collation.is_empty() {
+        String::new()
+    } else {
+        format!(" COLLATE '{}'", collation)
+    };
+
     let create_table = format!(
         r#"
             SET NAMES utf8mb4;
@@ -204,10 +216,10 @@ where
             CREATE TABLE encoding_table (
                 id INT NOT NULL,
                 hex VARCHAR(255) CHARACTER SET utf8mb4,
-                text {} COLLATE '{}'
+                text {} {}
             );
         "#,
-        column_type, collation
+        column_type, collation_clause
     );
     upstream_conn.query_drop(create_table).await.unwrap();
 
@@ -606,7 +618,9 @@ test_encoding_replication!(
 // Doesn't really do any encoding, obviously, but protects against mistakes in the conversion
 // codepaths where blob and binary string column types overlap with text column types.
 test_encoding_replication!(blob, "BLOB", "binary", format_u32s(2, 0..=255));
+test_encoding_replication!(blob_no_collate, "BLOB", "", format_u32s(2, 0..=255));
 test_encoding_replication!(binary, "BINARY", "binary", format_u32s(2, 0..=255));
+test_encoding_replication!(binary_no_collate, "BINARY", "", format_u32s(2, 0..=255));
 test_encoding_replication!(
     binary_padded,
     "BINARY(10)",
@@ -614,14 +628,26 @@ test_encoding_replication!(
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
-    char_binary_padded,
-    "CHAR(10)",
-    "binary",
+    binary_padded_no_collate,
+    "BINARY(10)",
+    "",
     format_u32s(2, 0..=255)
 );
 test_encoding_replication!(
     varbinary,
     "VARBINARY(255)",
+    "binary",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    varbinary_no_collate,
+    "VARBINARY(255)",
+    "",
+    format_u32s(2, 0..=255)
+);
+test_encoding_replication!(
+    char_binary_padded,
+    "CHAR(10)",
     "binary",
     format_u32s(2, 0..=255)
 );

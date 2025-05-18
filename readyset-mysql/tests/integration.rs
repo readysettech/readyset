@@ -2498,7 +2498,7 @@ async fn test_char_column_padding_binary_collation() {
     my_conn
         .query_drop(
             "DROP TABLE IF EXISTS char_binary_padding CASCADE;
-             CREATE TABLE char_binary_padding (col1 CHAR(5) COLLATE binary);
+             CREATE TABLE char_binary_padding (col1 CHAR(5) COLLATE 'binary');
              INSERT INTO char_binary_padding VALUES ('foo'), ('¥'), ('');",
         )
         .await

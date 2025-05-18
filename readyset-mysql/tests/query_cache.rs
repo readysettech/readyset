@@ -778,7 +778,7 @@ async fn test_char_padding_lookup() {
         "CREATE TABLE `col_pad_lookup` (
         id int NOT NULL PRIMARY KEY,
         c CHAR(3)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;",
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
     )
     .await
     .unwrap();
@@ -840,7 +840,7 @@ async fn test_binary_padding_lookup() {
         "CREATE TABLE `col_pad_bin_lookup` (
         id int NOT NULL PRIMARY KEY,
         b BINARY(3)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;",
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
     )
     .await
     .unwrap();

@@ -735,7 +735,7 @@ async fn mysql_binary_collation_padding_inner() {
             CREATE TABLE `col_bin_pad` (
                 id int NOT NULL PRIMARY KEY,
                 c BINARY(3)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             INSERT INTO `col_bin_pad` VALUES (1, 'ࠈ');
             INSERT INTO `col_bin_pad` VALUES (2, 'A');
             INSERT INTO `col_bin_pad` VALUES (3, 'AAA');
@@ -849,7 +849,7 @@ async fn mysql_char_collation_padding_inner() {
             CREATE TABLE `col_pad` (
                 id int NOT NULL PRIMARY KEY,
                 c CHAR(3)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             INSERT INTO `col_pad` VALUES (1, 'ࠈࠈ');
             INSERT INTO `col_pad` VALUES (2, 'A');
             INSERT INTO `col_pad` VALUES (3, 'AAA');
