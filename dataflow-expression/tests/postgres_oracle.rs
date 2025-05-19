@@ -105,8 +105,6 @@ fn example_exprs_eval_same_as_postgres() {
         "concat('a')",
         "split_part('abc~@~def~@~ghi', '~@~', 2)",
         "split_part('a.b.c', '.', 4)",
-        "split_part('a.b.c', '.', -1)",
-        "split_part('a.b.c', '.', -4)",
         r"'foo\bar'",
         r"'foo\%bar'",
         r"'foo\_bar'",
@@ -132,6 +130,29 @@ fn example_exprs_eval_same_as_postgres() {
         r"E'a\b' like 'a\b'",
         r"'a\b' like E'a\\\\b'",
         r"'a\b' like 'a\\b'",
+    ] {
+        compare_eval(expr, &mut client);
+    }
+}
+
+#[tags(serial, postgres15_upstream)]
+#[test]
+fn example_exprs_eval_same_as_postgres15() {
+    let mut client = config().connect(NoTls).unwrap();
+
+    client.simple_query("DROP TYPE IF EXISTS abc;").unwrap();
+    client
+        .simple_query("CREATE TYPE abc AS ENUM ('a', 'b', 'c')")
+        .unwrap();
+
+    client.simple_query("DROP TYPE IF EXISTS cba;").unwrap();
+    client
+        .simple_query("CREATE TYPE cba AS ENUM ('c', 'b', 'a')")
+        .unwrap();
+
+    for expr in [
+        "split_part('a.b.c', '.', -1)",
+        "split_part('a.b.c', '.', -4)",
     ] {
         compare_eval(expr, &mut client);
     }
@@ -311,7 +332,7 @@ mod extract {
         }
     }
 
-    #[tags(postgres_upstream)]
+    #[tags(postgres15_upstream)]
     #[test]
     fn timestamptz() {
         let client = RefCell::new(config().connect(NoTls).unwrap());
@@ -328,7 +349,7 @@ mod extract {
         });
     }
 
-    #[tags(postgres_upstream)]
+    #[tags(postgres15_upstream)]
     #[test]
     fn timestamp() {
         let client = RefCell::new(config().connect(NoTls).unwrap());
@@ -345,7 +366,7 @@ mod extract {
         });
     }
 
-    #[tags(postgres_upstream)]
+    #[tags(postgres15_upstream)]
     #[test]
     fn date() {
         let client = RefCell::new(config().connect(NoTls).unwrap());
@@ -386,25 +407,25 @@ mod extract {
         });
     }
 
-    #[tags(postgres_upstream)]
+    #[tags(postgres15_upstream)]
     #[test]
     fn time_from_date() {
         test_extract_time_from("date");
     }
 
-    #[tags(postgres_upstream)]
+    #[tags(postgres15_upstream)]
     #[test]
     fn time_from_timestamp_with_date_only() {
         test_extract_time_from("timestamp");
     }
 
-    #[tags(postgres_upstream)]
+    #[tags(postgres15_upstream)]
     #[test]
     fn time_from_timestamptz_with_date_only() {
         test_extract_time_from("timestamptz");
     }
 
-    #[tags(postgres_upstream)]
+    #[tags(postgres15_upstream)]
     #[test]
     fn timeee() {
         let client = RefCell::new(config().connect(NoTls).unwrap());
@@ -418,7 +439,7 @@ mod extract {
         });
     }
 
-    #[tags(postgres_upstream)]
+    #[tags(postgres15_upstream)]
     #[test]
     fn ethan() {
         use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeZone};

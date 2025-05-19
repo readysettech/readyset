@@ -983,7 +983,7 @@ async fn mysql_skip_unparsable() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, postgres_upstream)]
+#[tags(serial, postgres15_upstream)]
 #[slow]
 async fn pgsql_replication_filter() {
     replication_filter_inner(&pgsql_url()).await.unwrap();

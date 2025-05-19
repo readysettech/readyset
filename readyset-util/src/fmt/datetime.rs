@@ -412,7 +412,7 @@ mod tests {
             }
         }
 
-        #[tags(postgres_upstream)]
+        #[tags(postgres15_upstream)]
         #[test]
         fn test_timestamps_same_as_postgres() {
             let mut client = config().connect(NoTls).unwrap();
@@ -431,7 +431,7 @@ mod tests {
             }
         }
 
-        #[tags(postgres_upstream)]
+        #[tags(postgres15_upstream)]
         #[test]
         fn test_timestamptzs_same_as_postgres() {
             let mut client = config().connect(NoTls).unwrap();
@@ -507,7 +507,7 @@ mod tests {
             ///
             /// See the documentation for [`write_timestamp`] for more information about these
             /// discrepancies.
-            #[tags(postgres_upstream)]
+            #[tags(postgres15_upstream)]
             #[test]
             fn test_write_timestamp() {
                 let client = RefCell::new(config().connect(NoTls).unwrap());
@@ -529,7 +529,7 @@ mod tests {
             ///
             /// See the documentation for [`write_timestamp_tz`] for more information about these
             /// discrepancies.
-            #[tags(postgres_upstream)]
+            #[tags(postgres15_upstream)]
             #[test]
             fn test_write_timestamp_tz() {
                 fn arbitrary_stable_timezone() -> impl Strategy<Value = Tz> {

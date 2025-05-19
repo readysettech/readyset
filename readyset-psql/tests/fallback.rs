@@ -2772,7 +2772,7 @@ async fn drop_all_proxied_queries() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, postgres_upstream)]
+#[tags(serial, postgres15_upstream)]
 #[slow]
 async fn numeric_inf_nan() {
     readyset_tracing::init_test_logging();
