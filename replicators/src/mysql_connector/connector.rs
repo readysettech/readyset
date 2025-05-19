@@ -399,10 +399,6 @@ impl MySqlBinlogConnector {
                 .get_tme(table_id)
                 .ok_or_else(|| format!("TME not found for table ID {}", table_id))
         );
-        let (collation_vec, signedness_vec) = handle_err!(
-            self,
-            Self::get_table_metadata(&mut self.noria, &mut self.table_schemas, tme).await
-        );
 
         if !self
             .table_filter
@@ -410,6 +406,11 @@ impl MySqlBinlogConnector {
         {
             return Ok(ReplicationAction::Empty);
         }
+
+        let (collation_vec, signedness_vec) = handle_err!(
+            self,
+            Self::get_table_metadata(&mut self.noria, &mut self.table_schemas, tme).await
+        );
 
         let mut inserted_rows = Vec::new();
         for row in wr_event.rows(tme) {
@@ -617,10 +618,6 @@ impl MySqlBinlogConnector {
                 .get_tme(table_id)
                 .ok_or_else(|| format!("TME not found for table ID {}", table_id))
         );
-        let (collation_vec, signedness_vec) = handle_err!(
-            self,
-            Self::get_table_metadata(&mut self.noria, &mut self.table_schemas, tme).await
-        );
 
         if !self
             .table_filter
@@ -628,6 +625,11 @@ impl MySqlBinlogConnector {
         {
             return Ok(ReplicationAction::Empty);
         }
+
+        let (collation_vec, signedness_vec) = handle_err!(
+            self,
+            Self::get_table_metadata(&mut self.noria, &mut self.table_schemas, tme).await
+        );
 
         let mut updated_rows = Vec::with_capacity(ur_event.rows(tme).count());
         // Process each row update
@@ -669,10 +671,6 @@ impl MySqlBinlogConnector {
                 .get_tme(table_id)
                 .ok_or_else(|| format!("TME not found for table ID {}", table_id))
         );
-        let (collation_vec, signedness_vec) = handle_err!(
-            self,
-            Self::get_table_metadata(&mut self.noria, &mut self.table_schemas, tme).await
-        );
 
         if !self
             .table_filter
@@ -680,6 +678,11 @@ impl MySqlBinlogConnector {
         {
             return Ok(ReplicationAction::Empty);
         }
+
+        let (collation_vec, signedness_vec) = handle_err!(
+            self,
+            Self::get_table_metadata(&mut self.noria, &mut self.table_schemas, tme).await
+        );
 
         let mut deleted_rows = Vec::new();
         for row in dr_event.rows(tme) {
