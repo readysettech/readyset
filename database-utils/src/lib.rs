@@ -149,7 +149,7 @@ pub struct UpstreamConfig {
     ///
     /// If set, ReadySet still raises the soft limit to min(our requirement, hard limit). It just
     /// doesn't treat (our requirement > hard limit) as a fatal error.
-    #[arg(long, env = "IGNORE_ULIMIT_CHECK")]
+    #[arg(long, env = "IGNORE_ULIMIT_CHECK", default_value = "true")]
     #[serde(default)]
     pub ignore_ulimit_check: bool,
 
