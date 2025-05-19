@@ -86,9 +86,11 @@ steps:
 
   - label: ':rust: Run tests: {{matrix}}'
     key: rust-tests
-    commands:
-      - '[ -d public ] && cd public'
-      - 'MATRIX_VALUE={{matrix}} .buildkite/run-tests.sh'
+    command: |
+      [ -d public ] && cd public
+      MATRIX_VALUE={{matrix}} .buildkite/run-tests.sh
+      echo "~~~ Show sccache stats"
+      sccache --show-stats
     timeout_in_minutes: 60
     depends_on:
       - build-image
