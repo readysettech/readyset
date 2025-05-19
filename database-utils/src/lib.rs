@@ -80,13 +80,15 @@ pub struct UpstreamConfig {
 
     /// Server ID to use when registering as a replication follower with the upstream db
     ///
-    /// This can be used to differentiate different ReadySet deployments connected to the same
+    /// This can be used to differentiate different Readyset deployments connected to the same
     /// upstream DB.
     ///
-    /// This ends up being a suffix of the replication slot or resnapshot replication slot, which
-    /// have prefixes of 'readyset_' and 'readyset_resnapshot_', respectively. Since a replication
-    /// slot is limited by postgres to a length of 63 bytes, that means this server id must be 43
-    /// bytes or fewer.
+    /// For Postgres, this ends up being a suffix of the replication slot or resnapshot replication
+    /// slot, which have prefixes of 'readyset_' and 'readyset_resnapshot_', respectively. Since a
+    /// replication slot is limited by postgres to a length of 63 bytes, that means this server id
+    /// must be 43 bytes or fewer.
+    ///
+    /// For MySQL, this must be parseable as a u32 that is unique across the replication topology.
     #[arg(long, env = "REPLICATION_SERVER_ID", hide = true, value_parser = parse_repl_server_id)]
     #[serde(default)]
     pub replication_server_id: Option<ReplicationServerId>,

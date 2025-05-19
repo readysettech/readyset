@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -36,6 +36,36 @@ pub mod psql_helpers;
 
 pub async fn sleep() {
     tokio::time::sleep(Duration::from_millis(200)).await;
+}
+
+static UNIQUE_SERVER_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+/// Generate a unique server ID for this replica to connect to the upstream with. It should be
+/// "unique" in the sense that running tests in parallel will not cause conflicts.
+///
+/// For MySQL, the server ID must be parseable as a u32, and should be unique across all servers
+/// in the replication topology. Luckily, 32 bits should be enough to ensure uniqueness in a
+/// reasonable test run, exploiting a few facts:
+///
+/// 1. The theoretical max process ID on Linux is 22 bits.
+/// 2. `cargo nextest` runs each test in a separate process.
+///
+/// Based on (2), we can pretty much just use the PID as the server ID. But to support running
+/// under `cargo test`, which runs tests from a given test binary (i.e. crate or test module
+/// within a crate) in parallel within a single process.
+///
+/// 3. We are probably okay with running no more than 2^(32-22)=1024 concurrent tests within a
+///    single crate/test module.
+///
+/// So to give `cargo test` runs a good chance, we set the high bits to the current PID, and
+/// have an in-process atomic counter which wraps at 1024 to fill in the low bits.
+///
+/// For Postgres, we have 43 bytes to play with, but given this scheme, I don't think we need it.
+fn unique_server_id() -> ReplicationServerId {
+    let pid = std::process::id();
+    let counter = UNIQUE_SERVER_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let server_id = (pid << 10) | (counter & 0x3FF);
+    ReplicationServerId(server_id.to_string())
 }
 
 #[async_trait]
@@ -277,6 +307,8 @@ impl TestBuilder {
 
         if let Some(id) = self.replication_server_id {
             builder.set_replicator_server_id(id);
+        } else {
+            builder.set_replicator_server_id(unique_server_id());
         }
 
         let (mut handle, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
