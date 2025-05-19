@@ -151,7 +151,7 @@ impl fmt::Display for QueryDestination {
             QueryDestination::Upstream => "upstream",
             QueryDestination::Both => "both",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 

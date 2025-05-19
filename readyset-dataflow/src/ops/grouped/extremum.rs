@@ -148,7 +148,7 @@ impl GroupedOperation for ExtremumOperator {
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ");
-        format!("{} γ[{}]", op_string, group_cols)
+        format!("{op_string} γ[{group_cols}]")
     }
 
     fn over_column(&self) -> usize {

@@ -141,11 +141,11 @@ impl ReplContext {
             }
         );
         if let Some(user) = self.options.database_url.user() {
-            url.push_str(&format!("{}@", user))
+            url.push_str(&format!("{user}@"))
         }
         url.push_str(self.options.database_url.host());
         if let Some(db_name) = self.options.database_url.db_name() {
-            url.push_str(&format!("/{}", db_name));
+            url.push_str(&format!("/{db_name}"));
         }
 
         format!("[{}] {:?} ❯ ", style(url).bold(), last_duration)
@@ -220,7 +220,7 @@ impl ReplContext {
                 };
                 self.prepared_statements.push(stmt);
 
-                println!("Prepared statement id: {}", statement_id);
+                println!("Prepared statement id: {statement_id}");
             }
             Command::ExecutePrepared {
                 statement_id,
@@ -249,7 +249,7 @@ fn print_result(rows: Vec<Vec<DfValue>>) {
     for row in rows {
         table.add_row(row.into());
     }
-    print!("\n{}", table);
+    print!("\n{table}");
 }
 
 #[derive(Completer, Hinter, Helper, Highlighter)]
@@ -286,7 +286,7 @@ async fn main() -> Result<()> {
                 last_start = Instant::now();
                 match context.handle_command(&cmd).await {
                     Err(err) => {
-                        eprintln!("Error: {:#}", err);
+                        eprintln!("Error: {err:#}");
                     }
                     Ok(()) => {
                         rl.add_history_entry(&cmd)?;
@@ -307,7 +307,7 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
             Err(err) => {
-                eprintln!("Error: {:#}", err);
+                eprintln!("Error: {err:#}");
             }
         }
     }

@@ -95,7 +95,7 @@ fn eviction_lru() {
 }
 
 fn check_ts(last: u64, now: u64) {
-    assert!(now > last, "{} > {} failed", now, last);
+    assert!(now > last, "{now} > {last} failed");
     thread::sleep(Duration::from_millis(2));
 }
 

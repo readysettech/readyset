@@ -270,12 +270,12 @@ impl NotReplicatedReason {
                         let start_offset = start + prefix.len();
                         let type_name_raw = &reason[start_offset..];
                         let type_name = type_name_raw.trim();  // Trim whitespace
-                        format!("Column type {} is not supported.", type_name)
+                        format!("Column type {type_name} is not supported.")
                     } else {
                         "Column type unknown is not supported.".to_string()
                     }
                 },
-                NotReplicatedReason::OtherError(error) => format!("An unexpected replication error occurred: {}", error),
+                NotReplicatedReason::OtherError(error) => format!("An unexpected replication error occurred: {error}"),
                 NotReplicatedReason::Default => "No specific reason provided.".to_string(),
             }
     }
@@ -294,8 +294,8 @@ impl fmt::Debug for NotReplicatedReason {
             Self::Configuration => write!(f, "Configuration"),
             Self::TableDropped => write!(f, "TableDropped"),
             Self::Partitioned => write!(f, "Partitioned"),
-            Self::UnsupportedType(s) => write!(f, "UnsupportedType({})", s),
-            Self::OtherError(s) => write!(f, "OtherError({})", s),
+            Self::UnsupportedType(s) => write!(f, "UnsupportedType({s})"),
+            Self::OtherError(s) => write!(f, "OtherError({s})"),
             Self::Default => write!(f, ""),
         }
     }

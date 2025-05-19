@@ -1208,11 +1208,11 @@ mod tests {
         fn no_keys() {
             let (keys, query) = process_and_make_keys_postgres("SELECT * FROM test", vec![]);
             assert_eq!(query, parse_select_statement_postgres("SELECT * FROM test"));
-            assert!(keys.is_empty(), "keys = {:?}", keys);
+            assert!(keys.is_empty(), "keys = {keys:?}");
 
             let (keys, query) = process_and_make_keys_mysql("SELECT * FROM test", vec![]);
             assert_eq!(query, parse_select_statement_mysql("SELECT * FROM test"));
-            assert!(keys.is_empty(), "keys = {:?}", keys);
+            assert!(keys.is_empty(), "keys = {keys:?}");
         }
 
         #[test]

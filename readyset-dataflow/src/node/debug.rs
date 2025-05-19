@@ -30,14 +30,14 @@ fn out_header(
     key_count: &str,
     node_size: &str,
 ) -> usize {
-    s.push_str(&format!("<tr><td>{}</td> ", addr));
+    s.push_str(&format!("<tr><td>{addr}</td> "));
     let mut span = 1;
     if !materialized.is_empty() {
-        s.push_str(&format!("<td>{} {}</td> ", materialized, key_count));
+        s.push_str(&format!("<td>{materialized} {key_count}</td> "));
         span += 1;
     }
     if !node_size.is_empty() {
-        s.push_str(&format!("<td>{}</td> ", node_size));
+        s.push_str(&format!("<td>{node_size}</td> "));
         span += 1;
     }
     s.push_str("</tr> ");
@@ -57,10 +57,7 @@ fn out_columns(s: &mut String, span: usize, node: &Node) {
 }
 
 fn out_sharding(s: &mut String, span: usize, sharding: &str) {
-    s.push_str(&format!(
-        "<tr><td colspan=\"{}\">{}</td></tr>",
-        span, sharding
-    ));
+    s.push_str(&format!("<tr><td colspan=\"{span}\">{sharding}</td></tr>"));
 }
 
 impl Node {
@@ -78,14 +75,11 @@ impl Node {
 
         s.push_str("[label=< <table ");
         s.push_str(&format!(
-            r#"cellspacing="0" cellpadding="4" border="0" cellborder="1" bgcolor="{}"> "#,
-            color
+            r#"cellspacing="0" cellpadding="4" border="0" cellborder="1" bgcolor="{color}"> "#
         ));
 
         let (key_count, node_size) = match node_sizes.get(&idx) {
-            Some(NodeSize { key_count, bytes }) => {
-                (format!("({})", key_count), format!("{}", bytes))
-            }
+            Some(NodeSize { key_count, bytes }) => (format!("({key_count})"), format!("{bytes}")),
             _ => ("".to_string(), "".to_string()),
         };
 
@@ -125,8 +119,7 @@ impl Node {
         match self.inner {
             NodeType::Source => s.push_str("<tr><td>source</td></tr>"),
             NodeType::Dropped => s.push_str(&format!(
-                "<tr><td>{}</td></tr><tr><td>dropped</td></tr>",
-                addr
+                "<tr><td>{addr}</td></tr><tr><td>dropped</td></tr>"
             )),
             NodeType::Base(..) => {
                 s.push_str(&format!(
@@ -141,16 +134,16 @@ impl Node {
             }
             NodeType::Ingress => {
                 let span = out_header(&mut s, &addr, materialized, &key_count, &node_size);
-                s.push_str(&format!("<tr><td colspan=\"{}\">ingress</td></tr> ", span));
+                s.push_str(&format!("<tr><td colspan=\"{span}\">ingress</td></tr> "));
                 out_sharding(&mut s, span, &sharding);
             }
             NodeType::Egress { .. } => {
-                s.push_str(&format!("<tr><td>{}</td></tr> ", addr));
+                s.push_str(&format!("<tr><td>{addr}</td></tr> "));
                 s.push_str("<tr><td>egress</td></tr> ");
                 out_sharding(&mut s, 1, &sharding);
             }
             NodeType::Sharder(ref sharder) => {
-                s.push_str(&format!("<tr><td>{}</td></tr> ", addr));
+                s.push_str(&format!("<tr><td>{addr}</td></tr> "));
                 s.push_str(&format!(
                     "<tr><td>shard by {}</td></tr> ",
                     self.columns[sharder.sharded_by()].name
@@ -164,8 +157,7 @@ impl Node {
                 };
                 let span = out_header(&mut s, &addr, materialized, &key_count, &node_size);
                 s.push_str(&format!(
-                    "<tr><td colspan=\"{}\">reader — ⚷: {}</td></tr> ",
-                    span, key,
+                    "<tr><td colspan=\"{span}\">reader — ⚷: {key}</td></tr> ",
                 ));
                 out_sharding(&mut s, span, &sharding);
             }
@@ -179,11 +171,11 @@ impl Node {
 
                 let mut span = 2;
                 if !materialized.is_empty() {
-                    s.push_str(&format!("<td>{}</td> ", materialized));
+                    s.push_str(&format!("<td>{materialized}</td> "));
                     span += 1;
                 }
                 if !key_count.is_empty() {
-                    s.push_str(&format!("<td>{}</td> ", key_count));
+                    s.push_str(&format!("<td>{key_count}</td> "));
                     span += 1;
                 }
                 s.push_str("</tr> ");

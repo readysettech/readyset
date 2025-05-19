@@ -49,9 +49,9 @@ fn concat_fmt<F: Write>(f: &mut F, dt: &DfValue) -> ReadySetResult<()> {
     match dt {
         DfValue::Text(..) | DfValue::TinyText(..) => {
             let text: &str = <&str>::try_from(dt)?;
-            write!(f, "{}", text).unwrap();
+            write!(f, "{text}").unwrap();
         }
-        x => write!(f, "{}", x).unwrap(),
+        x => write!(f, "{x}").unwrap(),
     }
     Ok(())
 }
@@ -279,7 +279,7 @@ mod tests {
 
         // second row for a group should emit -"1" and +"1#2"
         let rs = c.narrow_one(u, true);
-        eprintln!("{:?}", rs);
+        eprintln!("{rs:?}");
         assert_eq!(rs.len(), 2);
         let mut rs = rs.into_iter();
 

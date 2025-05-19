@@ -155,7 +155,7 @@ async fn delete_multiple() {
     sleep().await;
 
     for i in 1..4 {
-        conn.simple_query(&format!("INSERT INTO Cats (id) VALUES ({})", i))
+        conn.simple_query(&format!("INSERT INTO Cats (id) VALUES ({i})"))
             .await
             .unwrap();
         sleep().await;

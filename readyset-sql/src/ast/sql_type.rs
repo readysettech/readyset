@@ -552,10 +552,10 @@ impl DialectDisplay for SqlType {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             let write_with_len = |f: &mut fmt::Formatter, name, len| {
-                write!(f, "{}", name)?;
+                write!(f, "{name}")?;
 
                 if let Some(len) = len {
-                    write!(f, "({})", len)?;
+                    write!(f, "({len})")?;
                 }
                 Ok(())
             };
@@ -603,8 +603,8 @@ impl DialectDisplay for SqlType {
                 SqlType::Float => write!(f, "FLOAT"),
                 SqlType::Real => write!(f, "REAL"),
                 SqlType::Numeric(precision) => match precision {
-                    Some((prec, Some(scale))) => write!(f, "NUMERIC({}, {})", prec, scale),
-                    Some((prec, _)) => write!(f, "NUMERIC({})", prec),
+                    Some((prec, Some(scale))) => write!(f, "NUMERIC({prec}, {scale})"),
+                    Some((prec, _)) => write!(f, "NUMERIC({prec})"),
                     _ => write!(f, "NUMERIC"),
                 },
                 SqlType::TinyText => write!(f, "TINYTEXT"),
@@ -637,7 +637,7 @@ impl DialectDisplay for SqlType {
                     Ok(())
                 }
                 SqlType::Binary(len) => write_with_len(f, "BINARY", len),
-                SqlType::VarBinary(len) => write!(f, "VARBINARY({})", len),
+                SqlType::VarBinary(len) => write!(f, "VARBINARY({len})"),
                 SqlType::Enum(ref variants) => {
                     write!(f, "ENUM(")?;
                     for (i, variant) in variants.iter().enumerate() {
@@ -648,7 +648,7 @@ impl DialectDisplay for SqlType {
                     }
                     write!(f, ")")
                 }
-                SqlType::Decimal(m, d) => write!(f, "DECIMAL({}, {})", m, d),
+                SqlType::Decimal(m, d) => write!(f, "DECIMAL({m}, {d})"),
                 SqlType::Json => write!(f, "JSON"),
                 SqlType::Jsonb => write!(f, "JSONB"),
                 SqlType::ByteArray => write!(f, "BYTEA"),
@@ -658,7 +658,7 @@ impl DialectDisplay for SqlType {
                 SqlType::Bit(n) => {
                     write!(f, "BIT")?;
                     if let Some(size) = n {
-                        write!(f, "({})", size)?;
+                        write!(f, "({size})")?;
                     }
                     Ok(())
                 }

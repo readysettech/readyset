@@ -652,7 +652,7 @@ impl<'a> PostgresReplicator<'a> {
             .await?;
 
         // Ensure each table has a consistent view by using the same snapshot
-        let query = format!("SET TRANSACTION SNAPSHOT '{}'", snapshot_name);
+        let query = format!("SET TRANSACTION SNAPSHOT '{snapshot_name}'");
         transaction.query(query.as_str(), &[]).await?;
 
         table
@@ -703,7 +703,7 @@ impl<'a> PostgresReplicator<'a> {
                             },
                             Change::AddNonReplicatedRelation(NonReplicatedRelation {
                                 name: table.clone(),
-                                reason: NotReplicatedReason::from_string(&format!("{:?}", error)),
+                                reason: NotReplicatedReason::from_string(&format!("{error:?}")),
                             }),
                         ],
                         DataDialect::DEFAULT_POSTGRESQL,
@@ -1068,7 +1068,7 @@ impl<'a> PostgresReplicator<'a> {
 
     /// Assign the specific snapshot to the underlying transaction
     async fn set_snapshot(&mut self, name: &str) -> Result<(), pgsql::Error> {
-        let query = format!("SET TRANSACTION SNAPSHOT '{}'", name);
+        let query = format!("SET TRANSACTION SNAPSHOT '{name}'");
         get_transaction!(self).query(query.as_str(), &[]).await?;
         Ok(())
     }

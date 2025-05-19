@@ -1121,8 +1121,7 @@ async fn replication_catch_up_inner(url: &str) -> ReadySetResult<()> {
 
                 client
                     .query(&format!(
-                        "INSERT INTO catch_up_pk VALUES ({}, 'I am a teapot')",
-                        idx
+                        "INSERT INTO catch_up_pk VALUES ({idx}, 'I am a teapot')"
                     ))
                     .await?;
 
@@ -1184,11 +1183,10 @@ async fn replication_many_tables_inner(url: &str) -> ReadySetResult<()> {
     let mut client = DbConnection::connect(url).await?;
 
     for t in 0..TOTAL_TABLES {
-        let tbl_name = format!("t{}", t);
+        let tbl_name = format!("t{t}");
         client
             .query(&format!(
-                "DROP TABLE IF EXISTS {0} CASCADE; CREATE TABLE {0} (id int); INSERT INTO {0} VALUES (1);",
-                tbl_name
+                "DROP TABLE IF EXISTS {tbl_name} CASCADE; CREATE TABLE {tbl_name} (id int); INSERT INTO {tbl_name} VALUES (1);"
             ))
             .await?;
     }
@@ -1217,7 +1215,7 @@ async fn replication_many_tables_inner(url: &str) -> ReadySetResult<()> {
 
     for t in 0..TOTAL_TABLES {
         client
-            .query(&format!("DROP TABLE IF EXISTS t{} CASCADE;", t))
+            .query(&format!("DROP TABLE IF EXISTS t{t} CASCADE;"))
             .await?;
     }
 
@@ -2225,7 +2223,7 @@ async fn snapshot_telemetry_inner(url: &String) {
         .into_iter()
         .map(|t| t.schema.expect("should be some"))
         .collect::<Vec<_>>();
-    let schema_str = format!("{:?}", schemas);
+    let schema_str = format!("{schemas:?}");
 
     // MySQL has 1 create table and 1 create view -- postgres has 2 of each. Just assert that we
     // see at least one of each create type:
@@ -2710,14 +2708,14 @@ async fn postgresql_drop_nonexistent_replication_slot() {
     // want to instead consider good enough from replication's point of view
     let slot_name = "doesnotexist";
     let res = client
-        .simple_query(&format!("DROP_REPLICATION_SLOT {}", slot_name))
+        .simple_query(&format!("DROP_REPLICATION_SLOT {slot_name}"))
         .await;
     assert!(error_is_slot_not_found(&res.unwrap_err().into(), slot_name));
 
     // Different type of error shouldn't pass the check
     let slot_name = "invalid syntax";
     let res = client
-        .simple_query(&format!("DROP_REPLICATION_SLOT {}", slot_name))
+        .simple_query(&format!("DROP_REPLICATION_SLOT {slot_name}"))
         .await;
     assert!(!error_is_slot_not_found(
         &res.unwrap_err().into(),

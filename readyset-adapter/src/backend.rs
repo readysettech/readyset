@@ -2155,7 +2155,7 @@ where
                     MigrationState::Unsupported(reason) if reason.is_empty() => {
                         "unsupported: unknown reason".to_string()
                     }
-                    MigrationState::Unsupported(reason) => format!("unsupported: {}", reason),
+                    MigrationState::Unsupported(reason) => format!("unsupported: {reason}"),
                 };
 
                 let mut row = vec![

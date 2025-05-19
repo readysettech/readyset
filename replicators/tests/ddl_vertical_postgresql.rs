@@ -973,10 +973,7 @@ impl ModelState for DDLModelState {
                 pg_conn.simple_query(&query).await.unwrap();
             }
             Operation::DropColumn(table_name, col_name) => {
-                let query = format!(
-                    "ALTER TABLE \"{}\" DROP COLUMN \"{}\"",
-                    table_name, col_name
-                );
+                let query = format!("ALTER TABLE \"{table_name}\" DROP COLUMN \"{col_name}\"");
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
@@ -986,8 +983,7 @@ impl ModelState for DDLModelState {
                 new_name,
             } => {
                 let query = format!(
-                    "ALTER TABLE \"{}\" RENAME COLUMN \"{}\" TO \"{}\"",
-                    table, col_name, new_name
+                    "ALTER TABLE \"{table}\" RENAME COLUMN \"{col_name}\" TO \"{new_name}\""
                 );
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
@@ -1025,10 +1021,9 @@ impl ModelState for DDLModelState {
                     .collect();
                 let select_list = select_list.join(", ");
                 let view_def = format!(
-                    "SELECT {} FROM \"{}\" JOIN \"{}\" ON \"{}\".id = \"{}\".id",
-                    select_list, table_a, table_b, table_a, table_b
+                    "SELECT {select_list} FROM \"{table_a}\" JOIN \"{table_b}\" ON \"{table_a}\".id = \"{table_b}\".id"
                 );
-                let query = format!("CREATE VIEW \"{}\" AS {}", name, view_def);
+                let query = format!("CREATE VIEW \"{name}\" AS {view_def}");
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
                 let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
@@ -1048,7 +1043,7 @@ impl ModelState for DDLModelState {
                 let elements: Vec<String> = elements.iter().map(|e| format!("'{e}'")).collect();
                 let element_list = elements.join(", ");
                 // Quote the type name to prevent clashes with builtin types or reserved keywords
-                let query = format!("CREATE TYPE \"{}\" AS ENUM ({})", name, element_list);
+                let query = format!("CREATE TYPE \"{name}\" AS ENUM ({element_list})");
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
@@ -1073,8 +1068,7 @@ impl ModelState for DDLModelState {
                 next_to_value,
             } => {
                 let query = format!(
-                    "ALTER TYPE \"{}\" ADD VALUE '{}' {} '{}'",
-                    type_name, value_name, position, next_to_value
+                    "ALTER TYPE \"{type_name}\" ADD VALUE '{value_name}' {position} '{next_to_value}'"
                 );
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
@@ -1086,8 +1080,7 @@ impl ModelState for DDLModelState {
                 new_name,
             } => {
                 let query = format!(
-                    "ALTER TYPE \"{}\" RENAME VALUE '{}' TO '{}'",
-                    type_name, value_name, new_name
+                    "ALTER TYPE \"{type_name}\" RENAME VALUE '{value_name}' TO '{new_name}'"
                 );
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();

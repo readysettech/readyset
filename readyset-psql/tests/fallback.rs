@@ -1494,7 +1494,7 @@ async fn show_proxied_queries_show_caches_query_text_matches() {
     };
 
     client
-        .simple_query(&format!("DROP CACHE {}", cache_name))
+        .simple_query(&format!("DROP CACHE {cache_name}"))
         .await
         .unwrap();
 

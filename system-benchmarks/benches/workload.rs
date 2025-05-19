@@ -164,7 +164,7 @@ impl PreparedPool {
                         .execute(&conn.statements[command.0], &command.1)
                         .await
                     {
-                        println!("Error executing prepared statement: {:?}", e);
+                        println!("Error executing prepared statement: {e:?}");
                     }
                 }
                 conn
@@ -235,7 +235,7 @@ impl Benchmark {
 
                 Benchmark {
                     name: name.clone(),
-                    schema: schema.unwrap_or_else(|| panic!("No schema for benchmark '{}'", name)),
+                    schema: schema.unwrap_or_else(|| panic!("No schema for benchmark '{name}'")),
                     workloads,
                 }
             })
@@ -275,7 +275,7 @@ impl Benchmark {
         for workload in self.workloads.iter() {
             let workload_name = workload.file_stem().unwrap().to_string_lossy();
 
-            println!("Preparing workload {}", workload_name);
+            println!("Preparing workload {workload_name}");
 
             let bytes_before_workload = get_allocated_bytes()?;
 
@@ -335,7 +335,7 @@ impl Benchmark {
                         match AdapterCommand::receive(&mut hdl.write_hdl)? {
                             AdapterCommand::ProfileComplete => break,
                             msg => {
-                                println!("received unexpected message: {:?}", msg);
+                                println!("received unexpected message: {msg:?}");
                             }
                         }
                     }
@@ -408,13 +408,13 @@ async fn dump_graphviz(
             let rows: Vec<Vec<DfValue>> = r.try_into()?;
             let gviz = rows.first().unwrap().first().unwrap();
             readyset_util::graphviz::write_graphviz(
-                format!("{}", gviz),
+                format!("{gviz}"),
                 Path::new(format!("{name}.graphviz.png").as_str()),
                 FileFormat::Png,
             )?;
         }
         Err(e) => {
-            println!("failed to get graphviz for dataflow graph: {:?}", e);
+            println!("failed to get graphviz for dataflow graph: {e:?}");
         }
     }
     Ok(())
@@ -554,7 +554,7 @@ impl AdapterHandle {
                             }
                         },
                         msg => {
-                            println!("received unexpected message: {:?}", msg);
+                            println!("received unexpected message: {msg:?}");
                         }
                     }
                 }
@@ -661,7 +661,7 @@ async fn prepare_db<P: Into<PathBuf>>(path: P, args: &SystemBenchArgs) -> anyhow
 fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
     let upstream_url = args.upstream_url_with_db_name();
     let database_type = DatabaseURL::from_str(&upstream_url)?.database_type();
-    let database_type_flag = format!("--database-type={}", database_type);
+    let database_type_flag = format!("--database-type={database_type}");
     let temp_dir = temp_dir::TempDir::new().unwrap();
     let log_level = env::var("LOG_LEVEL").unwrap_or_else(|_| "error".into());
     let materialization_frontier = format!(

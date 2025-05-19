@@ -211,7 +211,7 @@ async fn prepare_error_sync() {
         let res = client.execute("SELECT 1 as one", &[]);
         assert!(res.is_err());
         let err = res.err().unwrap();
-        assert!(err.as_db_error().is_some(), "err = {}", err);
+        assert!(err.as_db_error().is_some(), "err = {err}");
         assert_eq!(
             err.as_db_error().unwrap().message(),
             "internal error: a database"

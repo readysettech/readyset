@@ -240,7 +240,7 @@ mod tests {
                     }
                 ));
             }
-            _ => panic!("Invalid query returned: {:?}", revised_query),
+            _ => panic!("Invalid query returned: {revised_query:?}"),
         }
     }
 
@@ -377,7 +377,7 @@ mod tests {
                     LimitClause::LimitOffset { limit: None, .. }
                 ));
             }
-            _ => panic!("Invalid query returned: {:?}", revised_query),
+            _ => panic!("Invalid query returned: {revised_query:?}"),
         }
     }
 }

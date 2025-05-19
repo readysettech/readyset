@@ -217,7 +217,7 @@ async fn delete_multiple() {
     sleep().await;
 
     for i in 1..4 {
-        conn.query_drop(format!("INSERT INTO Cats (id) VALUES ({})", i))
+        conn.query_drop(format!("INSERT INTO Cats (id) VALUES ({i})"))
             .await
             .unwrap();
         sleep().await;
@@ -233,7 +233,7 @@ async fn delete_multiple() {
     }
 
     for i in 1..3 {
-        let query = format!("SELECT Cats.id FROM Cats WHERE Cats.id = {}", i);
+        let query = format!("SELECT Cats.id FROM Cats WHERE Cats.id = {i}");
         let row = conn.query_first::<Row, _>(query).await.unwrap();
         assert!(row.is_none());
     }
@@ -1409,17 +1409,17 @@ async fn design_doc_topk_with_preload() {
     sleep().await;
 
     for id in 5..10 {
-        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({}, 1)", id))
+        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({id}, 1)"))
             .await
             .unwrap();
     }
     for id in &[10, 4, 2, 1] {
-        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({}, 2)", id))
+        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({id}, 2)"))
             .await
             .unwrap();
     }
     for id in &[11, 3, 0, -1] {
-        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({}, 3)", id))
+        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({id}, 3)"))
             .await
             .unwrap();
     }
@@ -1463,17 +1463,17 @@ async fn design_doc_topk() {
     sleep().await;
 
     for id in 5..10 {
-        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({}, 1)", id))
+        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({id}, 1)"))
             .await
             .unwrap();
     }
     for id in &[10, 4, 2, 1] {
-        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({}, 2)", id))
+        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({id}, 2)"))
             .await
             .unwrap();
     }
     for id in &[11, 3, 0, -1] {
-        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({}, 3)", id))
+        conn.query_drop(format!("INSERT INTO posts (id, number) VALUES ({id}, 3)"))
             .await
             .unwrap();
     }
@@ -2405,7 +2405,7 @@ async fn timestamp_text_protocol() {
     for id in 1..=4 {
         eventually!(run_test: {
 
-        let q = format!("SELECT * FROM ts_text_protocol WHERE ID = {}", id);
+        let q = format!("SELECT * FROM ts_text_protocol WHERE ID = {id}");
         let my_rows: Vec<(String, String, String, String, String)> = direct_mysql
             .query(&q)
             .await
@@ -2664,13 +2664,13 @@ async fn test_case_expr_then_expr() {
 async fn populate_all_data_types(direct_mysql: &mut Conn, table_name: &str, add_sample_data: bool) {
     // Drop existing table if any
     direct_mysql
-        .query_drop(format!("DROP TABLE IF EXISTS {} CASCADE;", table_name))
+        .query_drop(format!("DROP TABLE IF EXISTS {table_name} CASCADE;"))
         .await
         .unwrap();
     // Create table
     direct_mysql
         .query_drop(
-            format!("CREATE TABLE {} (
+            format!("CREATE TABLE {table_name} (
         -- Numeric Data Types (Signed and Unsigned Integers)
         col_tinyint TINYINT NOT NULL,                  -- Signed (-128 to 127)
         col_tinyint_unsigned TINYINT UNSIGNED NOT NULL, -- Unsigned (0 to 255)
@@ -2719,7 +2719,7 @@ async fn populate_all_data_types(direct_mysql: &mut Conn, table_name: &str, add_
 
         col_enum ENUM('small', 'medium', 'large') NOT NULL,
         col_json JSON NOT NULL
-    );", table_name)
+    );")
         )
         .await
         .unwrap();
@@ -2727,7 +2727,7 @@ async fn populate_all_data_types(direct_mysql: &mut Conn, table_name: &str, add_
         // Insert test data
         direct_mysql
             .query_drop(format!(
-                "INSERT INTO {} (
+                "INSERT INTO {table_name} (
 col_tinyint, col_tinyint_unsigned,
 col_smallint, col_smallint_unsigned,
 col_mediumint, col_mediumint_unsigned,
@@ -2784,8 +2784,7 @@ CURRENT_TIMESTAMP,
 
 'medium',
 '{{\"name\": \"Alice\", \"roles\": [\"admin\", \"editor\"], \"active\": true}}'
-);",
-                table_name
+);"
             ))
             .await
             .unwrap();
@@ -2799,11 +2798,11 @@ async fn test_column_definition_verify(
 ) {
     // Verify results
     let direct_rows: Vec<Row> = direct_mysql
-        .query(format!("SELECT * FROM {}", table_name))
+        .query(format!("SELECT * FROM {table_name}"))
         .await
         .unwrap();
     let rs_rows: Vec<Row> = rs_conn
-        .query(format!("SELECT * FROM {}", table_name))
+        .query(format!("SELECT * FROM {table_name}"))
         .await
         .unwrap();
 
@@ -2816,38 +2815,32 @@ async fn test_column_definition_verify(
         assert_eq!(
             direct_column.column_length(),
             rs_column.column_length(),
-            "Column length mismatch for column: {}",
-            column_name
+            "Column length mismatch for column: {column_name}"
         );
         assert_eq!(
             direct_column.character_set(),
             rs_column.character_set(),
-            "Character set mismatch for column: {}",
-            column_name
+            "Character set mismatch for column: {column_name}"
         );
         assert_eq!(
             direct_column.column_type(),
             rs_column.column_type(),
-            "Column type mismatch for column: {}",
-            column_name
+            "Column type mismatch for column: {column_name}"
         );
         assert_eq!(
             direct_column.flags(),
             rs_column.flags(),
-            "Column flags mismatch for column: {}",
-            column_name
+            "Column flags mismatch for column: {column_name}"
         );
         assert_eq!(
             direct_column.decimals(),
             rs_column.decimals(),
-            "Column decimals mismatch for column: {}",
-            column_name
+            "Column decimals mismatch for column: {column_name}"
         );
         assert_eq!(
             direct_column.name_ref(),
             rs_column.name_ref(),
-            "Column name mismatch for column: {}",
-            column_name
+            "Column name mismatch for column: {column_name}"
         );
     }
 }

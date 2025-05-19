@@ -215,7 +215,7 @@ async fn start_request_router(
     let real_external_addr =
         SocketAddr::new(external_addr.ip(), http_listener.local_addr()?.port());
     // FIXME(eta): this won't work for IPv6
-    let http_uri = Url::parse(&format!("http://{}", real_external_addr))?;
+    let http_uri = Url::parse(&format!("http://{real_external_addr}"))?;
     tokio::spawn(maybe_abort_on_panic!(
         abort_on_task_failure,
         NoriaServerHttpRouter::route_requests(http_server, http_listener, shutdown_rx)

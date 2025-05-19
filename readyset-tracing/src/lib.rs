@@ -419,7 +419,7 @@ impl Options {
     fn statement_log_path_or_default(&self, deployment: &str) -> String {
         match self.statement_log_path {
             Some(ref p) => p.clone(),
-            None => format!("{}_statements.log", deployment),
+            None => format!("{deployment}_statements.log"),
         }
     }
 
@@ -572,7 +572,7 @@ pub fn init_test_logging() {
     // This errors out if it's already been called within the scope of a process, which we don't
     // care about, so we just discard the result
     if let Ok(output_dir) = std::env::var("ANTITHESIS_OUTPUT_DIR") {
-        let file = std::fs::File::create(format!("{}/readyset-test.jsonl", output_dir)).unwrap();
+        let file = std::fs::File::create(format!("{output_dir}/readyset-test.jsonl")).unwrap();
         let _ = tracing_subscriber::fmt()
             .json()
             .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))

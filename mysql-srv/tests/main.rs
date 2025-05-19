@@ -245,7 +245,7 @@ where
 
         // Connect to the server
         let mut db = mysql::Conn::new(
-            mysql::Opts::from_url(&format!("mysql://user:password@127.0.0.1:{}", port)).unwrap(),
+            mysql::Opts::from_url(&format!("mysql://user:password@127.0.0.1:{port}")).unwrap(),
         )
         .await
         .unwrap();
@@ -337,7 +337,7 @@ async fn it_inits_error() {
                 writer
                     .error(
                         ErrorKind::ER_BAD_DB_ERROR,
-                        format!("Database {} not found", schema).as_bytes(),
+                        format!("Database {schema} not found").as_bytes(),
                     )
                     .await
             })

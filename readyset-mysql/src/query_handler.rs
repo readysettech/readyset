@@ -868,7 +868,7 @@ impl QueryHandler for MySqlQueryHandler {
                 }) =>
             {
                 let field_name: SqlIdentifier =
-                    format!("@@{}", MAX_ALLOWED_PACKET_VARIABLE_NAME).into();
+                    format!("@@{MAX_ALLOWED_PACKET_VARIABLE_NAME}").into();
                 Ok(QueryResult::from_owned(
                     SelectSchema {
                         schema: Cow::Owned(vec![ColumnSchema {
@@ -892,7 +892,7 @@ impl QueryHandler for MySqlQueryHandler {
                     } if var.as_non_user_var() == Some(VERSION_COMMENT_VARIABLE_NAME) && stmt.fields.len() == 1)
                 }) =>
             {
-                let field_name: SqlIdentifier = format!("@@{}", VERSION_COMMENT_VARIABLE_NAME).into();
+                let field_name: SqlIdentifier = format!("@@{VERSION_COMMENT_VARIABLE_NAME}").into();
                 Ok(QueryResult::from_owned(
                     SelectSchema {
                         schema: Cow::Owned(vec![ColumnSchema {

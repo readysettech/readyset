@@ -447,7 +447,7 @@ where
     writeln!(output, "#     {}", std::env::args().join(" "))?;
 
     for rec in script.records() {
-        writeln!(output, "{}", rec)?;
+        writeln!(output, "{rec}")?;
     }
 
     Ok(())

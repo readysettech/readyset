@@ -674,7 +674,7 @@ impl ModelState for DDLModelState {
                     .collect();
                 let col_defs = col_defs.join(", ");
                 let query = format!("CREATE TABLE `{table_name}` ({col_defs})");
-                println!("Creating table: {}", query);
+                println!("Creating table: {query}");
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
 
@@ -726,7 +726,7 @@ impl ModelState for DDLModelState {
                 mysql_conn.query_drop(&query).await.unwrap();
             }
             Operation::DropColumn(table_name, col_name) => {
-                let query = format!("ALTER TABLE `{}` DROP COLUMN `{}`", table_name, col_name);
+                let query = format!("ALTER TABLE `{table_name}` DROP COLUMN `{col_name}`");
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
             }
@@ -735,22 +735,20 @@ impl ModelState for DDLModelState {
                 col_name,
                 new_name,
             } => {
-                let query = format!(
-                    "ALTER TABLE `{}` RENAME COLUMN `{}` TO `{}`",
-                    table, col_name, new_name
-                );
+                let query =
+                    format!("ALTER TABLE `{table}` RENAME COLUMN `{col_name}` TO `{new_name}`");
                 for (view, def) in self.views.iter() {
                     match def {
                         TestViewDef::Simple(table_source) => {
                             if table == table_source {
-                                let drop_view = format!("DROP VIEW `{}`", view);
+                                let drop_view = format!("DROP VIEW `{view}`");
                                 rs_conn.query_drop(&drop_view).await.unwrap();
                                 mysql_conn.query_drop(&drop_view).await.unwrap();
                             }
                         }
                         TestViewDef::Join { table_a, table_b } => {
                             if table == table_a || table == table_b {
-                                let drop_view = format!("DROP VIEW `{}`", view);
+                                let drop_view = format!("DROP VIEW `{view}`");
                                 rs_conn.query_drop(&drop_view).await.unwrap();
                                 mysql_conn.query_drop(&drop_view).await.unwrap();
                             }
@@ -793,10 +791,9 @@ impl ModelState for DDLModelState {
                     .collect();
                 let select_list = select_list.join(", ");
                 let view_def = format!(
-                    "SELECT {} FROM `{}` JOIN `{}` ON `{}`.`id` = `{}`.`id`",
-                    select_list, table_a, table_b, table_a, table_b
+                    "SELECT {select_list} FROM `{table_a}` JOIN `{table_b}` ON `{table_a}`.`id` = `{table_b}`.`id`"
                 );
-                let query = format!("CREATE VIEW `{}` AS {}", name, view_def);
+                let query = format!("CREATE VIEW `{name}` AS {view_def}");
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
                 let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM `{name}`");

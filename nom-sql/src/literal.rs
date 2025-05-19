@@ -306,7 +306,7 @@ mod tests {
     #[test]
     fn larger_than_i64_max_parses_to_unsigned() {
         let needs_unsigned = i64::MAX as u64 + 1;
-        let formatted = format!("{}", needs_unsigned);
+        let formatted = format!("{needs_unsigned}");
         let res = integer_literal(LocatedSpan::new(formatted.as_bytes()))
             .unwrap()
             .1;

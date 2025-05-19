@@ -159,12 +159,12 @@ where
                 if len != 2 {
                     write!(f, ",")?;
                 }
-                write!(f, " {} ", conjunction)?;
+                write!(f, " {conjunction} ")?;
             } else if i != 0 {
                 write!(f, ", ")?;
             }
 
-            write!(f, "{}", val)?;
+            write!(f, "{val}")?;
         }
 
         Ok(())

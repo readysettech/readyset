@@ -247,9 +247,9 @@ impl TryFrom<ParamRef<'_>> for DfValue {
             PsqlValue::SmallInt(v) => Ok((*v).into()),
             PsqlValue::Oid(v) => Ok((*v).into()),
             PsqlValue::Double(v) => DfValue::try_from(*v)
-                .map_err(|_| ps::Error::Unsupported(format!("f64 with value `{}`", v))),
+                .map_err(|_| ps::Error::Unsupported(format!("f64 with value `{v}`"))),
             PsqlValue::Float(v) => DfValue::try_from(*v)
-                .map_err(|_| ps::Error::Unsupported(format!("f32 with value `{}`", v))),
+                .map_err(|_| ps::Error::Unsupported(format!("f32 with value `{v}`"))),
             PsqlValue::Numeric(d) => Ok(DfValue::from(*d)),
             PsqlValue::Timestamp(v) => Ok((*v).into()),
             PsqlValue::TimestampTz(v) => Ok(DfValue::from(*v)),

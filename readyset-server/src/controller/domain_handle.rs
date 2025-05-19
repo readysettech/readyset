@@ -154,7 +154,7 @@ impl DomainHandle {
                     })
                     .await
                     .map_err(|e| {
-                        rpc_err_no_downcast(format!("domain request to {}", replica_address), e)
+                        rpc_err_no_downcast(format!("domain request to {replica_address}"), e)
                     })?,
             ))
         } else {

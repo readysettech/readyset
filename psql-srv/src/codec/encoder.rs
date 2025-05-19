@@ -151,27 +151,22 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             // Format command complete "tag" (eg "DELETE 5" to indicate 5 rows deleted).
             let mut tag_buf = [0u8; COMMAND_COMPLETE_TAG_BUF_LEN];
             match tag {
-                Delete(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_DELETE_TAG, n)?,
+                Delete(n) => write!(&mut tag_buf[..], "{COMMAND_COMPLETE_DELETE_TAG} {n}")?,
                 Insert(n) => write!(
                     &mut tag_buf[..],
-                    "{} {} {}",
-                    COMMAND_COMPLETE_INSERT_TAG,
-                    COMMAND_COMPLETE_INSERT_LEGACY_OID,
-                    n
+                    "{COMMAND_COMPLETE_INSERT_TAG} {COMMAND_COMPLETE_INSERT_LEGACY_OID} {n}"
                 )?,
-                Select(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_SELECT_TAG, n)?,
-                Update(n) => write!(&mut tag_buf[..], "{} {}", COMMAND_COMPLETE_UPDATE_TAG, n)?,
+                Select(n) => write!(&mut tag_buf[..], "{COMMAND_COMPLETE_SELECT_TAG} {n}")?,
+                Update(n) => write!(&mut tag_buf[..], "{COMMAND_COMPLETE_UPDATE_TAG} {n}")?,
                 Deallocate(t) => match t {
                     DeallocationType::All => {
                         write!(
                             &mut tag_buf[..],
-                            "{} {}",
-                            COMMAND_COMPLETE_DEALLOCATE_TAG,
-                            COMMAND_COMPLETE_DEALLOCATE_ALL_TAG
+                            "{COMMAND_COMPLETE_DEALLOCATE_TAG} {COMMAND_COMPLETE_DEALLOCATE_ALL_TAG}"
                         )?;
                     }
                     DeallocationType::Single => {
-                        write!(&mut tag_buf[..], "{}", COMMAND_COMPLETE_DEALLOCATE_TAG)?;
+                        write!(&mut tag_buf[..], "{COMMAND_COMPLETE_DEALLOCATE_TAG}")?;
                     }
                 },
             };
@@ -601,7 +596,7 @@ fn put_text_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
             } else {
                 BOOL_FALSE_TEXT_REP
             };
-            write!(dst, "{}", text)?;
+            write!(dst, "{text}")?;
         }
         PsqlValue::BpChar(v) | PsqlValue::VarChar(v) | PsqlValue::Name(v) | PsqlValue::Text(v) => {
             dst.extend_from_slice(v.as_bytes());
@@ -613,13 +608,13 @@ fn put_text_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
             dst.put_i8(*v);
         }
         PsqlValue::Int(v) => {
-            write!(dst, "{}", v)?;
+            write!(dst, "{v}")?;
         }
         PsqlValue::BigInt(v) => {
-            write!(dst, "{}", v)?;
+            write!(dst, "{v}")?;
         }
         PsqlValue::SmallInt(v) => {
-            write!(dst, "{}", v)?;
+            write!(dst, "{v}")?;
         }
         PsqlValue::Oid(v) => {
             write!(dst, "{}", *v)?;
@@ -656,16 +651,16 @@ fn put_text_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
                 dst,
                 "{}",
                 b.iter()
-                    .map(|byte| format!("{:02x}", byte))
+                    .map(|byte| format!("{byte:02x}"))
                     .collect::<Vec<String>>()
                     .join("")
             )?;
         }
         PsqlValue::MacAddress(m) => write!(dst, "{}", m.to_string(MacAddressFormat::HexString))?,
-        PsqlValue::Inet(ip) => write!(dst, "{}", ip)?,
-        PsqlValue::Uuid(u) => write!(dst, "{}", u)?,
-        PsqlValue::Json(v) => write!(dst, "{}", v)?,
-        PsqlValue::Jsonb(v) => write!(dst, "{}", v)?,
+        PsqlValue::Inet(ip) => write!(dst, "{ip}")?,
+        PsqlValue::Uuid(u) => write!(dst, "{u}")?,
+        PsqlValue::Json(v) => write!(dst, "{v}")?,
+        PsqlValue::Jsonb(v) => write!(dst, "{v}")?,
         PsqlValue::Bit(bits) | PsqlValue::VarBit(bits) => write!(
             dst,
             "{}",
@@ -674,7 +669,7 @@ fn put_text_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
                 .collect::<Vec<String>>()
                 .join("")
         )?,
-        PsqlValue::Array(arr, _) => write!(dst, "{}", arr)?,
+        PsqlValue::Array(arr, _) => write!(dst, "{arr}")?,
         PsqlValue::PassThrough(p) => {
             return Err(Error::InternalError(format!(
                 "Data of type {} unsupported in text mode",

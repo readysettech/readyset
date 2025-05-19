@@ -296,7 +296,7 @@ impl FromQueryLog {
                 };
                 if let Some(record) = record {
                     output
-                        .write_all(format!("{}\n", record).as_bytes())
+                        .write_all(format!("{record}\n").as_bytes())
                         .await
                         .unwrap();
                 }

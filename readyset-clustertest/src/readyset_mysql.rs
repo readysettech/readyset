@@ -660,8 +660,7 @@ async fn cached_queries_filtering() {
         .as_mysql_conn()
         .unwrap()
         .query::<(String, String, String, String, String), _>(&format!(
-            "SHOW CACHES WHERE query_id = '{}'",
-            query_id
+            "SHOW CACHES WHERE query_id = '{query_id}'"
         ))
         .await
         .unwrap();
@@ -1175,7 +1174,7 @@ async fn end_to_end_with_restarts() {
             .volume_id
             .clone()
             .unwrap();
-        println!("Killing server: {}", controller_uri);
+        println!("Killing server: {controller_uri}");
         deployment
             .kill_server(&controller_uri, false)
             .await
@@ -1243,7 +1242,7 @@ async fn view_survives_restart() {
 
     for _ in 0..10 {
         let controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
-        println!("Killing server: {}", controller_uri);
+        println!("Killing server: {controller_uri}");
         deployment
             .kill_server(&controller_uri, false)
             .await
@@ -1325,10 +1324,10 @@ async fn writes_survive_restarts() {
             let addr = server_handle.addr.clone();
             (volume_id, addr)
         };
-        println!("Killing server: {}", addr);
+        println!("Killing server: {addr}");
         deployment.kill_server(&addr, false).await.unwrap();
-        let t1_write = format!("UPDATE t1 SET value = {} WHERE uid = 1;", counter);
-        let t2_write = format!("UPDATE t2 SET value = {} WHERE uid = 1;", counter);
+        let t1_write = format!("UPDATE t1 SET value = {counter} WHERE uid = 1;");
+        let t2_write = format!("UPDATE t2 SET value = {counter} WHERE uid = 1;");
         upstream.query_drop(&t1_write).await.unwrap();
         upstream.query_drop(&t2_write).await.unwrap();
         results.write(&[(1, counter)]);

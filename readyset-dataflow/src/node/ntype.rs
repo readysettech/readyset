@@ -73,7 +73,7 @@ impl fmt::Display for NodeType {
         match self {
             NodeType::Ingress => write!(f, "Ingress"),
             NodeType::Base(_) => write!(f, "Base"),
-            NodeType::Internal(o) => write!(f, "Internal ({})", o),
+            NodeType::Internal(o) => write!(f, "Internal ({o})"),
             NodeType::Egress(_) => write!(f, "Egress"),
             NodeType::Sharder(_) => write!(f, "Sharder"),
             NodeType::Reader(_) => write!(f, "Reader"),

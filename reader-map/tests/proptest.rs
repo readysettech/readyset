@@ -161,14 +161,10 @@ where
 {
     assert_eq!(a.len(), b.len());
     for key in a.enter().iter().flat_map(|r| r.keys()) {
-        assert!(b.contains_key(key), "b does not contain {:?}", key);
+        assert!(b.contains_key(key), "b does not contain {key:?}");
     }
     for key in b.keys() {
-        assert!(
-            a.get(key).unwrap().is_some(),
-            "a does not contain {:?}",
-            key
-        );
+        assert!(a.get(key).unwrap().is_some(), "a does not contain {key:?}");
     }
     let guard = if let Ok(guard) = a.enter() {
         guard

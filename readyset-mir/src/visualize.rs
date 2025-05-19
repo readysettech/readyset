@@ -59,7 +59,7 @@ where
 {
     let mut edge_count = 0usize;
     let mut get_edge_name = || {
-        let name = format!("edge_{}", edge_count);
+        let name = format!("edge_{edge_count}");
         edge_count += 1;
         name
     };
@@ -158,24 +158,24 @@ impl GraphViz for MirNodeInner {
                 ..
             } => {
                 let op_string = match kind {
-                    AggregationKind::Count => format!("\\|*\\|({})", on),
-                    AggregationKind::Sum => format!("𝛴({})", on),
-                    AggregationKind::Avg => format!("AVG({})", on),
+                    AggregationKind::Count => format!("\\|*\\|({on})"),
+                    AggregationKind::Sum => format!("𝛴({on})"),
+                    AggregationKind::Avg => format!("AVG({on})"),
                     AggregationKind::GroupConcat { separator: s } => {
-                        format!("\\|\\|({}, \\\"{}\\\")", on, s)
+                        format!("\\|\\|({on}, \\\"{s}\\\")")
                     }
                     AggregationKind::JsonObjectAgg {
                         allow_duplicate_keys,
                     } => {
                         if *allow_duplicate_keys {
-                            format!("JsonObjectAgg({})", on)
+                            format!("JsonObjectAgg({on})")
                         } else {
-                            format!("JsonbObjectAgg({})", on)
+                            format!("JsonbObjectAgg({on})")
                         }
                     }
                 };
                 let group_cols = group_by.iter().join(", ");
-                write!(f, "{} | γ: {}", op_string, group_cols)
+                write!(f, "{op_string} | γ: {group_cols}")
             }
             MirNodeInner::Base {
                 column_specs,
@@ -206,11 +206,11 @@ impl GraphViz for MirNodeInner {
                 ..
             } => {
                 let op_string = match *kind {
-                    ExtremumKind::Min => format!("min({})", on),
-                    ExtremumKind::Max => format!("max({})", on),
+                    ExtremumKind::Min => format!("min({on})"),
+                    ExtremumKind::Max => format!("max({on})"),
                 };
                 let group_cols = group_by.iter().join(", ");
-                write!(f, "{} | γ: {}", op_string, group_cols)
+                write!(f, "{op_string} | γ: {group_cols}")
             }
             MirNodeInner::Filter { ref conditions, .. } => {
                 // FIXME(ENG-2502): Use correct dialect.
@@ -222,8 +222,8 @@ impl GraphViz for MirNodeInner {
 
             MirNodeInner::Identity => write!(f, "≡"),
             MirNodeInner::Join { ref on, .. } => {
-                let jc = on.iter().map(|(l, r)| format!("{}:{}", l, r)).join(", ");
-                write!(f, "⋈  | on: {}", jc)
+                let jc = on.iter().map(|(l, r)| format!("{l}:{r}")).join(", ");
+                write!(f, "⋈  | on: {jc}")
             }
             MirNodeInner::JoinAggregates => write!(f, "AGG ⋈"),
             MirNodeInner::Leaf {
@@ -259,7 +259,7 @@ impl GraphViz for MirNodeInner {
                         "\\norder_by: {}",
                         order_by
                             .iter()
-                            .map(|(col, ot)| format!("{} {}", col, ot))
+                            .map(|(col, ot)| format!("{col} {ot}"))
                             .join(", ")
                     )?;
                 }
@@ -304,21 +304,21 @@ impl GraphViz for MirNodeInner {
                 Ok(())
             }
             MirNodeInner::LeftJoin { ref on, .. } => {
-                let jc = on.iter().map(|(l, r)| format!("{}:{}", l, r)).join(", ");
-                write!(f, "⟕ | on: {}", jc)
+                let jc = on.iter().map(|(l, r)| format!("{l}:{r}")).join(", ");
+                write!(f, "⟕ | on: {jc}")
             }
             MirNodeInner::DependentJoin { ref on, .. } => {
                 write!(
                     f,
                     "⧑ | on: {}",
-                    on.iter().map(|(l, r)| format!("{}:{}", l, r)).join(", ")
+                    on.iter().map(|(l, r)| format!("{l}:{r}")).join(", ")
                 )
             }
             MirNodeInner::DependentLeftJoin { ref on, .. } => {
                 write!(
                     f,
                     "⟕D | on: {}",
-                    on.iter().map(|(l, r)| format!("{}:{}", l, r)).join(", ")
+                    on.iter().map(|(l, r)| format!("{l}:{r}")).join(", ")
                 )
             }
             MirNodeInner::Project { ref emit } => {
@@ -326,7 +326,7 @@ impl GraphViz for MirNodeInner {
             }
             MirNodeInner::Distinct { ref group_by } => {
                 let key_cols = group_by.iter().join(", ");
-                write!(f, "Distinct | γ: {}", key_cols)
+                write!(f, "Distinct | γ: {key_cols}")
             }
             MirNodeInner::Paginate {
                 ref order,
@@ -338,7 +338,7 @@ impl GraphViz for MirNodeInner {
                     .map(|(c, o)| format!("{}: {}", c.name.as_str(), o))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "Paginate [limit: {}; {}]", limit, order)
+                write!(f, "Paginate [limit: {limit}; {order}]")
             }
             MirNodeInner::TopK {
                 ref order,
@@ -350,7 +350,7 @@ impl GraphViz for MirNodeInner {
                     .map(|(c, o)| format!("{}: {}", c.name.as_str(), o))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "TopK [k: {}; {}]", limit, order)
+                write!(f, "TopK [k: {limit}; {order}]")
             }
             MirNodeInner::Union {
                 ref emit,
@@ -363,9 +363,9 @@ impl GraphViz for MirNodeInner {
                 let cols = emit
                     .iter()
                     .map(|c| c.iter().join(", "))
-                    .join(&format!(" {} ", symbol));
+                    .join(&format!(" {symbol} "));
 
-                write!(f, "{}", cols)
+                write!(f, "{cols}")
             }
             MirNodeInner::AliasTable { ref table } => {
                 write!(f, "AliasTable [{}]", table.display_unquoted())

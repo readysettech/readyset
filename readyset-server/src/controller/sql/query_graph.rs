@@ -1538,10 +1538,7 @@ mod tests {
     fn make_query_graph(sql: &str) -> QueryGraph {
         let query = match parse_query(Dialect::MySQL, sql).unwrap() {
             SqlQuery::Select(stmt) => stmt,
-            q => panic!(
-                "Unexpected query type; expected SelectStatement but got {:?}",
-                q
-            ),
+            q => panic!("Unexpected query type; expected SelectStatement but got {q:?}"),
         };
 
         to_query_graph(query).unwrap()

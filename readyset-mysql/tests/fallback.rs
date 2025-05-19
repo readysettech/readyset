@@ -771,11 +771,10 @@ async fn show_caches_index_hints() {
                     if formatted_index_list_str.is_empty() {
                         formatted_index_list_str = n.to_string();
                     } else {
-                        formatted_index_list_str = format!("{}, {}", formatted_index_list_str, n);
+                        formatted_index_list_str = format!("{formatted_index_list_str}, {n}");
                     }
                     let qstring = format!(
-                        "SELECT a, b, c FROM `t_idx_hnt` {} {} {}({}) WHERE a = 1",
-                        hint_type, index_or_key, index_for, formatted_index_list_str
+                        "SELECT a, b, c FROM `t_idx_hnt` {hint_type} {index_or_key} {index_for}({formatted_index_list_str}) WHERE a = 1"
                     );
                     conn.query_drop(&qstring).await.unwrap();
                 }
@@ -1035,7 +1034,7 @@ async fn show_proxied_queries_show_caches_query_text_matches() {
         conn.query("SHOW CACHES").await.unwrap();
     let (_, cache_name, cached_query_text, _) = cached_queries.first().unwrap();
 
-    conn.query_drop(format!("DROP CACHE {}", cache_name))
+    conn.query_drop(format!("DROP CACHE {cache_name}"))
         .await
         .unwrap();
 

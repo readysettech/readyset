@@ -20,7 +20,7 @@ fn main() {
         .unwrap()
         .stdout;
     let commit = str::from_utf8(&commit).unwrap().trim();
-    let out_path = out_directory.join(format!("{}.json", commit));
+    let out_path = out_directory.join(format!("{commit}.json"));
     let out_file = File::create(out_path.clone()).unwrap();
     serde_json::to_writer(out_file, &Config::default()).unwrap();
     println!("wrote {}", out_path.display());

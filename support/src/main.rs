@@ -45,12 +45,12 @@ fn main() -> anyhow::Result<()> {
         Operation::ListColumnFamilies => {
             println!("Available column families:");
             for cf in &column_families {
-                println!("  - {}", cf);
+                println!("  - {cf}");
             }
         }
         Operation::DumpData => {
             if let Some(cf) = options.column_family {
-                println!("Dumping data from column family: {}", cf);
+                println!("Dumping data from column family: {cf}");
                 let db = rocksdb::DB::open_cf(
                     &rocksdb::Options::default(),
                     options.rocksdb_datadir,
@@ -83,10 +83,10 @@ fn main() -> anyhow::Result<()> {
                                     );
                                 }
                             }
-                            Err(e) => println!("Error reading key-value pair: {}", e),
+                            Err(e) => println!("Error reading key-value pair: {e}"),
                         }
                     }
-                    println!("Dumped {} rows", rows);
+                    println!("Dumped {rows} rows");
                 } else {
                     return Err(anyhow::anyhow!("Column family '{}' not found", cf));
                 }

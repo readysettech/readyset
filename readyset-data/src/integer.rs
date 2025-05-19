@@ -128,7 +128,7 @@ where
             Ok(val.into_bytes().into())
         }
 
-        DfType::Json | DfType::Jsonb => Ok(format!("\"{}\"", val).into()),
+        DfType::Json | DfType::Jsonb => Ok(format!("\"{val}\"").into()),
 
         DfType::Date => {
             // https://dev.mysql.com/doc/refman/8.0/en/date-and-time-literals.html

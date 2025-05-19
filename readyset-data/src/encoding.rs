@@ -47,7 +47,7 @@ impl fmt::Display for Encoding {
             Encoding::Latin1 => write!(f, "latin1"),
             Encoding::Cp850 => write!(f, "cp850"),
             Encoding::Binary => write!(f, "binary"),
-            Encoding::OtherMySql(id) => write!(f, "unsupported MySQL collation {}", id),
+            Encoding::OtherMySql(id) => write!(f, "unsupported MySQL collation {id}"),
         }
     }
 }
@@ -223,7 +223,7 @@ mod tests {
                     "expected utf8 error message to mention index 6. Message '{message}'"
                 )
             }
-            e => panic!("Unexpected error type: {:?}", e),
+            e => panic!("Unexpected error type: {e:?}"),
         }
     }
 }

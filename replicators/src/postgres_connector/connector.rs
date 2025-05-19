@@ -283,7 +283,7 @@ impl PostgresWalConnector {
     /// Creates a new `PUBLICATION name FOR ALL TABLES`, to be able to receive WAL on that slot.
     /// The user must have superuser privileges for that to work.
     async fn create_publication(&mut self, name: &str) -> ReadySetResult<()> {
-        let query = format!("CREATE PUBLICATION {} FOR ALL TABLES", name);
+        let query = format!("CREATE PUBLICATION {name} FOR ALL TABLES");
         self.simple_query(&query).await.map_err(|e| {
             ReadySetError::ReplicationFailed(format!("Failed to create publication: {e}"))
         })?;
@@ -519,8 +519,7 @@ impl PostgresWalConnector {
                 Ok(std::array::from_fn(|i| row.get(i).unwrap().into()))
             }
             _ => Err(ReadySetError::ReplicationFailed(format!(
-                "Incorrect response to query {:?}",
-                query
+                "Incorrect response to query {query:?}"
             ))),
         }
     }
@@ -561,7 +560,7 @@ pub async fn drop_replication_slot(client: &mut pgsql::Client, name: &str) -> Re
 pub async fn drop_publication(client: &mut pgsql::Client, name: &str) -> ReadySetResult<()> {
     info!(slot = name, "Dropping publication if exists");
     client
-        .simple_query(&format!("DROP PUBLICATION IF EXISTS {}", name))
+        .simple_query(&format!("DROP PUBLICATION IF EXISTS {name}"))
         .await
         .map_err(ReadySetError::from)
         .map(|_| ())

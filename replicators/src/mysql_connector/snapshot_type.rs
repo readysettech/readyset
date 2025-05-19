@@ -81,7 +81,7 @@ impl SnapshotType {
         };
         let schema = match table.table_name().schema.as_ref() {
             Some(schema) => {
-                format!("AND TABLE_SCHEMA = '{}'", schema)
+                format!("AND TABLE_SCHEMA = '{schema}'")
             }
             None => "".to_string(),
         };
@@ -116,7 +116,7 @@ impl SnapshotType {
                     .collect::<Vec<_>>()
                     .join(" OR ");
 
-                let next_bound = format!("({})", next_bound);
+                let next_bound = format!("({next_bound})");
 
                 let initial_query = format!(
                     "SELECT * FROM {} {} ORDER BY {} LIMIT {}",

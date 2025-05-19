@@ -228,7 +228,7 @@ impl Permute {
         } else {
             eprintln!("The following tests failed to generate:\n");
             for (filename, errmsg) in failures {
-                eprintln!(" * {}\n   Error: {:#}", filename, errmsg);
+                eprintln!(" * {filename}\n   Error: {errmsg:#}");
             }
 
             Err(anyhow!("Some tests failed to generate"))

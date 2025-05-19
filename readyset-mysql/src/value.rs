@@ -26,7 +26,7 @@ pub(crate) fn mysql_value_to_dataflow_value(value: Value) -> ReadySetResult<DfVa
                     .map_err(|e| ReadySetError::DfValueConversionError {
                         src_type: "ValueInner::Time".to_string(),
                         target_type: "DfValue::Time".to_string(),
-                        details: format!("{:?}", e),
+                        details: format!("{e:?}"),
                     })?,
             )
         }
@@ -35,7 +35,7 @@ pub(crate) fn mysql_value_to_dataflow_value(value: Value) -> ReadySetResult<DfVa
                 .map_err(|e| ReadySetError::DfValueConversionError {
                     src_type: "ValueInner::Date".to_string(),
                     target_type: "DfValue::TimestampTz".to_string(),
-                    details: format!("{:?}", e),
+                    details: format!("{e:?}"),
                 })?
                 .into(),
         ),

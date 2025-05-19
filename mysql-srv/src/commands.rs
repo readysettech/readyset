@@ -283,7 +283,7 @@ mod tests {
         let mut pr = PacketConn::new(r);
         let packet = pr.next().await.unwrap().unwrap();
         let (_, handshake) = client_handshake(&packet.data).unwrap();
-        println!("{:?}", handshake);
+        println!("{handshake:?}");
         assert!(handshake
             .capabilities
             .contains(CapabilityFlags::CLIENT_LONG_PASSWORD));

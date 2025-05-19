@@ -160,8 +160,8 @@ impl DialectDisplay for ColumnConstraint {
         fmt_with(move |f| match self {
             Self::Null => write!(f, "NULL"),
             Self::NotNull => write!(f, "NOT NULL"),
-            Self::CharacterSet(charset) => write!(f, "CHARACTER SET {}", charset),
-            Self::Collation(collation) => write!(f, "COLLATE {}", collation),
+            Self::CharacterSet(charset) => write!(f, "CHARACTER SET {charset}"),
+            Self::Collation(collation) => write!(f, "COLLATE {collation}"),
             Self::DefaultValue(expr) => write!(f, "DEFAULT {}", expr.display(dialect)),
             Self::AutoIncrement => write!(f, "AUTO_INCREMENT"),
             Self::PrimaryKey => write!(f, "PRIMARY KEY"),
@@ -412,7 +412,7 @@ impl DialectDisplay for ColumnSpecification {
             }
 
             if let Some(ref comment) = self.comment {
-                write!(f, " COMMENT '{}'", comment)?;
+                write!(f, " COMMENT '{comment}'")?;
             }
 
             Ok(())

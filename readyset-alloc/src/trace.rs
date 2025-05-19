@@ -77,8 +77,8 @@ impl From<NonZeroU64> for Id {
 impl Display for Id {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Id::Number(n) => write!(f, "{}", n),
-            Id::Name(n) => write!(f, "{}", n),
+            Id::Number(n) => write!(f, "{n}"),
+            Id::Name(n) => write!(f, "{n}"),
         }
     }
 }

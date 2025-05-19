@@ -32,7 +32,7 @@ impl MetricsDump {
 
         let mut client = MetricsClient::new(handle).unwrap();
         let res = client.get_metrics().await?;
-        println!("{:?}", res);
+        println!("{res:?}");
 
         Ok(())
     }

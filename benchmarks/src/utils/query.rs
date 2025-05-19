@@ -510,7 +510,7 @@ pub fn interpolate_params(
                 let placeholder = format!("${}", i + 1);
                 if !result.contains(&placeholder) {
                     return Err(DatabaseError::Interpolation(
-                        format!("Parameter placeholder {} not found in query", placeholder).into(),
+                        format!("Parameter placeholder {placeholder} not found in query").into(),
                     ));
                 }
 
@@ -524,8 +524,7 @@ pub fn interpolate_params(
             if result.contains(&placeholder) {
                 return Err(DatabaseError::Interpolation(
                     format!(
-                        "Parameter placeholder {} found but not enough parameters provided",
-                        placeholder
+                        "Parameter placeholder {placeholder} found but not enough parameters provided"
                     )
                     .into(),
                 ));
@@ -552,7 +551,7 @@ fn format_param_value<T: Display>(param: &T) -> Result<String, DatabaseError> {
             && param_str != "TRUE"
             && param_str != "FALSE"
         {
-            format!("'{}'", param_str)
+            format!("'{param_str}'")
         } else {
             param_str
         },

@@ -165,7 +165,7 @@ where
         // Check if we have exceeded the given timeout. Otherwise, attempt query execution again.
         let elapsed = start.elapsed();
         if elapsed > timeout {
-            println!("query_until_expected timed out, last: {:?}", last);
+            println!("query_until_expected timed out, last: {last:?}");
             return false;
         }
         // Set the timeout for this query execution, which may take at most 5 seconds.
@@ -223,7 +223,7 @@ where
                 last = Some((r.clone(), correct_source));
             }
             Ok(Err(e)) => {
-                println!("Returned an error when querying for results, {:?}", e);
+                println!("Returned an error when querying for results, {e:?}");
                 return false;
             }
             Err(_) => {

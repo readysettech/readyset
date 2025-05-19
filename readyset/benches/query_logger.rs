@@ -85,7 +85,7 @@ fn event_logging_bench(c: &mut Criterion, mode: QueryLogMode) {
         ("proxy-upstream", true, true, true, true, false),
     ];
 
-    let mut group = c.benchmark_group(format!("query_logger_-{:?}", mode));
+    let mut group = c.benchmark_group(format!("query_logger_-{mode:?}"));
     for (
         name,
         with_query,

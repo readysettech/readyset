@@ -399,7 +399,7 @@ where
 
     match result {
         Ok(_) => (),
-        Err(e) => panic!("{}\n{}", e, runner),
+        Err(e) => panic!("{e}\n{runner}"),
     }
 }
 

@@ -58,7 +58,7 @@ impl From<MsqlSrvError> for io::Error {
     fn from(e: MsqlSrvError) -> io::Error {
         match e {
             MsqlSrvError::IoError(e) => e,
-            _ => std::io::Error::other(format!("{:?}", e)),
+            _ => std::io::Error::other(format!("{e:?}")),
         }
     }
 }
@@ -102,8 +102,7 @@ pub fn other_error(err_kind: OtherErrorKind) -> io::Error {
             index,
             length,
         } => io::Error::other(format!(
-            "Failed to index into {} (attempted index: {}, length: {})",
-            data, index, length
+            "Failed to index into {data} (attempted index: {index}, length: {length})"
         )),
         OtherErrorKind::Unexpected { error } => io::Error::other(error),
         OtherErrorKind::AuthDataErr => io::Error::other("Error generating auth data"),

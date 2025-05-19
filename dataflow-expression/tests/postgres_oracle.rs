@@ -178,7 +178,7 @@ fn date_trunc_timestamp_no_opt_tz() {
 
     proptest!(| (precision: DateTruncPrecision, datetime in arbitrary_timestamp_naive_date_time()) | {
         let mut client = client.borrow_mut();
-        let expr = format!("date_trunc('{}', '{}'::timestamp)", precision, datetime);
+        let expr = format!("date_trunc('{precision}', '{datetime}'::timestamp)");
         compare_eval(expr.as_str(), &mut client);
     });
 }
@@ -194,7 +194,7 @@ fn date_trunc_timestamptz_no_opt_tz() {
     proptest!(| (precision: DateTruncPrecision, datetime in arbitrary_date_time_timezone()) | {
        let dt = normalize_offset(datetime);
        let mut client = client.borrow_mut();
-       let expr = format!("date_trunc('{}', '{}'::timestamptz)", precision, dt);
+       let expr = format!("date_trunc('{precision}', '{dt}'::timestamptz)");
        compare_eval(expr.as_str(), &mut client);
     });
 }
@@ -210,7 +210,7 @@ fn date_trunc_timestamptz_downcast_no_opt_tz() {
     proptest!(| (precision: DateTruncPrecision, datetime in arbitrary_date_time_timezone()) | {
        let dt = normalize_offset(datetime);
        let mut client = client.borrow_mut();
-       let expr = format!("date_trunc('{}', '{}'::timestamp)", precision, dt);
+       let expr = format!("date_trunc('{precision}', '{dt}'::timestamp)");
        compare_eval(expr.as_str(), &mut client);
     });
 }
@@ -225,7 +225,7 @@ fn date_trunc_timestamp_upcast_no_opt_tz() {
 
     proptest!(| (precision: DateTruncPrecision, datetime in arbitrary_timestamp_naive_date_time()) | {
        let mut client = client.borrow_mut();
-       let expr = format!("date_trunc('{}', '{}'::timestamptz)", precision, datetime);
+       let expr = format!("date_trunc('{precision}', '{datetime}'::timestamptz)");
        compare_eval(expr.as_str(), &mut client);
     });
 }
@@ -297,16 +297,10 @@ mod extract {
                 }
             }
             (Ok(_), Err(our_err)) => {
-                panic!(
-                    "We failed with error \"{}\", but Postgres succeeded",
-                    our_err
-                );
+                panic!("We failed with error \"{our_err}\", but Postgres succeeded");
             }
             (Err(pg_err), Ok(_)) => {
-                panic!(
-                    "Postgres failed with error \"{}\", but we succeeded",
-                    pg_err
-                );
+                panic!("Postgres failed with error \"{pg_err}\", but we succeeded");
             }
         }
     }
@@ -320,10 +314,8 @@ mod extract {
             // There are no "invalid calls" for type TIMESTAMPTZ
             Regex::new("").unwrap()
         } else {
-            let mut regex_text: String = format!(
-                "ERROR:\\s*unit \"[a-z_]*\" not supported for type {}",
-                type_name
-            );
+            let mut regex_text: String =
+                format!("ERROR:\\s*unit \"[a-z_]*\" not supported for type {type_name}");
             if type_name.eq_ignore_ascii_case("time") || type_name.eq_ignore_ascii_case("timestamp")
             {
                 regex_text.push_str(" without time zone");
@@ -344,7 +336,7 @@ mod extract {
             datetime.put(&mut bytes);
             let dt_string = String::from_utf8(bytes.to_vec()).unwrap();
 
-            let expr = format!("extract({} FROM '{}'::timestamptz)", field, dt_string);
+            let expr = format!("extract({field} FROM '{dt_string}'::timestamptz)");
             compare_eval_numeric(expr.as_str(), &mut client, &re);
         });
     }
@@ -361,7 +353,7 @@ mod extract {
             datetime.put(&mut bytes);
             let ts_string = String::from_utf8(bytes.to_vec()).unwrap();
 
-            let expr = format!("extract({} FROM '{}'::timestamp)", field, ts_string);
+            let expr = format!("extract({field} FROM '{ts_string}'::timestamp)");
             compare_eval_numeric(expr.as_str(), &mut client, &re);
         });
     }
@@ -378,7 +370,7 @@ mod extract {
             date.put(&mut bytes);
             let date_string = String::from_utf8(bytes.to_vec()).unwrap();
 
-            let expr = format!("extract({} FROM '{}'::date)", field, date_string);
+            let expr = format!("extract({field} FROM '{date_string}'::date)");
             compare_eval_numeric(expr.as_str(), &mut client, &re);
         });
     }
@@ -399,7 +391,7 @@ mod extract {
                     date.put(&mut bytes);
                     let date_string = String::from_utf8(bytes.to_vec()).unwrap();
 
-                    let expr = format!("extract({} FROM '{}'::{})", field, date_string, type_name);
+                    let expr = format!("extract({field} FROM '{date_string}'::{type_name})");
                     compare_eval_numeric(expr.as_str(), &mut client, &re);
                 }
                 _ => ()
@@ -434,7 +426,7 @@ mod extract {
         proptest!(| (field: TimestampField, time in arbitrary_naive_time()) | {
             let mut client = client.borrow_mut();
 
-            let expr = format!("extract({} FROM '{}'::time)", field, time);
+            let expr = format!("extract({field} FROM '{time}'::time)");
             compare_eval_numeric(expr.as_str(), &mut client, &re);
         });
     }
@@ -461,7 +453,7 @@ mod extract {
 
         let time_string = String::from_utf8(bytes.to_vec()).unwrap();
         let field = TimestampField::Julian;
-        let expr = format!("extract({} FROM '{}'::timestamptz)", field, time_string);
+        let expr = format!("extract({field} FROM '{time_string}'::timestamptz)");
         compare_eval_numeric(expr.as_str(), &mut client, &re);
     }
 }

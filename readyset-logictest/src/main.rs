@@ -225,7 +225,7 @@ impl Parse {
                 Ok(records) => {
                     info!(count = records.len(), "Successfully parsed records",);
                     if self.output {
-                        println!("{:#?}", records);
+                        println!("{records:#?}");
                     }
                 }
                 Err(err) => error!(?filename, %err, "Error parsing records"),
@@ -337,7 +337,7 @@ impl Display for VerifyResult {
         if !self.failures.is_empty() {
             writeln!(f, "{} failed:\n", n_scripts(self.failures.len()))?;
             for script in &self.failures {
-                writeln!(f, "    {}", script)?;
+                writeln!(f, "    {script}")?;
             }
         }
 
@@ -353,7 +353,7 @@ impl Display for VerifyResult {
                 }
             )?;
             for script in &self.unexpected_passes {
-                writeln!(f, "    {}", script)?;
+                writeln!(f, "    {script}")?;
             }
             writeln!(
                 f,
@@ -621,7 +621,7 @@ impl Fuzz {
                 },
                 Default::default(),
             ))
-            .map_err(|err| TestCaseError::fail(format!("{:#}", err)))
+            .map_err(|err| TestCaseError::fail(format!("{err:#}")))
         });
 
         if let Err(TestError::Fail(reason, script)) = result {

@@ -113,7 +113,7 @@ impl OrderBy {
         fmt_with(move |f| {
             write!(f, "{}", self.field.display(dialect))?;
             if let Some(ot) = self.order_type {
-                write!(f, " {}", ot)?;
+                write!(f, " {ot}")?;
             }
 
             Ok(())

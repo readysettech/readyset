@@ -77,6 +77,6 @@ impl Display for CurrentStatus {
             CurrentStatus::Online => "Online",
             CurrentStatus::MaintenanceMode => "Maintenance Mode",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }

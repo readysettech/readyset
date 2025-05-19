@@ -1609,7 +1609,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     g.backend_ready().await;
     for (i, table) in tables.iter().enumerate() {
         let mut getter = g
-            .view(&format!("{}ID", table))
+            .view(&format!("{table}ID"))
             .await
             .unwrap()
             .into_reader_handle()
@@ -1685,7 +1685,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
     std::thread::sleep(Duration::from_secs(10));
     for (i, table) in tables.iter().enumerate() {
         let mut getter = g
-            .view(&format!("{}ID", table))
+            .view(&format!("{table}ID"))
             .await
             .unwrap()
             .into_reader_handle()
@@ -1983,8 +1983,7 @@ async fn votes() {
     assert!(
         res.iter()
             .any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
-        "no entry for [1,2,1|2] in {:?}",
-        res
+        "no entry for [1,2,1|2] in {res:?}"
     );
     assert_eq!(res.len(), 1);
 
@@ -2762,7 +2761,7 @@ async fn pkey_then_full_table_with_bogokey() {
         .unwrap();
 
     let rows: Vec<Vec<DfValue>> = (0..10)
-        .map(|n| vec![n.into(), format!("post {}", n).into()])
+        .map(|n| vec![n.into(), format!("post {n}").into()])
         .collect();
     posts.insert_many(rows.clone()).await.unwrap();
 
@@ -2776,7 +2775,7 @@ async fn pkey_then_full_table_with_bogokey() {
 
     // Looking up all posts using a 0 bogokey should return all posts.
     let rows_with_bogokey: Vec<Vec<DfValue>> = (0..10)
-        .map(|n| vec![n.into(), format!("post {}", n).into()])
+        .map(|n| vec![n.into(), format!("post {n}").into()])
         .collect();
     assert_eq!(
         all_posts
@@ -3083,7 +3082,7 @@ async fn migration_depends_on_unchanged_domain() {
 }
 
 async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
-    let name = format!("do_full_vote_migration_{}", old_puts_after);
+    let name = format!("do_full_vote_migration_{old_puts_after}");
     let (mut g, shutdown_tx) = if sharded {
         start_simple(&name).await
     } else {

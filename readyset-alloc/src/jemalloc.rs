@@ -201,8 +201,8 @@ pub fn fetch_thread_memory_stats() -> Result<Vec<AllocThreadStats>, Error> {
 fn fetch_thread_memory_stats_inner() -> Vec<AllocThreadStats> {
     let thread_memory_map = THREAD_MEMORY_MAP.lock().unwrap();
     thread_memory_map
-        .iter()
-        .map(|(_, accessor)| AllocThreadStats {
+        .values()
+        .map(|accessor| AllocThreadStats {
             thread_name: accessor.thread_name.clone(),
             allocated: accessor.get_allocated(),
             deallocated: accessor.get_deallocated(),
@@ -339,8 +339,7 @@ mod profiling {
         unsafe {
             if let Err(e) = tikv_jemalloc_ctl::raw::update(PROF_ACTIVE, true) {
                 return Err(ProfError::JemallocError(format!(
-                    "failed to activate profiling: {}",
-                    e
+                    "failed to activate profiling: {e}"
                 )));
             }
         }
@@ -351,8 +350,7 @@ mod profiling {
         unsafe {
             if let Err(e) = tikv_jemalloc_ctl::raw::update(PROF_ACTIVE, false) {
                 return Err(ProfError::JemallocError(format!(
-                    "failed to deactivate profiling: {}",
-                    e
+                    "failed to deactivate profiling: {e}"
                 )));
             }
         }
@@ -392,7 +390,7 @@ mod profiling {
             match unsafe { tikv_jemalloc_ctl::raw::read(OPT_PROF) } {
                 Err(e) => {
                     // Shouldn't be possible since mem-profiling is set
-                    panic!("is_profiling_on: {:?}", e);
+                    panic!("is_profiling_on: {e:?}");
                 }
                 Ok(prof) => prof,
             }

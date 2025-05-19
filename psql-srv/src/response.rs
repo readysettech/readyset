@@ -304,7 +304,7 @@ mod tests {
                                 Some(Arc::new(vec![TransferFormat::Text, TransferFormat::Binary]))
                             );
                         }
-                        _ => panic!("Unexpected message {:?}", m),
+                        _ => panic!("Unexpected message {m:?}"),
                     },
                     2 => match m {
                         BackendMessage::DataRow {
@@ -317,7 +317,7 @@ mod tests {
                                 Some(Arc::new(vec![TransferFormat::Text, TransferFormat::Binary]))
                             );
                         }
-                        _ => panic!("Unexpected message {:?}", m),
+                        _ => panic!("Unexpected message {m:?}"),
                     },
                     3 => assert!(matches!(
                         m,

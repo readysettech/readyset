@@ -38,7 +38,7 @@ where
     let collation_clause = if collation.is_empty() {
         String::new()
     } else {
-        format!(" COLLATE '{}'", collation)
+        format!(" COLLATE '{collation}'")
     };
 
     let create_table = format!(
@@ -48,11 +48,10 @@ where
             CREATE TABLE encoding_table (
                 id INT NOT NULL,
                 hex VARCHAR(255) CHARACTER SET utf8mb4,
-                text {} {},
+                text {column_type} {collation_clause},
                 counter INT NOT NULL DEFAULT 0
             );
-        "#,
-        column_type, collation_clause
+        "#
     );
     upstream_conn.query_drop(create_table).await.unwrap();
 
@@ -206,7 +205,7 @@ where
     let collation_clause = if collation.is_empty() {
         String::new()
     } else {
-        format!(" COLLATE '{}'", collation)
+        format!(" COLLATE '{collation}'")
     };
 
     let create_table = format!(
@@ -216,10 +215,9 @@ where
             CREATE TABLE encoding_table (
                 id INT NOT NULL,
                 hex VARCHAR(255) CHARACTER SET utf8mb4,
-                text {} {}
+                text {column_type} {collation_clause}
             );
-        "#,
-        column_type, collation_clause
+        "#
     );
     upstream_conn.query_drop(create_table).await.unwrap();
 
@@ -306,7 +304,7 @@ where
 {
     range
         .into_iter()
-        .map(move |value| (value, format!("{value:0width$X}", width = width)))
+        .map(move |value| (value, format!("{value:0width$X}")))
 }
 
 test_encoding_replication!(

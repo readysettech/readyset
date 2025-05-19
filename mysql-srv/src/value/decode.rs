@@ -162,7 +162,7 @@ impl<'a> ValueInner<'a> {
             ColumnType::MYSQL_TYPE_NULL => Ok(ValueInner::Null),
             ct => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("unknown column type {:?}", ct),
+                format!("unknown column type {ct:?}"),
             )),
         }
     }
@@ -205,7 +205,7 @@ impl<'a> TryFrom<Value<'a>> for &'a str {
         } else {
             Err(MsqlSrvError::InvalidConversion {
                 target_type: "str".to_string(),
-                src_type: format!("{:?}", val),
+                src_type: format!("{val:?}"),
             })
         }
     }
@@ -228,7 +228,7 @@ impl<'a> TryFrom<Value<'a>> for NaiveDate {
         } else {
             Err(MsqlSrvError::InvalidConversion {
                 target_type: "NaiveDate".to_string(),
-                src_type: format!("{:?}", val),
+                src_type: format!("{val:?}"),
             })
         }
     }
@@ -265,7 +265,7 @@ impl<'a> TryFrom<Value<'a>> for NaiveDateTime {
         } else {
             Err(MsqlSrvError::InvalidConversion {
                 target_type: "NaiveDateTime".to_string(),
-                src_type: format!("{:?}", val),
+                src_type: format!("{val:?}"),
             })
         }
     }
@@ -287,7 +287,7 @@ impl<'a> TryFrom<Value<'a>> for MySqlTime {
         } else {
             Err(MsqlSrvError::InvalidConversion {
                 target_type: "MySqlTime".to_string(),
-                src_type: format!("{:?}", val),
+                src_type: format!("{val:?}"),
             })
         }
     }
@@ -327,7 +327,7 @@ impl<'a> TryFrom<Value<'a>> for Duration {
         } else {
             Err(MsqlSrvError::InvalidConversion {
                 target_type: "Duration".to_string(),
-                src_type: format!("{:?}", val),
+                src_type: format!("{val:?}"),
             })
         }
     }

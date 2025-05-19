@@ -1082,7 +1082,7 @@ impl Ingredient for Union {
                             .join(", ");
                         format!("{}:[{}]", src.as_global().index(), cols)
                     })
-                    .join(&format!(" {} ", symbol))
+                    .join(&format!(" {symbol} "))
             }
         }
     }
@@ -1113,10 +1113,7 @@ mod tests {
     #[test]
     fn it_describes() {
         let (u, l, r) = setup(DuplicateMode::UnionAll);
-        assert_eq!(
-            u.node().description(),
-            format!("{}:[0, 1] ⋃ {}:[0, 2]", l, r)
-        );
+        assert_eq!(u.node().description(), format!("{l}:[0, 1] ⋃ {r}:[0, 2]"));
     }
 
     #[test]
@@ -1211,7 +1208,7 @@ mod tests {
                     assert_eq!(rows, Records::default());
                     assert_eq!(captured, HashSet::from([key.clone()]));
                 }
-                _ => panic!("expected replay piece, got: {:?}", res),
+                _ => panic!("expected replay piece, got: {res:?}"),
             }
 
             // then a point-key replay on the right
@@ -1241,7 +1238,7 @@ mod tests {
                     assert!(captured.is_empty());
                     assert_eq!(keys, HashSet::from([key]));
                 }
-                _ => panic!("Expected replay piece, got: {:?}", res),
+                _ => panic!("Expected replay piece, got: {res:?}"),
             }
         }
 
@@ -1276,7 +1273,7 @@ mod tests {
                     assert_eq!(rows, Records::default());
                     assert_eq!(captured, HashSet::from([key.clone()]));
                 }
-                _ => panic!("expected replay piece, got: {:?}", res),
+                _ => panic!("expected replay piece, got: {res:?}"),
             }
 
             // then an update from the left
@@ -1321,7 +1318,7 @@ mod tests {
                     assert!(captured.is_empty());
                     assert_eq!(keys, HashSet::from([key]));
                 }
-                _ => panic!("Expected replay piece, got: {:?}", res),
+                _ => panic!("Expected replay piece, got: {res:?}"),
             }
         }
 

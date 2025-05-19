@@ -43,8 +43,8 @@ impl From<Option<String>> for DeallocateId {
 impl Display for DeallocateId {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
-            DeallocateId::Numeric(id) => write!(f, "{}", id),
-            DeallocateId::Named(name) => write!(f, "{}", name),
+            DeallocateId::Numeric(id) => write!(f, "{id}"),
+            DeallocateId::Named(name) => write!(f, "{name}"),
             DeallocateId::All => write!(f, "all"),
         }
     }

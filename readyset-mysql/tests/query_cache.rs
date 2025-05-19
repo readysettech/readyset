@@ -919,8 +919,7 @@ async fn resnapshot_table(table: Relation, handle: &mut Handle, conn: &mut Conn)
 async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_lower: &str) {
     let row: Vec<(u32, String)> = conn
         .query(format!(
-            "SELECT id, varchar_ci FROM col_sensitiveness_lookup WHERE varchar_ci = '{}'",
-            key_lower
+            "SELECT id, varchar_ci FROM col_sensitiveness_lookup WHERE varchar_ci = '{key_lower}'"
         ))
         .await
         .unwrap();
@@ -930,8 +929,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
     assert_eq!(row[0].1, key_upper);
     let row: Vec<(u32, String)> = conn
         .query(format!(
-            "SELECT id, varchar_ci FROM col_sensitiveness_lookup WHERE varchar_ci = '{}'",
-            key_upper
+            "SELECT id, varchar_ci FROM col_sensitiveness_lookup WHERE varchar_ci = '{key_upper}'"
         ))
         .await
         .unwrap();
@@ -942,8 +940,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
 
     let row: Vec<(u32, String)> = conn
         .query(format!(
-            "SELECT id, varchar_cs FROM col_sensitiveness_lookup WHERE varchar_cs = '{}'",
-            key_lower
+            "SELECT id, varchar_cs FROM col_sensitiveness_lookup WHERE varchar_cs = '{key_lower}'"
         ))
         .await
         .unwrap();
@@ -953,8 +950,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
 
     let row: Vec<(u32, String)> = conn
         .query(format!(
-            "SELECT id, varchar_cs FROM col_sensitiveness_lookup WHERE varchar_cs = '{}'",
-            key_upper
+            "SELECT id, varchar_cs FROM col_sensitiveness_lookup WHERE varchar_cs = '{key_upper}'"
         ))
         .await
         .unwrap();
@@ -965,8 +961,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
 
     let row: Vec<(u32, String)> = conn
         .query(format!(
-            "SELECT id, char_ci FROM col_sensitiveness_lookup WHERE char_ci = '{}'",
-            key_lower
+            "SELECT id, char_ci FROM col_sensitiveness_lookup WHERE char_ci = '{key_lower}'"
         ))
         .await
         .unwrap();
@@ -977,8 +972,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
 
     let row: Vec<(u32, String)> = conn
         .query(format!(
-            "SELECT id, char_ci FROM col_sensitiveness_lookup WHERE char_ci = '{}'",
-            key_upper
+            "SELECT id, char_ci FROM col_sensitiveness_lookup WHERE char_ci = '{key_upper}'"
         ))
         .await
         .unwrap();
@@ -989,8 +983,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
 
     let row: Vec<(u32, String)> = conn
         .query(format!(
-            "SELECT id, char_cs FROM col_sensitiveness_lookup WHERE char_cs = '{}'",
-            key_lower
+            "SELECT id, char_cs FROM col_sensitiveness_lookup WHERE char_cs = '{key_lower}'"
         ))
         .await
         .unwrap();
@@ -1000,8 +993,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
 
     let row: Vec<(u32, String)> = conn
         .query(format!(
-            "SELECT id, char_cs FROM col_sensitiveness_lookup WHERE char_cs = '{}'",
-            key_upper
+            "SELECT id, char_cs FROM col_sensitiveness_lookup WHERE char_cs = '{key_upper}'"
         ))
         .await
         .unwrap();

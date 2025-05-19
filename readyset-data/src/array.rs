@@ -187,7 +187,7 @@ impl Display for Array {
         if self.lower_bounds.iter().any(|b| *b != 1) {
             for (lower_bound, len) in self.lower_bounds.iter().zip(self.contents.shape()) {
                 let upper_bound = (*lower_bound as isize) + (*len as isize - 1);
-                write!(f, "[{}:{}]", lower_bound, upper_bound)?;
+                write!(f, "[{lower_bound}:{upper_bound}]")?;
             }
             write!(f, "=")?;
         }
@@ -206,7 +206,7 @@ impl Display for Array {
                     if let Ok(s) = <&str>::try_from(val) {
                         write!(f, "\"{}\"", s.replace('"', "\\\""))?;
                     } else {
-                        write!(f, "{}", val)?;
+                        write!(f, "{val}")?;
                     }
                 }
             } else {
@@ -236,7 +236,7 @@ impl FromStr for Array {
 
         let (rem, res) = parse::array(LocatedSpan::new(s.as_bytes())).map_err(|e| {
             mk_err(match e {
-                nom::Err::Incomplete(n) => format!("Incomplete input; needed {:?}", n),
+                nom::Err::Incomplete(n) => format!("Incomplete input; needed {n:?}"),
                 nom::Err::Error(NomSqlError { input, kind })
                 | nom::Err::Failure(NomSqlError { input, kind }) => {
                     format!("{:?}: at {}", kind, String::from_utf8_lossy(&input))

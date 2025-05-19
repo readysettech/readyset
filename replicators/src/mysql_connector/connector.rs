@@ -397,7 +397,7 @@ impl MySqlBinlogConnector {
             self,
             self.reader
                 .get_tme(table_id)
-                .ok_or_else(|| format!("TME not found for table ID {}", table_id))
+                .ok_or_else(|| format!("TME not found for table ID {table_id}"))
         );
 
         if !self
@@ -616,7 +616,7 @@ impl MySqlBinlogConnector {
             self,
             self.reader
                 .get_tme(table_id)
-                .ok_or_else(|| format!("TME not found for table ID {}", table_id))
+                .ok_or_else(|| format!("TME not found for table ID {table_id}"))
         );
 
         if !self
@@ -669,7 +669,7 @@ impl MySqlBinlogConnector {
             self,
             self.reader
                 .get_tme(table_id)
-                .ok_or_else(|| format!("TME not found for table ID {}", table_id))
+                .ok_or_else(|| format!("TME not found for table ID {table_id}"))
         );
 
         if !self
@@ -1639,10 +1639,9 @@ fn temporal_packed_from_binary(data: &[u8]) -> i64 {
 
 fn mysql_common_value_to_json_string(val: &Value) -> String {
     match *val {
-        Value::Date(y, m, d, 0, 0, 0, 0) => format!("\"{:04}-{:02}-{:02}\"", y, m, d),
+        Value::Date(y, m, d, 0, 0, 0, 0) => format!("\"{y:04}-{m:02}-{d:02}\""),
         Value::Date(year, month, day, hour, minute, second, micros) => format!(
-            "\"{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}\"",
-            year, month, day, hour, minute, second, micros
+            "\"{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}.{micros:06}\""
         ),
         Value::Time(neg, d, h, i, s, u) => {
             assert_eq!(d, 0);

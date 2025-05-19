@@ -404,7 +404,7 @@ impl Worker {
                 let (abort, abort_rx) = oneshot::channel::<()>();
                 // Spawn the actual thread to run the domain
                 std::thread::Builder::new()
-                    .name(format!("Domain {}", replica_addr))
+                    .name(format!("Domain {replica_addr}"))
                     .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
                     .spawn_wrapper(move || {
                         // The runtime will run until the abort signal is sent.

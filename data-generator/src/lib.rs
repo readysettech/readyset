@@ -783,7 +783,7 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         SqlType::Time => {
             (NaiveTime::from_hms_opt(0, 0, 0).unwrap() + Duration::seconds(idx as _)).into()
         }
-        SqlType::Json | SqlType::Jsonb => DfValue::from(format!("{{\"k\": {}}}", idx)),
+        SqlType::Json | SqlType::Jsonb => DfValue::from(format!("{{\"k\": {idx}}}")),
         SqlType::MacAddr => {
             let b1: u8 = ((idx >> 24) & 0xff) as u8;
             let b2: u8 = ((idx >> 16) & 0xff) as u8;

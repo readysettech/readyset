@@ -1227,7 +1227,7 @@ mod tests {
                     func_name,
                     val,
                     if let Some(collation_name) = collate {
-                        format!(" COLLATE \"{}\"", collation_name)
+                        format!(" COLLATE \"{collation_name}\"")
                     } else {
                         "".to_string()
                     }

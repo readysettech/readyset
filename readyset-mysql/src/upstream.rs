@@ -359,13 +359,13 @@ impl UpstreamDatabase for MySqlUpstream {
                     // send it to the upstream for completeness and let mysql complain
                     // if the id is not found.
                     self.conn
-                        .query_drop(format!("DEALLOCATE PREPARE {}", id))
+                        .query_drop(format!("DEALLOCATE PREPARE {id}"))
                         .await?;
                 }
             },
             DeallocateId::Named(name) => {
                 self.conn
-                    .query_drop(format!("DEALLOCATE PREPARE {}", name))
+                    .query_drop(format!("DEALLOCATE PREPARE {name}"))
                     .await?
             }
             DeallocateId::All => {

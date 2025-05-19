@@ -157,8 +157,7 @@ impl RawReplayPath {
                 let mut uniq = HashSet::new();
                 segments.iter().all(|ir| uniq.insert(ir.node))
             },
-            "Tried to construct cyclic RawReplayPath: {:?}",
-            segments
+            "Tried to construct cyclic RawReplayPath: {segments:?}"
         );
         Self {
             target_index: segments.len() - 1,
@@ -1142,7 +1141,7 @@ mod tests {
     #[test]
     fn generated_columns_from_self() {
         let (mut g, a, _) = bases();
-        eprintln!("base: {:?}", a);
+        eprintln!("base: {a:?}");
 
         let mut paginate_node = node::Node::new(
             "paginate",
@@ -1167,7 +1166,7 @@ mod tests {
                 (a, IndexPair::from(a)),
             ]))
         }
-        eprintln!("paginate: {:?}", paginate);
+        eprintln!("paginate: {paginate:?}");
 
         let reader = g.add_node(node::Node::new(
             "reader",
@@ -1176,7 +1175,7 @@ mod tests {
                 .with_index(&Index::hash_map(vec![1, 2])),
         ));
         g.add_edge(paginate, reader, ());
-        eprintln!("reader: {:?}", reader);
+        eprintln!("reader: {reader:?}");
 
         let mut paths = replay_paths_for_nonstop(
             &g,

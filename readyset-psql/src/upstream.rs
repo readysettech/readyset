@@ -479,13 +479,13 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                     *a = None;
                 } else {
                     self.client
-                        .simple_query(format!("DEALLOCATE {}", id).as_str())
+                        .simple_query(format!("DEALLOCATE {id}").as_str())
                         .await?;
                 }
             }
             DeallocateId::Named(name) => {
                 self.client
-                    .simple_query(format!("DEALLOCATE {}", name).as_str())
+                    .simple_query(format!("DEALLOCATE {name}").as_str())
                     .await?;
             }
             DeallocateId::All => {

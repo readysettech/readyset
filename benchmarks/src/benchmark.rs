@@ -96,7 +96,7 @@ pub struct BenchmarkData {
 impl BenchmarkData {
     pub fn new(unit: metrics::Unit, desired_action: MetricGoal) -> Self {
         Self {
-            unit: format!("{:?}", unit),
+            unit: format!("{unit:?}"),
             desired_action,
             // TODO(jeb) why 3?
             values: Histogram::<u64>::new(3).unwrap(),

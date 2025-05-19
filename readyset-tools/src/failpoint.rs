@@ -51,8 +51,7 @@ impl Failpoint {
         let status = res.status();
         assert!(
             status == hyper::StatusCode::OK,
-            "status was: {} (don't forget to compile Readyset with --features failure_injection)",
-            status
+            "status was: {status} (don't forget to compile Readyset with --features failure_injection)"
         );
         Ok(())
     }

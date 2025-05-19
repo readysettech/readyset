@@ -895,8 +895,7 @@ impl BuiltinFunction {
                         // TODO(fran): I don't know if this is the right thing to do.
                         d.round().to_i32().ok_or_else(|| {
                             ReadySetError::BadRequest(format!(
-                                "NUMERIC value {} exceeds 32-bit integer size",
-                                d
+                                "NUMERIC value {d} exceeds 32-bit integer size"
                             ))
                         })?
                     }
@@ -1412,8 +1411,8 @@ impl BuiltinFunction {
             BuiltinFunction::Hex(expr) => {
                 let input = non_null!(expr.eval(record)?);
                 match input {
-                    DfValue::Int(n) => Ok(format!("{:X}", n).into()),
-                    DfValue::UnsignedInt(n) => Ok(format!("{:X}", n).into()),
+                    DfValue::Int(n) => Ok(format!("{n:X}").into()),
+                    DfValue::UnsignedInt(n) => Ok(format!("{n:X}").into()),
                     DfValue::Text(_) | DfValue::TinyText(_) => {
                         let bytes = input.as_bytes()?;
                         let hex = bytes.iter().fold(String::new(), |mut output, b| {

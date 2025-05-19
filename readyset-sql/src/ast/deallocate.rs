@@ -30,7 +30,7 @@ impl DialectDisplay for DeallocateStatement {
 
             match &self.identifier {
                 StatementIdentifier::AllStatements => write!(f, "ALL"),
-                StatementIdentifier::SingleStatement(id) => write!(f, "{}", id),
+                StatementIdentifier::SingleStatement(id) => write!(f, "{id}"),
             }
         })
     }

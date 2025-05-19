@@ -48,7 +48,7 @@ impl fmt::Display for BinaryDisplay<'_> {
         write!(
             f,
             "0x{}",
-            self.0.iter().map(|byte| format!("{:02x}", byte)).join("")
+            self.0.iter().map(|byte| format!("{byte:02x}")).join("")
         )
     }
 }

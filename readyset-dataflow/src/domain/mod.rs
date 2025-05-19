@@ -2365,7 +2365,7 @@ impl Domain {
                     Some((
                         node_index,
                         readyset_client::debug::stats::NodeStats {
-                            desc: format!("{:?}", n),
+                            desc: format!("{n:?}"),
                             process_time: time,
                             process_ptime: ptime,
                             mem_size: mem_size as _,

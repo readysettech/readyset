@@ -547,8 +547,7 @@ impl wal::TupleData {
         if self.n_cols != relation.n_cols {
             return Err(WalError::TableError {
                 kind: TableErrorKind::InvalidMapping(format!(
-                    "Relation and tuple must have 1:1 mapping; {:?}; {:?}",
-                    self, relation
+                    "Relation and tuple must have 1:1 mapping; {self:?}; {relation:?}"
                 )),
                 table: relation.relation_name_lossy(),
                 schema: relation.schema_name_lossy(),
@@ -837,8 +836,7 @@ impl wal::TupleData {
                                                 return Err(WalError::TableError {
                                                     kind: TableErrorKind::BitVectorParseError(
                                                         format!(
-                                                            "\"{}\" is not a valid binary digit",
-                                                            c
+                                                            "\"{c}\" is not a valid binary digit"
                                                         ),
                                                     ),
                                                     schema: relation.schema_name_lossy(),

@@ -669,10 +669,10 @@ impl ToMySqlValue for Duration {
         let s = s % 60;
         let us = self.subsec_micros();
         if us != 0 {
-            w.write_lenenc_str(format!("{:02}:{:02}:{:02}.{:06}", h, m, s, us).as_bytes())
+            w.write_lenenc_str(format!("{h:02}:{m:02}:{s:02}.{us:06}").as_bytes())
                 .map(|_| ())
         } else {
-            w.write_lenenc_str(format!("{:02}:{:02}:{:02}", h, m, s).as_bytes())
+            w.write_lenenc_str(format!("{h:02}:{m:02}:{s:02}").as_bytes())
                 .map(|_| ())
         }
     }

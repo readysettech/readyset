@@ -59,7 +59,7 @@ impl Display for ConnectionType {
             ConnectionType::MySQL => "MySQL".to_string(),
             ConnectionType::PostgreSQL => "PostgreSQL".to_string(),
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 

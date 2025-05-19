@@ -38,13 +38,12 @@ impl MySqlPosition {
     pub fn from_file_name_and_position(file_name: String, position: u64) -> ReadySetResult<Self> {
         let (binlog_file_base_name, binlog_file_suffix) =
             file_name.rsplit_once('.').ok_or_else(|| {
-                ReadySetError::ReplicationFailed(format!("Invalid binlog name {}", file_name))
+                ReadySetError::ReplicationFailed(format!("Invalid binlog name {file_name}"))
             })?;
         let binlog_file_suffix_length = binlog_file_suffix.len();
         let binlog_file_suffix = binlog_file_suffix.parse::<u32>().map_err(|e| {
             ReadySetError::ReplicationFailed(format!(
-                "Invalid binlog filename suffix {}: {e}",
-                file_name
+                "Invalid binlog filename suffix {file_name}: {e}"
             ))
         })?;
 

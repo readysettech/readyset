@@ -434,7 +434,7 @@ impl MirNodeInner {
                     .map(|c| c.name.as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{} γ[{}]", op_string, group_cols)
+                format!("{op_string} γ[{group_cols}]")
             }
             MirNodeInner::Base {
                 column_specs,
@@ -471,7 +471,7 @@ impl MirNodeInner {
                     .map(|c| c.name.as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{} γ[{}]", op_string, group_cols)
+                format!("{op_string} γ[{group_cols}]")
             }
             MirNodeInner::Filter { ref conditions, .. } => {
                 format!("σ[{}]", conditions.display(readyset_sql::Dialect::MySQL))
@@ -507,7 +507,7 @@ impl MirNodeInner {
                     .map(|(column, _)| column.name.clone())
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("Leaf [⚷: {}]", key_cols)
+                format!("Leaf [⚷: {key_cols}]")
             }
             MirNodeInner::LeftJoin {
                 ref on,
@@ -562,21 +562,21 @@ impl MirNodeInner {
                     .map(|k| k.name.clone())
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("Distinct [γ: {}]", key_cols)
+                format!("Distinct [γ: {key_cols}]")
             }
             MirNodeInner::Paginate {
                 ref order,
                 ref limit,
                 ..
             } => {
-                format!("Paginate [limit: {}, {:?}]", limit, order)
+                format!("Paginate [limit: {limit}, {order:?}]")
             }
             MirNodeInner::TopK {
                 ref order,
                 ref limit,
                 ..
             } => {
-                format!("TopK [k: {}, {:?}]", limit, order)
+                format!("TopK [k: {limit}, {order:?}]")
             }
             MirNodeInner::Union {
                 ref emit,
@@ -593,7 +593,7 @@ impl MirNodeInner {
                             .collect::<Vec<_>>()
                             .join(", ")
                     })
-                    .join(&format!(" {} ", symbol))
+                    .join(&format!(" {symbol} "))
             }
             MirNodeInner::AliasTable { ref table } => {
                 format!("AliasTable [{}]", table.display_unquoted())

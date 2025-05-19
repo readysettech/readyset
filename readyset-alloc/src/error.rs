@@ -18,13 +18,13 @@ impl fmt::Display for ProfError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ProfError::MemProfilingNotEnabled => write!(f, "mem-profiling was not enabled"),
-            ProfError::IoError(e) => write!(f, "io error occurred {:?}", e),
-            ProfError::JemallocError(e) => write!(f, "jemalloc error {}", e),
+            ProfError::IoError(e) => write!(f, "io error occurred {e:?}"),
+            ProfError::JemallocError(e) => write!(f, "jemalloc error {e}"),
             ProfError::PathEncodingError(path) => {
-                write!(f, "Dump target path {:?} is not unicode encoding", path)
+                write!(f, "Dump target path {path:?} is not unicode encoding")
             }
             ProfError::PathWithNulError(path) => {
-                write!(f, "Dump target path {:?} contain an internal 0 byte", path)
+                write!(f, "Dump target path {path:?} contain an internal 0 byte")
             }
         }
     }

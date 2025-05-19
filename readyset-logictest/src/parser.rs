@@ -354,7 +354,7 @@ fn query(i: &[u8]) -> IResult<&[u8], Query> {
                     if let Ok(v) = v.convert_type(typ) {
                         v.into_owned()
                     } else {
-                        panic!("can't convert value {} to {}", v, typ);
+                        panic!("can't convert value {v} to {typ}");
                     }
                 })
                 .collect(),

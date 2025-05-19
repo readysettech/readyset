@@ -311,16 +311,16 @@ impl fmt::Display for MySqlTime {
         let s = self.seconds();
         let us = self.microseconds();
         if us != 0 {
-            write!(f, "{}{:02}:{:02}:{:02}.{:06}", sign, h, m, s, us)
+            write!(f, "{sign}{h:02}:{m:02}:{s:02}.{us:06}")
         } else {
-            write!(f, "{}{:02}:{:02}:{:02}", sign, h, m, s)
+            write!(f, "{sign}{h:02}:{m:02}:{s:02}")
         }
     }
 }
 
 impl fmt::Debug for MySqlTime {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{self}")
     }
 }
 
@@ -1253,9 +1253,9 @@ mod tests {
             .unwrap_or(0);
         let sign = if total_secs.is_negative() { "-" } else { "" };
         if us != 0 {
-            format!("{}{:02}:{:02}:{:02}.{:06}", sign, h, m, s, us)
+            format!("{sign}{h:02}:{m:02}:{s:02}.{us:06}")
         } else {
-            format!("{}{:02}:{:02}:{:02}", sign, h, m, s)
+            format!("{sign}{h:02}:{m:02}:{s:02}")
         }
     }
 

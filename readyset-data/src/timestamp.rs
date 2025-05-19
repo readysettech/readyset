@@ -485,7 +485,7 @@ impl TimestampTz {
                 NaiveTime::from_hms_opt(0, 0, 0)
                     .ok_or_else(|| ReadySetError::DfValueConversionError {
                         src_type: "DfValue::TimestampTz".to_string(),
-                        target_type: format!("{:?}", to_ty),
+                        target_type: format!("{to_ty:?}"),
                         details: "Unexpected error constructing 00:00:00 time".to_string(),
                     })?
                     .into()
@@ -510,7 +510,7 @@ impl TimestampTz {
             | DfType::TinyInt
             | DfType::UnsignedTinyInt => Err(ReadySetError::DfValueConversionError {
                 src_type: "DfValue::TimestampTz".to_string(),
-                target_type: format!("{:?}", to_ty),
+                target_type: format!("{to_ty:?}"),
                 details: "Out of range".to_string(),
             }),
 
@@ -555,7 +555,7 @@ impl TimestampTz {
             DfType::Json => {
                 let mut ts = *self;
                 ts.set_subsecond_digits(6); // Set max precision before json conversion
-                Ok(DfValue::from(format!("\"{}\"", ts).as_str()))
+                Ok(DfValue::from(format!("\"{ts}\"").as_str()))
             }
 
             DfType::Unknown
@@ -571,7 +571,7 @@ impl TimestampTz {
             | DfType::Point
             | DfType::PostgisPoint => Err(ReadySetError::DfValueConversionError {
                 src_type: "DfValue::TimestampTz".to_string(),
-                target_type: format!("{:?}", to_ty),
+                target_type: format!("{to_ty:?}"),
                 details: "Not allowed".to_string(),
             }),
         }

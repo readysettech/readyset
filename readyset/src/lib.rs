@@ -1271,7 +1271,7 @@ where
                     no_upstream_connections,
                 )
                 .await
-                .map_err(|e| format!("Error connecting to upstream database: {}", e));
+                .map_err(|e| format!("Error connecting to upstream database: {e}"));
 
                 match upstream_res {
                     Ok(upstream) => {

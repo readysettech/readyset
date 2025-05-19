@@ -613,12 +613,12 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     if let nom::error::ErrorKind::Eof = code {
                         io::Error::new(
                             io::ErrorKind::UnexpectedEof,
-                            format!("client did not complete handshake; got {:?}", input),
+                            format!("client did not complete handshake; got {input:?}"),
                         )
                     } else {
                         io::Error::new(
                             io::ErrorKind::InvalidData,
-                            format!("bad client handshake; got {:?} ({:?})", input, code),
+                            format!("bad client handshake; got {input:?} ({code:?})"),
                         )
                     }
                 }
@@ -713,7 +713,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             debug!(%username, ?client_auth_plugin, "Received incorrect password");
             writers::write_err(
                 ErrorKind::ER_ACCESS_DENIED_ERROR,
-                format!("Access denied for user {}", username).as_bytes(),
+                format!("Access denied for user {username}").as_bytes(),
                 &mut self.conn,
             )
             .await?;
@@ -737,7 +737,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             let cmd = commands::parse(&packet)
                 .map_err(|e| {
                     other_error(OtherErrorKind::GenericErr {
-                        error: format!("{:?}", e),
+                        error: format!("{e:?}"),
                     })
                 })?
                 .1;
@@ -758,7 +758,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     let change_user = change_user(q, self.client_capabilities)
                         .map_err(|e| {
                             other_error(OtherErrorKind::GenericErr {
-                                error: format!("{:?}", e),
+                                error: format!("{e:?}"),
                             })
                         })?
                         .1;
@@ -817,7 +817,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                             Err(_) => {
                                 writers::write_err(
                                     ErrorKind::ER_ACCESS_DENIED_ERROR,
-                                    format!("Access denied for user {}", username).as_bytes(),
+                                    format!("Access denied for user {username}").as_bytes(),
                                     &mut self.conn,
                                 )
                                 .await?;
@@ -827,7 +827,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         debug!("Received incorrect password");
                         writers::write_err(
                             ErrorKind::ER_ACCESS_DENIED_ERROR,
-                            format!("Access denied for user {}", username).as_bytes(),
+                            format!("Access denied for user {username}").as_bytes(),
                             &mut self.conn,
                         )
                         .await?;
@@ -898,7 +898,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         .ok_or_else(|| {
                             io::Error::new(
                                 io::ErrorKind::InvalidData,
-                                format!("got reset data packet for unknown statement {}", stmt),
+                                format!("got reset data packet for unknown statement {stmt}"),
                             )
                         })?
                         .long_data
@@ -909,7 +909,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     let state = stmts.get_mut(&stmt).ok_or_else(|| {
                         io::Error::new(
                             io::ErrorKind::InvalidData,
-                            format!("asked to execute unknown statement {}", stmt),
+                            format!("asked to execute unknown statement {stmt}"),
                         )
                     })?;
                     {
@@ -927,7 +927,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         .ok_or_else(|| {
                             io::Error::new(
                                 io::ErrorKind::InvalidData,
-                                format!("got long data packet for unknown statement {}", stmt),
+                                format!("got long data packet for unknown statement {stmt}"),
                             )
                         })?
                         .long_data

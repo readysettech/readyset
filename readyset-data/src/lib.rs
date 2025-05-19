@@ -186,22 +186,22 @@ impl fmt::Display for DfValue {
             DfValue::None => write!(f, "NULL"),
             DfValue::Text(..) | DfValue::TinyText(..) => {
                 let text: &str = <&str>::try_from(self).map_err(|_| fmt::Error)?;
-                write!(f, "{}", text)
+                write!(f, "{text}")
             }
-            DfValue::Int(n) => write!(f, "{}", n),
-            DfValue::UnsignedInt(n) => write!(f, "{}", n),
-            DfValue::Float(n) => write!(f, "{}", n),
-            DfValue::Double(n) => write!(f, "{}", n),
-            DfValue::TimestampTz(ref ts) => write!(f, "{}", ts),
-            DfValue::Time(ref t) => write!(f, "{}", t),
+            DfValue::Int(n) => write!(f, "{n}"),
+            DfValue::UnsignedInt(n) => write!(f, "{n}"),
+            DfValue::Float(n) => write!(f, "{n}"),
+            DfValue::Double(n) => write!(f, "{n}"),
+            DfValue::TimestampTz(ref ts) => write!(f, "{ts}"),
+            DfValue::Time(ref t) => write!(f, "{t}"),
             DfValue::ByteArray(ref array) => {
                 write!(
                     f,
                     "E'\\x{}'",
-                    array.iter().map(|byte| format!("{:02x}", byte)).join("")
+                    array.iter().map(|byte| format!("{byte:02x}")).join("")
                 )
             }
-            DfValue::Numeric(ref d) => write!(f, "{}", d),
+            DfValue::Numeric(ref d) => write!(f, "{d}"),
             DfValue::BitVector(ref b) => {
                 write!(
                     f,
@@ -209,7 +209,7 @@ impl fmt::Display for DfValue {
                     b.iter().map(|bit| if bit { "1" } else { "0" }).join("")
                 )
             }
-            DfValue::Array(ref arr) => write!(f, "{}", arr),
+            DfValue::Array(ref arr) => write!(f, "{arr}"),
             DfValue::PassThrough(ref p) => {
                 write!(f, "[{}:{:x?}]", p.ty.name(), p.data)
             }
@@ -1492,7 +1492,7 @@ impl<'a> TryFrom<&'a Literal> for DfValue {
                 .map_err(|e| ReadySetError::DfValueConversionError {
                     src_type: "Literal".to_string(),
                     target_type: "DfValue".to_string(),
-                    details: format!("Values out-of-bounds for Numeric type. Error: {}", e),
+                    details: format!("Values out-of-bounds for Numeric type. Error: {e}"),
                 })
                 .map(|d| DfValue::Numeric(Arc::new(d))),
             Literal::Blob(b) => Ok(DfValue::from(b.to_vec())),
@@ -2021,8 +2021,7 @@ impl ToSql for DfValue {
                 MacAddress::parse_str(<&str>::try_from(self).unwrap())
                     .map_err(|e| {
                         Box::<dyn Error + Send + Sync>::from(format!(
-                            "Could not convert Text into a Mac Address: {}",
-                            e
+                            "Could not convert Text into a Mac Address: {e}"
                         ))
                     })
                     .and_then(|m| m.to_sql(ty, out))
@@ -2032,8 +2031,7 @@ impl ToSql for DfValue {
                 .parse::<IpInet>()
                 .map_err(|e| {
                     Box::<dyn Error + Send + Sync>::from(format!(
-                        "Could not convert Text into an IP Address: {}",
-                        e
+                        "Could not convert Text into an IP Address: {e}"
                     ))
                 })
                 .and_then(|ip| ip.to_sql(ty, out)),
@@ -2041,8 +2039,7 @@ impl ToSql for DfValue {
                 Uuid::parse_str(<&str>::try_from(self).unwrap())
                     .map_err(|e| {
                         Box::<dyn Error + Send + Sync>::from(format!(
-                            "Could not convert Text into a UUID: {}",
-                            e
+                            "Could not convert Text into a UUID: {e}"
                         ))
                     })
                     .and_then(|m| m.to_sql(ty, out))
@@ -2051,8 +2048,7 @@ impl ToSql for DfValue {
                 serde_json::from_str::<serde_json::Value>(<&str>::try_from(self).unwrap())
                     .map_err(|e| {
                         Box::<dyn Error + Send + Sync>::from(format!(
-                            "Could not convert Text into a JSON: {}",
-                            e
+                            "Could not convert Text into a JSON: {e}"
                         ))
                     })
                     .and_then(|v| v.to_sql(ty, out))

@@ -23,11 +23,11 @@ fn parse_queryset(dialect: Dialect, queries: Vec<String>) -> (i32, i32) {
         }
     }
 
-    println!("\nParsing failed: {} queries", parsed_err);
+    println!("\nParsing failed: {parsed_err} queries");
     println!("Parsed successfully: {} queries", parsed_ok.len());
     println!("\nSuccessfully parsed queries:");
     for q in parsed_ok.iter() {
-        println!("{:?}", q);
+        println!("{q:?}");
     }
 
     (parsed_ok.len() as i32, parsed_err)

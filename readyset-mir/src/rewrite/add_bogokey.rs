@@ -459,7 +459,7 @@ mod tests {
                 .neighbors_directed(join_node, petgraph::Direction::Incoming)
                 .inspect(|p| println!("Parent: {:?}", mir_graph[*p]))
                 .find(|&n| mir_graph[n].name() == &Relation::from(parent_name))
-                .unwrap_or_else(|| panic!("Expected a projection node for {}", parent_name));
+                .unwrap_or_else(|| panic!("Expected a projection node for {parent_name}"));
 
             match &mir_graph[parent].inner {
                 MirNodeInner::Project { emit, .. } => {
@@ -467,11 +467,10 @@ mod tests {
                         emit.iter().any(
                             |c| matches!(c, ProjectExpr::Expr{ alias, ..} if alias == "bogokey")
                         ),
-                        "{} projection should output bogokey",
-                        parent_name
+                        "{parent_name} projection should output bogokey"
                     );
                 }
-                _ => panic!("{} parent is not a Projection node", parent_name),
+                _ => panic!("{parent_name} parent is not a Projection node"),
             }
         };
 

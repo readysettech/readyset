@@ -917,7 +917,7 @@ mod tests {
                     algorithm: Some("INPLACE".into()),
                     lock: Some("DEFAULT".into()),
                 };
-                let qstring = format!("ALTER TABLE `t` DROP COLUMN c{}", qstring);
+                let qstring = format!("ALTER TABLE `t` DROP COLUMN c{qstring}");
                 let result =
                     alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
                 assert_eq!(result.unwrap().1, expected);

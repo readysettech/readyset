@@ -105,7 +105,7 @@ impl ViewCreateRequest {
             id.anonymize(&mut anonymizer);
         }
 
-        format!("{:?}", anon)
+        format!("{anon:?}")
     }
 }
 

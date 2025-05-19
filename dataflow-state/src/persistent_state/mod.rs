@@ -487,10 +487,7 @@ impl SharedState {
             .iter()
             .find(|index| index.index.index_type == index_type && index.index.columns == columns)
             .unwrap_or_else(|| {
-                panic!(
-                    "lookup on non-indexed column set {:?}({:?})",
-                    index_type, columns
-                )
+                panic!("lookup on non-indexed column set {index_type:?}({columns:?})")
             })
     }
 }
@@ -884,7 +881,7 @@ impl State for PersistentState {
         match temp_dir {
             Some(_) => Ok(()),
             None => fs::remove_dir_all(full_path).map_err(|e| {
-                ReadySetError::IOError(format!("Failed to remove rocksdb directory: {}", e))
+                ReadySetError::IOError(format!("Failed to remove rocksdb directory: {e}"))
             }),
         }
     }
@@ -1732,7 +1729,7 @@ impl PersistentState {
         let secs = left % 60;
 
         let progress = format!("{:.1}%", progress * 100.0);
-        let left = format!("{:02}:{:02}:{:02}", hours, mins, secs);
+        let left = format!("{hours:02}:{mins:02}:{secs:02}");
 
         info!(
             base = %self.name,

@@ -268,7 +268,7 @@ pub enum ReadySetError {
     },
 
     /// A table has been found
-    #[error("Table '{}{}' already exists", schema.as_ref().map(|s| format!("{}.", s)).unwrap_or_default(),
+    #[error("Table '{}{}' already exists", schema.as_ref().map(|s| format!("{s}.")).unwrap_or_default(),
     name)]
     TableAlreadyExists {
         /// The name of the table that already exists.
@@ -281,7 +281,7 @@ pub enum ReadySetError {
     /// FIXME(eta): this is currently slightly overloaded in meaning.
     #[error(
         "Could not find table '{}{}'",
-        schema.as_ref().map(|s| format!("{}.", s)).unwrap_or_default(),
+        schema.as_ref().map(|s| format!("{s}.")).unwrap_or_default(),
         name
     )]
     TableNotFound {
@@ -293,7 +293,7 @@ pub enum ReadySetError {
     /// replicated
     #[error(
         "Table '{}{}' is not being replicated by ReadySet",
-        schema.as_ref().map(|s| format!("{}.", s)).unwrap_or_default(),
+        schema.as_ref().map(|s| format!("{s}.")).unwrap_or_default(),
         name
     )]
     TableNotReplicated {

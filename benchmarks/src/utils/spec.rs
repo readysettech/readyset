@@ -48,9 +48,8 @@ impl DatabaseGenerationSpec {
             self
         } else {
             panic!(
-                "Attempted to set number of rows for a table, {}, that is not in
-             the database spec",
-                table_name
+                "Attempted to set number of rows for a table, {table_name}, that is not in
+             the database spec"
             );
         }
     }
@@ -188,7 +187,7 @@ impl DatabaseSchema {
                             // We stupidly go over each comment and replace each var
                             // definition with its value instead
                             for (var, value) in &user_vars {
-                                *comment = comment.replace(&format!("@{}", var), value);
+                                *comment = comment.replace(&format!("@{var}"), value);
                             }
                         }
                     }

@@ -278,7 +278,7 @@ mod tests {
             let res = query.detect_problematic_self_joins();
             assert!(res.is_err());
             let err = res.err().unwrap();
-            assert!(err.is_unsupported(), "res.err().unwrap() = {:?}", err);
+            assert!(err.is_unsupported(), "res.err().unwrap() = {err:?}");
         }
 
         #[test]

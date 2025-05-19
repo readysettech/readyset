@@ -96,7 +96,7 @@ pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
 
         let repl_slot_name = match &config.replication_server_id {
             Some(server_id) => {
-                format!("{}_{}", REPLICATION_SLOT, server_id)
+                format!("{REPLICATION_SLOT}_{server_id}")
             }
             _ => REPLICATION_SLOT.to_string(),
         };
@@ -125,7 +125,7 @@ pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
 }
 
 pub fn resnapshot_slot_name(repl_slot_name: &String) -> String {
-    format!("{}_{}", RESNAPSHOT_SLOT, repl_slot_name)
+    format!("{RESNAPSHOT_SLOT}_{repl_slot_name}")
 }
 /// An adapter that converts database events into ReadySet API calls
 pub struct NoriaAdapter<'a> {
@@ -209,7 +209,7 @@ impl<'a> NoriaAdapter<'a> {
 
                     let repl_slot_name = match &config.replication_server_id {
                         Some(server_id) => {
-                            format!("{}_{}", REPLICATION_SLOT, server_id)
+                            format!("{REPLICATION_SLOT}_{server_id}")
                         }
                         _ => REPLICATION_SLOT.to_string(),
                     };
@@ -529,11 +529,11 @@ impl<'a> NoriaAdapter<'a> {
             .await
             .and_then(|row| row.try_get::<_, String>(0))
             .map_err(|e| {
-                ReadySetError::Internal(format!("Unable to determine postgres version: {}", e))
+                ReadySetError::Internal(format!("Unable to determine postgres version: {e}"))
             })?
             .parse()
             .map_err(|e| {
-                ReadySetError::Internal(format!("Unable to parse postgres version: {}", e))
+                ReadySetError::Internal(format!("Unable to parse postgres version: {e}"))
             })?;
 
         let max_parallel_snapshot_tables = config.max_parallel_snapshot_tables();
@@ -569,8 +569,7 @@ impl<'a> NoriaAdapter<'a> {
                 .and_then(|row| row.try_get::<_, bool>(0))
                 .map_err(|e| {
                     ReadySetError::Internal(format!(
-                        "Unable to read replication slot from upstream database: {}",
-                        e
+                        "Unable to read replication slot from upstream database: {e}"
                     ))
                 })?;
 

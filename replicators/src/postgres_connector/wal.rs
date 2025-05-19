@@ -90,12 +90,11 @@ impl From<WalError> for ReadySetError {
                 ReadySetError::TableError {
                     table,
                     source: Box::new(ReadySetError::ReplicationFailed(format!(
-                        "WAL error: {:?}",
-                        kind
+                        "WAL error: {kind:?}"
                     ))),
                 }
             }
-            _ => ReadySetError::ReplicationFailed(format!("WAL error: {:?}", err)),
+            _ => ReadySetError::ReplicationFailed(format!("WAL error: {err:?}")),
         }
     }
 }

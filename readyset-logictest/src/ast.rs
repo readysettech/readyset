@@ -67,8 +67,8 @@ pub enum Conditional {
 impl Display for Conditional {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Conditional::SkipIf(engine) => write!(f, "skipif {}", engine),
-            Conditional::OnlyIf(engine) => write!(f, "onlyif {}", engine),
+            Conditional::SkipIf(engine) => write!(f, "skipif {engine}"),
+            Conditional::OnlyIf(engine) => write!(f, "onlyif {engine}"),
             Conditional::InvertNoUpstream => write!(f, "invertupstream"),
         }
     }
@@ -227,7 +227,7 @@ impl TryFrom<mysql_async::Value> for Value {
             Bytes(bs) => Ok(Self::Text(String::from_utf8(bs.clone()).or_else(|_| {
                 Ok(format!(
                     "0x{}",
-                    bs.iter().map(|b| format!("{:02X}", b)).join("")
+                    bs.iter().map(|b| format!("{b:02X}")).join("")
                 ))
             })?)),
             Int(i) => Ok(Self::Integer(i)),
@@ -286,8 +286,7 @@ impl TryFrom<Literal> for Value {
             Literal::Numeric(mantissa, scale) => Decimal::try_from_i128_with_scale(mantissa, scale)
                 .map_err(|e| {
                     ValueConversionError(format!(
-                        "Could not convert literal value to NUMERIC type: {}",
-                        e
+                        "Could not convert literal value to NUMERIC type: {e}"
                     ))
                 })
                 .map(Value::Numeric)?,
@@ -486,7 +485,7 @@ impl Display for Value {
                     for chr in s.chars() {
                         let code = chr as u8;
                         if (0x20..0x7f).contains(&code) {
-                            write!(f, "{}", chr)?;
+                            write!(f, "{chr}")?;
                         } else {
                             write!(f, "@")?;
                         }
@@ -494,10 +493,10 @@ impl Display for Value {
                     Ok(())
                 }
             }
-            Self::Integer(i) => write!(f, "{}", i),
-            Self::UnsignedInteger(i) => write!(f, "{}", i),
+            Self::Integer(i) => write!(f, "{i}"),
+            Self::UnsignedInteger(i) => write!(f, "{i}"),
             Self::Real(whole, frac) => {
-                write!(f, "{}.", whole)?;
+                write!(f, "{whole}.")?;
                 let frac = frac.to_string();
                 write!(f, "{}", &frac[..(cmp::min(frac.len(), 3))])
             }
@@ -505,14 +504,14 @@ impl Display for Value {
                 // TODO(fran): We will probably need to extend our NUMERIC
                 //  implementation to correctly support the precision and scale,
                 //  so we can display it correctly.
-                write!(f, "{}", d)
+                write!(f, "{d}")
             }
             Self::Date(dt) => write!(f, "{}", dt.format(TIMESTAMP_FORMAT)),
             Self::Null => write!(f, "NULL"),
-            Self::Time(t) => write!(f, "{}", t),
+            Self::Time(t) => write!(f, "{t}"),
             Self::ByteArray(a) => {
                 // TODO(fran): This is gonna be more complicated than this, probably.
-                write!(f, "{:?}", a)
+                write!(f, "{a:?}")
             }
             Self::BitVector(b) => {
                 write!(
@@ -521,7 +520,7 @@ impl Display for Value {
                     b.iter().map(|bit| if bit { "1" } else { "0" }).join("")
                 )
             }
-            Self::TimestampTz(ts) => write!(f, "{}", ts),
+            Self::TimestampTz(ts) => write!(f, "{ts}"),
         }
     }
 }
@@ -726,7 +725,7 @@ impl Display for QueryResults {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             QueryResults::Hash { count, digest } => {
-                write!(f, "{} values hashing to {:x}", count, digest)
+                write!(f, "{count} values hashing to {digest:x}")
             }
             QueryResults::Results(results) => write!(f, "{}", results.iter().join("\n")),
         }
@@ -772,13 +771,13 @@ impl Display for QueryParams {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             QueryParams::PositionalParams(ps) => {
-                write!(f, "{}", ps.iter().map(|p| format!("? = {}", p)).join("\n"))?;
+                write!(f, "{}", ps.iter().map(|p| format!("? = {p}")).join("\n"))?;
             }
             QueryParams::NumberedParams(ps) => {
                 write!(
                     f,
                     "{}",
-                    ps.iter().map(|(n, p)| format!("${} = {}", n, p)).join("\n")
+                    ps.iter().map(|(n, p)| format!("${n} = {p}")).join("\n")
                 )?;
             }
         }
@@ -915,14 +914,14 @@ pub enum Record {
 impl Display for Record {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Record::Statement(s) => write!(f, "{}", s),
-            Record::Query(q) => write!(f, "{}", q),
-            Record::HashThreshold(ht) => writeln!(f, "hash-threshold {}", ht),
+            Record::Statement(s) => write!(f, "{s}"),
+            Record::Query(q) => write!(f, "{q}"),
+            Record::HashThreshold(ht) => writeln!(f, "hash-threshold {ht}"),
             Record::Halt { conditionals } => {
                 writeln!(f, "{}\nhalt\n", conditionals.iter().join("\n"))
             }
             Record::Graphviz => f.write_str("graphviz\n"),
-            Record::Sleep(msecs) => writeln!(f, "sleep {}", msecs),
+            Record::Sleep(msecs) => writeln!(f, "sleep {msecs}"),
         }
     }
 }

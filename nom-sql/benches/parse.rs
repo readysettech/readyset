@@ -7,7 +7,7 @@ fn selects_nom_sql_by_db(c: &mut Criterion, dialect: Dialect) {
         b.iter(|| black_box(nom_sql::parse_query(dialect, query).unwrap()));
     };
 
-    c.benchmark_group(format!("single_select_statements-nom_sql-{:?}", dialect))
+    c.benchmark_group(format!("single_select_statements-nom_sql-{dialect:?}"))
         .bench_with_input("plain", "select * from t where id = ?", run_benchmark)
         .bench_with_input(
             "namespaced",
@@ -63,7 +63,7 @@ fn transactions_nom_sql_by_db(c: &mut Criterion, dialect: Dialect) {
         b.iter(|| black_box(nom_sql::parse_query(dialect, query).unwrap()));
     };
 
-    c.benchmark_group(format!("transactions-nom_sql-{:?}", dialect))
+    c.benchmark_group(format!("transactions-nom_sql-{dialect:?}"))
         .bench_with_input("start", "start transaction", run_benchmark)
         .bench_with_input("begin", "begin work", run_benchmark)
         .bench_with_input("commit", "commit", run_benchmark)
@@ -84,7 +84,7 @@ where
         b.iter(|| black_box(sqlparser::parser::Parser::parse_sql(&dialect, query).unwrap()));
     };
 
-    c.benchmark_group(format!("transactions-sqlparser-{:?}", dialect))
+    c.benchmark_group(format!("transactions-sqlparser-{dialect:?}"))
         .bench_with_input("start", "start transaction", run_benchmark)
         .bench_with_input("begin", "begin work", run_benchmark)
         .bench_with_input("commit", "commit", run_benchmark)

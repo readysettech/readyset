@@ -604,7 +604,7 @@ mod readreply {
                     assert_eq!(got.as_slice(), &expected[..]);
                 }
             }
-            r => panic!("{:?}", r),
+            r => panic!("{r:?}"),
         }
     }
 
@@ -629,7 +629,7 @@ mod readreply {
             } => {
                 assert!(data.is_empty());
             }
-            r => panic!("{:?}", r),
+            r => panic!("{r:?}"),
         }
     }
 
@@ -776,7 +776,7 @@ mod readreply {
                         assert_eq!(got.as_slice(), &expected[..]);
                     }
                 }
-                r => panic!("{:?}", r),
+                r => panic!("{r:?}"),
             }
         }
     }

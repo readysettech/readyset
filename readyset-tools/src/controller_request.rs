@@ -47,11 +47,11 @@ impl Request {
         match self {
             Request::HealthyWorkers => {
                 let res = handle.healthy_workers().await?;
-                println!("{:?}", res);
+                println!("{res:?}");
             }
             Request::ControllerUri => {
                 let res = handle.controller_uri().await?;
-                println!("{:?}", res);
+                println!("{res:?}");
             }
         }
 

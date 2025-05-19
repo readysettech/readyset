@@ -123,7 +123,7 @@ mod tests {
                     LimitClause::LimitOffset { limit: None, .. }
                 ));
             }
-            _ => panic!("Invalid query returned: {:?}", actual),
+            _ => panic!("Invalid query returned: {actual:?}"),
         }
     }
 
@@ -201,7 +201,7 @@ mod tests {
                     }
                 );
             }
-            _ => panic!("Invalid query returned: {:?}", result),
+            _ => panic!("Invalid query returned: {result:?}"),
         }
     }
 

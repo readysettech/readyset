@@ -39,9 +39,8 @@ pub fn failpoint(attr: TokenStream, input: TokenStream) -> TokenStream {
     let new_stmts_str = format!(
         r#"
         #[cfg(feature = "failure_injection")]
-        fail::fail_point!({});
-        "#,
-        attr
+        fail::fail_point!({attr});
+        "#
     );
 
     let new_stmts: Vec<Stmt> = syn::Block::parse_within.parse_str(&new_stmts_str).unwrap();

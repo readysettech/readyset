@@ -332,7 +332,7 @@ fn gen_column_specs() -> impl Strategy<Value = Vec<ColumnSpec>> {
             // Reset the column counter for each new table
             for (i, spec) in specs.iter_mut().enumerate() {
                 // Set the name to col_ID format
-                spec.name = format!("col_{}", i);
+                spec.name = format!("col_{i}");
             }
             specs
         })
@@ -481,7 +481,7 @@ impl ModelState for DDLModelState {
             possible_ops.push(create_table_strat);
             possible_ops_string.push("create_table".to_string());
         }
-        println!("possible_ops: {:?}", possible_ops_string);
+        println!("possible_ops: {possible_ops_string:?}");
         possible_ops
     }
 
@@ -515,7 +515,7 @@ impl ModelState for DDLModelState {
     /// Checks preconditions for an [`Operation`] given a current test model state.
     fn preconditions_met(&self, op: &Self::Operation) -> bool {
         println!("preconditions_met table_exists: {}", self.table_exists);
-        println!("preconditions_met op: {:?}", op);
+        println!("preconditions_met op: {op:?}");
         match op {
             Operation::CreateTable { .. } => true,
             Operation::InsertRow { pkey, .. } => {
@@ -604,7 +604,7 @@ impl ModelState for DDLModelState {
                             let random_collation =
                                 collations.choose(&mut rand::thread_rng()).unwrap();
                             if random_collation != &"" {
-                                col_def.push_str(&format!(" COLLATE {}", random_collation));
+                                col_def.push_str(&format!(" COLLATE {random_collation}"));
                             }
                         }
 
@@ -627,9 +627,9 @@ impl ModelState for DDLModelState {
                                 || def_value.is_datetime()
                                 || def_value.is_time()
                             {
-                                col_def.push_str(&format!(" DEFAULT '{}'", def_value));
+                                col_def.push_str(&format!(" DEFAULT '{def_value}'"));
                             } else {
-                                col_def.push_str(&format!(" DEFAULT {}", def_value));
+                                col_def.push_str(&format!(" DEFAULT {def_value}"));
                             }
                         } else if *default_current_timestamp
                             && (matches!(sql_type, SqlType::Timestamp)
@@ -715,7 +715,7 @@ impl ModelState for DDLModelState {
                 // Build the INSERT statement
                 let col_list = insert_cols
                     .iter()
-                    .map(|c| format!("`{}`", c))
+                    .map(|c| format!("`{c}`"))
                     .collect::<Vec<_>>()
                     .join(", ");
                 let placeholders: Vec<_> = (1..=params.len()).map(|_| "?".to_string()).collect();
@@ -739,7 +739,7 @@ impl ModelState for DDLModelState {
                 // Build the SET clause for the UPDATE statement
                 let set_clauses: Vec<String> = col_names
                     .iter()
-                    .map(|name| format!("`{}` = ?", name))
+                    .map(|name| format!("`{name}` = ?"))
                     .collect();
                 let set_clauses = set_clauses.join(", ");
 

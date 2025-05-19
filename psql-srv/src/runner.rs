@@ -149,7 +149,7 @@ impl<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
             if let Err(e) = result {
                 self.handle_error(e)
                     .await
-                    .unwrap_or_else(|e| eprintln!("{}", e));
+                    .unwrap_or_else(|e| eprintln!("{e}"));
                 continue;
             }
 

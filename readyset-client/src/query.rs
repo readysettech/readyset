@@ -403,7 +403,7 @@ impl Display for MigrationState {
             MigrationState::Unsupported(reason) if reason.is_empty() => {
                 write!(f, "unsupported: reason unknown")
             }
-            MigrationState::Unsupported(reason) => write!(f, "unsupported: {}", reason),
+            MigrationState::Unsupported(reason) => write!(f, "unsupported: {reason}"),
             MigrationState::DryRunSucceeded => write!(f, "dry run succeeded"),
             MigrationState::Inlined(InlinedState { epoch, .. }) => match epoch {
                 0u64 => write!(f, "pending inlining"),

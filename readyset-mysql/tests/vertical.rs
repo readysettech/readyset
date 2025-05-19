@@ -589,8 +589,7 @@ impl Operation {
                 .map(|dt| {
                     Value::try_from(dt.clone()).map_err(|e| {
                         TestCaseError::reject(format!(
-                            "DfValue conversion to mysql Value failed: {}",
-                            e
+                            "DfValue conversion to mysql Value failed: {e}"
                         ))
                     })
                 })
@@ -633,7 +632,7 @@ impl Operation {
                     .collect::<Vec<_>>();
                 let set_clause = updates
                     .iter()
-                    .map(|(col_name, _)| format!("{} = ?", col_name))
+                    .map(|(col_name, _)| format!("{col_name} = ?"))
                     .join(",");
                 let mut params = updates
                     .into_iter()

@@ -360,7 +360,7 @@ impl AuthorityType {
     pub fn to_authority(&self, addr: &str, deployment: &str) -> Authority {
         match self {
             AuthorityType::Consul => Authority::from(
-                ConsulAuthority::new(&format!("http://{}/{}", addr, deployment)).unwrap(),
+                ConsulAuthority::new(&format!("http://{addr}/{deployment}")).unwrap(),
             ),
             AuthorityType::Local => Authority::from(LocalAuthority::new()),
             AuthorityType::Standalone => {

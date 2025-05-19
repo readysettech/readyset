@@ -1397,7 +1397,7 @@ impl SqlToMirConverter {
             let parent_columns = self.mir_graph.columns(parent);
             let project_node = self.make_project_node(
                 query_name,
-                format!("{}_proj", name).into(),
+                format!("{name}_proj").into(),
                 parent,
                 parent_columns
                     .into_iter()
@@ -1573,7 +1573,7 @@ impl SqlToMirConverter {
                 let label = lhs.display(readyset_sql::Dialect::MySQL).to_string();
                 let prj = self.make_project_node(
                     query_name,
-                    self.generate_label(&format!("{}_lhs_project", text_context).into()),
+                    self.generate_label(&format!("{text_context}_lhs_project").into()),
                     parent,
                     self.mir_graph
                         .columns(parent)
@@ -1858,7 +1858,7 @@ impl SqlToMirConverter {
         let col = cols.into_iter().next().expect("Just checked");
         let distinct = self.make_distinct_node(
             query_name,
-            self.generate_label(&format!("{}_subquery_distinct", text_context).into()),
+            self.generate_label(&format!("{text_context}_subquery_distinct").into()),
             subquery_leaf,
             vec![col.clone()],
         );
@@ -1876,7 +1876,7 @@ impl SqlToMirConverter {
         let node_index = if negated {
             self.make_antijoin(
                 query_name,
-                self.generate_label(&format!("join_not_{}_subquery", text_context).into()),
+                self.generate_label(&format!("join_not_{text_context}_subquery").into()),
                 join_preds,
                 parent,
                 distinct,
@@ -1885,7 +1885,7 @@ impl SqlToMirConverter {
         } else {
             self.make_join_node(
                 query_name,
-                self.generate_label(&format!("join_{}_subquery", text_context).into()),
+                self.generate_label(&format!("join_{text_context}_subquery").into()),
                 join_preds,
                 parent,
                 distinct,

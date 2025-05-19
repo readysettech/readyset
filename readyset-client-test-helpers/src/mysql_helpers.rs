@@ -44,11 +44,11 @@ where
 {
     let mut management_db = mysql_async::Conn::new(upstream_config()).await.unwrap();
     management_db
-        .query_drop(format!("DROP DATABASE IF EXISTS {}", dbname))
+        .query_drop(format!("DROP DATABASE IF EXISTS {dbname}"))
         .await
         .unwrap();
     management_db
-        .query_drop(format!("CREATE DATABASE {}", dbname))
+        .query_drop(format!("CREATE DATABASE {dbname}"))
         .await
         .unwrap();
 }

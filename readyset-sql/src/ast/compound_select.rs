@@ -132,7 +132,7 @@ impl DialectDisplay for CompoundSelectStatement {
         fmt_with(move |f| {
             for (op, sel) in &self.selects {
                 if let Some(o) = op {
-                    write!(f, " {}", o)?;
+                    write!(f, " {o}")?;
                 }
                 write!(f, " {}", sel.display(dialect))?;
             }

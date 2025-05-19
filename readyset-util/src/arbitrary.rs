@@ -122,8 +122,7 @@ pub fn arbitrary_date() -> impl Strategy<Value = DateTime<FixedOffset>> {
             FixedOffset::west_opt(offset)
                 .unwrap_or_else(|| {
                     panic!(
-                    "FixedOffset::west(secs) requires that -86_400 < secs < 86_400. Secs used: {}",
-                    offset
+                    "FixedOffset::west(secs) requires that -86_400 < secs < 86_400. Secs used: {offset}"
                 )
                 })
                 .from_utc_datetime(&NaiveDateTime::new(

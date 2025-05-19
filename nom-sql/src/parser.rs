@@ -378,13 +378,12 @@ mod tests {
                                 formatted_index_list_str = n.to_string();
                             } else {
                                 formatted_index_list_str =
-                                    format!("{}, {}", formatted_index_list_str, n);
+                                    format!("{formatted_index_list_str}, {n}");
                             }
                             let index_hint_str = format!(
-                                "{} {}{} ({})",
-                                hint_type, index_or_key, index_for, formatted_index_list_str
+                                "{hint_type} {index_or_key}{index_for} ({formatted_index_list_str})"
                             );
-                            let qstring = format!("SELECT * FROM `users` {}", index_hint_str);
+                            let qstring = format!("SELECT * FROM `users` {index_hint_str}");
                             let res = parse_query(Dialect::MySQL, &qstring);
                             assert!(res.is_ok());
                             assert_eq!(

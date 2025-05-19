@@ -172,7 +172,7 @@ pub fn get_counter(metric: &str, metrics_dump: &MetricsDump) -> f64 {
     if let DumpedMetricValue::Counter(v) = dumped_metric.value {
         v
     } else {
-        panic!("{} is not a counter", metric);
+        panic!("{metric} is not a counter");
     }
 }
 
@@ -192,7 +192,7 @@ where
     } {
         assert_eq!(name, table_name);
     } else {
-        panic!("Expected table not found error for table {}", table_name);
+        panic!("Expected table not found error for table {table_name}");
     }
 }
 

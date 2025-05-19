@@ -340,7 +340,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
     fn coerce_err<D: ToString>(ty: &DfType, deets: D) -> ReadySetError {
         ReadySetError::DfValueConversionError {
             src_type: Self::type_name(),
-            target_type: format!("{:?}", ty),
+            target_type: format!("{ty:?}"),
             details: deets.to_string(),
         }
     }

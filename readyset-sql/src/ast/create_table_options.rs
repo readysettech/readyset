@@ -21,14 +21,14 @@ pub enum CreateTableOption {
 impl fmt::Display for CreateTableOption {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            CreateTableOption::AutoIncrement(v) => write!(f, "AUTO_INCREMENT={}", v),
+            CreateTableOption::AutoIncrement(v) => write!(f, "AUTO_INCREMENT={v}"),
             CreateTableOption::Engine(e) => {
                 write!(f, "ENGINE={}", e.as_deref().unwrap_or(""))
             }
-            CreateTableOption::Charset(c) => write!(f, "DEFAULT CHARSET={}", c),
-            CreateTableOption::Collate(c) => write!(f, "COLLATE={}", c),
-            CreateTableOption::Comment(c) => write!(f, "COMMENT='{}'", c),
-            CreateTableOption::DataDirectory(d) => write!(f, "DATA DIRECTORY='{}'", d),
+            CreateTableOption::Charset(c) => write!(f, "DEFAULT CHARSET={c}"),
+            CreateTableOption::Collate(c) => write!(f, "COLLATE={c}"),
+            CreateTableOption::Comment(c) => write!(f, "COMMENT='{c}'"),
+            CreateTableOption::DataDirectory(d) => write!(f, "DATA DIRECTORY='{d}'"),
             CreateTableOption::Other => Ok(()),
         }
     }

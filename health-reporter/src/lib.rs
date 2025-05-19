@@ -40,7 +40,7 @@ impl Display for State {
             State::ShuttingDown => "shutting down",
             State::Unknown => "unknown",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 

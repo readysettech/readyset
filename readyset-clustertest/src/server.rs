@@ -48,7 +48,7 @@ impl ProcessHandle {
                 select!(
                     _ = interval.tick() => {
                         if !Self::check_alive_inner(&task_process).await {
-                            println!("Restarting process {} that is no longer alive", task_name);
+                            println!("Restarting process {task_name} that is no longer alive");
                             let process = Self::run_cmd(&mut cmd, &task_name, &binary).expect("Failed to re-run command");
                             *task_process.lock().await = Some(process);
                         }
@@ -259,11 +259,11 @@ impl AdapterBuilder {
     }
 
     pub fn port(self, port: u16) -> Self {
-        self.push_arg_kv("-a", &format!("127.0.0.1:{}", port))
+        self.push_arg_kv("-a", &format!("127.0.0.1:{port}"))
     }
 
     pub fn metrics_port(self, port: u16) -> Self {
-        self.push_arg_kv("--metrics-address", &format!("0.0.0.0:{}", port))
+        self.push_arg_kv("--metrics-address", &format!("0.0.0.0:{port}"))
     }
 
     pub fn min_workers(self, min_workers: usize) -> Self {

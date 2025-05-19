@@ -816,7 +816,7 @@ impl DeploymentBuilder {
                         tokio_postgres::connect(&root_addr, NoTls).await.unwrap();
                     let handle = tokio::spawn(async move {
                         if let Err(e) = connection.await {
-                            eprintln!("connection error: {}", e);
+                            eprintln!("connection error: {e}");
                         }
                     });
 
@@ -1040,7 +1040,7 @@ where
 }
 
 async fn endpoint_reports_healthy(port: u16) -> bool {
-    let health_check_url = format!("http://127.0.0.1:{}/health", port);
+    let health_check_url = format!("http://127.0.0.1:{port}/health");
     let r = hyper::Request::get(&health_check_url)
         .body(hyper::Body::from(String::default()))
         .unwrap();
@@ -1059,7 +1059,7 @@ async fn endpoint_reports_healthy(port: u16) -> bool {
 }
 
 async fn http_router_is_up(port: u16) -> bool {
-    let health_check_url = format!("http://127.0.0.1:{}/health", port);
+    let health_check_url = format!("http://127.0.0.1:{port}/health");
     let r = hyper::Request::get(&health_check_url)
         .body(hyper::Body::from(String::default()))
         .unwrap();
@@ -1607,7 +1607,7 @@ async fn start_server(
     if server_start_params.post_lookups {
         builder = builder.enable_post_lookups();
     }
-    let addr = Url::parse(&format!("http://127.0.0.1:{}", port)).unwrap();
+    let addr = Url::parse(&format!("http://127.0.0.1:{port}")).unwrap();
     Ok(ServerHandle {
         addr,
         process: builder.start().await?,

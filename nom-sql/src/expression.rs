@@ -1041,7 +1041,7 @@ mod tests {
             }
         }
         fn from_date_func(dialect: Dialect, arg: &str) -> Expr {
-            expression(dialect)(LocatedSpan::new(format!("DATE('{}')", arg).as_bytes()))
+            expression(dialect)(LocatedSpan::new(format!("DATE('{arg}')").as_bytes()))
                 .unwrap()
                 .1
         }

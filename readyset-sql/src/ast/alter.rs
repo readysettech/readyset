@@ -201,7 +201,7 @@ impl DialectDisplay for AlterTableDefinition {
             Self::DropColumn { name, behavior } => {
                 write!(f, "DROP COLUMN {}", dialect.quote_identifier(name))?;
                 if let Some(behavior) = behavior {
-                    write!(f, " {}", behavior)?;
+                    write!(f, " {behavior}")?;
                 }
                 Ok(())
             }
@@ -225,13 +225,13 @@ impl DialectDisplay for AlterTableDefinition {
                 name,
                 drop_behavior,
             } => match drop_behavior {
-                None => write!(f, "DROP CONSTRAINT {}", name),
-                Some(d) => write!(f, "DROP CONSTRAINT {} {}", name, d),
+                None => write!(f, "DROP CONSTRAINT {name}"),
+                Some(d) => write!(f, "DROP CONSTRAINT {name} {d}"),
             },
             Self::ReplicaIdentity(replica_identity) => {
                 write!(f, "REPLICA IDENTITY {replica_identity}")
             }
-            Self::DropForeignKey { name } => write!(f, "DROP FOREIGN KEY {}", name),
+            Self::DropForeignKey { name } => write!(f, "DROP FOREIGN KEY {name}"),
         })
     }
 }
@@ -295,7 +295,7 @@ impl DialectDisplay for AlterTableStatement {
                     )?;
                 }
                 Err(unparsed) => {
-                    write!(f, "{}", unparsed)?;
+                    write!(f, "{unparsed}")?;
                 }
             }
             Ok(())

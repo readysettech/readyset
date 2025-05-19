@@ -236,35 +236,35 @@ impl Display for BuiltinFunction {
 
         match self {
             ConvertTZ([arg1, arg2, arg3]) => {
-                write!(f, "({}, {}, {})", arg1, arg2, arg3)
+                write!(f, "({arg1}, {arg2}, {arg3})")
             }
             DayOfWeek(arg) => {
-                write!(f, "({})", arg)
+                write!(f, "({arg})")
             }
             IfNull(arg1, arg2) => {
-                write!(f, "({}, {})", arg1, arg2)
+                write!(f, "({arg1}, {arg2})")
             }
             Month(arg) => {
-                write!(f, "({})", arg)
+                write!(f, "({arg})")
             }
             Timediff(arg1, arg2) => {
-                write!(f, "({}, {})", arg1, arg2)
+                write!(f, "({arg1}, {arg2})")
             }
             Addtime(arg1, arg2) => {
-                write!(f, "({}, {})", arg1, arg2)
+                write!(f, "({arg1}, {arg2})")
             }
             DateFormat(arg1, arg2) => {
-                write!(f, "({}, {})", arg1, arg2)
+                write!(f, "({arg1}, {arg2})")
             }
             Round(arg1, precision) => {
-                write!(f, "({}, {})", arg1, precision)
+                write!(f, "({arg1}, {precision})")
             }
             JsonDepth(arg) | JsonValid(arg) | JsonQuote(arg) | JsonTypeof(arg)
             | JsonArrayLength(arg) | JsonStripNulls(arg) | JsonbPretty(arg) => {
-                write!(f, "({})", arg)
+                write!(f, "({arg})")
             }
             JsonOverlaps(arg1, arg2) => {
-                write!(f, "({}, {})", arg1, arg2)
+                write!(f, "({arg1}, {arg2})")
             }
             JsonObject { arg1, arg2, .. } => {
                 write!(f, "({arg1}")?;
@@ -320,23 +320,23 @@ impl Display for BuiltinFunction {
                 write!(f, ")")
             }
             DateTrunc(field, source) => {
-                write!(f, "({}, {})", field, source)
+                write!(f, "({field}, {source})")
             }
             Extract(field, expr) => {
-                write!(f, "({} FROM {})", field, expr)
+                write!(f, "({field} FROM {expr})")
             }
             Length { expr, .. } => {
-                write!(f, "({})", expr)
+                write!(f, "({expr})")
             }
             Ascii { expr, .. } => {
-                write!(f, "({})", expr)
+                write!(f, "({expr})")
             }
             Lower {
                 expr,
                 collation,
                 dialect,
             } => {
-                write!(f, "({}", expr)?;
+                write!(f, "({expr}")?;
                 if dialect.engine() == SqlEngine::PostgreSQL {
                     write!(f, " COLLATE \"{collation}\"")?;
                 }
@@ -347,14 +347,14 @@ impl Display for BuiltinFunction {
                 collation,
                 dialect,
             } => {
-                write!(f, "({}", expr)?;
+                write!(f, "({expr}")?;
                 if dialect.engine() == SqlEngine::PostgreSQL {
                     write!(f, " COLLATE \"{collation}\"")?;
                 }
                 write!(f, ")")
             }
             Hex(expr) => {
-                write!(f, "({})", expr)
+                write!(f, "({expr})")
             }
             JsonBuildObject { args, .. } => write!(f, "({})", args.iter().join(", ")),
             SpatialAsText { .. } => write!(f, "st_astext"),
@@ -506,12 +506,12 @@ impl Display for Expr {
 
         match self {
             Row { elements } => write!(f, "({})", elements.iter().join(", ")),
-            Column { index, .. } => write!(f, "{}", index),
-            Literal { val, .. } => write!(f, "(lit: {})", val),
+            Column { index, .. } => write!(f, "{index}"),
+            Literal { val, .. } => write!(f, "(lit: {val})"),
             Op {
                 op, left, right, ..
-            } => write!(f, "({} {} {})", left, op, right),
-            Not { expr, .. } => write!(f, "NOT {}", expr),
+            } => write!(f, "({left} {op} {right})"),
+            Not { expr, .. } => write!(f, "NOT {expr}"),
             OpAny {
                 op, left, right, ..
             } => {
@@ -530,9 +530,9 @@ impl Display for Expr {
                 if *null_on_failure {
                     write!(f, "try_")?;
                 }
-                write!(f, "cast({} as {})", expr, ty,)
+                write!(f, "cast({expr} as {ty})",)
             }
-            Call { func, .. } => write!(f, "{}", func),
+            Call { func, .. } => write!(f, "{func}"),
             CaseWhen {
                 branches,
                 else_expr,

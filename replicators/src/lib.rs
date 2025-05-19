@@ -79,7 +79,7 @@ pub(crate) fn estimate_remaining_time(elapsed: Duration, progress: i64, total: i
     let seconds = remaining.as_secs() % 60;
     let minutes = (remaining.as_secs() / 60) % 60;
     let hours = (remaining.as_secs() / 60) / 60;
-    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
 }
 /// Logs snapshot progress. Handles cases when 'total' is undefined or inaccurate.
 /// Log message will never show progress greater than 100%, if total number of rows is
@@ -100,7 +100,7 @@ pub(crate) fn log_snapshot_progress(elapsed: Duration, cnt: i64, total: i64) {
         0.
     };
     let progress = if total > 1 {
-        format!("{:.2}%", progress_percent)
+        format!("{progress_percent:.2}%")
     } else {
         "n/a".to_owned()
     };

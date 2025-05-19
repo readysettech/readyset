@@ -81,8 +81,8 @@ pub struct MaterializationInfo {
 impl Display for KeyCount {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            KeyCount::ExactKeyCount(count) => write!(f, "{}", count),
-            KeyCount::EstimatedRowCount(count) => write!(f, "~{}", count),
+            KeyCount::ExactKeyCount(count) => write!(f, "{count}"),
+            KeyCount::EstimatedRowCount(count) => write!(f, "~{count}"),
             KeyCount::ExternalMaterialization => write!(f, ""),
         }
     }
@@ -127,10 +127,7 @@ impl AddAssign for KeyCount {
             (KeyCount::EstimatedRowCount(self_count), KeyCount::EstimatedRowCount(rhs_count)) => {
                 *self = KeyCount::EstimatedRowCount(*self_count + rhs_count)
             }
-            _ => panic!(
-                "Cannot add mismatched KeyCount types for values {}/{}",
-                self, rhs
-            ),
+            _ => panic!("Cannot add mismatched KeyCount types for values {self}/{rhs}"),
         };
     }
 }

@@ -343,7 +343,7 @@ fn benchmark_direct_proxy(c: &mut Criterion) {
         ("SELECT 1", "one value"),
         ("SELECT x FROM benchmark_fixture_data", "many values"),
     ] {
-        let mut group = c.benchmark_group(format!("proxy to postgres/{}", label));
+        let mut group = c.benchmark_group(format!("proxy to postgres/{label}"));
 
         group.bench_function("no proxy (control)", |b| {
             let rt = Runtime::new().unwrap();

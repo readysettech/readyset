@@ -37,7 +37,7 @@ impl DialectDisplay for ShowStatement {
                 Self::Tables(tables) => write!(f, "{}", tables.display(dialect)),
                 Self::CachedQueries(maybe_query_id) => {
                     if let Some(query_id) = maybe_query_id {
-                        write!(f, "CACHES WHERE query_id = {}", query_id)
+                        write!(f, "CACHES WHERE query_id = {query_id}")
                     } else {
                         write!(f, "CACHES")
                     }
@@ -48,14 +48,14 @@ impl DialectDisplay for ShowStatement {
                         write!(f, "SUPPORTED ")?;
                     }
                     if let Some(query_id) = &options.query_id {
-                        write!(f, "QUERIES WHERE query_id = {}", query_id)
+                        write!(f, "QUERIES WHERE query_id = {query_id}")
                     } else {
                         write!(f, "QUERIES")
                     }
                 }
                 Self::ReadySetStatus => write!(f, "READYSET STATUS"),
                 Self::ReadySetStatusAdapter => write!(f, "READYSET STATUS ADAPTER"),
-                Self::ReadySetMigrationStatus(id) => write!(f, "READYSET MIGRATION STATUS {}", id),
+                Self::ReadySetMigrationStatus(id) => write!(f, "READYSET MIGRATION STATUS {id}"),
                 Self::ReadySetVersion => write!(f, "READYSET VERSION"),
                 Self::ReadySetTables(options) => {
                     if options.all {
@@ -101,7 +101,7 @@ impl DialectDisplay for Tables {
             }
             write!(f, "TABLES")?;
             if let Some(from_db) = self.from_db.as_ref() {
-                write!(f, " FROM {}", from_db)?;
+                write!(f, " FROM {from_db}")?;
             }
             if let Some(filter) = self.filter.as_ref() {
                 write!(f, " {}", filter.display(dialect))?;
@@ -136,7 +136,7 @@ impl TryFromDialect<sqlparser::ast::ShowStatementFilter> for FilterPredicate {
 impl DialectDisplay for FilterPredicate {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
-            Self::Like(like) => write!(f, "LIKE '{}'", like),
+            Self::Like(like) => write!(f, "LIKE '{like}'"),
             Self::Where(expr) => write!(f, "WHERE {}", expr.display(dialect)),
         })
     }

@@ -398,7 +398,7 @@ impl MultithreadBenchmark for WorkloadEmulator {
         );
         for (i, query) in per_query.iter().enumerate() {
             benchmark_results.push(
-                &format!("duration_{}", i),
+                &format!("duration_{i}"),
                 Unit::Microseconds,
                 MetricGoal::Decreasing,
                 query.clone(),

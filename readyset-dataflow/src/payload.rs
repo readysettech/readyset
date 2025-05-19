@@ -75,7 +75,7 @@ impl Display for PrettyReplayPath<'_> {
                 write!(f, "◎ ")?;
             }
 
-            write!(f, "{}", node)?;
+            write!(f, "{node}")?;
             if let Some(idx) = partial_index {
                 write!(
                     f,
@@ -86,7 +86,7 @@ impl Display for PrettyReplayPath<'_> {
             }
 
             if let Some(tag) = force_tag_to {
-                write!(f, " force: {:?}", tag)?;
+                write!(f, " force: {tag:?}")?;
             }
         }
         Ok(())
@@ -250,7 +250,7 @@ pub enum Eviction {
 impl fmt::Display for Eviction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Bytes { num_bytes, .. } => write!(f, "Bytes {{ num_bytes: {} }}", num_bytes),
+            Self::Bytes { num_bytes, .. } => write!(f, "Bytes {{ num_bytes: {num_bytes} }}"),
             Self::Keys { keys, .. } => write!(f, "Keys {{ [{} keys] }}", keys.len()),
             Self::SingleKey { .. } => write!(f, "SingleKey"),
         }

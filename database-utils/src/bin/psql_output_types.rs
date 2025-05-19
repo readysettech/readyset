@@ -48,7 +48,7 @@ async fn test(
     let out = if let Some(ty) = map.get(ty.as_str()) {
         ty.to_string()
     } else {
-        panic!("unknown type: {}", ty);
+        panic!("unknown type: {ty}");
     };
 
     format!(
@@ -117,7 +117,7 @@ async fn main() {
         for b in 0..PSQL_TYPES.len() {
             for op in 0..PSQL_OPS.len() {
                 let args = test(&client2, &map, a, op, b).await;
-                println!("map.insert({});", args);
+                println!("map.insert({args});");
             }
         }
     }

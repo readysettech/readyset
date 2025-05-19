@@ -24,7 +24,7 @@ where
             .send()
             .await
             .map_err(|e| ReadySetError::HttpRequestFailed {
-                request: format!("{:?}", req),
+                request: format!("{req:?}"),
                 message: e.to_string(),
             })?;
     let status = resp.status();
@@ -32,7 +32,7 @@ where
         .bytes()
         .await
         .map_err(|e| ReadySetError::HttpRequestFailed {
-            request: format!("{:?}", req),
+            request: format!("{req:?}"),
             message: e.to_string(),
         })?;
     if !status.is_success() {

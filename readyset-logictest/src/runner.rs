@@ -74,7 +74,7 @@ impl TestScript {
     where
         W: Write,
     {
-        write!(w, "{}", self)
+        write!(w, "{self}")
     }
 }
 
@@ -149,11 +149,11 @@ pub(crate) async fn recreate_test_database(url: &DatabaseURL) -> anyhow::Result<
         .with_context(|| "connecting to upstream")?;
 
     admin_conn
-        .query_drop(format!("DROP DATABASE IF EXISTS {}", db_name))
+        .query_drop(format!("DROP DATABASE IF EXISTS {db_name}"))
         .await
         .with_context(|| "dropping database")?;
 
-    let mut create_database_query = format!("CREATE DATABASE {}", db_name);
+    let mut create_database_query = format!("CREATE DATABASE {db_name}");
     if url.is_mysql() {
         create_database_query.push_str(" CHARACTER SET 'utf8mb4' COLLATE 'utf8mb4_bin'");
     }
@@ -453,7 +453,7 @@ impl TestScript {
                             let val = vals.next().ok_or_else(wrong_columns)?;
                             Ok(val
                                 .convert_type(col_type)
-                                .with_context(|| format!("Converting value to {:?}", col_type))?
+                                .with_context(|| format!("Converting value to {col_type:?}"))?
                                 .into_owned())
                         })
                         .collect::<Result<_, _>>()?;
@@ -552,7 +552,7 @@ impl TestScript {
                     // This can error out if there are too many open files, but if we wait a bit
                     // they will get closed (macOS problem)
                     if retry > 100 {
-                        panic!("{:?}", err)
+                        panic!("{err:?}")
                     }
                     tokio::time::sleep(Duration::from_millis(1000)).await;
                     continue;
@@ -580,7 +580,7 @@ impl TestScript {
                 Ok(listener) => break listener,
                 Err(err) => {
                     if retry > 100 {
-                        panic!("{:?}", err)
+                        panic!("{err:?}")
                     }
                     tokio::time::sleep(Duration::from_millis(1000)).await
                 }

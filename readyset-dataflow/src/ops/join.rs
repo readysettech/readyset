@@ -774,7 +774,7 @@ mod tests {
         let (j, l, r) = setup();
         assert_eq!(
             j.node().description(),
-            format!("[{}:0, {}:1, {}:1] {}:(0) ⋉ {}:(0)", l, l, r, l, r)
+            format!("[{l}:0, {l}:1, {r}:1] {l}:(0) ⋉ {r}:(0)")
         );
     }
 

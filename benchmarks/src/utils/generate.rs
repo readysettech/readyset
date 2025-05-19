@@ -99,7 +99,7 @@ impl DataGenerator {
                 let old_size: usize = results.first()?.first()?.try_into().ok()?;
                 let new_size = std::cmp::min(old_size * 8, 1024 * 1024 * 1024); // We want a buffer of at least 1GiB
 
-                let set_pool_size_q = format!("SET GLOBAL innodb_buffer_pool_size={}", new_size);
+                let set_pool_size_q = format!("SET GLOBAL innodb_buffer_pool_size={new_size}");
                 let disable_redo_log_q = "ALTER INSTANCE DISABLE INNODB REDO_LOG";
                 let _ = conn.query_drop(set_pool_size_q).await;
                 let _ = conn.query_drop(disable_redo_log_q).await;
@@ -118,8 +118,7 @@ impl DataGenerator {
                 // Changing the shared buffer size via `ALTER SYSTEM` is only supported by Postgres
                 // >= 14
                 if get_postgres_version(&mut conn).await? >= 14000 {
-                    let set_pool_size_q =
-                        format!("ALTER SYSTEM SET shared_buffers TO {}", new_size);
+                    let set_pool_size_q = format!("ALTER SYSTEM SET shared_buffers TO {new_size}");
                     let _ = conn.query_drop(set_pool_size_q).await;
                 }
                 Some(old_size)
@@ -132,7 +131,7 @@ impl DataGenerator {
 
         match (conn, old_size) {
             (Ok(mut conn @ DatabaseConnection::MySQL(_)), Some(old_size)) => {
-                let set_pool_size_q = format!("SET GLOBAL innodb_buffer_pool_size={}", old_size);
+                let set_pool_size_q = format!("SET GLOBAL innodb_buffer_pool_size={old_size}");
                 let disable_redo_log_q = "ALTER INSTANCE ENABLE INNODB REDO_LOG";
                 let _ = conn.query_drop(set_pool_size_q).await;
                 let _ = conn.query_drop(disable_redo_log_q).await;
@@ -143,7 +142,7 @@ impl DataGenerator {
                     // Postgres >= 14
                     if pg_version >= 14000 {
                         let set_pool_size_q =
-                            format!("ALTER SYSTEM SET shared_buffers TO {}", old_size);
+                            format!("ALTER SYSTEM SET shared_buffers TO {old_size}");
                         let _ = conn.query_drop(set_pool_size_q).await;
                     }
                 }

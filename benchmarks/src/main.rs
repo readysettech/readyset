@@ -67,10 +67,7 @@ struct BenchmarkRunner {
 }
 
 fn make_prometheus_url(base: &str, benchmark_name_label: &str, instance_label: &str) -> String {
-    format!(
-        "{}/metrics/job/{}/instance/{}",
-        base, benchmark_name_label, instance_label
-    )
+    format!("{base}/metrics/job/{benchmark_name_label}/instance/{instance_label}")
 }
 
 impl BenchmarkRunner {
@@ -176,8 +173,8 @@ impl BenchmarkRunner {
 
         let cmd_as_yaml = serde_yaml_ng::to_string(&self.benchmark_cmd.as_ref().unwrap())?;
         let deployment_as_yaml = serde_yaml_ng::to_string(&self.deployment_params)?;
-        let identifier = format!("{}\n{}\n", cmd_as_yaml, deployment_as_yaml);
-        println!("{}", identifier);
+        let identifier = format!("{cmd_as_yaml}\n{deployment_as_yaml}\n");
+        println!("{identifier}");
 
         let prometheus_handle = self.init_prometheus().await?;
 
@@ -199,7 +196,7 @@ impl BenchmarkRunner {
         let mut results = Vec::new();
         for i in 0..self.iterations {
             if self.iterations > 1 {
-                println!("Iteration: {} ---------------------------", i);
+                println!("Iteration: {i} ---------------------------");
                 benchmark_cmd.reset(&self.deployment_params).await?;
                 readyset_ready(&readyset_target).await?;
             }
@@ -222,7 +219,7 @@ impl BenchmarkRunner {
                     report_mode,
                 )
                 .await?;
-                println!("Regression Analysis: {:?}", analysis);
+                println!("Regression Analysis: {analysis:?}");
             }
             results.push((result, duration));
         }

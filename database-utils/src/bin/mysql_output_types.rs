@@ -67,9 +67,9 @@ async fn test(
         let ty = &ty[8..ty.len() - 1]; // remove leading "decimal(" and trailing ")"
         let mut ty = ty.split(',');
         let (x, y) = (ty.next().unwrap(), ty.next().unwrap());
-        format!("Numeric {{ prec: {}, scale: {} }}", x, y)
+        format!("Numeric {{ prec: {x}, scale: {y} }}")
     } else {
-        panic!("unknown type: {}", ty);
+        panic!("unknown type: {ty}");
     };
 
     format!(
@@ -140,7 +140,7 @@ async fn main() {
                 for a_sign in 0..MYSQL_SIGNED.len() {
                     for b_sign in 0..MYSQL_SIGNED.len() {
                         let args = test(&mut conn, &map, a, a_sign, op, b, b_sign).await;
-                        println!("map.insert({});", args);
+                        println!("map.insert({args});");
                     }
                 }
             }

@@ -26,7 +26,7 @@ impl From<&str> for IndexHintType {
             "USE" => IndexHintType::Use,
             "IGNORE" => IndexHintType::Ignore,
             "FORCE" => IndexHintType::Force,
-            _ => panic!("Invalid index hint type: {}", s),
+            _ => panic!("Invalid index hint type: {s}"),
         }
     }
 }
@@ -72,7 +72,7 @@ impl From<&str> for IndexOrKeyType {
         match s {
             "INDEX" => IndexOrKeyType::Index,
             "KEY" => IndexOrKeyType::Key,
-            _ => panic!("Invalid index or key type: {}", s),
+            _ => panic!("Invalid index or key type: {s}"),
         }
     }
 }
@@ -111,7 +111,7 @@ impl From<&str> for IndexUsageType {
             "FOR JOIN" => IndexUsageType::Join,
             "FOR ORDER BY" => IndexUsageType::OrderBy,
             "FOR GROUP BY" => IndexUsageType::GroupBy,
-            _ => panic!("Invalid index usage type: {}", s),
+            _ => panic!("Invalid index usage type: {s}"),
         }
     }
 }
@@ -170,11 +170,7 @@ impl DialectDisplay for IndexHint {
                 .map(|t| t.clone().into())
                 .unwrap_or("");
             let index_list = self.index_list.iter().map(|t| t.to_owned()).join(", ");
-            write!(
-                f,
-                "{} {}{} ({})",
-                hint_type, index_or_key, index_usage, index_list
-            )
+            write!(f, "{hint_type} {index_or_key}{index_usage} ({index_list})")
         })
     }
 }

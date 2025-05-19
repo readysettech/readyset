@@ -387,7 +387,7 @@ impl DialectDisplay for TableKey {
                         columns.iter().map(|c| c.display(dialect)).join(", ")
                     )?;
                     if let Some(constraint_timing) = constraint_timing {
-                        write!(f, " {}", constraint_timing)?;
+                        write!(f, " {constraint_timing}")?;
                     }
                     Ok(())
                 }
@@ -408,7 +408,7 @@ impl DialectDisplay for TableKey {
                         write!(f, "{} ", dialect.quote_identifier(index_name))?;
                     }
                     if let Some(nulls_distinct) = nulls_distinct {
-                        write!(f, "{} ", nulls_distinct)?;
+                        write!(f, "{nulls_distinct} ")?;
                     }
                     write!(
                         f,
@@ -416,10 +416,10 @@ impl DialectDisplay for TableKey {
                         columns.iter().map(|c| c.display(dialect)).join(", ")
                     )?;
                     if let Some(constraint_timing) = constraint_timing {
-                        write!(f, " {}", constraint_timing)?;
+                        write!(f, " {constraint_timing}")?;
                     }
                     if let Some(index_type) = index_type {
-                        write!(f, " USING {}", index_type)?;
+                        write!(f, " USING {index_type}")?;
                     }
                     Ok(())
                 }
@@ -453,7 +453,7 @@ impl DialectDisplay for TableKey {
                         columns.iter().map(|c| c.display(dialect)).join(", ")
                     )?;
                     if let Some(index_type) = index_type {
-                        write!(f, " USING {}", index_type)?;
+                        write!(f, " USING {index_type}")?;
                     }
                     Ok(())
                 }
@@ -482,10 +482,10 @@ impl DialectDisplay for TableKey {
                         target_columns.iter().map(|c| c.display(dialect)).join(", ")
                     )?;
                     if let Some(on_delete) = on_delete {
-                        write!(f, " ON DELETE {}", on_delete)?;
+                        write!(f, " ON DELETE {on_delete}")?;
                     }
                     if let Some(on_update) = on_update {
-                        write!(f, " ON UPDATE {}", on_update)?;
+                        write!(f, " ON UPDATE {on_update}")?;
                     }
                     Ok(())
                 }
@@ -636,7 +636,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for FieldReference {
 impl DialectDisplay for FieldReference {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
-            Self::Numeric(n) => write!(f, "{}", n),
+            Self::Numeric(n) => write!(f, "{n}"),
             Self::Expr(expr) => write!(f, "{}", expr.display(dialect)),
         })
     }

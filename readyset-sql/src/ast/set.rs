@@ -100,7 +100,7 @@ impl DialectDisplay for SetStatement {
             write!(f, "SET ")?;
             match self {
                 Self::Variable(set) => write!(f, "{}", set.display(dialect)),
-                Self::Names(set) => write!(f, "{}", set),
+                Self::Names(set) => write!(f, "{set}"),
                 Self::PostgresParameter(set) => write!(f, "{}", set.display(dialect)),
             }
         })
@@ -209,7 +209,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for PostgresParameterValueInner {
 impl DialectDisplay for PostgresParameterValueInner {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
-            PostgresParameterValueInner::Identifier(ident) => write!(f, "{}", ident),
+            PostgresParameterValueInner::Identifier(ident) => write!(f, "{ident}"),
             PostgresParameterValueInner::Literal(lit) => write!(f, "{}", lit.display(dialect)),
         })
     }
@@ -485,7 +485,7 @@ impl fmt::Display for SetNames {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "NAMES '{}'", &self.charset)?;
         if let Some(collation) = self.collation.as_ref() {
-            write!(f, " COLLATE '{}'", collation)?;
+            write!(f, " COLLATE '{collation}'")?;
         }
         Ok(())
     }
@@ -502,7 +502,7 @@ impl DialectDisplay for SetPostgresParameter {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             if let Some(scope) = self.scope {
-                write!(f, "{} ", scope)?;
+                write!(f, "{scope} ")?;
             }
             write!(f, "{} = {}", self.name, self.value.display(dialect))
         })

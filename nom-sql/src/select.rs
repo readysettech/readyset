@@ -363,7 +363,7 @@ mod tests {
     fn select_without_table() {
         let qstring = "SELECT * FROM;";
         let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert!(res.is_err(), "!{:?}.is_err()", res);
+        assert!(res.is_err(), "!{res:?}.is_err()");
     }
 
     #[test]
@@ -1554,7 +1554,7 @@ mod tests {
     fn alias_cast() {
         let qstr = "SELECT id, CAST(created_at AS date) AS created_day FROM users WHERE id = ?;";
         let res = selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
-        assert!(res.is_ok(), "!{:?}.is_ok()", res);
+        assert!(res.is_ok(), "!{res:?}.is_ok()");
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -1618,7 +1618,7 @@ mod tests {
         fn alias_generic_function() {
             let qstr = "SELECT id, coalesce(a, \"b\",c) AS created_day FROM users;";
             let res = selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
-            assert!(res.is_ok(), "!{:?}.is_ok()", res);
+            assert!(res.is_ok(), "!{res:?}.is_ok()");
             assert_eq!(
                 res.unwrap().1,
                 SelectStatement {
@@ -1853,7 +1853,7 @@ mod tests {
         fn alias_generic_function() {
             let qstr = "SELECT id, coalesce(a, 'b',c) AS created_day FROM users;";
             let res = selection(Dialect::PostgreSQL)(LocatedSpan::new(qstr.as_bytes()));
-            assert!(res.is_ok(), "!{:?}.is_ok()", res);
+            assert!(res.is_ok(), "!{res:?}.is_ok()");
             assert_eq!(
                 res.unwrap().1,
                 SelectStatement {
@@ -2002,7 +2002,7 @@ mod tests {
             let qstr = "select exists(select * from \"groups\" where \"id\" = ?) as \"exists\"";
             let res = test_parse!(selection(Dialect::PostgreSQL), qstr.as_bytes());
             let qstr = res.display(Dialect::PostgreSQL).to_string();
-            println!("{}", qstr);
+            println!("{qstr}");
             assert_eq!(
                 qstr,
                 "SELECT EXISTS (SELECT * FROM \"groups\" WHERE (\"id\" = ?)) AS \"exists\""

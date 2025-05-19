@@ -151,8 +151,8 @@ impl fmt::Display for ItemPlaceholder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             ItemPlaceholder::QuestionMark => write!(f, "?"),
-            ItemPlaceholder::DollarNumber(ref i) => write!(f, "${}", i),
-            ItemPlaceholder::ColonNumber(ref i) => write!(f, ":{}", i),
+            ItemPlaceholder::DollarNumber(ref i) => write!(f, "${i}"),
+            ItemPlaceholder::ColonNumber(ref i) => write!(f, ":{i}"),
         }
     }
 }
@@ -345,8 +345,8 @@ impl DialectDisplay for Literal {
                 Literal::Null => write!(f, "NULL"),
                 Literal::Boolean(true) => write!(f, "TRUE"),
                 Literal::Boolean(false) => write!(f, "FALSE"),
-                Literal::Integer(i) => write!(f, "{}", i),
-                Literal::UnsignedInteger(i) => write!(f, "{}", i),
+                Literal::Integer(i) => write!(f, "{i}"),
+                Literal::UnsignedInteger(i) => write!(f, "{i}"),
                 Literal::Float(float) => write_real!(float.value, float.precision),
                 Literal::Double(double) => write_real!(double.value, double.precision),
                 Literal::Numeric(val, scale) => {
@@ -357,9 +357,9 @@ impl DialectDisplay for Literal {
                     Dialect::PostgreSQL => {
                         let escaped = escape_string_literal(s);
                         if s.len() != escaped.len() {
-                            write!(f, "E'{}'", escaped)
+                            write!(f, "E'{escaped}'")
                         } else {
-                            write!(f, "'{}'", escaped)
+                            write!(f, "'{escaped}'")
                         }
                     }
                 },
@@ -367,19 +367,19 @@ impl DialectDisplay for Literal {
                     f,
                     "{}",
                     bv.iter()
-                        .map(|v| format!("{:x}", v))
+                        .map(|v| format!("{v:x}"))
                         .collect::<Vec<String>>()
                         .join(" ")
                 ),
                 Literal::ByteArray(b) => match dialect {
                     Dialect::PostgreSQL => {
-                        write!(f, "E'\\x{}'", b.iter().map(|v| format!("{:x}", v)).join(""))
+                        write!(f, "E'\\x{}'", b.iter().map(|v| format!("{v:x}")).join(""))
                     }
                     Dialect::MySQL => {
-                        write!(f, "X'{}'", b.iter().map(|v| format!("{:02X}", v)).join(""))
+                        write!(f, "X'{}'", b.iter().map(|v| format!("{v:02X}")).join(""))
                     }
                 },
-                Literal::Placeholder(item) => write!(f, "{}", item),
+                Literal::Placeholder(item) => write!(f, "{item}"),
                 Literal::BitVector(ref b) => {
                     write!(
                         f,
