@@ -1032,7 +1032,7 @@ async fn psql14_ddl_replicate_drop_table() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, postgres13_upstream)]
+#[tags(serial, postgres_upstream)]
 #[slow]
 async fn psql13_ddl_replicate_drop_table() {
     postgresql_ddl_replicate_drop_table_internal(&pgsql13_url()).await
@@ -1046,7 +1046,7 @@ async fn psql14_ddl_replicate_create_table() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, postgres13_upstream)]
+#[tags(serial, postgres_upstream)]
 #[slow]
 async fn psql13_ddl_replicate_create_table() {
     postgresql_ddl_replicate_create_table_internal(&pgsql13_url()).await
@@ -1060,7 +1060,7 @@ async fn psql14_ddl_replicate_drop_view() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, postgres13_upstream)]
+#[tags(serial, postgres_upstream)]
 #[slow]
 async fn psql13_ddl_replicate_drop_view() {
     postgresql_ddl_replicate_drop_view_internal(&pgsql13_url()).await
@@ -1074,7 +1074,7 @@ async fn psql14_ddl_replicate_create_view() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, postgres13_upstream)]
+#[tags(serial, postgres_upstream)]
 #[slow]
 async fn psql13_ddl_replicate_create_view() {
     postgresql_ddl_replicate_create_view_internal(&pgsql13_url()).await

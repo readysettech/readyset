@@ -5,7 +5,7 @@ use std::mem;
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenTree};
 use quote::{quote, ToTokens};
-use syn::{parse_macro_input, parse_quote, Ident, ItemFn};
+use syn::{parse_macro_input, parse_quote, Error, Ident, ItemFn};
 
 /// Mark the given test as a "slow" test, meaning it won't be run if slow tests should not be run.
 ///
@@ -75,12 +75,22 @@ pub fn skip_flaky_finder(_args: TokenStream, item: TokenStream) -> TokenStream {
     result.into_token_stream().into()
 }
 
+/// List of valid test that can be used with the `tags` attribute. See descriptions in [`tags`].
+const VALID_TAGS: &[&str] = &[
+    "serial",
+    "consul",
+    "mysql_upstream",
+    "mysql8_upstream",
+    "postgres_upstream",
+    "postgres15_upstream",
+];
+
 /// "Tag" a test by moving it into a module. This is a lightweight version of the [test-tag] crate
 /// with special support for the `serial` tag.
 ///
 /// ```rust,ignore
 /// // This:
-/// #[tags(serial, mysql80_upstream)]
+/// #[tags(serial, mysql8_upstream)]
 /// #[test]
 /// fn test_foobar() {
 ///     // Test code here
@@ -89,7 +99,7 @@ pub fn skip_flaky_finder(_args: TokenStream, item: TokenStream) -> TokenStream {
 /// // Will turn into this:
 /// pub mod test_foobar {
 ///     pub mod serial {
-///         pub mod mysql80_upstream {
+///         pub mod mysql8_upstream {
 ///             #[test]
 ///             fn test() {
 ///                 // Test code here
@@ -102,8 +112,8 @@ pub fn skip_flaky_finder(_args: TokenStream, item: TokenStream) -> TokenStream {
 /// This allows test runs to target specific tags using the `:tag:` pattern, like so:
 ///
 /// ```sh
-/// cargo test -- :mysql80_upstream:
-/// cargo nextest run -E 'test(/:mysql80_upstream:/)'
+/// cargo test -- :mysql8_upstream:
+/// cargo nextest run -E 'test(/:mysql8_upstream:/)'
 /// ```
 ///
 /// If one of the tags is `serial`, we add the [`serial_test::serial`] attribute so this can be run
@@ -115,6 +125,18 @@ pub fn skip_flaky_finder(_args: TokenStream, item: TokenStream) -> TokenStream {
 /// module with the original test name primarily so that regardless of the ordering of the tags,
 /// they will always be identifiable as `:tag:`, not requiring `:tag` for the last or `tag:` for the
 /// first.
+///
+/// ## Supported Tags
+///
+/// The following tags are supported (defined in [`VALID_TAGS`]):
+///
+/// - `serial`: Indicates that tests must be run serially (not in parallel with other serial tests for
+///   the same upstream; see .config/nextest.toml for test groups)
+/// - `consul`: Requires a Consul server
+/// - `mysql_upstream`: For tests that can run against any supported MySQL version
+/// - `mysql8_upstream`: For tests that specifically target MySQL 8.x features or behavior
+/// - `postgres_upstream`: For tests that can run against any supported PostgreSQL version
+/// - `postgres15_upstream`: For tests that specifically target PostgreSQL 15.x features or behavior
 ///
 /// [test-tag]: https://crates.io/crates/test-tag
 #[proc_macro_attribute]
@@ -136,6 +158,21 @@ pub fn tags(args: TokenStream, item: TokenStream) -> TokenStream {
         })
         .collect();
 
+    // Validate that all tags are known
+    for tag in &tags {
+        let tag_str = tag.to_string();
+        if !VALID_TAGS.contains(&tag_str.as_str()) {
+            let err_msg = format!(
+                "Unknown test tag '{}'. Valid tags are: {}",
+                tag_str,
+                VALID_TAGS.join(", ")
+            );
+            let error = Error::new(tag.span(), err_msg);
+            return error.to_compile_error().into();
+        }
+    }
+
+    // Special handling for `serial`: add the in-process mutex from `serial_test`
     if tags.iter().any(|tag| tag == "serial") {
         let serial_attr = parse_quote! {
             #[serial_test::serial(#serial_groups)]
