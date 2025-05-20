@@ -6,48 +6,50 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
+antithesis_sdk = { workspace = true }
 anyhow = { workspace = true }
+bit-vec = { workspace = true, features = ["serde"] }
+bytes = { workspace = true }
+chrono = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 console = { workspace = true }
 derive_more = { workspace = true }
+enum-display-derive = { workspace = true }
+futures = { workspace = true }
 hex = { workspace = true }
+indicatif = { workspace = true }
+itertools = { workspace = true }
+lazy_static = { workspace = true }
 md5 = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true, features = ["chrono"] }
-tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
 nom = { workspace = true }
 nom_locate = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
-itertools = { workspace = true }
-chrono = { workspace = true }
 pretty_assertions = { workspace = true }
-walkdir = { workspace = true }
 proptest = { workspace = true }
-futures = { workspace = true }
-bytes = { workspace = true }
-enum-display-derive = { workspace = true }
-lazy_static = { workspace = true }
 rust_decimal = { workspace = true, features = ["db-tokio-postgres"] }
-indicatif = { workspace = true }
-bit-vec = { workspace = true, features = ["serde"] }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
+walkdir = { workspace = true }
 
-readyset-server = { path = "../readyset-server/" }
+database-utils = { path = "../database-utils" }
+mysql-srv = { path = "../mysql-srv" }
+mysql-time = { path = "../mysql-time" }
+nom-sql = { path = "../nom-sql" }
+psql-srv = { path = "../psql-srv" }
+query-generator = { path = "../query-generator" }
 readyset-adapter = { path = "../readyset-adapter/" }
 readyset-alloc = { path = "../readyset-alloc/" }
 readyset-client = { path = "../readyset-client/" }
-database-utils = { path = "../database-utils" }
-nom-sql = { path = "../nom-sql" }
-mysql-srv = { path = "../mysql-srv" }
-psql-srv = { path = "../psql-srv" }
+readyset-data = { path = "../readyset-data" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
-query-generator = { path = "../query-generator" }
-mysql-time = { path = "../mysql-time" }
-readyset-tracing = { path = "../readyset-tracing" }
-readyset-data = { path = "../readyset-data" }
+readyset-server = { path = "../readyset-server/" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
+readyset-tracing = { path = "../readyset-tracing" }
 readyset-util = { path = "../readyset-util" }
 
 [lints.clippy]

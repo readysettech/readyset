@@ -90,6 +90,7 @@ tokio-postgres = "0.7.12"
 ########################
 
 ahash = "0.8"
+antithesis_sdk = { version = "0.2.5", default-features = false }
 anyhow = "1.0.82"
 atoi = "2.0.0"
 assert_approx_eq = "1.1.0"

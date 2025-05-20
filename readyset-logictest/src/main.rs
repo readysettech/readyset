@@ -8,6 +8,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use antithesis_sdk::prelude::*;
 use anyhow::{anyhow, bail, Context};
 use clap::Parser;
 use console::style;
@@ -20,6 +21,7 @@ use proptest::strategy::Strategy;
 use proptest::test_runner::{self, TestCaseError, TestError, TestRng, TestRunner};
 use query_generator::{QueryOperationArgs, QuerySeed};
 use readyset_client::consensus::AuthorityType;
+use serde_json::json;
 use tokio::sync::Mutex;
 use walkdir::WalkDir;
 
@@ -606,6 +608,10 @@ impl Fuzz {
             TestRunner::new(self.into())
         };
 
+        lifecycle::setup_complete(&json!({
+            "logictest-type": "fuzz",
+        }));
+
         let result = runner.run(&self.test_script_strategy(), move |mut test_script| {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let _guard = rt.enter();
@@ -633,7 +639,10 @@ impl Fuzz {
             eprintln!("Writing failing test script to {}", path.to_string_lossy());
             script.write_to(&mut file)?;
             file.flush()?;
+            assert_sometimes!(true, "Found failing queries");
             bail!("Found failing set of queries: {}", reason);
+        } else {
+            assert_sometimes!(true, "No bugs found");
         }
 
         println!("No bugs found!");
@@ -705,6 +714,7 @@ impl<'a> From<&'a Fuzz> for test_runner::Config {
 }
 
 fn main() -> anyhow::Result<()> {
+    antithesis_sdk::antithesis_init();
     let opts = Opts::parse();
     opts.subcommand.run()
 }

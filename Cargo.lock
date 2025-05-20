@@ -137,6 +137,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "antithesis_sdk"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "201eba73b76341631014baf9c0018e703af204a1e0f15d7664d8a0947f6be74d"
+dependencies = [
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4497,6 +4508,7 @@ dependencies = [
 name = "readyset-logictest"
 version = "0.1.0"
 dependencies = [
+ "antithesis_sdk",
  "anyhow",
  "bit-vec 0.6.3",
  "bytes",
@@ -4535,6 +4547,7 @@ dependencies = [
  "readyset-tracing",
  "readyset-util",
  "rust_decimal",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
  "tokio-postgres",
