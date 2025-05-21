@@ -2047,6 +2047,7 @@ async fn recreate_replication_slot() {
 
     let (config, mut handle, shutdown_tx) = TestBuilder::default()
         .fallback(true)
+        .replication_server_id("recreate_replication_slot".to_string())
         .build::<PostgreSQLAdapter>()
         .await;
 
@@ -2117,7 +2118,7 @@ async fn recreate_replication_slot() {
 
     // Delete the replication slot while the replicator is waiting to restart
     eventually!(client
-        .simple_query("SELECT pg_drop_replication_slot('readyset')")
+        .simple_query("SELECT pg_drop_replication_slot('readyset_recreate_replication_slot')")
         .await
         .is_ok());
 
@@ -2169,6 +2170,7 @@ async fn named_cache_queryable_after_being_cleared() {
             .fallback(true)
             .migration_style(MigrationStyle::Explicit)
             .migration_mode(MigrationMode::OutOfBand)
+            .replication_server_id("named_cache_queryable_after_being_cleared".to_string())
             .build::<PostgreSQLAdapter>()
             .await;
 
@@ -2223,6 +2225,7 @@ async fn named_cache_queryable_after_being_cleared() {
         .recreate_database(false)
         .migration_style(MigrationStyle::Explicit)
         .migration_mode(MigrationMode::OutOfBand)
+        .replication_server_id("named_cache_queryable_after_being_cleared".to_string())
         .build::<PostgreSQLAdapter>()
         .await;
 
@@ -2315,6 +2318,7 @@ mod failure_injection_tests {
                 .replicate(true)
                 .fallback(true)
                 .migration_style(MigrationStyle::Explicit)
+                .replication_server_id(prefix.to_string())
                 .build::<PostgreSQLAdapter>()
                 .await;
 
@@ -2362,6 +2366,7 @@ mod failure_injection_tests {
             .fallback(true)
             .recreate_database(false)
             .migration_style(MigrationStyle::Explicit)
+            .replication_server_id(prefix.to_string())
             .build::<PostgreSQLAdapter>()
             .await;
 
