@@ -21,6 +21,7 @@ use proptest::strategy::Strategy;
 use proptest::test_runner::{self, TestCaseError, TestError, TestRng, TestRunner};
 use query_generator::{QueryOperationArgs, QuerySeed};
 use readyset_client::consensus::AuthorityType;
+use readyset_tracing::init_test_logging;
 use serde_json::json;
 use tokio::sync::Mutex;
 use walkdir::WalkDir;
@@ -587,7 +588,7 @@ pub struct Fuzz {
 
     /// URL of a reference database to compare to.
     #[arg(long)]
-    compare_to: DatabaseURL,
+    compare_to: String,
 
     /// Enable verbose log output
     #[arg(long, short = 'v')]
@@ -602,6 +603,7 @@ pub struct Fuzz {
 
 impl Fuzz {
     fn run(&'static self) -> anyhow::Result<()> {
+        init_test_logging();
         let mut runner = if let Some(Seed(seed)) = self.seed {
             TestRunner::new_with_rng(self.into(), TestRng::from_seed(Default::default(), &seed))
         } else {
@@ -618,7 +620,8 @@ impl Fuzz {
             rt.block_on(test_script.run(
                 RunOptions {
                     verbose: self.verbose,
-                    database_type: self.compare_to.database_type(),
+                    database_type: DatabaseURL::from_str(&self.compare_to)?.database_type(),
+                    replication_url: Some(self.compare_to.clone()),
                     ..Default::default()
                 },
                 Default::default(),
@@ -679,7 +682,7 @@ impl Fuzz {
     }
 
     fn generate_opts(&self) -> impl Strategy<Value = generate::GenerateOpts> + 'static {
-        let compare_to = self.compare_to.clone();
+        let compare_to = DatabaseURL::from_str(&self.compare_to).unwrap();
         let verbose = self.verbose;
         (0..100usize).prop_flat_map(move |rows_per_table| {
             let compare_to = compare_to.clone();
@@ -695,7 +698,7 @@ impl Fuzz {
     }
 
     fn dialect(&self) -> readyset_sql::Dialect {
-        match self.compare_to {
+        match DatabaseURL::from_str(&self.compare_to).unwrap() {
             DatabaseURL::MySQL(_) => readyset_sql::Dialect::MySQL,
             DatabaseURL::PostgreSQL(_) => readyset_sql::Dialect::PostgreSQL,
         }
