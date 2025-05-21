@@ -28,6 +28,18 @@ async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
         .await
 }
 
+#[cfg(feature = "failure_injection")]
+macro_rules! assert_last_statement_matches {
+    ($table:expr, $dest:expr, $status:expr, $client:expr) => {
+        let (matches, err) = last_statement_matches($dest, $status, $client).await;
+        assert!(
+            matches,
+            "EXPLAIN LAST STATEMENT mismatch for query involving table {}: {}",
+            $table, err
+        );
+    };
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, postgres_upstream)]
 #[slow]
@@ -372,7 +384,7 @@ async fn schema_resolution_with_unreplicated_tables() {
         .get::<_, i32>(0);
     assert_eq!(result, 2);
 
-    assert_last_statement_matches("t", "readyset", "ok", &client).await;
+    assert_last_statement_matches!("t", "readyset", "ok", &client);
 
     shutdown_tx.shutdown().await;
 }
@@ -981,15 +993,6 @@ async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> (b
     }
 }
 
-#[allow(dead_code)]
-async fn assert_last_statement_matches(table: &str, dest: &str, status: &str, client: &Client) {
-    let (matches, err) = last_statement_matches(dest, status, client).await;
-    assert!(
-        matches,
-        "EXPLAIN LAST STATEMENT mismatch for query involving table {table}: {err}"
-    );
-}
-
 #[cfg(feature = "failure_injection")]
 async fn setup_for_replication_failure(client: &Client) {
     client
@@ -1014,7 +1017,7 @@ async fn setup_for_replication_failure(client: &Client) {
     sleep().await;
     sleep().await;
 
-    assert_last_statement_matches("cats", "upstream", "ok", client).await;
+    assert_last_statement_matches!("cats", "upstream", "ok", client);
     client
         .simple_query("CREATE CACHE FROM SELECT * FROM cats")
         .await
@@ -1067,7 +1070,7 @@ async fn assert_table_ignored(client: &Client) {
         let mut results = vec![c1, c2];
         results.sort();
         assert_eq!(results, vec!["1", "2"]);
-        assert_last_statement_matches(source, "upstream", "ok", client).await;
+        assert_last_statement_matches!(source, "upstream", "ok", client);
     }
 }
 
