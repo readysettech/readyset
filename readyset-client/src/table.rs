@@ -292,13 +292,6 @@ impl Display for TableReplicationStatus {
     }
 }
 
-/// Information about the current status of a table in ReadySet
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TableStatus {
-    /// The status of the table's replication
-    pub replication_status: TableReplicationStatus,
-}
-
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TableBuilder {
     pub txs: Vec<SocketAddr>,

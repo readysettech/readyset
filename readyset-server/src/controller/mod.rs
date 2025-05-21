@@ -1419,7 +1419,7 @@ mod tests {
     use readyset_client::debug::info::KeyCount;
     use readyset_client::recipe::changelist::{Change, ChangeList};
     use readyset_client::{
-        PersistencePoint, TableOperation, TableReplicationStatus, TableStatus, ViewCreateRequest,
+        PersistencePoint, TableOperation, TableReplicationStatus, ViewCreateRequest,
     };
     use readyset_data::Dialect as DataDialect;
     use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
@@ -1832,18 +1832,14 @@ mod tests {
                         schema: Some("s2".into()),
                         name: "snapshotting_t".into(),
                     },
-                    TableStatus {
-                        replication_status: TableReplicationStatus::Snapshotting
-                    }
+                    TableReplicationStatus::Snapshotting
                 ),
                 (
                     Relation {
                         schema: Some("s2".into()),
                         name: "snapshotted_t".into(),
                     },
-                    TableStatus {
-                        replication_status: TableReplicationStatus::Snapshotted
-                    }
+                    TableReplicationStatus::Snapshotted
                 ),
             ])
         );
@@ -1857,29 +1853,21 @@ mod tests {
                         schema: Some("s1".into()),
                         name: "t".into(),
                     },
-                    TableStatus {
-                        replication_status: TableReplicationStatus::NotReplicated(
-                            NotReplicatedReason::Configuration
-                        )
-                    }
+                    TableReplicationStatus::NotReplicated(NotReplicatedReason::Configuration)
                 ),
                 (
                     Relation {
                         schema: Some("s2".into()),
                         name: "snapshotting_t".into(),
                     },
-                    TableStatus {
-                        replication_status: TableReplicationStatus::Snapshotting
-                    }
+                    TableReplicationStatus::Snapshotting
                 ),
                 (
                     Relation {
                         schema: Some("s2".into()),
                         name: "snapshotted_t".into(),
                     },
-                    TableStatus {
-                        replication_status: TableReplicationStatus::Snapshotted
-                    }
+                    TableReplicationStatus::Snapshotted
                 ),
             ])
         );

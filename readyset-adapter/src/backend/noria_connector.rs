@@ -938,7 +938,7 @@ impl NoriaConnector {
         let data = statuses
             .into_iter()
             .map(|(tbl, status)| {
-                let replication_status_str = status.replication_status.to_string();
+                let replication_status_str = status.to_string();
                 let replication_split = replication_status_str
                     .splitn(2, ": ")
                     .collect::<Vec<&str>>();
@@ -949,7 +949,7 @@ impl NoriaConnector {
                             replication_split.get(1).unwrap_or(&"").to_string(),
                         )
                     } else {
-                        (status.replication_status.to_string(), "".to_string())
+                        (status.to_string(), "".to_string())
                     };
                 vec![
                     tbl.display(self.parse_dialect).to_string().into(),

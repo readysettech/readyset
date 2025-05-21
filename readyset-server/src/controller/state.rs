@@ -47,8 +47,8 @@ use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::recipe::{CacheExpr, ExtendRecipeSpec};
 use readyset_client::{
-    PersistencePoint, SingleKeyEviction, TableReplicationStatus, TableStatus, ViewCreateRequest,
-    ViewFilter, ViewRequest, ViewSchema,
+    PersistencePoint, SingleKeyEviction, TableReplicationStatus, ViewCreateRequest, ViewFilter,
+    ViewRequest, ViewSchema,
 };
 use readyset_data::{DfValue, Dialect};
 use readyset_errors::{
@@ -1059,29 +1059,25 @@ impl DfState {
     pub(super) async fn table_statuses(
         &self,
         all: bool,
-    ) -> ReadySetResult<BTreeMap<Relation, TableStatus>> {
+    ) -> ReadySetResult<BTreeMap<Relation, TableReplicationStatus>> {
         let known_tables = self.tables();
         let snapshotting_tables = self.snapshotting_tables().await?;
         let out = known_tables.into_keys().map(|tbl| {
-            let status = TableStatus {
-                replication_status: if snapshotting_tables.contains(&tbl) {
-                    TableReplicationStatus::Snapshotting
-                } else {
-                    TableReplicationStatus::Snapshotted
-                },
+            let status = if snapshotting_tables.contains(&tbl) {
+                TableReplicationStatus::Snapshotting
+            } else {
+                TableReplicationStatus::Snapshotted
             };
             (tbl, status)
         });
         if all {
             Ok(out
-                .chain(self.non_replicated_relations().iter().cloned().map(|tbl| {
-                    (
-                        tbl.name,
-                        TableStatus {
-                            replication_status: TableReplicationStatus::NotReplicated(tbl.reason),
-                        },
-                    )
-                }))
+                .chain(
+                    self.non_replicated_relations()
+                        .iter()
+                        .cloned()
+                        .map(|tbl| (tbl.name, TableReplicationStatus::NotReplicated(tbl.reason))),
+                )
                 .collect())
         } else {
             Ok(out.collect())
