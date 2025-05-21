@@ -310,6 +310,11 @@ impl LimitClause {
             LimitClause::OffsetCommaLimit { .. } => false,
         }
     }
+
+    /// Checks that limit is present and offset is not present
+    pub fn is_topk(&self) -> bool {
+        self.limit().is_some() && self.offset().is_none()
+    }
 }
 
 impl Default for LimitClause {

@@ -13,7 +13,8 @@ use readyset_errors::{
 };
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
-    BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, SelectStatement,
+    BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, OrderClause,
+    SelectStatement,
 };
 use readyset_sql::DialectDisplay;
 use serde::{Deserialize, Serialize};
@@ -48,11 +49,14 @@ fn use_fallback_pagination(
     server_supports_pagination: bool,
     server_supports_topk: bool,
     limit_clause: &LimitClause,
+    order: &Option<OrderClause>,
 ) -> bool {
-    // TopK doesn't support Placeholders in Limit, so we have to fallback else topk will throw an
-    // error
-    if server_supports_topk && matches!(limit_clause.limit(), Some(Literal::Placeholder(_))) {
-        return true;
+    // Check that the query contains a topk and that topk is enabled.
+    // If topk is enabled, and the limit is a placeholder, then we need to fallback to the
+    // adapter because topk doesn't support LIMIT placeholders (aka k can't be parameterized)
+    // else, topk will handle the LIMIT and the ORDER as expected, and no fallback is needed.
+    if server_supports_topk && order.is_some() && limit_clause.is_topk() {
+        return matches!(limit_clause.limit(), Some(Literal::Placeholder(_)));
     }
 
     if server_supports_pagination &&
@@ -98,6 +102,7 @@ pub fn process_query(
         params.server_supports_pagination,
         params.server_supports_topk,
         &query.limit_clause,
+        &query.order,
     );
 
     let limit_clause = if force_paginate_in_adapter {
