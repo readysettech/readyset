@@ -73,8 +73,7 @@ impl TryFromDialect<sqlparser::ast::Query> for CompoundSelectStatement {
             return failed!("Expected a set operation");
         }
         if with.is_some() {
-            // TODO(mvzink): Figure out whether the sqlparser (probably) or nom-sql (probably not)
-            // AST is putting CTEs in the right place
+            // not supported at the moment
             return unsupported!("WITH clause is not supported in compound SELECT statements");
         }
         let selects = flatten_set_expr(body, dialect)?;

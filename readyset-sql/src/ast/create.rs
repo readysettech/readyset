@@ -186,7 +186,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for CreateTableStatement {
     ) -> Result<Self, AstConversionError> {
         match value {
             sqlparser::ast::Statement::CreateTable(stmt) => stmt.try_into_dialect(dialect),
-            _ => panic!("Should only be called on a CREATE TABLE statement"),
+            other => failed!("Should only be called on a CREATE TABLE statement, got: {other:?}"),
         }
     }
 }
@@ -196,15 +196,6 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
         value: sqlparser::ast::CreateTable,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        // TODO(mvzink): We don't actually care about most table options, and don't cover the DATA
-        // DIRECTORY variant because sqlparser doesn't support it. We will have to either upstream a
-        // fix or wait for [sqlparser#1747] to go through to support DATA DIRECTORY.
-        //
-        // Also note that this is likely to change the ordering of the options compared to the
-        // original SQL, since sqlparser stores them as individual fields instead of a list of
-        // options.
-        //
-        // [sqlparser#1747]: https://github.com/apache/datafusion-sqlparser-rs/pull/1747
         let mut options = vec![];
         if let CreateTableOptions::Plain(opts) = value.table_options {
             for option in opts {
@@ -255,6 +246,17 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                             v => {
                                 return Err(AstConversionError::Failed(format!(
                                     "Unsupported collate value {v}"
+                                )))
+                            }
+                        },
+                        "DATA DIRECTORY" => match value {
+                            sqlparser::ast::Expr::Value(ValueWithSpan {
+                                value: Value::SingleQuotedString(v),
+                                ..
+                            }) => options.push(CreateTableOption::DataDirectory(v)),
+                            _ => {
+                                return Err(AstConversionError::Failed(format!(
+                                    "Unsupported table option {key}"
                                 )))
                             }
                         },

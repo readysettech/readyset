@@ -134,7 +134,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
             Delete(delete) => Ok(Self::Delete(delete.try_into_dialect(dialect)?)),
             create @ CreateView { .. } => Ok(Self::CreateView(create.try_into_dialect(dialect)?)),
             update @ Update { .. } => Ok(Self::Update(update.try_into_dialect(dialect)?)),
-            Use(use_statement) => Ok(Self::Use(use_statement.into_dialect(dialect))),
+            Use(use_statement) => Ok(Self::Use(use_statement.try_into_dialect(dialect)?)),
             Set(set_statement) => Ok(Self::Set(set_statement.try_into_dialect(dialect)?)),
             Drop {
                 object_type,

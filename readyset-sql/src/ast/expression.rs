@@ -444,14 +444,14 @@ impl TryFrom<sqlparser::ast::BinaryOperator> for BinaryOperator {
             BinOp::Arrow => Self::Arrow1,
             BinOp::ArrowAt => Self::AtArrowLeft,
             BinOp::AtArrow => Self::AtArrowRight,
-            BinOp::AtAt => unimplemented!("@@ {value:?}"),
-            BinOp::AtQuestion => unimplemented!("@? {value:?}"),
-            BinOp::BitwiseAnd => unimplemented!("& {value:?}"),
-            BinOp::BitwiseOr => unimplemented!("| {value:?}"),
-            BinOp::BitwiseXor => unimplemented!("^ {value:?}"),
-            BinOp::Custom(_) => unimplemented!("CUSTOM {value:?}"),
+            BinOp::AtAt => unsupported!("@@ {value:?}")?,
+            BinOp::AtQuestion => unsupported!("@? {value:?}")?,
+            BinOp::BitwiseAnd => unsupported!("& {value:?}")?,
+            BinOp::BitwiseOr => unsupported!("| {value:?}")?,
+            BinOp::BitwiseXor => unsupported!("^ {value:?}")?,
+            BinOp::Custom(_) => unsupported!("Custom operator {value:?}")?,
             BinOp::Divide => Self::Divide,
-            BinOp::DuckIntegerDivide => unimplemented!("Duck // {value:?}"),
+            BinOp::DuckIntegerDivide => unsupported!("DuckDB // {value:?}")?,
             BinOp::Eq => Self::Equal,
             BinOp::Gt => Self::Greater,
             BinOp::GtEq => Self::GreaterOrEqual,
@@ -462,53 +462,53 @@ impl TryFrom<sqlparser::ast::BinaryOperator> for BinaryOperator {
             BinOp::Lt => Self::Less,
             BinOp::LtEq => Self::LessOrEqual,
             BinOp::Minus => Self::Subtract,
-            BinOp::Modulo => unimplemented!("% {value:?}"),
+            BinOp::Modulo => unsupported!("% {value:?}")?,
             BinOp::Multiply => Self::Multiply,
-            BinOp::MyIntegerDivide => unimplemented!("MySQL DIV {value:?}"),
+            BinOp::MyIntegerDivide => unsupported!("MySQL DIV {value:?}")?,
             BinOp::NotEq => Self::NotEqual,
             BinOp::Or => Self::Or,
-            BinOp::Overlaps => todo!(),
-            BinOp::PGBitwiseShiftLeft => todo!(),
-            BinOp::PGBitwiseShiftRight => todo!(),
-            BinOp::PGBitwiseXor => todo!(),
-            BinOp::PGCustomBinaryOperator(_vec) => todo!(),
-            BinOp::PGExp => todo!(),
-            BinOp::PGILikeMatch => todo!(),
-            BinOp::PGLikeMatch => todo!(),
-            BinOp::PGNotILikeMatch => todo!(),
-            BinOp::PGNotLikeMatch => todo!(),
-            BinOp::PGOverlap => todo!(),
+            BinOp::Overlaps => unsupported!("OVERLAPS {value:?}")?,
+            BinOp::PGBitwiseShiftLeft => unsupported!("PGBitwiseShiftLeft '<<'")?,
+            BinOp::PGBitwiseShiftRight => unsupported!("PGBitwiseShiftRight '>>'")?,
+            BinOp::PGBitwiseXor => unsupported!("PGBitwiseXor '#'")?,
+            BinOp::PGCustomBinaryOperator(_vec) => unsupported!("PGCustomBinaryOperator")?,
+            BinOp::PGExp => unsupported!("PGExp '^'")?,
+            BinOp::PGILikeMatch => Self::ILike,
+            BinOp::PGLikeMatch => Self::Like,
+            BinOp::PGNotILikeMatch => Self::NotILike,
+            BinOp::PGNotLikeMatch => Self::NotLike,
+            BinOp::PGOverlap => unsupported!("PGOverlap '&&'")?,
             BinOp::PGRegexIMatch => unsupported!("PGRegexIMatch '~*'")?,
             BinOp::PGRegexMatch => unsupported!("PGRegexMatch '~'")?,
             BinOp::PGRegexNotIMatch => unsupported!("PGRegexNotIMatch '!~*'")?,
             BinOp::PGRegexNotMatch => unsupported!("PGRegexNotMatch '!~'")?,
-            BinOp::PGStartsWith => todo!(),
+            BinOp::PGStartsWith => unsupported!("PGStartsWith '^@'")?,
             BinOp::Plus => Self::Add,
             BinOp::Question => Self::QuestionMark,
             BinOp::QuestionAnd => Self::QuestionMarkAnd,
             BinOp::QuestionPipe => Self::QuestionMarkPipe,
-            BinOp::Spaceship => todo!(),
+            BinOp::Spaceship => unsupported!("Spaceship '<=>'")?,
             BinOp::StringConcat => Self::DoublePipe,
-            BinOp::Xor => todo!(),
-            BinOp::DoubleHash => todo!(),
-            BinOp::LtDashGt => todo!(),
-            BinOp::AndLt => todo!(),
-            BinOp::AndGt => todo!(),
-            BinOp::LtLtPipe => todo!(),
-            BinOp::PipeGtGt => todo!(),
-            BinOp::AndLtPipe => todo!(),
-            BinOp::PipeAndGt => todo!(),
-            BinOp::LtCaret => todo!(),
-            BinOp::GtCaret => todo!(),
-            BinOp::QuestionHash => todo!(),
-            BinOp::QuestionDash => todo!(),
-            BinOp::QuestionDashPipe => todo!(),
-            BinOp::QuestionDoublePipe => todo!(),
-            BinOp::At => todo!(),
-            BinOp::TildeEq => todo!(),
-            BinOp::Assignment => todo!(),
-            BinOp::Match => todo!(),
-            BinOp::Regexp => todo!(),
+            BinOp::Xor => unsupported!("XOR operator")?,
+            BinOp::DoubleHash => unsupported!("DoubleHash '##'")?,
+            BinOp::LtDashGt => unsupported!("LtDashGt '<->'")?,
+            BinOp::AndLt => unsupported!("AndLt '&<'")?,
+            BinOp::AndGt => unsupported!("AndGt '&>'")?,
+            BinOp::LtLtPipe => unsupported!("LtLtPipe '<<|'")?,
+            BinOp::PipeGtGt => unsupported!("PipeGtGt '|>>'")?,
+            BinOp::AndLtPipe => unsupported!("AndLtPipe '&<|'")?,
+            BinOp::PipeAndGt => unsupported!("PipeAndGt '|&>'")?,
+            BinOp::LtCaret => unsupported!("LtCaret '<^'")?,
+            BinOp::GtCaret => unsupported!("GtCaret '>^'")?,
+            BinOp::QuestionHash => unsupported!("QuestionHash '?#'")?,
+            BinOp::QuestionDash => unsupported!("QuestionDash '?-'")?,
+            BinOp::QuestionDashPipe => unsupported!("QuestionDashPipe '?-|'")?,
+            BinOp::QuestionDoublePipe => unsupported!("QuestionDoublePipe '?||'")?,
+            BinOp::At => unsupported!("At '@'")?,
+            BinOp::TildeEq => unsupported!("TildeEq '~='")?,
+            BinOp::Assignment => unsupported!("Assignment ':='")?,
+            BinOp::Match => unsupported!("MATCH operator")?,
+            BinOp::Regexp => unsupported!("REGEXP operator")?,
         })
     }
 }
@@ -962,7 +962,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 syntax: _, // We only support FROM
                 expr,
             } => Ok(Self::Call(FunctionExpr::Extract {
-                field: field.into(),
+                field: field.try_into()?,
                 expr: expr.try_into_dialect(dialect)?,
             })),
             Floor { expr: _, field: _ } => not_yet_implemented!("FLOOR"),
@@ -1092,9 +1092,6 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             } => unsupported!("OVERLAY"),
             Position { expr: _, r#in: _ } => not_yet_implemented!("POSITION"),
             Prior(_expr) => not_yet_implemented!("PRIOR"),
-            QualifiedWildcard(_object_name, _token) => {
-                todo!("Not actually sure how we represent `foo`.* in nom-sql")
-            }
             RLike {
                 negated: _,
                 expr: _,
@@ -1192,10 +1189,17 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             } => {
                 unsupported!("Compound field access a la `foo['bar'].baz[1]`: `{cfa}` = {cfa:?}")
             }
-            Wildcard(_token) => todo!("wildcard expression"),
+            // not sure what these are for, parity tests seem to be
+            // passing normally though
+            Wildcard(_token) => unsupported!("wildcard expression in this context"),
+            QualifiedWildcard(_object_name, _token) => {
+                unsupported!("qualified wildcard expression in this context")
+            }
             IsNormalized { .. } => unsupported!("IS NORMALIZED"),
-            // TODO(mohamed): no idea what this is, check if this is supported
-            Prefixed { .. } => todo!(),
+            // Prefixed expression like introducer string
+            // https://dev.mysql.com/doc/refman/8.0/en/charset-introducer.html
+            // prefix is ignored for now
+            Prefixed { value, .. } => value.try_into_dialect(dialect),
         }
     }
 }
@@ -1424,11 +1428,11 @@ fn sqlparser_value_into_string(value: sqlparser::ast::Value) -> String {
         | TripleSingleQuotedRawStringLiteral(s)
         | TripleDoubleQuotedRawStringLiteral(s)
         | NationalStringLiteral(s)
-        | DoubleQuotedString(s) => s,
-        HexStringLiteral(_) => todo!(),
-        Boolean(_) => todo!(),
-        Null => todo!(),
-        Placeholder(_) => todo!(),
+        | DoubleQuotedString(s)
+        | HexStringLiteral(s)
+        | Placeholder(s) => s,
+        Boolean(b) => b.to_string(),
+        Null => "NULL".to_string(),
     }
 }
 

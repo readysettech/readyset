@@ -57,18 +57,29 @@ pub enum JoinOperator {
     StraightJoin,
 }
 
-impl From<&sqlparser::ast::JoinOperator> for JoinOperator {
-    fn from(value: &sqlparser::ast::JoinOperator) -> Self {
+impl TryFrom<&sqlparser::ast::JoinOperator> for JoinOperator {
+    type Error = AstConversionError;
+    fn try_from(value: &sqlparser::ast::JoinOperator) -> Result<Self, Self::Error> {
         use sqlparser::ast::JoinOperator as JoinOp;
         match value {
-            JoinOp::Join(..) => Self::Join,
-            JoinOp::Inner(..) => Self::InnerJoin,
-            JoinOp::Left(..) => Self::LeftJoin,
-            JoinOp::LeftOuter(..) => Self::LeftOuterJoin,
-            JoinOp::Right(..) => Self::RightJoin,
-            JoinOp::RightOuter(..) => Self::RightOuterJoin,
-            JoinOp::CrossJoin => Self::CrossJoin,
-            _ => todo!("unsupported join type {value:?}"),
+            JoinOp::Join(..) => Ok(Self::Join),
+            JoinOp::Inner(..) => Ok(Self::InnerJoin),
+            JoinOp::Left(..) => Ok(Self::LeftJoin),
+            JoinOp::LeftOuter(..) => Ok(Self::LeftOuterJoin),
+            JoinOp::Right(..) => Ok(Self::RightJoin),
+            JoinOp::RightOuter(..) => Ok(Self::RightOuterJoin),
+            JoinOp::StraightJoin(..) => Ok(Self::StraightJoin),
+            JoinOp::CrossJoin => Ok(Self::CrossJoin),
+            JoinOp::FullOuter(..)
+            | JoinOp::Semi(..)
+            | JoinOp::LeftSemi(..)
+            | JoinOp::RightSemi(..)
+            | JoinOp::Anti(..)
+            | JoinOp::LeftAnti(..)
+            | JoinOp::RightAnti(..)
+            | JoinOp::CrossApply
+            | JoinOp::OuterApply
+            | JoinOp::AsOf { .. } => unsupported!("Unsupported join operator: {value:?}"),
         }
     }
 }

@@ -3,6 +3,7 @@ use std::{cmp::Ordering, fmt};
 use itertools::Itertools;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use sqlparser::ast::ObjectName;
 use test_strategy::Arbitrary;
 
 use crate::{
@@ -88,14 +89,42 @@ impl FromDialect<sqlparser::ast::ViewColumnDef> for Column {
     }
 }
 
-impl FromDialect<sqlparser::ast::AssignmentTarget> for Column {
-    fn from_dialect(value: sqlparser::ast::AssignmentTarget, dialect: Dialect) -> Self {
-        match value {
-            sqlparser::ast::AssignmentTarget::ColumnName(object_name) => {
-                object_name.into_dialect(dialect)
+impl TryFromDialect<Vec<sqlparser::ast::Assignment>> for Vec<(Column, Expr)> {
+    fn try_from_dialect(
+        assignments: Vec<sqlparser::ast::Assignment>,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        let mut result = Vec::with_capacity(assignments.len());
+
+        for assignment in assignments {
+            match assignment.target {
+                sqlparser::ast::AssignmentTarget::ColumnName(object_name) => {
+                    let column = object_name.into_dialect(dialect);
+                    let value = assignment.value.try_into_dialect(dialect)?;
+                    result.push((column, value));
+                }
+                sqlparser::ast::AssignmentTarget::Tuple(v1) => match assignment.value {
+                    sqlparser::ast::Expr::Tuple(v2) => {
+                        if v1.len() != v2.len() {
+                            unsupported!(
+                                "Tuple assignment with mismatched element counts ({} elements with {} values)",
+                                v1.len(),
+                                v2.len()
+                            )?;
+                        }
+
+                        for (target, value) in v1.into_iter().zip(v2) {
+                            let column = target.into_dialect(dialect);
+                            let expr = value.try_into_dialect(dialect)?;
+                            result.push((column, expr));
+                        }
+                    }
+                    _ => unsupported!("Tuple assignment with non-tuple value")?,
+                },
             }
-            sqlparser::ast::AssignmentTarget::Tuple(_vec) => todo!("tuple assignment syntax"),
         }
+
+        Ok(result)
     }
 }
 
@@ -236,11 +265,21 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
                         constraints.push(ColumnConstraint::AutoIncrement)
                     }
                 }
-                sqlparser::ast::ColumnOption::CharacterSet(object_name) => {
-                    constraints.push(ColumnConstraint::CharacterSet(object_name.to_string()))
+                sqlparser::ast::ColumnOption::CharacterSet(ObjectName(object_name)) => {
+                    // strip the quoting style from the charset
+                    let value = object_name
+                        .iter()
+                        .map(|s| s.as_ident().unwrap().value.clone())
+                        .join(".");
+                    constraints.push(ColumnConstraint::CharacterSet(value))
                 }
-                sqlparser::ast::ColumnOption::Collation(object_name) => {
-                    constraints.push(ColumnConstraint::Collation(object_name.to_string()))
+                sqlparser::ast::ColumnOption::Collation(ObjectName(object_name)) => {
+                    // strip the quoting style from the collation
+                    let value = object_name
+                        .iter()
+                        .map(|s| s.as_ident().unwrap().value.clone())
+                        .join(".");
+                    constraints.push(ColumnConstraint::Collation(value))
                 }
                 sqlparser::ast::ColumnOption::Comment(s) => {
                     comment = Some(s);

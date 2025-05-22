@@ -5,7 +5,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
 
 /// Type of index hint.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
@@ -20,20 +20,24 @@ pub enum IndexHintType {
     Force,
 }
 
-impl From<&str> for IndexHintType {
-    fn from(s: &str) -> Self {
-        match s {
+impl TryFrom<&str> for IndexHintType {
+    type Error = AstConversionError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Ok(match s {
             "USE" => IndexHintType::Use,
             "IGNORE" => IndexHintType::Ignore,
             "FORCE" => IndexHintType::Force,
-            _ => panic!("Invalid index hint type: {s}"),
-        }
+            e => unsupported!("Unsupported index hint type: {e}")?,
+        })
     }
 }
 
-impl From<&&str> for IndexHintType {
-    fn from(s: &&str) -> Self {
-        IndexHintType::from(*s)
+impl TryFrom<&&str> for IndexHintType {
+    type Error = AstConversionError;
+
+    fn try_from(s: &&str) -> Result<Self, Self::Error> {
+        IndexHintType::try_from(*s)
     }
 }
 
@@ -67,19 +71,23 @@ pub enum IndexOrKeyType {
     Key,
 }
 
-impl From<&str> for IndexOrKeyType {
-    fn from(s: &str) -> Self {
-        match s {
+impl TryFrom<&str> for IndexOrKeyType {
+    type Error = AstConversionError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Ok(match s {
             "INDEX" => IndexOrKeyType::Index,
             "KEY" => IndexOrKeyType::Key,
-            _ => panic!("Invalid index or key type: {s}"),
-        }
+            e => unsupported!("Invalid index or key type: {e}")?,
+        })
     }
 }
 
-impl From<&&str> for IndexOrKeyType {
-    fn from(s: &&str) -> Self {
-        IndexOrKeyType::from(*s)
+impl TryFrom<&&str> for IndexOrKeyType {
+    type Error = AstConversionError;
+
+    fn try_from(s: &&str) -> Result<Self, Self::Error> {
+        IndexOrKeyType::try_from(*s)
     }
 }
 
@@ -105,20 +113,24 @@ pub enum IndexUsageType {
     GroupBy,
 }
 
-impl From<&str> for IndexUsageType {
-    fn from(s: &str) -> Self {
-        match s {
+impl TryFrom<&str> for IndexUsageType {
+    type Error = AstConversionError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Ok(match s {
             "FOR JOIN" => IndexUsageType::Join,
             "FOR ORDER BY" => IndexUsageType::OrderBy,
             "FOR GROUP BY" => IndexUsageType::GroupBy,
-            _ => panic!("Invalid index usage type: {s}"),
-        }
+            e => unsupported!("Invalid index usage type: {e}")?,
+        })
     }
 }
 
-impl From<&&str> for IndexUsageType {
-    fn from(s: &&str) -> Self {
-        IndexUsageType::from(*s)
+impl TryFrom<&&str> for IndexUsageType {
+    type Error = AstConversionError;
+
+    fn try_from(s: &&str) -> Result<Self, Self::Error> {
+        IndexUsageType::try_from(*s)
     }
 }
 

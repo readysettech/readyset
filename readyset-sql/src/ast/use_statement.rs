@@ -1,9 +1,9 @@
 use std::fmt;
 
+use crate::ast::SqlIdentifier;
+use crate::{AstConversionError, Dialect, IntoDialect, TryFromDialect};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
-
-use crate::{ast::*, Dialect, FromDialect, IntoDialect};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct UseStatement {
@@ -16,13 +16,17 @@ impl UseStatement {
     }
 }
 
-impl FromDialect<sqlparser::ast::Use> for UseStatement {
-    fn from_dialect(value: sqlparser::ast::Use, dialect: Dialect) -> Self {
+impl TryFromDialect<sqlparser::ast::Use> for UseStatement {
+    fn try_from_dialect(
+        value: sqlparser::ast::Use,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         match value {
-            sqlparser::ast::Use::Object(mut object) if object.0.len() == 1 => Self {
+            sqlparser::ast::Use::Object(mut object) if object.0.len() == 1 => Ok(Self {
                 database: object.0.pop().unwrap().into_dialect(dialect),
-            },
-            _ => unimplemented!("unsupported use statement {value:?}"),
+            }),
+            // can also be skipped!, but not much of a difference between them
+            _ => unsupported!("unsupported use statement {value:?}"),
         }
     }
 }

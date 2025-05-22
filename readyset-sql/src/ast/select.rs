@@ -64,7 +64,7 @@ impl TryFromDialect<sqlparser::ast::Join> for JoinClause {
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
         Ok(Self {
-            operator: (&value.join_operator).into(),
+            operator: (&value.join_operator).try_into()?,
             constraint: value.join_operator.try_into_dialect(dialect)?,
             right: JoinRightSide::Table(value.relation.try_into_dialect(dialect)?),
         })

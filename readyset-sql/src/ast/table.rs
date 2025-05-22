@@ -87,24 +87,30 @@ impl FromDialect<sqlparser::ast::ObjectName> for Relation {
     }
 }
 
-impl FromDialect<sqlparser::ast::FromTable> for Relation {
-    fn from_dialect(value: sqlparser::ast::FromTable, dialect: Dialect) -> Self {
+impl TryFromDialect<sqlparser::ast::FromTable> for Relation {
+    fn try_from_dialect(
+        value: sqlparser::ast::FromTable,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::FromTable::*;
         match value {
             WithFromKeyword(tables) | WithoutKeyword(tables) => tables
                 .into_iter()
-                .map(|table| table.into_dialect(dialect))
+                .map(|table| table.try_into_dialect(dialect))
                 .next()
                 .expect("empty list of tables"),
         }
     }
 }
 
-impl FromDialect<sqlparser::ast::TableWithJoins> for Relation {
-    fn from_dialect(value: sqlparser::ast::TableWithJoins, dialect: Dialect) -> Self {
+impl TryFromDialect<sqlparser::ast::TableWithJoins> for Relation {
+    fn try_from_dialect(
+        value: sqlparser::ast::TableWithJoins,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         match value.relation {
-            sqlparser::ast::TableFactor::Table { name, .. } => name.into_dialect(dialect),
-            _ => todo!("We don't support joins yet"),
+            sqlparser::ast::TableFactor::Table { name, .. } => Ok(name.into_dialect(dialect)),
+            _ => unsupported!("Joined Tables in this context"),
         }
     }
 }

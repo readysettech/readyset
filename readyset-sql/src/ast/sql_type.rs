@@ -164,7 +164,7 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
             TinyBlob => Ok(Self::TinyBlob),
             MediumBlob => Ok(Self::MediumBlob),
             LongBlob => Ok(Self::LongBlob),
-            Bytes(_) => unimplemented!(),
+            Bytes(_) => unsupported!("BYTES data type"),
             Numeric(info) => exact_number_info_into_numeric(info)
                 .map_err(|e| failed_err!("NUMERIC conversion: {e}")),
             Decimal(info) => exact_number_info_into_decimal(info)
@@ -283,13 +283,14 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
             GeometricType(geometric_type_kind) => {
                 unsupported!("geometric type {geometric_type_kind}")
             }
-            // TODO(mohamed): Are these supported?
-            TimestampNtz => todo!(),
-            UTinyInt => todo!(),
-            USmallInt => todo!(),
-            HugeInt => todo!(),
-            UHugeInt => todo!(),
-            UBigInt => todo!(),
+            // DuckDB-specific numeric types
+            UTinyInt => unsupported!("UTINYINT type"),
+            USmallInt => unsupported!("USMALLINT type"),
+            HugeInt => unsupported!("HUGEINT type"),
+            UHugeInt => unsupported!("UHUGEINT type"),
+            UBigInt => unsupported!("UBIGINT type"),
+            // Databricks-specific datatype
+            TimestampNtz => unsupported!("TIMESTAMP_NTZ type"),
         }
     }
 }
@@ -314,6 +315,7 @@ fn exact_number_info_into_decimal(
     info: sqlparser::ast::ExactNumberInfo,
 ) -> Result<SqlType, std::num::TryFromIntError> {
     match info {
+        // XXX(mohamed): seems to be a generic TODO, not specific to sqlparser
         // TODO(mvzink): this default of 32 matches nom-sql, which is wrong, and varies by dialect
         // (and it should actually be optional like [`SqlType::Numeric`] too)
         sqlparser::ast::ExactNumberInfo::None => Ok(SqlType::Decimal(32, 0)),

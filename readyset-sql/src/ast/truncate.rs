@@ -33,6 +33,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for TruncateStatement {
             // TODO(mvzink): I believe sqlparser is incorrect here; ONLY should be on each table
             // target, not the whole statement. We interpret it as applying to all tables, but
             // should probably upstream a fix (or verify that sqlparser is correct).
+            // TODO(mohamed): upstream a fix REA-5744
             only,
             identity,
             cascade,

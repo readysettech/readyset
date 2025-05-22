@@ -282,9 +282,11 @@ pub enum VariableScope {
     Session,
 }
 
-impl From<&str> for VariableScope {
-    fn from(value: &str) -> Self {
-        if value.eq_ignore_ascii_case("@@LOCAL") {
+impl TryFrom<&str> for VariableScope {
+    type Error = AstConversionError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(if value.eq_ignore_ascii_case("@@LOCAL") {
             Self::Local
         } else if value.eq_ignore_ascii_case("@@GLOBAL") {
             Self::Global
@@ -293,19 +295,22 @@ impl From<&str> for VariableScope {
         } else if value.eq_ignore_ascii_case("@") {
             Self::User
         } else {
-            panic!("unexpected variable scope {value}")
-        }
+            unsupported!("unexpected variable scope {value}")?
+        })
     }
 }
 
-impl From<sqlparser::ast::ObjectNamePart> for VariableScope {
-    fn from(value: sqlparser::ast::ObjectNamePart) -> Self {
+impl TryFrom<sqlparser::ast::ObjectNamePart> for VariableScope {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::ObjectNamePart) -> Result<Self, Self::Error> {
         match value {
-            sqlparser::ast::ObjectNamePart::Identifier(ident) => ident.value.as_str().into(),
+            sqlparser::ast::ObjectNamePart::Identifier(ident) => {
+                VariableScope::try_from(ident.value.as_str())
+            }
         }
     }
 }
-
 impl From<sqlparser::ast::ContextModifier> for VariableScope {
     fn from(value: sqlparser::ast::ContextModifier) -> Self {
         match value {
@@ -394,7 +399,7 @@ impl TryFromDialect<Vec<sqlparser::ast::Ident>> for Variable {
         if value.is_empty() {
             Ok(name.try_into_dialect(dialect)?)
         } else if value.len() == 1 {
-            let scope = value.pop().unwrap().value.as_str().into();
+            let scope = value.pop().unwrap().value.as_str().try_into()?;
             Ok(Self {
                 scope,
                 name: name.into(),

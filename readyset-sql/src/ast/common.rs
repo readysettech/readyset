@@ -210,7 +210,8 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
             Check { name, expr } => Ok(Self::CheckConstraint {
                 constraint_name: name.into_dialect(dialect),
                 expr: expr.try_into_dialect(dialect)?,
-                enforced: None, // TODO(mvzink): Find out where this is supposed to come from
+                enforced: None, // TODO(mohamed): Enforced is supported in unique contraints, but
+                                // not in checks. Need an upstream PR to sqlparser REA-5742
             }),
             ForeignKey {
                 name,
@@ -223,6 +224,8 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 characteristics: _characteristics,
             } => Ok(Self::ForeignKey {
                 // TODO(mvzink): Where do these two different names come from for sqlparser?
+                // TODO(mohamed): sqlparser doesn't support index_name in constraints, needs an
+                // upstream PR REA-5743
                 constraint_name: name.into_dialect(dialect),
                 index_name: None,
                 columns: columns.into_dialect(dialect),
@@ -688,10 +691,11 @@ impl TimestampField {
     }
 }
 
-impl From<sqlparser::ast::DateTimeField> for TimestampField {
-    fn from(value: sqlparser::ast::DateTimeField) -> Self {
+impl TryFrom<sqlparser::ast::DateTimeField> for TimestampField {
+    type Error = AstConversionError;
+    fn try_from(value: sqlparser::ast::DateTimeField) -> Result<Self, Self::Error> {
         use sqlparser::ast::DateTimeField;
-        match value {
+        Ok(match value {
             DateTimeField::Century => Self::Century,
             DateTimeField::Day | DateTimeField::Days => Self::Day,
             DateTimeField::DayOfWeek => Self::Dow,
@@ -725,10 +729,8 @@ impl From<sqlparser::ast::DateTimeField> for TimestampField {
             | DateTimeField::NoDateTime
             | DateTimeField::Time
             | DateTimeField::TimezoneAbbr
-            | DateTimeField::TimezoneRegion => {
-                unimplemented!("not supported by MySQL or Postgres")
-            }
-        }
+            | DateTimeField::TimezoneRegion => unsupported!("not supported by MySQL or Postgres")?,
+        })
     }
 }
 

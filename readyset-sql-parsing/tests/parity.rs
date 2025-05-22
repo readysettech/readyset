@@ -436,3 +436,94 @@ fn test_psql_lower_upper_collations() {
     check_parse_postgres!(r#"SELECT lower('A' COLLATE "en_US.utf8");"#);
     check_parse_postgres!(r#"SELECT upper('a' COLLATE "en_US.utf8");"#);
 }
+
+#[test]
+fn test_wildcard_various_positions() {
+    check_parse_mysql!("SELECT * FROM t WHERE a = ?;");
+    check_parse_mysql!("SELECT t.* FROM t WHERE t.id = ?;");
+    check_parse_mysql!("SELECT *, id FROM users;");
+    check_parse_mysql!("SELECT * FROM (SELECT * FROM users) AS sub;");
+    check_parse_mysql!("SELECT COUNT(*) FROM users;");
+}
+
+#[test]
+fn test_charset_introducers() {
+    check_parse_mysql!("SELECT _utf8'hello';");
+    check_parse_mysql!("SELECT _utf8mb4'hello' AS greeting;");
+    check_parse_mysql!("SELECT _binary'123';");
+}
+
+#[test]
+fn test_psql_escape_literal() {
+    check_parse_postgres!("SELECT E'\\n';");
+}
+
+#[test]
+fn test_compound_select_cases() {
+    check_parse_both!(
+        "WITH cte1 AS (SELECT id FROM users), cte2 AS (SELECT id FROM admins)
+        SELECT * FROM cte1 UNION SELECT * FROM cte2;"
+    );
+    check_parse_both!("SELECT id FROM users UNION SELECT id FROM admins;");
+    check_parse_both!("SELECT name FROM employees UNION ALL SELECT name FROM contractors ORDER BY name LIMIT 5 OFFSET 2;");
+    check_parse_both!("SELECT 1 EXCEPT SELECT 2 LIMIT 1;");
+    check_parse_both!(
+        "WITH cte AS (SELECT id FROM users) SELECT id FROM cte UNION SELECT id FROM admins;"
+    );
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "(SELECT a FROM t1 INTERSECT SELECT a FROM t2) ORDER BY a;",
+        "NomSqlError"
+    );
+}
+
+#[test]
+#[cfg(feature = "sqlparser")]
+#[should_panic(expected = "sqlparser error")]
+fn test_fk_index_name() {
+    check_parse_mysql!(
+        r#"
+CREATE TABLE child_table (
+    id INT PRIMARY KEY,
+    parent_id INT,
+    CONSTRAINT fk_child_parent
+        FOREIGN KEY idx_parent_id (parent_id)
+        REFERENCES parent_table(id)
+);
+"#
+    );
+}
+
+#[test]
+#[cfg(feature = "sqlparser")]
+#[should_panic(expected = "sqlparser error")]
+fn test_tablekey_key_variant() {
+    check_parse_both!("ALTER TABLE t ADD CONSTRAINT c KEY key_name (t1.c1, t2.c2) USING BTREE");
+    // why does nom only parse this in psql? it seems closer to mysql syntax
+    check_parse_postgres!(
+        r#"CREATE TABLE "comments" (
+            "id" int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            "hat_id" int,
+            fulltext INDEX "index_comments_on_comment" ("comment"),
+            INDEX "confidence_idx" ("confidence"),
+            UNIQUE ("short_id"),
+            INDEX "story_id_short_id" ("story_id", "short_id"),
+            INDEX "thread_id" ("thread_id"),
+            INDEX "index_comments_on_user_id" ("user_id")
+        )
+        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"#
+    );
+}
+
+#[test]
+fn test_create_table_with_data_directory_option() {
+    check_parse_mysql!(
+        r#"CREATE TABLE comments (
+            id INT PRIMARY KEY,
+            comment TEXT
+        )
+        DATA DIRECTORY = '/var/lib/mysql-files'
+        ENGINE=InnoDB
+        DEFAULT CHARSET=utf8mb4;"#
+    );
+}

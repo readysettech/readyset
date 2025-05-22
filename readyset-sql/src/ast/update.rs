@@ -5,10 +5,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{
-    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
-    TryIntoDialect,
-};
+use crate::{ast::*, AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct UpdateStatement {
@@ -31,16 +28,8 @@ impl TryFromDialect<sqlparser::ast::Statement> for UpdateStatement {
                 returning: _,
                 or: _,
             } => {
-                let table = table.into_dialect(dialect);
-                let fields = assignments
-                    .into_iter()
-                    .map(|sqlparser::ast::Assignment { target, value }| {
-                        Ok((
-                            target.into_dialect(dialect),
-                            value.try_into_dialect(dialect)?,
-                        ))
-                    })
-                    .try_collect()?;
+                let table = table.try_into_dialect(dialect)?;
+                let fields: Vec<(Column, Expr)> = assignments.try_into_dialect(dialect)?;
                 let where_clause = selection.try_into_dialect(dialect)?;
                 Ok(Self {
                     table,
