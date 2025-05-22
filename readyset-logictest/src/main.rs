@@ -600,7 +600,6 @@ pub struct Fuzz {
 
 impl Fuzz {
     fn run(&'static self) -> anyhow::Result<()> {
-        init_test_logging();
         let mut runner = if let Some(Seed(seed)) = self.seed {
             TestRunner::new_with_rng(self.into(), TestRng::from_seed(Default::default(), &seed))
         } else {
@@ -715,6 +714,7 @@ impl<'a> From<&'a Fuzz> for test_runner::Config {
 
 fn main() -> anyhow::Result<()> {
     antithesis_sdk::antithesis_init();
+    init_test_logging();
     let opts = Opts::parse();
     opts.subcommand.run()
 }

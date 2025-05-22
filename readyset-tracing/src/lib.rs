@@ -564,12 +564,24 @@ impl Drop for Options {
     }
 }
 
-/// Configure the global tracing subscriber for logging inside of tests
+/// Configure the global tracing subscriber for logging inside of tests. If this is running under
+/// Antithesis, we'll output JSONL to the special sink directory. See [docs].
+///
+/// [docs]: https://antithesis.com/docs/environment/the_antithesis_environment/#generating-structured-events
 pub fn init_test_logging() {
     // This errors out if it's already been called within the scope of a process, which we don't
     // care about, so we just discard the result
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
-        .with_test_writer()
-        .try_init();
+    if let Ok(output_dir) = std::env::var("ANTITHESIS_OUTPUT_DIR") {
+        let file = std::fs::File::create(format!("{}/readyset-test.jsonl", output_dir)).unwrap();
+        let _ = tracing_subscriber::fmt()
+            .json()
+            .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
+            .with_writer(file)
+            .try_init();
+    } else {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
+            .with_test_writer()
+            .try_init();
+    }
 }
