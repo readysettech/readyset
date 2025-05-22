@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::fs::File;
 use std::io::Write;
 use std::iter::FromIterator;
@@ -73,7 +74,13 @@ impl TestScript {
     where
         W: Write,
     {
-        writeln!(w, "{}", self.records().iter().join("\n"))
+        write!(w, "{}", self)
+    }
+}
+
+impl Display for TestScript {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{}", self.records().iter().join("\n"))
     }
 }
 

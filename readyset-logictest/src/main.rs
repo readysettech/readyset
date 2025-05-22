@@ -642,10 +642,14 @@ impl Fuzz {
             eprintln!("Writing failing test script to {}", path.to_string_lossy());
             script.write_to(&mut file)?;
             file.flush()?;
-            assert_sometimes!(true, "Found failing queries");
+            assert_unreachable!(
+                "Found failing queries",
+                json!({
+                    "script": script.to_string(),
+                    "reason": reason.message(),
+                })
+            );
             bail!("Found failing set of queries: {}", reason);
-        } else {
-            assert_sometimes!(true, "No bugs found");
         }
 
         println!("No bugs found!");
