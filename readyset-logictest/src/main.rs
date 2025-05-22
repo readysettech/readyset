@@ -24,6 +24,7 @@ use readyset_client::consensus::AuthorityType;
 use readyset_tracing::init_test_logging;
 use serde_json::json;
 use tokio::sync::Mutex;
+use tracing::{error, info, warn};
 use walkdir::WalkDir;
 
 pub mod ast;
@@ -162,6 +163,15 @@ enum ExpectedResult {
     Fail,
 }
 
+impl Display for ExpectedResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExpectedResult::Pass => write!(f, "pass"),
+            ExpectedResult::Fail => write!(f, "fail"),
+        }
+    }
+}
+
 struct InputFile {
     name: PathBuf,
     data: Box<dyn io::Read>,
@@ -210,19 +220,15 @@ impl Parse {
     pub fn run(&self) -> anyhow::Result<()> {
         for InputFile { name, data, .. } in InputFiles::try_from(&self.input_opts)? {
             let filename = name.canonicalize()?;
-            println!("Parsing records from {}", filename.to_string_lossy());
+            info!(?filename, "parsing records");
             match parser::read_records(data) {
                 Ok(records) => {
-                    println!(
-                        "Successfully parsed {} record{}",
-                        records.len(),
-                        if records.len() == 1 { "" } else { "s" }
-                    );
+                    info!(count = records.len(), "Successfully parsed records",);
                     if self.output {
                         println!("{:#?}", records);
                     }
                 }
-                Err(e) => eprintln!("Error parsing {}: {}", filename.to_string_lossy(), e),
+                Err(err) => error!(?filename, %err, "Error parsing records"),
             };
         }
         Ok(())
@@ -390,9 +396,6 @@ impl Verify {
 
     #[tokio::main]
     async fn run(&self) -> anyhow::Result<()> {
-        self.tracing
-            .init("noria-logictest", "logictest-deployment")?;
-
         let result = Arc::new(Mutex::new(VerifyResult::default()));
         let mut tasks = FuturesUnordered::new();
 
@@ -430,7 +433,10 @@ impl Verify {
                 let script_name = script.name().to_string();
                 let hang_notifier = tokio::spawn(async move {
                     tokio::time::sleep(REPORT_HANG).await;
-                    println!("Test {script_name} has been running for {REPORT_HANG:?}");
+                    info!(
+                        script_name,
+                        "Test has been running for {REPORT_HANG:?}; it may be stuck"
+                    );
                 });
 
                 let script_result = script
@@ -440,28 +446,14 @@ impl Verify {
 
                 hang_notifier.abort();
 
-                if script_result.is_ok() {
-                    println!(
-                        "{}",
-                        style(format!(
-                            "==> {} successfully ran {} operations in {:.1} seconds",
-                            script.name(),
-                            script.len(),
-                            test_started.elapsed().as_secs_f64()
-                        ))
-                        .bold()
-                    );
-                } else {
-                    println!(
-                        "{}",
-                        style(format!(
-                            "==> {} failed in {:.1} seconds",
-                            script.name(),
-                            test_started.elapsed().as_secs_f64()
-                        ))
-                        .bold()
-                    );
-                }
+                info!(
+                    script_name = %script.name(),
+                    operations = script.len(),
+                    duration = test_started.elapsed().as_secs_f64(),
+                    expected_result = %expected_result,
+                    succeeded = %script_result.is_ok(),
+                    "script finished",
+                );
 
                 match script_result {
                     Ok(_) if expected_result == ExpectedResult::Fail => {
@@ -473,36 +465,45 @@ impl Verify {
 
                         let failing_fname = script.path().to_str().unwrap();
                         let passing_fname = failing_fname.replace(".fail.test", ".test");
-                        eprintln!(
-                            "Script {} didn't fail, but was expected to (maybe rename it to {}?)",
-                            failing_fname, passing_fname,
-                        );
                         if rename_passing {
-                            eprintln!("Renaming {} to {}", failing_fname, passing_fname);
+                            warn!(script_name = %script.name(), "Renaming {} to {}", failing_fname, passing_fname);
                             fs::rename(Path::new(failing_fname), Path::new(&passing_fname))
                                 .unwrap();
+                        } else {
+                            error!(
+                                script_name = %script.name(),
+                                "Script {} didn't fail, but was expected to (maybe rename it to {}?)",
+                                failing_fname, passing_fname,
+                            );
                         }
                     }
-                    Err(e) if expected_result == ExpectedResult::Pass => {
+                    Err(err) if expected_result == ExpectedResult::Pass => {
                         result
                             .lock()
                             .await
                             .failures
                             .push(script.name().into_owned());
-                        eprintln!("{:#}", e);
+                        let passing_fname = script.path().to_str().unwrap();
+                        let failing_fname = passing_fname.replace(".test", ".fail.test");
                         if rename_failing {
-                            let passing_fname = script.path().to_str().unwrap();
-                            let failing_fname = passing_fname.replace(".test", ".fail.test");
-                            eprintln!("Renaming {} to {}", passing_fname, failing_fname);
+                            warn!(script_name = %script.name(), "Renaming {} to {}", passing_fname, failing_fname);
                             fs::rename(Path::new(passing_fname), Path::new(&failing_fname))
                                 .unwrap();
+                        } else {
+                            error!(
+                                script_name = %script.name(),
+                                %err,
+                                "Script {} failed, but was expected to pass (maybe rename it to {}?)",
+                                passing_fname, failing_fname,
+                            );
                         }
                     }
-                    Err(e) => {
-                        eprintln!(
-                            "Test script {} failed as expected:\n\n{:#}",
+                    Err(err) => {
+                        info!(
+                            script_name = %script.name(),
+                            %err,
+                            "Test script {} failed as expected",
                             script.name(),
-                            e
                         );
                         result.lock().await.passes += 1;
                     }
@@ -523,7 +524,7 @@ impl Verify {
             tasks.select_next_some().await.unwrap();
         }
 
-        println!("{}", result.lock().await);
+        info!(result = %result.lock().await, "verify finished");
 
         if result.lock().await.is_success() {
             Ok(())
@@ -590,10 +591,6 @@ pub struct Fuzz {
     #[arg(long)]
     compare_to: String,
 
-    /// Enable verbose log output
-    #[arg(long, short = 'v')]
-    verbose: bool,
-
     /// Write generated test scripts to this file.
     ///
     /// If not specified, test scripts will be written to a temporary file
@@ -619,7 +616,6 @@ impl Fuzz {
             let _guard = rt.enter();
             rt.block_on(test_script.run(
                 RunOptions {
-                    verbose: self.verbose,
                     database_type: DatabaseURL::from_str(&self.compare_to)?.database_type(),
                     replication_url: Some(self.compare_to.clone()),
                     ..Default::default()
@@ -639,7 +635,7 @@ impl Fuzz {
                 .create(true)
                 .write(true)
                 .open(&path)?;
-            eprintln!("Writing failing test script to {}", path.to_string_lossy());
+            info!(?path, "writing out failing test script");
             script.write_to(&mut file)?;
             file.flush()?;
             assert_unreachable!(
@@ -652,7 +648,7 @@ impl Fuzz {
             bail!("Found failing set of queries: {}", reason);
         }
 
-        println!("No bugs found!");
+        info!("No bugs found!");
 
         Ok(())
     }
@@ -676,8 +672,8 @@ impl Fuzz {
                     let mut seed = generate::Seed::from_seeds(query_seeds, dialect).unwrap();
                     match rt.block_on(seed.run(generate_opts, dialect)) {
                         Ok(script) => Some(script.clone()),
-                        Err(e) => {
-                            eprintln!("Error generating test script from seed: {e:#}");
+                        Err(err) => {
+                            error!(%err, "Error generating test script from seed");
                             None
                         }
                     }
@@ -687,13 +683,11 @@ impl Fuzz {
 
     fn generate_opts(&self) -> impl Strategy<Value = generate::GenerateOpts> + 'static {
         let compare_to = DatabaseURL::from_str(&self.compare_to).unwrap();
-        let verbose = self.verbose;
         (0..100usize).prop_flat_map(move |rows_per_table| {
             let compare_to = compare_to.clone();
             (0..=rows_per_table).prop_map(move |rows_to_delete| generate::GenerateOpts {
                 compare_to: compare_to.clone(),
                 rows_per_table,
-                verbose,
                 random: true,
                 include_deletes: true,
                 rows_to_delete: Some(rows_to_delete),
@@ -713,7 +707,6 @@ impl<'a> From<&'a Fuzz> for test_runner::Config {
     fn from(fuzz: &'a Fuzz) -> Self {
         Self {
             cases: fuzz.num_tests,
-            verbose: u32::from(fuzz.verbose),
             max_shrink_iters: fuzz.max_shrink_iters,
             ..Default::default()
         }

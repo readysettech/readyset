@@ -6,7 +6,6 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context};
 use clap::Parser;
-use console::style;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
 use query_generator::{GeneratorState, ParameterMode, QuerySeed};
@@ -16,12 +15,13 @@ use readyset_sql::ast::{
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::parse_query;
+use tracing::{debug, info};
 
 use crate::ast::{
     Conditional, Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult,
     Value,
 };
-use crate::runner::{recreate_test_database, RunOptions, TestScript};
+use crate::runner::{recreate_test_database, TestScript};
 
 /// Default value for [`Seed::hash_threshold`]
 const DEFAULT_HASH_THRESHOLD: usize = 20;
@@ -88,10 +88,7 @@ async fn run_queries(
     conn: &mut DatabaseConnection,
     hash_threshold: usize,
 ) -> anyhow::Result<Vec<Record>> {
-    eprintln!(
-        "{}",
-        style(format!("==> Running {} queries", queries.len())).bold()
-    );
+    info!(count = queries.len(), "Running queries");
 
     let mut ret = Vec::new();
     for q in queries {
@@ -281,34 +278,18 @@ impl Seed {
             })
             .collect::<Vec<_>>();
 
-        eprintln!("{}", style("==> Running original test script").bold());
+        info!("Running original test script");
         self.script
-            .run_on_database(
-                &RunOptions {
-                    verbose: opts.verbose,
-                    ..Default::default()
-                },
-                &mut conn,
-                None,
-            )
+            .run_on_database(&Default::default(), &mut conn, None)
             .await?;
 
-        eprintln!(
-            "{}",
-            style(format!(
-                "==> Running {} insert statements",
-                insert_statements.len()
-            ))
-            .bold()
-        );
+        info!(count = insert_statements.len(), "Running insert statements");
         for insert_statement in &insert_statements {
-            if opts.verbose {
-                eprintln!(
-                    "     > Inserting {} rows of seed data into {}",
-                    opts.rows_per_table,
-                    insert_statement.table.display_unquoted()
-                );
-            }
+            debug!(
+                rows = opts.rows_per_table,
+                table = %insert_statement.table.display_unquoted(),
+                "Inserting seed data",
+            );
             conn.query_drop(insert_statement.display(dialect).to_string())
                 .await
                 .with_context(|| {
@@ -367,23 +348,13 @@ impl Seed {
                     Record::Statement(Statement::ok(stmt.display(dialect).to_string()))
                 }));
 
-            eprintln!(
-                "{}",
-                style(format!(
-                    "==> Running {} delete statements",
-                    delete_statements.len()
-                ))
-                .bold()
-            );
-
+            info!(count = delete_statements.len(), "Running delete statements");
             for delete_statement in &delete_statements {
-                if opts.verbose {
-                    eprintln!(
-                        "     > Deleting {} rows of seed data from {}",
-                        rows_to_delete,
-                        delete_statement.table.display_unquoted()
-                    );
-                }
+                debug!(
+                    rows = rows_to_delete,
+                    table = %delete_statement.table.display_unquoted(),
+                    "Deleting seed data",
+                );
 
                 conn.query_drop(delete_statement.display(dialect).to_string())
                     .await
@@ -418,10 +389,6 @@ pub struct GenerateOpts {
     /// Rows of data to generate per table
     #[arg(long, default_value = "100")]
     pub rows_per_table: usize,
-
-    /// Enable verbose output
-    #[arg(long, short = 'v')]
-    pub verbose: bool,
 
     /// Enable randomly generating column data.
     #[arg(long)]

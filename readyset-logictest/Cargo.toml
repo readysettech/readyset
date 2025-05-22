@@ -32,6 +32,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
+tracing = { workspace = true }
 walkdir = { workspace = true }
 
 database-utils = { path = "../database-utils" }

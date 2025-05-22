@@ -10,6 +10,7 @@ use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::parse_query;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncWriteExt, BufReader};
+use tracing::error;
 
 use crate::ast::{Record, Statement, StatementResult, Value};
 
@@ -263,10 +264,12 @@ impl FromQueryLog {
                     Command::Prepare => {
                         let parsed = match parse_query(Dialect::MySQL, &entry.arguments) {
                             Ok(v) => v,
-                            Err(e) => {
-                                eprintln!(
-                                    "!!! (prepare) Failed to parse {}:\n{}",
-                                    &entry.arguments, e
+                            Err(err) => {
+                                error!(
+                                    %err,
+                                    entry = entry.id,
+                                    arguments = &entry.arguments,
+                                    "Failed to parse",
                                 );
                                 continue;
                             }
@@ -277,8 +280,13 @@ impl FromQueryLog {
                     Command::Execute => {
                         match self.process_execute(&session, entry, &mut conn).await {
                             Ok(v) => Some(v).flatten(),
-                            Err(e) => {
-                                eprintln!("!!! (execute) Error with {}:  {}", entry.arguments, e);
+                            Err(err) => {
+                                error!(
+                                    %err,
+                                    entry = entry.id,
+                                    arguments = &entry.arguments,
+                                    "Failed to execute",
+                                );
                                 continue;
                             }
                         }

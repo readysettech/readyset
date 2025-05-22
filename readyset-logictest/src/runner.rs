@@ -11,7 +11,6 @@ use std::time::{Duration, Instant, SystemTime};
 use std::{io, mem};
 
 use anyhow::{anyhow, bail, Context};
-use console::style;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection, TlsMode};
 use itertools::Itertools;
 use mysql_srv::MySqlIntermediary;
@@ -35,6 +34,7 @@ use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
+use tracing::{debug, error, info};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::ast::{
@@ -196,17 +196,7 @@ impl TestScript {
     }
 
     pub async fn run(&mut self, opts: RunOptions, noria_opts: NoriaOptions) -> anyhow::Result<()> {
-        println!(
-            "==> {} {}",
-            style("Running test script").bold(),
-            style(
-                self.path
-                    .canonicalize()
-                    .unwrap_or_else(|_| "".into())
-                    .to_string_lossy()
-            )
-            .blue()
-        );
+        info!(path = ?self.path, "Running test script");
 
         if let Some(upstream_url) = &opts.upstream_database_url {
             recreate_test_database(upstream_url).await?;
@@ -332,9 +322,7 @@ impl TestScript {
                     if Self::might_be_timezone_changing_statement(conn, stmt.command.as_str()) {
                         update_system_timezone = true;
                     }
-                    if opts.verbose {
-                        eprintln!("     > {}", stmt.command);
-                    }
+                    debug!(command = stmt.command, "Running statement");
                     self.run_statement(stmt, conn)
                         .await
                         .with_context(|| format!("Running statement {}", stmt.command))?
@@ -363,13 +351,11 @@ impl TestScript {
                     let invert_result = query.conditionals.contains(&Conditional::InvertNoUpstream)
                         && (opts.replication_url.is_none());
 
-                    if opts.verbose {
-                        eprintln!("     > {}", query.query);
-                    }
+                    debug!(query = query.query, "Running query");
 
                     if update_system_timezone {
-                        if let Err(e) = Self::update_system_timezone(conn).await {
-                            eprintln!("{e}");
+                        if let Err(err) = Self::update_system_timezone(conn).await {
+                            error!(%err, "Failed to update system timezone")
                         }
                         update_system_timezone = false;
                     }
@@ -392,32 +378,18 @@ impl TestScript {
                     }
                     if let Some((label, start_time)) = timer {
                         let duration = start_time.elapsed().as_secs();
-                        let hours = duration / 3600;
-                        let minutes = (duration % 3600) / 60;
-                        let seconds = duration % 60;
-                        println!(
-                            "{} {} {} {}",
-                            style("  > Query").bold(),
-                            style(label).blue(),
-                            style("ran in").bold(),
-                            style(format!("{hours}:{minutes:02}:{seconds:02}")).blue()
-                        );
+                        debug!(label, "Query ran in {duration:?}");
                     }
                 }
                 Record::HashThreshold(_) => {}
                 Record::Halt { .. } => break,
                 Record::Sleep(msecs) => {
-                    if opts.verbose {
-                        eprintln!("     > sleep {msecs}ms");
-                    }
+                    debug!(msecs, "sleep");
                     sleep(Duration::from_millis(*msecs)).await
                 }
                 Record::Graphviz => {
                     if let Some(noria) = &mut noria {
-                        if opts.verbose {
-                            eprintln!("     > graphviz");
-                        }
-                        println!("{}", noria.graphviz(Default::default()).await?);
+                        info!(graphviz = noria.graphviz(Default::default()).await?);
                     }
                 }
             }
