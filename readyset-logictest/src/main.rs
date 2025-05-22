@@ -644,8 +644,8 @@ impl Fuzz {
             file.flush()?;
             assert_unreachable!(
                 "Found failing queries",
-                json!({
-                    "script": script.to_string(),
+                &json!({
+                    "script_path": path.to_string_lossy(),
                     "reason": reason.message(),
                 })
             );
