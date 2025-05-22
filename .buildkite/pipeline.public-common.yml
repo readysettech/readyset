@@ -212,6 +212,7 @@ steps:
       - cargo --locked run --bin readyset-logictest -- verify logictests/psql --database-type postgresql
       - cargo --locked run --bin readyset-logictest -- verify logictests/mysql --database-type mysql
       - cargo --locked run --bin readyset-logictest -- verify logictests/replicated/psql --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria
+      - cargo --locked run --bin readyset-logictest -- verify logictests/replicated/postgis --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria
       - cargo --locked run --bin readyset-logictest -- verify logictests/replicated/mysql --database-type mysql --replication-url mysql://root:noria@mysql/noria
     timeout_in_minutes: 60
     depends_on:
@@ -229,6 +230,7 @@ steps:
           config:
             - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
             - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-default.yml"
+            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-postgis-15.yml"
           quiet-pull: true    # don't log all the image pulls
           pull-retries: 3
       - ecr#${ECR_PLUGIN_VERSION}:
