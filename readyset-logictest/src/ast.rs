@@ -420,6 +420,10 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
                 ty, raw,
             )?)),
             Type::BIT | Type::VARBIT => Ok(Self::BitVector(BitVec::from_sql(ty, raw)?)),
+            ref ty if ty.name() == "geometry" => Ok(Self::Text(format!(
+                "0x{}",
+                raw.iter().map(|b| format!("{:02X}", b)).join("")
+            ))),
             _ => Err("Invalid type".into()),
         }
     }
@@ -444,6 +448,7 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             | Type::BIT
             | Type::VARBIT => true,
             ref ty if ty.name() == "citext" => true,
+            ref ty if ty.name() == "geometry" => true,
             _ => false,
         }
     }
