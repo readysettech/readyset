@@ -420,7 +420,6 @@ fn test_point_columns() {
 }
 
 #[test]
-#[ignore = "issue: REA-5723"]
 fn test_point_columns_srid() {
     check_parse_mysql!("CREATE TABLE t (p POINT SRID 4326)");
 }

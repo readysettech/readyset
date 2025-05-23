@@ -311,6 +311,7 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
                 | sqlparser::ast::ColumnOption::Identity(_)
                 | sqlparser::ast::ColumnOption::OnConflict(_)
                 | sqlparser::ast::ColumnOption::Policy(_)
+                | sqlparser::ast::ColumnOption::Srid(_)
                 | sqlparser::ast::ColumnOption::Tags(_) => {
                     // Don't care about these options
                 }
