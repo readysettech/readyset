@@ -82,6 +82,7 @@ impl<'a> ReferredColumnsIter<'a> {
             }
             Expr::NestedSelect(_) => None,
             Expr::Variable(_) => None,
+            Expr::Collate { expr, .. } => self.visit_expr(expr),
         }
     }
 
@@ -200,6 +201,7 @@ impl<'a> ReferredColumnsMut<'a> {
             }
             Expr::NestedSelect(_) => None,
             Expr::Variable(_) => None,
+            Expr::Collate { expr, .. } => self.visit_expr(expr),
         }
     }
 
@@ -403,6 +405,7 @@ pub fn contains_aggregate(expr: &Expr) -> bool {
         }
         Expr::Array(exprs) | Expr::Row { exprs, .. } => exprs.iter().any(contains_aggregate),
         Expr::Variable(_) => false,
+        Expr::Collate { expr, .. } => contains_aggregate(expr),
     }
 }
 
@@ -488,6 +491,7 @@ impl Expr {
                 ..
             } => Box::new(iter::once(lhs.as_ref())) as _,
             Expr::Array(exprs) | Expr::Row { exprs, .. } => Box::new(exprs.iter()),
+            Expr::Collate { expr, .. } => expr.immediate_subexpressions(),
         }
     }
 

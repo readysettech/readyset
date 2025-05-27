@@ -1424,7 +1424,10 @@ impl Expr {
             }),
             AstExpr::Exists(_) => unsupported!("EXISTS not currently supported"),
             AstExpr::Variable(_) => unsupported!("Variables not currently supported"),
-            AstExpr::Between { .. } | AstExpr::NestedSelect(_) | AstExpr::In { .. } => {
+            AstExpr::Between { .. }
+            | AstExpr::NestedSelect(_)
+            | AstExpr::In { .. }
+            | AstExpr::Collate { .. } => {
                 internal!(
                     "Expression should have been desugared earlier: {}",
                     expr.display(readyset_sql::Dialect::MySQL)

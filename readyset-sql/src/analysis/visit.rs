@@ -527,6 +527,7 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(
             Ok(())
         }
         Expr::Variable(var) => visitor.visit_variable(var),
+        Expr::Collate { expr, .. } => visitor.visit_expr(expr.as_ref()),
     }
 }
 

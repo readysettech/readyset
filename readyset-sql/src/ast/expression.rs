@@ -741,6 +741,14 @@ pub enum Expr {
 
     /// A variable reference
     Variable(Variable),
+
+    /// Expr [COLLATE collation]
+    /// This is here because that's how sqlparser represents it
+    /// and it should be desugared before lowering
+    Collate {
+        expr: Box<Expr>,
+        collation: CollationName,
+    },
 }
 
 impl Expr {
@@ -912,10 +920,10 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 postgres_style: kind == sqlparser::ast::CastKind::DoubleColon,
             }),
             Ceil { expr: _, field: _ } => not_yet_implemented!("CEIL"),
-            Collate {
-                expr: _,
-                collation: _,
-            } => not_yet_implemented!("COLLATE"),
+            Collate { expr, collation } => Ok(Self::Collate {
+                expr: expr.try_into_dialect(dialect)?,
+                collation: collation.try_into_dialect(dialect)?,
+            }),
             CompoundIdentifier(idents) => {
                 let is_variable = if let Some(first) = idents.first() {
                     first.quote_style.is_none() && first.value.starts_with('@')
@@ -1210,6 +1218,21 @@ impl TryFromDialect<Box<sqlparser::ast::Expr>> for Expr {
     }
 }
 
+impl TryFromDialect<sqlparser::ast::ObjectName> for CollationName {
+    fn try_from_dialect(
+        value: sqlparser::ast::ObjectName,
+        _dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        // strip the quoting style from the ObjectName
+        let ident = value
+            .0
+            .iter()
+            .map(|s| s.as_ident().unwrap().value.clone())
+            .join(".");
+        Ok(CollationName::Unquoted(ident.into()))
+    }
+}
+
 /// Convert a sqlparser-rs's `Ident` into a `Expr`; special handling because it might be a variable
 /// or a column and sqlparser doesn't distinguish them.
 ///
@@ -1332,18 +1355,29 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 postgres_style: false,
             }
         } else if ident.value.eq_ignore_ascii_case("LOWER") {
-            // TODO(mvzink): support COLLATE for upper and lower. nom-sql doesn't seem to parse
-            // collation here, and in the case of sqlparser-rs we would have to pull it out of the
-            // inner expression
-            Self::Call(FunctionExpr::Lower {
-                expr: next_expr()?,
-                collation: None,
-            })
+            let expr = next_expr()?;
+            match *expr {
+                Self::Collate { expr, collation } => Self::Call(FunctionExpr::Lower {
+                    expr,
+                    collation: Some(collation),
+                }),
+                _ => Self::Call(FunctionExpr::Lower {
+                    expr,
+                    collation: None,
+                }),
+            }
         } else if ident.value.eq_ignore_ascii_case("UPPER") {
-            Self::Call(FunctionExpr::Upper {
-                expr: next_expr()?,
-                collation: None,
-            })
+            let expr = next_expr()?;
+            match *expr {
+                Self::Collate { expr, collation } => Self::Call(FunctionExpr::Upper {
+                    expr,
+                    collation: Some(collation),
+                }),
+                _ => Self::Call(FunctionExpr::Upper {
+                    expr,
+                    collation: None,
+                }),
+            }
         } else if ident.value.eq_ignore_ascii_case("JSON_OBJECT_AGG") {
             Self::Call(FunctionExpr::JsonObjectAgg {
                 key: next_expr()?,
@@ -1557,6 +1591,9 @@ impl DialectDisplay for Expr {
                 write!(f, ")")
             }
             Expr::Variable(var) => write!(f, "{}", var.display(dialect)),
+            Expr::Collate { expr, collation } => {
+                write!(f, "{} COLLATE {}", expr.display(dialect), collation)
+            }
         })
     }
 }

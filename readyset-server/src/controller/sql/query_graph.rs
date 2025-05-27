@@ -732,6 +732,7 @@ fn classify_conditionals(
         | Expr::Cast { .. }
         | Expr::Array(_)
         | Expr::Row { .. }
+        | Expr::Collate { .. }
         | Expr::Variable(_) => global.push(ce.clone()),
     }
     Ok(())

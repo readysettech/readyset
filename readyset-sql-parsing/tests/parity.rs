@@ -34,7 +34,7 @@ macro_rules! check_parse_both {
 macro_rules! check_parse_fails {
     ($dialect:expr, $sql:expr, $expected_error:expr) => {
         let result = parse_query($dialect, $sql)
-            .expect_err(&format!("Expected failure for MySQL: {:?}", $sql));
+            .expect_err(&format!("Expected failure for {:?}: {:?}", $dialect, $sql));
         assert!(
             result.to_string().contains($expected_error),
             "Expected error '{}' not found: got {}",
@@ -430,4 +430,10 @@ fn test_column_spec_charset_collation_quotation() {
     check_parse_mysql!(
         "CREATE TABLE t (a VARCHAR(10) CHARACTER SET 'utf8mb4' COLLATE 'utf8mb4_unicode_ci')"
     );
+}
+
+#[test]
+fn test_psql_lower_upper_collations() {
+    check_parse_postgres!(r#"SELECT lower('A' COLLATE "en_US.utf8");"#);
+    check_parse_postgres!(r#"SELECT upper('a' COLLATE "en_US.utf8");"#);
 }
