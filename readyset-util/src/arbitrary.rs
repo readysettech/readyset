@@ -3,6 +3,7 @@
 use std::iter::FromIterator;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::ops::RangeInclusive;
+use std::str::FromStr as _;
 use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
 use bit_vec::BitVec;
@@ -16,7 +17,7 @@ use eui48::MacAddress;
 use prop::string::bytes_regex;
 use proptest::prelude::*;
 use proptest::sample::SizeRange;
-use rust_decimal::Decimal;
+use readyset_decimal::Decimal;
 use uuid::Uuid;
 
 const NANOS_IN_SEC: u32 = 1_000_000_000;
@@ -84,15 +85,10 @@ pub fn arbitrary_duration_without_microseconds() -> impl Strategy<Value = Durati
     arbitrary_duration_without_microseconds_in_range(-838i32..=838)
 }
 
-/// Generate an arbitrary [`Decimal`]
-pub fn arbitrary_decimal() -> impl Strategy<Value = Decimal> {
-    // Numeric range compatible with `rust_decimal::Decimal`
-    (
-        -0x0000_0000_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_i128
-            ..0x0000_0000_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_i128,
-        0..28_u32,
-    )
-        .prop_map(|(i, s)| Decimal::from_i128_with_scale(i, s))
+///Generate an arbitrary [`Decimal`] within a given valid range.
+pub fn arbitrary_decimal(precision: u16, scale: u8) -> impl Strategy<Value = Decimal> {
+    arbitrary_decimal_bytes_with_digits(precision, scale)
+        .prop_map(|bytes| Decimal::from_str(std::str::from_utf8(&bytes).unwrap()).unwrap())
 }
 
 /// Generate an arbitrary `Vec<u8>` which is the string representation of a [`Decimal`] with up to

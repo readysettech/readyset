@@ -3,8 +3,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use bit_vec::BitVec;
+use readyset_decimal::Decimal;
 use readyset_errors::{ReadySetError, ReadySetResult};
-use rust_decimal::Decimal;
 
 use crate::{r#enum, DfType, DfValue};
 

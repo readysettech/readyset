@@ -694,7 +694,7 @@ mod tests {
     use eui48::MacAddress;
     use postgres::SimpleQueryRow;
     use postgres_protocol::message::backend::DataRowBody;
-    use rust_decimal::Decimal;
+    use readyset_decimal::Decimal;
     use tokio_postgres::OwnedField;
     use uuid::Uuid;
 
@@ -1367,7 +1367,7 @@ mod tests {
     fn test_encode_binary_numeric() {
         let mut buf = BytesMut::new();
         let decimal = Decimal::new(1234567890123456, 16);
-        put_binary_value(&PsqlValue::Numeric(decimal), &mut buf).unwrap();
+        put_binary_value(&PsqlValue::Numeric(decimal.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // length (placeholder)
         decimal.to_sql(&Type::NUMERIC, &mut exp).unwrap(); // add value

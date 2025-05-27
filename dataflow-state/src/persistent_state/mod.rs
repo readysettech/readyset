@@ -2498,11 +2498,16 @@ mod tests {
     use std::path::PathBuf;
 
     use pretty_assertions::assert_eq;
+
     use readyset_data::Bound::*;
+
     use readyset_data::Collation;
+
     use replication_offset::mysql::MySqlPosition;
+
     use replication_offset::postgres::PostgresPosition;
-    use rust_decimal::Decimal;
+
+    use readyset_decimal::Decimal;
 
     use super::*;
 
@@ -2709,7 +2714,7 @@ mod tests {
         let mut state = setup_persistent("lookup_numeric_with_different_precision", None);
         state.add_index(Index::btree_map(vec![0]), None);
 
-        let records = vec![vec![DfValue::from(Decimal::from_str_exact("4.0").unwrap())]];
+        let records = vec![vec![DfValue::from(Decimal::from_str("4.0").unwrap())]];
 
         state
             .process_records(&mut records.clone().into(), None, None)
@@ -2718,13 +2723,13 @@ mod tests {
         let res = state
             .lookup(
                 &[0],
-                &PointKey::Single(DfValue::from(Decimal::from_str_exact("4").unwrap())),
+                &PointKey::Single(DfValue::from(Decimal::from_str("4").unwrap())),
             )
             .unwrap();
 
         assert_eq!(res, records.into());
         let val = Decimal::try_from(&res.into_iter().next().unwrap()[0]).unwrap();
-        assert_eq!(val.scale(), 1);
+        assert_eq!(val.scale(), Some(1));
     }
 
     #[test]

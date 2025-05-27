@@ -42,7 +42,7 @@ pub enum WalError {
 
 #[derive(Debug)]
 pub enum NumericParseErrorKind {
-    RustDecimalError(rust_decimal::Error),
+    DecimalError(readyset_decimal::ReadysetDecimalError),
     UnsupportedValue(String),
 }
 /// The kinds of table-specific errors that can arise during replication

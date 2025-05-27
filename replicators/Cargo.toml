@@ -29,7 +29,6 @@ postgres-types = { workspace = true, features = [
     "with-chrono-0_4",
     "with-serde_json-1",
 ] }
-rust_decimal = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 tokio = { workspace = true, features = ["full"] }
@@ -39,7 +38,6 @@ tokio-postgres = { workspace = true, features = [
 ] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 tracing-futures = { workspace = true }
-
 database-utils = { path = "../database-utils" }
 failpoint-macros = { path = "../failpoint-macros" }
 mysql-srv = { path = "../mysql-srv" }
@@ -54,6 +52,7 @@ readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-util = { path = "../readyset-util" }
+readyset-decimal = { path = "../readyset-decimal" }
 replication-offset = { path = "../replication-offset" }
 
 [dev-dependencies]

@@ -24,6 +24,7 @@ database-utils = { path = "../database-utils" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
+readyset-decimal = { path = "../readyset-decimal" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-util = { path = "../readyset-util", features = ["failure_injection"] }
@@ -36,7 +37,6 @@ itertools = { workspace = true }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-clustertest-macros = { path = "./macros" }
 readyset-tracing = { path = "../readyset-tracing" }
-rust_decimal = { workspace = true }
 test-utils = { path = "../test-utils" }
 
 [build-dependencies]

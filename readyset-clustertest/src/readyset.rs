@@ -3,9 +3,8 @@ use ::readyset_client::metrics::{recorded, DumpedMetricValue};
 use ::readyset_client::recipe::changelist::ChangeList;
 use database_utils::QueryableConnection;
 use readyset_data::{DfValue, Dialect};
+use readyset_decimal::Decimal;
 use readyset_util::{eventually, failpoints};
-use rust_decimal::prelude::FromPrimitive;
-use rust_decimal::Decimal;
 use test_utils::tags;
 use tracing::{debug, info};
 
@@ -248,13 +247,13 @@ async fn replicated_readers() {
     let view_0_key_1 = view_0.lookup(&[1.into()], true).await.unwrap();
     assert_eq!(
         view_0_key_1.into_vec()[0],
-        vec![DfValue::from(1), DfValue::from(Decimal::from_i32(3))]
+        vec![DfValue::from(1), DfValue::from(Decimal::from(3))]
     );
 
     let view_1_key_2 = view_1.lookup(&[2.into()], true).await.unwrap();
     assert_eq!(
         view_1_key_2.into_vec()[0],
-        vec![DfValue::from(2), DfValue::from(Decimal::from_i32(7))]
+        vec![DfValue::from(2), DfValue::from(Decimal::from(7))]
     );
 
     t.insert_many(vec![
@@ -266,25 +265,25 @@ async fn replicated_readers() {
 
     eventually! {
         let view_0_key_1 = view_0.lookup(&[1.into()], true).await.unwrap();
-        view_0_key_1.into_vec()[0] == vec![DfValue::from(1), DfValue::from(Decimal::from_i32(6))]
+        view_0_key_1.into_vec()[0] == vec![DfValue::from(1), DfValue::from(Decimal::from(6))]
     }
 
     let view_1_key_2 = view_1.lookup(&[2.into()], true).await.unwrap();
     assert_eq!(
         view_1_key_2.into_vec()[0],
-        vec![DfValue::from(2), DfValue::from(Decimal::from_i32(9))]
+        vec![DfValue::from(2), DfValue::from(Decimal::from(9))]
     );
 
     let view_0_key_2 = view_0.lookup(&[2.into()], true).await.unwrap();
     assert_eq!(
         view_0_key_2.into_vec()[0],
-        vec![DfValue::from(2), DfValue::from(Decimal::from_i32(9))]
+        vec![DfValue::from(2), DfValue::from(Decimal::from(9))]
     );
 
     let view_1_key_1 = view_1.lookup(&[1.into()], true).await.unwrap();
     assert_eq!(
         view_1_key_1.into_vec()[0],
-        vec![DfValue::from(1), DfValue::from(Decimal::from_i32(6))]
+        vec![DfValue::from(1), DfValue::from(Decimal::from(6))]
     );
     deployment.teardown().await.unwrap();
 }

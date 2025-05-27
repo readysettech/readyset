@@ -3,6 +3,7 @@ use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::future;
+use std::str::FromStr as _;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -18,13 +19,13 @@ use mysql_common::constants::ColumnType;
 use mysql_srv::ColumnFlags;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_data::{DfValue, Dialect};
+use readyset_decimal::Decimal;
 use readyset_errors::{internal_err, ReadySetResult};
 use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_sql::DialectDisplay;
 use readyset_sql_parsing::ParsingPreset;
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
-use rust_decimal::Decimal;
 use serde_json::Value;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
@@ -951,10 +952,9 @@ fn mysql_row_to_noria_row(
             ColumnType::MYSQL_TYPE_DECIMAL | ColumnType::MYSQL_TYPE_NEWDECIMAL => match val {
                 mysql_common::value::Value::Bytes(b) => {
                     let df_val = str::from_utf8(&b)
-                        .ok()
-                        .and_then(|s| Decimal::from_str_exact(s).ok())
-                        .map(|d| DfValue::Numeric(Arc::new(d)))
-                        .ok_or_else(|| internal_err!("Failed to parse decimal value"))?;
+                        .map_err(readyset_errors::ReadySetError::from)
+                        .and_then(|s| Decimal::from_str(s).map_err(Into::into))
+                        .map(|d| DfValue::Numeric(Arc::new(d)))?;
                     noria_row.push(df_val)
                 }
                 mysql_common::value::Value::NULL => noria_row.push(DfValue::None),

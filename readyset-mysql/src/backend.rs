@@ -8,7 +8,6 @@ use std::ops::{Deref, DerefMut};
 use futures_util::StreamExt;
 use itertools::{izip, Itertools};
 use mysql_async::consts::StatusFlags;
-use mysql_common::bigdecimal::ToPrimitive;
 use mysql_srv::{
     CachedSchema, Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MySqlShim,
     QueryResultWriter, QueryResultsResponse, RowWriter, StatementMetaWriter,
@@ -138,12 +137,8 @@ async fn write_column<S: AsyncRead + AsyncWrite + Unpin>(
                 let f = format!("{v:.0$}", cs.decimals as usize);
                 rw.write_col(f)
             }
-            mysql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
-                let f = v.to_f64().ok_or_else(conv_error)?;
-                rw.write_col(f)
-            }
-            mysql_srv::ColumnType::MYSQL_TYPE_FLOAT => {
-                let f = v.to_f64().ok_or_else(conv_error)?;
+            mysql_srv::ColumnType::MYSQL_TYPE_FLOAT | mysql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
+                let f: f64 = v.as_ref().try_into().map_err(|_| conv_error())?;
                 rw.write_col(f)
             }
             _ => return Err(conv_error())?,

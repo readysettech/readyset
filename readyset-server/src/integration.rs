@@ -30,14 +30,13 @@ use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore}
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
 use readyset_data::{Bound, Collation, DfType, DfValue, Dialect, IntoBoundedRange, TinyText};
+use readyset_decimal::Decimal;
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_sql::ast;
 use readyset_sql::ast::{OrderType, Relation, SqlQuery};
 use readyset_sql_parsing::{parse_create_table, parse_create_view, parse_query, parse_select};
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
-use rust_decimal::prelude::ToPrimitive;
-use rust_decimal::Decimal;
 use rusty_fork::rusty_fork_test;
 use tempfile::TempDir;
 use test_utils::skip_with_flaky_finder;
@@ -5606,7 +5605,7 @@ async fn overlapping_indices() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(q, r, "s", Decimal).to_i32().unwrap(),
+                get_col!(q, r, "s", Decimal).try_into().unwrap(),
                 get_col!(q, r, "id", i32),
             )
         })
@@ -5661,7 +5660,7 @@ async fn aggregate_after_filter_non_equality() {
         .unwrap()
         .into_vec()
         .iter()
-        .map(|r| get_col!(q, r, "s", Decimal).to_i32().unwrap())
+        .map(|r| get_col!(q, r, "s", Decimal).try_into().unwrap())
         .collect::<Vec<i32>>();
 
     assert_eq!(res, vec![13]);
@@ -5780,8 +5779,8 @@ async fn multiple_aggregate_sum() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(q, r, "s1", Decimal).to_i32().unwrap(),
-                get_col!(q, r, "s2", Decimal).to_i32().unwrap(),
+                get_col!(q, r, "s1", Decimal).try_into().unwrap(),
+                get_col!(q, r, "s2", Decimal).try_into().unwrap(),
             )
         })
         .sorted()
@@ -5832,7 +5831,7 @@ async fn multiple_aggregate_same_col() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(q, r, "s", Decimal).to_i32().unwrap(),
+                get_col!(q, r, "s", Decimal).try_into().unwrap(),
                 get_col!(q, r, "a", f64),
             )
         })
@@ -5905,8 +5904,8 @@ async fn multiple_aggregate_sum_sharded() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(q, r, "s1", Decimal).to_i32().unwrap(),
-                get_col!(q, r, "s2", Decimal).to_i32().unwrap(),
+                get_col!(q, r, "s1", Decimal).try_into().unwrap(),
+                get_col!(q, r, "s2", Decimal).try_into().unwrap(),
             )
         })
         .sorted()
@@ -5958,7 +5957,7 @@ async fn multiple_aggregate_same_col_sharded() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(q, r, "s", Decimal).to_i32().unwrap(),
+                get_col!(q, r, "s", Decimal).try_into().unwrap(),
                 get_col!(q, r, "a", f64),
             )
         })
@@ -6011,7 +6010,7 @@ async fn multiple_aggregate_over_two() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(q, r, "s", Decimal).to_i32().unwrap(),
+                get_col!(q, r, "s", Decimal).try_into().unwrap(),
                 get_col!(q, r, "a", f64),
                 get_col!(q, r, "c", i32),
                 get_col!(q, r, "m", i32),
@@ -6068,7 +6067,7 @@ async fn multiple_aggregate_over_two_sharded() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(q, r, "s", Decimal).to_i32().unwrap(),
+                get_col!(q, r, "s", Decimal).try_into().unwrap(),
                 get_col!(q, r, "a", f64),
                 get_col!(q, r, "c", i32),
                 get_col!(q, r, "m", i32),
@@ -6123,7 +6122,7 @@ async fn multiple_aggregate_with_expressions() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(q, r, "s", Decimal).to_i32().unwrap(),
+                get_col!(q, r, "s", Decimal).try_into().unwrap(),
                 get_col!(q, r, "a", f64),
             )
         })
@@ -6177,7 +6176,7 @@ async fn multiple_aggregate_with_expressions_sharded() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(q, r, "s", Decimal).to_i32().unwrap(),
+                get_col!(q, r, "s", Decimal).try_into().unwrap(),
                 get_col!(q, r, "a", f64),
             )
         })
@@ -6230,7 +6229,7 @@ async fn multiple_aggregate_reuse() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(q, r, "s", Decimal).to_i32().unwrap(),
+                get_col!(q, r, "s", Decimal).try_into().unwrap(),
                 get_col!(q, r, "a", f64),
             )
         })
@@ -6263,7 +6262,7 @@ async fn multiple_aggregate_reuse() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(q, r, "s", Decimal).to_i32().unwrap(),
+                get_col!(q, r, "s", Decimal).try_into().unwrap(),
                 get_col!(q, r, "a", i32),
             )
         })
@@ -6880,7 +6879,7 @@ async fn partial_distinct_multi() {
         .map(|r| {
             (
                 get_col!(q, r, "value", i32),
-                get_col!(q, r, "s", Decimal).to_i32().unwrap(),
+                get_col!(q, r, "s", Decimal).try_into().unwrap(),
             )
         })
         .sorted()

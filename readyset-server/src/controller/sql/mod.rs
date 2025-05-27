@@ -273,18 +273,6 @@ impl SqlIncorporator {
                             )),
                         });
                     }
-                    if let Some(col) = body
-                        .fields
-                        .iter()
-                        .find(|col| !dialect.sql_type_is_supported(&col.sql_type))
-                    {
-                        unsupported!(
-                            "CREATE TABLE {} specifies unsupported column type for {}: {}",
-                            cts.table.display_unquoted(),
-                            col.column.name,
-                            col.sql_type.display(dialect.into())
-                        )
-                    }
                     match self.registry.get(&cts.table) {
                         Some(RecipeExpr::Table {
                             body: current_body, ..

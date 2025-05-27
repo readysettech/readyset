@@ -5,7 +5,7 @@ use std::sync::Arc;
 use bit_vec::BitVec;
 use chrono::DateTime;
 use mysql_time::MySqlTime;
-use rust_decimal::Decimal;
+use readyset_decimal::Decimal;
 use serde::de::{DeserializeSeed, EnumAccess, VariantAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_bytes::{ByteBuf, Bytes};
@@ -25,7 +25,7 @@ impl DfValue {
     // make_serialized_row`, every time we make a backwards incompatible change to deserialization
     // of DfValue! Hopefully `test::deserialize_backwards_compatibility` will automatically catch
     // that, but it's worth being extra careful, as that test is not perfect.
-    pub const SERDE_VERSION: u8 = 3;
+    pub const SERDE_VERSION: u8 = 4;
 
     /// Reference example "row" of `DfValue`s to check against for backwards compatible
     /// deserialization.
@@ -52,6 +52,7 @@ impl DfValue {
             DfValue::ByteArray(Arc::new(b"aaaaaaaaaaaa".to_vec())),
             DfValue::Numeric(Arc::new(Decimal::MIN)),
             DfValue::Numeric(Arc::new(Decimal::MAX)),
+            DfValue::Numeric(Arc::new(Decimal::try_from(42.42).unwrap())),
             DfValue::BitVector(Arc::new(BitVec::from_bytes(b"aaaaaaaaa"))),
             DfValue::Array(Arc::new(Array::from(vec![DfValue::from("aaaaaaaaa")]))),
             DfValue::Default,
@@ -442,5 +443,25 @@ mod tests {
         let serialized = bincode::serialize(&v).unwrap();
         let rt = bincode::deserialize::<DfValue>(&serialized).unwrap();
         assert_eq!(rt, v);
+    }
+
+    #[test]
+    fn numeric_serialize_round_trip() {
+        use readyset_decimal::Decimal;
+        use std::sync::Arc;
+
+        let test_cases = vec![
+            DfValue::Numeric(Arc::new(Decimal::NaN)),
+            DfValue::Numeric(Arc::new(Decimal::Infinity)),
+            DfValue::Numeric(Arc::new(Decimal::NegativeInfinity)),
+            DfValue::Numeric(Arc::new(Decimal::new(12345678901234567890, 18))),
+            DfValue::Numeric(Arc::new(Decimal::zero())),
+        ];
+
+        for df_value in test_cases {
+            let serialized = bincode::serialize(&df_value).unwrap();
+            let rt = bincode::deserialize::<DfValue>(&serialized).unwrap();
+            assert_eq!(rt, df_value);
+        }
     }
 }

@@ -8,6 +8,7 @@ use std::sync::atomic::Ordering::Relaxed;
 
 use cidr::IpInet;
 use lazy_static::lazy_static;
+use readyset_decimal::Decimal;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use regex::Regex;
 
@@ -556,7 +557,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 .try_into(),
 
             DfType::Numeric { .. } => Ok(str
-                .parse::<rust_decimal::Decimal>()
+                .parse::<Decimal>()
                 .map_err(|e| Self::coerce_err(to_ty, e))?
                 .into()),
 

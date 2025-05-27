@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 use std::convert::TryFrom;
-use std::str;
+use std::str::{self, FromStr as _};
 
 use bit_vec::BitVec;
 use bytes::{Buf, Bytes, BytesMut};
@@ -9,8 +9,7 @@ use cidr::IpInet;
 use eui48::MacAddress;
 use postgres_types::{FromSql, Kind, Type};
 use readyset_data::{Array, Collation, PassThroughFormat};
-use rust_decimal::prelude::FromStr;
-use rust_decimal::Decimal;
+use readyset_decimal::Decimal;
 use tokio_util::codec::Decoder;
 use uuid::Uuid;
 

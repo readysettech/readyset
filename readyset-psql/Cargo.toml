@@ -10,9 +10,10 @@ edition = "2021"
 clap = { workspace = true, features = ["derive", "env"] }
 async-trait = { workspace = true }
 lazy_static = { workspace = true }
-readyset-client = { path = "../readyset-client/" }
-readyset-errors = { path = "../readyset-errors/" }
-readyset-data = { path = "../readyset-data/" }
+readyset-client = { path = "../readyset-client" }
+readyset-errors = { path = "../readyset-errors" }
+readyset-data = { path = "../readyset-data" }
+readyset-decimal = { path = "../readyset-decimal" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
@@ -36,7 +37,6 @@ itertools = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 tracing-futures = { workspace = true }
-rust_decimal = { workspace = true }
 eui48 = { workspace = true }
 uuid = { workspace = true }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }

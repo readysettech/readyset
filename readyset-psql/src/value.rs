@@ -7,7 +7,7 @@ use ps::util::type_is_oid;
 use ps::PsqlValue;
 use psql_srv as ps;
 use readyset_data::DfValue;
-use rust_decimal::Decimal;
+use readyset_decimal::Decimal;
 use tokio_postgres::types::Type;
 use tracing::{error, trace};
 use uuid::Uuid;
@@ -63,9 +63,9 @@ impl TryFrom<TypedDfValue<'_>> for PsqlValue {
             (&Type::FLOAT4 | &Type::FLOAT8, DfValue::Float(f)) => Ok(PsqlValue::Float(f)),
             (&Type::FLOAT8, DfValue::Double(f)) => Ok(PsqlValue::Double(f)),
             (&Type::NUMERIC, DfValue::Double(f)) => Ok(PsqlValue::Numeric(
-                <Decimal>::try_from(f).map_err(|e| ps::Error::InternalError(e.to_string()))?,
+                Decimal::try_from(f).map_err(|e| ps::Error::InternalError(e.to_string()))?,
             )),
-            (&Type::NUMERIC, DfValue::Numeric(ref d)) => Ok(PsqlValue::Numeric(*d.as_ref())),
+            (&Type::NUMERIC, DfValue::Numeric(ref d)) => Ok(PsqlValue::Numeric(d.as_ref().clone())),
             (&Type::TEXT, DfValue::Text(v)) => Ok(PsqlValue::Text(v)),
             (&Type::TEXT, DfValue::TinyText(t)) => Ok(PsqlValue::TinyText(t)),
             (ty, DfValue::Text(v)) if ty.name() == "citext" => Ok(PsqlValue::Text(v)),

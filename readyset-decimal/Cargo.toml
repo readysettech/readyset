@@ -1,0 +1,28 @@
+[package]
+name = "readyset-decimal"
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bigdecimal = { workspace = true }
+byteorder = { workspace = true }
+bytes = { workspace = true }
+mysql_common = { workspace = true }
+num-integer = { workspace = true }
+paste = { workspace = true }
+postgres-types = { workspace = true }
+serde = { workspace = true }
+strum = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+bincode = { workspace = true }
+proptest = { workspace = true }
+readyset-util = { path = "../readyset-util" }
+test-strategy = { workspace = true }
+test-utils = { path = "../test-utils" }
+
+[lints]
+workspace = true

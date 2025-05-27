@@ -31,13 +31,13 @@ mod types {
     use readyset_client_test_helpers::psql_helpers::{last_query_info, upstream_config};
     use readyset_client_test_helpers::{sleep, Adapter};
     use readyset_data::DfValue;
+    use readyset_decimal::Decimal;
     use readyset_util::arbitrary::{
         arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipinet, arbitrary_json,
         arbitrary_json_without_f64, arbitrary_mac_address, arbitrary_naive_date,
         arbitrary_naive_time, arbitrary_systemtime, arbitrary_uuid,
     };
     use readyset_util::eventually;
-    use rust_decimal::Decimal;
     use tokio_postgres::types::{FromSql, ToSql};
     use tokio_postgres::{NoTls, SimpleQueryMessage};
     use uuid::Uuid;
@@ -161,10 +161,11 @@ mod types {
         bpchar_string("bpchar", String);
         bytea_bytes("bytea", Vec<u8>);
         name_string("name", String, string_regex("[a-zA-Z0-9]{1,63}").unwrap());
-        // TODO(fran): Add numeric with precision and scale when we start correctly
-        //  handling them.
-        numeric_decimal("numeric", Decimal, arbitrary_decimal());
-        decimal("decimal", Decimal, arbitrary_decimal());
+        // TODO(fran): Add numeric with precision and scale when we start correctly handling them.
+        // XXX(mvzink): We could generate much larger decimals, but they quickly take too long to
+        // de/serialize (e.g. reaching 1s for a 50k digit value). See comment in `Decimal::from_sql`
+        numeric_decimal("numeric", Decimal, arbitrary_decimal(<u16>::MAX, 255));
+        decimal("decimal", Decimal, arbitrary_decimal(<u16>::MAX, 255));
         timestamp_systemtime("timestamp", std::time::SystemTime, arbitrary_systemtime());
         inet_ipaddr("inet", IpInet, arbitrary_ipinet());
         macaddr_string("macaddr", MacAddress, arbitrary_mac_address());

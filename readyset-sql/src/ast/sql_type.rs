@@ -6,7 +6,7 @@ use proptest::{
     prelude::{any_with, Arbitrary, BoxedStrategy, Strategy},
     sample::SizeRange,
 };
-use readyset_util::{fmt::fmt_with, NUMERIC_MAX_SCALE};
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use triomphe::ThinArc;
 
@@ -415,6 +415,19 @@ impl Arbitrary for SqlType {
         use proptest::prelude::*;
         use SqlType::*;
 
+        let precision_range = match args.dialect {
+            Some(Dialect::PostgreSQL) => 1..=1000u16,
+            // Default to MySQL's more restricted range
+            _ => 1..=65,
+        };
+
+        let scale_range = move |precision: u16| match args.dialect {
+            // Postgres actually supports -1000..=1000, but we can't even represent that
+            Some(Dialect::PostgreSQL) => 0..=u8::MAX,
+            // Default to MySQL's more restricted range
+            _ => 0..=(precision.min(30) as u8),
+        };
+
         let mut variants = vec![
             Just(Bool).boxed(),
             option::of(1..255u16).prop_map(Char).boxed(),
@@ -429,14 +442,14 @@ impl Arbitrary for SqlType {
             Just(Date).boxed(),
             Just(Time).boxed(),
             Just(Timestamp).boxed(),
-            option::of(
-                (1..=NUMERIC_MAX_SCALE as u16)
-                    .prop_flat_map(|n| (Just(n), option::of(0..=(n as u8)).boxed())),
-            )
+            option::of(precision_range.clone().prop_flat_map(move |precision| {
+                (Just(precision), option::of(scale_range(precision)))
+            }))
             .prop_map(Numeric)
             .boxed(),
-            (1..=NUMERIC_MAX_SCALE)
-                .prop_flat_map(|prec| (1..=prec).prop_map(move |scale| Decimal(prec, scale)))
+            precision_range
+                .prop_flat_map(move |precision| (Just(precision), scale_range(precision)))
+                .prop_map(|(precision, scale)| Decimal(precision as u8, scale))
                 .boxed(),
         ];
 

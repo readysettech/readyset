@@ -29,6 +29,7 @@ bincode = { workspace = true }
 serde = { workspace = true, features = ["rc", "derive"] }
 vec1 = { workspace = true, features = ["serde"] }
 tikv-jemalloc-ctl = { workspace = true }
+readyset-decimal = { path = "../readyset-decimal" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 deadpool-postgres = { workspace = true }

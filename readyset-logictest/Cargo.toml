@@ -27,7 +27,6 @@ nom = { workspace = true }
 nom_locate = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
-rust_decimal = { workspace = true, features = ["db-tokio-postgres"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
@@ -45,6 +44,7 @@ readyset-adapter = { path = "../readyset-adapter/" }
 readyset-alloc = { path = "../readyset-alloc/" }
 readyset-client = { path = "../readyset-client/" }
 readyset-data = { path = "../readyset-data" }
+readyset-decimal = { path = "../readyset-decimal" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
 readyset-server = { path = "../readyset-server/" }

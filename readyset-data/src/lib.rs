@@ -17,16 +17,14 @@ use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use mysql_time::MySqlTime;
 use postgres_types::Format;
+use readyset_decimal::Decimal;
 use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{Double, Float, Literal, SqlType};
 use readyset_sql::DialectDisplay;
 use readyset_util::{
     arbitrary::{arbitrary_decimal, arbitrary_duration},
     redacted::Sensitive,
-    NUMERIC_MAX_SCALE,
 };
-use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
-use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
 use test_strategy::Arbitrary;
 use text::TextCoerce;
@@ -61,10 +59,6 @@ pub use crate::text::{Text, TinyText};
 pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT, TIMESTAMP_PARSE_FORMAT};
 
 type JsonObject = serde_json::Map<String, JsonValue>;
-
-/// This is the byte representation of NaN for Postgres' Numeric
-/// Which sets `NUMERIC_SPECIAL` and `NUMERIC_NAN`
-const NUMERIC_NAN: &[u8] = &[0, 0, 0, 0, 192, 0, 0, 0];
 
 /// Used to wrap arbitrary Postgres types which aren't natively supported, enabling more extensive
 /// proxying support
@@ -995,7 +989,7 @@ impl PartialEq for DfValue {
             (&DfValue::Float(fa), DfValue::Numeric(d)) => {
                 // We need to compare the *bit patterns* of the floats so that our Hash matches our
                 // Eq
-                d.to_f32()
+                f32::try_from(d.as_ref())
                     .map(|df| fa.to_bits() == df.to_bits())
                     .unwrap_or(false)
             }
@@ -1013,7 +1007,7 @@ impl PartialEq for DfValue {
             (&DfValue::Double(fa), DfValue::Numeric(d)) => {
                 // We need to compare the *bit patterns* of the floats so that our Hash matches our
                 // Eq
-                d.to_f64()
+                f64::try_from(d.as_ref())
                     .map(|df| fa.to_bits() == df.to_bits())
                     .unwrap_or(false)
             }
@@ -1097,26 +1091,14 @@ impl Ord for DfValue {
             (DfValue::Numeric(da), DfValue::Numeric(db)) => da.cmp(db),
             (&DfValue::Float(fa), &DfValue::Double(fb)) => fa.total_cmp(&(fb as f32)),
             (&DfValue::Double(fa), &DfValue::Float(fb)) => fb.total_cmp(&(fa as f32)).reverse(),
-            (&DfValue::Float(fa), DfValue::Numeric(d)) => {
-                if let Some(da) = Decimal::from_f32_retain(fa) {
-                    da.cmp(d)
-                } else {
-                    d.to_f32()
-                        .as_ref()
-                        .map(|fb| fa.total_cmp(fb))
-                        .unwrap_or(Ordering::Greater)
-                }
-            }
-            (&DfValue::Double(fa), DfValue::Numeric(d)) => {
-                if let Some(da) = Decimal::from_f64_retain(fa) {
-                    da.cmp(d)
-                } else {
-                    d.to_f64()
-                        .as_ref()
-                        .map(|fb| fa.total_cmp(fb))
-                        .unwrap_or(Ordering::Greater)
-                }
-            }
+            (&DfValue::Float(fa), DfValue::Numeric(d)) => f32::try_from(d.as_ref())
+                .as_ref()
+                .map(|fb| fa.total_cmp(fb))
+                .unwrap_or(Ordering::Greater),
+            (&DfValue::Double(fa), DfValue::Numeric(d)) => f64::try_from(d.as_ref())
+                .as_ref()
+                .map(|fb| fa.total_cmp(fb))
+                .unwrap_or(Ordering::Greater),
             (&DfValue::Numeric(_), &DfValue::Float(_) | &DfValue::Double(_)) => {
                 other.cmp(self).reverse()
             }
@@ -1317,21 +1299,9 @@ impl<'a> TryFrom<&'a DfValue> for Decimal {
         match dt {
             DfValue::Int(i) => Ok(Decimal::from(*i)),
             DfValue::UnsignedInt(i) => Ok(Decimal::from(*i)),
-            DfValue::Float(value) => {
-                Decimal::from_f32(*value).ok_or_else(|| Self::Error::DfValueConversionError {
-                    src_type: "DfValue".to_string(),
-                    target_type: "Decimal".to_string(),
-                    details: "".to_string(),
-                })
-            }
-            DfValue::Double(value) => {
-                Decimal::from_f64(*value).ok_or_else(|| Self::Error::DfValueConversionError {
-                    src_type: "DfValue".to_string(),
-                    target_type: "Decimal".to_string(),
-                    details: "".to_string(),
-                })
-            }
-            DfValue::Numeric(d) => Ok(*d.as_ref()),
+            DfValue::Float(value) => Ok(Decimal::try_from(*value)?),
+            DfValue::Double(value) => Ok(Decimal::try_from(*value)?),
+            DfValue::Numeric(d) => Ok(d.as_ref().clone()),
             _ => Err(Self::Error::DfValueConversionError {
                 src_type: "DfValue".to_string(),
                 target_type: "Decimal".to_string(),
@@ -1388,13 +1358,7 @@ impl<'a> TryFrom<&'a Literal> for DfValue {
             Literal::String(s) => Ok(s.as_str().into()),
             Literal::Float(ref float) => Ok(DfValue::Float(float.value)),
             Literal::Double(ref double) => Ok(DfValue::Double(double.value)),
-            Literal::Numeric(i, s) => Decimal::try_from_i128_with_scale(*i, *s)
-                .map_err(|e| ReadySetError::DfValueConversionError {
-                    src_type: "Literal".to_string(),
-                    target_type: "DfValue".to_string(),
-                    details: format!("Values out-of-bounds for Numeric type. Error: {e}"),
-                })
-                .map(|d| DfValue::Numeric(Arc::new(d))),
+            Literal::Numeric(i, s) => Ok(DfValue::Numeric(Arc::new(Decimal::new(*i, *s as i64)))),
             Literal::Blob(b) => Ok(DfValue::from(b.to_vec())),
             Literal::ByteArray(b) => Ok(DfValue::ByteArray(Arc::new(b.clone()))),
             Literal::BitVector(b) => Ok(DfValue::from(b)),
@@ -1438,7 +1402,10 @@ impl TryFrom<DfValue> for Literal {
                 value.coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)?,
             )?)),
             DfValue::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
-            DfValue::Numeric(ref d) => Ok(Literal::Numeric(d.mantissa(), d.scale())),
+            DfValue::Numeric(ref d) => Ok(d
+                .mantissa_and_scale()
+                .map(|(mantissa, scale)| Literal::Numeric(mantissa, scale as u32))
+                .unwrap_or_else(|| Literal::String(d.to_string()))),
             DfValue::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().clone())),
             DfValue::Array(_) => unsupported!("Arrays not implemented yet"),
             DfValue::PassThrough(_) => internal!("PassThrough has no representation as a literal"),
@@ -1678,14 +1645,7 @@ impl TryFrom<&'_ DfValue> for f32 {
         match *data {
             DfValue::Float(f) => Ok(f),
             DfValue::Double(f) => Ok(f as f32),
-            DfValue::Numeric(ref d) => {
-                d.to_f32()
-                    .ok_or_else(|| Self::Error::DfValueConversionError {
-                        src_type: "DfValue".to_string(),
-                        target_type: "f32".to_string(),
-                        details: "".to_string(),
-                    })
-            }
+            DfValue::Numeric(ref d) => Ok(f32::try_from(d.as_ref())?),
             DfValue::UnsignedInt(i) => Ok(i as f32),
             DfValue::Int(i) => Ok(i as f32),
             _ => Err(Self::Error::DfValueConversionError {
@@ -1712,14 +1672,7 @@ impl TryFrom<&'_ DfValue> for f64 {
         match *data {
             DfValue::Float(f) => Ok(f as f64),
             DfValue::Double(f) => Ok(f),
-            DfValue::Numeric(ref d) => {
-                d.to_f64()
-                    .ok_or_else(|| Self::Error::DfValueConversionError {
-                        src_type: "DfValue".to_string(),
-                        target_type: "f32".to_string(),
-                        details: "".to_string(),
-                    })
-            }
+            DfValue::Numeric(ref d) => Ok(f64::try_from(d.as_ref())?),
             DfValue::UnsignedInt(i) => Ok(i as f64),
             DfValue::Int(i) => Ok(i as f64),
             _ => Err(Self::Error::DfValueConversionError {
@@ -2023,29 +1976,7 @@ impl<'a> FromSql<'a> for DfValue {
                 Type::DATE => mk_from_sql!(NaiveDate),
                 Type::TIME => mk_from_sql!(NaiveTime),
                 Type::BYTEA => mk_from_sql!(Vec<u8>),
-                Type::NUMERIC => {
-                    // rust-decimal has a bug whereby it will successfully deserialize from the
-                    // Postgres binary format NUMERIC values with scales in [0, 255], but it will
-                    // panic when serializing them to bincode if they are outside [0, 28].
-                    //
-                    // rust-decimal also has a bug where it converts NaN to 0, so until [this
-                    // issue][] is merged and we update rust-decimal to that version, explicitly
-                    // reject NaN here.
-                    // [][https://github.com/paupino/rust-decimal/issues/655]
-                    if raw == NUMERIC_NAN {
-                        unsupported!("Numeric NaN is not supported");
-                    }
-                    let d = Decimal::from_sql(ty, raw)?;
-                    if d.scale() > NUMERIC_MAX_SCALE as u32 {
-                        Err(format!(
-                            "Could not convert Postgres type {ty} into a DfValue. Error: \
-                             scale > {NUMERIC_MAX_SCALE}"
-                        )
-                        .into())
-                    } else {
-                        Ok(DfValue::from(d))
-                    }
-                }
+                Type::NUMERIC => mk_from_sql!(Decimal),
                 Type::TIMESTAMP => mk_from_sql!(NaiveDateTime),
                 Type::TIMESTAMPTZ => mk_from_sql!(chrono::DateTime<chrono::FixedOffset>),
                 Type::MACADDR => Ok(DfValue::from(
@@ -2150,7 +2081,7 @@ impl TryFrom<&DfValue> for mysql_common::value::Value {
             DfValue::UnsignedInt(val) => Ok(Value::UInt(*val)),
             DfValue::Float(val) => Ok(Value::Float(*val)),
             DfValue::Double(val) => Ok(Value::Double(*val)),
-            DfValue::Numeric(d) => Ok(Value::from(**d)),
+            DfValue::Numeric(d) => Ok(Value::from(d.as_ref())),
             DfValue::Text(_) | DfValue::TinyText(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
             DfValue::TimestampTz(val) if val.is_zero() => Ok(Value::Date(0, 0, 0, 0, 0, 0, 0)),
             DfValue::TimestampTz(val) => Ok(val.to_chrono().naive_utc().into()),
@@ -2229,7 +2160,7 @@ macro_rules! arithmetic_operation (
                         target_type: "Decimal".to_string(),
                         details: e.to_string(),
                     })?;
-                DfValue::from(a.$checked_op(b))
+                DfValue::from(a.$checked_op(&b))
             }
             (first @ &DfValue::Numeric(..), second @ &DfValue::Float(..)) => {
                 let a: Decimal = Decimal::try_from(first)
@@ -2238,13 +2169,9 @@ macro_rules! arithmetic_operation (
                         target_type: "Decimal".to_string(),
                         details: e.to_string(),
                     })?;
-                let b: Decimal = f32::try_from(second).and_then(|f| Decimal::from_f32(f)
-                    .ok_or_else(|| ReadySetError::DfValueConversionError {
-                        src_type: "DfValue".to_string(),
-                        target_type: "Decimal".to_string(),
-                        details: "".to_string(),
-                    }))?;
-                DfValue::from(a.$checked_op(b))
+                let b: Decimal = f32::try_from(second)
+                    .and_then(|f| Decimal::try_from(f).map_err(Into::into))?;
+                DfValue::from(a.$checked_op(&b))
             }
             (first @ &DfValue::Numeric(..), second @ &DfValue::Double(..)) => {
                 let a: Decimal = Decimal::try_from(first)
@@ -2253,13 +2180,10 @@ macro_rules! arithmetic_operation (
                         target_type: "Decimal".to_string(),
                         details: e.to_string(),
                     })?;
-                let b: Decimal = f64::try_from(second).and_then(|f| Decimal::from_f64(f)
-                    .ok_or_else(|| ReadySetError::DfValueConversionError {
-                        src_type: "DfValue".to_string(),
-                        target_type: "Decimal".to_string(),
-                        details: "".to_string(),
-                    }))?;
-                DfValue::from(a.$checked_op(b))
+
+                let b: Decimal = f64::try_from(second)
+                    .and_then(|f| Decimal::try_from(f).map_err(Into::into))?;
+                DfValue::from(a.$checked_op(&b))
             }
 
 
@@ -2332,7 +2256,7 @@ impl Arbitrary for DfValue {
             Some(DfValueKind::ByteArray) => any::<Vec<u8>>()
                 .prop_map(|b| DfValue::ByteArray(Arc::new(b)))
                 .boxed(),
-            Some(DfValueKind::Numeric) => arbitrary_decimal().prop_map(DfValue::from).boxed(),
+            Some(DfValueKind::Numeric) => arbitrary_decimal(65, 30).prop_map(DfValue::from).boxed(),
             Some(DfValueKind::BitVector) => any::<Vec<u8>>()
                 .prop_map(|bs| DfValue::BitVector(Arc::new(BitVec::from_bytes(&bs))))
                 .boxed(),
@@ -2365,7 +2289,7 @@ impl Arbitrary for DfValue {
                     .prop_map(MySqlTime::new)
                     .prop_map(DfValue::Time),
                 any::<Vec<u8>>().prop_map(|b| DfValue::ByteArray(Arc::new(b))),
-                arbitrary_decimal().prop_map(DfValue::from),
+                arbitrary_decimal(65, 30).prop_map(DfValue::from),
                 any::<Array>().prop_map(DfValue::from)
             ]
             .boxed(),
@@ -2418,7 +2342,9 @@ mod arbitrary {
             Some(DfType::Double) => any::<f64>().prop_map(DfValue::Double).boxed(),
             // TODO(fran): Numeric might need a more specific generator, based on precision and
             //  scale
-            Some(DfType::Numeric { .. }) => arbitrary_decimal().prop_map(DfValue::from).boxed(),
+            Some(DfType::Numeric { prec, scale }) => arbitrary_decimal(*prec, *scale)
+                .prop_map(DfValue::from)
+                .boxed(),
             Some(DfType::Text(_)) => "[^\0]{0, 32}".prop_map(DfValue::from).boxed(),
             Some(DfType::Char(len, _)) => {
                 proptest::string::string_regex(format!("[^\0]{{{len}}}").as_str())
@@ -2537,7 +2463,7 @@ mod tests {
         DfValue
     );
 
-    #[derive(Debug, From, Into)]
+    #[derive(Debug, derive_more::From, derive_more::Into)]
     struct MySqlValue(mysql_common::value::Value);
 
     impl Arbitrary for MySqlValue {
@@ -2803,7 +2729,7 @@ mod tests {
     #[allow(clippy::float_cmp)]
     fn real_to_numeric() {
         let original: Decimal = Decimal::new(3141, 3);
-        let data_type: DfValue = From::from(original);
+        let data_type: DfValue = From::from(original.clone());
         let converted: Decimal = Decimal::try_from(&data_type).unwrap();
         assert_eq!(DfValue::Numeric(Arc::new(Decimal::new(3141, 3))), data_type);
         assert_eq!(original, converted);
@@ -2837,7 +2763,7 @@ mod tests {
         assert_arithmetic!(+, Decimal::new(15, 1), 2.5_f32, Decimal::new(40, 1));
         assert_arithmetic!(+, Decimal::new(15, 1), 2.5_f64, Decimal::new(40, 1));
         assert_arithmetic!(+, i64::MAX, 1, None::<i64>);
-        assert_arithmetic!(+, Decimal::MAX, Decimal::MAX, None::<Decimal>);
+        assert_arithmetic!(+, Decimal::MAX, Decimal::MAX, Decimal::MAX);
         assert_eq!((&DfValue::Int(1) + &DfValue::Int(2)).unwrap(), 3.into());
         assert_eq!((&DfValue::from(1) + &DfValue::Int(2)).unwrap(), 3.into());
         assert_eq!((&DfValue::Int(2) + &DfValue::from(1)).unwrap(), 3.into());
@@ -2862,7 +2788,7 @@ mod tests {
         assert_arithmetic!(-, Decimal::new(35, 1), 2.0_f64, Decimal::new(15, 1));
         assert_arithmetic!(-, Decimal::new(35, 1), Decimal::new(20, 1), Decimal::new(15, 1));
         assert_arithmetic!(-, 1_u64, 2_u64, None::<u64>);
-        assert_arithmetic!(-, Decimal::MIN, Decimal::MAX, None::<Decimal>);
+        assert_arithmetic!(-, Decimal::MIN, Decimal::MAX, Decimal::NegativeInfinity);
         assert_eq!((&DfValue::Int(1) - &DfValue::Int(2)).unwrap(), (-1).into());
         assert_eq!((&DfValue::from(1) - &DfValue::Int(2)).unwrap(), (-1).into());
         assert_eq!((&DfValue::Int(2) - &DfValue::from(1)).unwrap(), 1.into());
@@ -2884,7 +2810,7 @@ mod tests {
         assert_arithmetic!(*, 3.5_f64, 2.0_f64, 7.0_f64);
         assert_arithmetic!(*, 3.5_f64, Decimal::new(20, 1), Decimal::new(70, 1));
         assert_arithmetic!(*, i64::MAX, 2, None::<i64>);
-        assert_arithmetic!(*, Decimal::MAX, Decimal::MAX, None::<Decimal>);
+        assert_arithmetic!(*, Decimal::MAX, Decimal::MAX, Decimal::MAX);
         assert_eq!((&DfValue::Int(1) * &DfValue::Int(2)).unwrap(), 2.into());
         assert_eq!((&DfValue::from(1) * &DfValue::Int(2)).unwrap(), 2.into());
         assert_eq!((&DfValue::Int(2) * &DfValue::from(1)).unwrap(), 2.into());
@@ -2906,7 +2832,7 @@ mod tests {
         assert_arithmetic!(/, 3.5_f64, 2.0_f64, 1.75_f64);
         assert_arithmetic!(/, 3.5_f64, Decimal::new(20, 1), Decimal::new(175, 2));
         assert_arithmetic!(/, 1, 0, None::<i64>);
-        assert_arithmetic!(/, Decimal::ONE, Decimal::ZERO, None::<Decimal>);
+        assert_arithmetic!(/, Decimal::from(1), Decimal::zero(), None::<Decimal>);
         assert_eq!((&DfValue::Int(4) / &DfValue::Int(2)).unwrap(), 2.into());
         assert_eq!((&DfValue::from(4) / &DfValue::Int(2)).unwrap(), 2.into());
         assert_eq!((&DfValue::Int(4) / &DfValue::from(2)).unwrap(), 2.into());
@@ -3672,7 +3598,6 @@ mod tests {
         use readyset_util::arbitrary::{
             arbitrary_naive_date, arbitrary_naive_date_time, arbitrary_naive_time,
         };
-        use rust_decimal::Decimal;
         use test_strategy::proptest;
 
         use super::*;

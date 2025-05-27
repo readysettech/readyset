@@ -16,13 +16,9 @@ icu = { workspace = true }
 itertools = { workspace = true }
 lazy_static = { workspace = true }
 once_cell = { workspace = true }
-mysql_common = { workspace = true, features = ["chrono", "rust_decimal"] }
+mysql_common = { workspace = true, features = ["chrono"] }
 proptest = { workspace = true }
 regex = { workspace = true }
-rust_decimal = { workspace = true, features = [
-    "db-tokio-postgres",
-    "serde-str",
-] }
 serde = { workspace = true, features = ["rc", "derive"] }
 serde_bytes = { workspace = true }
 serde_json = { workspace = true, features = [
@@ -49,6 +45,7 @@ log-once = { workspace = true }
 
 # Local dependencies
 nom-sql = { path = "../nom-sql" }
+readyset-decimal = { path = "../readyset-decimal" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 readyset-errors = { path = "../readyset-errors" }

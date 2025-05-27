@@ -1,6 +1,7 @@
 use core::str;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
+use std::str::FromStr as _;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -21,8 +22,8 @@ use mysql_common::constants::ColumnType;
 use mysql_common::{binlog, Value};
 use mysql_srv::ColumnFlags;
 use readyset_data::encoding::{mysql_character_set_name_to_collation_id, Encoding};
+use readyset_decimal::Decimal;
 use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
-use rust_decimal::Decimal;
 use serde_json::Map;
 use tracing::{error, info, warn};
 
@@ -1518,10 +1519,9 @@ fn binlog_val_to_noria_val(
         (ColumnType::MYSQL_TYPE_DECIMAL, _) | (ColumnType::MYSQL_TYPE_NEWDECIMAL, _) => {
             if let Value::Bytes(b) = val {
                 str::from_utf8(b)
-                    .ok()
-                    .and_then(|s| Decimal::from_str_exact(s).ok())
+                    .map_err(Into::into)
+                    .and_then(|s| Decimal::from_str(s).map_err(Into::into))
                     .map(|d| DfValue::Numeric(Arc::new(d)))
-                    .ok_or_else(|| internal_err!("Failed to parse decimal value"))
             } else {
                 internal!("Expected a bytes value for decimal column")
             }

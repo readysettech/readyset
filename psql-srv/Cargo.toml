@@ -26,7 +26,6 @@ postgres-types = { workspace = true, features = [
     "with-cidr-0_2",
 ] }
 rand = { workspace = true }
-rust_decimal = { workspace = true }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 sha2 = { workspace = true }
 smallvec = { workspace = true }
@@ -48,6 +47,7 @@ uuid = { workspace = true }
 database-utils = { path = "../database-utils" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-data = { path = "../readyset-data" }
+readyset-decimal = { path = "../readyset-decimal" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 

@@ -105,7 +105,7 @@ dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow", featu
 diff = { workspace = true }
 include_dir = { workspace = true }
 mysql_async = { workspace = true }
-rust_decimal = { workspace = true }
+readyset-decimal = { path = "../readyset-decimal" }
 rusty-fork = { workspace = true }
 tempfile = { workspace = true }
 test-strategy = { workspace = true }

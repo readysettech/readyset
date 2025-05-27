@@ -21,9 +21,8 @@ use mysql_common::chrono::NaiveDateTime;
 use mysql_time::MySqlTime;
 use pgsql::types::to_sql_checked;
 use readyset_data::{DfValue, TIMESTAMP_FORMAT};
+use readyset_decimal::Decimal;
 use readyset_sql::ast::{Literal, SqlQuery};
-use rust_decimal::prelude::ToPrimitive;
-use rust_decimal::Decimal;
 use thiserror::Error;
 use tokio_postgres as pgsql;
 
@@ -283,13 +282,9 @@ impl TryFrom<Literal> for Value {
             Literal::UnsignedInteger(v) => Value::UnsignedInteger(v),
             Literal::Float(float) => real_value!(float.value, float.precision),
             Literal::Double(double) => real_value!(double.value, double.precision),
-            Literal::Numeric(mantissa, scale) => Decimal::try_from_i128_with_scale(mantissa, scale)
-                .map_err(|e| {
-                    ValueConversionError(format!(
-                        "Could not convert literal value to NUMERIC type: {e}"
-                    ))
-                })
-                .map(Value::Numeric)?,
+            Literal::Numeric(mantissa, scale) => {
+                Value::Numeric(Decimal::new(mantissa, scale as i64))
+            }
             Literal::String(v) => Value::Text(v),
             Literal::Blob(v) => {
                 Value::Text(String::from_utf8(v).map_err(|e| ValueConversionError(e.to_string()))?)
@@ -312,13 +307,7 @@ impl From<Value> for mysql_async::Value {
             Value::Integer(x) => x.into(),
             Value::UnsignedInteger(x) => x.into(),
             Value::Real(i, f) => (i as f64 + ((f as f64) / 1_000_000_000.0)).into(),
-            Value::Numeric(d) => {
-                // FIXME(fran): This shouldn't be implemented for mysql_async::Value, since
-                // MySQL has it's own type `DECIMAL`, which is not supported by the library.
-                // However, it seems like the AST relies on this even when the database being used
-                // is Postgres, so we return a float to bypass that for now.
-                d.to_f64().unwrap_or(f64::MAX).into()
-            }
+            Value::Numeric(d) => d.to_string().into(),
             Value::Null => mysql_async::Value::NULL,
             Value::Date(dt) => mysql_async::Value::from(dt),
             Value::Time(t) => mysql_async::Value::Time(
@@ -472,7 +461,7 @@ impl TryFrom<DfValue> for Value {
             DfValue::TimestampTz(ref ts) => Ok(Value::Date(ts.to_chrono().naive_utc())),
             DfValue::Time(t) => Ok(Value::Time(t)),
             DfValue::ByteArray(t) => Ok(Value::ByteArray(t.as_ref().clone())),
-            DfValue::Numeric(ref d) => Ok(Value::Numeric(*d.as_ref())),
+            DfValue::Numeric(ref d) => Ok(Value::Numeric(d.as_ref().clone())),
             DfValue::BitVector(ref b) => Ok(Value::BitVector(b.as_ref().clone())),
             DfValue::Array(_) => bail!("Arrays not supported"),
             DfValue::PassThrough(_) => unimplemented!(),
@@ -671,13 +660,13 @@ impl Value {
                 txt.as_bytes(),
             )))),
             (Self::Numeric(dec), Type::Integer) => {
-                Ok(Cow::Owned(Self::Integer(dec.to_i64().unwrap())))
+                Ok(Cow::Owned(Self::Integer(dec.try_into().unwrap())))
             }
             (Self::Integer(i), Type::Real) => Ok(Cow::Owned(Self::Real(*i, 0))),
             (Self::Numeric(dec), Type::Real) => Ok(Cow::Owned(Self::Real(
-                dec.to_i64().unwrap(),
+                dec.try_into().unwrap(),
                 (dec.fract() * Decimal::from(1_000_000_000))
-                    .to_u64()
+                    .try_into()
                     .unwrap(),
             ))),
             (Self::Integer(i), Type::Text) => Ok(Cow::Owned(Self::Text(i.to_string()))),

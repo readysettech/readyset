@@ -1,8 +1,7 @@
 use std::convert::TryInto;
 
+use readyset_decimal::Decimal;
 use readyset_errors::{ReadySetError, ReadySetResult};
-use rust_decimal::prelude::ToPrimitive;
-use rust_decimal::Decimal;
 
 use crate::{r#enum, DfType, DfValue};
 
@@ -66,8 +65,8 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
             Ok(DfValue::Float(val))
         }
 
-        DfType::Numeric { .. } => Decimal::from_f64_retain(val)
-            .ok_or_else(bounds_err)
+        DfType::Numeric { .. } => Decimal::try_from(val)
+            .map_err(Into::into)
             .map(DfValue::from),
 
         DfType::TinyInt => coerce_f64_to_int::<i8>(val)
@@ -194,42 +193,54 @@ pub(crate) fn coerce_decimal(
     };
 
     match *to_ty {
-        DfType::Numeric { .. } => Ok(DfValue::from(*val)),
+        DfType::Numeric { .. } => Ok(DfValue::from(val.clone())),
 
         DfType::Bool => Ok(DfValue::from(!val.is_zero())),
 
-        DfType::TinyInt => val.to_i8().ok_or_else(err).map(DfValue::from),
-        DfType::UnsignedTinyInt => val.to_u8().ok_or_else(err).map(DfValue::from),
-        DfType::SmallInt => val.to_i16().ok_or_else(err).map(DfValue::from),
-        DfType::UnsignedSmallInt => val.to_u16().ok_or_else(err).map(DfValue::from),
-        DfType::MediumInt => val
-            .to_i32()
-            .filter(|i| ((-1 << 23)..(1 << 23)).contains(i))
-            .ok_or_else(err)
-            .map(DfValue::from),
-        DfType::UnsignedMediumInt => val
-            .to_u32()
-            .filter(|&i| i < (1 << 24))
-            .ok_or_else(err)
-            .map(DfValue::from),
-        DfType::Int => val.to_i32().ok_or_else(err).map(DfValue::from),
-        DfType::UnsignedInt => val.to_u32().ok_or_else(err).map(DfValue::from),
-        DfType::BigInt => val.to_i64().ok_or_else(err).map(DfValue::from),
-        DfType::UnsignedBigInt => val.to_u64().ok_or_else(err).map(DfValue::from),
+        DfType::TinyInt => i8::try_from(val).map_err(Into::into).map(DfValue::from),
+        DfType::UnsignedTinyInt => u8::try_from(val).map_err(Into::into).map(DfValue::from),
+        DfType::SmallInt => i16::try_from(val).map_err(Into::into).map(DfValue::from),
+        DfType::UnsignedSmallInt => u16::try_from(val).map_err(Into::into).map(DfValue::from),
+        DfType::MediumInt => {
+            let i = i32::try_from(val)?;
+            if ((-1 << 23)..(1 << 23)).contains(&i) {
+                Ok(DfValue::from(i))
+            } else {
+                Err(ReadySetError::DfValueConversionError {
+                    src_type: "Decimal".to_string(),
+                    target_type: to_ty.to_string(),
+                    details: "out of bounds".to_string(),
+                })
+            }
+        }
+        DfType::UnsignedMediumInt => {
+            let i = u32::try_from(val)?;
+            if i < (1 << 24) {
+                Ok(DfValue::from(i))
+            } else {
+                Err(ReadySetError::DfValueConversionError {
+                    src_type: "Decimal".to_string(),
+                    target_type: to_ty.to_string(),
+                    details: "out of bounds".to_string(),
+                })
+            }
+        }
+        DfType::Int => i32::try_from(val).map_err(Into::into).map(DfValue::from),
+        DfType::UnsignedInt => u32::try_from(val).map_err(Into::into).map(DfValue::from),
+        DfType::BigInt => i64::try_from(val).map_err(Into::into).map(DfValue::from),
+        DfType::UnsignedBigInt => u64::try_from(val).map_err(Into::into).map(DfValue::from),
 
-        DfType::Float => val
-            .to_f32()
-            .and_then(|v| if v.is_finite() { Some(v) } else { None })
-            .ok_or_else(err)
+        DfType::Float => f32::try_from(val)
+            .map_err(Into::into)
+            .and_then(|v| if v.is_finite() { Ok(v) } else { Err(err()) })
             .map(DfValue::Float),
-        DfType::Double => val
-            .to_f64()
-            .and_then(|v| if v.is_finite() { Some(v) } else { None })
-            .ok_or_else(err)
+        DfType::Double => f64::try_from(val)
+            .map_err(Into::into)
+            .and_then(|v| if v.is_finite() { Ok(v) } else { Err(err()) })
             .map(DfValue::Double),
 
         DfType::Enum { ref variants, .. } => {
-            Ok(r#enum::apply_enum_limits(usize::try_from(*val).unwrap_or(0), variants).into())
+            Ok(r#enum::apply_enum_limits(usize::try_from(val).unwrap_or(0), variants).into())
         }
 
         DfType::Text(collation) => Ok(DfValue::from_str_and_collation(&val.to_string(), collation)),
@@ -275,7 +286,8 @@ pub(crate) fn coerce_decimal(
         | DfType::Time { .. }
         | DfType::Timestamp { .. }
         | DfType::TimestampTz { .. } => {
-            crate::integer::coerce_integer(val.to_i64().ok_or_else(err)?, to_ty, from_ty)
+            let i: i64 = i64::try_from(val)?;
+            crate::integer::coerce_integer::<i64>(i, to_ty, from_ty)
         }
 
         DfType::Unknown

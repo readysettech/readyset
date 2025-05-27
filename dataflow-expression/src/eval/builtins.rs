@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::{self, Write};
-use std::ops::{Add, Div, Mul, Sub};
+use std::ops::{Add, Sub};
 use std::str::FromStr;
 
 use chrono::{
@@ -11,13 +11,13 @@ use chrono::{
 use chrono_tz::Tz;
 use itertools::Either;
 use mysql_time::MySqlTime;
+use num_traits::cast::FromPrimitive;
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{Array, Collation, DfType, DfValue, TimestampTz};
+use readyset_decimal::{Decimal, RoundingMode};
 use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::TimestampField;
 use readyset_util::math::integer_rnd;
-use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
-use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
 use test_strategy::Arbitrary;
 use vec1::Vec1;
@@ -891,14 +891,12 @@ impl BuiltinFunction {
                     DfValue::UnsignedInt(inner) => inner as i32,
                     DfValue::Float(f) => f.round() as i32,
                     DfValue::Double(f) => f.round() as i32,
-                    DfValue::Numeric(d) => {
-                        // TODO(fran): I don't know if this is the right thing to do.
-                        d.round().to_i32().ok_or_else(|| {
-                            ReadySetError::BadRequest(format!(
-                                "NUMERIC value {d} exceeds 32-bit integer size"
-                            ))
-                        })?
-                    }
+                    // XXX(mvzink): Yes, MySQL does round the second argument (up) if it's a decimal
+                    // before using that to round the first argument. However, Postgres throws an
+                    // error, so we are not matching that.
+                    DfValue::Numeric(d) => d
+                        .round_dp_with_strategy(0, RoundingMode::HalfUp)
+                        .try_into()?,
                     _ => 0,
                 };
 
@@ -938,22 +936,10 @@ impl BuiltinFunction {
                         Ok(DfValue::Int(rounded as _))
                     }
                     DfValue::Numeric(d) => {
-                        let rounded_dec = if rnd_prec >= 0 {
-                            d.round_dp_with_strategy(
-                                rnd_prec as _,
-                                rust_decimal::RoundingStrategy::MidpointAwayFromZero,
-                            )
-                        } else {
-                            let factor = Decimal::from_f64(10.0f64.powf(-rnd_prec as _)).unwrap();
-
-                            d.div(factor)
-                                .round_dp_with_strategy(
-                                    0,
-                                    rust_decimal::RoundingStrategy::MidpointAwayFromZero,
-                                )
-                                .mul(factor)
-                        };
-
+                        let rounded_dec = d.round_dp_with_strategy(
+                            rnd_prec as _,
+                            readyset_decimal::RoundingMode::HalfUp,
+                        );
                         Ok(DfValue::Numeric(rounded_dec.into()))
                     }
                     dt => {
@@ -1966,29 +1952,37 @@ mod tests {
         let expr = parse_and_lower("round(c0, c1)", MySQL);
         assert_eq!(
             expr.eval::<DfValue>(&[
-                DfValue::from(Decimal::from_f64(52.123).unwrap()),
+                DfValue::from(Decimal::try_from(52.123).unwrap()),
                 DfValue::from(1)
             ])
             .unwrap(),
-            DfValue::from(Decimal::from_f64(52.1)),
+            DfValue::from(Decimal::from_str("52.1").unwrap()),
         );
 
         assert_eq!(
             expr.eval::<DfValue>(&[
-                DfValue::from(Decimal::from_f64(-52.666).unwrap()),
+                DfValue::from(Decimal::try_from(-52.666).unwrap()),
                 DfValue::from(2)
             ])
             .unwrap(),
-            DfValue::from(Decimal::from_f64(-52.67)),
+            DfValue::from(Decimal::from_str("-52.67").unwrap()),
         );
 
         assert_eq!(
             expr.eval::<DfValue>(&[
-                DfValue::from(Decimal::from_f64(-52.666).unwrap()),
+                DfValue::from(Decimal::try_from(-52.666).unwrap()),
                 DfValue::from(-1)
             ])
             .unwrap(),
-            DfValue::from(Decimal::from_f64(-50.)),
+            DfValue::from(Decimal::try_from(-50.).unwrap()),
+        );
+        assert_eq!(
+            expr.eval::<DfValue>(&[
+                DfValue::from(Decimal::try_from(-5266.666).unwrap()),
+                DfValue::from(-2)
+            ])
+            .unwrap(),
+            DfValue::from(Decimal::try_from(-5300.).unwrap()),
         );
     }
 

@@ -7,25 +7,25 @@ edition = "2021"
 description = "Extensions to the Rust standard library"
 
 [dependencies]
-exponential-backoff = { workspace = true }
+async-stream = { workspace = true }
+bit-vec = { workspace = true, features = ["serde"] }
 bytes = { workspace = true }
-proptest = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 chrono-tz = { workspace = true }
-fail = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
-futures = { workspace = true }
-tempfile = { workspace = true }
-tracing = { workspace = true, features = ["release_max_level_debug"] }
-rust_decimal = { workspace = true }
-eui48 = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
-serde_json = { workspace = true }
-bit-vec = { workspace = true, features = ["serde"] }
-serde = { workspace = true, features = ["derive"] }
-async-stream = { workspace = true }
 cidr = { workspace = true }
+eui48 = { workspace = true }
+exponential-backoff = { workspace = true }
+fail = { workspace = true }
+futures = { workspace = true }
+proptest = { workspace = true }
+readyset-decimal = { path = "../readyset-decimal" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true, features = ["release_max_level_debug"] }
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 criterion = { workspace = true }

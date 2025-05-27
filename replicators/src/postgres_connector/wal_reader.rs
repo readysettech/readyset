@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::str::FromStr as _;
 use std::sync::Arc;
 
 use bit_vec::BitVec;
 use mysql_time::MySqlTime;
 use postgres_types::Kind;
 use readyset_data::{Array, DfType, DfValue, TimestampTz};
+use readyset_decimal::Decimal;
 use readyset_errors::ReadySetError;
 use replication_offset::postgres::{CommitLsn, Lsn};
-use rust_decimal::prelude::FromStr;
-use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, trace};
 
@@ -691,10 +691,10 @@ impl wal::TupleData {
                                             schema: relation.schema_name_lossy(),
                                         });
                                     }
-                                    s => Decimal::from_str_exact(s)
+                                    s => Decimal::from_str(s)
                                         .map_err(|e| WalError::TableError {
                                             kind: TableErrorKind::NumericParseError(
-                                                NumericParseErrorKind::RustDecimalError(e),
+                                                NumericParseErrorKind::DecimalError(e),
                                             ),
                                             table: relation.relation_name_lossy(),
                                             schema: relation.schema_name_lossy(),

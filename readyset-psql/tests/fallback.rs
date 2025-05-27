@@ -10,10 +10,10 @@ use readyset_client_test_helpers::psql_helpers::{upstream_config, PostgreSQLAdap
 use readyset_client_test_helpers::{sleep, Adapter, TestBuilder};
 use readyset_data::DfValue;
 use readyset_server::Handle;
+use readyset_util::eventually;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use readyset_util::shutdown::ShutdownSender;
-use readyset_util::{eventually, NUMERIC_MAX_SCALE};
 use test_utils::tags;
 
 mod common;
@@ -468,101 +468,6 @@ async fn generated_columns() {
     // because the write synchronously falls back to upstream
     let res = fallback_conn
         .simple_query("SELECT * from calc_columns")
-        .await
-        .expect("select failed");
-    assert!(matches!(
-        res[2],
-        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 2, .. })
-    ));
-
-    shutdown_tx.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, postgres_upstream)]
-async fn unsupported_numeric_scale() {
-    // Tests that we handle tables that have NUMERIC values with scales > NUMERIC_MAX_SCALE by not
-    // snapshotting them and falling back to upstream
-    readyset_tracing::init_test_logging();
-
-    let mut upstream_config = upstream_config();
-    upstream_config.dbname("noria");
-    let fallback_conn = connect(upstream_config).await;
-    let res = fallback_conn
-        .simple_query("DROP TABLE IF EXISTS t CASCADE")
-        .await
-        .expect("create failed");
-    assert!(matches!(res[0], SimpleQueryMessage::CommandComplete(_)));
-
-    let res = fallback_conn
-        .simple_query("CREATE TABLE t (c NUMERIC)")
-        .await
-        .expect("create failed");
-    assert!(matches!(res[0], SimpleQueryMessage::CommandComplete(_)));
-
-    let invalid = format!("0.{:0digits$}", 1, digits = NUMERIC_MAX_SCALE as usize + 1);
-    let res = fallback_conn
-        .simple_query(&format!("INSERT INTO t VALUES({invalid})"))
-        .await
-        .expect("populate failed");
-    assert!(matches!(
-        res[0],
-        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
-    ));
-
-    let res = fallback_conn
-        .simple_query("SELECT * FROM t")
-        .await
-        .expect("select failed");
-    // CommandComplete and 1 row should be returned
-    assert_eq!(res.len(), 2);
-
-    let (opts, _handle, shutdown_tx) = TestBuilder::default()
-        .recreate_database(false)
-        .replicate_url(PostgreSQLAdapter::upstream_url("noria"))
-        .fallback(true)
-        .migration_mode(MigrationMode::OutOfBand)
-        .build::<PostgreSQLAdapter>()
-        .await;
-    let conn = connect(opts).await;
-    // Check that we see the existing insert
-    let res = conn
-        .simple_query("SELECT * FROM t")
-        .await
-        .expect("select failed");
-    // CommandComplete and the 1 inserted rows
-    assert_eq!(res.len(), 2);
-
-    // This should fail, since we don't have a base table, as it was ignored in the
-    // initial snapshot
-    conn.simple_query("CREATE CACHE FROM SELECT * from t")
-        .await
-        .expect_err("create cache should have failed");
-
-    // There shouldnt be any caches
-    let res = conn
-        .simple_query("SHOW CACHES")
-        .await
-        .expect("show caches failed");
-    assert!(matches!(
-        res[0],
-        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
-    ));
-
-    // Inserting will go to upstream
-    let res = conn
-        .simple_query("INSERT INTO t VALUES(0)")
-        .await
-        .expect("populate failed");
-    assert!(matches!(
-        res[0],
-        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
-    ));
-
-    // We should immediately see the inserted data via the upstream connection
-    // because the write synchronously falls back to upstream
-    let res = fallback_conn
-        .simple_query("SELECT * FROM t")
         .await
         .expect("select failed");
     assert!(matches!(
@@ -2762,63 +2667,6 @@ async fn numeric_inf_nan() {
         command,
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 4, .. })
     ));
-
-    shutdown_tx.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, postgres_upstream)]
-async fn numeric_snapshot_nan() {
-    readyset_tracing::init_test_logging();
-    let mut upstream_config = upstream_config();
-    upstream_config.dbname("noria");
-    let upstream_conn = connect(upstream_config).await;
-
-    upstream_conn
-        .simple_query(
-            "drop table if exists numer;
-            create table numer (a numeric);
-            insert into numer (a) values ('NaN')",
-        )
-        .await
-        .unwrap();
-
-    let (opts, _handle, shutdown_tx) = TestBuilder::default()
-        .recreate_database(false)
-        .replicate_url(PostgreSQLAdapter::upstream_url("noria"))
-        .fallback(true)
-        .migration_mode(MigrationMode::OutOfBand)
-        .build::<PostgreSQLAdapter>()
-        .await;
-
-    let conn = connect(opts).await;
-
-    eventually!(run_test: {
-        let result = conn
-            .simple_query("SHOW READYSET ALL TABLES")
-            .await
-            .unwrap()
-            .into_iter()
-            .filter_map(|m| {
-                if let SimpleQueryMessage::Row(r) = m {
-                    let (table, status) = (r.get(0).map(String::from).unwrap(), r.get(1).map(String::from).unwrap());
-                        // Tables from other tests can linger in the upstream, so filter this to only
-                        // numer
-                        if table.contains("numer") {
-                            Some((table, status))
-                        } else {
-                            None
-                        }
-                } else {
-                    None
-                }
-            })
-            .next_back()
-            .unwrap().1;
-        AssertUnwindSafe(|| result)
-    }, then_assert: |result| {
-        assert!(result().contains("Not Replicated"));
-    });
 
     shutdown_tx.shutdown().await;
 }

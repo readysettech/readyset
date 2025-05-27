@@ -755,6 +755,10 @@ pub enum ReadySetError {
         /// The error message
         message: String,
     },
+
+    /// Error parsing, converting, or performing operations on a decimal value
+    #[error("Error with decimal: {0}")]
+    DecimalError(String),
 }
 
 impl ReadySetError {
@@ -1231,6 +1235,7 @@ impl_from_to_string!(tikv_jemalloc_ctl::Error, JemallocCtlError);
 impl_from_to_string!(consulrs::error::ClientError, ConsulError);
 impl_from_to_string!(tokio_native_tls::native_tls::Error, NativeTlsError);
 impl_from_to_string!(hyper::Error, HttpError);
+impl_from_to_string!(readyset_decimal::ReadysetDecimalError, DecimalError);
 
 impl From<Size0Error> for ReadySetError {
     fn from(_: Size0Error) -> Self {

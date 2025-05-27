@@ -1,6 +1,5 @@
 use std::fmt;
 
-use readyset_sql::ast::SqlType;
 use serde::{Deserialize, Serialize};
 
 use crate::DfType;
@@ -119,15 +118,6 @@ impl Dialect {
                     || storage_engine.as_ref().eq_ignore_ascii_case("RocksDB")
             }
             SqlEngine::PostgreSQL => true,
-        }
-    }
-
-    /// Return whether the specified SQL type is supported by Readyset.
-    pub fn sql_type_is_supported(&self, sql_type: &SqlType) -> bool {
-        match sql_type {
-            SqlType::Numeric(Some((m, _maybe_d))) => *m <= 28,
-            SqlType::Decimal(m, _d) => *m <= 28,
-            _ => true,
         }
     }
 }

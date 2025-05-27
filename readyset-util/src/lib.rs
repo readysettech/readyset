@@ -28,11 +28,6 @@ pub mod shutdown;
 mod time_scope;
 pub use time_scope::time_scope;
 
-/// The maximum NUMERIC scale we can accurately represent.
-// XXX JCD rust_decimal made scale 28 possibly incorrect by rounding down to it:
-// https://github.com/paupino/rust-decimal/pull/647
-pub const NUMERIC_MAX_SCALE: u8 = 27;
-
 /// Error (returned by [`Indices::indices`] and [`Indices::cloned_indices`]) for an out-of-bounds
 /// index access
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]

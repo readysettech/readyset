@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5f1dd9d7a2213129c7bd1e47b44634470fbcca232d680a8982b830142467b57d # shrinks to input = _SerializeRoundTripArgs { v: Numeric(Number(BigDecimal(sign=NoSign, scale=1, digits=[]))) }

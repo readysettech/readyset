@@ -250,7 +250,7 @@ impl TryFrom<ParamRef<'_>> for DfValue {
                 .map_err(|_| ps::Error::Unsupported(format!("f64 with value `{v}`"))),
             PsqlValue::Float(v) => DfValue::try_from(*v)
                 .map_err(|_| ps::Error::Unsupported(format!("f32 with value `{v}`"))),
-            PsqlValue::Numeric(d) => Ok(DfValue::from(*d)),
+            PsqlValue::Numeric(d) => Ok(DfValue::from(d.clone())),
             PsqlValue::Timestamp(v) => Ok((*v).into()),
             PsqlValue::TimestampTz(v) => Ok(DfValue::from(*v)),
             PsqlValue::Date(v) => Ok((*v).into()),

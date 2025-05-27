@@ -18,9 +18,6 @@ pub enum DecodeError {
     #[error("invalid byte sequence for encoding \"UTF8\": 0x00")]
     InvalidUtf8,
 
-    #[error("invalid numeric: {0}")]
-    InvalidNumeric(#[from] rust_decimal::Error),
-
     // Conversion for errors resulting from postgres_types::FromSql.
     #[error("invalid binary data value: {0}")]
     InvalidBinaryDataValue(#[from] Box<dyn std::error::Error + Send + Sync>),
@@ -63,6 +60,9 @@ pub enum DecodeError {
 
     #[error("invalid array value: {0}")]
     InvalidArrayValue(String),
+
+    #[error("invalid numeric value: {0}")]
+    InvalidNumericValue(#[from] readyset_decimal::ReadysetDecimalError),
 
     #[error("unknown enum variant: {0}")]
     UnknownEnumVariant(String),

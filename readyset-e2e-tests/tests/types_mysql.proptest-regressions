@@ -11,3 +11,5 @@ cc 60a2be5a4cfbeeb413a85a646f7e5a49efc8167846f5301ec7135038743f54f1 # shrinks to
 cc 6c0544dda39e7053c05310fb0ac78a30342bd4b81e2a075f3382804875f9f410 # shrinks to input = _RoundTripMysqlTypeArbitraryArgs { sql_type: DateTime(Some(2)), initial_val: Bytes("1000-01-.."), updated_val: Bytes("1000-01-..") }
 cc b16085b32116e7b4c19ab6cf4aca0d84450a93b6c4342adb38dc1c4ae1603b1f # shrinks to input = _RoundTripMysqlTypeArbitraryArgs { sql_type: Real, initial_val: Double(0.0), updated_val: Double(2.3430450331584184e135) }
 cc c9510af93c87ec2c80baaaab859df683c91b0e4b61cc58eb03899f136b90ab5f # shrinks to input = _RoundTripMysqlTypeArbitrarySerialMysqlArgs { sql_type: Binary(None), initial_val: Bytes("\0"), updated_val: Bytes("\0\0") }
+cc e49848864115f5be627d25f974e0be9307802d148d8eddbfa842df031fbb9b7c # shrinks to input = _TestArgs { sql_type: Numeric(Some((55, Some(30)))), initial_val: Bytes("02848075.."), updated_val: Bytes("-8808800..") }
+cc 0421ca62fb49dcd5c0ae31ace1572be8277be92fef9558923e771e6dbc955cdd # shrinks to input = _TestArgs { sql_type: Decimal(53, 3), initial_val: Bytes("46775564.."), updated_val: Bytes("54488189..") }

@@ -1,18 +1,19 @@
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::str::FromStr as _;
 
 use bit_vec::BitVec;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use proptest::prelude::Strategy;
+use readyset_decimal::Decimal;
 use readyset_util::arbitrary::{
     arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipinet, arbitrary_json,
     arbitrary_naive_time, arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time,
     arbitrary_uuid,
 };
 use readyset_util::fmt::fmt_with;
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
@@ -269,9 +270,11 @@ impl TryFrom<sqlparser::ast::Value> for Literal {
                         value: f,
                         precision: s.find('.').map(|i| (s.len() - i - 1) as u8).unwrap_or(0),
                     }))
-                } else if let Ok(d) = Decimal::from_str_exact(&s) {
-                    // Seems like this will later get re-parsed the same way
-                    Ok(Self::Numeric(d.mantissa(), d.scale()))
+                } else if let Ok(Some((mantissa, scale))) =
+                    Decimal::from_str(&s).map(|d| d.mantissa_and_scale())
+                {
+                    // Seems like this will later get re-parsed the same way, which is unfortunate
+                    Ok(Self::Numeric(mantissa, scale as u32))
                 } else {
                     failed!("failed to parse number: {s}")
                 }
@@ -350,7 +353,7 @@ impl DialectDisplay for Literal {
                 Literal::Float(float) => write_real!(float.value, float.precision),
                 Literal::Double(double) => write_real!(double.value, double.precision),
                 Literal::Numeric(val, scale) => {
-                    write!(f, "{}", Decimal::from_i128_with_scale(*val, *scale))
+                    write!(f, "{}", Decimal::new(*val, (*scale).into()))
                 }
                 Literal::String(ref s) => match dialect {
                     Dialect::MySQL => display_string_literal(f, s),
@@ -450,12 +453,26 @@ impl Literal {
             | SqlType::Binary(_)
             | SqlType::VarBinary(_) => any::<Vec<u8>>().prop_map(Self::Blob).boxed(),
             SqlType::Float => any::<Float>().prop_map(Self::Float).boxed(),
-            SqlType::Double | SqlType::Real | SqlType::Decimal(_, _) => {
-                any::<Double>().prop_map(Self::Double).boxed()
-            }
-            SqlType::Numeric(_) => arbitrary_decimal()
-                .prop_map(|d| Self::Numeric(d.mantissa(), d.scale()))
+            SqlType::Double | SqlType::Real => any::<Double>().prop_map(Self::Double).boxed(),
+            SqlType::Decimal(prec, scale) => arbitrary_decimal(*prec as u16, *scale)
+                .prop_map(|d| {
+                    d.mantissa_and_scale()
+                        .map(|(mantissa, scale)| Self::Numeric(mantissa, scale as u32))
+                        .unwrap()
+                })
                 .boxed(),
+            SqlType::Numeric(prec_scale) => {
+                let (prec, scale) = prec_scale
+                    .map(|(p, s)| (p, s.unwrap_or(30)))
+                    .unwrap_or((65, 30));
+                arbitrary_decimal(prec, scale)
+                    .prop_map(|d| {
+                        d.mantissa_and_scale()
+                            .map(|(mantissa, scale)| Self::Numeric(mantissa, scale as u32))
+                            .unwrap()
+                    })
+                    .boxed()
+            }
             SqlType::Date => arbitrary_positive_naive_date()
                 .prop_map(|nd| Self::String(nd.format("%Y-%m-%d").to_string()))
                 .boxed(),

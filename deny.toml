@@ -132,24 +132,26 @@ deny = [
     #{ name = "ansi_term", version = "=0.11.0", wrappers = [] },
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
-skip = []
+skip = [
+    { name = "bit-vec", version = "0.6.3" },
+    { name = "uuid", version = "0.8.2" },
+]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    { name = "rusty-fork", version = "0.3.0" },
-    { name = "fail", version = "0.5.0" },
-    { name = "rust_decimal", version = "1.17.0" },
     { name = "consulrs", version = "0.1.0" },
+    { name = "fail", version = "0.5.0" },
     { name = "hashbrown", version = "0.12.3" },
-    { name = "unicode-width", version = "0.1.14" },
-    { name = "web-time", version = "0.2.4" },
+    { name = "hermit-abi", version = "0.3.9" },
     { name = "itertools", version = "0.10.5" },
     { name = "itertools", version = "0.12.1" },
-    { name = "winnow", version = "0.6.26" },
     { name = "regex-automata", version = "0.1.10" },
-    { name = "hermit-abi", version = "0.3.9" },
+    { name = "rusty-fork", version = "0.3.0" },
+    { name = "unicode-width", version = "0.1.14" },
+    { name = "web-time", version = "0.2.4" },
+    { name = "winnow", version = "0.6.26" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
@@ -166,9 +168,7 @@ unknown-git = "warn"
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
-allow-git = [
-    "git+https://github.com/apache/datafusion-sqlparser-rs",
-]
+allow-git = ["git+https://github.com/apache/datafusion-sqlparser-rs"]
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for

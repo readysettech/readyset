@@ -13,8 +13,8 @@ use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng, RngCore};
 use rand_distr::Zipf;
 use readyset_data::{encoding::Encoding, DfType, DfValue, Dialect};
+use readyset_decimal::Decimal;
 use readyset_sql::ast::SqlType;
-use rust_decimal::Decimal;
 
 mod distribution_annotation;
 
@@ -756,11 +756,13 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         SqlType::MediumIntUnsigned(_) => (idx).into(),
         SqlType::Float | SqlType::Double => (1.5 + idx as f64).try_into().unwrap(),
         SqlType::Real => (1.5 + idx as f32).try_into().unwrap(),
-        SqlType::Decimal(prec, scale) => Decimal::new(clamp_digits(*prec as _), *scale as _).into(),
+        SqlType::Decimal(prec, scale) => {
+            Decimal::new(clamp_digits(*prec as _) as _, *scale as _).into()
+        }
         SqlType::Numeric(prec_scale) => match prec_scale {
-            Some((prec, None)) => Decimal::new(clamp_digits(*prec as _), 1),
-            Some((prec, Some(scale))) => Decimal::new(clamp_digits(*prec as _), *scale as _),
-            None => Decimal::new((15 + idx) as i64, 2),
+            Some((prec, None)) => Decimal::new(clamp_digits(*prec as _) as _, 1),
+            Some((prec, Some(scale))) => Decimal::new(clamp_digits(*prec as _) as _, *scale as _),
+            None => Decimal::new((15 + idx) as _, 2),
         }
         .into(),
         SqlType::DateTime(_) | SqlType::Timestamp => (NaiveDate::from_ymd_opt(2020, 1, 1)

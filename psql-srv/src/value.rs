@@ -6,8 +6,7 @@ use cidr::IpInet;
 use eui48::MacAddress;
 use postgres_types::{FromSql, Kind, Type};
 use readyset_data::{Array, PassThroughFormat, Text, TinyText};
-use readyset_util::NUMERIC_MAX_SCALE;
-use rust_decimal::Decimal;
+use readyset_decimal::Decimal;
 use uuid::Uuid;
 
 /// A PostgreSQL data value that can be received from, or sent to, a PostgreSQL frontend.
@@ -77,22 +76,7 @@ impl<'a> FromSql<'a> for PsqlValue {
                 | Type::REGTYPE => u32::from_sql(ty, raw).map(PsqlValue::Oid),
                 Type::FLOAT8 => f64::from_sql(ty, raw).map(PsqlValue::Double),
                 Type::FLOAT4 => f32::from_sql(ty, raw).map(PsqlValue::Float),
-                Type::NUMERIC => {
-                    // rust-decimal has a bug whereby it will successfully deserialize from the
-                    // Postgres binary format NUMERIC values with scales in [0, 255], but it will
-                    // panic when serializing them to bincode if they are outside [0, 28].
-                    let d = Decimal::from_sql(ty, raw)?;
-                    if d.scale() > NUMERIC_MAX_SCALE as u32 {
-                        Err(format!(
-                            "Unsupported scale {} on NUMERIC value - \
-                             max supported by ReadySet is {NUMERIC_MAX_SCALE}",
-                            d.scale(),
-                        )
-                        .into())
-                    } else {
-                        Ok(PsqlValue::Numeric(d))
-                    }
-                }
+                Type::NUMERIC => Decimal::from_sql(ty, raw).map(PsqlValue::Numeric),
                 Type::TEXT => <&str>::from_sql(ty, raw).map(|s| PsqlValue::Text(s.into())),
                 Type::TIMESTAMP => NaiveDateTime::from_sql(ty, raw).map(PsqlValue::Timestamp),
                 Type::TIMESTAMPTZ => <chrono::DateTime<chrono::FixedOffset>>::from_sql(ty, raw)

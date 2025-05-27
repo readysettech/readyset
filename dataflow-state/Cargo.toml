@@ -42,16 +42,13 @@ readyset-util = { path = "../readyset-util" }
 replication-offset = { path = "../replication-offset" }
 
 [dev-dependencies]
-proptest-stateful = { path = "../proptest-stateful" }
 async-trait = { workspace = true }
-pretty_assertions = { workspace = true }
-lazy_static = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
-rust_decimal = { workspace = true, features = [
-    "db-tokio-postgres",
-    "serde-str",
-] }
+lazy_static = { workspace = true }
+pretty_assertions = { workspace = true }
 test-utils = { path = "../test-utils" }
+proptest-stateful = { path = "../proptest-stateful" }
+readyset-decimal = { path = "../readyset-decimal" }
 
 [[bench]]
 name = "persistent_state"
