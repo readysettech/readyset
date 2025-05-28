@@ -427,6 +427,10 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
         }
     }
 
+    fn from_sql_null(_: &pgsql::types::Type) -> Result<Self, Box<dyn Error + Sync + Send>> {
+        Ok(Value::Null)
+    }
+
     fn accepts(ty: &pgsql::types::Type) -> bool {
         use pgsql::types::Type;
 
@@ -444,6 +448,7 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             | Type::TIMESTAMP
             | Type::TIMESTAMPTZ
             | Type::TIME
+            | Type::TS_VECTOR
             | Type::BIT
             | Type::VARBIT => true,
             ref ty if ty.name() == "citext" => true,
