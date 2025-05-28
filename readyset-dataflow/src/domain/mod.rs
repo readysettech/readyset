@@ -3831,15 +3831,16 @@ impl Domain {
         // While there are still misses, we iterate over the array, each time draining it from
         // elements that can be batched into a single call to `on_replay_misses`
         while let Some(next_replay) = need_replay.first().cloned() {
-            let mut misses = HashSet::new();
-            need_replay.retain(|rep| {
-                if next_replay.can_combine(rep) {
-                    misses.insert((rep.replay_key.clone(), rep.lookup_key.clone()));
-                    false
-                } else {
-                    true
-                }
-            });
+            let misses: HashSet<_> = need_replay
+                .extract_if(.., |rep| next_replay.can_combine(rep))
+                .map(
+                    |ReplayDescriptor {
+                         lookup_key,
+                         replay_key,
+                         ..
+                     }| (replay_key, lookup_key),
+                )
+                .collect();
 
             trace!(%tag, ?misses, on = %next_replay.idx, "missed during replay processing");
 
