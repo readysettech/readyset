@@ -213,6 +213,13 @@ pub enum DfType {
     /// This "postgis"-specific type is meant to distinguish it from the native `point` type in
     /// PostgreSQL.
     PostgisPoint,
+
+    /// [PostgreSQL `tsvector`](https://www.postgresql.org/docs/current/datatype-textsearch.html).
+    ///
+    /// We do not currently support the data in upstream `tsvector` columns, nor do we
+    /// support `tsquery` operations over that data. Note that we replicate the column,
+    /// but discard the data (as we have no need for it, and users shouldn't directly select it, either).
+    Tsvector,
 }
 
 /// Defaults.
@@ -328,6 +335,7 @@ impl DfType {
             Citext => Self::Text(Collation::Citext),
             Point => Self::Point,
             PostgisPoint => Self::PostgisPoint,
+            Tsvector => Self::Tsvector,
             Other(ref id) => resolve_custom_type(id.clone()).ok_or_else(|| {
                 let id_upper = format!("{}", id.display_unquoted()).to_uppercase();
                 unsupported_err!("Unsupported type: {}", id_upper)
@@ -384,6 +392,7 @@ impl DfType {
             | DfType::Timestamp { .. }
             | DfType::TimestampTz { .. } => PgTypeCategory::DateTime,
             DfType::MacAddr | DfType::Inet => PgTypeCategory::NetworkAddress,
+            DfType::Tsvector => PgTypeCategory::UserDefined,
             DfType::Uuid
             | DfType::Enum { .. }
             | DfType::Json
@@ -836,6 +845,7 @@ impl fmt::Display for DfType {
             Self::Numeric { prec, scale } => write!(f, "{kind:?}({prec}, {scale})"),
             Self::Point => write!(f, "Point"),
             Self::PostgisPoint => write!(f, "Postgis Geometry(Point)"),
+            Self::Tsvector => write!(f, "TSVECTOR"),
         }
     }
 }

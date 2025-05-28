@@ -482,6 +482,7 @@ fn type_identifier_part3(
                 )),
                 |_| SqlType::PostgisPoint,
             ),
+            map(tag_no_case("tsvector"), |_| SqlType::Tsvector),
             map(other_type(dialect), SqlType::Other),
         ))(i)
     }
@@ -1051,6 +1052,12 @@ mod tests {
                     name: "mediumint".into()
                 })
             );
+        }
+
+        #[test]
+        fn tsvector_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"tsvector");
+            assert_eq!(res, SqlType::Tsvector);
         }
     }
 }

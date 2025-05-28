@@ -2579,7 +2579,8 @@ mod arbitrary {
             | Some(DfType::Inet)
             | Some(DfType::Row)
             | Some(DfType::Point)
-            | Some(DfType::PostgisPoint) => Just(DfValue::None).boxed(),
+            | Some(DfType::PostgisPoint)
+            | Some(DfType::Tsvector) => Just(DfValue::None).boxed(),
         }
     }
 }

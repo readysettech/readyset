@@ -114,6 +114,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         // postgres built-in point type not supported, but postgis point is supported
         DfType::Point => unsupported_type!(),
         DfType::PostgisPoint => Ok(Type::BYTEA),
+        DfType::Tsvector => Ok(Type::TS_VECTOR),
         DfType::Array(elem) => {
             match elem.as_ref() {
                 DfType::Unknown => {
@@ -186,6 +187,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                 // postgres built-in point type not supported, but postgis point is supported
                 DfType::Point => unsupported_type!(),
                 DfType::PostgisPoint => Ok(Type::BYTEA_ARRAY),
+                DfType::Tsvector => Ok(Type::TS_VECTOR_ARRAY),
             }
         }
         DfType::Row => Ok(Type::RECORD),

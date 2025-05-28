@@ -318,7 +318,9 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
         SqlType::Signed | SqlType::Unsigned | SqlType::UnsignedInteger | SqlType::SignedInteger => {
             unimplemented!("This type is only valid in `CAST` and can't be used as a Column Def")
         }
-        SqlType::Point | SqlType::PostgisPoint => unimplemented!("Points aren't implemented yet"),
+        SqlType::Point => unimplemented!("Points aren't implemented yet"),
+        SqlType::PostgisPoint => unimplemented!("Postgis point isn't supported for mysql"),
+        SqlType::Tsvector => unimplemented!("Tsvector isn't supported for mysql"),
     }
 }
 

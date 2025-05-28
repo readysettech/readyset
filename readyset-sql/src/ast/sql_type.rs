@@ -116,6 +116,7 @@ pub enum SqlType {
     Array(Box<SqlType>),
     Point,
     PostgisPoint,
+    Tsvector,
 
     /// Any other named type
     Other(Relation),
@@ -673,6 +674,7 @@ impl DialectDisplay for SqlType {
                 SqlType::UnsignedInteger => write!(f, "UNSIGNED INTEGER"),
                 SqlType::Point => write!(f, "POINT"),
                 SqlType::PostgisPoint => write!(f, "GEOMETRY(POINT)"),
+                SqlType::Tsvector => write!(f, "TSVECTOR"),
             }
         })
     }

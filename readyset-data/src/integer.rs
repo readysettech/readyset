@@ -207,7 +207,8 @@ where
         | DfType::Array(_)
         | DfType::Row
         | DfType::Point
-        | DfType::PostgisPoint => Err(ReadySetError::DfValueConversionError {
+        | DfType::PostgisPoint
+        | DfType::Tsvector => Err(ReadySetError::DfValueConversionError {
             src_type: from_ty.to_string(),
             target_type: to_ty.to_string(),
             details: "Not allowed".to_string(),
