@@ -2205,6 +2205,8 @@ impl<'a> FromSql<'a> for DfValue {
                     Ok(DfValue::from(out))
                 }
                 Type::BIT | Type::VARBIT => mk_from_sql!(BitVec),
+                // we intentionally throw away the tsvector data.
+                Type::TS_VECTOR => Ok(DfValue::None),
                 ref ty if ty.name() == "citext" => Ok(DfValue::from_str_and_collation(
                     <&str>::from_sql(ty, raw)?,
                     Collation::Citext,

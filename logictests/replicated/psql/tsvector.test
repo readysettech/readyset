@@ -1,0 +1,28 @@
+statement ok
+create table documents (id int primary key, content_vector tsvector);
+
+statement ok
+insert into documents values
+  (1, to_tsvector('english', 'The quick brown fox jumps over the lazy dog'));
+
+sleep 1000
+
+query T nosort
+select content_vector from documents where id = 1
+----
+NULL
+
+statement ok
+update documents values set content_vector = to_tsvector('english', 'A fast white rabbit jumps over the fence') where id = 1;
+
+sleep 1000
+
+query T nosort
+select content_vector from documents where id = 1
+----
+NULL
+
+
+
+
+

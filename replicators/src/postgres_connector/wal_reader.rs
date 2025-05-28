@@ -627,6 +627,7 @@ impl wal::TupleData {
                                     PGType::UUID => DfType::Uuid,
                                     PGType::BIT => DfType::DEFAULT_BIT,
                                     PGType::VARBIT => DfType::VarBit(None),
+                                    PGType::TS_VECTOR => DfType::Tsvector,
                                     ref ty => {
                                         trace!("got unsupported type '{}'", ty.to_string());
                                         return Err(unsupported_type_err());
@@ -847,6 +848,8 @@ impl wal::TupleData {
                                     }
                                     DfValue::from(bits)
                                 }
+                                // we intentionally throw away the tsvector data.
+                                PGType::TS_VECTOR => DfValue::None,
                                 _ => return Err(unsupported_type_err()),
                             },
                         }
