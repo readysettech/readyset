@@ -170,12 +170,11 @@ impl DialectDisplay for TableExprInner {
     }
 }
 
-/// An expression for a table in the `FROM` clause of a query, with optional alias and index hint
+/// An expression for a table in the `FROM` clause of a query, with optional alias
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
 pub struct TableExpr {
     pub inner: TableExprInner,
     pub alias: Option<SqlIdentifier>,
-    pub index_hint: Option<IndexHint>,
 }
 
 /// Constructs a [`TableExpr`] with no alias
@@ -184,7 +183,6 @@ impl From<Relation> for TableExpr {
         Self {
             inner: TableExprInner::Table(table),
             alias: None,
-            index_hint: None,
         }
     }
 }
@@ -198,7 +196,6 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
             sqlparser::ast::TableFactor::Table { name, alias, .. } => Ok(Self {
                 inner: TableExprInner::Table(name.into_dialect(dialect)),
                 alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)), // XXX we don't support [`TableAlias::columns`]
-                index_hint: None, // TODO(mvzink): Find where this is parsed in sqlparser
             }),
             sqlparser::ast::TableFactor::Derived {
                 subquery,
@@ -211,7 +208,6 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
                     Ok(Self {
                         inner: TableExprInner::Subquery(Box::new(subselect)),
                         alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)), // XXX we don't support [`TableAlias::columns`]
-                        index_hint: None, // TODO(mvzink): Find where this is parsed in sqlparser
                     })
                 } else {
                     failed!("unexpected non-SELECT subquery in table expression")

@@ -63,16 +63,7 @@ pub fn table_expr(
         let (i, inner) = table_expr_inner(dialect)(i)?;
         let (i, alias) = opt(as_alias(dialect))(i)?;
         let (i, _) = opt(index_hint_list(dialect))(i)?;
-        Ok((
-            i,
-            TableExpr {
-                inner,
-                alias,
-                // We don't actually care about the index list.
-                // Just parse it and always return an empty object.
-                index_hint: None,
-            },
-        ))
+        Ok((i, TableExpr { inner, alias }))
     }
 }
 
