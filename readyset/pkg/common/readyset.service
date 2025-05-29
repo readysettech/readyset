@@ -1,5 +1,5 @@
 [Unit]
-Description=ReadySet standalone daemon
+Description=Readyset standalone daemon
 AssertPathExists=/usr/bin/readyset
 After=network.target
 
