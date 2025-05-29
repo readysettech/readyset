@@ -1,5 +1,5 @@
 use nom::branch::alt;
-use nom::bytes::complete::tag;
+use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::terminated;
@@ -33,11 +33,14 @@ fn subquery(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SelectStatement> {
     move |i| {
+        let (i, lateral) = opt(terminated(tag_no_case("lateral"), whitespace0))(i)?;
         let (i, _) = tag("(")(i)?;
         let (i, _) = whitespace0(i)?;
-        let (i, stmt) = nested_selection(dialect, false)(i)?;
+        let (i, mut stmt) = nested_selection(dialect, false)(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag(")")(i)?;
+
+        stmt.lateral = lateral.is_some();
 
         Ok((i, stmt))
     }
@@ -48,10 +51,10 @@ fn table_expr_inner(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TableExprInner> {
     move |i| {
         alt((
-            map(relation(dialect), TableExprInner::Table),
             map(subquery(dialect), |sq| {
                 TableExprInner::Subquery(Box::new(sq))
             }),
+            map(relation(dialect), TableExprInner::Table),
         ))(i)
     }
 }

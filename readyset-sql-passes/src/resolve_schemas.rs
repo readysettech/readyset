@@ -2,16 +2,16 @@
 //!
 //! See [`ResolveSchemas::resolve_schemas`] for more information.
 
-use std::collections::{HashMap, HashSet};
-
+use crate::CanQuery;
+use itertools::Either;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
-    CreateTableStatement, JoinClause, JoinRightSide, Relation, SelectStatement, SqlIdentifier,
-    SqlType,
+    CreateTableStatement, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlType,
+    TableExpr, TableExprInner,
 };
-
-use crate::CanQuery;
+use std::collections::{HashMap, HashSet};
+use std::iter;
 
 struct ResolveSchemaVisitor<'schema> {
     /// Map from schema name to the set of table names in that schema
@@ -73,28 +73,34 @@ impl ResolveSchemaVisitor<'_> {
         Ok(())
     }
 
-    /// Visit a join clause with an extra set of aliases which should be available for the `ON`
-    /// condition but *not* for the table factor or subquery. We take ownership of it and return it
-    /// at the end to avoid cloning it in the loop in `visit_select_statement`.
-    fn visit_join_clause_with_extra_aliases(
+    /// Visit FROM items defined via iterator, with the preceding `from_aliases` available only
+    /// for `lateral` subqueries, accumulating `from_aliases` as we are iterating over the items.
+    fn visit_from_items_with_from_aliases<'a>(
         &mut self,
-        join: &mut JoinClause,
-        extra_aliases: HashSet<SqlIdentifier>,
+        it: impl Iterator<Item = &'a mut TableExpr>,
+        mut from_aliases: HashSet<SqlIdentifier>,
     ) -> Result<HashSet<SqlIdentifier>, ReadySetError> {
-        match &mut join.right {
-            JoinRightSide::Table(table_expr) => self.visit_table_expr(table_expr)?,
-            JoinRightSide::Tables(table_exprs) => {
-                for table_expr in table_exprs {
-                    self.visit_table_expr(table_expr)?;
-                }
+        for from_item in it {
+            if matches!(from_item, TableExpr { inner : TableExprInner::Subquery(sq), .. } if sq.as_ref().lateral)
+            {
+                self.alias_stack.push(from_aliases);
+                self.visit_table_expr(from_item)?;
+                from_aliases = self
+                    .alias_stack
+                    .pop()
+                    .ok_or_else(Self::stack_underflow_error)?;
+            } else {
+                self.visit_table_expr(from_item)?;
+            }
+            if let Some(alias) = &from_item.alias {
+                from_aliases.insert(alias.clone());
             }
         }
+        Ok(from_aliases)
+    }
 
-        self.alias_stack.push(extra_aliases);
-        self.visit_join_constraint(&mut join.constraint)?;
-        self.alias_stack
-            .pop()
-            .ok_or_else(|| ReadySetError::Internal("Alias stack underflow".to_string()))
+    fn stack_underflow_error() -> ReadySetError {
+        ReadySetError::Internal("Stack underflow".to_string())
     }
 }
 
@@ -136,32 +142,50 @@ impl<'ast> VisitorMut<'ast> for ResolveSchemaVisitor<'_> {
                 .collect(),
         );
 
-        for table_expr in &mut select_statement.tables {
-            self.visit_table_expr(table_expr)?;
-        }
+        // The `from_aliases` set will accumulate aliases on `FROM` items
+        // (joined tables or subqueries).
+        //
+        // They should be available:
+        // - In the field list
+        // - In `WHERE` conditions
+        // - In subqueries within those clauses
+        // - Inside `LATERAL` joined subqueries (in left-to-right order)
+        // - In all top-level `JOIN ON` conditions
+        //
+        // But they should NOT be available:
+        // - Inside non-`LATERAL` joined subqueries
+        // - In CTES (already handled above)
+        //
+        // To accomplish this, `visit_from_items_with_from_aliases` processes
+        // all `FROM` items left-to-right, and conditionally adds this set of
+        // aliases to the alias stack for `LATERAL` subqueries but not for other
+        // types of `FROM` items. Each `FROM` item with an alias also adds that
+        // alias to `from_aliases`. After processing all `FROM` items, these
+        // aliases are subsequently available everywhere for the remainder of
+        // this visitation.
+        let mut from_aliases: HashSet<SqlIdentifier> = HashSet::new();
 
-        // These aliases will be available in `JOIN ON` conditions, the field list, `WHERE`
-        // conditions, and subqueries within those clauses. They will not be available in CTEs, the
-        // table list, or table expressions in `JOIN` clauses (specifically, subqueries in the table
-        // factors themselves, and CTE definitions, should not see these aliases).
-        let mut pending_aliases: HashSet<_> = select_statement
-            .tables
-            .iter()
-            .chain(
-                select_statement
-                    .join
-                    .iter()
-                    .flat_map(|j| j.right.table_exprs()),
-            )
-            .filter_map(|te| te.alias.clone())
-            .collect();
+        from_aliases = self
+            .visit_from_items_with_from_aliases(select_statement.tables.iter_mut(), from_aliases)?;
 
         for join in &mut select_statement.join {
-            pending_aliases = self.visit_join_clause_with_extra_aliases(join, pending_aliases)?;
+            from_aliases = self.visit_from_items_with_from_aliases(
+                match &mut join.right {
+                    JoinRightSide::Table(table) => Either::Left(iter::once(table)),
+                    JoinRightSide::Tables(tables) => Either::Right(tables.iter_mut()),
+                },
+                from_aliases,
+            )?;
+            self.alias_stack.push(from_aliases);
+            self.visit_join_constraint(&mut join.constraint)?;
+            from_aliases = self
+                .alias_stack
+                .pop()
+                .ok_or_else(Self::stack_underflow_error)?;
         }
 
-        // Now the pending aliases are available to subqueries
-        self.alias_stack.last_mut().unwrap().extend(pending_aliases);
+        // Now the lateral aliases are available to subqueries
+        self.alias_stack.last_mut().unwrap().extend(from_aliases);
 
         for field in &mut select_statement.fields {
             self.visit_field_definition_expr(field)?;
@@ -272,7 +296,6 @@ impl ResolveSchemas for SelectStatement {
             invalidating_tables,
         }
         .visit_select_statement(&mut self)?;
-
         Ok(self)
     }
 }
@@ -576,11 +599,48 @@ mod tests {
         );
     }
     #[test]
-
     fn resolves_join_subquery_referencing_outer_aliased_table() {
         select_rewrites_to(
             "SELECT * FROM t1 AS t2 JOIN (SELECT t2.id FROM t2) AS foo",
             "SELECT * FROM s1.t1 AS t2 JOIN (SELECT s1.t2.id FROM s1.t2) AS foo",
+        );
+    }
+
+    #[test]
+    fn resolves_lateral_subquery_referencing_preceding_lateral_subquery() {
+        select_rewrites_to(
+            "SELECT * from t1 AS foo,
+                LATERAL (SELECT * FROM t1 WHERE foo.id = t1.id) AS t1,
+                LATERAL (SELECT * FROM t1 WHERE t1.id = s2.t1.id) AS bar",
+            "SELECT * from s1.t1 AS foo,
+                LATERAL (SELECT * FROM s1.t1 WHERE foo.id = s1.t1.id) AS t1,
+                LATERAL (SELECT * FROM t1 WHERE t1.id = s2.t1.id) AS bar",
+        );
+    }
+
+    #[test]
+    fn does_not_resolve_nonlateral_subquery_referencing_preceding_lateral_subquery() {
+        select_rewrites_to(
+            "SELECT * from t1 AS foo,
+                LATERAL (SELECT * FROM t1 WHERE foo.id = t1.id) AS t1,
+                (SELECT * FROM t1 WHERE t1.id = s2.t1.id) AS bar",
+            "SELECT * from s1.t1 AS foo,
+                LATERAL (SELECT * FROM s1.t1 WHERE foo.id = s1.t1.id) AS t1,
+                (SELECT * FROM s1.t1 WHERE s1.t1.id = s2.t1.id) AS bar",
+        );
+    }
+
+    #[test]
+    fn does_not_resolve_join_condition_referencing_subsequent_join() {
+        select_rewrites_to(
+            "SELECT t1.id, t2.id, foo.id, bar.id FROM t1 AS foo
+                JOIN t2 AS bar ON bar.id = t1.id AND bar.id = foo.id
+                JOIN (SELECT * FROM t1 WHERE foo.id = t1.id) AS t1
+                WHERE bar.id = t1.id AND t1.id = foo.id",
+            "SELECT t1.id, s1.t2.id, foo.id, bar.id FROM s1.t1 AS foo
+                JOIN s1.t2 AS bar ON bar.id = s1.t1.id AND bar.id = foo.id
+                JOIN (SELECT * FROM s1.t1 WHERE foo.id = s1.t1.id) AS t1
+                WHERE bar.id = t1.id AND t1.id = foo.id",
         );
     }
 }

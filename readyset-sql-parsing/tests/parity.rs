@@ -58,6 +58,31 @@ fn complex_join_parsing() {
 }
 
 #[test]
+fn lateral_join_parsing() {
+    check_parse_both!("
+            SELECT u.name, o.order_date
+            FROM users u, LATERAL (SELECT o.order_date, o.status from orders o WHERE o.user_id = u.id) o
+            WHERE o.status = 'completed'
+            ORDER BY o.order_date DESC;
+        ");
+
+    check_parse_both!(
+        "
+            SELECT u.name, o.order_date
+            FROM users u,
+            LATERAL (SELECT o.order_date, o.status from orders o join
+                        lateral (select u.name from users u where u.id = o.user_id) u1 on o.status = u.name
+                     WHERE o.user_id = u.id) o join
+            LATERAL (SELECT o.status from orders o,
+                        lateral (select u.id from users u where u.id = o.user_id) u1
+                     WHERE o.user_id = u1.id) o1 on o.status = o1.status
+            WHERE o.status = 'completed'
+            ORDER BY o.order_date DESC;
+        "
+    );
+}
+
+#[test]
 fn cast_with_mysql_integer_types() {
     check_parse_mysql!("SELECT CAST(123 AS SIGNED);");
     check_parse_mysql!("SELECT CAST(123 AS SIGNED INTEGER);");

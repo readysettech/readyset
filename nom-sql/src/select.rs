@@ -319,6 +319,7 @@ pub fn nested_selection(
             join,
             ctes,
             distinct,
+            lateral: false,
             fields,
             where_clause,
             group_by,

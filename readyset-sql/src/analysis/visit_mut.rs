@@ -1461,6 +1461,7 @@ mod tests {
         let query = SqlQuery::Select(SelectStatement {
             ctes: vec![],
             distinct: false,
+            lateral: false,
             fields: vec![FieldDefinitionExpr::Expr {
                 expr: Expr::Column(Column {
                     name: "id".into(),
@@ -1485,6 +1486,7 @@ mod tests {
         let query = SqlQuery::Select(SelectStatement {
             ctes: vec![],
             distinct: false,
+            lateral: false,
             fields: vec![FieldDefinitionExpr::Expr {
                 expr: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(Column {
@@ -1516,6 +1518,7 @@ mod tests {
         let query = SqlQuery::Select(SelectStatement {
             ctes: vec![],
             distinct: false,
+            lateral: false,
             fields: vec![
                 FieldDefinitionExpr::Expr {
                     expr: Expr::Column(Column {
@@ -1545,6 +1548,7 @@ mod tests {
                     inner: TableExprInner::Subquery(Box::new(SelectStatement {
                         ctes: vec![],
                         distinct: false,
+                        lateral: false,
                         fields: vec![FieldDefinitionExpr::Expr {
                             expr: Expr::Column(Column {
                                 name: "id".into(),
@@ -1591,6 +1595,7 @@ mod tests {
         let query = SqlQuery::Select(SelectStatement {
             ctes: vec![],
             distinct: false,
+            lateral: false,
             fields: vec![FieldDefinitionExpr::Expr {
                 expr: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(Column {
@@ -1626,6 +1631,7 @@ mod tests {
         let query = SqlQuery::Select(SelectStatement {
             ctes: vec![],
             distinct: false,
+            lateral: false,
             fields: vec![FieldDefinitionExpr::Expr {
                 expr: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(Column {
@@ -1661,6 +1667,7 @@ mod tests {
         let query = SqlQuery::Select(SelectStatement {
             ctes: vec![],
             distinct: false,
+            lateral: false,
             fields: vec![FieldDefinitionExpr::Expr {
                 expr: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(Column {

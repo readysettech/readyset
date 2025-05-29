@@ -175,7 +175,12 @@ impl DialectDisplay for TableExprInner {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             TableExprInner::Table(t) => write!(f, "{}", t.display(dialect)),
-            TableExprInner::Subquery(sq) => write!(f, "({})", sq.display(dialect)),
+            TableExprInner::Subquery(sq) => write!(
+                f,
+                "{}({})",
+                if sq.lateral { "LATERAL " } else { "" },
+                sq.display(dialect)
+            ),
         })
     }
 }
@@ -210,10 +215,11 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
             sqlparser::ast::TableFactor::Derived {
                 subquery,
                 alias,
-                lateral: _lateral, // XXX We don't support this
+                lateral,
             } => {
                 match subquery.try_into_dialect(dialect)? {
-                    crate::ast::SqlQuery::Select(subselect) => {
+                    crate::ast::SqlQuery::Select(mut subselect) => {
+                        subselect.lateral = lateral;
                         Ok(Self {
                             inner: TableExprInner::Subquery(Box::new(subselect)),
                             alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)), // XXX we don't support [`TableAlias::columns`]

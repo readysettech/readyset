@@ -9,11 +9,13 @@ pub mod expr;
 mod implied_tables;
 mod inline_literals;
 mod key_def_coalescing;
+mod lateral_join;
 mod normalize_topk_with_aggregate;
 mod order_limit_removal;
 mod remove_numeric_field_references;
 mod resolve_schemas;
 mod rewrite_between;
+mod rewrite_utils;
 mod star_expansion;
 mod strip_literals;
 mod strip_post_filters;
@@ -38,6 +40,7 @@ pub use crate::expr::ScalarOptimizeExpressions;
 pub use crate::implied_tables::ImpliedTableExpansion;
 pub use crate::inline_literals::InlineLiterals;
 pub use crate::key_def_coalescing::KeyDefinitionCoalescing;
+use crate::lateral_join::RewriteLateralJoin;
 pub use crate::normalize_topk_with_aggregate::NormalizeTopKWithAggregate;
 pub use crate::order_limit_removal::OrderLimitRemoval;
 pub use crate::remove_numeric_field_references::RemoveNumericFieldReferences;
@@ -176,6 +179,7 @@ impl Rewrite for SelectStatement {
             )?
             .expand_stars(context.view_schemas, context.non_replicated_relations)?
             .expand_implied_tables(context.view_schemas)?
+            .rewrite_lateral_joins()?
             .normalize_topk_with_aggregate()?
             .detect_problematic_self_joins()?
             .remove_numeric_field_references()?

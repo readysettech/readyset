@@ -1,0 +1,93 @@
+# tests for readyset's support of LATERAL sub-queries
+
+statement ok
+create table lt (auth_id uuid, i int, b int, t text, dt date);
+
+statement ok
+insert into lt (auth_id, i, b, t, dt) values
+   ('1c75691c-b02b-4fde-a049-bd6848dbf0d4', 10, 11, 'aa', '2025-02-18'),
+   ('b7474fb5-007a-4d11-9a09-c062253189f1', 11, 10, 'aa', '2025-02-18'),
+   ('8757f95f-4cb7-437b-9688-d11e5c943b4d', 11, 11, 'ab', '2025-02-17'),
+   ('82abb461-3448-4a10-9ffa-eee8f4038582', 12, 11, 'bb', '2025-02-19');
+
+statement ok
+create table lt1 (auth_id uuid, i int, b int, t text, dt date);
+
+statement ok
+insert into lt1 (auth_id, i, b, t, dt) values
+   ('1c75691c-b02b-4fde-a049-bd6848dbf0d4', 10, 11, 'aa', '2025-02-18'),
+   ('b7474fb5-007a-4d11-9a09-c062253189f1', 11, 10, 'aa', '2025-02-18'),
+   ('8757f95f-4cb7-437b-9688-d11e5c943b4d', 11, 11, 'ab', '2025-02-17'),
+   ('82abb461-3448-4a10-9ffa-eee8f4038582', 12, 11, 'bb', '2025-02-19');
+
+statement ok
+create table lt2 (auth_id uuid, i int, b int, t text, dt date);
+
+statement ok
+insert into lt2 (auth_id, i, b, t, dt) values
+   ('1c75691c-b02b-4fde-a049-bd6848dbf0d4', 10, 11, 'aa', '2025-02-18'),
+   ('b7474fb5-007a-4d11-9a09-c062253189f1', 11, 10, 'aa', '2025-02-18'),
+   ('8757f95f-4cb7-437b-9688-d11e5c943b4d', 11, 11, 'ab', '2025-02-17'),
+   ('82abb461-3448-4a10-9ffa-eee8f4038582', 12, 11, 'bb', '2025-02-19');
+
+statement ok
+create table lt3 (auth_id uuid, i int, b int, t text, dt date);
+
+statement ok
+insert into lt3 (auth_id, i, b, t, dt) values
+   ('1c75691c-b02b-4fde-a049-bd6848dbf0d4', 10, 11, 'aa', '2025-02-18'),
+   ('b7474fb5-007a-4d11-9a09-c062253189f1', 11, 10, 'aa', '2025-02-18'),
+   ('8757f95f-4cb7-437b-9688-d11e5c943b4d', 11, 11, 'ab', '2025-02-17'),
+   ('82abb461-3448-4a10-9ffa-eee8f4038582', 12, 11, 'bb', '2025-02-19');
+
+query I rowsort
+select T1.i from lt1 T1, LATERAL(select T3.i, T3.b from lt2 T3 WHERE T3.b = T1.b) T2 WHERE T1.t = 'aa';
+----
+10
+10
+10
+11
+
+
+query I rowsort
+SELECT T1.b FROM lt1 T1, LATERAL(SELECT T11.i FROM lt2 T11 WHERE T1.b = T11.b AND T1.t = T11.t AND T11.dt = '2025-02-18') TT
+ WHERE T1.t = 'aa';
+----
+10
+11
+
+query I rowsort
+SELECT T1.b FROM lt1 T1, LATERAL (SELECT T11.i FROM lt2 T11 join (select T22.i a from lt3 T22
+ where T22.b = T1.b and T22.auth_id = T1.auth_id) T12 on T11.i = T12.a) T13 WHERE T1.t = 'aa';
+----
+10
+10
+11
+
+query I rowsort
+SELECT T1.b FROM lt1 T1, LATERAL(SELECT T11.i FROM lt2 T11 join (select T22.i a, T22.b d from lt3 T22
+ where T22.b = T1.b and T22.t = T1.t and T22.dt = '2025-02-18') T12 on T11.i = T12.a and (T11.b = 11 or T12.d = 11)) T13
+   WHERE T1.t = 'aa';
+----
+10
+11
+
+query I rowsort
+select T1.i from lt1 T1 left join LATERAL(select max(T3.i) i from lt3 T3 WHERE T3.b = T1.b group by T3.t) T2
+ on T1.i = T2.i WHERE T1.t = 'aa';
+----
+10
+11
+
+query I rowsort
+select T1.i from lt1 T1 left join LATERAL(select max(T3.i) i, T3.b bb from lt3 T3 WHERE T3.b = T1.b group by bb) T2
+ on T1.i = T2.i WHERE T1.t = 'aa';
+----
+10
+11
+
+query I rowsort
+select lt1.b from lt1 join LATERAL(select max(T3.i) i from lt3 T3 WHERE lt1.t = T3.t) T2 on TRUE WHERE lt1.t = 'aa';
+----
+10
+11

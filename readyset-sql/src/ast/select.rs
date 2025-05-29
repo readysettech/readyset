@@ -367,6 +367,7 @@ pub enum SelectMetadata {
 pub struct SelectStatement {
     pub ctes: Vec<CommonTableExpr>,
     pub distinct: bool,
+    pub lateral: bool,
     pub fields: Vec<FieldDefinitionExpr>,
     pub tables: Vec<TableExpr>,
     pub join: Vec<JoinClause>,
@@ -423,6 +424,7 @@ impl TryFromDialect<sqlparser::ast::Select> for SelectStatement {
         let join = join_clauses.into_iter().flatten().collect();
         Ok(SelectStatement {
             distinct: matches!(value.distinct, Some(sqlparser::ast::Distinct::Distinct)),
+            lateral: false,
             fields: value.projection.try_into_dialect(dialect)?,
             tables,
             join,
