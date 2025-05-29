@@ -119,7 +119,7 @@ async fn write_column<S: AsyncRead + AsyncWrite + Unpin>(
         ref dt @ (DfValue::Float(..) | DfValue::Double(..)) => match cs.coltype {
             mysql_srv::ColumnType::MYSQL_TYPE_DECIMAL
             | mysql_srv::ColumnType::MYSQL_TYPE_NEWDECIMAL => {
-                let f = dt.to_string();
+                let f = format!("{dt:.0$}", cs.decimals as usize);
                 rw.write_col(f)
             }
             mysql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
@@ -135,7 +135,7 @@ async fn write_column<S: AsyncRead + AsyncWrite + Unpin>(
         DfValue::Numeric(ref v) => match cs.coltype {
             mysql_srv::ColumnType::MYSQL_TYPE_DECIMAL
             | mysql_srv::ColumnType::MYSQL_TYPE_NEWDECIMAL => {
-                let f = v.to_string();
+                let f = format!("{v:.0$}", cs.decimals as usize);
                 rw.write_col(f)
             }
             mysql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {

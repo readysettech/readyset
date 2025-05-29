@@ -492,7 +492,7 @@ impl Verify {
                         } else {
                             error!(
                                 script_name = %script.name(),
-                                %err,
+                                ?err,
                                 "Script {} failed, but was expected to pass (maybe rename it to {}?)",
                                 passing_fname, failing_fname,
                             );

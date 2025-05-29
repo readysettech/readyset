@@ -453,7 +453,9 @@ impl TestScript {
                             let val = vals.next().ok_or_else(wrong_columns)?;
                             Ok(val
                                 .convert_type(col_type)
-                                .with_context(|| format!("Converting value to {col_type:?}"))?
+                                .with_context(|| {
+                                    format!("Converting value {val:?} to {col_type:?}")
+                                })?
                                 .into_owned())
                         })
                         .collect::<Result<_, _>>()?;
