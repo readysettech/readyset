@@ -1473,6 +1473,7 @@ mod tests {
     use chrono::NaiveTime;
     use chrono_tz::{Asia, Atlantic};
     use lazy_static::lazy_static;
+    use pretty_assertions::assert_eq;
     use readyset_errors::{internal, internal_err};
     use readyset_sql::Dialect::*;
     use readyset_sql_parsing::parse_expr;
@@ -2373,6 +2374,7 @@ mod tests {
     mod json {
         use super::*;
         use crate::utils::normalize_json;
+        use pretty_assertions::assert_eq;
 
         #[test]
         fn json_valid() {
@@ -2457,6 +2459,7 @@ mod tests {
 
         mod json_depth {
             use super::*;
+            use pretty_assertions::assert_eq;
 
             #[track_caller]
             fn test(json: &str, expected: usize) {
@@ -2631,6 +2634,7 @@ mod tests {
 
         mod json_overlaps {
             use super::*;
+            use pretty_assertions::assert_eq;
 
             #[track_caller]
             fn test_nullable(json1_expr: &str, json2_expr: &str, expected: Option<bool>) {
@@ -2720,6 +2724,7 @@ mod tests {
         mod json_object {
             use super::*;
             use crate::utils::{empty_array_expr, iter_to_array_expr};
+            use pretty_assertions::assert_eq;
 
             #[track_caller]
             fn test_nullable(
@@ -2894,6 +2899,7 @@ mod tests {
 
         mod jsonb_insert {
             use super::*;
+            use pretty_assertions::assert_eq;
 
             #[track_caller]
             fn test_nullable(
@@ -3023,6 +3029,7 @@ mod tests {
 
         mod jsonb_set {
             use super::*;
+            use pretty_assertions::assert_eq;
 
             #[track_caller]
             fn test_nullable(
@@ -3208,6 +3215,7 @@ mod tests {
         mod jsonb_set_lax {
             use super::*;
             use crate::eval::json::NullValueTreatment;
+            use pretty_assertions::assert_eq;
 
             #[track_caller]
             fn test_nullable(

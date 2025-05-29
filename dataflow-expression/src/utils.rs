@@ -182,6 +182,8 @@ mod tests {
     use super::*;
 
     mod index_bidirectional {
+        use pretty_assertions::assert_eq;
+
         use super::*;
 
         /// Ensures correct bounds checking.
@@ -216,6 +218,8 @@ mod tests {
     }
 
     mod insert_bidirectional {
+        use pretty_assertions::assert_eq;
+
         use super::*;
 
         #[proptest]

@@ -258,6 +258,7 @@ impl Point {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     // Helper function shared between MySQL and PostgreSQL tests
@@ -267,6 +268,7 @@ mod tests {
     }
 
     mod mysql {
+
         use super::*;
 
         fn make_point_bytes(
@@ -336,6 +338,8 @@ mod tests {
     }
 
     mod postgres {
+        use pretty_assertions::assert_eq;
+
         use super::*;
 
         fn make_point_bytes(srid: Option<u32>, x: f64, y: f64, little_endian: bool) -> Vec<u8> {

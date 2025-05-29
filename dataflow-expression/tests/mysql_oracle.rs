@@ -2,6 +2,7 @@ use std::env;
 
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, Opts, OptsBuilder, Row};
+use pretty_assertions::assert_eq;
 use readyset_data::{DfType, DfValue};
 use readyset_sql_parsing::parse_sql_type;
 use test_utils::tags;

@@ -730,6 +730,7 @@ mod tests {
     use super::*;
 
     mod json_quote {
+        use pretty_assertions::assert_eq;
         use test_strategy::proptest;
 
         use super::*;

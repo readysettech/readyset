@@ -1536,6 +1536,7 @@ impl Expr {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use pretty_assertions::assert_eq;
     use readyset_data::{Collation, PgEnumMetadata};
     use readyset_sql::ast::{BinaryOperator as AstBinaryOperator, Float, Literal};
     use readyset_sql::Dialect as ParserDialect;
@@ -2207,6 +2208,8 @@ pub(crate) mod tests {
     }
 
     mod binary_operator {
+        use pretty_assertions::assert_eq;
+
         use super::*;
 
         #[test]
@@ -2224,6 +2227,8 @@ pub(crate) mod tests {
         }
 
         mod output_type {
+            use pretty_assertions::assert_eq;
+
             use super::*;
 
             #[track_caller]

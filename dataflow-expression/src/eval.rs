@@ -374,6 +374,7 @@ impl Expr {
 #[cfg(test)]
 mod tests {
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+    use pretty_assertions::assert_eq;
     use readyset_data::{ArrayD, Collation, DfType, Dialect, IxDyn, PgEnumMetadata};
     use readyset_errors::internal;
     use readyset_sql::Dialect::*;
@@ -1355,6 +1356,8 @@ mod tests {
 
     /// Tests evaluation of `JsonContains` and `JsonContainedIn` binary ops.
     mod json_contains {
+        use pretty_assertions::assert_eq;
+
         use super::*;
 
         #[track_caller]

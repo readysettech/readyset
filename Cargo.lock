@@ -1211,6 +1211,7 @@ dependencies = [
  "nom-sql",
  "partial-map",
  "postgres",
+ "pretty_assertions",
  "proptest",
  "readyset-data",
  "readyset-errors",

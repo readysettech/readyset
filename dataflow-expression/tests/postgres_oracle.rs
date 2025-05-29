@@ -5,6 +5,7 @@ use std::sync::Arc;
 use chrono::{DateTime, FixedOffset};
 use dataflow_expression::DateTruncPrecision;
 use postgres::{Client, Config, NoTls};
+use pretty_assertions::assert_eq;
 use proptest::prelude::*;
 use readyset_data::DfValue;
 use readyset_sql::ast::TimestampField;
@@ -232,6 +233,7 @@ fn date_trunc_timestamp_upcast_no_opt_tz() {
 
 mod extract {
     use bytes::BytesMut;
+    use pretty_assertions::assert_eq;
     use readyset_util::arbitrary::{
         arbitrary_date_time_with_nanos, arbitrary_naive_date, arbitrary_naive_date_time_with_nanos,
         arbitrary_naive_time,
