@@ -122,7 +122,7 @@ steps:
     agents:
       queue: c6a-4xlarge
     retry: *retry_on_agent_kill
-    
+
   - label: ':rust: Run tests (nextest, mysql80 upstream, MRBR on)'
     key: rust-tests-mrbr
     command: |
@@ -161,7 +161,7 @@ steps:
     agents:
       queue: c6a-4xlarge
     retry: *retry_on_agent_kill
-    
+
   - label: ':rust: Run doctests :books:'
     key: rust-dectests
     command: |
