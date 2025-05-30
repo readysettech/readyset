@@ -13,6 +13,7 @@ common_values:
 env:
   ECR_PLUGIN_VERSION: "v2.9.0"
   DOCKER_PLUGIN_VERSION: "v5.12.0"
+  DOCKER_LOGIN_PLUGIN_VERSION: "v2.1.0"
   DOCKER_COMPOSE_PLUGIN_VERSION: "v5.5.0"
   BUILDKIT_PROGRESS: "plain"
 
@@ -206,14 +207,14 @@ steps:
     command:
       - 'echo +++ Running readyset-logictest'
       - '[ -d public ] && cd public'
-      - export RUST_BACKTRACE=full
-      - export AUTHORITY=standalone
-      - cargo --locked run --bin readyset-logictest -- verify logictests
-      - cargo --locked run --bin readyset-logictest -- verify logictests/psql --database-type postgresql
-      - cargo --locked run --bin readyset-logictest -- verify logictests/mysql --database-type mysql
-      - cargo --locked run --bin readyset-logictest -- verify logictests/replicated/psql --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria
-      - cargo --locked run --bin readyset-logictest -- verify logictests/replicated/postgis --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria
-      - cargo --locked run --bin readyset-logictest -- verify logictests/replicated/mysql --database-type mysql --replication-url mysql://root:noria@mysql/noria
+      - 'export RUST_BACKTRACE=full'
+      - 'export AUTHORITY=standalone'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests/psql --database-type postgresql'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests/mysql --database-type mysql'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/psql --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/postgis --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/mysql --database-type mysql --replication-url mysql://root:noria@mysql/noria'
     timeout_in_minutes: 60
     depends_on:
       - build-image
@@ -236,4 +237,11 @@ steps:
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
+      - docker-login#${DOCKER_LOGIN_PLUGIN_VERSION}:
+          # Need to log in to avoid rate-limit while pulling postgis image.
+          server: "docker.io"
+          username: readysetservices
+          password-env: DOCKER_HUB_TOKEN
+    agents:
+      queue: c6a-4xlarge
     retry: *retry_on_agent_kill
