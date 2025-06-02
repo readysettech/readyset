@@ -430,7 +430,6 @@ fn unique(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
 fn key_or_index(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TableKey> {
     move |i| {
         debug_print("before key_or_index", &i);
-        let (i, constraint_name) = constraint_identifier(dialect)(i)?;
 
         let (i, _) = whitespace0(i)?;
         let (i, _) = alt((tag_no_case("key"), tag_no_case("index")))(i)?;
@@ -447,7 +446,6 @@ fn key_or_index(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult
         Ok((
             i,
             TableKey::Key {
-                constraint_name,
                 index_name,
                 columns,
                 index_type,
@@ -1355,7 +1353,6 @@ mod tests {
         assert_eq!(
             res.body.unwrap().keys,
             Some(vec![TableKey::Key {
-                constraint_name: None,
                 index_name: Some("age_key".into()),
                 columns: vec!["age".into()],
                 index_type: Some(IndexType::BTree),
@@ -1766,7 +1763,6 @@ mod tests {
                                 columns: vec![Column::from("comment")]
                             },
                             TableKey::Key {
-                                constraint_name: None,
                                 index_name: Some("confidence_idx".into()),
                                 columns: vec![Column::from("confidence")],
                                 index_type: None
@@ -1780,19 +1776,16 @@ mod tests {
                                 nulls_distinct: None,
                             },
                             TableKey::Key {
-                                constraint_name: None,
                                 index_name: Some("story_id_short_id".into()),
                                 columns: vec![Column::from("story_id"), Column::from("short_id")],
                                 index_type: None
                             },
                             TableKey::Key {
-                                constraint_name: None,
                                 index_name: Some("thread_id".into()),
                                 columns: vec![Column::from("thread_id")],
                                 index_type: None,
                             },
                             TableKey::Key {
-                                constraint_name: None,
                                 index_name: Some("index_comments_on_user_id".into()),
                                 columns: vec![Column::from("user_id")],
                                 index_type: None
@@ -2275,7 +2268,6 @@ mod tests {
                                 columns: vec![Column::from("comment")]
                             },
                             TableKey::Key {
-                                constraint_name: None,
                                 index_name: Some("confidence_idx".into()),
                                 columns: vec![Column::from("confidence")],
                                 index_type: None
@@ -2289,19 +2281,16 @@ mod tests {
                                 nulls_distinct: None,
                             },
                             TableKey::Key {
-                                constraint_name: None,
                                 index_name: Some("story_id_short_id".into()),
                                 columns: vec![Column::from("story_id"), Column::from("short_id")],
                                 index_type: None
                             },
                             TableKey::Key {
-                                constraint_name: None,
                                 index_name: Some("thread_id".into()),
                                 columns: vec![Column::from("thread_id")],
                                 index_type: None
                             },
                             TableKey::Key {
-                                constraint_name: None,
                                 index_name: Some("index_comments_on_user_id".into()),
                                 columns: vec![Column::from("user_id")],
                                 index_type: None
@@ -2521,13 +2510,11 @@ mod tests {
                             nulls_distinct: None,
                         },
                         TableKey::Key {
-                            constraint_name: None,
                             index_name: Some("access_tokens_user_id_foreign".into()),
                             columns: vec!["user_id".into()],
                             index_type: None,
                         },
                         TableKey::Key {
-                            constraint_name: None,
                             index_name: Some("access_tokens_type_index".into()),
                             columns: vec!["type".into()],
                             index_type: None,

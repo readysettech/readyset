@@ -179,7 +179,6 @@ pub enum TableKey {
         columns: Vec<Column>,
     },
     Key {
-        constraint_name: Option<SqlIdentifier>,
         index_name: Option<SqlIdentifier>,
         columns: Vec<Column>,
         index_type: Option<IndexType>,
@@ -250,8 +249,6 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 columns,
                 display_as_key: _display_as_key,
             } => Ok(Self::Key {
-                // TODO(mvzink): Where do these two different names come from for sqlparser?
-                constraint_name: None,
                 index_name: name.into_dialect(dialect),
                 columns: columns.into_dialect(dialect),
                 index_type: index_type.into_dialect(dialect),
@@ -307,16 +304,13 @@ impl TableKey {
             | TableKey::UniqueKey {
                 constraint_name, ..
             }
-            | TableKey::Key {
-                constraint_name, ..
-            }
             | TableKey::ForeignKey {
                 constraint_name, ..
             }
             | TableKey::CheckConstraint {
                 constraint_name, ..
             } => constraint_name,
-            TableKey::FulltextKey { .. } => &None,
+            TableKey::FulltextKey { .. } | TableKey::Key { .. } => &None,
         }
     }
 

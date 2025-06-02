@@ -249,8 +249,8 @@ fn alter_table_definition(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
     move |i| {
         alt((
-            add_column(dialect),
             add_key(dialect),
+            add_column(dialect),
             drop_column(dialect),
             alter_column(dialect),
             change_column(dialect),
@@ -821,7 +821,6 @@ mod tests {
                 AlterTableStatement {
                     table: Relation::from("flags"),
                     definitions: Ok(vec![AlterTableDefinition::AddKey(TableKey::Key {
-                        constraint_name: None,
                         index_name: Some("flags_created_at_index".into()),
                         columns: vec![Column::from("created_at")],
                         index_type: None,
@@ -1238,12 +1237,11 @@ mod tests {
         #[test]
         fn parse_alter_add_constraint_key() {
             let (index_name, columns) = setup_alter_key();
-            let qstring = "ALTER TABLE t ADD CONSTRAINT c KEY key_name (t1.c1, t2.c2)";
+            let qstring = "ALTER TABLE t ADD INDEX key_name (t1.c1, t2.c2)";
             check_add_constraint(
                 qstring,
                 TableKey::Key {
                     index_name,
-                    constraint_name: Some("c".into()),
                     columns,
                     index_type: None,
                 },
@@ -1254,12 +1252,11 @@ mod tests {
         fn parse_alter_add_index_type_constraint_key() {
             let (index_name, columns) = setup_alter_key();
             let index_type = Some(IndexType::BTree);
-            let qstring = "ALTER TABLE t ADD CONSTRAINT c KEY key_name (t1.c1, t2.c2) USING BTREE";
+            let qstring = "ALTER TABLE t ADD KEY key_name (t1.c1, t2.c2) USING BTREE";
             check_add_constraint(
                 qstring,
                 TableKey::Key {
                     index_name,
-                    constraint_name: Some("c".into()),
                     columns,
                     index_type,
                 },

@@ -953,14 +953,10 @@ pub fn walk_table_key<'a, V: VisitorMut<'a>>(
             }
         }
         TableKey::Key {
-            constraint_name,
             index_name,
             columns,
             index_type: _,
         } => {
-            if let Some(constraint_name) = constraint_name {
-                visitor.visit_sql_identifier(constraint_name)?;
-            }
             if let Some(index_name) = index_name {
                 visitor.visit_sql_identifier(index_name)?;
             }
