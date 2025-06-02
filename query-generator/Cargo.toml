@@ -14,7 +14,6 @@ lazy_static = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 strum = { workspace = true }
-strum_macros = { workspace = true }
 proptest = { workspace = true }
 test-strategy = { workspace = true }
 parking_lot = { workspace = true }

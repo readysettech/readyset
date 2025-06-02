@@ -97,8 +97,7 @@ use readyset_sql::Dialect as ParseDialect;
 use readyset_sql_passes::outermost_table_exprs;
 use readyset_util::intervals::{BoundPair, IterBoundPair};
 use serde::{Deserialize, Serialize};
-use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
+use strum::{EnumIter, IntoEnumIterator};
 use test_strategy::Arbitrary;
 
 use crate::types::{arbitrary_numeric_type, arbitrary_postgres_min_max_arg_type};

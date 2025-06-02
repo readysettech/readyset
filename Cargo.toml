@@ -226,8 +226,7 @@ sqlparser = { git = "https://github.com/apache/datafusion-sqlparser-rs", rev = "
 strawpoll = "0.2.3"
 streaming-iterator = "0.1"
 stringprep = "0.1.4"
-strum = "0.26"
-strum_macros = "0.26"
+strum = { version = "0.26", features = ["derive"] }
 syn = { version = "2.0.87", default-features = false }
 temp-dir = "0.1"
 tempfile = "3.10.1"

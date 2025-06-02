@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 
 use readyset_util::iter::cmp_by;
 use serde::{Deserialize, Serialize};
-use strum_macros::{EnumCount, FromRepr};
+use strum::{EnumCount, FromRepr};
 use test_strategy::Arbitrary;
 
 /// Description for how string values should be compared against each other for ordering and

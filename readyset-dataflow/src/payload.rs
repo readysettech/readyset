@@ -7,7 +7,7 @@ use readyset_client::{self, KeyComparison, PacketData, PacketTrace};
 use readyset_data::DfType;
 use readyset_sql::ast::Relation;
 use serde::{Deserialize, Serialize};
-use strum_macros::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};
+use strum::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};
 use url::Url;
 use vec1::Vec1;
 

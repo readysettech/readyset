@@ -3839,7 +3839,6 @@ dependencies = [
  "serde",
  "serial_test",
  "strum",
- "strum_macros",
  "test-strategy",
  "test-utils",
  "tokio",
@@ -4392,7 +4391,6 @@ dependencies = [
  "serial_test",
  "smallvec",
  "strum",
- "strum_macros",
  "test-strategy",
  "test-utils",
  "tokio",
@@ -4442,7 +4440,6 @@ dependencies = [
  "serde_with 3.12.0",
  "socket2",
  "strum",
- "strum_macros",
  "test-strategy",
  "thiserror 1.0.69",
  "timekeeper",
@@ -5817,6 +5814,9 @@ name = "strum"
 version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
+dependencies = [
+ "strum_macros",
+]
 
 [[package]]
 name = "strum_macros"

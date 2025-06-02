@@ -30,7 +30,6 @@ serde_json = { workspace = true, features = [
 ] }
 serde_stacker = { workspace = true }
 strum = { workspace = true }
-strum_macros = { workspace = true }
 test-strategy = { workspace = true }
 triomphe = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }

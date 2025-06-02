@@ -33,7 +33,6 @@ thiserror = { workspace = true }
 proptest = { workspace = true }
 fail = { workspace = true }
 strum = { workspace = true }
-strum_macros = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 url = { workspace = true }
 html-escape = { workspace = true }
