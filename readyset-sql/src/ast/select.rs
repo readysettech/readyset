@@ -306,7 +306,7 @@ impl LimitClause {
     /// Whether this [`LimitClause`] is empty (has no `limit` and no `offset`) or not.
     pub fn is_empty(&self) -> bool {
         match self {
-            LimitClause::LimitOffset { limit, offset } => limit.is_some() || offset.is_some(),
+            LimitClause::LimitOffset { limit, offset } => !(limit.is_some() || offset.is_some()),
             LimitClause::OffsetCommaLimit { .. } => false,
         }
     }

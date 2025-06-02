@@ -141,7 +141,7 @@ impl DialectDisplay for CompoundSelectStatement {
                 write!(f, " {}", ord.display(dialect))?;
             }
 
-            if self.limit_clause.is_empty() {
+            if !self.limit_clause.is_empty() {
                 write!(f, " {}", self.limit_clause.display(dialect))?;
             }
 
