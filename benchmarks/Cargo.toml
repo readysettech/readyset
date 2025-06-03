@@ -9,7 +9,6 @@ edition = "2021"
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
-crossbeam-skiplist = { workspace = true }
 enum_dispatch = { workspace = true }
 futures = { workspace = true }
 hdrhistogram = { workspace = true }
@@ -37,11 +36,8 @@ data-generator = { path = "../data-generator" }
 database-utils = { path = "../database-utils" }
 nom-sql = { path = "../nom-sql" }
 query-generator = { path = "../query-generator" }
-readyset-adapter = { path = "../readyset-adapter" }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
-readyset-mysql = { path = "../readyset-mysql" }
-readyset-psql = { path = "../readyset-psql" }
 readyset-server = { path = "../readyset-server" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
@@ -54,7 +50,6 @@ path = "src/lib.rs"
 [features]
 
 [dev-dependencies]
-indoc = { workspace = true }
 itertools = { workspace = true }
 proptest = { workspace = true }
 test-strategy = { workspace = true }

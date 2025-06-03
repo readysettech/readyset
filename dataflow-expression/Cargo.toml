@@ -11,7 +11,6 @@ chrono = { workspace = true, features = ["serde"] }
 chrono-tz = { workspace = true, features = ["serde"] }
 itertools = { workspace = true }
 lazy_static = { workspace = true }
-pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 regex = { workspace = true }
 rust_decimal = { workspace = true }
@@ -41,6 +40,7 @@ postgres = { workspace = true, features = [
     "with-serde_json-1",
     "with-bit-vec-0_6",
 ] }
+pretty_assertions = { workspace = true }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 regex = { workspace = true }
 test-utils = { path = "../test-utils" }

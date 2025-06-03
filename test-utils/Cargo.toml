@@ -7,13 +7,9 @@ edition = "2021"
 
 [dependencies]
 test-utils-proc-macros = { path = "./proc-macros" }
-tokio = { workspace = true, features = ["full"] }
 serial_test = { workspace = true }
 
 # Avoid adding dependencies as this is included in tests.
-
-[dev-dependencies]
-tokio-scoped = { workspace = true }
 
 [lints]
 workspace = true

@@ -97,9 +97,6 @@ replication-offset = { path = "../replication-offset" }
 
 [dev-dependencies]
 assert_approx_eq = { workspace = true }
-# Exact version dep here is only to avoid duplicate versions of downstream
-# dependencies
-backtrace = { workspace = true, features = ["serialize-serde"] }
 chrono = { workspace = true }
 criterion = { workspace = true }
 dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow", features = [
@@ -114,7 +111,6 @@ rusty-fork = { workspace = true }
 tempfile = { workspace = true }
 test-strategy = { workspace = true }
 test-utils = { path = "../test-utils" }
-toml = { workspace = true }
 triomphe = { workspace = true }
 
 [[bench]]

@@ -32,7 +32,6 @@ tikv-jemalloc-ctl = { workspace = true }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 deadpool-postgres = { workspace = true }
-failpoint-macros = { path = "../failpoint-macros" }
 tokio-native-tls = { workspace = true }
 
 [lints]

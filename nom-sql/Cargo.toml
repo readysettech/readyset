@@ -27,7 +27,6 @@ failpoint-macros = { path = "../failpoint-macros" }
 [dev-dependencies]
 assert_approx_eq = { workspace = true }
 pretty_assertions = { workspace = true }
-bincode = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
 test-utils = { path = "../test-utils" }
 

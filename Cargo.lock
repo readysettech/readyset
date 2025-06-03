@@ -293,7 +293,6 @@ dependencies = [
  "miniz_oxide",
  "object",
  "rustc-demangle",
- "serde",
  "windows-targets 0.52.6",
 ]
 
@@ -322,14 +321,12 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap",
- "crossbeam-skiplist",
  "data-generator",
  "database-utils",
  "enum_dispatch",
  "futures",
  "hdrhistogram",
  "indicatif",
- "indoc",
  "itertools 0.13.0",
  "metrics",
  "metrics-exporter-prometheus",
@@ -341,11 +338,8 @@ dependencies = [
  "query-generator",
  "rand 0.8.5",
  "rand_distr",
- "readyset-adapter",
  "readyset-client",
  "readyset-data",
- "readyset-mysql",
- "readyset-psql",
  "readyset-server",
  "readyset-sql",
  "readyset-sql-parsing",
@@ -2353,12 +2347,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "indoc"
-version = "2.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4c7245a08504955605670dbf141fceab975f15ca21570696aebe9d2e71576bd"
-
-[[package]]
 name = "inferno"
 version = "0.11.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2842,7 +2830,6 @@ dependencies = [
  "readyset-util",
  "sha-1",
  "slab",
- "test-utils",
  "thiserror 1.0.69",
  "time",
  "tokio",
@@ -3005,7 +2992,6 @@ name = "nom-sql"
 version = "0.0.11"
 dependencies = [
  "assert_approx_eq",
- "bincode",
  "bit-vec 0.6.3",
  "criterion",
  "fail",
@@ -4228,7 +4214,6 @@ dependencies = [
  "rocksdb",
  "serde",
  "serde_json",
- "serde_with 3.12.0",
  "slab",
  "smallvec",
  "streaming-iterator",
@@ -4480,7 +4465,6 @@ dependencies = [
  "consulrs",
  "deadpool-postgres",
  "derive_more",
- "failpoint-macros",
  "futures",
  "hyper",
  "mysql_async",
@@ -4687,7 +4671,6 @@ dependencies = [
  "array2",
  "assert_approx_eq",
  "async-bincode",
- "backtrace",
  "base64 0.22.1",
  "bimap",
  "bincode",
@@ -4756,7 +4739,6 @@ dependencies = [
  "tokio-retry",
  "tokio-stream",
  "tokio-tower",
- "toml",
  "tower",
  "tracing",
  "tracing-futures",
@@ -5460,15 +5442,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_spanned"
-version = "0.6.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87607cb1398ed59d48732e575a4c28a7a8ebf2454b964fe3f224f2afc07909e1"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "serde_stacker"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6046,8 +6019,6 @@ version = "0.0.0"
 dependencies = [
  "serial_test",
  "test-utils-proc-macros",
- "tokio",
- "tokio-scoped",
 ]
 
 [[package]]
@@ -6322,16 +6293,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-scoped"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4beb8ba13bc53ac53ce1d52b42f02e5d8060f0f42138862869beb769722b256"
-dependencies = [
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
 name = "tokio-stream"
 version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6386,25 +6347,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "toml"
-version = "0.8.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05ae329d1f08c4d17a59bed7ff5b5a769d062e64a62d34a3261b219e62cd5aae"
-dependencies = [
- "serde",
- "serde_spanned",
- "toml_datetime",
- "toml_edit",
-]
-
-[[package]]
 name = "toml_datetime"
 version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3da5db5a963e24bc68be8b17b6fa82814bb22ee8660f192bb182771d498f09a3"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "toml_edit"
@@ -6413,18 +6359,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "310068873db2c5b3e7659d2cc35d21855dbafa50d1ce336397c666e3cb08137e"
 dependencies = [
  "indexmap 2.9.0",
- "serde",
- "serde_spanned",
  "toml_datetime",
- "toml_write",
  "winnow 0.7.9",
 ]
-
-[[package]]
-name = "toml_write"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfb942dfe1d8e29a7ee7fcbde5bd2b9a25fb89aa70caea2eba3bee836ff41076"
 
 [[package]]
 name = "tonic"

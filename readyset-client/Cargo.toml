@@ -19,7 +19,6 @@ fail = { workspace = true }
 hyper = { workspace = true, features = ["stream", "client", "http2"] }
 serde = { workspace = true, features = ["rc", "derive"] }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
-serde_with = { workspace = true }
 rmp-serde = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 bincode = { workspace = true }
