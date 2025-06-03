@@ -46,6 +46,12 @@ postgres = { workspace = true, features = [
 redact_sensitive = []
 failure_injection = ["fail/failpoints"]
 
+[package.metadata.cargo-udeps.ignore]
+# As a convenience, we have the `failpoints_injection` feature (defined above) which turns the
+# feature on in the `fail` crate. cargo-udeps doesn't detect it being used (as no code in this crate
+# actually calls any code in the `fail` crate), so we ignore it.
+normal = ["fail"]
+
 [[bench]]
 name = "fmt"
 harness = false

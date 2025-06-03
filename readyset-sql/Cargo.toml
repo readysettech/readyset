@@ -26,6 +26,10 @@ readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 test-utils = { path = "../test-utils" }
 
 
+[package.metadata.cargo-udeps.ignore]
+# This is only used in doctests, which cargo-udeps can't detect.
+normal = ["readyset-sql-parsing"]
+
 [lints.clippy]
 dbg_macro = "warn"
 # During initial development, we are ok with todo!(); could remove them and just use workspace lints
