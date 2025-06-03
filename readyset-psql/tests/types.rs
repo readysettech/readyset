@@ -1087,4 +1087,13 @@ mod types {
 
         shutdown_tx.shutdown().await;
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[tags(serial, postgres_upstream)]
+    #[test_utils::slow]
+    async fn regression_text_array() {
+        let vals = vec![vec!["0.".to_string()]];
+        readyset_tracing::init_test_logging();
+        test_type_roundtrip("text[]", vals).await;
+    }
 }

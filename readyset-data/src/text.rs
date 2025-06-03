@@ -393,7 +393,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
     }
 
     /// Coerce this type to a different DfValue.
-    fn coerce_to(&self, to_ty: &DfType, from_ty: &DfType) -> ReadySetResult<DfValue> {
+    fn coerce_to(&self, to_ty: &DfType, _from_ty: &DfType) -> ReadySetResult<DfValue> {
         let str = self.try_str()?;
 
         match *to_ty {
@@ -578,11 +578,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 .map_err(|e| Self::coerce_err(to_ty, e))?
                 .into()),
 
-            DfType::Array(_) => DfValue::from(
-                str.parse::<Array>()
-                    .map_err(|e| Self::coerce_err(to_ty, e))?,
-            )
-            .coerce_to(to_ty, from_ty),
+            DfType::Array(ref member_ty) => Ok(DfValue::from(Array::parse_as(str, member_ty)?)),
 
             DfType::Enum { ref variants, .. } => {
                 if let Some(i) = variants.iter().position(|variant| variant == str) {

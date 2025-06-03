@@ -5,7 +5,7 @@ use std::sync::Arc;
 use bit_vec::BitVec;
 use mysql_time::MySqlTime;
 use postgres_types::Kind;
-use readyset_data::{Array, Collation, DfType, DfValue, Dialect, TimestampTz};
+use readyset_data::{Array, DfType, DfValue, TimestampTz};
 use readyset_errors::ReadySetError;
 use replication_offset::postgres::{CommitLsn, Lsn};
 use rust_decimal::prelude::FromStr;
@@ -602,45 +602,20 @@ impl wal::TupleData {
 
                         match pg_type.kind() {
                             Kind::Array(member_type) => {
-                                let dialect = Dialect::DEFAULT_POSTGRESQL;
-                                let subsecond_digits = dialect.default_subsecond_digits();
+                                let member_dftype: DfType =
+                                    member_type.try_into().map_err(|e| {
+                                        trace!(?e, "got unsupported type '{member_type}'");
+                                        unsupported_type_err()
+                                    })?;
+                                let target_type = DfType::Array(Box::new(member_dftype.clone()));
 
-                                let target_type = DfType::Array(Box::new(match *member_type {
-                                    PGType::BOOL => DfType::Bool,
-                                    PGType::CHAR => DfType::Char(1, Collation::default()),
-                                    PGType::TEXT | PGType::VARCHAR => DfType::DEFAULT_TEXT,
-                                    PGType::INT2 => DfType::SmallInt,
-                                    PGType::INT4 => DfType::Int,
-                                    PGType::INT8 => DfType::BigInt,
-                                    PGType::FLOAT4 => DfType::Float,
-                                    PGType::FLOAT8 => DfType::Double,
-                                    PGType::TIMESTAMP => DfType::Timestamp { subsecond_digits },
-                                    PGType::TIMESTAMPTZ => DfType::TimestampTz { subsecond_digits },
-                                    PGType::JSON => DfType::Json,
-                                    PGType::JSONB => DfType::Jsonb,
-                                    PGType::DATE => DfType::Date,
-                                    PGType::TIME => DfType::Time { subsecond_digits },
-                                    PGType::NUMERIC => DfType::DEFAULT_NUMERIC,
-                                    PGType::BYTEA => DfType::Blob,
-                                    PGType::MACADDR => DfType::MacAddr,
-                                    PGType::INET => DfType::Inet,
-                                    PGType::UUID => DfType::Uuid,
-                                    PGType::BIT => DfType::DEFAULT_BIT,
-                                    PGType::VARBIT => DfType::VarBit(None),
-                                    PGType::TS_VECTOR => DfType::Tsvector,
-                                    ref ty => {
-                                        trace!("got unsupported type '{}'", ty.to_string());
-                                        return Err(unsupported_type_err());
-                                    }
-                                }));
-
-                                DfValue::from(str.parse::<Array>().map_err(|_| {
-                                    WalError::TableError {
+                                DfValue::from(Array::parse_as(&str, &member_dftype).map_err(
+                                    |_| WalError::TableError {
                                         kind: TableErrorKind::ArrayParseError,
                                         schema: relation.schema_name_lossy(),
                                         table: relation.relation_name_lossy(),
-                                    }
-                                })?)
+                                    },
+                                )?)
                                 .coerce_to(&target_type, &DfType::Unknown)
                                 .map_err(|_| unsupported_type_err())?
                             }

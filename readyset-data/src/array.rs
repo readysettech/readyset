@@ -1,6 +1,5 @@
 use std::cmp::Ordering;
 use std::fmt::{self, Display};
-use std::str::FromStr;
 
 use fallible_iterator::FallibleIterator;
 use ndarray::{ArrayBase, ArrayD, ArrayViewD, Data, IxDyn, RawData};
@@ -225,16 +224,14 @@ impl Display for Array {
     }
 }
 
-impl FromStr for Array {
-    type Err = ReadySetError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+impl Array {
+    pub fn parse_as(s: &str, ty: &DfType) -> ReadySetResult<Self> {
         let mk_err = |message| ReadySetError::ArrayParseError {
             input: s.to_owned(),
             message,
         };
 
-        let (rem, res) = parse::array(LocatedSpan::new(s.as_bytes())).map_err(|e| {
+        let (rem, mut res) = parse::array(LocatedSpan::new(s.as_bytes())).map_err(|e| {
             mk_err(match e {
                 nom::Err::Incomplete(n) => format!("Incomplete input; needed {n:?}"),
                 nom::Err::Error(NomSqlError { input, kind })
@@ -245,6 +242,12 @@ impl FromStr for Array {
         })?;
         if !rem.is_empty() {
             return Err(mk_err("Junk after closing right brace".to_string()));
+        }
+
+        for value in res.values_mut() {
+            if !value.is_none() {
+                *value = value.coerce_to(ty, &DfType::Unknown)?;
+            }
         }
 
         Ok(res)
@@ -410,7 +413,7 @@ mod parse {
 
     use ndarray::{ArrayD, IxDyn};
     use nom::branch::alt;
-    use nom::bytes::complete::{is_not, tag};
+    use nom::bytes::complete::{is_not, tag, tag_no_case};
     use nom::character::complete::{digit1, multispace0};
     use nom::combinator::{map, map_parser, not, opt, peek};
     use nom::error::ErrorKind;
@@ -418,11 +421,12 @@ mod parse {
     use nom::sequence::{delimited, pair, preceded, terminated, tuple};
     use nom::AsBytes;
     use nom_locate::LocatedSpan;
-    use nom_sql::{embedded_literal, NomSqlError, NomSqlResult, QuotingStyle};
+    use nom_sql::{raw_string_literal, NomSqlError, NomSqlResult, QuotingStyle};
     use readyset_sql::Dialect;
 
+    use crate::{Collation, DfValue};
+
     use super::Array;
-    use crate::DfValue;
 
     enum ArrayOrNested {
         Array(Vec<DfValue>),
@@ -571,34 +575,29 @@ mod parse {
 
     fn literal(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DfValue> {
         alt((
+            map(tag_no_case("null"), |_| DfValue::None),
             map(
-                terminated(
-                    embedded_literal(Dialect::PostgreSQL, QuotingStyle::Double),
-                    peek(pair(multispace0, alt((tag(","), tag("}"))))),
-                ),
-                |lit| {
-                    DfValue::try_from(lit)
-                        .expect("Only parsing literals that can be converted to DfValue")
+                alt((
+                    terminated(
+                        raw_string_literal(Dialect::PostgreSQL, QuotingStyle::Double),
+                        peek(pair(multispace0, alt((tag(","), tag("}"))))),
+                    ),
+                    unquoted_string_literal,
+                )),
+                |v| {
+                    // SAFETY: The input was a valid utf8 `str` when passed into `Array::from_str`, and
+                    // we aren't slicing a string on any bytes that are used as combining characters.
+                    let s = unsafe { str::from_utf8_unchecked(v.as_bytes()) };
+                    DfValue::from_str_and_collation(s, Collation::default())
                 },
             ),
-            unquoted_string_literal,
         ))(i)
     }
 
-    fn unquoted_string_literal(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DfValue> {
-        let fail = || {
-            nom::Err::Error(NomSqlError {
-                input: i,
-                kind: ErrorKind::Fail,
-            })
-        };
-
+    fn unquoted_string_literal(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
         let (i, _) = not(peek(tag("\"")))(i)?;
         let (i, v) = is_not("{},\"\\")(i)?;
-        // XXX(mvzink): Yes, we only support UTF-8 string literals at this level. To support other
-        // encodings, we should decode queries to UTF-8 before parsing.
-        let s = std::str::from_utf8(v.as_bytes()).map_err(|_| fail())?;
-        Ok((i, DfValue::from_str_and_collation(s, Default::default())))
+        Ok((i, v.to_vec()))
     }
 }
 
@@ -725,7 +724,7 @@ mod tests {
 
     #[test]
     fn parse_1d_int_array() {
-        let arr = Array::from_str("{1,2 , 3} ").unwrap();
+        let arr = Array::parse_as("{1,2 , 3} ", &DfType::Int).unwrap();
         assert_eq!(
             arr,
             Array::from(vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)])
@@ -735,7 +734,7 @@ mod tests {
     #[test]
     #[ignore = "ENG-1416"]
     fn parse_array_big_int() {
-        let arr = Array::from_str("{9223372036854775808}").unwrap();
+        let arr = Array::parse_as("{9223372036854775808}", &DfType::UnsignedInt).unwrap();
         assert_eq!(
             arr,
             Array::from(vec![DfValue::from(9223372036854775808_u64)])
@@ -744,7 +743,7 @@ mod tests {
 
     #[test]
     fn parse_2d_int_array() {
-        let arr = Array::from_str("{{1,2} , {3, 4 }} ").unwrap();
+        let arr = Array::parse_as("{{1,2} , {3, 4 }} ", &DfType::Int).unwrap();
         assert_eq!(
             arr,
             Array::from(
@@ -764,7 +763,7 @@ mod tests {
 
     #[test]
     fn parse_2d_string_array() {
-        let arr = Array::from_str(r#"{{"a","b"},  { "c" ,  "d"}}"#).unwrap();
+        let arr = Array::parse_as(r#"{{"a","b"},  { "c" ,  "d"}}"#, &DfType::DEFAULT_TEXT).unwrap();
         assert_eq!(
             arr,
             Array::from(
@@ -784,7 +783,7 @@ mod tests {
 
     #[test]
     fn parse_2d_int_array_with_alt_lower_bounds() {
-        let arr = Array::from_str("[-1:0][3:4]={{1,2} , {3, 4 }} ").unwrap();
+        let arr = Array::parse_as("[-1:0][3:4]={{1,2} , {3, 4 }} ", &DfType::Int).unwrap();
         assert_eq!(
             arr,
             Array::from_lower_bounds_and_contents(
@@ -808,14 +807,14 @@ mod tests {
     #[ignore = "DfValue <-> Literal doesn't round trip (ENG-1416)"]
     fn display_parse_round_trip(arr: Array) {
         let s = arr.to_string();
-        let res = Array::from_str(&s).unwrap();
+        let res = Array::parse_as(&s, &DfType::Int).unwrap();
         assert_eq!(res, arr);
     }
 
     #[test]
     fn parse_unquoted_string_array() {
         assert_eq!(
-            "{a,b,c}".parse::<Array>().unwrap(),
+            Array::parse_as("{a,b,c}", &DfType::DEFAULT_TEXT).unwrap(),
             Array::from(vec![
                 DfValue::from("a"),
                 DfValue::from("b"),
@@ -827,7 +826,7 @@ mod tests {
     #[test]
     fn parse_unquoted_numeric_string() {
         assert_eq!(
-            Array::from_str("{2a, 3b}").unwrap(),
+            Array::parse_as("{2a, 3b}", &DfType::DEFAULT_TEXT).unwrap(),
             Array::from(vec![DfValue::from("2a"), DfValue::from("3b"),])
         );
     }
@@ -855,6 +854,33 @@ mod tests {
                 vec![DfValue::from(1), DfValue::from(2)],
                 vec![DfValue::from(3), DfValue::from(4)]
             ]
+        );
+    }
+
+    #[test]
+    fn numeric_text_trailing_dot() {
+        assert_eq!(
+            Array::parse_as("{0., 1.}", &DfType::DEFAULT_TEXT).unwrap(),
+            Array::from(vec![DfValue::from("0."), DfValue::from("1."),])
+        );
+    }
+
+    #[test]
+    fn misc_regressions() {
+        assert_eq!(
+            Array::parse_as("{{1,2},{3,4}}", &DfType::Int).unwrap(),
+            Array::from(
+                ArrayD::from_shape_vec(
+                    IxDyn(&[2, 2]),
+                    vec![
+                        DfValue::from(1),
+                        DfValue::from(2),
+                        DfValue::from(3),
+                        DfValue::from(4),
+                    ]
+                )
+                .unwrap()
+            )
         );
     }
 }

@@ -1502,7 +1502,9 @@ impl Expr {
             // since we can leave the values alone)
             right = Box::new(Self::Cast {
                 expr: right,
-                ty: DfType::Array(Box::new(right_coerce_target.unwrap_or(DfType::Unknown))),
+                ty: DfType::Array(Box::new(
+                    right_coerce_target.unwrap_or_else(|| left.ty().clone()),
+                )),
                 null_on_failure: false,
             });
         }

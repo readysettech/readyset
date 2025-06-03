@@ -528,12 +528,11 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
                 Kind::Array(inner_t) => inner_t.clone(),
                 _ => unreachable!(),
             };
-            Ok(PsqlValue::Array(
-                text_str
-                    .parse::<Array>()
-                    .map_err(|e| DecodeError::InvalidArrayValue(e.to_string()))?,
-                inner_t,
-            ))
+            let array = (&inner_t)
+                .try_into()
+                .and_then(|ty| Array::parse_as(text_str, &ty))
+                .map_err(|e| DecodeError::InvalidArrayValue(e.to_string()))?;
+            Ok(PsqlValue::Array(array, inner_t))
         }
         ref t if t.name() == "citext" => Ok(PsqlValue::Text(text_str.into())),
         _ => Ok(PsqlValue::PassThrough(readyset_data::PassThrough {

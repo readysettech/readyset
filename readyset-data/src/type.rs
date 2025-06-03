@@ -2,10 +2,11 @@ use std::fmt;
 
 use enum_kinds::EnumKind;
 use itertools::Itertools;
+use postgres_types::Type as PGType;
 use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::prop_oneof;
 use proptest::strategy::{BoxedStrategy, Just};
-use readyset_errors::{unsupported, unsupported_err, ReadySetResult};
+use readyset_errors::{unsupported, unsupported_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{EnumVariants, Relation, SqlIdentifier, SqlType};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -752,6 +753,44 @@ pub enum PgTypeCategory {
     UserDefined,
     BitString,
     Unknown,
+}
+
+impl TryFrom<&PGType> for DfType {
+    type Error = ReadySetError;
+
+    fn try_from(value: &PGType) -> Result<Self, Self::Error> {
+        match value {
+            &PGType::BOOL => Ok(Self::Bool),
+            &PGType::CHAR => Ok(Self::Char(1, Collation::default())),
+            &PGType::TEXT | &PGType::VARCHAR => Ok(Self::DEFAULT_TEXT),
+            &PGType::INT2 => Ok(Self::SmallInt),
+            &PGType::INT4 => Ok(Self::Int),
+            &PGType::INT8 => Ok(Self::BigInt),
+            &PGType::FLOAT4 => Ok(Self::Float),
+            &PGType::FLOAT8 => Ok(Self::Double),
+            &PGType::TIMESTAMP => Ok(Self::Timestamp {
+                subsecond_digits: Dialect::DEFAULT_POSTGRESQL.default_subsecond_digits(),
+            }),
+            &PGType::TIMESTAMPTZ => Ok(Self::TimestampTz {
+                subsecond_digits: Dialect::DEFAULT_POSTGRESQL.default_subsecond_digits(),
+            }),
+            &PGType::JSON => Ok(Self::Json),
+            &PGType::JSONB => Ok(Self::Jsonb),
+            &PGType::DATE => Ok(Self::Date),
+            &PGType::TIME => Ok(Self::Time {
+                subsecond_digits: Dialect::DEFAULT_POSTGRESQL.default_subsecond_digits(),
+            }),
+            &PGType::NUMERIC => Ok(Self::DEFAULT_NUMERIC),
+            &PGType::BYTEA => Ok(Self::Blob),
+            &PGType::MACADDR => Ok(Self::MacAddr),
+            &PGType::INET => Ok(Self::Inet),
+            &PGType::UUID => Ok(Self::Uuid),
+            &PGType::BIT => Ok(Self::DEFAULT_BIT),
+            &PGType::VARBIT => Ok(Self::VarBit(None)),
+            &PGType::TS_VECTOR => Ok(Self::Tsvector),
+            _ => unsupported!("Unsupported postgres type {value}"),
+        }
+    }
 }
 
 /// Test helpers.
