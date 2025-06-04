@@ -2622,52 +2622,78 @@ impl SqlToMirConverter {
                     project_order,
                 );
 
-                let post_lookup_aggregates = if view_key.index_type == IndexType::HashMap {
-                    // If we have aggregates under the IndexType::HashMap, they aren't necessarily
-                    // post-lookup operations. For example, `select sum(col2) from t where col1 =
-                    // ?`, the aggregate will be handled in the dataflow graph.
-                    // But if the query originally contained a `where col1 in
-                    // (?, ?)`, the aggregate does need to be executed as a
-                    // post-lookup. Adding a post-lookup is necessary for `where in` for correctly
-                    // aggregating results, but a mild perf impediment for aggregates with a simple
-                    // equality (we'll run an aggregation on a single row). However, we've lost the
-                    // "did this come from a `where in` information" way above, as it's rewritten in
-                    // the adapter. Hence, to avoid that penalty on all users,
-                    // only add the post-lookup to users who have opted in to
-                    // using post-lookups.
-                    if self.config.allow_post_lookup {
-                        match post_lookup_aggregates(query_graph, query_name) {
-                            Ok(aggs) => aggs,
-                            // This part is a hack. When we get an ReadySetError::Unsupported,
-                            // that is because the aggregate was a AVG, COUNT(DISTINCT..), or
-                            // SUM(DISTINCT..). We can only support those (currently!) when the
-                            // query contained an equality clause, and
-                            // not a `where in` clause (that was
-                            // rewritten as an equality).  As mentioned above, we don't know which
-                            // one the original query had, thus this
-                            // code opts to preserve the functionality
-                            // of the simple equality. Once again, this only applies if the user
-                            // opted in to using "experimental"
-                            // post-lookups.
-                            Err(ReadySetError::Unsupported(..)) => None,
-                            Err(e) => return Err(e),
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    post_lookup_aggregates(query_graph, query_name)?
-                };
-
                 let order_by = query_graph
                     .order
                     .as_ref()
                     .map(|order| order.iter().map(|(c, ot)| (Column::from(c), *ot)).collect());
 
-                let limit = query_graph.pagination.as_ref().map(|p| p.limit);
+                let mut limit = query_graph.pagination.as_ref().map(|p| p.limit);
+                let offset = query_graph.pagination.as_ref().and_then(|p| p.offset);
+                let is_topk_query = order_by.is_some() && limit.is_some() && offset.is_none();
+                let is_range_query = view_key.index_type == IndexType::BTreeMap;
 
+                let are_post_lookups_required = query_graph.collapsed_where_in
+                    || (order_by.is_some() && !is_topk_query)
+                    || (is_topk_query && !self.config.allow_topk)
+                    || is_range_query;
+
+                let mut post_lookup_aggregates = if are_post_lookups_required {
+                    // When a query contains WHERE col IN (?, ?, ...), it gets rewritten
+                    // (or collapsed) to WHERE col = ? during SQL parsing, with the
+                    // collapsed_where_in flag set to indicate this transformation.
+                    //
+                    // This creates a correctness issue for aggregates: the original multi-value IN clause
+                    // should aggregate across all matching rows, but the rewritten single-value equality
+                    // will only see one row at a time. To fix this, we need post-lookup aggregation that
+                    // combines results from multiple point lookups.
+                    //
+                    // Example:
+                    //   Original: SELECT sum(amount) FROM orders WHERE id IN (1, 2, 3)
+                    //   Rewritten: SELECT sum(amount) FROM orders WHERE id = ? (executed 3 times)
+                    //   Solution: Sum the results from each execution via post-lookup aggregation
+                    //
+                    // Another scenario is when aggregated results are used in an order by clause
+                    // without a topk node (either because the query didn't have a limit or the
+                    // feature wasn't enabled). In this case, we also need post-lookup aggregation
+                    // for correctness.
+                    //
+                    // And obviously if the query is a range query, we need post-lookup aggregation
+                    // since we can't precompute aggregations over different ranges.
+                    //
+                    // Note: Post-lookup operations have performance overhead, so they're gated behind
+                    // the allow_post_lookup config flag.
+                    if self.config.allow_post_lookup {
+                        post_lookup_aggregates(query_graph, query_name)?
+                    } else {
+                        unsupported!(
+                            "Queries which perform operations post-lookup are not supported"
+                        );
+                    }
+                } else {
+                    None
+                };
+
+                // If the query is a topk query, and the user has opted in to using
+                // topk feature, remove the limit, order by and agg from the post-lookup
+                // operations UNLESS the original query had a WHERE IN. In that case,
+                // post-lookups are required for correctness.
+                if self.config.allow_topk && is_topk_query && !are_post_lookups_required {
+                    limit = None;
+                    post_lookup_aggregates = None;
+                    // TODO: even though we are doing topk, we still need the reader
+                    // to order stuff. Becuase TopK communictes the diff,
+                    // and the reader keeps the values in ASC order if ORDER BY
+                    // is not specified. Please refer to [reader_map::Values] struct.
+                    // order_by = None;
+                }
+
+                // order_by is required by almost all queries. Only complain if it does
+                // aggregations as well.
+                // If a query contains just a limit without an order by, the adapter will
+                // automatically remove the limit and keep it for itself, so the server won't have
+                // to worry about it.
                 if !self.config.allow_post_lookup
-                    && (post_lookup_aggregates.is_some() || order_by.is_some() || limit.is_some())
+                    && ((post_lookup_aggregates.is_some() && order_by.is_some()) || limit.is_some())
                 {
                     unsupported!("Queries which perform operations post-lookup are not supported");
                 }
@@ -2738,5 +2764,197 @@ impl SqlToMirConverter {
 
         // finally, we output all the nodes we generated
         Ok(leaf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::{
+        controller::sql::mir::SqlToMirConverter,
+        sql::mir::{Config, LeafBehavior},
+    };
+    use mir::node::MirNodeInner;
+    use mir::NodeIndex;
+    use readyset_errors::ReadySetResult;
+    use readyset_sql::ast::{Column, ColumnSpecification, Relation, SelectMetadata, SqlType};
+
+    use crate::controller::sql::query_graph::to_query_graph;
+    use readyset_sql_parsing::parse_select;
+
+    fn sql_to_mir_test(
+        name: &str,
+        qg: crate::sql::query_graph::QueryGraph,
+    ) -> ReadySetResult<(SqlToMirConverter, NodeIndex)> {
+        let mut converter = SqlToMirConverter::default();
+        converter.set_config(Config {
+            allow_topk: true,
+            allow_post_lookup: true,
+            ..Default::default()
+        });
+
+        let _ = converter.make_base_node(
+            &Relation::from("topk_test"),
+            &[
+                ColumnSpecification {
+                    column: Column::from("topk_test.a"),
+                    sql_type: SqlType::Int(None),
+                    generated: None,
+                    constraints: vec![],
+                    comment: None,
+                },
+                ColumnSpecification {
+                    column: Column::from("topk_test.b"),
+                    sql_type: SqlType::Int(None),
+                    generated: None,
+                    constraints: vec![],
+                    comment: None,
+                },
+                ColumnSpecification {
+                    column: Column::from("topk_test.c"),
+                    sql_type: SqlType::Int(None),
+                    generated: None,
+                    constraints: vec![],
+                    comment: None,
+                },
+            ],
+            None,
+        )?;
+
+        let node = converter.named_query_to_mir(
+            &Relation::from(name),
+            &qg,
+            &HashMap::new(),
+            LeafBehavior::Leaf,
+        )?;
+
+        Ok((converter, node))
+    }
+
+    macro_rules! test_topk_scenario {
+        (
+        name: $test_name:ident,
+        query: $query_str:literal,
+        query_name: $query_name:literal,
+        collapsed_where_in: $collapsed:expr,
+        expect_leaf: {
+            aggregates: $expect_agg:expr,
+            order_by: $expect_order:expr,
+            limit: $expect_limit:expr
+        },
+        expect_topk_node: $expect_topk:expr
+    ) => {
+            #[test]
+            fn $test_name() -> ReadySetResult<()> {
+                let mut query =
+                    parse_select(readyset_sql::Dialect::PostgreSQL, $query_str).unwrap();
+
+                if $collapsed {
+                    query.metadata.push(SelectMetadata::CollapsedWhereIn);
+                }
+
+                let qg = to_query_graph(query).unwrap();
+                let (mut converter, node) = sql_to_mir_test($query_name, qg)?;
+                let query = converter.make_mir_query($query_name.into(), node);
+
+                // Check leaf node properties
+                if let MirNodeInner::Leaf {
+                    aggregates,
+                    order_by,
+                    limit,
+                    ..
+                } = &query.get_node(node).unwrap().inner
+                {
+                    assert_eq!(aggregates.is_some(), $expect_agg, "aggregates mismatch");
+                    assert_eq!(order_by.is_some(), $expect_order, "order_by mismatch");
+                    assert_eq!(limit.is_some(), $expect_limit, "limit mismatch");
+                } else {
+                    panic!("Expected leaf node");
+                }
+
+                // Check for TopK node existence
+                let mut has_topk = false;
+                for node in query.topo_nodes() {
+                    if let MirNodeInner::TopK { .. } = &query.get_node(node).unwrap().inner {
+                        has_topk = true;
+                        break;
+                    }
+                }
+
+                if $expect_topk {
+                    assert!(has_topk, "topk node not found");
+                } else {
+                    assert!(!has_topk, "unexpected topk node found");
+                }
+
+                Ok(())
+            }
+        };
+    }
+
+    test_topk_scenario! {
+        name: topk_node_exists,
+        query: "SELECT a FROM topk_test ORDER BY b LIMIT 3",
+        query_name: "q1",
+        collapsed_where_in: false,
+        expect_leaf: {
+            aggregates: false,
+            order_by: true,
+            limit: false
+        },
+        expect_topk_node: true
+    }
+
+    test_topk_scenario! {
+        name: topk_node_exists_with_where_in,
+        query: "SELECT a FROM topk_test WHERE b = 1 ORDER BY c LIMIT 3",
+        query_name: "q1",
+        collapsed_where_in: true,
+        expect_leaf: {
+            aggregates: false,
+            order_by: true,
+            limit: true
+        },
+        expect_topk_node: true
+    }
+
+    test_topk_scenario! {
+        name: aggregate_with_where_in,
+        query: "SELECT sum(topk_test.a) FROM topk_test WHERE b = 5 GROUP BY c ORDER BY b",
+        query_name: "q2",
+        collapsed_where_in: true,
+        expect_leaf: {
+            aggregates: true,
+            order_by: true,
+            limit: false
+        },
+        expect_topk_node: false
+    }
+
+    test_topk_scenario! {
+        name: topk_without_where_in,
+        query: "SELECT avg(topk_test.a) FROM topk_test WHERE topk_test.b = 5 GROUP BY topk_test.c ORDER BY topk_test.b LIMIT 10",
+        query_name: "q2",
+        collapsed_where_in: false,
+        expect_leaf: {
+            aggregates: false,
+            order_by: true,
+            limit: false
+        },
+        expect_topk_node: true
+    }
+
+    test_topk_scenario! {
+        name: topk_with_where_in,
+        query: "SELECT a FROM topk_test WHERE b = 5 ORDER BY a LIMIT 10",
+        query_name: "q1",
+        collapsed_where_in: true,
+        expect_leaf: {
+            aggregates: false,
+            order_by: true,
+            limit: true
+        },
+        expect_topk_node: true
     }
 }
