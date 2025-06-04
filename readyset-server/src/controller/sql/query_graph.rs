@@ -17,7 +17,7 @@ use readyset_sql::analysis::{is_aggregate, ReferredColumns};
 use readyset_sql::ast::{
     self, BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
     ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderBy,
-    OrderType, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+    OrderType, Relation, SelectMetadata, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::{is_correlated, is_predicate, map_aggregates, LogicalOp};
@@ -294,6 +294,9 @@ pub struct QueryGraph {
     pub pagination: Option<Pagination>,
     /// True if the query is correlated (is a subquery that refers to columns in an outer query)
     pub is_correlated: bool,
+    /// True if the adapter rewrote a WHERE IN clause to an equality. In this case
+    /// post-lookup operations are required for correctness
+    pub collapsed_where_in: bool,
 }
 
 impl QueryGraph {
@@ -487,6 +490,7 @@ impl Hash for QueryGraph {
         self.order.hash(state);
         self.pagination.hash(state);
         self.is_correlated.hash(state);
+        self.collapsed_where_in.hash(state);
     }
 }
 
@@ -1523,6 +1527,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
         pagination,
         order,
         is_correlated,
+        collapsed_where_in: stmt.metadata.contains(&SelectMetadata::CollapsedWhereIn),
     })
 }
 

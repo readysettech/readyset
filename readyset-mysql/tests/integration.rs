@@ -3044,10 +3044,10 @@ async fn create_duplicate_named_caches() {
     conn.query_drop("CREATE CACHE name1 FROM SELECT b FROM foo WHERE a = ?")
         .await
         .unwrap();
-    conn.query_drop("CREATE CACHE name2 FROM SELECT b FROM foo WHERE a IN (?, ?, ?)")
+    conn.query_drop("CREATE CACHE name2 FROM SELECT b FROM foo WHERE a = ?")
         .await
         .unwrap();
-    conn.query_drop("CREATE CACHE name2 FROM SELECT b FROM foo WHERE a IN (?, ?, ?)")
+    conn.query_drop("CREATE CACHE name2 FROM SELECT b FROM foo WHERE a = ?")
         .await
         .unwrap();
 
@@ -3073,10 +3073,10 @@ async fn create_duplicate_query_id_and_name_caches() {
     conn.query_drop("CREATE CACHE name2 FROM SELECT b FROM foo WHERE a = ?")
         .await
         .unwrap();
-    conn.query_drop("CREATE CACHE name1 FROM SELECT b FROM foo WHERE a IN (?, ?, ?)")
+    conn.query_drop("CREATE CACHE name1 FROM SELECT b FROM foo WHERE a = 1")
         .await
         .unwrap();
-    conn.query_drop("CREATE CACHE name1 FROM SELECT b FROM foo WHERE a IN (?, ?, ?)")
+    conn.query_drop("CREATE CACHE name1 FROM SELECT b FROM foo WHERE a = 3")
         .await
         .unwrap();
 
