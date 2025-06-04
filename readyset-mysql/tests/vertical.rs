@@ -426,7 +426,7 @@ where
 
         mysql
             .query_drop(
-                "ALTER DATABASE vertical DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_bin",
+                "ALTER DATABASE vertical DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_0900_bin",
             )
             .await
             .unwrap();
@@ -722,7 +722,7 @@ macro_rules! vertical_tests {
                 }
             }
 
-            #[tags(serial, mysql_upstream)]
+            #[tags(serial, mysql8_upstream)]
             #[test]
             #[cfg_attr(not(feature = "vertical_tests"), ignore)]
             fn $name() {

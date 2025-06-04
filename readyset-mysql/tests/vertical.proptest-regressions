@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 84ad9f82b6d25fb872775db5de66952092150ebf7decd394961c819109dd471d # shrinks to [Insert { table: "posts", row: [Int(534830610), TinyText(" "), Int(17164), Int(-21252)] }, Query { key: [TinyText("")] }]
