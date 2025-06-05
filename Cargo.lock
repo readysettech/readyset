@@ -3002,7 +3002,6 @@ dependencies = [
  "nom_locate",
  "pprof",
  "pratt",
- "pretty_assertions",
  "proptest",
  "readyset-sql",
  "readyset-util",
@@ -6017,6 +6016,7 @@ dependencies = [
 name = "test-utils"
 version = "0.0.0"
 dependencies = [
+ "pretty_assertions",
  "serial_test",
  "test-utils-proc-macros",
 ]

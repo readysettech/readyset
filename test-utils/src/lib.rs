@@ -7,6 +7,9 @@ pub use test_utils_proc_macros::{skip_flaky_finder, slow, tags};
 // use it.
 pub use serial_test;
 
+// Re-export pretty_assertions for similar reasons.
+pub use pretty_assertions;
+
 /// Returns `false` if slow tests should not run, otherwise returns `true`.
 pub fn skip_slow_tests() -> bool {
     let should_skip = std::env::var("RUN_SLOW_TESTS").is_err();

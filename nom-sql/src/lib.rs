@@ -1,7 +1,3 @@
-#[cfg(test)]
-#[macro_use]
-extern crate pretty_assertions;
-
 use std::fmt::{Debug, Formatter};
 
 use nom::error::{ErrorKind, FromExternalError, ParseError};

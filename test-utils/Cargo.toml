@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 test-utils-proc-macros = { path = "./proc-macros" }
 serial_test = { workspace = true }
+pretty_assertions = { workspace = true }
 
 # Avoid adding dependencies as this is included in tests.
 

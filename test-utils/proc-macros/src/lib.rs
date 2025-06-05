@@ -201,10 +201,12 @@ pub fn tags(args: TokenStream, item: TokenStream) -> TokenStream {
     let mut out = if uses_serial {
         quote! {
             use ::test_utils::serial_test;
+            use ::test_utils::pretty_assertions::assert_eq;
             #item
         }
     } else {
         quote! {
+            use ::test_utils::pretty_assertions::assert_eq;
             #item
         }
     };

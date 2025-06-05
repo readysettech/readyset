@@ -2078,7 +2078,7 @@ mod tests {
             .unwrap()
             .with_timezone(&target_tz)
             .naive_local();
-        self::assert_eq!(
+        assert_eq!(
             super::convert_tz(&datetime, &src_tz.to_string(), &target_tz.to_string()).unwrap(),
             expected
         );
@@ -2090,14 +2090,14 @@ mod tests {
     #[proptest]
     fn day_of_week(#[strategy(arbitrary_timestamp_naive_date_time())] datetime: NaiveDateTime) {
         let expected = datetime.weekday().number_from_sunday() as u8;
-        self::assert_eq!(super::day_of_week(&datetime.date()), expected);
+        assert_eq!(super::day_of_week(&datetime.date()), expected);
     }
 
     #[tags(no_retry)]
     #[proptest]
     fn month(#[strategy(arbitrary_timestamp_naive_date_time())] datetime: NaiveDateTime) {
         let expected = datetime.month() as u8;
-        self::assert_eq!(super::month(&datetime.date()), expected);
+        assert_eq!(super::month(&datetime.date()), expected);
     }
 
     #[test]

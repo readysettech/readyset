@@ -228,7 +228,7 @@ mod tests {
         fn inputs(mut vec: Vec<u32>, index: isize, element: u32, insert_after: bool) {
             let prev_len = vec.len();
             insert_bidirectional(&mut vec, index, element, insert_after);
-            self::assert_eq!(vec.len(), prev_len + 1);
+            assert_eq!(vec.len(), prev_len + 1);
         }
 
         #[track_caller]

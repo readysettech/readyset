@@ -759,7 +759,7 @@ mod tests {
 
             prop_assume!(!contains_escapable);
 
-            self::assert_eq!(json_quote(&s), format!("\"{s}\""));
+            assert_eq!(json_quote(&s), format!("\"{s}\""));
         }
 
         #[test]

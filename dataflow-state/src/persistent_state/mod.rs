@@ -2549,7 +2549,7 @@ mod tests {
         where
             D: DeserializeOwned + Debug + PartialEq,
         {
-            self::assert_eq!(deserialize_key::<D>(serialized).1, v);
+            assert_eq!(deserialize_key::<D>(serialized).1, v);
         }
 
         match key {
