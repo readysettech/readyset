@@ -7,7 +7,7 @@ use readyset_adapter::backend::QueryInfo;
 use readyset_client_metrics::QueryDestination;
 use readyset_sql::ast::SqlQuery;
 use readyset_util::{eventually, failpoints};
-use test_utils::{slow, tags};
+use test_utils::tags;
 use tokio::time::{sleep, timeout};
 
 use crate::utils::*;
@@ -1124,7 +1124,7 @@ async fn update_propagation_through_failed_domain() {
 /// Fail the controller 10 times and check if we can execute the query. This
 /// test will pass if we correctly execute queries against fallback.
 #[clustertest(mysql)]
-#[slow]
+#[tags(slow)]
 async fn end_to_end_with_restarts() {
     let mut deployment = readyset_mysql("ct_end_to_end_with_restarts")
         .min_workers(2)
@@ -1203,7 +1203,7 @@ async fn end_to_end_with_restarts() {
 /// Fail the controller 10 times and check if we can query a view following
 /// a restart.
 #[clustertest(mysql)]
-#[slow]
+#[tags(slow)]
 async fn view_survives_restart() {
     let mut deployment = readyset_mysql("ct_view_survives_restarts")
         .min_workers(2)
@@ -1270,8 +1270,8 @@ async fn view_survives_restart() {
 /// Fail the non-leader worker 10 times while issuing writes.
 // This test currently fails because we drop writes to failed workers.
 #[clustertest(mysql)]
-#[ignore]
-#[slow]
+#[ignore = "We drop writes to failed workers"]
+#[tags(slow)]
 async fn writes_survive_restarts() {
     let mut deployment = readyset_mysql("ct_writes_survive_restarts")
         .min_workers(2)
@@ -1464,7 +1464,7 @@ async fn correct_deployment_permissions() {
 }
 
 #[clustertest(mysql)]
-#[slow]
+#[tags(slow)]
 async fn post_deployment_permissions_lock_table() {
     let mut deployment = readyset_mysql("ct_post_deployment_permissions_lock_table")
         .with_servers(1, ServerParams::default())
@@ -1511,7 +1511,7 @@ async fn post_deployment_permissions_lock_table() {
 
 #[clustertest(mysql)]
 #[ignore = "ENG-2067: flaky test"]
-#[slow]
+#[tags(slow)]
 async fn post_deployment_permissions_replication() {
     let mut deployment = readyset_mysql("ct_post_deployment_permissions_replication")
         .with_servers(1, ServerParams::default())
@@ -1805,7 +1805,7 @@ async fn show_query_metrics() {
 /// Fail the controller once and check if we can query a view which contains table aliases
 /// following a restart.
 #[clustertest(mysql)]
-#[slow]
+#[tags(slow)]
 async fn table_aliased_view_survives_restart() {
     let mut builder = readyset_mysql("ct_table_aliased_view_survives_restarts");
     builder.dry_run_migration_interval = Some(1000);

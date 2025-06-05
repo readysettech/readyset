@@ -7,7 +7,7 @@ use readyset_client_test_helpers::{
 };
 use readyset_util::eventually;
 use std::time::Duration;
-use test_utils::{slow, tags};
+use test_utils::tags;
 
 macro_rules! check_rows {
     ($my_rows:expr, $rs_rows:expr, $($format_args:tt)*) => {
@@ -317,15 +317,13 @@ macro_rules! test_encoding_replication {
     ($name:ident, $coltype:expr, $charset:expr, $range:expr) => {
         paste::paste! {
             #[tokio::test]
-            #[tags(serial, mysql_upstream)]
-            #[slow]
+            #[tags(serial, slow, mysql_upstream)]
             async fn [<test_ $name _snapshot>]() {
                 test_snapshot_encoding(stringify!($name), $coltype, $charset, $range).await;
             }
 
             #[tokio::test]
-            #[tags(serial, mysql_upstream)]
-            #[slow]
+            #[tags(serial, slow, mysql_upstream)]
             async fn [<test_ $name _streaming>]() {
                 test_streaming_encoding(stringify!($name), $coltype, $charset, $range).await;
             }

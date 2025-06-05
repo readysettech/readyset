@@ -3,11 +3,10 @@ use mysql_async::prelude::Queryable;
 use mysql_common::Value;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
-use test_utils::{slow, tags};
+use test_utils::tags;
 
-#[tags(serial, mysql8_upstream)]
+#[tags(serial, slow, mysql8_upstream)]
 #[test]
-#[slow]
 fn mysql_send_long_data() {
     readyset_tracing::init_test_logging();
     tokio::runtime::Builder::new_multi_thread()

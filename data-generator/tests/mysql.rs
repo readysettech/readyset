@@ -7,7 +7,7 @@ use proptest::prop_assume;
 use rand::{rngs::SmallRng, SeedableRng};
 use readyset_sql::{ast::SqlType, Dialect, DialectDisplay};
 use test_strategy::proptest;
-use test_utils::{slow, tags};
+use test_utils::tags;
 
 async fn mysql_connection() -> mysql_async::Conn {
     mysql_async::Conn::new(
@@ -33,9 +33,8 @@ async fn mysql_connection() -> mysql_async::Conn {
     .unwrap()
 }
 
-#[tags(serial, no_retry, mysql_upstream)]
+#[tags(serial, slow, no_retry, mysql_upstream)]
 #[proptest]
-#[slow]
 fn value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Some(Dialect::MySQL))] ty: SqlType,
 ) {
@@ -61,9 +60,8 @@ fn value_of_type_always_valid(
     .unwrap();
 }
 
-#[tags(serial, no_retry, mysql_upstream)]
+#[tags(serial, slow, no_retry, mysql_upstream)]
 #[proptest]
-#[slow]
 fn unique_value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Some(Dialect::MySQL))] ty: SqlType,
     #[strategy(0..=255u32)] idx: u32,
@@ -92,9 +90,8 @@ fn unique_value_of_type_always_valid(
     .unwrap();
 }
 
-#[tags(serial, no_retry, mysql_upstream)]
+#[tags(serial, slow, no_retry, mysql_upstream)]
 #[proptest]
-#[slow]
 fn random_value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Some(Dialect::MySQL))] ty: SqlType,
     seed: u64,

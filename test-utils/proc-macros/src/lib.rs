@@ -80,6 +80,7 @@ const VALID_TAGS: &[&str] = &[
     "serial",
     "consul",
     "no_retry",
+    "slow",
     "mysql_upstream",
     "mysql8_upstream",
     "postgres_upstream",
@@ -135,6 +136,7 @@ const VALID_TAGS: &[&str] = &[
 ///   the same upstream; see .config/nextest.toml for test groups)
 /// - `consul`: Requires a Consul server
 /// - `no_retry`: For generative tests such as proptests which should not be retried if they fail
+/// - `slow`: For tests that are expected to take a long time to run. See [`slow`]
 /// - `mysql_upstream`: For tests that can run against any supported MySQL version
 /// - `mysql8_upstream`: For tests that specifically target MySQL 8.x features or behavior
 /// - `postgres_upstream`: For tests that can run against any supported PostgreSQL version
@@ -181,6 +183,14 @@ pub fn tags(args: TokenStream, item: TokenStream) -> TokenStream {
             #[::test_utils::serial_test::serial(#serial_groups)]
         };
         item.attrs.push(serial_attr);
+    }
+
+    let uses_slow = tags.iter().any(|tag| tag == "slow");
+    if uses_slow {
+        let slow_attr = parse_quote! {
+            #[::test_utils::slow]
+        };
+        item.attrs.push(slow_attr);
     }
 
     let test_name = mem::replace(&mut item.sig.ident, Ident::new("test", Span::call_site()));
