@@ -23,6 +23,8 @@ triomphe = { workspace = true }
 [dev-dependencies]
 bincode = { workspace = true }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
+test-utils = { path = "../test-utils" }
+
 
 [lints.clippy]
 dbg_macro = "warn"

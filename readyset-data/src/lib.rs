@@ -2592,6 +2592,7 @@ mod tests {
     use derive_more::{From, Into};
     use readyset_util::{eq_laws, hash_laws, ord_laws};
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::*;
 
@@ -2678,12 +2679,14 @@ mod tests {
         }
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn max_greater_than_all(dt: DfValue) {
         prop_assume!(dt != DfValue::Max, "MAX");
         assert!(DfValue::Max > dt);
     }
 
+    #[tags(no_retry)]
     #[proptest]
     #[allow(clippy::float_cmp)]
     fn dt_to_mysql_value_roundtrip_prop(v: MySqlValue) {
@@ -2699,6 +2702,7 @@ mod tests {
         }
     }
 
+    #[tags(no_retry)]
     #[proptest]
     #[allow(clippy::float_cmp)]
     fn mysql_value_to_dt_roundtrip_prop(dt: DfValue) {
@@ -3388,6 +3392,7 @@ mod tests {
         _data_type_conversion_test_eq_i128(&ubigint_u64_max);
     }
 
+    #[tags(no_retry)]
     #[proptest]
     #[allow(clippy::unnecessary_fallible_conversions)]
     fn data_type_string_conversion_roundtrip(s: String) {
@@ -3771,6 +3776,7 @@ mod tests {
 
         use super::*;
 
+        #[tags(no_retry)]
         #[proptest]
         fn same_type_is_identity(dt: DfValue) {
             prop_assume!(dt.is_homogeneous());
@@ -3785,6 +3791,7 @@ mod tests {
             );
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn unknown_to_unknown(value: DfValue) {
             assert_eq!(
@@ -3793,6 +3800,7 @@ mod tests {
             );
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn parse_timestamps(#[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime) {
             let subsecond_digits = Dialect::DEFAULT_MYSQL.default_subsecond_digits();
@@ -3806,6 +3814,7 @@ mod tests {
             assert_eq!(result, expected);
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn parse_times(#[strategy(arbitrary_naive_time())] nt: NaiveTime) {
             let subsecond_digits = Dialect::DEFAULT_MYSQL.default_subsecond_digits();
@@ -3817,6 +3826,7 @@ mod tests {
             assert_eq!(result, expected);
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn parse_datetimes(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
             let subsecond_digits = Dialect::DEFAULT_MYSQL.default_subsecond_digits();
@@ -3831,6 +3841,7 @@ mod tests {
             assert_eq!(result, expected);
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn parse_dates(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
             let expected = DfValue::from(NaiveDateTime::new(
@@ -3863,6 +3874,7 @@ mod tests {
             );
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn timestamp_to_datetime(
             #[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime,
@@ -3882,6 +3894,7 @@ mod tests {
 
         macro_rules! int_conversion {
             ($name: ident, $from: ty, $to: ty, $df_type: expr) => {
+                #[tags(no_retry)]
                 #[proptest]
                 fn $name(source: $to) {
                     let input = <$from>::try_from(source);
@@ -3914,6 +3927,7 @@ mod tests {
 
         macro_rules! real_conversion {
             ($name: ident, $from: ty, $to: ty, $df_type: expr) => {
+                #[tags(no_retry)]
                 #[proptest]
                 fn $name(source: $from) {
                     if (source as $to).is_finite() {
@@ -3939,6 +3953,7 @@ mod tests {
 
         real_conversion!(double_to_float, f64, f32, DfType::Float);
 
+        #[tags(no_retry)]
         #[proptest]
         fn char_equal_length(#[strategy("a{1,30}")] text: String) {
             let input = DfValue::from(text.as_str());
@@ -4054,6 +4069,7 @@ mod tests {
 
         macro_rules! bool_conversion {
             ($name: ident, $ty: ty) => {
+                #[tags(no_retry)]
                 #[proptest]
                 fn $name(input: $ty) {
                     let input_dt = DfValue::from(input);

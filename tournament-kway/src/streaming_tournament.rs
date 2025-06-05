@@ -234,9 +234,11 @@ where
 mod tests {
     use streaming_iterator::StreamingIterator;
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use crate::StreamingTournament;
 
+    #[tags(no_retry)]
     #[proptest]
     fn test_usize_min(mut inputs: Vec<Vec<usize>>) {
         inputs.iter_mut().for_each(|i| i.sort());
@@ -251,6 +253,7 @@ mod tests {
         assert_eq!(tournament_result, sort_result);
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn test_usize_max(mut inputs: Vec<Vec<usize>>) {
         inputs.iter_mut().for_each(|i| i.sort_by(|a, b| b.cmp(a)));
@@ -265,6 +268,7 @@ mod tests {
         assert_eq!(tournament_result, sort_result);
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn test_arr_min(mut inputs: Vec<Vec<[u8; 4]>>) {
         inputs.iter_mut().for_each(|i| i.sort());
@@ -279,6 +283,7 @@ mod tests {
         assert_eq!(tournament_result, sort_result);
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn test_arr_max(mut inputs: Vec<Vec<[u8; 4]>>) {
         inputs.iter_mut().for_each(|i| i.sort_by(|a, b| b.cmp(a)));

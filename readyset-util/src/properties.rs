@@ -34,16 +34,19 @@ macro_rules! eq_laws {
         mod eq {
             use super::*;
 
+            #[::test_utils::tags(no_retry)]
             #[::test_strategy::proptest]
             fn reflexive(#[$meta] x: $ty) {
                 assert!(x == x);
             }
 
+            #[::test_utils::tags(no_retry)]
             #[::test_strategy::proptest]
             fn symmetric(#[$meta] x: $ty, #[$meta] y: $ty) {
                 assert_eq!(x == y, y == x);
             }
 
+            #[::test_utils::tags(no_retry)]
             #[::test_strategy::proptest]
             fn transitive(#[$meta] x: $ty, #[$meta] y: $ty, #[$meta] z: $ty) {
                 if x == y && y == z {

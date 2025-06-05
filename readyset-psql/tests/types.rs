@@ -123,7 +123,7 @@ mod types {
         };
 
         (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr, $rust_type: ty, $strategy: expr) => {
-            #[tags(serial, postgres_upstream)]
+            #[tags(serial, no_retry, postgres_upstream)]
             // these are pretty slow, so we only run a few cases at a time
             #[test_strategy::proptest(ProptestConfig {
                 cases: 5,

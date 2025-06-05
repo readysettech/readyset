@@ -33,7 +33,7 @@ async fn mysql_connection() -> mysql_async::Conn {
     .unwrap()
 }
 
-#[tags(serial, mysql_upstream)]
+#[tags(serial, no_retry, mysql_upstream)]
 #[proptest]
 #[slow]
 fn value_of_type_always_valid(
@@ -61,7 +61,7 @@ fn value_of_type_always_valid(
     .unwrap();
 }
 
-#[tags(serial, mysql_upstream)]
+#[tags(serial, no_retry, mysql_upstream)]
 #[proptest]
 #[slow]
 fn unique_value_of_type_always_valid(
@@ -92,7 +92,7 @@ fn unique_value_of_type_always_valid(
     .unwrap();
 }
 
-#[tags(serial, mysql_upstream)]
+#[tags(serial, no_retry, mysql_upstream)]
 #[proptest]
 #[slow]
 fn random_value_of_type_always_valid(

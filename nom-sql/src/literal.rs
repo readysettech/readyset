@@ -270,6 +270,7 @@ mod tests {
     use readyset_sql::DialectDisplay;
     use readyset_util::hash::hash;
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::*;
 
@@ -322,6 +323,7 @@ mod tests {
         assert_eq!(res, Literal::Integer(i64::MIN));
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn real_hash_matches_eq(real1: Double, real2: Double) {
         if real1 == real2 {
@@ -329,6 +331,7 @@ mod tests {
         }
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn literal_to_string_parse_round_trip(lit: Literal) {
         prop_assume!(!matches!(

@@ -116,6 +116,7 @@ mod tests {
 
     use strum::EnumCount;
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::*;
 
@@ -127,6 +128,7 @@ mod tests {
         assert!(Collation::COUNT <= 16)
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn hash_matches_eq(collation: Collation, s1: String, s2: String) {
         if collation.compare_strs(&s1, &s2) == Ordering::Equal {
@@ -140,6 +142,7 @@ mod tests {
         }
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn normalize_matches_cmp(collation: Collation, s1: String, s2: String) {
         assert_eq!(

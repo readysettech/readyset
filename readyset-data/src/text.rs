@@ -627,6 +627,7 @@ impl TextCoerce for Text {
 mod tests {
     use proptest::prop_assume;
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::*;
     use crate::Collation;
@@ -634,6 +635,7 @@ mod tests {
     mod len_and_collation {
         use super::*;
 
+        #[tags(no_retry)]
         #[proptest]
         fn len_round_trip(mut len: u8) {
             len &= 0b00001111;
@@ -641,6 +643,7 @@ mod tests {
             assert_eq!(lc.len(), len);
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn collation_round_trip(mut len: u8, collation: Collation) {
             len &= 0b00001111;
@@ -649,6 +652,7 @@ mod tests {
             assert_eq!(lc.collation(), collation);
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn set_collation_round_trip(mut len: u8, collation: Collation) {
             len &= 0b00001111;
@@ -661,18 +665,21 @@ mod tests {
         }
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn tiny_str_round_trip(#[strategy("[a-bA-B0-9]{0,14}")] s: String) {
         let tt: TinyText = s.as_str().try_into().unwrap();
         assert_eq!(tt.as_str(), s);
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn text_str_round_trip(s: String) {
         let t: Text = s.as_str().into();
         assert_eq!(t.as_str(), s);
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn text_collation_round_trip(s: String, c: Collation) {
         let t = Text::from_str_with_collation(&s, c);
@@ -907,6 +914,7 @@ mod tests {
         )
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn coerce_value_to_citext(input: DfValue) {
         let result = input.coerce_to(&DfType::Text(Collation::Citext), &DfType::Unknown);

@@ -3,6 +3,7 @@ use std::env;
 use query_generator::{GeneratorState, QueryDialect, QuerySeed};
 use readyset_sql::{ast::CreateTableStatement, Dialect, DialectDisplay};
 use test_strategy::proptest;
+use test_utils::tags;
 use tokio_postgres::NoTls;
 
 fn config() -> tokio_postgres::Config {
@@ -35,6 +36,7 @@ async fn recreate_test_database(mut config: tokio_postgres::Config) {
         .unwrap();
 }
 
+#[tags(no_retry)]
 #[proptest]
 #[ignore = "Currently failing"]
 fn queries_work_in_postgresql(#[any(dialect = QueryDialect(Dialect::PostgreSQL))] seed: QuerySeed) {

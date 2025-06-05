@@ -57,6 +57,9 @@ readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 replication-offset = { path = "../replication-offset" }
 
+[dev-dependencies]
+test-utils = { path = "../test-utils" }
+
 [features]
 bench = ["criterion"]
 failure_injection = ["fail/failpoints", "readyset-util/failure_injection"]

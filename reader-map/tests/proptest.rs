@@ -12,6 +12,7 @@ use reader_map::handles::{ReadHandle, WriteHandle};
 use reader_map::DefaultInsertionOrder;
 use readyset_util::ranges::{Bound, RangeBounds};
 use test_strategy::{proptest, Arbitrary};
+use test_utils::tags;
 
 const LARGE_VEC_RANGE: Range<usize> = 10..1000;
 
@@ -23,6 +24,7 @@ where
     iter.into_iter().cloned().collect()
 }
 
+#[tags(no_retry)]
 #[proptest]
 fn contains(insert: Vec<u32>) {
     let (mut w, r) = reader_map::new();
@@ -34,6 +36,7 @@ fn contains(insert: Vec<u32>) {
     assert!(insert.iter().all(|&key| r.get(&key).unwrap().is_some()));
 }
 
+#[tags(no_retry)]
 #[proptest]
 fn contains_not(insert: Vec<u8>, not: Vec<u8>) {
     let (mut w, r) = reader_map::new();
@@ -46,6 +49,7 @@ fn contains_not(insert: Vec<u8>, not: Vec<u8>) {
     assert!(nots.iter().all(|&key| r.get(&key).unwrap().is_none()));
 }
 
+#[tags(no_retry)]
 #[proptest]
 fn insert_empty(insert: Vec<u8>, remove: Vec<u8>) {
     let (mut w, r) = reader_map::new();
@@ -182,6 +186,7 @@ where
     true
 }
 
+#[tags(no_retry)]
 #[proptest]
 fn operations_i8(#[any(size_range(LARGE_VEC_RANGE).lift())] ops: Vec<Op<i8, i8>>) {
     let (mut w, r) = reader_map::new();
@@ -194,6 +199,7 @@ fn operations_i8(#[any(size_range(LARGE_VEC_RANGE).lift())] ops: Vec<Op<i8, i8>>
     assert_maps_equivalent(&r, &write_ref);
 }
 
+#[tags(no_retry)]
 #[proptest]
 fn operations_string(ops: Vec<Op<String, i8>>) {
     let (mut w, r) = reader_map::new();
@@ -206,6 +212,7 @@ fn operations_string(ops: Vec<Op<String, i8>>) {
     assert_maps_equivalent(&r, &write_ref);
 }
 
+#[tags(no_retry)]
 #[proptest]
 fn keys_values(#[any(size_range(LARGE_VEC_RANGE).lift())] ops: Vec<Op<i8, i8>>) {
     let (mut w, r) = reader_map::new();

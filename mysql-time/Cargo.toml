@@ -16,6 +16,7 @@ mysql_common = { workspace = true }
 
 [dev-dependencies]
 test-strategy = { workspace = true }
+test-utils = { path = "../test-utils" }
 
 [lints]
 workspace = true

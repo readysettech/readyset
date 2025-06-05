@@ -313,6 +313,7 @@ impl RangeKey {
 mod tests {
     use readyset_data::Collation;
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::*;
 
@@ -369,6 +370,7 @@ mod tests {
         );
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn single_point_key_serialize_injective(v1: DfValue, v2: DfValue) {
         let k1 = PointKey::Single(v1);

@@ -51,6 +51,7 @@ rust_decimal = { workspace = true, features = [
     "db-tokio-postgres",
     "serde-str",
 ] }
+test-utils = { path = "../test-utils" }
 
 [[bench]]
 name = "persistent_state"

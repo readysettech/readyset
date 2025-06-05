@@ -1269,6 +1269,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "test-strategy",
+ "test-utils",
  "thiserror 1.0.69",
  "tracing",
  "tuple",
@@ -2725,6 +2726,7 @@ version = "0.1.0"
 dependencies = [
  "proptest",
  "test-strategy",
+ "test-utils",
 ]
 
 [[package]]
@@ -2862,6 +2864,7 @@ dependencies = [
  "readyset-util",
  "serde",
  "test-strategy",
+ "test-utils",
  "thiserror 1.0.69",
 ]
 
@@ -4047,6 +4050,7 @@ dependencies = [
  "readyset-util",
  "smallvec",
  "test-strategy",
+ "test-utils",
  "thiserror 1.0.69",
  "triomphe",
 ]
@@ -4441,6 +4445,7 @@ dependencies = [
  "socket2",
  "strum",
  "test-strategy",
+ "test-utils",
  "thiserror 1.0.69",
  "timekeeper",
  "tokio",
@@ -4789,6 +4794,7 @@ dependencies = [
  "serde",
  "sqlparser",
  "test-strategy",
+ "test-utils",
  "thiserror 1.0.69",
  "triomphe",
 ]
@@ -6467,6 +6473,7 @@ dependencies = [
  "proptest",
  "streaming-iterator",
  "test-strategy",
+ "test-utils",
 ]
 
 [[package]]

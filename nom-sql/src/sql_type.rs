@@ -602,9 +602,11 @@ mod tests {
     mod arbitrary {
         use proptest::arbitrary::any_with;
         use test_strategy::proptest;
+        use test_utils::tags;
 
         use super::*;
 
+        #[tags(no_retry)]
         #[proptest]
         fn dont_generate_arrays(
             #[strategy(any_with::<SqlType>(SqlTypeArbitraryOptions {
@@ -616,6 +618,7 @@ mod tests {
             assert!(!matches!(ty, SqlType::Array(..)))
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn dont_generate_other(
             #[strategy(any_with::<SqlType>(SqlTypeArbitraryOptions {

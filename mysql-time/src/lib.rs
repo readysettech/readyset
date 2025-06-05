@@ -676,6 +676,7 @@ mod tests {
         arbitrary_duration, arbitrary_naive_date_time, arbitrary_naive_time,
     };
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::*;
 
@@ -704,6 +705,7 @@ mod tests {
         };
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn new(#[strategy(arbitrary_duration())] duration: Duration) {
         let mysql_time = MySqlTime::new(duration);
@@ -725,6 +727,7 @@ mod tests {
         assert_valid!(mysql_time, -MAX_MYSQL_TIME_SECONDS);
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn from_microseconds(#[strategy(arbitrary_duration())] duration: Duration) {
         let mysql_time =
@@ -785,6 +788,7 @@ mod tests {
         assert!(mysql_time1 < mysql_time3)
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn sub(
         #[strategy(arbitrary_duration())] duration1: Duration,
@@ -796,6 +800,7 @@ mod tests {
         assert_valid!(mysql_time1 - mysql_time2, total_secs);
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn add(
         #[strategy(arbitrary_duration())] duration1: Duration,
@@ -807,6 +812,7 @@ mod tests {
         assert_valid!(mysql_time1 + mysql_time2, total_secs);
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn add_naive_date_time(
         #[strategy(arbitrary_duration())] duration: Duration,
@@ -820,6 +826,7 @@ mod tests {
     mod from_str {
         use super::*;
 
+        #[tags(no_retry)]
         #[proptest]
         fn from_str(#[strategy(arbitrary_duration())] duration: Duration) {
             let duration_str = duration_to_str(duration);
@@ -828,6 +835,7 @@ mod tests {
             assert_valid!(mysql_time, total_secs);
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn from_str_display(#[strategy(arbitrary_duration())] duration: Duration) {
             let mysql_time = MySqlTime::new(duration);
@@ -1259,6 +1267,7 @@ mod tests {
         }
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn naive_time_from_into_round_trip(#[strategy(arbitrary_naive_time())] naive_time: NaiveTime) {
         let mt = MySqlTime::from(naive_time);

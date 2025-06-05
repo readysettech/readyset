@@ -402,6 +402,7 @@ impl<'de> Deserialize<'de> for TextOrTinyText {
 #[cfg(test)]
 mod tests {
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::*;
 
@@ -424,6 +425,7 @@ mod tests {
         );
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn text_serialize_bincode_round_trip(s: String, collation: Collation) {
         let input = DfValue::from_str_and_collation(&s, collation);
@@ -436,6 +438,7 @@ mod tests {
         assert_eq!(rt.collation(), input.collation());
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn text_ref_serializes_same_as_text_value(s: String) {
         let text_ref = bincode::serialize(&TextRef(&s)).unwrap();
@@ -443,6 +446,7 @@ mod tests {
         assert_eq!(text_ref, text_value);
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn serialize_round_trip(v: DfValue) {
         let serialized = bincode::serialize(&v).unwrap();

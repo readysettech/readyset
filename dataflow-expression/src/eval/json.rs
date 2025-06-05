@@ -727,6 +727,8 @@ mod tests {
     use itertools::Itertools;
     use proptest::prelude::*;
 
+    use test_utils::tags;
+
     use super::*;
 
     mod json_quote {
@@ -735,6 +737,7 @@ mod tests {
 
         use super::*;
 
+        #[tags(no_retry)]
         #[proptest]
         fn inputs(string: String) {
             let quoted = json_quote(&string);
@@ -747,6 +750,7 @@ mod tests {
             assert_eq!(json_quote("wo\u{1f}rl\\d"), r#""wo\u001frl\\d""#);
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn non_escaped(s: String) {
             let contains_escapable = s
@@ -755,7 +759,7 @@ mod tests {
 
             prop_assume!(!contains_escapable);
 
-            assert_eq!(json_quote(&s), format!("\"{s}\""));
+            self::assert_eq!(json_quote(&s), format!("\"{s}\""));
         }
 
         #[test]

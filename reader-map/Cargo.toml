@@ -25,6 +25,7 @@ readyset-util = { path = "../readyset-util" }
 [dev-dependencies]
 proptest = { workspace = true }
 test-strategy = { workspace = true }
+test-utils = { path = "../test-utils" }
 
 
 [lints]

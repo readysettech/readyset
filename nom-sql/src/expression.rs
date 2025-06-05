@@ -860,6 +860,7 @@ pub(crate) fn expression(
 mod tests {
     use readyset_sql::DialectDisplay;
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::*;
     use crate::to_nom_result;
@@ -892,6 +893,7 @@ mod tests {
         )
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn arbitrary_expr_doesnt_stack_overflow(_expr: Expr) {}
 

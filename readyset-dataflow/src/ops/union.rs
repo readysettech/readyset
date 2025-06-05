@@ -1550,6 +1550,7 @@ mod tests {
         use std::cmp::max;
 
         use test_strategy::{proptest, Arbitrary};
+        use test_utils::tags;
 
         use super::*;
 
@@ -1561,6 +1562,7 @@ mod tests {
             NegRight,
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn bag_union_state_returns_correct_state_size(inputs: Vec<Input>) {
             let (total_lefts, total_rights) =

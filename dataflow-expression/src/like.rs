@@ -119,6 +119,7 @@ impl From<String> for LikePattern {
 #[cfg(test)]
 mod tests {
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::*;
 
@@ -165,6 +166,7 @@ mod tests {
         assert!(LikePattern::new(r"\\", CaseSensitive).matches(r"\"));
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn pattern_matches_itself(pat: String) {
         lazy_static! {

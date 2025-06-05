@@ -202,6 +202,7 @@ fn set_postgres_parameter(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SetPostg
 #[cfg(test)]
 mod tests {
     use readyset_sql::DialectDisplay;
+    use test_utils::tags;
 
     use super::*;
 

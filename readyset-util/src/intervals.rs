@@ -549,6 +549,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use test_utils::tags;
+
     use super::*;
 
     #[test]
@@ -561,11 +563,13 @@ mod tests {
 
         use super::*;
 
+        #[tags(no_retry)]
         #[proptest]
         fn covers_reflexive(x: (Bound<i32>, Bound<i32>)) {
             assert!(covers(&x, &x))
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn covers_transitive(
             r1: (Bound<i32>, Bound<i32>),
@@ -577,6 +581,7 @@ mod tests {
             }
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn infinite_covers_all(r: (Bound<i8>, Bound<i8>)) {
             assert!(covers(&(..), &r));
@@ -592,6 +597,7 @@ mod tests {
 
         use super::*;
 
+        #[tags(no_retry)]
         #[proptest]
         fn overlaps_is_collect_intersects(r1: Range<i8>, r2: Range<i8>) {
             prop_assume!(!r1.is_empty());
@@ -607,11 +613,13 @@ mod tests {
             );
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn overlaps_commutative(r1: Range<i8>, r2: Range<i8>) {
             assert_eq!(overlaps(&r1, &r2), overlaps(&r2, &r1));
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn covers_implies_overlaps(r1: Range<i8>, r2: Range<i8>) {
             if covers(&r1, &r2) {
@@ -678,6 +686,7 @@ mod tests {
             )
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn idempotent(r1: (Bound<i8>, Bound<i8>), r2: (Bound<i8>, Bound<i8>)) {
             let once: Vec<_> = difference(&r1, &r2).collect();
@@ -694,11 +703,13 @@ mod tests {
 
         use super::*;
 
+        #[tags(no_retry)]
         #[proptest]
         fn commutative(r1: Range<i8>, r2: Range<i8>) {
             assert_eq!(intersection(&r1, &r2), intersection(&r2, &r1));
         }
 
+        #[tags(no_retry)]
         #[proptest]
         fn is_some_implies_overlaps(r1: Range<i8>, r2: Range<i8>) {
             prop_assume!(!r1.is_empty());

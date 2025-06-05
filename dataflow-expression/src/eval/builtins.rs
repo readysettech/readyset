@@ -1481,6 +1481,7 @@ mod tests {
         arbitrary_timestamp_naive_date_time, arbitrary_timestamp_naive_date_time_for_timezone,
     };
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::*;
     use crate::eval::tests::{eval_expr, try_eval_expr};
@@ -2064,6 +2065,7 @@ mod tests {
     // NOTE(Fran): We have to be careful when testing timezones, as the time difference
     //   between two timezones might differ depending on the date (due to daylight savings
     //   or by historical changes).
+    #[tags(no_retry)]
     #[proptest]
     fn convert_tz(
         #[strategy(arbitrary_timestamp_naive_date_time_for_timezone(Atlantic::Cape_Verde))]
@@ -2076,7 +2078,7 @@ mod tests {
             .unwrap()
             .with_timezone(&target_tz)
             .naive_local();
-        assert_eq!(
+        self::assert_eq!(
             super::convert_tz(&datetime, &src_tz.to_string(), &target_tz.to_string()).unwrap(),
             expected
         );
@@ -2084,16 +2086,18 @@ mod tests {
         super::convert_tz(&datetime, &src_tz.to_string(), "invalid timezone").unwrap_err();
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn day_of_week(#[strategy(arbitrary_timestamp_naive_date_time())] datetime: NaiveDateTime) {
         let expected = datetime.weekday().number_from_sunday() as u8;
-        assert_eq!(super::day_of_week(&datetime.date()), expected);
+        self::assert_eq!(super::day_of_week(&datetime.date()), expected);
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn month(#[strategy(arbitrary_timestamp_naive_date_time())] datetime: NaiveDateTime) {
         let expected = datetime.month() as u8;
-        assert_eq!(super::month(&datetime.date()), expected);
+        self::assert_eq!(super::month(&datetime.date()), expected);
     }
 
     #[test]

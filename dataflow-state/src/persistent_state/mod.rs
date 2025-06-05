@@ -2504,6 +2504,7 @@ mod tests {
     use replication_offset::postgres::PostgresPosition;
     use rust_decimal::Decimal;
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::*;
 
@@ -2539,6 +2540,7 @@ mod tests {
         state
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn point_key_serialize_round_trip(key: PointKey) {
         let serialized = PersistentState::serialize_prefix(&key);
@@ -2547,7 +2549,7 @@ mod tests {
         where
             D: DeserializeOwned + Debug + PartialEq,
         {
-            assert_eq!(deserialize_key::<D>(serialized).1, v);
+            self::assert_eq!(deserialize_key::<D>(serialized).1, v);
         }
 
         match key {

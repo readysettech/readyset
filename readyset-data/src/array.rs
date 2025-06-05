@@ -607,6 +607,7 @@ mod tests {
     use proptest::strategy::Strategy;
     use readyset_util::ord_laws;
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::*;
 
@@ -803,6 +804,7 @@ mod tests {
         );
     }
 
+    #[tags(no_retry)]
     #[proptest]
     #[ignore = "DfValue <-> Literal doesn't round trip (ENG-1416)"]
     fn display_parse_round_trip(arr: Array) {

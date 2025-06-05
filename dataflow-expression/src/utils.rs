@@ -219,14 +219,16 @@ mod tests {
 
     mod insert_bidirectional {
         use pretty_assertions::assert_eq;
+        use test_utils::tags;
 
         use super::*;
 
+        #[tags(no_retry)]
         #[proptest]
         fn inputs(mut vec: Vec<u32>, index: isize, element: u32, insert_after: bool) {
             let prev_len = vec.len();
             insert_bidirectional(&mut vec, index, element, insert_after);
-            assert_eq!(vec.len(), prev_len + 1);
+            self::assert_eq!(vec.len(), prev_len + 1);
         }
 
         #[track_caller]

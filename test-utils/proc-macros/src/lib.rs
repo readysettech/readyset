@@ -79,6 +79,7 @@ pub fn skip_flaky_finder(_args: TokenStream, item: TokenStream) -> TokenStream {
 const VALID_TAGS: &[&str] = &[
     "serial",
     "consul",
+    "no_retry",
     "mysql_upstream",
     "mysql8_upstream",
     "postgres_upstream",
@@ -133,6 +134,7 @@ const VALID_TAGS: &[&str] = &[
 /// - `serial`: Indicates that tests must be run serially (not in parallel with other serial tests for
 ///   the same upstream; see .config/nextest.toml for test groups)
 /// - `consul`: Requires a Consul server
+/// - `no_retry`: For generative tests such as proptests which should not be retried if they fail
 /// - `mysql_upstream`: For tests that can run against any supported MySQL version
 /// - `mysql8_upstream`: For tests that specifically target MySQL 8.x features or behavior
 /// - `postgres_upstream`: For tests that can run against any supported PostgreSQL version

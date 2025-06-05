@@ -174,9 +174,11 @@ where
 #[cfg(test)]
 mod tests {
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::*;
 
+    #[tags(no_retry)]
     #[proptest]
     fn all_elements_in_string(elems: Vec<String>, conjunction: String) {
         let mut res = String::new();

@@ -1002,6 +1002,7 @@ mod tests {
     use std::ops::{Bound, RangeBounds};
 
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use crate::{Endpoint, IntervalTreeSet};
 
@@ -1457,6 +1458,7 @@ mod tests {
             .is_none());
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn insert_interval_is_in_tree(intervals: Vec<(Bound<u16>, Bound<u16>)>) {
         let mut tree = IntervalTreeSet::default();
@@ -1491,6 +1493,7 @@ mod tests {
         }
     }
 
+    #[tags(no_retry)]
     #[proptest]
     fn remove_interval_not_in_tree(intervals: Vec<(Bound<u16>, Bound<u16>)>) {
         let mut tree = IntervalTreeSet::<u16>::default();

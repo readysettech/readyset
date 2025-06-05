@@ -25,3 +25,7 @@ test-group = 'serial-postgres'
 [[profile.default.overrides]]
 filter = 'test(/:serial:/) and test(/:mysql\d*_upstream:/)'
 test-group = 'serial-mysql'
+
+[[profile.default.overrides]]
+filter = 'test(/:proptest:/)'
+retries = 0

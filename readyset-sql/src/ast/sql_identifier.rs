@@ -474,6 +474,7 @@ impl Arbitrary for SqlIdentifier {
 mod tests {
     use readyset_util::{eq_laws, hash_laws, ord_laws};
     use test_strategy::proptest;
+    use test_utils::tags;
 
     use super::SqlIdentifier;
 
@@ -481,6 +482,7 @@ mod tests {
     ord_laws!(SqlIdentifier);
     hash_laws!(SqlIdentifier);
 
+    #[tags(no_retry)]
     #[proptest]
     fn serde_roundtrip(val: SqlIdentifier) {
         let ser = bincode::serialize(&val).unwrap();

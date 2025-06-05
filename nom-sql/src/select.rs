@@ -334,6 +334,7 @@ pub fn nested_selection(
 #[cfg(test)]
 mod tests {
     use readyset_sql::DialectDisplay;
+    use test_utils::tags;
 
     use super::*;
     use crate::to_nom_result;

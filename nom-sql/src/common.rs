@@ -712,6 +712,7 @@ mod tests {
     use super::*;
 
     use readyset_sql::DialectDisplay;
+    use test_utils::tags;
 
     use crate::to_nom_result;
 

@@ -43,7 +43,7 @@ async fn mysql_connection() -> mysql_async::Conn {
     conn
 }
 
-#[tags(serial, mysql_upstream)]
+#[tags(serial, no_retry, mysql_upstream)]
 #[proptest]
 #[ignore = "Currently failing"]
 fn queries_work_in_mysql(seed: QuerySeed) {
