@@ -40,7 +40,7 @@ enable_mrbr() {
 }
 
 export DISABLE_TELEMETRY=true
-export PROPTEST_MAX_SHRINK_TIME=1800000
+export PROPTEST_MAX_SHRINK_TIME=600000
 export CARGO_TERM_PROGRESS_WHEN=never
 
 : "${TEST_CATEGORY:=nextest}"
