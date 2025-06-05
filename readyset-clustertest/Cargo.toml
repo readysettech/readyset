@@ -37,7 +37,6 @@ readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-clustertest-macros = { path = "./macros" }
 readyset-tracing = { path = "../readyset-tracing" }
 rust_decimal = { workspace = true }
-serial_test = { workspace = true }
 test-utils = { path = "../test-utils" }
 
 [build-dependencies]

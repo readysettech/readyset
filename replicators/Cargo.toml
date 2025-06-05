@@ -26,7 +26,7 @@ bit-vec = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
 nom_locate = { workspace = true }
 deadpool-postgres = { workspace = true }
-mysql_common = { workspace = true, features =  ["binlog"] }
+mysql_common = { workspace = true, features = ["binlog"] }
 
 tokio-postgres = { workspace = true, features = [
     "with-chrono-0_4",
@@ -38,7 +38,7 @@ postgres-types = { workspace = true, features = [
 ] }
 postgres-native-tls = { workspace = true }
 postgres-protocol = { workspace = true }
-mysql_async = { workspace = true}
+mysql_async = { workspace = true }
 
 nom-sql = { path = "../nom-sql" }
 readyset-client = { path = "../readyset-client" }
@@ -57,7 +57,6 @@ readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 replication-offset = { path = "../replication-offset" }
 
 [dev-dependencies]
-serial_test = { workspace = true }
 test-utils = { path = "../test-utils" }
 readyset-server = { path = "../readyset-server" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = [

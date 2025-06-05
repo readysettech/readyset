@@ -26,7 +26,7 @@ readyset-client-metrics = { path = "../readyset-client-metrics" }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 thiserror = { workspace = true }
-mysql_common = { workspace = true, features = ["bigdecimal","binlog"] }
+mysql_common = { workspace = true, features = ["bigdecimal", "binlog"] }
 itertools = { workspace = true }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
@@ -40,7 +40,6 @@ readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", feature
     "test-util",
 ] }
 readyset-server = { path = "../readyset-server" }
-serial_test = { workspace = true }
 test-utils = { path = "../test-utils" }
 chrono = { workspace = true }
 futures = { workspace = true }

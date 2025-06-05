@@ -66,7 +66,6 @@ features = [
 derive_more = { workspace = true }
 bincode = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
-serial_test = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 test-utils = { path = "../test-utils" }
 

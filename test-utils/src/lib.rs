@@ -3,7 +3,10 @@
 
 pub use test_utils_proc_macros::{skip_flaky_finder, slow, tags};
 
+// Re-export serial_test so we only need to add `readyset_utils` to `Cargo.toml` for packages that
+// use it.
 pub use serial_test;
+
 /// Returns `false` if slow tests should not run, otherwise returns `true`.
 pub fn skip_slow_tests() -> bool {
     let should_skip = std::env::var("RUN_SLOW_TESTS").is_err();

@@ -175,9 +175,10 @@ pub fn tags(args: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     // Special handling for `serial`: add the in-process mutex from `serial_test`
-    if tags.iter().any(|tag| tag == "serial") {
+    let uses_serial = tags.iter().any(|tag| tag == "serial");
+    if uses_serial {
         let serial_attr = parse_quote! {
-            #[serial_test::serial(#serial_groups)]
+            #[::test_utils::serial_test::serial(#serial_groups)]
         };
         item.attrs.push(serial_attr);
     }
@@ -185,8 +186,17 @@ pub fn tags(args: TokenStream, item: TokenStream) -> TokenStream {
     let test_name = mem::replace(&mut item.sig.ident, Ident::new("test", Span::call_site()));
     tags.insert(0, test_name);
 
-    let mut out = quote! {
-        #item
+    // In addition to adding the attribute, we also need to make `serial_test` resolve in scope,
+    // because the macro adds a call out to the crate for a runtime function.
+    let mut out = if uses_serial {
+        quote! {
+            use ::test_utils::serial_test;
+            #item
+        }
+    } else {
+        quote! {
+            #item
+        }
     };
 
     for group in tags.into_iter().rev() {

@@ -43,7 +43,6 @@ postgres = { workspace = true, features = [
 ] }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 regex = { workspace = true }
-serial_test = { workspace = true }
 test-utils = { path = "../test-utils" }
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = [

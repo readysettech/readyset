@@ -23,7 +23,6 @@ readyset-client-test-helpers = { path = "../readyset-client-test-helpers", featu
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
-serial_test = { workspace = true }
 test-strategy = { workspace = true }
 test-utils = { path = "../test-utils" }
 tokio = { workspace = true, features = ["full"] }

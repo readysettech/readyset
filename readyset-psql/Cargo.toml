@@ -59,7 +59,6 @@ criterion = { workspace = true, features = ["async_tokio"] }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-tracing = { path = "../readyset-tracing" }
 test-utils = { path = "../test-utils" }
-serial_test = { workspace = true }
 
 [[bench]]
 name = "proxy"

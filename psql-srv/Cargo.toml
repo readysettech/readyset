@@ -59,7 +59,6 @@ readyset-tracing = { path = "../readyset-tracing" }
 postgres-native-tls = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
 test-utils = { path = "../test-utils" }
-serial_test = { workspace = true }
 
 [[bench]]
 name = "parse"
