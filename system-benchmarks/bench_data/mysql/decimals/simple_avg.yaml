@@ -1,0 +1,15 @@
+distributions:
+  - name: group_ids
+    range:
+      start: 0
+      end: 5000000
+    uniform: ~
+queries:
+  - spec: >-
+      SELECT avg(value) FROM decimals WHERE group_id = ?
+    params:
+      - sql_type: bigint
+        distribution: group_ids
+        col: 0
+    weight: 1
+    migrate: true

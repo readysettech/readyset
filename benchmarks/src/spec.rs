@@ -117,6 +117,7 @@ use crate::workload_emulator::{ColGenerator, Distributions, Query, QuerySet, Sam
 pub struct WorkloadSpec {
     pub distributions: Vec<WorkloadDistribution>,
     pub queries: Vec<WorkloadQuery>,
+    #[serde(default)]
     pub setup: Vec<String>,
 }
 
