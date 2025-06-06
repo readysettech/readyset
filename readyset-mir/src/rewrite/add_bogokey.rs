@@ -8,46 +8,33 @@ use tracing::trace;
 use crate::node::node_inner::ProjectExpr;
 use crate::node::{MirNode, MirNodeInner};
 use crate::query::MirQuery;
-use crate::Column;
+use crate::{Column, NodeIndex};
 
-fn add_bogokey_leaf(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
-    match &query.leaf_node().inner {
-        MirNodeInner::Leaf { keys, .. } if keys.is_empty() => {}
-        _ => {
-            // Either the query has a Leaf with keys (so no bogokey is necessary) or the query has
-            // no Leaf at all (which is the case for eg VIEWs). Either way, we don't need to do
-            // anything
-            return Ok(());
-        }
-    }
+/// A few scenarios where a bogokey (from "bogus key") is needed:
+///
+/// If the given query has a Leaf but doesn't have any keys, create a key for it by adding a new
+/// node to the query that projects out a constant literal value (a "bogokey", from "bogus key") and
+/// making that the key for the query.
+///
+/// This pass will also handle ensuring that any topk or paginate nodes in leaf position in such
+/// queries have `group_by` columns, by lifting the bogokey project node over those nodes and adding
+/// the bogokey to their `group_by`
+///
+/// Consider a join node without a join condition (i.e. a cross-join); however, all join nodes
+/// require a join condition, so we add a bogokey projection to both of the join's parents and
+/// use that as a filter condition..
+pub(crate) fn add_bogokey_if_necessary(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
+    add_bogokey_leaf(query)?;
+    add_bogokey_topk(query)?;
+    add_bogokey_join(query)?;
 
-    // Find the node we're going to insert the bogokey project node above
-    //
-    // Usually this'll be the first leaf project node, but in the case of topk or paginate with an
-    // empty group_by we insert above those instead, since those both happen to need a group_by.
-    let mut node_to_insert_above = query.leaf();
-    while let Some(parent) = query
-        .ancestors(node_to_insert_above)?
-        .first()
-        .filter(|parent| {
-            let inner = &query.get_node(**parent).unwrap().inner;
-            matches!(inner, MirNodeInner::Project { .. })
-                || matches!(
-                    inner,
-                    MirNodeInner::TopK { group_by, .. }
-                    | MirNodeInner::Paginate { group_by, .. }
-                    if group_by.is_empty()
-                )
-        })
-    {
-        node_to_insert_above = *parent;
-        invariant_eq!(query.ancestors(node_to_insert_above)?.len(), 1);
-    }
-    trace!(
-        ?node_to_insert_above,
-        "found node to insert bogo_project above"
-    );
+    Ok(())
+}
 
+fn insert_bogokey_project_above(
+    query: &mut MirQuery<'_>,
+    node_to_insert_above: NodeIndex,
+) -> ReadySetResult<NodeIndex> {
     let ancestors = query.ancestors(node_to_insert_above)?;
     invariant_eq!(ancestors.len(), 1);
     let parent_idx = *ancestors.first().unwrap();
@@ -72,18 +59,75 @@ fn add_bogokey_leaf(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
     )?;
     trace!(?bogo_project, "Added new bogokey project node");
 
-    if let MirNodeInner::Leaf { keys, .. } = &mut query.leaf_node_mut().inner {
-        keys.push((Column::named("bogokey"), ViewPlaceholder::Generated))
+    Ok(bogo_project)
+}
+
+fn add_bogokey_topk(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
+    let topk_nodes = query
+        .node_references()
+        .filter(|(_, node)| {
+            matches!(
+                node,
+                MirNode {
+                    inner: MirNodeInner::TopK { group_by, .. },
+                    ..
+                } if group_by.is_empty()
+            )
+        })
+        .map(|(idx, _)| idx)
+        .collect::<Vec<_>>();
+
+    topk_nodes
+        .iter()
+        .try_for_each(|idx| -> ReadySetResult<()> {
+            invariant_eq!(query.ancestors(*idx)?.len(), 1);
+            insert_bogokey_project_above(query, *idx)?;
+            if let MirNodeInner::TopK { group_by, .. } =
+                &mut query.get_node_mut(*idx).unwrap().inner
+            {
+                group_by.push(Column::named("bogokey"));
+            }
+            Ok(())
+        })?;
+
+    Ok(())
+}
+
+fn add_bogokey_leaf(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
+    match &query.leaf_node().inner {
+        MirNodeInner::Leaf { keys, .. } if keys.is_empty() => {}
+        _ => {
+            // Either the query has a Leaf with keys (so no bogokey is necessary) or the query has
+            // no Leaf at all (which is the case for eg VIEWs). Either way, we don't need to do
+            // anything
+            return Ok(());
+        }
     }
 
-    if let MirNodeInner::TopK { group_by, .. } =
-        &mut query.get_node_mut(node_to_insert_above).unwrap().inner
+    // Find the node we're going to insert the bogokey project node above
+    // Usually this'll be the first leaf project node.
+    let mut node_to_insert_above = query.leaf();
+    while let Some(parent) = query
+        .ancestors(node_to_insert_above)?
+        .first()
+        .filter(|parent| {
+            let inner = &query.get_node(**parent).unwrap().inner;
+            matches!(inner, MirNodeInner::Project { .. })
+        })
     {
-        // TODO: Move this up once the if-let chains are stabilized in Rust
-        if group_by.is_empty() {
-            group_by.push(Column::named("bogokey"))
-        }
-    };
+        node_to_insert_above = *parent;
+        invariant_eq!(query.ancestors(node_to_insert_above)?.len(), 1);
+    }
+    trace!(
+        ?node_to_insert_above,
+        "found node to insert bogo_project above"
+    );
+
+    insert_bogokey_project_above(query, node_to_insert_above)?;
+
+    if let MirNodeInner::Leaf { keys, .. } = &mut query.leaf_node_mut().inner {
+        keys.push((Column::named("bogokey"), ViewPlaceholder::Generated));
+    }
 
     Ok(())
 }
@@ -140,26 +184,6 @@ fn add_bogokey_join(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
 
             Ok(())
         })?;
-
-    Ok(())
-}
-
-/// A few scenarios where a bogokey (from "bogus key") is needed:
-///
-/// If the given query has a Leaf but doesn't have any keys, create a key for it by adding a new
-/// node to the query that projects out a constant literal value (a "bogokey", from "bogus key") and
-/// making that the key for the query.
-///
-/// This pass will also handle ensuring that any topk or paginate nodes in leaf position in such
-/// queries have `group_by` columns, by lifting the bogokey project node over those nodes and adding
-/// the bogokey to their `group_by`
-///
-/// Consider a join node without a join condition (i.e. a cross-join); however, all join nodes
-/// require a join condition, so we add a bogokey projection to both of the join's parents and
-/// use that as a filter condition..
-pub(crate) fn add_bogokey_if_necessary(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
-    add_bogokey_leaf(query)?;
-    add_bogokey_join(query)?;
 
     Ok(())
 }
