@@ -19,7 +19,7 @@ use readyset_client::consensus::{
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
-use readyset_client::{ControllerConnectionPool, ControllerDescriptor};
+use readyset_client::{ControllerConnectionPool, ControllerDescriptor, TableStatus};
 use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::Relation;
@@ -33,6 +33,7 @@ use readyset_util::shutdown::ShutdownReceiver;
 use replicators::{ControllerMessage, ReplicatorMessage};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use table_status::TableStatusState;
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{debug, error, info, info_span, warn};
@@ -56,6 +57,7 @@ pub(crate) mod replication;
 pub(crate) mod schema;
 pub(crate) mod sql;
 mod state;
+pub(crate) mod table_status;
 
 /// Time between leader state change checks without thread parking.
 const LEADER_STATE_CHECK_INTERVAL: Duration = Duration::from_secs(1);
@@ -411,6 +413,10 @@ pub struct Controller {
     permissive_writes: bool,
     /// Explicit dialect to use when creating ControllerState
     dialect: Option<readyset_sql::Dialect>,
+    /// The currently known state for all tables (if we're the leader).
+    table_statuses: TableStatusState,
+    /// Any TableStatus updates sent here will be sent to the leading controller.
+    table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     /// Handle used to receive a shutdown signal
     shutdown_rx: ShutdownReceiver,
 }
@@ -427,32 +433,42 @@ impl Controller {
         config: Config,
         parsing_preset: ParsingPreset,
         dialect: Option<readyset_sql::Dialect>,
+        table_status_tx: UnboundedSender<(Relation, TableStatus)>,
+        table_status_rx: UnboundedReceiver<(Relation, TableStatus)>,
         shutdown_rx: ShutdownReceiver,
     ) -> Self {
         // If we don't have an upstream, we allow permissive writes to base tables.
         let permissive_writes = config.replicator_config.upstream_db_url.is_none();
         let (background_task_failed_tx, background_task_failed_rx) = mpsc::channel(1);
+        let table_statuses = TableStatusState::new(
+            authority.is_single_process(),
+            controller_http.clone(),
+            table_status_rx,
+            shutdown_rx.clone(),
+        );
         Self {
             inner: Arc::new(LeaderHandle::new()),
             authority,
             http_rx: controller_rx,
             handle_rx,
-            background_task_failed_tx,
             background_task_failed_rx,
+            background_task_failed_tx,
             our_descriptor,
             worker_descriptor,
             config,
             parsing_preset,
             leader_ready: Arc::new(AtomicBool::new(false)),
             maintenance_mode: Arc::new(AtomicBool::new(false)),
+            cache_ddl: None,
             controller_http,
             controller_channel: ControllerChannel::new(),
             replicator_channel: ReplicatorChannel::new(),
             telemetry_sender,
             permissive_writes,
             dialect,
+            table_statuses,
+            table_status_tx,
             shutdown_rx,
-            cache_ddl: None,
         }
     }
 
@@ -530,6 +546,7 @@ impl Controller {
                 info!("won leader election, creating Leader");
                 gauge!(recorded::CONTROLLER_IS_LEADER).set(1f64);
                 let background_task_failed_tx = self.background_task_failed_tx.clone();
+                self.table_statuses.init(&state.dataflow_state).await;
                 let mut leader = Leader::new(
                     state,
                     self.our_descriptor.controller_uri.clone(),
@@ -542,6 +559,8 @@ impl Controller {
                     self.parsing_preset,
                     self.replicator_channel.sender(),
                     self.controller_channel.sender(),
+                    self.table_statuses.clone(),
+                    self.table_status_tx.clone(),
                 );
                 self.leader_ready.store(false, Ordering::Release);
 

@@ -1211,6 +1211,7 @@ dependencies = [
  "test-strategy",
  "test-utils",
  "thiserror 2.0.16",
+ "tokio",
  "tracing",
  "tuple",
  "vec1",

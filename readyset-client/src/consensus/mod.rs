@@ -336,6 +336,15 @@ impl Debug for Authority {
     }
 }
 
+impl Authority {
+    pub fn is_single_process(&self) -> bool {
+        matches!(
+            self,
+            Self::LocalAuthority(..) | Self::StandaloneAuthority(..)
+        )
+    }
+}
+
 /// Enum that mirrors Authority that parses command line arguments.
 #[derive(Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub enum AuthorityType {

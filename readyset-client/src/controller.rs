@@ -37,8 +37,8 @@ use crate::status::ReadySetControllerStatus;
 use crate::table::{PersistencePoint, Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
-    ReplicationOffset, SingleKeyEviction, TableReplicationStatus, ViewCreateRequest, ViewFilter,
-    ViewRequest,
+    ReplicationOffset, SingleKeyEviction, TableReplicationStatus, TableStatus, ViewCreateRequest,
+    ViewFilter, ViewRequest,
 };
 
 mod rpc;
@@ -522,6 +522,14 @@ impl ReadySetHandle {
         /// Query the status of all known tables, including those not replicated by ReadySet if
         /// the `all` parameter is set to `true`.
         table_statuses(all: bool) -> BTreeMap<Relation, TableReplicationStatus>
+    );
+
+    simple_request!(
+        /// Update the statuses for multiple tables.
+        // XXX JCD Avoid calling this when running in standalone, single-process mode, as there is
+        // no ordering guarantee for updates rapidly sent via this endpoint due to the requests
+        // being dispatched asynchronously in the controller.
+        set_table_status(statuses: &HashMap<Relation, TableStatus>) -> ()
     );
 
     simple_request!(

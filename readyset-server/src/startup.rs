@@ -59,8 +59,9 @@ use health_reporter::{HealthReporter, State as ServerState};
 use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::{Authority, WorkerSchedulingConfig};
 use readyset_client::{
-    ControllerConnectionPool, ControllerDescriptor, ReadySetHandle, WorkerDescriptor,
+    ControllerConnectionPool, ControllerDescriptor, ReadySetHandle, TableStatus, WorkerDescriptor,
 };
+use readyset_sql::ast::Relation;
 use readyset_sql::Dialect;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -69,7 +70,7 @@ use readyset_util::failpoints;
 use readyset_util::futures::abort_on_panic;
 use readyset_util::shutdown::{self, ShutdownReceiver, ShutdownSender};
 use tokio::net::TcpListener;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tracing::error;
 use url::Url;
 
@@ -160,6 +161,8 @@ fn start_controller(
     leader_eligible: bool,
     telemetry_sender: TelemetrySender,
     dialect: Option<Dialect>,
+    table_status_tx: UnboundedSender<(Relation, TableStatus)>,
+    table_status_rx: UnboundedReceiver<(Relation, TableStatus)>,
     shutdown_rx: ShutdownReceiver,
 ) -> Result<ControllerDescriptor, anyhow::Error> {
     set_failpoint!(failpoints::START_CONTROLLER);
@@ -186,6 +189,8 @@ fn start_controller(
         config,
         parsing_preset,
         dialect,
+        table_status_tx,
+        table_status_rx,
         shutdown_rx,
     );
 
@@ -284,6 +289,7 @@ pub(crate) async fn start_instance_inner(
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
     let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
     let (handle_tx, handle_rx) = tokio::sync::mpsc::channel(16);
+    let (table_status_tx, table_status_rx) = tokio::sync::mpsc::unbounded_channel();
 
     let Config {
         abort_on_task_failure,
@@ -341,6 +347,8 @@ pub(crate) async fn start_instance_inner(
         leader_eligible,
         telemetry_sender.clone(),
         dialect,
+        table_status_tx,
+        table_status_rx,
         shutdown_rx,
     )?;
 

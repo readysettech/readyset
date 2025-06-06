@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::future::Future;
+use std::mem::discriminant;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -289,6 +290,55 @@ impl Display for TableReplicationStatus {
             TableReplicationStatus::Snapshotted => f.write_str("Snapshotted")?,
         }
         Ok(())
+    }
+}
+
+/// The status of a table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TableStatus {
+    Initializing,
+    Snapshotting(Option<f64>),
+    Compacting(Option<f64>),
+    CreatingIndex(Option<f64>),
+    Online,
+    NotReplicated(NotReplicatedReason),
+    Dropped,
+}
+
+impl Display for TableStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Initializing => write!(f, "Initializing"),
+            Self::Snapshotting(..) => write!(f, "Snapshotting"),
+            Self::Compacting(..) => write!(f, "Compacting"),
+            Self::CreatingIndex(..) => write!(f, "Creating index"),
+            Self::Online => write!(f, "Online"),
+            Self::NotReplicated(..) => write!(f, "Not replicated"),
+            Self::Dropped => write!(f, "Dropped"),
+        }
+    }
+}
+
+impl TableStatus {
+    pub fn description(&self) -> String {
+        match self {
+            Self::Initializing
+            | Self::Snapshotting(None)
+            | Self::Compacting(None)
+            | Self::CreatingIndex(None)
+            | Self::Online
+            | Self::Dropped => "".to_string(),
+            Self::Snapshotting(Some(progress))
+            | Self::Compacting(Some(progress))
+            | Self::CreatingIndex(Some(progress)) => format!("{progress:.2}%"),
+            Self::NotReplicated(reason) => reason.description(),
+        }
+    }
+}
+
+impl PartialEq for TableStatus {
+    fn eq(&self, other: &Self) -> bool {
+        discriminant(self) == discriminant(other)
     }
 }
 

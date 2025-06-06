@@ -26,7 +26,7 @@ use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::{ChangeList, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use readyset_client::status::{CurrentStatus, ReadySetControllerStatus};
-use readyset_client::{GraphvizOptions, ViewCreateRequest, WorkerDescriptor};
+use readyset_client::{GraphvizOptions, TableStatus, ViewCreateRequest, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::Relation;
 use readyset_sql::Dialect;
@@ -54,6 +54,8 @@ use crate::controller::state::{DfState, DfStateHandle};
 use crate::controller::{ControllerState, Worker, WorkerIdentifier};
 use crate::worker::WorkerRequestKind;
 
+use super::table_status::TableStatusState;
+
 /// Maximum amount of time to wait for an `extend_recipe` request to run synchronously, before we
 /// let it run in the background and return [`ExtendRecipeResult::Pending`].
 const EXTEND_RECIPE_MAX_SYNC_TIME: Duration = Duration::from_secs(5);
@@ -76,45 +78,40 @@ type RunningMigration = Fuse<JoinHandle<ReadySetResult<()>>>;
 /// occur at any given point in time.
 pub struct Leader {
     pub(super) dataflow_state_handle: Arc<DfStateHandle>,
-
     /// Number of workers to wait for before we start trying to run any domains at all
     min_workers: usize,
     controller_uri: Url,
-
     /// The amount of time to wait for a worker request to complete.
     worker_request_timeout: Duration,
     /// Interval on which to automatically run recovery as long as there are unscheduled domains
     background_recovery_interval: Duration,
     /// Are we currently trying to run recovery in the background?
     background_recovery_running: Arc<AtomicBool>,
-
     /// Whether to log statements received by the replicators
     replicator_statement_logging: bool,
     /// Configuration for the replicator
     pub(super) replicator_config: UpstreamConfig,
     /// A client to the current authority.
     pub(super) authority: Arc<Authority>,
-
     /// Parsing mode for the controller (used in extend_recipe and the replicator)
     parsing_preset: ParsingPreset,
-
     /// A map of currently running migrations.
     ///
     /// Requests to `/extend_recipe` run for at least [`EXTEND_RECIPE_MAX_SYNC_TIME`], after which
     /// a handle to the running migration is placed here, where it can be queried via an rpc to
     /// `/migration_status`.
     running_migrations: Mutex<SlotMap<DefaultKey, RunningMigration>>,
-
     /// A channel that will be notified if a background task for the controller fails
     pub(super) background_task_failed: mpsc::Sender<ReadySetError>,
-
     pub(super) running_recovery: Option<watch::Receiver<ReadySetResult<()>>>,
-
     /// This channel is for sending events to the replicator.
     pub(super) replicator_tx: UnboundedSender<ReplicatorMessage>,
-
     /// This channel is for sending events to the controller.
     pub(super) controller_tx: UnboundedSender<ControllerMessage>,
+    /// The currently known state for all tables.
+    table_statuses: TableStatusState,
+    /// Any TableStatus updates sent here will update this controller's state machine.
+    _table_status_tx: UnboundedSender<(Relation, TableStatus)>,
 }
 
 impl Leader {
@@ -438,6 +435,11 @@ impl Leader {
                     ds.table_statuses(all).await?
                 };
                 return_serialized!(res)
+            }
+            (&Method::POST, "/set_table_status") => {
+                let statuses: HashMap<Relation, TableStatus> = bincode::deserialize(&body)?;
+                self.table_statuses.set(statuses).await?;
+                return_serialized!(())
             }
             (&Method::POST, "/resnapshot_table") => {
                 let table: Relation = bincode::deserialize(&body)?;
@@ -1059,6 +1061,8 @@ impl Leader {
         parsing_preset: ParsingPreset,
         replicator_tx: UnboundedSender<ReplicatorMessage>,
         controller_tx: UnboundedSender<ControllerMessage>,
+        table_statuses: TableStatusState,
+        table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     ) -> Self {
         assert_ne!(state.config.min_workers, 0);
 
@@ -1067,9 +1071,7 @@ impl Leader {
         Leader {
             dataflow_state_handle,
             min_workers: state.config.min_workers,
-
             controller_uri,
-
             replicator_statement_logging,
             replicator_config,
             authority,
@@ -1082,6 +1084,8 @@ impl Leader {
             running_recovery: None,
             replicator_tx,
             controller_tx,
+            table_statuses,
+            _table_status_tx: table_status_tx,
         }
     }
 }
