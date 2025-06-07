@@ -143,6 +143,7 @@ impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinitio
                 column_name,
                 if_exists: _,
                 drop_behavior,
+                has_column_keyword: _,
             } => Ok(Self::DropColumn {
                 name: column_name.into_dialect(dialect),
                 behavior: drop_behavior.map(Into::into),
@@ -246,7 +247,9 @@ pub struct AlterTableStatement {
     /// [`String`] that could not be parsed.
     pub definitions: Result<Vec<AlterTableDefinition>, String>,
     pub only: bool,
+    /// [DEFAULT | INPLACE | COPY]
     pub algorithm: Option<String>,
+    /// [DEFAULT | NONE | SHARED | EXCLUSIVE]
     pub lock: Option<String>,
 }
 
@@ -262,15 +265,27 @@ impl TryFromDialect<sqlparser::ast::Statement> for AlterTableStatement {
             operations,
             location: _,
             on_cluster: _,
+            iceberg: _,
         } = value
         {
             Ok(Self {
                 table: name.into_dialect(dialect),
-                definitions: Ok(operations.try_into_dialect(dialect)?),
                 only,
-                // TODO: might need to fix sqlparser for algorithm and lock
-                algorithm: None,
-                lock: None,
+                algorithm: operations.iter().find_map(|op| match op {
+                    sqlparser::ast::AlterTableOperation::Algorithm { algorithm, .. }
+                        if algorithm != &sqlparser::ast::AlterTableAlgorithm::Instant =>
+                    {
+                        Some(algorithm.to_string())
+                    }
+                    _ => None,
+                }),
+                lock: operations.iter().find_map(|op| match op {
+                    sqlparser::ast::AlterTableOperation::Lock { lock, .. } => {
+                        Some(lock.to_string())
+                    }
+                    _ => None,
+                }),
+                definitions: Ok(operations.try_into_dialect(dialect)?),
             })
         } else {
             failed!("Expected ALTER TABLE statement")

@@ -207,11 +207,14 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
     ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::TableConstraint::*;
         match value {
-            Check { name, expr } => Ok(Self::CheckConstraint {
+            Check {
+                name,
+                expr,
+                enforced,
+            } => Ok(Self::CheckConstraint {
                 constraint_name: name.into_dialect(dialect),
                 expr: expr.try_into_dialect(dialect)?,
-                enforced: None, // TODO(mohamed): Enforced is supported in unique contraints, but
-                                // not in checks. Need an upstream PR to sqlparser REA-5742
+                enforced,
             }),
             ForeignKey {
                 name,
@@ -220,14 +223,12 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 referred_columns,
                 on_delete,
                 on_update,
+                index_name,
                 // XXX Not sure why, but we don't support characteristics
                 characteristics: _characteristics,
             } => Ok(Self::ForeignKey {
-                // TODO(mvzink): Where do these two different names come from for sqlparser?
-                // TODO(mohamed): sqlparser doesn't support index_name in constraints, needs an
-                // upstream PR REA-5743
                 constraint_name: name.into_dialect(dialect),
-                index_name: None,
+                index_name: index_name.into_dialect(dialect),
                 columns: columns.into_dialect(dialect),
                 target_table: foreign_table.into_dialect(dialect),
                 target_columns: referred_columns.into_dialect(dialect),

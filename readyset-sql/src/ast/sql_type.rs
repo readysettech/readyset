@@ -291,6 +291,7 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
             UBigInt => unsupported!("UBIGINT type"),
             // Databricks-specific datatype
             TimestampNtz => unsupported!("TIMESTAMP_NTZ type"),
+            NamedTable { .. } => unsupported!("NAMED TABLE type"),
         }
     }
 }

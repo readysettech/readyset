@@ -877,6 +877,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 operand: None,
                 conditions,
                 else_result,
+                ..
             } => Ok(Self::CaseWhen {
                 branches: conditions
                     .into_iter()
@@ -893,6 +894,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 operand: Some(expr),
                 conditions,
                 else_result,
+                ..
             } => Ok(Self::CaseWhen {
                 branches: conditions
                     .into_iter()

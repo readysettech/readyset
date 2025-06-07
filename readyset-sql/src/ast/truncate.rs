@@ -5,7 +5,9 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect};
+use crate::{
+    ast::*, AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 
@@ -21,6 +23,15 @@ pub struct TruncateStatement {
     pub cascade: bool,
 }
 
+impl FromDialect<sqlparser::ast::TruncateTableTarget> for TruncateTable {
+    fn from_dialect(value: sqlparser::ast::TruncateTableTarget, dialect: Dialect) -> Self {
+        Self {
+            relation: value.name.into_dialect(dialect),
+            only: value.only,
+        }
+    }
+}
+
 impl TryFromDialect<sqlparser::ast::Statement> for TruncateStatement {
     fn try_from_dialect(
         value: sqlparser::ast::Statement,
@@ -30,11 +41,6 @@ impl TryFromDialect<sqlparser::ast::Statement> for TruncateStatement {
             table_names,
             partitions: _,
             table: _,
-            // TODO(mvzink): I believe sqlparser is incorrect here; ONLY should be on each table
-            // target, not the whole statement. We interpret it as applying to all tables, but
-            // should probably upstream a fix (or verify that sqlparser is correct).
-            // TODO(mohamed): upstream a fix REA-5744
-            only,
             identity,
             cascade,
             on_cluster: _,
@@ -42,10 +48,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for TruncateStatement {
         {
             let tables = table_names
                 .into_iter()
-                .map(|table| TruncateTable {
-                    relation: table.name.into_dialect(dialect),
-                    only,
-                })
+                .map(|tn| tn.into_dialect(dialect))
                 .collect();
             Ok(Self {
                 tables,
