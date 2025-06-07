@@ -354,8 +354,7 @@ pub use crate::controller::{
 };
 pub use crate::table::{
     Modification, Operation, PacketData, PacketPayload, PacketTrace, PersistencePoint, Table,
-    TableOperation, TableReplicationStatus, TableRequest, TableStatus,
-    TABLE_STATUS_REPORT_INTERVAL,
+    TableOperation, TableRequest, TableStatus, TABLE_STATUS_REPORT_INTERVAL,
 };
 pub use crate::view::{
     KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyBatch, ReadReplyStats, SchemaType,

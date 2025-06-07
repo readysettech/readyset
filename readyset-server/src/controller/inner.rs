@@ -432,11 +432,8 @@ impl Leader {
             }
             (&Method::POST, "/table_statuses") => {
                 let all: bool = bincode::deserialize(&body)?;
-                let res = {
-                    let ds = self.dataflow_state_handle.read().await;
-                    ds.table_statuses(all).await?
-                };
-                return_serialized!(res)
+                let table_statuses = self.table_statuses.get(all).await;
+                return_serialized!(table_statuses)
             }
             (&Method::POST, "/set_table_status") => {
                 let statuses: HashMap<Relation, TableStatus> = bincode::deserialize(&body)?;

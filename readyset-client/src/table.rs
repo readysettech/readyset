@@ -272,30 +272,6 @@ impl fmt::Debug for PacketData {
     }
 }
 
-/// The status of a single table with respect to replication
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum TableReplicationStatus {
-    /// The table is not being replicated by ReadySet
-    NotReplicated(NotReplicatedReason),
-    /// The table is currently being snapshotted by ReadySet
-    Snapshotting,
-    /// The table has been successfully snapshotted by ReadySet
-    Snapshotted,
-}
-
-impl Display for TableReplicationStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TableReplicationStatus::NotReplicated(reason) => {
-                write!(f, "Not Replicated : {}", reason.description())?;
-            }
-            TableReplicationStatus::Snapshotting => f.write_str("Snapshotting")?,
-            TableReplicationStatus::Snapshotted => f.write_str("Snapshotted")?,
-        }
-        Ok(())
-    }
-}
-
 /// The status of a table.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TableStatus {

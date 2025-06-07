@@ -1415,9 +1415,7 @@ mod tests {
     use dataflow::DomainIndex;
     use readyset_client::debug::info::KeyCount;
     use readyset_client::recipe::changelist::{Change, ChangeList};
-    use readyset_client::{
-        PersistencePoint, TableOperation, TableReplicationStatus, ViewCreateRequest,
-    };
+    use readyset_client::{PersistencePoint, TableOperation, TableStatus, ViewCreateRequest};
     use readyset_data::Dialect as DataDialect;
     use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
     use readyset_sql::Dialect;
@@ -1829,14 +1827,14 @@ mod tests {
                         schema: Some("s2".into()),
                         name: "snapshotting_t".into(),
                     },
-                    TableReplicationStatus::Snapshotting
+                    TableStatus::Snapshotting(None)
                 ),
                 (
                     Relation {
                         schema: Some("s2".into()),
                         name: "snapshotted_t".into(),
                     },
-                    TableReplicationStatus::Snapshotted
+                    TableStatus::Online
                 ),
             ])
         );
@@ -1850,21 +1848,21 @@ mod tests {
                         schema: Some("s1".into()),
                         name: "t".into(),
                     },
-                    TableReplicationStatus::NotReplicated(NotReplicatedReason::Configuration)
+                    TableStatus::NotReplicated(NotReplicatedReason::Configuration)
                 ),
                 (
                     Relation {
                         schema: Some("s2".into()),
                         name: "snapshotting_t".into(),
                     },
-                    TableReplicationStatus::Snapshotting
+                    TableStatus::Snapshotting(None)
                 ),
                 (
                     Relation {
                         schema: Some("s2".into()),
                         name: "snapshotted_t".into(),
                     },
-                    TableReplicationStatus::Snapshotted
+                    TableStatus::Online
                 ),
             ])
         );

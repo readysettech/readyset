@@ -103,6 +103,30 @@ impl TableStatusState {
         *self.state.write().await = Some(state);
     }
 
+    /// Get all known table statuses.
+    pub async fn get(&self, all: bool) -> BTreeMap<Relation, TableStatus> {
+        let state = self.state.read().await;
+        let state = match state.as_ref() {
+            Some(state) => state,
+            None => return BTreeMap::new(),
+        };
+
+        if all {
+            state.clone()
+        } else {
+            state
+                .iter()
+                .filter_map(|(table, status)| {
+                    if matches!(status, TableStatus::NotReplicated(..)) {
+                        None
+                    } else {
+                        Some((table.clone(), status.clone()))
+                    }
+                })
+                .collect()
+        }
+    }
+
     /// Update the statuses for multiple tables.
     ///
     /// NOTE: Only call this if you know what you're doing.  Most users should instead feed updates

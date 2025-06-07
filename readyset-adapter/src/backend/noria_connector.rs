@@ -937,27 +937,14 @@ impl NoriaConnector {
         };
         let data = statuses
             .into_iter()
-            .map(|(tbl, status)| {
-                let replication_status_str = status.to_string();
-                let replication_split = replication_status_str
-                    .splitn(2, ": ")
-                    .collect::<Vec<&str>>();
-                let (replication_status, description) =
-                    if replication_split[0].starts_with("Not Replicated") {
-                        (
-                            replication_split[0].to_string(),
-                            replication_split.get(1).unwrap_or(&"").to_string(),
-                        )
-                    } else {
-                        (status.to_string(), "".to_string())
-                    };
+            .map(|(table, status)| {
                 vec![
-                    tbl.display(self.parse_dialect).to_string().into(),
-                    replication_status.into(),
-                    description.into(),
+                    table.display(self.parse_dialect).to_string().into(),
+                    status.to_string().into(),
+                    status.description().into(),
                 ]
             })
-            .collect::<Vec<_>>();
+            .collect();
 
         Ok(QueryResult::from_owned(schema, vec![Results::new(data)]))
     }
