@@ -16,9 +16,9 @@ use readyset_errors::{
     ReadySetResult,
 };
 use readyset_sql::ast::{
-    self, CompoundSelectStatement, CreateTableBody, CreateTableOption, FieldDefinitionExpr,
-    NonReplicatedRelation, NotReplicatedReason, Relation, SelectSpecification, SelectStatement,
-    SqlIdentifier, SqlType, TableExpr,
+    self, AlterTableDefinition, CompoundSelectStatement, CreateTableBody, CreateTableOption,
+    FieldDefinitionExpr, NonReplicatedRelation, NotReplicatedReason, Relation, SelectSpecification,
+    SelectStatement, SqlIdentifier, SqlType, TableExpr, TableKey,
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
@@ -292,7 +292,7 @@ impl SqlIncorporator {
                             // Table already exists, so check if it has been changed.
                             if current_body != &body {
                                 // Table has changed. Drop and recreate.
-                                trace!(
+                                info!(
                                     table = %cts.table.display_unquoted(),
                                     "table exists and has changed. Dropping and recreating..."
                                 );
@@ -408,9 +408,13 @@ impl SqlIncorporator {
                 Change::CreateCache(cc) => {
                     self.add_query(cc.name, *cc.statement, cc.always, &schema_search_path, mig)?;
                 }
-                Change::AlterTable(_) => {
-                    // The only ALTER TABLE changes that can end up here (currently) are ones that
-                    // aren't relevant to ReadySet, so we can just ignore them.
+                ref change @ Change::AlterTable(ref alter_table_body) => {
+                    // for PG we don't replicate create index. Also Foreign key is not retrieved
+                    // as part of SHOW CREATE TABLE so we don't need to modify the base schema
+                    if dialect == Dialect::DEFAULT_MYSQL {
+                        let mut table = alter_table_body.table.clone();
+                        self.modify_base_schema(&mut table, &schema_search_path, change)?;
+                    }
                 }
                 Change::CreateType { mut name, ty } => {
                     if let Some(first_schema) = schema_search_path.first() {
@@ -967,6 +971,100 @@ impl SqlIncorporator {
                 .map(|na| na.address()),
             Some(na) => Some(*na),
         }
+    }
+
+    pub(super) fn propagate_default_search_path(
+        &self,
+        name: &mut Relation,
+        schema_search_path: &[SqlIdentifier],
+    ) -> ReadySetResult<()> {
+        if name.schema.is_none() {
+            let Some(first_schema) = schema_search_path.first() else {
+                return Err(invalid_query_err!("No schema search path provided"));
+            };
+            name.schema = Some(first_schema.clone());
+        }
+        Ok(())
+    }
+
+    /// Modify the base schema of a table. This needs to be aligned with [`Change::requires_resnapshot`]
+    /// This will update the base_schemas and the registry.
+    pub(super) fn modify_base_schema(
+        &mut self,
+        name: &mut Relation,
+        schema_search_path: &[SqlIdentifier],
+        change: &Change,
+    ) -> ReadySetResult<()> {
+        self.propagate_default_search_path(name, schema_search_path)?;
+        if change.requires_resnapshot() {
+            return Err(invalid_query_err!("Unsupported alter table type"));
+        }
+        let base_schema = self
+            .base_schemas
+            .get_mut(name)
+            .ok_or_else(|| invalid_query_err!("Table not found"))?;
+
+        if let Change::AlterTable(alter_table_statement) = change {
+            alter_table_statement
+                .definitions
+                .iter()
+                .try_for_each(|definition| {
+                    definition.iter().try_for_each(|alter_table_body| {
+                        match *alter_table_body {
+                            // Extensive list of operations to adjust the base schema.
+                            AlterTableDefinition::AddKey(ref key @ TableKey::Key { .. })
+                            | AlterTableDefinition::AddKey(ref key @ TableKey::ForeignKey { .. })
+                            | AlterTableDefinition::AddKey(
+                                ref key @ TableKey::CheckConstraint { .. },
+                            )
+                            | AlterTableDefinition::AddKey(
+                                ref key @ TableKey::FulltextKey { .. },
+                            ) => {
+                                let mut key = key.clone();
+                                // propagate default search path to the new key. Otherwise we might get different table body on restarts.
+                                key.get_columns_mut()
+                                    .iter_mut()
+                                    .filter(|col| col.table.is_none())
+                                    .for_each(|col| col.table = Some(name.clone()));
+                                base_schema
+                                    .statement
+                                    .add_key_with_name_mysql(key.clone(), name.clone());
+
+                                if let Some(RecipeExpr::Table { ref body, .. }) =
+                                    self.registry.get(name)
+                                {
+                                    let mut new_body = body.clone();
+                                    new_body.add_key_with_name_mysql(key.clone(), name.clone());
+                                    let _ = self.registry.update_query(
+                                        name,
+                                        RecipeExpr::Table {
+                                            name: name.clone(),
+                                            body: new_body,
+                                            pg_meta: base_schema.pg_meta.clone(),
+                                        },
+                                    );
+                                }
+                                Ok(())
+                            }
+                            // These operations will change the underlying table, and should have been caught earlier
+                            AlterTableDefinition::AddColumn(_)
+                            | AlterTableDefinition::AddKey(TableKey::PrimaryKey { .. })
+                            | AlterTableDefinition::AddKey(TableKey::UniqueKey { .. })
+                            | AlterTableDefinition::AlterColumn { .. }
+                            | AlterTableDefinition::DropColumn { .. }
+                            | AlterTableDefinition::ChangeColumn { .. }
+                            | AlterTableDefinition::RenameColumn { .. }
+                            | AlterTableDefinition::DropConstraint { .. }
+                            | AlterTableDefinition::ReplicaIdentity(_)
+                            | AlterTableDefinition::DropForeignKey { .. } => {
+                                Err(invalid_query_err!("Unsupported ALTER TABLE type"))
+                            }
+                        }
+                    })
+                })?;
+        }
+
+        Ok(())
     }
 
     fn add_base_via_mir(

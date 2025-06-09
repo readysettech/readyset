@@ -159,6 +159,16 @@ impl fmt::Display for NullsDistinct {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum TableKeyType {
+    PrimaryKey,
+    UniqueKey,
+    FulltextKey,
+    Key,
+    ForeignKey,
+    CheckConstraint,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum TableKey {
     PrimaryKey {
         constraint_name: Option<SqlIdentifier>,
@@ -357,6 +367,7 @@ impl TableKey {
             _ => None,
         }
     }
+
     /// Returns a mutable reference to the target columns of the foreign key
     pub fn target_columns_mut(&mut self) -> Option<&mut Vec<Column>> {
         match self {
@@ -396,6 +407,11 @@ impl TableKey {
         matches!(self, TableKey::ForeignKey { .. })
     }
 
+    /// Check if the key is of type Key
+    pub fn is_key(&self) -> bool {
+        matches!(self, TableKey::Key { .. })
+    }
+
     /// Get the columns that the key is defined on
     pub fn get_columns(&self) -> &[Column] {
         match self {
@@ -417,6 +433,18 @@ impl TableKey {
             | TableKey::Key { columns, .. }
             | TableKey::ForeignKey { columns, .. } => columns,
             TableKey::CheckConstraint { .. } => &mut [],
+        }
+    }
+
+    /// Order the column keys following the rules of MySQL
+    pub fn priority(&self) -> u8 {
+        match self {
+            TableKey::PrimaryKey { .. } => 0,
+            TableKey::UniqueKey { .. } => 1,
+            TableKey::Key { .. } => 2,
+            TableKey::FulltextKey { .. } => 3,
+            TableKey::ForeignKey { .. } => 4,
+            TableKey::CheckConstraint { .. } => 5,
         }
     }
 }
@@ -570,6 +598,19 @@ impl DialectDisplay for TableKey {
                 }
             }
         })
+    }
+}
+
+impl PartialOrd for TableKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TableKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Compare by priority
+        self.priority().cmp(&other.priority())
     }
 }
 

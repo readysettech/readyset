@@ -178,6 +178,8 @@ enum Operation {
     Evict {
         inner: RefCell<Option<SingleKeyEviction>>,
     },
+    /// Adds a new key to an existing table
+    AddKey { table: String, column: String },
 }
 
 // Generators for Operation:
@@ -214,6 +216,16 @@ prop_compose! {
         // Find the first unused key:
         let pkey = (0..).find(|k| !table_keys.contains(k)).unwrap();
         Operation::WriteRow { table, pkey, col_vals, col_types }
+    }
+}
+
+prop_compose! {
+    fn gen_add_key(tables: BTreeMap<String, Vec<ColumnSpec>>)
+    (t in sample::select(tables.keys().cloned().collect::<Vec<_>>()))
+    (table in Just(t.clone()),
+     col_name in sample::select(tables[&t].iter().map(|cs| cs.name.clone()).collect::<Vec<_>>()))
+    -> Operation {
+        Operation::AddKey { table, column: col_name }
     }
 }
 
@@ -389,12 +401,14 @@ impl ModelState for DDLModelState {
             let add_col_strat = gen_add_col(self.tables.clone()).boxed();
             let create_simple_view_strat =
                 gen_create_simple_view(self.tables.keys().cloned().collect()).boxed();
+            let add_key_strat = gen_add_key(self.tables.clone()).boxed();
 
             possible_ops.extend([
                 drop_strategy,
                 write_strategy,
                 add_col_strat,
                 create_simple_view_strat,
+                add_key_strat,
             ]);
         }
 
@@ -542,6 +556,7 @@ impl ModelState for DDLModelState {
                 self.deleted_views.insert(name.clone());
             }
             Operation::Evict { .. } => (),
+            Operation::AddKey { .. } => (),
         }
     }
 
@@ -593,6 +608,10 @@ impl ModelState for DDLModelState {
                 .tables
                 .get(table)
                 .is_some_and(|t| t.iter().all(|cs| cs.name != *column_spec.name)),
+            Operation::AddKey { table, column } => self
+                .tables
+                .get(table)
+                .is_some_and(|t| t.iter().any(|cs| cs.name == *column)),
             Operation::DropColumn(table, col_name) => self
                 .tables
                 .get(table)
@@ -722,6 +741,21 @@ impl ModelState for DDLModelState {
                     col_spec.name,
                     col_spec.sql_type.display(readyset_sql::Dialect::MySQL)
                 );
+                rs_conn.query_drop(&query).await.unwrap();
+                mysql_conn.query_drop(&query).await.unwrap();
+            }
+            Operation::AddKey { table, column } => {
+                let col_type = &self.tables[table]
+                    .iter()
+                    .find(|cs| cs.name == *column)
+                    .unwrap()
+                    .sql_type;
+                let key_len = match col_type {
+                    SqlType::Blob | SqlType::Text => "(10)",
+                    _ => "",
+                };
+                let query = format!("ALTER TABLE `{table}` ADD KEY ({column}{key_len})");
+                println!("Adding key: {query}");
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
             }

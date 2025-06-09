@@ -423,6 +423,22 @@ impl ExprRegistry {
         Ok(true)
     }
 
+    /// Update the [`RecipeExpr`] associated with the given name (or alias).
+    pub(super) fn update_query(
+        &mut self,
+        name: &Relation,
+        expression: RecipeExpr,
+    ) -> ReadySetResult<()> {
+        let query_id = self.aliases.get(name).ok_or_else(|| {
+            ReadySetError::RecipeInvariantViolated(format!(
+                "Query {} does not exist",
+                name.display_unquoted(),
+            ))
+        })?;
+        self.expressions.insert(*query_id, expression);
+        Ok(())
+    }
+
     /// Retrieves the [`RecipeExpr`] associated with the given name or alias.
     /// If no query is found, returns `None`.
     pub(super) fn get(&self, alias: &Relation) -> Option<&RecipeExpr> {

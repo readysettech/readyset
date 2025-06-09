@@ -16,6 +16,7 @@ use readyset_client::ReadySetHandle;
 use readyset_data::{Collation, DfValue, Dialect, TimestampTz, TinyText};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_server::Builder;
+use readyset_server::NodeIndex;
 use readyset_sql::ast::{NonReplicatedRelation, Relation};
 use readyset_sql_parsing::parse_select;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
@@ -4238,6 +4239,239 @@ async fn mysql_minimal_row_based_blob() {
         "mrbr_blob_insert",
         &[&[DfValue::Int(0), DfValue::ByteArray(vec![].into())]]
     );
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, mysql_upstream)]
+#[slow]
+async fn alter_table_add_key_mysql() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS test_alter_table_add_key;
+            DROP TABLE IF EXISTS test_alter_table_add_key2;
+            DROP TABLE IF EXISTS test_alter_table_add_key_bogus;
+        CREATE TABLE test_alter_table_add_key (id INT PRIMARY KEY, c INT NOT NULL, d VARCHAR(10));
+        CREATE TABLE test_alter_table_add_key2 (id INT PRIMARY KEY);
+        CREATE TABLE test_alter_table_add_key_bogus (id INT PRIMARY KEY);
+        INSERT INTO test_alter_table_add_key (id, c, d) VALUES (1, 2, 'a');
+        INSERT INTO test_alter_table_add_key2 (id) VALUES (2);",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    check_results!(
+        ctx,
+        "test_alter_table_add_key",
+        "Snapshot1",
+        &[&[
+            DfValue::Int(1),
+            DfValue::Int(2),
+            DfValue::from_str_and_collation("a", Collation::Citext)
+        ]]
+    );
+
+    // Ensure that:
+    // 1. The base table exists
+    // 2. There is a cache created on previous step
+    let tables = ctx.noria.tables().await.unwrap();
+    let caches = ctx.noria.views().await.unwrap();
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "test_alter_table_add_key".into(),
+    };
+    assert!(tables.contains_key(&relation));
+    assert_eq!(caches.len(), 1);
+    let table_id = tables.get(&relation).unwrap();
+    let bogus_table = Relation {
+        schema: Some("public".into()),
+        name: "test_alter_table_add_key_bogus".into(),
+    };
+    let bogus_table_id = tables.get(&bogus_table).unwrap();
+
+    let verify_tables_and_caches =
+        async move |ctx: &mut TestHandle, expected_table_id: &NodeIndex| -> ReadySetResult<()> {
+            let tables = ctx.noria.tables().await.unwrap();
+            let caches = ctx.noria.views().await.unwrap();
+            assert_eq!(tables.len(), 3, "tables.len() = {}", tables.len());
+            assert_eq!(caches.len(), 1, "caches.len() = {}", caches.len());
+            let table_id_after = tables.get(&relation).unwrap();
+            assert_eq!(
+                table_id_after, expected_table_id,
+                "table_id_after = {:?}, expected_table_id = {:?}",
+                table_id_after, expected_table_id
+            );
+            Ok(())
+        };
+
+    // Add a new key
+    client
+        .query("ALTER TABLE test_alter_table_add_key ADD KEY (c), ADD FOREIGN KEY (c) REFERENCES test_alter_table_add_key2 (id), ADD KEY (c), ADD FULLTEXT KEY (d);")
+        .await
+        .unwrap();
+
+    // Wait in case of resnapshot for the snapshot to complete
+    eventually!(verify_tables_and_caches(&mut ctx, table_id).await.is_ok());
+
+    // trigger resnapshot
+
+    ctx.replicator_tx
+        .as_ref()
+        .unwrap()
+        .send(ReplicatorMessage::ResnapshotTable {
+            table: bogus_table.clone(),
+        })
+        .unwrap();
+
+    eventually!(
+            let tables = ctx.noria.tables().await.unwrap();
+            let new_bogus_table_id = tables.get(&bogus_table);
+            new_bogus_table_id.is_some() && new_bogus_table_id.unwrap() != bogus_table_id
+    );
+
+    // Verify again after resnapshot
+    verify_tables_and_caches(&mut ctx, table_id).await.unwrap();
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, postgres_upstream)]
+#[slow]
+async fn alter_table_add_key_postgres() {
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS test_alter_table_add_key;
+            DROP TABLE IF EXISTS test_alter_table_add_key2;
+            DROP TABLE IF EXISTS test_alter_table_add_key_bogus;
+        CREATE TABLE test_alter_table_add_key (id INT PRIMARY KEY, c INT NOT NULL, d VARCHAR(10));
+        CREATE TABLE test_alter_table_add_key2 (id INT PRIMARY KEY);
+        CREATE TABLE test_alter_table_add_key_bogus (id INT PRIMARY KEY);
+        INSERT INTO test_alter_table_add_key (id, c, d) VALUES (1, 2, 'a');
+        INSERT INTO test_alter_table_add_key2 (id) VALUES (2);",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    check_results!(
+        ctx,
+        "test_alter_table_add_key",
+        "Snapshot1",
+        &[&[
+            DfValue::Int(1),
+            DfValue::Int(2),
+            DfValue::from_str_and_collation("a", Collation::Citext)
+        ]]
+    );
+
+    // Ensure that:
+    // 1. The base table exists
+    // 2. There is a cache created on previous step
+    let tables = ctx.noria.tables().await.unwrap();
+    let caches = ctx.noria.views().await.unwrap();
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "test_alter_table_add_key".into(),
+    };
+    assert!(tables.contains_key(&relation));
+    assert_eq!(caches.len(), 1);
+    let table_id = tables.get(&relation).unwrap();
+    let bogus_table = Relation {
+        schema: Some("public".into()),
+        name: "test_alter_table_add_key_bogus".into(),
+    };
+    let bogus_table_id = tables.get(&bogus_table).unwrap();
+
+    let verify_tables_and_caches =
+        async move |ctx: &mut TestHandle, expected_table_id: &NodeIndex| -> ReadySetResult<()> {
+            let tables = ctx.noria.tables().await.unwrap();
+            let caches = ctx.noria.views().await.unwrap();
+            assert_eq!(tables.len(), 3, "tables.len() = {}", tables.len());
+            assert_eq!(caches.len(), 1, "caches.len() = {}", caches.len());
+            let table_id_after = tables.get(&relation).unwrap();
+            assert_eq!(
+                table_id_after, expected_table_id,
+                "table_id_after = {:?}, expected_table_id = {:?}",
+                table_id_after, expected_table_id
+            );
+            Ok(())
+        };
+
+    // Add a new key
+    client
+        .query("CREATE INDEX ON test_alter_table_add_key (c);")
+        .await
+        .unwrap();
+
+    client
+        .query("CREATE INDEX test_alter_table_add_key_c_idx2 ON test_alter_table_add_key (c);")
+        .await
+        .unwrap();
+
+    client
+        .query("CREATE INDEX ON test_alter_table_add_key (c);")
+        .await
+        .unwrap();
+    client
+        .query(
+            "ALTER TABLE test_alter_table_add_key
+  ADD CONSTRAINT myfk
+  FOREIGN KEY (c) REFERENCES test_alter_table_add_key2 (id);",
+        )
+        .await
+        .unwrap();
+
+    eventually!(verify_tables_and_caches(&mut ctx, table_id).await.is_ok());
+
+    // trigger resnapshot
+
+    ctx.replicator_tx
+        .as_ref()
+        .unwrap()
+        .send(ReplicatorMessage::ResnapshotTable {
+            table: bogus_table.clone(),
+        })
+        .unwrap();
+
+    eventually!(
+            let tables = ctx.noria.tables().await.unwrap();
+            let new_bogus_table_id = tables.get(&bogus_table);
+            new_bogus_table_id.is_some() && new_bogus_table_id.unwrap() != bogus_table_id
+    );
+
+    // Verify again after resnapshot
+    verify_tables_and_caches(&mut ctx, table_id).await.unwrap();
 
     shutdown_tx.shutdown().await;
 }
