@@ -24,6 +24,15 @@ use readyset_util::eventually;
 use test_strategy::proptest;
 use test_utils::tags;
 
+fn get_value(results: &[Row], expected_value: &Value) -> Value {
+    let err = || panic!("No row found for value: {:?}", expected_value);
+    results
+        .first()
+        .and_then(|row| row.get::<Value, usize>(0))
+        .unwrap_or_else(err)
+        .clone()
+}
+
 fn round_trip_mysql_type(sql_type: SqlType, initial_val: Value, updated_val: Value) {
     readyset_tracing::init_test_logging();
     tokio::runtime::Builder::new_multi_thread()
@@ -97,7 +106,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
             )
             .await
             .unwrap();
-        AssertUnwindSafe(move || rs_rows[0][0].clone())
+        AssertUnwindSafe(move || get_value(&rs_rows, upstream_val))
     }, then_assert: |result| {
         assert_eq!(*upstream_val, result());
     });
@@ -137,7 +146,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
             )
             .await
             .unwrap();
-        AssertUnwindSafe(move || replicated_rs_rows[0][0].clone())
+        AssertUnwindSafe(move || get_value(&replicated_rs_rows, upstream_val))
     }, then_assert: |result| {
         assert_eq!(*upstream_val, result());
     });
@@ -173,7 +182,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
             )
             .await
             .unwrap();
-        AssertUnwindSafe(move || updated_rs_rows[0][0].clone())
+        AssertUnwindSafe(move || get_value(&updated_rs_rows, updated_upstream_val))
     }, then_assert: |result| {
         assert_eq!(*updated_upstream_val, result());
     });
@@ -209,7 +218,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
             )
             .await
             .unwrap();
-        AssertUnwindSafe(move || updated_rs_rows[0][0].clone())
+        AssertUnwindSafe(move || get_value(&updated_rs_rows, updated_upstream_val))
     }, then_assert: |result| {
         assert_eq!(*updated_upstream_val, result());
     });
