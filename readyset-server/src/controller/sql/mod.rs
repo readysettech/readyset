@@ -18,8 +18,8 @@ use readyset_errors::{
 };
 use readyset_sql::ast::{
     self, AlterTableDefinition, CompoundSelectStatement, CreateTableBody, CreateTableOption,
-    FieldDefinitionExpr, NonReplicatedRelation, NotReplicatedReason, Relation, SelectSpecification,
-    SelectStatement, SqlIdentifier, SqlType, TableExpr, TableKey,
+    FieldDefinitionExpr, NonReplicatedRelation, Relation, SelectSpecification, SelectStatement,
+    SqlIdentifier, SqlType, TableExpr, TableKey,
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
@@ -335,67 +335,7 @@ impl SqlIncorporator {
                         }
                     }
                 }
-
-                Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                    name,
-                    reason: NotReplicatedReason::OtherError(desc),
-                }) => {
-                    debug!(name = %name.display_unquoted(), desc = %desc, "Adding non-replicated relation with OtherError");
-                    self.add_non_replicated_relation(NonReplicatedRelation {
-                        name,
-                        reason: NotReplicatedReason::OtherError(desc),
-                    });
-                }
-                Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                    name,
-                    reason: NotReplicatedReason::UnsupportedType(desc),
-                }) => {
-                    debug!(name = %name.display_unquoted(), desc = %desc, "Adding non-replicated relation with UnsupportedType");
-                    self.add_non_replicated_relation(NonReplicatedRelation {
-                        name,
-                        reason: NotReplicatedReason::UnsupportedType(desc),
-                    });
-                }
-                Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                    name,
-                    reason: NotReplicatedReason::Partitioned,
-                }) => {
-                    debug!(name = %name.display_unquoted(), "Adding non-replicated relation with Partitioned");
-                    self.add_non_replicated_relation(NonReplicatedRelation {
-                        name,
-                        reason: NotReplicatedReason::Partitioned,
-                    });
-                }
-                Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                    name,
-                    reason: NotReplicatedReason::TableDropped,
-                }) => {
-                    debug!(name = %name.display_unquoted(), "Adding non-replicated relation with TableDropped");
-                    self.add_non_replicated_relation(NonReplicatedRelation {
-                        name,
-                        reason: NotReplicatedReason::TableDropped,
-                    });
-                }
-                Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                    name,
-                    reason: NotReplicatedReason::Configuration,
-                }) => {
-                    debug!(name = %name.display_unquoted(), "Adding non-replicated relation with Configuration");
-                    self.add_non_replicated_relation(NonReplicatedRelation {
-                        name,
-                        reason: NotReplicatedReason::Configuration,
-                    });
-                }
-                Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                    name,
-                    reason: NotReplicatedReason::Default,
-                }) => {
-                    debug!(name = %name.display_unquoted(), "Adding non-replicated relation with Default");
-                    self.add_non_replicated_relation(NonReplicatedRelation {
-                        name,
-                        reason: NotReplicatedReason::Default,
-                    });
-                }
+                Change::AddNonReplicatedRelation(table) => self.add_non_replicated_relation(table),
                 Change::CreateView(mut stmt) => {
                     if let Some(first_schema) = schema_search_path.first() {
                         if stmt.name.schema.is_none() {
