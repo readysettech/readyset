@@ -41,7 +41,7 @@ use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
     AlterTableDefinition, AlterTableStatement, CacheInner, CreateCacheStatement,
     CreateTableStatement, CreateViewStatement, DropTableStatement, DropViewStatement,
-    NonReplicatedRelation, Relation, SelectStatement, SqlIdentifier, SqlQuery,
+    NonReplicatedRelation, Relation, SelectStatement, SqlIdentifier, SqlQuery, TableKey,
 };
 use readyset_sql_parsing::parse_query;
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
@@ -393,10 +393,15 @@ impl Change {
                         | AlterTableDefinition::DropColumn { .. }
                         | AlterTableDefinition::ChangeColumn { .. }
                         | AlterTableDefinition::RenameColumn { .. }
-                        | AlterTableDefinition::AddKey(_)
+                        | AlterTableDefinition::AddKey(TableKey::PrimaryKey { .. })
+                        | AlterTableDefinition::AddKey(TableKey::UniqueKey { .. })
                         | AlterTableDefinition::DropForeignKey { .. }
                         | AlterTableDefinition::DropConstraint { .. } => true,
-                        AlterTableDefinition::ReplicaIdentity(_) => false,
+                        AlterTableDefinition::ReplicaIdentity(_)
+                        | AlterTableDefinition::AddKey(TableKey::FulltextKey { .. })
+                        | AlterTableDefinition::AddKey(TableKey::Key { .. })
+                        | AlterTableDefinition::AddKey(TableKey::CheckConstraint { .. })
+                        | AlterTableDefinition::AddKey(TableKey::ForeignKey { .. }) => false,
                     })
                 } else {
                     // We know it's an alter table, but we couldn't fully parse it.
