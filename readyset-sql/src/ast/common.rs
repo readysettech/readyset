@@ -300,6 +300,38 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
 }
 
 impl TableKey {
+    /// Set the index name for the key
+    pub fn set_index_name(&mut self, new_index_name: SqlIdentifier) {
+        match self {
+            TableKey::PrimaryKey { index_name, .. } => *index_name = Some(new_index_name),
+            TableKey::UniqueKey { index_name, .. } => *index_name = Some(new_index_name),
+            TableKey::FulltextKey { index_name, .. } => *index_name = Some(new_index_name),
+            TableKey::Key { index_name, .. } => *index_name = Some(new_index_name),
+            TableKey::ForeignKey { index_name, .. } => *index_name = Some(new_index_name),
+            TableKey::CheckConstraint { .. } => (),
+        }
+    }
+
+    /// Set the constraint name for the key
+    pub fn set_constraint_name(&mut self, new_constraint_name: SqlIdentifier) {
+        match self {
+            TableKey::PrimaryKey {
+                constraint_name, ..
+            } => *constraint_name = Some(new_constraint_name),
+            TableKey::UniqueKey {
+                constraint_name, ..
+            } => *constraint_name = Some(new_constraint_name),
+            TableKey::Key {
+                constraint_name, ..
+            } => *constraint_name = Some(new_constraint_name),
+            TableKey::ForeignKey {
+                constraint_name, ..
+            } => *constraint_name = Some(new_constraint_name),
+            TableKey::FulltextKey { .. } => (),
+            TableKey::CheckConstraint { .. } => (),
+        }
+    }
+
     pub fn constraint_name(&self) -> &Option<SqlIdentifier> {
         match self {
             TableKey::PrimaryKey {
@@ -315,6 +347,21 @@ impl TableKey {
                 constraint_name, ..
             } => constraint_name,
             TableKey::FulltextKey { .. } | TableKey::Key { .. } => &None,
+        }
+    }
+
+    /// Returns a mutable reference to the target table of the foreign key
+    pub fn target_table_mut(&mut self) -> Option<&mut Relation> {
+        match self {
+            TableKey::ForeignKey { target_table, .. } => Some(target_table),
+            _ => None,
+        }
+    }
+    /// Returns a mutable reference to the target columns of the foreign key
+    pub fn target_columns_mut(&mut self) -> Option<&mut Vec<Column>> {
+        match self {
+            TableKey::ForeignKey { target_columns, .. } => Some(target_columns),
+            _ => None,
         }
     }
 
@@ -344,6 +391,11 @@ impl TableKey {
         matches!(self, TableKey::UniqueKey { .. })
     }
 
+    /// Check if the key is a foreign key
+    pub fn is_foreign_key(&self) -> bool {
+        matches!(self, TableKey::ForeignKey { .. })
+    }
+
     /// Get the columns that the key is defined on
     pub fn get_columns(&self) -> &[Column] {
         match self {
@@ -353,6 +405,18 @@ impl TableKey {
             | TableKey::Key { columns, .. }
             | TableKey::ForeignKey { columns, .. } => columns,
             TableKey::CheckConstraint { .. } => &[],
+        }
+    }
+
+    /// Get mutable reference to the columns that the key is defined on
+    pub fn get_columns_mut(&mut self) -> &mut [Column] {
+        match self {
+            TableKey::PrimaryKey { columns, .. }
+            | TableKey::UniqueKey { columns, .. }
+            | TableKey::FulltextKey { columns, .. }
+            | TableKey::Key { columns, .. }
+            | TableKey::ForeignKey { columns, .. } => columns,
+            TableKey::CheckConstraint { .. } => &mut [],
         }
     }
 }

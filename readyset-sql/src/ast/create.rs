@@ -123,6 +123,81 @@ pub struct CreateTableBody {
 }
 
 impl CreateTableBody {
+    /// Check if the index name is already in use for the table
+    pub fn is_index_name_in_use(&self, index_name: &str) -> bool {
+        self.keys.as_ref().unwrap_or(&Vec::new()).iter().any(|key| {
+            key.index_name()
+                .as_deref()
+                .is_some_and(|name| name == index_name)
+        })
+    }
+
+    /// Check if the constraint name is already in use for the table
+    pub fn is_constraint_name_in_use(&self, constraint_name: &str) -> bool {
+        self.keys.as_ref().unwrap_or(&Vec::new()).iter().any(|key| {
+            key.constraint_name()
+                .as_deref()
+                .is_some_and(|name| name == constraint_name)
+        })
+    }
+
+    /// Add a new key to the table
+    pub fn add_key(&mut self, key: TableKey) {
+        if let Some(keys) = &mut self.keys {
+            keys.push(key);
+        } else {
+            self.keys = Some(vec![key]);
+        }
+    }
+
+    /// Add a new key and generate a name for it if it doesn't have one
+    /// The column name uses the first column as index name, if that name is already in use,
+    /// we append a number to the name.
+    pub fn add_key_with_name(&mut self, key: TableKey, table: Relation) {
+        let mut new_key = key;
+
+        // check index name for non-foreign keys
+        if !new_key.is_foreign_key() && new_key.index_name().is_none() {
+            let first_column = new_key.get_columns().first().unwrap();
+            let base_index_name = first_column.name.as_str().to_string();
+            let mut index_name = base_index_name.clone();
+            let mut i = 0;
+            while self.is_index_name_in_use(&index_name) {
+                index_name = format!("{base_index_name}_{i}");
+                i += 1;
+            }
+            new_key.set_index_name(index_name.into());
+        }
+
+        // special case for foreign keys
+        if new_key.is_foreign_key() {
+            if new_key.constraint_name().is_none() {
+                let table_name = table.name.clone();
+                let base_constraint_name = format!("{table_name}_ibfk");
+                let mut i = 1;
+                let mut constraint_name = format!("{base_constraint_name}_{i}");
+                while self.is_constraint_name_in_use(&constraint_name) {
+                    i += 1;
+                    constraint_name = format!("{base_constraint_name}_{i}");
+                }
+                new_key.set_constraint_name(constraint_name.into());
+            }
+
+            // target_table
+            if let Some(target_table) = new_key.target_table_mut() {
+                target_table.set_schema(table.schema.clone());
+            }
+
+            // target_columns
+            if let Some(target_columns) = new_key.target_columns_mut() {
+                for column in target_columns {
+                    column.table = Some(table.clone());
+                }
+            }
+        }
+        self.add_key(new_key);
+    }
+
     /// Returns the primary key of the table, if one exists.
     pub fn get_primary_key(&self) -> Option<&TableKey> {
         self.keys

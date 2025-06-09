@@ -138,6 +138,11 @@ impl Relation {
             write!(f, "{}", self.name)
         })
     }
+
+    /// set the schema of the relation
+    pub fn set_schema(&mut self, schema: Option<SqlIdentifier>) {
+        self.schema = schema;
+    }
 }
 
 /// An expression for a table in a query
