@@ -544,7 +544,6 @@ impl ModelState for DDLModelState {
 
         let (opts, handle, shutdown_tx) = TestBuilder::default()
             .replicate(true)
-            .durability_mode(readyset_server::DurabilityMode::DeleteOnExit)
             .fallback(true)
             .build::<MySQLAdapter>()
             .await;

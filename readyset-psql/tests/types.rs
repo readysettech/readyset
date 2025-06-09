@@ -1,6 +1,6 @@
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
-use readyset_server::Handle;
+use readyset_server::{DurabilityMode, Handle};
 use readyset_util::shutdown::ShutdownSender;
 use test_utils::tags;
 
@@ -10,6 +10,8 @@ use common::connect;
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
     TestBuilder::default()
         .fallback(true)
+        // TODO(mvzink): Switch to DeleteOnExit after fixing REA-5757
+        .durability_mode(DurabilityMode::MemoryOnly)
         .build::<PostgreSQLAdapter>()
         .await
 }
@@ -1042,7 +1044,6 @@ mod types {
         let (rs_config, _handle, shutdown_tx) = TestBuilder::default()
             .replicate_db("psql_date_only_test".to_string())
             .recreate_database(false)
-            .durability_mode(readyset_server::DurabilityMode::Permanent)
             .build::<PostgreSQLAdapter>()
             .await;
         let rs_client = connect(rs_config.clone()).await;

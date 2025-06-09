@@ -152,7 +152,7 @@ impl TestBuilder {
             migration_style: MigrationStyle::InRequestPath,
             recreate_database: true,
             query_status_cache: None,
-            durability_mode: DurabilityMode::MemoryOnly,
+            durability_mode: DurabilityMode::DeleteOnExit,
             storage_dir_path: None,
             authority: None,
             replication_server_id: None,

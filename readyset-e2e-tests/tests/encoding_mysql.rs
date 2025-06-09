@@ -81,7 +81,6 @@ where
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
         .replicate_db(db_name.clone())
-        .durability_mode(dataflow_state::DurabilityMode::DeleteOnExit)
         .build::<MySQLAdapter>()
         .await;
 
@@ -213,7 +212,6 @@ where
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
         .replicate_db(db_name.clone())
-        .durability_mode(dataflow_state::DurabilityMode::DeleteOnExit)
         .build::<MySQLAdapter>()
         .await;
 
