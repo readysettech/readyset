@@ -59,9 +59,8 @@ macro_rules! test_format_parse_round_trip {
     };
 
     (@impl, $name: ident, $parser: expr, $type: ty, $dialect: expr $(, $prop_assume_fn: block)? ) => {
-        #[tags(no_retry)]
+        #[tags(no_retry, slow)]
         #[test_strategy::proptest]
-        #[test_utils::slow]
         fn $name(s: $type) {
             $(proptest::prop_assume!($prop_assume_fn(&s));)?
 
