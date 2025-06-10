@@ -19,13 +19,15 @@ env:
 
 steps:
 
+  # NOTE:  This entire pipeline has a dependency on the 'build-image' step.  Any step that uploads
+  # it must have a "depends_on: build-image" set.  Putting "depends_on" on these steps won't do the
+  # trick and may in fact interfere with correct buildkite step scheduling.
+
   - label: ':rust: Check rustfmt'
     key: check-rustfmt
     commands:
       - '[ -d public ] && cd public'
       - "cargo --locked fmt -- --check"
-    depends_on:
-      - build-image
     plugins:
       - docker#${DOCKER_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
@@ -46,8 +48,6 @@ steps:
       - '[ -d public ] && cd public'
       - export RUST_BACKTRACE=full
       - cargo --locked deny check
-    depends_on:
-      - build-image
     plugins:
       - docker#${DOCKER_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
@@ -68,8 +68,6 @@ steps:
       - '[ -d public ] && cd public'
       - export RUST_BACKTRACE=full
       - cargo --locked clippy --workspace --all-targets --all-features -- -D warnings
-    depends_on:
-      - build-image
     plugins:
       - docker#${DOCKER_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
@@ -93,8 +91,6 @@ steps:
       echo "~~~ Show sccache stats"
       sccache --show-stats
     timeout_in_minutes: 60
-    depends_on:
-      - build-image
     plugins:
       - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
           run: app
@@ -132,8 +128,6 @@ steps:
       echo "~~~ Show sccache stats"
       sccache --show-stats
     timeout_in_minutes: 60
-    depends_on:
-      - build-image
     plugins:
       - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
           run: app
@@ -171,8 +165,6 @@ steps:
       echo "~~~ Show sccache stats"
       sccache --show-stats
     timeout_in_minutes: 60
-    depends_on:
-      - build-image
     plugins:
       - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
           run: app
@@ -202,7 +194,7 @@ steps:
       queue: c6a-4xlarge
     retry: *retry_on_agent_kill
 
-  - label: ':sqlite: Run logictest'
+  - label: ":sqlite: Run logictest"
     key: logictest
     command:
       - 'echo +++ Running readyset-logictest'
@@ -216,8 +208,6 @@ steps:
       - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/postgis --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria'
       - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/mysql --database-type mysql --replication-url mysql://root:noria@mysql/noria'
     timeout_in_minutes: 60
-    depends_on:
-      - build-image
     plugins:
       - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
           run: app
@@ -243,5 +233,5 @@ steps:
           username: readysetservices
           password-env: DOCKER_HUB_TOKEN
     agents:
-      queue: c6a-4xlarge
+      queue: "c6a-4xlarge"
     retry: *retry_on_agent_kill

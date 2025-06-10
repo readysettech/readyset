@@ -26,18 +26,16 @@ steps:
   #   agents:
   #     queue: t3a-small
 
-  - label: ':docker: Build build image'
+  - label: ":pipeline: Upload build image pipeline"
     key: build-image
-    commands:
-      - '.buildkite/build-image.sh build/Dockerfile readyset-build .'
-    plugins:
-      ecr#${ECR_PLUGIN_VERSION}:
-        login: true
-        retries: 3
+    command: buildkite-agent pipeline upload public/.buildkite/pipeline.build-image.yml
+    agents:
+      queue: t3a-small
     retry: *retry_on_agent_kill
 
   - label: ':pipeline: Upload public-common pipeline'
     commands:
       - buildkite-agent pipeline upload .buildkite/pipeline.public-common.yml
+    depends_on: build-image
     agents:
       queue: t3a-small
