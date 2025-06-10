@@ -4617,6 +4617,7 @@ dependencies = [
  "native-tls",
  "postgres-native-tls",
  "postgres-types",
+ "pretty_assertions",
  "proptest",
  "psql-srv",
  "readyset-adapter",

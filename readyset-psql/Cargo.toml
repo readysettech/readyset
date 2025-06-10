@@ -49,6 +49,7 @@ tempfile = { workspace = true }
 chrono = { workspace = true }
 database-utils = { path = "../database-utils" }
 readyset-server = { path = "../readyset-server/" }
+pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 test-strategy = { workspace = true }
 readyset-util = { path = "../readyset-util" }

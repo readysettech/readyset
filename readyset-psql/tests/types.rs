@@ -23,6 +23,7 @@ mod types {
 
     use cidr::IpInet;
     use eui48::MacAddress;
+    use pretty_assertions::assert_eq;
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::string::string_regex;
@@ -125,14 +126,13 @@ mod types {
         };
 
         (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr, $rust_type: ty, $strategy: expr) => {
-            #[tags(serial, no_retry, postgres_upstream)]
+            #[tags(serial, slow, no_retry, postgres_upstream)]
             // these are pretty slow, so we only run a few cases at a time
             #[test_strategy::proptest(ProptestConfig {
                 cases: 5,
                 max_shrink_iters: 200, // May need many shrink iters for large vecs
                 ..ProptestConfig::default()
             })]
-            #[test_utils::slow]
             $(#[$meta])*
             fn $test_name(#[strategy(vec($strategy, 1..20))] vals: Vec<$rust_type>) {
                 readyset_tracing::init_test_logging();
@@ -1090,11 +1090,19 @@ mod types {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[tags(serial, postgres_upstream)]
-    #[test_utils::slow]
+    #[tags(serial, slow, postgres_upstream)]
     async fn regression_text_array() {
-        let vals = vec![vec!["0.".to_string()]];
         readyset_tracing::init_test_logging();
+        let vals = vec![vec!["0.".to_string()]];
+        test_type_roundtrip("text[]", vals).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[tags(serial, slow, postgres_upstream)]
+    #[ignore = "REA-5757"]
+    async fn regression_large_text_array_multiple_matches() {
+        readyset_tracing::init_test_logging();
+        let vals = vec![vec!["1".to_string(); 1500]; 15];
         test_type_roundtrip("text[]", vals).await;
     }
 }
