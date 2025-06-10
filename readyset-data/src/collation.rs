@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::hash::Hash;
@@ -17,12 +16,17 @@ thread_local! {
         Default::default(),
         collator_options(Some(Strength::Tertiary))
     )
-    .expect("cannot create default collator!");
+    .expect("cannot create UTF8 collator!");
+    static UTF8_CI: CollatorBorrowed<'static> = Collator::try_new(
+        Default::default(),
+        collator_options(Some(Strength::Secondary))
+    )
+    .expect("cannot create UTF8_CI collator!");
     static UTF8_AI_CI: CollatorBorrowed<'static> = Collator::try_new(
         Default::default(),
         collator_options(Some(Strength::Primary))
     )
-    .expect("cannot create default collator!");
+    .expect("cannot create UTF8_AI_CI collator!");
 }
 
 /// Description for how string values should be compared against each other for ordering and
@@ -66,29 +70,42 @@ impl Display for Collation {
 }
 
 impl Collation {
-    /// Normalize the given string according to this collation.
-    pub(crate) fn normalize(self, s: &str) -> Cow<str> {
-        match self {
-            Self::Utf8 => s.into(),
-            Self::Citext => s.to_lowercase().into(),
-            Self::Utf8AiCi => s.to_lowercase().into(),
-        }
-    }
-
-    /// Compare the given strings according to this collation
+    /// Compare the given strings according to this collation.
     pub(crate) fn compare<A, B>(&self, a: A, b: B) -> Ordering
     where
         A: AsRef<str>,
         B: AsRef<str>,
     {
-        let a = self.normalize(a.as_ref());
-        let b = self.normalize(b.as_ref());
-        let cmp = |c: &CollatorBorrowed| c.compare(&a, &b);
+        let cmp = |c: &CollatorBorrowed| c.compare(a.as_ref(), b.as_ref());
         match self {
             Self::Utf8 => UTF8.with(cmp),
-            Self::Citext => UTF8.with(cmp),
+            Self::Citext => UTF8_CI.with(cmp),
             Self::Utf8AiCi => UTF8_AI_CI.with(cmp),
         }
+    }
+
+    /// Compute a collation key for a string.  This key may be compared bytewise with another
+    /// key or hashed.
+    pub(crate) fn key<S>(&self, s: S) -> Vec<u8>
+    where
+        S: AsRef<str>,
+    {
+        let s = s.as_ref();
+        let len = match self {
+            Self::Utf8 => s.len() * 4,
+            Self::Citext => s.len() * 2,
+            Self::Utf8AiCi => s.len(),
+        };
+
+        let mut out = Vec::with_capacity(len); // just a close guess
+        let make = |c: &CollatorBorrowed| c.write_sort_key_to(s.as_ref(), &mut out);
+        let Ok(()) = match self {
+            Self::Utf8 => UTF8.with(make),
+            Self::Citext => UTF8_CI.with(make),
+            Self::Utf8AiCi => UTF8_AI_CI.with(make),
+        };
+
+        out
     }
 
     /// The default collation for a dialect.
@@ -154,7 +171,7 @@ mod tests {
         if collation.compare(&s1, &s2) == Ordering::Equal {
             let [h1, h2] = [&s1, &s2].map(|s| {
                 let mut hasher = DefaultHasher::new();
-                collation.normalize(s).hash(&mut hasher);
+                collation.key(s).hash(&mut hasher);
                 hasher.finish()
             });
 

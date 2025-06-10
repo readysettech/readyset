@@ -311,64 +311,10 @@ impl RangeKey {
 
 #[cfg(test)]
 mod tests {
-    use readyset_data::Collation;
     use test_strategy::proptest;
     use test_utils::tags;
 
     use super::*;
-
-    #[test]
-    fn single_point_key_serialize_normalizes_citext() {
-        assert_eq!(
-            bincode::serialize(&PointKey::Single(DfValue::from_str_and_collation(
-                "AbC",
-                Collation::Citext
-            )))
-            .unwrap(),
-            bincode::serialize(&PointKey::Single(DfValue::from("abc"))).unwrap(),
-        )
-    }
-
-    #[test]
-    fn double_point_key_serialize_normalizes_citext() {
-        assert_eq!(
-            bincode::serialize(&PointKey::Double((
-                DfValue::from(1),
-                DfValue::from_str_and_collation("AbC", Collation::Citext)
-            )))
-            .unwrap(),
-            bincode::serialize(&PointKey::Double((DfValue::from(1), DfValue::from("abc"))))
-                .unwrap(),
-        )
-    }
-
-    #[test]
-    fn multi_point_key_serialize_normalizes_citext() {
-        assert_eq!(
-            bincode::serialize(&PointKey::Multi(Box::new([
-                DfValue::from(1),
-                DfValue::from(2),
-                DfValue::from(3),
-                DfValue::from(4),
-                DfValue::from(5),
-                DfValue::from(6),
-                DfValue::from(7),
-                DfValue::from_str_and_collation("AbC", Collation::Citext)
-            ])))
-            .unwrap(),
-            bincode::serialize(&PointKey::Multi(Box::new([
-                DfValue::from(1),
-                DfValue::from(2),
-                DfValue::from(3),
-                DfValue::from(4),
-                DfValue::from(5),
-                DfValue::from(6),
-                DfValue::from(7),
-                DfValue::from_str_and_collation("abc", Collation::Utf8)
-            ])))
-            .unwrap(),
-        );
-    }
 
     #[tags(no_retry)]
     #[proptest]

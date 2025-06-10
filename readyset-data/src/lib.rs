@@ -782,10 +782,7 @@ impl DfValue {
     #[inline]
     pub fn transform_for_serialized_key(&self) -> Cow<Self> {
         match self.as_str_and_collation() {
-            Some((s, collation)) => match collation.normalize(s) {
-                Cow::Borrowed(_) => Cow::Borrowed(self),
-                Cow::Owned(s) => Cow::Owned(s.into()),
-            },
+            Some((s, collation)) => Cow::Owned(collation.key(s).into()),
             None => match self {
                 DfValue::Float(f) => Cow::Owned((*f as f64).try_into().unwrap()),
                 _ => Cow::Borrowed(self),
@@ -1201,7 +1198,7 @@ impl Hash for DfValue {
             DfValue::Text(..) | DfValue::TinyText(..) => {
                 let collation = self.collation().unwrap();
                 let s = <&str>::try_from(self).unwrap();
-                collation.normalize(s).hash(state);
+                collation.key(s).hash(state);
             }
             DfValue::TimestampTz(ts) => ts.hash(state),
             DfValue::Time(ref t) => t.hash(state),
