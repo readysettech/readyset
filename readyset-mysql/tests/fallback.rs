@@ -1139,14 +1139,18 @@ async fn resnapshot_table_command() {
     let (opts, mut handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (id INT)").await.unwrap();
-    sleep().await;
 
-    let old_table = get_table_index(&mut handle, "noria", "t").await;
+    let old_table = eventually!(
+        run_test: { get_table_index(&mut handle, "noria", "t").await },
+        then_assert: |result| {
+            assert!(result.is_some());
+            result
+        }
+    );
 
     conn.query_drop("ALTER READYSET RESNAPSHOT TABLE t")
         .await
         .unwrap();
-    sleep().await;
 
     eventually! {
         let new_table = get_table_index(&mut handle, "noria", "t").await;
