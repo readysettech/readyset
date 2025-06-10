@@ -3,8 +3,8 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 use std::hash::Hash;
 
-use icu::collator::{Collator, CollatorOptions, Strength};
-use icu::normalizer::ComposingNormalizer;
+use icu::collator::options::{CollatorOptions, Strength};
+use icu::collator::{Collator, CollatorBorrowed};
 use serde::{Deserialize, Serialize};
 use strum::{EnumCount, FromRepr};
 use test_strategy::Arbitrary;
@@ -13,18 +13,16 @@ use tracing::error;
 use crate::{Dialect, SqlEngine};
 
 thread_local! {
-    static UTF8: Collator = Collator::try_new(
-        &Default::default(),
+    static UTF8: CollatorBorrowed<'static> = Collator::try_new(
+        Default::default(),
         collator_options(Some(Strength::Tertiary))
     )
     .expect("cannot create default collator!");
-    static UTF8_AI_CI: Collator = Collator::try_new(
-        &Default::default(),
+    static UTF8_AI_CI: CollatorBorrowed<'static> = Collator::try_new(
+        Default::default(),
         collator_options(Some(Strength::Primary))
     )
     .expect("cannot create default collator!");
-
-    static NORMALIZER: ComposingNormalizer = const { ComposingNormalizer::new_nfc() };
 }
 
 /// Description for how string values should be compared against each other for ordering and
@@ -85,7 +83,7 @@ impl Collation {
     {
         let a = self.normalize(a.as_ref());
         let b = self.normalize(b.as_ref());
-        let cmp = |c: &Collator| c.compare(&a, &b);
+        let cmp = |c: &CollatorBorrowed| c.compare(&a, &b);
         match self {
             Self::Utf8 => UTF8.with(cmp),
             Self::Citext => UTF8.with(cmp),
@@ -126,7 +124,7 @@ impl Collation {
 }
 
 fn collator_options(strength: Option<Strength>) -> CollatorOptions {
-    let mut options = CollatorOptions::new();
+    let mut options = CollatorOptions::default();
     options.strength = strength;
     options
 }

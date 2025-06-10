@@ -148,7 +148,7 @@ hex = "0.4.3"
 hmac = "0.12.1"
 html-escape = "0.2.13"
 hyper = "0.14.28"
-icu = "1.5.0"
+icu = { git = "https://github.com/unicode-org/icu4x.git" }
 include_dir = "0.7.4"
 indexmap = { version = "2.5.0", default-features = false }
 indicatif = "0.17"
