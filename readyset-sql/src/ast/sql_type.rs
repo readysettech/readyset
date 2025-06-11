@@ -375,6 +375,11 @@ pub struct SqlTypeArbitraryOptions {
     /// Enable generation of [`SqlType::Json`] and [`SqlType::Jsonb`]. Defaults to `true`
     pub generate_json: bool,
 
+    /// Generate unsupported types, i.e. types which would raise an unsupported error in
+    /// [`DfType::from_sql_type`] and cause replication to deny a table using this type. Defaults to
+    /// `false`.
+    pub generate_unsupported: bool,
+
     /// Constrain types to only those which are valid for this SQL dialect
     pub dialect: Option<Dialect>,
 }
@@ -385,6 +390,7 @@ impl Default for SqlTypeArbitraryOptions {
             generate_arrays: true,
             generate_other: false,
             generate_json: true,
+            generate_unsupported: false,
             dialect: None,
         }
     }
@@ -430,13 +436,14 @@ impl Arbitrary for SqlType {
 
         if args.dialect.is_none() || args.dialect == Some(Dialect::PostgreSQL) {
             variants.extend([
+                Just(Int(None)).boxed(),
+                Just(BigInt(None)).boxed(),
+                Just(SmallInt(None)).boxed(),
                 Just(Int2).boxed(),
                 Just(Int4).boxed(),
                 Just(Int8).boxed(),
                 Just(VarChar(None)).boxed(),
                 Just(ByteArray).boxed(),
-                Just(MacAddr).boxed(),
-                Just(Inet).boxed(),
                 Just(Uuid).boxed(),
                 any::<Option<u16>>().prop_map(Bit).boxed(),
                 any::<Option<u16>>().prop_map(VarBit).boxed(),
@@ -446,6 +453,10 @@ impl Arbitrary for SqlType {
                 Just(Citext).boxed(),
                 Just(QuotedChar).boxed(),
             ]);
+
+            if args.generate_unsupported {
+                variants.extend([Just(MacAddr).boxed(), Just(Inet).boxed()]);
+            }
 
             if args.generate_json {
                 variants.push(Just(Jsonb).boxed());
@@ -477,7 +488,7 @@ impl Arbitrary for SqlType {
             ]);
         }
 
-        if args.generate_arrays {
+        if args.generate_arrays && args.dialect != Some(Dialect::MySQL) {
             variants.push(
                 any_with::<Box<SqlType>>(SqlTypeArbitraryOptions {
                     generate_arrays: false,
@@ -488,7 +499,7 @@ impl Arbitrary for SqlType {
             );
         }
 
-        if args.generate_other {
+        if args.generate_other && args.generate_unsupported {
             variants.push(any::<Relation>().prop_map(Other).boxed())
         }
 

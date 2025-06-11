@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 81e5b55be79c5d1a424007870e7046f46f9d18f89896161901a289ab11120d60 # shrinks to input = _ArbitrarySqlTypeDoesntGenerateUnsupportedMysqlArgs { sql_type: Other(Relation { schema: None, name: Tiny("aA") }) }
+cc e0cc9165bac309fb4054e87cabd6be538755961efad26e8fdb47d646862baee6 # shrinks to input = _ArbitrarySqlTypeDoesntGenerateUnsupportedPostgresqlArgs { sql_type: MacAddr }

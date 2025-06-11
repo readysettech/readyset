@@ -243,26 +243,20 @@ impl DfType {
 impl DfType {
     /// Converts from a possible [`SqlType`] reference within the context of a SQL [`Dialect`],
     /// given a function to resolve named custom types in the schema
-    pub fn from_sql_type<'a, T, R>(
-        ty: T,
+    pub fn from_sql_type<R>(
+        ty: &SqlType,
         dialect: Dialect,
         resolve_custom_type: R,
         collation: Option<Collation>,
     ) -> ReadySetResult<Self>
     where
-        T: Into<Option<&'a SqlType>>,
         R: Fn(Relation) -> Option<DfType>,
     {
         use SqlType::*;
 
-        let ty = match ty.into() {
-            Some(ty) => ty,
-            None => return Ok(Self::Unknown),
-        };
-
         Ok(match *ty {
             Array(ref ty) => Self::Array(Box::new(Self::from_sql_type(
-                Some(ty.as_ref()),
+                ty.as_ref(),
                 dialect,
                 resolve_custom_type,
                 collation,
@@ -893,6 +887,9 @@ impl fmt::Display for DfType {
 
 #[cfg(test)]
 mod tests {
+    use readyset_sql::ast::SqlTypeArbitraryOptions;
+    use test_strategy::proptest;
+
     use super::*;
 
     #[test]
@@ -903,5 +900,37 @@ mod tests {
                 assert_eq!(arr.innermost_array_type(), &ty);
             }
         }
+    }
+
+    // These are really testing SqlTypeArbitraryOptions, but putting the tests in that file causes
+    // `readyset-sql` to be compiled twice due to adding a dev dependency on `readyset-data` there.
+    #[proptest]
+    fn arbitrary_sql_type_doesnt_generate_unsupported_mysql(
+        #[strategy(SqlType::arbitrary_with(SqlTypeArbitraryOptions {
+            dialect: Some(readyset_sql::Dialect::MySQL),
+            generate_arrays: true,
+            generate_json: true,
+            generate_other: true,
+            generate_unsupported: false
+        }))]
+        sql_type: SqlType,
+    ) {
+        DfType::from_sql_type(&sql_type, Dialect::DEFAULT_MYSQL, |_| None, None)
+            .expect("Unsupported type generated");
+    }
+
+    #[proptest]
+    fn arbitrary_sql_type_doesnt_generate_unsupported_postgresql(
+        #[strategy(SqlType::arbitrary_with(SqlTypeArbitraryOptions {
+            dialect: Some(readyset_sql::Dialect::PostgreSQL),
+            generate_arrays: true,
+            generate_json: true,
+            generate_other: true,
+            generate_unsupported: false
+        }))]
+        sql_type: SqlType,
+    ) {
+        DfType::from_sql_type(&sql_type, Dialect::DEFAULT_POSTGRESQL, |_| None, None)
+            .expect("Unsupported type generated");
     }
 }

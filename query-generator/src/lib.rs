@@ -1184,6 +1184,7 @@ impl Arbitrary for Filter {
                 generate_other: false,
                 // PG's json doesn't support comparison operators
                 generate_json: dialect == ParseDialect::MySQL,
+                generate_unsupported: false,
                 dialect: Some(dialect.0),
             }),
             any::<LogicalOp>(),

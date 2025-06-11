@@ -341,6 +341,7 @@ fn round_trip_mysql_type_arbitrary(
         generate_arrays: false,
         generate_json: true,
         generate_other: false,
+        generate_unsupported: false,
     }))]
     sql_type: SqlType,
     #[strategy(arbitrary_mysql_value_for_type(#sql_type))] initial_val: Value,
