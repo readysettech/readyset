@@ -122,6 +122,7 @@ impl AuthorityControl for StandaloneAuthority {
             Some(_) => Ok(None),
             empty_state => {
                 *empty_state = Some(payload.clone());
+                *self.last_leader.write() = Some(payload.clone());
                 Ok(Some(payload))
             }
         }
