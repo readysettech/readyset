@@ -29,7 +29,7 @@ use itertools::Itertools;
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
-use readyset_data::{Bound, Collation, DfType, DfValue, Dialect, IntoBoundedRange};
+use readyset_data::{Bound, Collation, DfType, DfValue, Dialect, IntoBoundedRange, TinyText};
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_sql::ast;
 use readyset_sql::ast::{OrderType, Relation, SqlQuery};
@@ -762,7 +762,12 @@ async fn it_works_with_sql_recipe() {
 
     // Retrieve the result of the count query:
     let result = getter
-        .lookup(&["Volvo".into()], true)
+        .lookup(
+            &[TinyText::try_new("Volvo", Collation::Utf8AiCi)
+                .unwrap()
+                .into()],
+            true,
+        )
         .await
         .unwrap()
         .into_vec();
@@ -3684,25 +3689,20 @@ macro_rules! get {
         // combine private and public results
         // also, there's currently a bug where MIR doesn't guarantee the order of parameters, so we
         // try both O:)
+        let aid: DfValue = TinyText::try_new($aid, Collation::Utf8AiCi).unwrap().into();
         let mut v = $private
-            .lookup(&[$uid.into(), $aid.into()], true)
+            .lookup(&[$uid.into(), aid.clone()], true)
             .await
             .unwrap()
             .into_vec();
         v.append(
             &mut $private
-                .lookup(&[$aid.into(), $uid.into()], true)
+                .lookup(&[aid.clone(), $uid.into()], true)
                 .await
                 .unwrap()
                 .into_vec(),
         );
-        v.append(
-            &mut $public
-                .lookup(&[$aid.into()], true)
-                .await
-                .unwrap()
-                .into_vec(),
-        );
+        v.append(&mut $public.lookup(&[aid], true).await.unwrap().into_vec());
         eprintln!("check {} as {}: {:?}", $aid, $uid, v);
         v
     }};
@@ -4124,7 +4124,13 @@ async fn simple_pagination() {
     );
 
     let mut a_page1: Vec<Vec<DfValue>> = q
-        .lookup(&["a".into(), 0.into()], true)
+        .lookup(
+            &[
+                TinyText::try_new("a", Collation::Utf8AiCi).unwrap().into(),
+                0.into(),
+            ],
+            true,
+        )
         .await
         .unwrap()
         .into();
@@ -4139,7 +4145,13 @@ async fn simple_pagination() {
     );
 
     let mut a_page2: Vec<Vec<DfValue>> = q
-        .lookup(&["a".into(), 1.into()], true)
+        .lookup(
+            &[
+                TinyText::try_new("a", Collation::Utf8AiCi).unwrap().into(),
+                1.into(),
+            ],
+            true,
+        )
         .await
         .unwrap()
         .into();
@@ -4154,7 +4166,13 @@ async fn simple_pagination() {
     );
 
     let mut b_page1: Vec<Vec<DfValue>> = q
-        .lookup(&["b".into(), 0.into()], true)
+        .lookup(
+            &[
+                TinyText::try_new("b", Collation::Utf8AiCi).unwrap().into(),
+                0.into(),
+            ],
+            true,
+        )
         .await
         .unwrap()
         .into();

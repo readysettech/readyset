@@ -692,7 +692,7 @@ impl DfValue {
                 // trigger the happy path:
                 .unwrap_or(DfValue::Int(0));
         } else if (col_ty.is_array() && col_ty.innermost_array_type().is_enum())
-            || col_ty.is_citext()
+            || (col_ty.is_any_text() && col_ty.collation() != self.collation())
         {
             *self = self.coerce_to(col_ty, &DfType::Unknown)?;
         }
@@ -3891,7 +3891,6 @@ mod tests {
         }
 
         #[test]
-
         fn int_to_text() {
             assert_eq!(
                 DfValue::from(20070523i64)

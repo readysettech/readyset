@@ -461,12 +461,6 @@ impl DfType {
         matches!(self, DfType::Enum { .. })
     }
 
-    /// Returns `true` if this is a text type with a citext collation.
-    #[inline]
-    pub fn is_citext(&self) -> bool {
-        matches!(self, DfType::Text(Collation::Citext))
-    }
-
     /// Returns `true` if this is the JSON type in MySQL or PostgreSQL.
     #[inline]
     pub fn is_json(&self) -> bool {
@@ -612,6 +606,15 @@ impl DfType {
     #[inline]
     pub fn is_binary(&self) -> bool {
         matches!(self, Self::Binary(_) | Self::VarBinary(_))
+    }
+
+    /// Returns a text type's collation.
+    #[inline]
+    pub fn collation(&self) -> Option<Collation> {
+        match self {
+            Self::Text(c) | Self::VarChar(_, c) | Self::Char(_, c) => Some(*c),
+            _ => None,
+        }
     }
 
     /// Returns the deepest nested type in [`DfType::Array`], otherwise returns `self`.
