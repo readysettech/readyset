@@ -55,8 +55,11 @@ pub enum Collation {
     /// locale set to `en_US.utf8`.
     Citext,
 
-    /// UTF-8, accent-insensitive, case-insensitive
+    /// UTF-8, accent-insensitive, case-insensitive.
     Utf8AiCi,
+
+    /// The binary collation, that simply compares bytes.
+    Binary,
 }
 
 impl Display for Collation {
@@ -65,6 +68,7 @@ impl Display for Collation {
             Self::Utf8 => write!(f, "utf8"),
             Self::Citext => write!(f, "citext"),
             Self::Utf8AiCi => write!(f, "utf8_ai_ci"),
+            Self::Binary => write!(f, "binary"),
         }
     }
 }
@@ -81,6 +85,7 @@ impl Collation {
             Self::Utf8 => UTF8.with(cmp),
             Self::Citext => UTF8_CI.with(cmp),
             Self::Utf8AiCi => UTF8_AI_CI.with(cmp),
+            Self::Binary => a.as_ref().cmp(b.as_ref()),
         }
     }
 
@@ -94,7 +99,7 @@ impl Collation {
         let len = match self {
             Self::Utf8 => s.len() * 4,
             Self::Citext => s.len() * 2,
-            Self::Utf8AiCi => s.len(),
+            Self::Utf8AiCi | Self::Binary => s.len(),
         };
 
         let mut out = Vec::with_capacity(len); // just a close guess
@@ -103,6 +108,10 @@ impl Collation {
             Self::Utf8 => UTF8.with(make),
             Self::Citext => UTF8_CI.with(make),
             Self::Utf8AiCi => UTF8_AI_CI.with(make),
+            Self::Binary => {
+                out.extend_from_slice(s.as_bytes());
+                Ok(())
+            }
         };
 
         out
@@ -121,6 +130,7 @@ impl Collation {
         match (dialect.engine(), collation) {
             (SqlEngine::MySQL, "utf8mb4_0900_ai_ci") => Some(Collation::Utf8AiCi),
             (SqlEngine::MySQL, "utf8mb4_0900_as_cs") => Some(Collation::Utf8),
+            (SqlEngine::MySQL, "binary") => Some(Collation::Binary),
             (_, _) => None,
         }
     }
