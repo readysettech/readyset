@@ -441,9 +441,11 @@ mod tests {
         let state = MaterializedNodeState::Persistent(
             PersistentState::new(
                 String::from("it_queries_through_all_persistent"),
+                None,
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
                 PersistenceType::BaseTable,
+                None,
             )
             .unwrap(),
         );
@@ -488,9 +490,11 @@ mod tests {
         let state = MaterializedNodeState::Persistent(
             PersistentState::new(
                 String::from("it_queries_through_some_persistent"),
+                None,
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
                 PersistenceType::BaseTable,
+                None,
             )
             .unwrap(),
         );
@@ -531,9 +535,11 @@ mod tests {
         let state = MaterializedNodeState::Persistent(
             PersistentState::new(
                 String::from("it_queries_through_w_literals"),
+                None,
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
                 PersistenceType::BaseTable,
+                None,
             )
             .unwrap(),
         );
@@ -586,9 +592,11 @@ mod tests {
         let state = MaterializedNodeState::Persistent(
             PersistentState::new(
                 String::from("it_queries_through_w_arithmetic_and_literals_persistent"),
+                None,
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
                 PersistenceType::BaseTable,
+                None,
             )
             .unwrap(),
         );
@@ -633,9 +641,11 @@ mod tests {
         let state = MaterializedNodeState::Persistent(
             PersistentState::new(
                 String::from("it_queries_nested_expressions"),
+                None,
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
                 PersistenceType::BaseTable,
+                None,
             )
             .unwrap(),
         );

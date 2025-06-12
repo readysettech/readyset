@@ -882,9 +882,11 @@ mod tests {
         fn lots_of_changes_in_same_batch_persistent() {
             let state = PersistentState::new(
                 String::from("lots_of_changes_in_same_batch_persistent"),
+                None,
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
                 PersistenceType::BaseTable,
+                None,
             )
             .unwrap();
 
@@ -900,9 +902,11 @@ mod tests {
             let state = MaterializedNodeState::Persistent(
                 PersistentState::new(
                     String::from("delete_row_not_in_batch"),
+                    None,
                     Vec::<Box<[usize]>>::new(),
                     &PersistenceParameters::default(),
                     PersistenceType::BaseTable,
+                    None,
                 )
                 .unwrap(),
             );
@@ -950,9 +954,11 @@ mod tests {
             let mut state = MaterializedNodeState::Persistent(
                 PersistentState::new(
                     String::from("delete_row_not_in_batch_keyed"),
+                    None,
                     Vec::<Box<[usize]>>::new(),
                     &PersistenceParameters::default(),
                     PersistenceType::BaseTable,
+                    None,
                 )
                 .unwrap(),
             );
@@ -1005,9 +1011,11 @@ mod tests {
             let mut state = MaterializedNodeState::Persistent(
                 PersistentState::new(
                     String::from("delete_after_key_update"),
+                    None,
                     Vec::<Box<[usize]>>::new(),
                     &PersistenceParameters::default(),
                     PersistenceType::BaseTable,
+                    None,
                 )
                 .unwrap(),
             );
@@ -1066,9 +1074,11 @@ mod tests {
             let mut state = MaterializedNodeState::Persistent(
                 PersistentState::new(
                     "truncate".into(),
+                    None,
                     Vec::<Box<[usize]>>::new(),
                     &PersistenceParameters::default(),
                     PersistenceType::BaseTable,
+                    None,
                 )
                 .unwrap(),
             );
@@ -1124,9 +1134,11 @@ mod tests {
             let mut state = MaterializedNodeState::Persistent(
                 PersistentState::new(
                     "truncate".into(),
+                    None,
                     Vec::<Box<[usize]>>::new(),
                     &PersistenceParameters::default(),
                     PersistenceType::BaseTable,
+                    None,
                 )
                 .unwrap(),
             );
@@ -1183,9 +1195,11 @@ mod tests {
             let mut state = MaterializedNodeState::Persistent(
                 PersistentState::new(
                     "citext_coercion".into(),
+                    None,
                     Vec::<Box<[usize]>>::new(),
                     &PersistenceParameters::default(),
                     PersistenceType::BaseTable,
+                    None,
                 )
                 .unwrap(),
             );

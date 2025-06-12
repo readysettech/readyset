@@ -257,12 +257,14 @@ impl PersistentStateBenchArgs {
     fn initialize_state(&self) -> PersistentState {
         let mut state = PersistentState::new(
             format!("bench_{}", self.unique_entries),
+            None,
             vec![&[0usize][..], &[3][..]],
             &PersistenceParameters {
                 mode: self.durability_mode,
                 ..PersistenceParameters::default()
             },
             PersistenceType::BaseTable,
+            None,
         )
         .unwrap();
 
@@ -310,12 +312,14 @@ impl PersistentStateBenchArgs {
     fn initialize_large_strings_state(&self) -> PersistentState {
         let mut state = PersistentState::new(
             format!("bench_{}_large_strings", self.unique_entries),
+            None,
             vec![&[0usize][..], &[3][..]],
             &PersistenceParameters {
                 mode: self.durability_mode,
                 ..PersistenceParameters::default()
             },
             PersistenceType::BaseTable,
+            None,
         )
         .unwrap();
 

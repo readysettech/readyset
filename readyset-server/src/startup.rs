@@ -128,6 +128,7 @@ fn start_worker(
     memory_check_frequency: Option<Duration>,
     shutdown_rx: ShutdownReceiver,
     unquery: bool,
+    table_status_tx: UnboundedSender<(Relation, TableStatus)>,
 ) -> Result<(), anyhow::Error> {
     set_failpoint!(failpoints::START_WORKER);
     let worker = Worker::new(
@@ -141,6 +142,7 @@ fn start_worker(
         memory_check_frequency,
         shutdown_rx,
         unquery,
+        table_status_tx,
     )?;
 
     tokio::spawn(maybe_abort_on_panic!(abort_on_task_failure, worker.run()));
@@ -331,6 +333,7 @@ pub(crate) async fn start_instance_inner(
         memory_check_frequency,
         shutdown_rx.clone(),
         unquery,
+        table_status_tx.clone(),
     )?;
 
     let our_descriptor = start_controller(

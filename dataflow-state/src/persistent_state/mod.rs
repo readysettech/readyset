@@ -84,10 +84,10 @@ use rand::Rng;
 use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
-use readyset_client::KeyComparison;
+use readyset_client::{KeyComparison, TableStatus};
 use readyset_data::{Bound, BoundedRange, DfValue};
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
-use readyset_sql::ast::SqlIdentifier;
+use readyset_sql::ast::{Relation, SqlIdentifier};
 use replication_offset::ReplicationOffset;
 use rocksdb::{
     self, BlockBasedOptions, ColumnFamily, ColumnFamilyDescriptor, CompactOptions, IteratorMode,
@@ -98,6 +98,7 @@ use serde::{Deserialize, Serialize};
 use tempfile::{Builder, TempDir};
 use test_strategy::Arbitrary;
 use thiserror::Error;
+use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error, info, info_span, trace, warn};
 
 use crate::persistent_state::metrics::{MetricsReporter, MetricsReporterStop};
@@ -444,6 +445,8 @@ impl Drop for CompactionThreadHandle {
 /// PersistentState stores data in RocksDB.
 pub struct PersistentState {
     name: SqlIdentifier,
+    /// The relation when PersistenceType::BaseTable.
+    _table: Option<Relation>,
     default_options: rocksdb::Options,
     db: PersistentStateHandle,
     // The list of all the indices that are defined as unique in the schema for this table
@@ -458,10 +461,12 @@ pub struct PersistentState {
     snapshot_mode: SnapshotMode,
     compaction_threads: Vec<CompactionThreadHandle>,
     wal_flush_thread_handle: Option<(mpsc::Sender<()>, JoinHandle<()>)>,
-
     persistence_type: PersistenceType,
     replay_done: bool,
     metrics_stop: Option<MetricsReporterStop>,
+    /// Any TableStatus updates sent here will be sent to the current controller (only relevant for
+    /// PersistenceType::BaseTable).
+    _table_status_tx: Option<UnboundedSender<(Relation, TableStatus)>>,
 }
 
 /// Things that are shared between read handles and the state itself, that can be locked under a
@@ -1469,9 +1474,11 @@ impl IndexKeyValue {
 impl PersistentState {
     pub fn new<C: AsRef<[usize]>, K: IntoIterator<Item = C>>(
         mut name: String,
+        table: Option<Relation>,
         unique_keys: K,
         params: &PersistenceParameters,
         persistence_type: PersistenceType,
+        table_status_tx: Option<UnboundedSender<(Relation, TableStatus)>>,
     ) -> Result<Self> {
         let mut params = params.clone();
 
@@ -1527,10 +1534,12 @@ impl PersistentState {
 
         match Self::new_inner(
             name.clone(),
+            table.clone(),
             full_path.clone(),
             unique_keys.clone(),
             &params,
             persistence_type,
+            table_status_tx.clone(),
         ) {
             Ok(mut ps) => {
                 ps._tmpdir = tmpdir;
@@ -1545,17 +1554,27 @@ impl PersistentState {
                 if full_path.is_dir() {
                     fs::remove_dir_all(&full_path)?;
                 }
-                Self::new_inner(name, full_path, unique_keys, &params, persistence_type)
+                Self::new_inner(
+                    name,
+                    table,
+                    full_path,
+                    unique_keys,
+                    &params,
+                    persistence_type,
+                    table_status_tx,
+                )
             }
         }
     }
 
     fn new_inner(
         name: SqlIdentifier,
+        table: Option<Relation>,
         path: PathBuf,
         unique_keys: Vec<Box<[usize]>>,
         params: &PersistenceParameters,
         persistence_type: PersistenceType,
+        table_status_tx: Option<UnboundedSender<(Relation, TableStatus)>>,
     ) -> Result<Self> {
         let default_options = base_options(params);
         // We use a column family for each index, and one for metadata.
@@ -1683,6 +1702,7 @@ impl PersistentState {
 
         let state = Self {
             name,
+            _table: table,
             default_options,
             seq: 0,
             unique_keys,
@@ -1695,6 +1715,7 @@ impl PersistentState {
             persistence_type,
             replay_done: persistence_type == PersistenceType::BaseTable,
             metrics_stop: Some(metrics),
+            _table_status_tx: table_status_tx,
         };
 
         if let Some(pk) = state.unique_keys.first().cloned() {
@@ -2530,9 +2551,11 @@ mod tests {
     ) -> PersistentState {
         PersistentState::new(
             String::from(prefix),
+            None,
             unique_keys,
             &PersistenceParameters::default(),
             PersistenceType::BaseTable,
+            None,
         )
         .unwrap()
     }
@@ -2817,9 +2840,11 @@ mod tests {
         let pk = Index::new(IndexType::HashMap, pk_cols.clone());
         let mut state = PersistentState::new(
             String::from("persistent_state_primary_key"),
+            None,
             Some(&pk_cols),
             &PersistenceParameters::default(),
             PersistenceType::BaseTable,
+            None,
         )
         .unwrap();
         let first: Vec<DfValue> = vec![1.into(), 2.into(), "Cat".into()];
@@ -2868,9 +2893,11 @@ mod tests {
         let pk = Index::new(IndexType::HashMap, vec![0]);
         let mut state = PersistentState::new(
             String::from("persistent_state_primary_key_delete"),
+            None,
             Some(&pk.columns),
             &PersistenceParameters::default(),
             PersistenceType::BaseTable,
+            None,
         )
         .unwrap();
         let first: Vec<DfValue> = vec![1.into(), 2.into()];
@@ -2975,9 +3002,11 @@ mod tests {
         {
             let mut state = PersistentState::new(
                 name.clone(),
+                None,
                 Vec::<Box<[usize]>>::new(),
                 &params,
                 PersistenceType::BaseTable,
+                None,
             )
             .unwrap();
             state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
@@ -2989,9 +3018,11 @@ mod tests {
 
         let state = PersistentState::new(
             name,
+            None,
             Vec::<Box<[usize]>>::new(),
             &params,
             PersistenceType::BaseTable,
+            None,
         )
         .unwrap();
         match state.lookup(&[0], &PointKey::Single(10.into())) {
@@ -3023,9 +3054,11 @@ mod tests {
         {
             let mut state = PersistentState::new(
                 name.clone(),
+                None,
                 Some(&[0]),
                 &params,
                 PersistenceType::BaseTable,
+                None,
             )
             .unwrap();
             state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
@@ -3035,8 +3068,15 @@ mod tests {
                 .unwrap();
         }
 
-        let state =
-            PersistentState::new(name, Some(&[0]), &params, PersistenceType::BaseTable).unwrap();
+        let state = PersistentState::new(
+            name,
+            None,
+            Some(&[0]),
+            &params,
+            PersistenceType::BaseTable,
+            None,
+        )
+        .unwrap();
         match state.lookup(&[0], &PointKey::Single(10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
@@ -3258,9 +3298,11 @@ mod tests {
         let path = {
             let state = PersistentState::new(
                 String::from(".s-o_u#p."),
+                None,
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
                 PersistenceType::BaseTable,
+                None,
             )
             .unwrap();
             let path = state._tmpdir.as_ref().unwrap().path();

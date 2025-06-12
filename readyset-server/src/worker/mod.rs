@@ -17,10 +17,11 @@ use futures_util::stream::StreamExt;
 use metrics::{counter, gauge, histogram};
 use pin_project::pin_project;
 use rand::Rng;
+use readyset_sql::ast::Relation;
 use serde::{Deserialize, Serialize};
 use tikv_jemalloc_ctl::stats::allocated_mib;
 use tikv_jemalloc_ctl::{epoch, epoch_mib, stats};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender};
 use tokio::sync::{oneshot, Mutex, MutexGuard};
 use tokio::task::{JoinError, JoinHandle};
 use tokio::time::Interval;
@@ -35,7 +36,7 @@ use dataflow::{ChannelCoordinator, DomainBuilder, DomainRequest, Packet, Readers
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
-use readyset_client::ControllerConnectionPool;
+use readyset_client::{ControllerConnectionPool, TableStatus};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_util::shutdown::ShutdownReceiver;
 use readyset_util::{select, time_scope};
@@ -200,6 +201,8 @@ pub struct Worker {
     domain_wait_queue: FuturesUnordered<FinishedDomain>,
     shutdown_rx: ShutdownReceiver,
     barriers: Arc<BarrierManager>,
+    /// Any TableStatus updates sent here will be sent to the current controller.
+    table_status_tx: UnboundedSender<(Relation, TableStatus)>,
 }
 
 impl Worker {
@@ -216,6 +219,7 @@ impl Worker {
         evict_interval: Option<Duration>,
         shutdown_rx: ShutdownReceiver,
         unquery: bool,
+        table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     ) -> anyhow::Result<Self> {
         // this initial duration doesn't matter; it gets set upon worker registration
         let evict_interval = evict_interval.unwrap_or(Self::DEFAULT_EVICT_INTERVAL);
@@ -239,6 +243,7 @@ impl Worker {
             is_evicting: Default::default(),
             domain_wait_queue: Default::default(),
             barriers: Default::default(),
+            table_status_tx,
         })
     }
 
@@ -314,6 +319,7 @@ impl Worker {
                     state_size.clone(),
                     init_state_tx,
                     self.unquery,
+                    self.table_status_tx.clone(),
                 );
 
                 // this channel is used for in-process domain traffic, to avoid going through the

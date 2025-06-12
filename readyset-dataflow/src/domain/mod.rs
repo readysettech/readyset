@@ -34,7 +34,7 @@ use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::{self, Index};
 use readyset_client::metrics::recorded;
-use readyset_client::{KeyComparison, PersistencePoint, ReaderAddress};
+use readyset_client::{KeyComparison, PersistencePoint, ReaderAddress, TableStatus};
 use readyset_data::DfType;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::Relation;
@@ -454,6 +454,7 @@ impl DomainBuilder {
         state_size: Arc<AtomicUsize>,
         init_state_tx: Sender<MaterializedState>,
         unquery: bool,
+        table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     ) -> Domain {
         // initially, all nodes are not ready
         let not_ready = self
@@ -473,7 +474,6 @@ impl DomainBuilder {
             shard: self.shard,
             replica: self.replica,
             _nshards: self.nshards,
-
             persistence_parameters: self.persistence_parameters,
             state: LenMetric::new_meta("state", &meta),
             auxiliary_node_states: LenMetric::new_from(
@@ -489,7 +489,6 @@ impl DomainBuilder {
                 &meta,
             ),
             nodes: LenMetric::new_from(self.nodes, "nodes", &meta),
-
             reader_write_handles: LenMetric::new_meta("reader_write_handles", &meta),
             not_ready: LenMetric::new_from(not_ready, "not_ready", &meta),
             mode: DomainMode::Forwarding,
@@ -497,36 +496,27 @@ impl DomainBuilder {
             reader_triggered: LenMetric::new_meta("reader_triggered", &meta),
             replay_paths: Default::default(),
             trigger_addresses: Default::default(),
-
             ingress_inject: LenMetric::new_meta("ingress_inject", &meta),
-
             readers,
             channel_coordinator,
-
             timed_purges: LenMetric::new_meta("timed_purges", &meta),
-
             delayed_for_self: LenMetric::new_meta("delayed_for_self", &meta),
-
             state_size,
             total_time: Timer::new(),
             total_ptime: Timer::new(),
             wait_time: Timer::new(),
             process_times: TimerSet::new(),
             process_ptimes: TimerSet::new(),
-
             total_replay_time: Timer::new(),
             total_forward_time: Timer::new(),
-
             aggressively_update_state_sizes: self.config.aggressively_update_state_sizes,
-
             metrics: domain_metrics::DomainMetrics::new(self.config.verbose_metrics),
-
             eviction_kind: self.config.eviction_kind,
             unquery_after_eviction: unquery,
             remapped_keys: LenMetric::new_meta("remapped_keys", &meta),
-
             init_state_tx,
             materialization_persistence: self.config.materialization_persistence,
+            table_status_tx,
         }
     }
 }
@@ -665,7 +655,6 @@ pub struct Domain {
     shard: Option<usize>,
     replica: usize,
     _nshards: usize,
-
     /// Map of nodes managed by this domain
     ///
     /// # Invariants
@@ -675,23 +664,19 @@ pub struct Domain {
     /// * All keys of `self.state` and `self.auxiliary_node_states` must also be keys in
     ///   `self.nodes` * `nodes` cannot be empty
     nodes: LenMetric<DomainNodes>,
-
     /// State for all materialized non-reader nodes managed by this domain
     ///
     /// Invariant: All keys of `self.state` must also be keys in `self.nodes`
     state: LenMetric<StateMap>,
-
     /// State for internal nodes managed by this domain
     ///
     /// Invariant: All keys of `self.auxiliary_node_states` must also be keys in
     /// `self.nodes`
     auxiliary_node_states: LenMetric<AuxiliaryNodeStateMap>,
-
     /// State for all reader nodes managed by this domain
     ///
     /// Invariant: All keys of `self.reader_write_handles` must also be keys in `self.nodes`
     reader_write_handles: LenMetric<NodeMap<backlog::WriteHandle>>,
-
     not_ready: LenMetric<HashSet<LocalNodeIndex>>,
     ingress_inject: LenMetric<NodeMap<(usize, Vec<DfValue>)>>,
     persistence_parameters: PersistenceParameters,
@@ -699,14 +684,11 @@ pub struct Domain {
     waiting: LenMetric<NodeMap<Waiting>>,
     remapped_keys: LenMetric<RemappedKeys>,
     trigger_addresses: NodeMap<Vec<ReplicaAddress>>,
-
     /// Replay paths that go through this domain
     replay_paths: ReplayPaths,
-
     /// Map from node ID to an interval tree of the keys of all current pending upqueries to that
     /// node
     reader_triggered: LenMetric<NodeMap<RequestedKeys>>,
-
     /// Queue of purge operations to be performed on reader nodes at some point in the future, used
     /// as part of the implementation of materialization frontiers
     ///
@@ -715,41 +697,35 @@ pub struct Domain {
     /// * Each node referenced by a `view` of a TimedPurge must be in `self.nodes`
     /// * Each node referenced by a `view` of a TimedPurge must be a reader node
     timed_purges: LenMetric<VecDeque<TimedPurge>>,
-
     readers: Readers,
     channel_coordinator: Arc<ChannelCoordinator>,
-
     delayed_for_self: LenMetric<VecDeque<Packet>>,
-
     state_size: Arc<AtomicUsize>,
     total_time: Timer<SimpleTracker, RealTime>,
     total_ptime: Timer<SimpleTracker, ThreadTime>,
     wait_time: Timer<SimpleTracker, RealTime>,
     process_times: TimerSet<LocalNodeIndex, SimpleTracker, RealTime>,
     process_ptimes: TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
-
     /// time spent processing replays
     total_replay_time: Timer<SimpleTracker, RealTime>,
     /// time spent processing ordinary, forward updates
     total_forward_time: Timer<SimpleTracker, RealTime>,
-
     /// If set to `true`, the metric tracking the in-memory size of materialized state will be
     /// updated after every packet is handled, rather than only when requested by the eviction
     /// worker. This causes a (minor) runtime cost, with the upside being that the materialization
     /// state sizes will never be out-of-date.
     pub aggressively_update_state_sizes: bool,
-
     metrics: domain_metrics::DomainMetrics,
     eviction_kind: crate::EvictionKind,
     unquery_after_eviction: bool,
-
     /// This channel is used to notify the replica that a base node has its persistent state
     /// initialized.
     /// This allow us to asynchronously run that process, and avoid any bottlenecks on the
     /// initialization of their state.
     init_state_tx: tokio::sync::mpsc::Sender<MaterializedState>,
-
     materialization_persistence: bool,
+    /// Any TableStatus updates sent here will be sent to the current controller.
+    table_status_tx: UnboundedSender<(Relation, TableStatus)>,
 }
 
 /// Creates the materialized node state for the given node.
@@ -757,13 +733,16 @@ pub struct Domain {
 /// it takes a lot of time for large tables.
 /// Upon completion, this method will send the node index and the pointer to the new
 /// `PersistentState` through the `sender`.
+#[allow(clippy::too_many_arguments)]
 async fn initialize_state(
     node_idx: LocalNodeIndex,
     indices: HashSet<Index>,
     base_name: String,
+    table: Relation,
     unique_keys: Vec<Box<[usize]>>,
     persistence_params: PersistenceParameters,
     sender: Sender<MaterializedState>,
+    table_status_tx: UnboundedSender<(Relation, TableStatus)>,
 ) -> ReadySetResult<()> {
     trace!("running separate task to initialize base node persistent state");
     let reported_once = Arc::new(AtomicBool::new(false));
@@ -790,9 +769,11 @@ async fn initialize_state(
                 tokio::task::spawn_blocking(move || {
                     PersistentState::new(
                         base_name,
+                        Some(table),
                         unique_keys,
                         &persistence_params,
                         PersistenceType::BaseTable,
+                        Some(table_status_tx),
                     )
                     .map_err(|e| ReadySetError::from(e))
                 })
@@ -1718,9 +1699,11 @@ impl Domain {
                     node,
                     MaterializedNodeState::Persistent(PersistentState::new(
                         name,
+                        None,
                         keys,
                         &self.persistence_parameters,
                         PersistenceType::FullMaterialization,
+                        None,
                     )?),
                 );
             } else {
@@ -2280,9 +2263,11 @@ impl Domain {
                             node_idx,
                             index,
                             base_name.clone(),
+                            node_name.clone(),
                             unique_keys,
                             persistence_params,
                             init_state_tx,
+                            self.table_status_tx.clone(),
                         )
                         .instrument(tracing::trace_span!(
                             "initialize_state",
