@@ -85,7 +85,6 @@ use readyset_adapter_types::{DeallocateId, ParsedCommand, PreparedStatementType}
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
 use readyset_client::query::*;
 use readyset_client::results::Results;
-use readyset_client::utils::retry_with_exponential_backoff;
 use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{
@@ -104,6 +103,7 @@ use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::adapter_rewrites::{self, ProcessedQueryParams};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::{RedactedString, Sensitive};
+use readyset_util::retry_with_exponential_backoff;
 use readyset_version::READYSET_VERSION;
 use slab::Slab;
 use tokio::sync::mpsc::UnboundedSender;
@@ -2445,15 +2445,15 @@ where
                 // background, so we don't remove the ddl request for timeouts.
                 if let Err(e) = &res {
                     if let Some(ddl_req) = ddl_req {
-                        let remove_res = retry_with_exponential_backoff(
+                        let remove_res = retry_with_exponential_backoff!(
                             || async {
                                 let ddl_req = ddl_req.clone();
                                 self.authority.remove_cache_ddl_request(ddl_req).await
                             },
-                            5,
-                            Duration::from_millis(1),
-                        )
-                        .await;
+                            retries: 5,
+                            delay: 1,
+                            backoff: 2,
+                        );
                         if remove_res.is_err() {
                             error!("Failed to remove stored 'create cache' request. It will be re-run if there is a backwards incompatible upgrade.");
                         }
@@ -2491,15 +2491,15 @@ where
                         Ok(noria_connector::QueryResult::Delete { num_rows_deleted }) if num_rows_deleted < 1
                     )
                 {
-                    let remove_res = retry_with_exponential_backoff(
+                    let remove_res = retry_with_exponential_backoff!(
                         || async {
                             let ddl_req = ddl_req.clone();
                             self.authority.remove_cache_ddl_request(ddl_req).await
                         },
-                        5,
-                        Duration::from_millis(1),
-                    )
-                    .await;
+                        retries: 5,
+                        delay: 1,
+                        backoff: 2,
+                    );
                     if remove_res.is_err() {
                         error!("Failed to remove stored 'drop cache' request. It will be re-run if there is a backwards incompatible upgrade");
                     }

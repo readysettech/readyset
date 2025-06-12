@@ -545,8 +545,6 @@ ORDER BY 1
             Query {
                 column_types: Some(vec![Type::Integer]),
                 sort_mode: Some(SortMode::NoSort),
-                label: None,
-                conditionals: vec![],
                 query: "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
 FROM t1
 ORDER BY 1"
@@ -560,7 +558,7 @@ ORDER BY 1"
                             .unwrap()
                     )
                 },
-                params: Default::default(),
+                ..Default::default()
             }
         )
     }
@@ -577,10 +575,7 @@ ORDER BY 1
         assert_eq!(
             result.unwrap().1,
             Query {
-                column_types: None,
                 sort_mode: Some(SortMode::NoSort),
-                label: None,
-                conditionals: vec![],
                 query: "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
 FROM t1
 ORDER BY 1"
@@ -594,7 +589,7 @@ ORDER BY 1"
                             .unwrap()
                     )
                 },
-                params: Default::default(),
+                ..Default::default()
             }
         )
     }
@@ -624,8 +619,6 @@ SELECT a,
             Query {
                 column_types: Some(vec![Type::Integer, Type::Integer, Type::Integer]),
                 sort_mode: Some(SortMode::NoSort),
-                label: None,
-                conditionals: vec![],
                 query: "SELECT a,
        c-d,
        d
@@ -643,7 +636,7 @@ SELECT a,
                     1.into(),
                     183.into(),
                 ]),
-                params: Default::default(),
+                ..Default::default()
             }
         )
     }
@@ -677,11 +670,9 @@ a
                 Record::Query(Query {
                     column_types: Some(vec![Type::Text]),
                     sort_mode: Some(SortMode::ValueSort),
-                    label: None,
-                    conditionals: vec![],
                     query: "SELECT * FROM t1".to_string(),
                     results: QueryResults::Results(vec![]),
-                    params: Default::default(),
+                    ..Default::default()
                 }),
                 Record::Statement(Statement {
                     result: StatementResult::Ok,
@@ -689,13 +680,11 @@ a
                     conditionals: vec![],
                 }),
                 Record::Query(Query {
-                    label: None,
                     column_types: Some(vec![Type::Text]),
                     sort_mode: Some(SortMode::ValueSort),
-                    conditionals: vec![],
                     query: "SELECT * FROM t1".to_string(),
                     results: QueryResults::Results(vec![Value::Text("a".to_string())]),
-                    params: Default::default(),
+                    ..Default::default()
                 }),
             ]
         )
@@ -715,7 +704,6 @@ SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
                 column_types: Some(vec![Type::Integer]),
                 sort_mode: Some(SortMode::RowSort),
                 label: Some("x0".to_string()),
-                conditionals: vec![],
                 query: "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
   FROM t1"
                     .to_string(),
@@ -728,7 +716,7 @@ SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
                             .unwrap()
                     )
                 },
-                params: Default::default(),
+                ..Default::default()
             }
         );
     }
@@ -748,11 +736,10 @@ SELECT * FROM t1 WHERE id = ?
             Query {
                 column_types: Some(vec![Type::Integer, Type::Integer, Type::Integer]),
                 sort_mode: Some(SortMode::NoSort),
-                label: None,
-                conditionals: vec![],
                 query: "SELECT * FROM t1 WHERE id = ?".to_owned(),
                 results: QueryResults::Results(vec![131.into(), 1.into(),]),
                 params: QueryParams::PositionalParams(vec![1.into()]),
+                ..Default::default()
             }
         )
     }
@@ -772,11 +759,10 @@ $1 = 1
             Query {
                 column_types: Some(vec![Type::Integer, Type::Integer, Type::Integer]),
                 sort_mode: Some(SortMode::NoSort),
-                label: None,
-                conditionals: vec![],
                 query: "SELECT * FROM t1 WHERE id = $1".to_owned(),
                 results: QueryResults::Results(vec![131.into(), 1.into()]),
                 params: QueryParams::NumberedParams(HashMap::from([(1, 1.into())])),
+                ..Default::default()
             }
         )
     }
@@ -805,21 +791,18 @@ SELECT * FROM t1
                     column_types: Some(vec![Type::Integer]),
                     sort_mode: Some(SortMode::RowSort),
                     label: Some("x0".to_string()),
-                    conditionals: vec![],
                     query: "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
   FROM t1"
                         .to_string(),
                     results: QueryResults::Results(vec![123.into(), 456.into()]),
-                    params: Default::default(),
+                    ..Default::default()
                 }),
                 Record::Query(Query {
                     column_types: Some(vec![Type::Integer, Type::Integer]),
                     sort_mode: Some(SortMode::RowSort),
-                    label: None,
-                    conditionals: vec![],
                     query: "SELECT * FROM t1".to_string(),
                     results: QueryResults::Results(vec![123.into(), 456.into(), 789.into(),]),
-                    params: Default::default(),
+                    ..Default::default()
                 })
             ]
         );
@@ -841,7 +824,6 @@ SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
                 column_types: Some(vec![Type::Integer]),
                 sort_mode: Some(SortMode::RowSort),
                 label: Some("x0".to_string()),
-                conditionals: vec![],
                 query: "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
   FROM t1"
                     .to_string(),
@@ -854,7 +836,7 @@ SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
                             .unwrap()
                     )
                 },
-                params: Default::default(),
+                ..Default::default()
             })]
         );
     }
@@ -888,11 +870,9 @@ SELECT * FROM t2
                 Record::Query(Query {
                     column_types: Some(vec![Type::TimestampTz]),
                     sort_mode: Some(SortMode::ValueSort),
-                    label: None,
-                    conditionals: vec![],
                     query: "SELECT * FROM t2".to_string(),
                     results: QueryResults::Results(vec![]),
-                    params: Default::default(),
+                    ..Default::default()
                 }),
                 Record::Statement(Statement {
                     result: StatementResult::Ok,
@@ -900,10 +880,8 @@ SELECT * FROM t2
                     conditionals: vec![],
                 }),
                 Record::Query(Query {
-                    label: None,
                     column_types: Some(vec![Type::TimestampTz]),
                     sort_mode: Some(SortMode::NoSort),
-                    conditionals: vec![],
                     query: "SELECT * FROM t2".to_string(),
                     results: QueryResults::Results(vec![Value::TimestampTz(
                         FixedOffset::from_str("-0800")
@@ -918,7 +896,7 @@ SELECT * FROM t2
                             .single()
                             .unwrap()
                     )]),
-                    params: Default::default(),
+                    ..Default::default()
                 }),
             ]
         )
@@ -943,16 +921,13 @@ b'00000000000000000'
         assert_eq!(
             result.unwrap().1,
             vec![Record::Query(Query {
-                label: None,
                 column_types: Some(vec![Type::BitVec]),
-                sort_mode: None,
-                conditionals: vec![],
                 query: "SELECT * FROM t1".to_string(),
                 results: QueryResults::Results(vec![
                     Value::BitVector(BitVec::from_elem(3, true)),
                     Value::BitVector(BitVec::from_elem(17, false)),
                 ]),
-                params: Default::default(),
+                ..Default::default()
             })]
         )
     }
@@ -968,13 +943,10 @@ select x - 1 from t1
         assert_eq!(
             result.unwrap().1,
             vec![Record::Query(Query {
-                label: None,
                 column_types: Some(vec![Type::UnsignedInteger]),
-                sort_mode: None,
-                conditionals: vec![],
                 query: "select x - 1 from t1".to_string(),
                 results: QueryResults::Results(vec![Value::UnsignedInteger(18446744073709551614),]),
-                params: Default::default(),
+                ..Default::default()
             })]
         )
     }
@@ -990,13 +962,10 @@ select x - 1 from t1
         assert_eq!(
             result.unwrap().1,
             vec![Record::Query(Query {
-                label: None,
                 column_types: Some(vec![Type::UnsignedInteger]),
-                sort_mode: None,
-                conditionals: vec![],
                 query: "select x - 1 from t1".to_string(),
                 results: QueryResults::Results(vec![Value::UnsignedInteger(1),]),
-                params: Default::default(),
+                ..Default::default()
             })]
         )
     }

@@ -861,7 +861,7 @@ impl From<QueryParams> for mysql_async::Params {
 }
 
 /// Run a query against the database engine and check the results against an expected result set
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Default)]
 pub struct Query {
     pub label: Option<String>,
     pub column_types: Option<Vec<Type>>,

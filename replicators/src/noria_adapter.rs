@@ -14,7 +14,6 @@ use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
 use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
 use readyset_client::recipe::changelist::{Change, ChangeList};
-use readyset_client::utils::retry_with_exponential_backoff;
 use readyset_client::{ReadySetHandle, Table, TableOperation};
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
@@ -23,9 +22,11 @@ use readyset_sql::DialectDisplay;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
+use readyset_util::retry_with_exponential_backoff;
 use readyset_util::select;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::time::sleep;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
@@ -291,15 +292,15 @@ impl<'a> NoriaAdapter<'a> {
         // Load the replication offset for all tables and the schema from ReadySet
         // Retry a few times to give domains a chance to spin up--if we fail at all attempts, we
         // will start the loop over and there will be an error logged
-        let mut replication_offsets = retry_with_exponential_backoff(
-            || async {
+        let mut replication_offsets = retry_with_exponential_backoff!(
+            {
                 let mut noria = noria.clone();
                 noria.replication_offsets().await
             },
-            5,
-            Duration::from_millis(250),
-        )
-        .await?;
+            retries: 5,
+            delay: 250,
+            backoff: 2,
+        )?;
 
         let pos = match (replication_offsets.min_present_offset()?, resnapshot) {
             (None, _) | (_, true) => {
@@ -503,15 +504,15 @@ impl<'a> NoriaAdapter<'a> {
         // present begin the snapshot process
         // Retry a few times to give domains a chance to spin up--if we fail at all attempts, we
         // will start the loop over and there will be an error logged
-        let replication_offsets = retry_with_exponential_backoff(
-            || async {
+        let replication_offsets = retry_with_exponential_backoff!(
+            {
                 let mut noria = noria.clone();
                 noria.replication_offsets().await
             },
-            5,
-            Duration::from_millis(250),
-        )
-        .await?;
+            retries: 5,
+            delay: 250,
+            backoff: 2,
+        )?;
 
         let pos = replication_offsets
             .min_present_offset()?
@@ -1133,15 +1134,16 @@ impl<'a> NoriaAdapter<'a> {
         // In case of a domain failure, we might be replacing the failed domain.
         // and at the same time attempting to remove a table from readyset.
         // We need to wait for the new domain to be ready before removing the table.
-        retry_with_exponential_backoff(
+        retry_with_exponential_backoff!(
             || async {
                 let mut noria = self.noria.clone();
                 noria.replication_offsets().await
             },
-            5,
-            Duration::from_millis(250),
-        )
-        .await?;
+            retries: 5,
+            delay: 250,
+            backoff: 2,
+        )?;
+
         self.replication_offsets.tables.remove(&table);
         self.mutator_map.remove(&table);
         // Dropping the table cleans up any dataflow state that may have been made as well as

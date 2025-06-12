@@ -142,16 +142,12 @@ impl Seed {
                 let query_string = query.statement.display(dialect).to_string();
 
                 Ok(Query {
-                    label: None,
-                    column_types: None,
                     sort_mode: if query.statement.order.is_some() {
                         Some(SortMode::NoSort)
                     } else {
                         Some(SortMode::RowSort)
                     },
-                    conditionals: vec![],
                     query: query_string,
-                    results: Default::default(),
                     params: QueryParams::PositionalParams(
                         query
                             .state
@@ -160,6 +156,7 @@ impl Seed {
                             .map(|dt| dt.try_into())
                             .collect::<Result<Vec<_>, _>>()?,
                     ),
+                    ..Default::default()
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

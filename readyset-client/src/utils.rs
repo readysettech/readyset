@@ -1,75 +1,22 @@
 //! readyset-client utilities
 
-use std::future::Future;
-use std::time::Duration;
-
-use tokio::time::sleep;
-
-/// Attempts to execute an asynchronous operation with exponential backoff and returns a `Result`.
-/// The provided `base_delay` will be doubled up to `max_retries` times.
-///
-/// # Arguments
-///
-/// * `operation` - A closure that returns a future representing the operation to be retried.
-/// * `max_retries` - The maximum number of times to retry the operation before giving up.
-/// * `base_delay` - The initial delay before the first retry, which doubles on each subsequent
-///   retry.
-///
-/// # Examples
-///
-/// ```
-/// // Example usage:
-/// // let result = retry_with_exponential_backoff(my_async_operation, 5, Duration::from_secs(1)).await;
-/// ```
-///
-/// This function returns a `Result` indicating whether the operation was successful (`Ok(T)`)
-/// or not (`Err(E)`) after the maximum number of retries has been reached.
-pub async fn retry_with_exponential_backoff<F, Fut, T, E>(
-    mut operation: F,
-    max_retries: usize,
-    base_delay: Duration,
-) -> Result<T, E>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, E>>,
-    E: std::fmt::Debug,
-{
-    let mut attempts_completed = 0;
-    let mut delay = base_delay;
-
-    while attempts_completed <= max_retries {
-        match operation().await {
-            Ok(result) => return Ok(result),
-            Err(e) => {
-                if attempts_completed == max_retries {
-                    return Err(e);
-                } else {
-                    sleep(delay).await;
-                    attempts_completed += 1;
-                    // Exponential backoff
-                    delay = delay.checked_mul(2).unwrap_or(delay);
-                }
-            }
-        }
-    }
-
-    unreachable!();
-}
-
+// TODO: move these out of this module
+// should be in readyset-util, however readyset_errors causes
+// a circular dependency. Need to replace readyset_errors with a
+// std Result if possible
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicI32, Ordering};
     use std::sync::Arc;
     use std::time::Instant;
+    use tokio::time::{sleep, Duration};
 
     use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
-
-    use super::*;
+    use readyset_util::retry_with_exponential_backoff;
 
     #[tokio::test]
     async fn test_retry_success_first_try() {
-        let operation = || async { ReadySetResult::Ok("success") };
-        let result = retry_with_exponential_backoff(operation, 3, Duration::from_millis(100)).await;
+        let result = retry_with_exponential_backoff!({ ReadySetResult::Ok("success") }, retries: 3, delay:100, backoff:1,);
         assert_eq!(result, Ok("success"));
     }
 
@@ -90,7 +37,7 @@ mod tests {
                 }
             }
         };
-        let result = retry_with_exponential_backoff(operation, 3, Duration::from_millis(100)).await;
+        let result = retry_with_exponential_backoff!(operation, retries: 3, delay: 100, backoff: 1);
         assert_eq!(result, Ok(()));
     }
 
@@ -99,7 +46,7 @@ mod tests {
         let operation = || async {
             ReadySetResult::<()>::Err(ReadySetError::Internal("test failure".to_string()))
         };
-        let result = retry_with_exponential_backoff(operation, 3, Duration::from_millis(100)).await;
+        let result = retry_with_exponential_backoff!(operation, retries: 3, delay:100, backoff:1);
         assert_eq!(
             result,
             Err(ReadySetError::Internal("test failure".to_string()))
@@ -120,7 +67,7 @@ mod tests {
                 }
             }
         };
-        let _ = retry_with_exponential_backoff(operation, 3, Duration::from_millis(100)).await;
+        let _ = retry_with_exponential_backoff!(operation, retries: 3, delay: 100, backoff: 2);
         let duration = start.elapsed();
         // The total wait time should be at least 100ms + 200ms + 400ms = 700ms
         assert!(duration >= Duration::from_millis(700));
@@ -139,7 +86,7 @@ mod tests {
                 }
             }
         };
-        let _ = retry_with_exponential_backoff(operation, 3, Duration::from_millis(100)).await;
+        let _ = retry_with_exponential_backoff!(operation, retries: 3, delay: 100, backoff: 1);
         // 3 retries means there are 4 total attempts.
         assert_eq!(attempts.load(Ordering::SeqCst), 4);
     }

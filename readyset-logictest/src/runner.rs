@@ -30,6 +30,7 @@ use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_server::{Builder, LocalAuthority, ReuseConfigType};
 use readyset_sql::ast::Relation;
 use readyset_sql::Dialect;
+use readyset_util::retry_with_exponential_backoff;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
 use tokio::sync::RwLock;
@@ -309,7 +310,6 @@ impl TestScript {
             })
         };
 
-        let mut prev_was_statement = false;
         let mut update_system_timezone = false;
 
         for record in &self.records {
@@ -318,7 +318,6 @@ impl TestScript {
                     if conditional_skip(&stmt.conditionals) {
                         continue;
                     }
-                    prev_was_statement = true;
                     if Self::might_be_timezone_changing_statement(conn, stmt.command.as_str()) {
                         update_system_timezone = true;
                     }
@@ -331,13 +330,6 @@ impl TestScript {
                 Record::Query(query) => {
                     if conditional_skip(&query.conditionals) {
                         continue;
-                    }
-
-                    if prev_was_statement {
-                        prev_was_statement = false;
-                        // we need to give the statements some time to propagate before we can issue
-                        // the next query
-                        tokio::time::sleep(Duration::from_millis(2000)).await;
                     }
 
                     let timer = if opts.time {
@@ -360,26 +352,43 @@ impl TestScript {
                         update_system_timezone = false;
                     }
 
-                    match self
-                        .run_query(query, conn)
-                        .await
-                        .with_context(|| format!("Running query {}", query.query))
-                    {
+                    let retries = std::env::var("LOGICTEST_RETRIES")
+                        .ok()
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .unwrap_or(8);
+
+                    // 100 ms, 2x backoff
+                    // 25.5 seconds total
+                    match retry_with_exponential_backoff!(
+                        {
+                            {
+                                let query_result = self
+                                    .run_query(query, conn)
+                                    .await
+                                    .with_context(|| format!("Running query {}", query.query));
+
+                                match (query_result, invert_result) {
+                                    (Ok(_), true) => {
+                                        Err(anyhow!("Expected failure: {}", query.query))
+                                    }
+                                    (Err(e), false) => Err(e),
+                                    _ => Ok(()),
+                                }
+                            }
+                        },
+                        retries: retries,
+                        delay: 100,
+                        backoff: 2,
+                    ) {
                         Ok(_) => {
-                            if invert_result {
-                                return Err(anyhow!("Expected failure: {}", query.query));
-                            }
+                            if let Some((label, start)) = &timer {
+                                let duration = start.elapsed();
+                                debug!(label, "Query succeeded in {duration:?}");
+                            };
+                            Ok(())
                         }
-                        Err(e) => {
-                            if !invert_result {
-                                return Err(e);
-                            }
-                        }
-                    }
-                    if let Some((label, start_time)) = timer {
-                        let duration = start_time.elapsed().as_secs();
-                        debug!(label, "Query ran in {duration:?}");
-                    }
+                        Err(e) => Err(anyhow!("Query failed after {retries} retries: {e}")),
+                    }?
                 }
                 Record::HashThreshold(_) => {}
                 Record::Halt { .. } => break,

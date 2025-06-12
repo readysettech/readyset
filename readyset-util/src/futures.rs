@@ -20,6 +20,121 @@ macro_rules! select {
     };
 }
 
+/// Retries an asynchronous operation with exponential backoff.
+///
+/// This macro supports both code blocks and async closures as the retryable operation.
+/// Delays between retries follow the exponential function:
+///
+/// ```text
+/// delay = base_delay * (backoff ^ attempts)
+/// ```
+///
+/// # Parameters
+///
+/// This macro accepts either:
+/// - A `{ block }`, or
+/// - A closure expression `|| async { ... }`
+///
+/// ## Named Parameters
+/// - `retries:` – Maximum number of attempts before giving up.
+/// - `delay:` – The initial base delay between retries, in milliseconds.
+/// - `backoff:` – A multiplier applied exponentially on each retry
+///
+/// # Example: Using a code block
+/// ```ignore
+/// use readyset_util::retry_with_exponential_backoff;
+/// use tokio::time::{sleep, Duration};
+/// let result = retry_with_exponential_backoff!({
+///     return Result::Ok(());
+/// }, retries: 3, delay: 100, backoff: 2);
+/// assert!(result.is_ok());
+/// ```
+///
+/// # Example: Using a closure
+/// ```ignore
+/// use readyset_util::retry_with_exponential_backoff;
+/// use tokio::time::{sleep, Duration};
+/// let closure = async || { Result::Ok(()) };
+/// let result = retry_with_exponential_backoff!(
+///     closure,
+///     retries: 3,
+///     delay: 100,
+///     backoff: 2
+/// );
+/// assert!(result.is_ok());
+/// ```
+///
+/// # Returns
+///
+/// A `Result<T, E>`:
+/// - `Ok(T)` if the operation succeeds within the retry limit
+/// - `Err(E)` if all attempts fail
+#[macro_export]
+macro_rules! retry_with_exponential_backoff {
+    (
+        $body:block,
+        retries: $max_retries:expr,
+        delay: $base_delay:expr,
+        backoff: $backoff:expr $(,)?
+    ) => {{
+        let mut attempts_completed: u32 = 0;
+
+        let base_delay = $base_delay as f64;
+        let backoff = $backoff as f64;
+
+        loop {
+            let result = async $body.await;
+
+            let delay = base_delay * backoff.powi(attempts_completed as i32);
+
+            match result {
+                Ok(val) => break Ok(val),
+                Err(e) => {
+                    if attempts_completed >= $max_retries {
+                        break Err(e);
+                    }
+
+                    sleep(Duration::from_millis(delay as u64)).await;
+                    attempts_completed += 1;
+                }
+            }
+        }
+    }};
+
+    (
+        $closure:expr,
+        retries: $max_retries:expr,
+        delay: $base_delay:expr,
+        backoff: $backoff:expr $(,)?
+    ) => {{
+        use tokio::time::{sleep, Duration};
+
+        let mut attempts_completed = 0;
+        let mut op = $closure;
+
+        let base_delay = $base_delay as f64;
+        let backoff = $backoff as f64;
+
+        loop {
+            let result = op().await;
+
+            let delay = base_delay * backoff.powi(attempts_completed);
+
+            match result {
+                Ok(val) => break Ok(val),
+                Err(e) => {
+                    if attempts_completed >= $max_retries {
+                        break Err(e);
+                    }
+
+                    sleep(Duration::from_millis(delay as u64)).await;
+                    attempts_completed += 1;
+                }
+            }
+        }
+    }};
+}
+
 /// Wrap the given future in a handler that will cause the entire process to exit if the future
 /// panics during its execution
 pub fn abort_on_panic<F, A>(f: F) -> impl Future<Output = A> + Send + 'static
