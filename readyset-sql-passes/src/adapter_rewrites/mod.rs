@@ -27,6 +27,7 @@ use tracing::{trace, trace_span};
 
 use crate::disallow_row::DisallowRow as _;
 use crate::drop_redundant_join::DropRedundantSelfJoin as _;
+use crate::expand_join_on_using::ExpandJoinOnUsing as _;
 use crate::expr::ScalarOptimizeExpressions as _;
 use crate::inline_leading_derived_table::InlineLeadingDerivedTable as _;
 use crate::rewrite_utils::contains_question_mark_placeholders;
@@ -276,6 +277,8 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     trace!(parent: &span, pass="expand_stars", query = %query.display(flags.dialect));
     query.expand_implied_tables(&context)?;
     trace!(parent: &span, pass="expand_implied_tables", query = %query.display(flags.dialect));
+    query.expand_join_on_using(&context)?;
+    trace!(parent: &span, pass="expand_join_on_using", query = %query.display(flags.dialect));
     if !contains_question_mark_placeholders(query)? {
         query.rewrite_array_constructors()?;
         trace!(parent: &span, pass="rewrite_array_constructors", query = %query.display(flags.dialect));

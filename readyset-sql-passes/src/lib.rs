@@ -8,6 +8,7 @@ mod detect_problematic_self_joins;
 pub mod detect_unsupported_placeholders;
 mod disallow_row;
 mod drop_redundant_join;
+mod expand_join_on_using;
 pub mod expr;
 mod implied_tables;
 mod infer_nullability;

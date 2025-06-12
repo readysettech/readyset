@@ -16,7 +16,8 @@ use readyset_sql::ast::{
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use std::collections::{HashMap, HashSet};
-use std::{iter, mem};
+use std::iter;
+use std::mem;
 
 const INNER_STMT_ALIAS: &str = "INNER";
 
@@ -78,6 +79,25 @@ macro_rules! as_column {
     };
 }
 
+#[macro_export]
+macro_rules! is_window_function_expr {
+    ($expr:expr) => {{
+        let mut contains_window_functions = false;
+        let _ = for_each_window_function($expr, &mut |_| contains_window_functions = true);
+        contains_window_functions
+    }};
+}
+
+#[macro_export]
+macro_rules! contains_wf {
+    ($stmt:expr) => {
+        $stmt.fields.iter().any(|f| {
+            let (expr, _) = expect_field_as_expr(f);
+            is_window_function_expr!(expr)
+        })
+    };
+}
+
 /// Classification of a single JOIN `ON` atom under the supported-join policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OnAtom {
@@ -130,14 +150,14 @@ impl RewriteStatus {
     }
 }
 
-enum ConstraintKind<'a> {
+pub(crate) enum ConstraintKind<'a> {
     EqualityComparison(&'a Expr, &'a Expr),
     OrderingComparison(&'a Expr, BinaryOperator, &'a Expr),
     Other(&'a Expr),
 }
 
 impl<'a> ConstraintKind<'a> {
-    fn new(constraint: &'a Expr) -> Self {
+    pub(crate) fn new(constraint: &'a Expr) -> Self {
         match constraint {
             Expr::BinaryOp {
                 lhs,
@@ -151,7 +171,7 @@ impl<'a> ConstraintKind<'a> {
         }
     }
 
-    fn is_same_as(&self, expr: &'a Expr) -> bool {
+    pub(crate) fn is_same_as(&self, expr: &'a Expr) -> bool {
         match &self {
             ConstraintKind::EqualityComparison(c_lhs, c_rhs) => match expr {
                 Expr::BinaryOp {
@@ -179,7 +199,7 @@ impl<'a> ConstraintKind<'a> {
     }
 
     /// Check if constraint associated with `self` is contained in `expr`
-    fn is_contained_in(&self, expr: &'a Expr) -> bool {
+    pub(crate) fn is_contained_in(&self, expr: &'a Expr) -> bool {
         let mut is_contained = false;
         split_expr_mut(
             expr,
@@ -562,7 +582,7 @@ pub(crate) fn contain_subqueries_with_limit_clause(stmt: &SelectStatement) -> Re
 
 /// Return the **alias** of the first projected field if present; otherwise set it to a default,
 /// update the statement in place, and return it.
-pub fn ensure_first_field_alias(stmt: &mut SelectStatement) -> SqlIdentifier {
+pub(crate) fn ensure_first_field_alias(stmt: &mut SelectStatement) -> SqlIdentifier {
     let (expr, alias) = match stmt.fields.first_mut() {
         Some(FieldDefinitionExpr::Expr { expr, alias }) => (expr, alias),
         _ => panic!(
@@ -950,36 +970,46 @@ pub(crate) fn add_expression_to_join_constraint(
     }
 }
 
-/// Collect all top-level expressions (SELECT items, JOIN ON, WHERE, HAVING, GROUP BY,
-/// ORDER BY) for immutable analysis.
-pub(crate) fn outermost_expression(stmt: &SelectStatement) -> impl Iterator<Item = &Expr> {
-    stmt.fields
-        .iter()
+macro_rules! outermost_expression_iter {
+    ($stmt:expr, $iter:tt$(, $mutable:tt)?) => {
+    $stmt.fields
+        .$iter()
         .filter_map(|fde| match fde {
             FieldDefinitionExpr::Expr { expr, .. } => Some(expr),
             FieldDefinitionExpr::All | FieldDefinitionExpr::AllInTable(_) => None,
         })
-        .chain(stmt.join.iter().filter_map(|join| match &join.constraint {
-            JoinConstraint::On(expr) => Some(expr),
-            JoinConstraint::Using(_) => None,
-            JoinConstraint::Empty => None,
-        }))
-        .chain(&stmt.where_clause)
-        .chain(&stmt.having)
-        .chain(stmt.group_by.iter().flat_map(|gb| {
-            gb.fields.iter().filter_map(|f| match f {
+        .chain(
+            $stmt.join
+                .$iter()
+                .filter_map(|join| match &$($mutable)? join.constraint {
+                    JoinConstraint::On(expr) => Some(expr),
+                    JoinConstraint::Using(_) => None,
+                    JoinConstraint::Empty => None,
+                }),
+        )
+        .chain(&$($mutable)? $stmt.where_clause)
+        .chain(&$($mutable)? $stmt.having)
+        .chain($stmt.group_by.$iter().flat_map(|gb| {
+            gb.fields.$iter().filter_map(|f| match f {
                 FieldReference::Expr(expr) => Some(expr),
                 _ => None,
             })
         }))
-        .chain(stmt.order.iter().flat_map(|oc| {
+        .chain($stmt.order.$iter().flat_map(|oc| {
             oc.order_by
-                .iter()
+                .$iter()
                 .filter_map(|OrderBy { field, .. }| match field {
                     FieldReference::Expr(expr) => Some(expr),
                     _ => None,
                 })
         }))
+    };
+}
+
+/// Collect all top-level expressions (SELECT items, JOIN ON, WHERE, HAVING, GROUP BY,
+/// ORDER BY) for immutable analysis.
+pub(crate) fn outermost_expression(stmt: &SelectStatement) -> impl Iterator<Item = &Expr> {
+    outermost_expression_iter!(stmt, iter)
 }
 
 /// Collect all top-level expressions (SELECT items, JOIN ON, WHERE, HAVING, GROUP BY,
@@ -987,37 +1017,7 @@ pub(crate) fn outermost_expression(stmt: &SelectStatement) -> impl Iterator<Item
 pub(crate) fn outermost_expression_mut(
     stmt: &mut SelectStatement,
 ) -> impl Iterator<Item = &mut Expr> {
-    stmt.fields
-        .iter_mut()
-        .filter_map(|fde| match fde {
-            FieldDefinitionExpr::Expr { expr, .. } => Some(expr),
-            FieldDefinitionExpr::All | FieldDefinitionExpr::AllInTable(_) => None,
-        })
-        .chain(
-            stmt.join
-                .iter_mut()
-                .filter_map(|join| match &mut join.constraint {
-                    JoinConstraint::On(expr) => Some(expr),
-                    JoinConstraint::Using(_) => None,
-                    JoinConstraint::Empty => None,
-                }),
-        )
-        .chain(&mut stmt.where_clause)
-        .chain(&mut stmt.having)
-        .chain(stmt.group_by.iter_mut().flat_map(|gb| {
-            gb.fields.iter_mut().filter_map(|f| match f {
-                FieldReference::Expr(expr) => Some(expr),
-                _ => None,
-            })
-        }))
-        .chain(stmt.order.iter_mut().flat_map(|oc| {
-            oc.order_by
-                .iter_mut()
-                .filter_map(|OrderBy { field, .. }| match field {
-                    FieldReference::Expr(expr) => Some(expr),
-                    _ => None,
-                })
-        }))
+    outermost_expression_iter!(stmt, iter_mut, mut)
 }
 
 /// Gather those as a flat `Vec<&mut Expr::Column(column)>` so we can inspect or replace columns.
@@ -1725,13 +1725,6 @@ fn project_row_number_field(
     stmt_alias: SqlIdentifier,
 ) -> ReadySetResult<(SqlIdentifier, bool, bool)> {
     //
-    macro_rules! is_window_function_expr {
-        ($expr:expr) => {{
-            let mut contains_window_functions = false;
-            for_each_window_function($expr, &mut |_| contains_window_functions = true)?;
-            contains_window_functions
-        }};
-    }
     let mut require_wrapper = false;
     let mut rn_order_by = if let Some(order_by_clause) = &stmt.order {
         let mut rn_order_by = Vec::new();
