@@ -3031,7 +3031,7 @@ async fn create_duplicate_caches() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 async fn test_utf8_ai_ci() {
     readyset_tracing::init_test_logging();
     let (rs_opts, _rs_handle, tx) = setup_with_mysql().await;
