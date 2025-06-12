@@ -418,6 +418,44 @@ impl CreateTableStatement {
             }
         }
     }
+
+    /// MySQL turns `CHAR(10) COLLATE binary` into `BINARY(10)`, `CHAR COLLATE binary` into
+    /// `BINARY(1)`, etc. However, these are not done before DDL is sent over the binlog. So when
+    /// snapshotting, we will see `BINARY(10)`, but if the table is created during replication, we
+    /// need to do the translation ourselves.
+    ///
+    /// The below translations were determined empirically with MySQL 8.0. MySQL 5.7 does not have
+    /// the `binary` collation, but I don't think it's worth finding a way to error gracefully if we
+    /// encounter it instead of attempting this translation.
+    pub fn rewrite_binary_collation_columns(&mut self) {
+        let Ok(ref mut body) = self.body else {
+            return;
+        };
+        for field in &mut body.fields {
+            if field.sql_type.is_any_text()
+                && field
+                    .constraints
+                    .extract_if(.., |constraint| {
+                        matches!(
+                            constraint,
+                            ColumnConstraint::Collation(collation) if collation.eq_ignore_ascii_case("binary")
+                        )
+                    })
+                    .next()
+                    .is_some()
+            {
+                field.sql_type = match field.sql_type {
+                    SqlType::Char(len) => SqlType::Binary(Some(len.unwrap_or(1))),
+                    SqlType::VarChar(len) => SqlType::VarBinary(len.unwrap_or(1)),
+                    SqlType::TinyText => SqlType::TinyBlob,
+                    SqlType::MediumText => SqlType::MediumBlob,
+                    SqlType::Text => SqlType::Blob,
+                    SqlType::LongText => SqlType::LongBlob,
+                    _ => unreachable!(),
+                };
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]

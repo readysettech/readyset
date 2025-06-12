@@ -826,6 +826,7 @@ impl MySqlBinlogConnector {
                                     ));
                                 }
                                 statement.propagate_default_charset(readyset_sql::Dialect::MySQL);
+                                statement.rewrite_binary_collation_columns();
                                 if let Ok(body) = &statement.body {
                                     self.table_schemas
                                         .insert(statement.table.clone(), body.clone());
