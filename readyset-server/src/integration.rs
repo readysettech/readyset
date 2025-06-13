@@ -763,7 +763,7 @@ async fn it_works_with_sql_recipe() {
     // Retrieve the result of the count query:
     let result = getter
         .lookup(
-            &[TinyText::try_new("Volvo", Collation::Utf8AiCi)
+            &[TinyText::try_new("Volvo", Collation::OldCitext)
                 .unwrap()
                 .into()],
             true,
@@ -3689,7 +3689,9 @@ macro_rules! get {
         // combine private and public results
         // also, there's currently a bug where MIR doesn't guarantee the order of parameters, so we
         // try both O:)
-        let aid: DfValue = TinyText::try_new($aid, Collation::Utf8AiCi).unwrap().into();
+        let aid: DfValue = TinyText::try_new($aid, Collation::OldCitext)
+            .unwrap()
+            .into();
         let mut v = $private
             .lookup(&[$uid.into(), aid.clone()], true)
             .await
@@ -4126,7 +4128,7 @@ async fn simple_pagination() {
     let mut a_page1: Vec<Vec<DfValue>> = q
         .lookup(
             &[
-                TinyText::try_new("a", Collation::Utf8AiCi).unwrap().into(),
+                TinyText::try_new("a", Collation::OldCitext).unwrap().into(),
                 0.into(),
             ],
             true,
@@ -4147,7 +4149,7 @@ async fn simple_pagination() {
     let mut a_page2: Vec<Vec<DfValue>> = q
         .lookup(
             &[
-                TinyText::try_new("a", Collation::Utf8AiCi).unwrap().into(),
+                TinyText::try_new("a", Collation::OldCitext).unwrap().into(),
                 1.into(),
             ],
             true,
@@ -4168,7 +4170,7 @@ async fn simple_pagination() {
     let mut b_page1: Vec<Vec<DfValue>> = q
         .lookup(
             &[
-                TinyText::try_new("b", Collation::Utf8AiCi).unwrap().into(),
+                TinyText::try_new("b", Collation::OldCitext).unwrap().into(),
                 0.into(),
             ],
             true,
@@ -4214,7 +4216,7 @@ async fn correct_nested_view_schema() {
 
     let expected_schema = vec![
         ("swvc.id".into(), DfType::Int),
-        ("swvc.content".into(), DfType::Text(Collation::Utf8AiCi)),
+        ("swvc.content".into(), DfType::Text(Collation::OldCitext)),
         ("swvc.vc".into(), DfType::BigInt),
         ("swvc.story".into(), DfType::Int),
     ];
