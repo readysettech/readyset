@@ -185,6 +185,14 @@ impl PartialOrd for OutputColumn {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowFunction {
+    pub function: FunctionExpr,
+    pub partition_by: Vec<Expr>,
+    pub order_by: Vec<(Expr, OrderType, NullOrder)>,
+    pub alias: SqlIdentifier,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinRef {
     pub src: Relation,
     pub dst: Relation,
@@ -291,6 +299,8 @@ pub struct QueryGraph {
     pub having_predicates: Vec<Expr>,
     /// The list of columns and directionsj that the query is ordering by, if any
     pub order: Option<Vec<(Column, OrderType, NullOrder)>>,
+    /// Window Functions specified in the query
+    pub window_functions: Vec<WindowFunction>,
     /// The pagination (order, limit, offset) for the query, if any
     pub pagination: Option<Pagination>,
     /// True if the query is correlated (is a subquery that refers to columns in an outer query)
@@ -738,7 +748,8 @@ fn classify_conditionals(
         | Expr::Array(_)
         | Expr::Row { .. }
         | Expr::Collate { .. }
-        | Expr::Variable(_) => global.push(ce.clone()),
+        | Expr::Variable(_)
+        | Expr::WindowFunction { .. } => global.push(ce.clone()),
     }
     Ok(())
 }
@@ -1275,6 +1286,8 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
         vec![]
     };
 
+    let mut window_functions = Vec::new();
+
     let mut columns = Vec::with_capacity(stmt.fields.len());
     for field in stmt.fields.iter() {
         match field {
@@ -1301,6 +1314,31 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                             alias: alias.clone().unwrap_or_else(|| c.name.clone()),
                             column: c.clone(),
                         });
+                    }
+                    Expr::WindowFunction {
+                        function,
+                        partition_by,
+                        order_by,
+                    } => {
+                        let fn_name: SqlIdentifier = expr
+                            .display(readyset_sql::Dialect::MySQL)
+                            .to_string()
+                            .into();
+
+                        columns.push(OutputColumn::Data {
+                            alias: alias.clone().unwrap_or(fn_name.clone()),
+                            column: Column {
+                                name: fn_name.clone(),
+                                table: None,
+                            },
+                        });
+
+                        window_functions.push(WindowFunction {
+                            function: function.clone(),
+                            partition_by: partition_by.clone(),
+                            order_by: order_by.clone(),
+                            alias: alias.clone().unwrap_or(fn_name),
+                        })
                     }
                     Expr::Call(function) if is_aggregate(function) => {
                         let agg_name = aggregates
@@ -1507,6 +1545,10 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
             .collect()
     };
 
+    if !window_functions.is_empty() && !group_by.is_empty() {
+        unsupported!("Mixing window functions and aggregates is not yet supported");
+    }
+
     Ok(QueryGraph {
         distinct: stmt.distinct,
         relations,
@@ -1519,6 +1561,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
         join_order,
         global_predicates,
         having_predicates,
+        window_functions,
         pagination,
         order,
         is_correlated,

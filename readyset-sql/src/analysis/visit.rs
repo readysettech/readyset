@@ -528,6 +528,21 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(
         }
         Expr::Variable(var) => visitor.visit_variable(var),
         Expr::Collate { expr, .. } => visitor.visit_expr(expr.as_ref()),
+        Expr::WindowFunction {
+            function,
+            partition_by,
+            order_by,
+            ..
+        } => {
+            visitor.visit_function_expr(function)?;
+            for expr in partition_by {
+                visitor.visit_expr(expr)?;
+            }
+            for (expr, _, _) in order_by {
+                visitor.visit_expr(expr)?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -546,7 +561,6 @@ pub fn walk_function_expr<'ast, V: Visitor<'ast>>(
     match function_expr {
         FunctionExpr::Avg { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Count { expr, .. } => visitor.visit_expr(expr.as_ref()),
-        FunctionExpr::CountStar => Ok(()),
         FunctionExpr::Sum { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Max(expr) => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Min(expr) => visitor.visit_expr(expr.as_ref()),
@@ -554,6 +568,10 @@ pub fn walk_function_expr<'ast, V: Visitor<'ast>>(
         FunctionExpr::Extract { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Lower { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Upper { expr, .. } => visitor.visit_expr(expr.as_ref()),
+        FunctionExpr::CountStar
+        | FunctionExpr::RowNumber
+        | FunctionExpr::Rank
+        | FunctionExpr::DenseRank => Ok(()),
         FunctionExpr::Call {
             arguments: None, ..
         } => Ok(()),

@@ -352,6 +352,9 @@ pub(super) fn post_lookup_aggregates(
                     // TODO(REA-4289)
                     unsupported!("SUM(DISTINCT ...) is not supported as a post-lookup aggregate")
                 }
+                RowNumber | Rank | DenseRank => {
+                    unsupported!("Window functions are not supported as post-lookup aggregates")
+                }
                 // Count and sum are handled the same way, as re-aggregating counts is
                 // done by just summing the numbers together
                 Count { .. } | CountStar | Sum { .. } => PostLookupAggregateFunction::Sum,

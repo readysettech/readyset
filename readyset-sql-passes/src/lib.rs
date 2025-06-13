@@ -20,6 +20,7 @@ mod star_expansion;
 mod strip_literals;
 mod strip_post_filters;
 mod util;
+mod validate_window_functions;
 
 use std::collections::{HashMap, HashSet};
 
@@ -52,6 +53,7 @@ pub use crate::strip_post_filters::StripPostFilters;
 pub use crate::util::{
     is_correlated, is_logical_op, is_predicate, map_aggregates, outermost_table_exprs, LogicalOp,
 };
+pub use crate::validate_window_functions::ValidateWindowFunctions;
 
 /// Context provided to all query rewriting passes.
 #[derive(Debug)]
@@ -169,6 +171,7 @@ impl Rewrite for SelectStatement {
 
         self.rewrite_between()
             .disallow_row()?
+            .validate_window_functions()?
             .scalar_optimize_expressions(context.dialect)
             .strip_post_filters()
             .resolve_schemas(

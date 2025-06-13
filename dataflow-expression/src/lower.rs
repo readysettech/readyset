@@ -1461,7 +1461,8 @@ impl Expr {
             AstExpr::Between { .. }
             | AstExpr::NestedSelect(_)
             | AstExpr::In { .. }
-            | AstExpr::Collate { .. } => {
+            | AstExpr::Collate { .. }
+            | AstExpr::WindowFunction { .. } => {
                 internal!(
                     "Expression should have been desugared earlier: {}",
                     expr.display(readyset_sql::Dialect::MySQL)

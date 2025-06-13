@@ -83,6 +83,17 @@ impl<'a> ReferredColumnsIter<'a> {
             Expr::NestedSelect(_) => None,
             Expr::Variable(_) => None,
             Expr::Collate { expr, .. } => self.visit_expr(expr),
+            Expr::WindowFunction {
+                function,
+                partition_by,
+                order_by,
+                ..
+            } => {
+                self.visit_function_expression(function)?;
+                self.exprs_to_visit.extend(partition_by.iter());
+                self.exprs_to_visit.extend(order_by.iter().map(|e| &e.0));
+                None
+            }
         }
     }
 
@@ -96,7 +107,7 @@ impl<'a> ReferredColumnsIter<'a> {
                 self.exprs_to_visit.push(key);
                 self.visit_expr(value)
             }
-            CountStar => None,
+            CountStar | RowNumber | DenseRank | Rank => None,
             Extract { expr, .. } => self.visit_expr(expr),
             Lower { expr, .. } => self.visit_expr(expr),
             Upper { expr, .. } => self.visit_expr(expr),
@@ -208,6 +219,18 @@ impl<'a> ReferredColumnsMut<'a> {
             Expr::NestedSelect(_) => None,
             Expr::Variable(_) => None,
             Expr::Collate { expr, .. } => self.visit_expr(expr),
+            Expr::WindowFunction {
+                function,
+                partition_by,
+                order_by,
+                ..
+            } => {
+                self.visit_function_expression(function)?;
+                self.exprs_to_visit.extend(partition_by.iter_mut());
+                self.exprs_to_visit
+                    .extend(order_by.iter_mut().map(|e| &mut e.0));
+                None
+            }
         }
     }
 
@@ -217,7 +240,7 @@ impl<'a> ReferredColumnsMut<'a> {
         match fexpr {
             Avg { expr, .. } => self.visit_expr(expr),
             Count { expr, .. } => self.visit_expr(expr),
-            CountStar => None,
+            CountStar | RowNumber | Rank | DenseRank => None,
             Extract { expr, .. } => self.visit_expr(expr),
             Lower { expr, .. } => self.visit_expr(expr),
             Upper { expr, .. } => self.visit_expr(expr),
@@ -375,12 +398,17 @@ pub fn is_aggregate(function: &FunctionExpr) -> bool {
         | FunctionExpr::Substring { .. }
         | FunctionExpr::Lower { .. }
         | FunctionExpr::Upper { .. }
+        // Window Functions are aggregates in a sense, but they
+        // are handled separately in the graph
+        | FunctionExpr::RowNumber
+        | FunctionExpr::Rank
+        | FunctionExpr::DenseRank
         // For now, assume all "generic" function calls are not aggregates
         | FunctionExpr::Call { .. } => false,
     }
 }
 
-/// Rturns true if *any* of the recursive subexpressions of the given [`Expr`] contain an
+/// Returns true if *any* of the recursive subexpressions of the given [`Expr`] contain an
 /// aggregate
 pub fn contains_aggregate(expr: &Expr) -> bool {
     match expr {
@@ -416,7 +444,7 @@ pub fn contains_aggregate(expr: &Expr) -> bool {
                 }
         }
         Expr::Array(exprs) | Expr::Row { exprs, .. } => exprs.iter().any(contains_aggregate),
-        Expr::Variable(_) => false,
+        Expr::Variable(_) | Expr::WindowFunction { .. } => false,
         Expr::Collate { expr, .. } => contains_aggregate(expr),
     }
 }
@@ -504,6 +532,17 @@ impl Expr {
             } => Box::new(iter::once(lhs.as_ref())) as _,
             Expr::Array(exprs) | Expr::Row { exprs, .. } => Box::new(exprs.iter()),
             Expr::Collate { expr, .. } => expr.immediate_subexpressions(),
+            Expr::WindowFunction {
+                function,
+                partition_by,
+                order_by,
+                ..
+            } => Box::new(
+                function
+                    .arguments()
+                    .chain(partition_by.iter())
+                    .chain(order_by.iter().map(|(col, _, _)| col)),
+            ),
         }
     }
 

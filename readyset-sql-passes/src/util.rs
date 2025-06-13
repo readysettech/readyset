@@ -186,6 +186,9 @@ pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
             ret.extend(exprs.iter_mut().flat_map(map_aggregates))
         }
         Expr::Collate { expr, .. } => ret.append(&mut map_aggregates(expr)),
+        // Window functions are handled separately
+        // `PARTITION BY` and `ORDER BY` can *NOT* contain aggregates
+        Expr::WindowFunction { .. } => {}
     }
     ret
 }

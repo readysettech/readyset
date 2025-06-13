@@ -544,6 +544,21 @@ pub fn walk_expr<'ast, V: VisitorMut<'ast>>(
         }
         Expr::Variable(var) => visitor.visit_variable(var),
         Expr::Collate { expr, .. } => visitor.visit_expr(expr.as_mut()),
+        Expr::WindowFunction {
+            function,
+            partition_by,
+            order_by,
+            ..
+        } => {
+            visitor.visit_function_expr(function)?;
+            for expr in partition_by {
+                visitor.visit_expr(expr)?;
+            }
+            for (expr, _, _) in order_by {
+                visitor.visit_expr(expr)?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -562,7 +577,6 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
     match function_expr {
         FunctionExpr::Avg { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Count { expr, .. } => visitor.visit_expr(expr.as_mut()),
-        FunctionExpr::CountStar => Ok(()),
         FunctionExpr::Extract { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Lower { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Upper { expr, .. } => visitor.visit_expr(expr.as_mut()),
@@ -570,6 +584,10 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
         FunctionExpr::Max(expr) => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Min(expr) => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::GroupConcat { expr, .. } => visitor.visit_expr(expr.as_mut()),
+        FunctionExpr::CountStar
+        | FunctionExpr::RowNumber
+        | FunctionExpr::Rank
+        | FunctionExpr::DenseRank => Ok(()),
         FunctionExpr::Call {
             arguments: None, ..
         } => Ok(()),

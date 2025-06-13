@@ -20,10 +20,16 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
 pub enum FunctionExpr {
     /// `AVG` aggregation. The boolean argument is `true` if `DISTINCT`
-    Avg { expr: Box<Expr>, distinct: bool },
+    Avg {
+        expr: Box<Expr>,
+        distinct: bool,
+    },
 
     /// `COUNT` aggregation
-    Count { expr: Box<Expr>, distinct: bool },
+    Count {
+        expr: Box<Expr>,
+        distinct: bool,
+    },
 
     /// `COUNT(*)` aggregation
     CountStar,
@@ -55,7 +61,10 @@ pub enum FunctionExpr {
     },
 
     /// `SUM` aggregation
-    Sum { expr: Box<Expr>, distinct: bool },
+    Sum {
+        expr: Box<Expr>,
+        distinct: bool,
+    },
 
     /// `MAX` aggregation
     Max(Box<Expr>),
@@ -68,6 +77,17 @@ pub enum FunctionExpr {
         expr: Box<Expr>,
         separator: Option<String>,
     },
+
+    /// The standard SQL Window Functions
+    /// https://www.postgresql.org/docs/17/tutorial-window.html
+    /// https://dev.mysql.com/doc/refman/8.4/en/window-function-descriptions.html
+    /// Note that some of the standard aggregate functions can also
+    /// be used as window functions such as `AVG`, `COUNT`, `MAX`, `MIN`, and `SUM`
+    ///
+    /// We currently don't support the other window functions
+    RowNumber,
+    Rank,
+    DenseRank,
 
     /// The SQL `SUBSTRING`/`SUBSTR` function.
     ///
@@ -180,6 +200,9 @@ impl FunctionExpr {
                     .collect::<Option<Vec<_>>>()?
                     .join(", ") //FIXME
             ),
+            FunctionExpr::RowNumber => "row_number()".to_string(),
+            FunctionExpr::Rank => "rank()".to_string(),
+            FunctionExpr::DenseRank => "dense_rank()".to_string(),
         })
     }
 }
@@ -204,7 +227,10 @@ impl FunctionExpr {
             FunctionExpr::JsonObjectAgg { key, value, .. } => {
                 concrete_iter!(iter::once(key.as_ref()).chain(iter::once(value.as_ref())))
             }
-            FunctionExpr::CountStar => concrete_iter!(iter::empty()),
+            FunctionExpr::CountStar
+            | FunctionExpr::RowNumber
+            | FunctionExpr::Rank
+            | FunctionExpr::DenseRank => concrete_iter!(iter::empty()),
             FunctionExpr::Call {
                 arguments: None, ..
             } => concrete_iter!(iter::empty()),
@@ -317,6 +343,9 @@ impl DialectDisplay for FunctionExpr {
                 }
                 write!(f, ")")
             }
+            FunctionExpr::RowNumber => write!(f, "ROW_NUMBER()"),
+            FunctionExpr::Rank => write!(f, "RANK()"),
+            FunctionExpr::DenseRank => write!(f, "DENSE_RANK()"),
         })
     }
 }
@@ -815,6 +844,15 @@ pub enum Expr {
         ty: SqlType,
         /// If true indicates that the expression used the Postgres syntax (expr::type)
         postgres_style: bool,
+    },
+
+    /// fn OVER([PARTITION BY [column, ...]] [ORDER BY [column [ASC|DESC], ...]])
+    /// fn: COUNT, SUM, MIN, MAX, AVG, ROW_NUMBER, RANK, DENSE_RANK
+    /// more to be supported later
+    WindowFunction {
+        function: FunctionExpr,
+        partition_by: Vec<Expr>,
+        order_by: Vec<(Expr, OrderType, NullOrder)>,
     },
 
     /// `ARRAY[expr1, expr2, ...]`
@@ -1392,6 +1430,47 @@ impl TryFromDialect<sqlparser::ast::Ident> for Expr {
     }
 }
 
+impl TryFromDialect<sqlparser::ast::OrderByExpr> for (Expr, OrderType, NullOrder) {
+    fn try_from_dialect(
+        value: sqlparser::ast::OrderByExpr,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        let (order_type, null_order) = value.options.try_into_dialect(dialect)?;
+
+        Ok((
+            value.expr.try_into_dialect(dialect)?,
+            order_type,
+            null_order,
+        ))
+    }
+}
+
+impl TryFromDialect<sqlparser::ast::OrderByOptions> for (OrderType, NullOrder) {
+    fn try_from_dialect(
+        value: sqlparser::ast::OrderByOptions,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        let sqlparser::ast::OrderByOptions { asc, nulls_first } = value;
+
+        let order_type = match asc {
+            Some(true) | None => OrderType::OrderAscending,
+            Some(false) => OrderType::OrderDescending,
+        };
+
+        let null_order = nulls_first
+            .map(|nf| {
+                if nf {
+                    NullOrder::NullsFirst
+                } else {
+                    NullOrder::NullsLast
+                }
+            })
+            .unwrap_or(NullOrder::default_for(dialect, &order_type));
+
+        Ok((order_type, null_order))
+    }
+}
+
 /// Convert a function call into an expression.
 ///
 /// We don't turn every function into a [`FunctionExpr`], because we have some special cases that
@@ -1401,8 +1480,14 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
         value: sqlparser::ast::Function,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
+        use sqlparser::ast::{
+            Function, FunctionArg, FunctionArgExpr, FunctionArgumentList, FunctionArguments,
+        };
+
         // TODO: handle null treatment and other stuff
-        let sqlparser::ast::Function { args, name, .. } = value;
+        let Function {
+            args, name, over, ..
+        } = value;
 
         let sqlparser::ast::ObjectNamePart::Identifier(mut ident) = name
             .0
@@ -1410,20 +1495,25 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             .exactly_one()
             .map_err(|_| unsupported_err!("non-builtin function (UDF)"))?;
 
-        // Special case for `COUNT(*)`
-        if ident.value.eq_ignore_ascii_case("COUNT") {
-            use sqlparser::ast::{
-                FunctionArg, FunctionArgExpr, FunctionArgumentList, FunctionArguments,
-            };
-            match args {
-                FunctionArguments::List(FunctionArgumentList { args, .. })
-                    if args == vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard)] =>
-                {
-                    return Ok(Self::Call(FunctionExpr::CountStar));
-                }
-                _ => {}
+        // Special case for `COUNT(*)`, unless used in a window function
+        if ident.value.eq_ignore_ascii_case("COUNT")
+            && matches!(
+                args,
+                FunctionArguments::List(FunctionArgumentList { ref args, .. })
+                    if args.len() == 1
+                        && matches!(&args[0], FunctionArg::Unnamed(FunctionArgExpr::Wildcard))
+            )
+        {
+            if let Some(window) = over {
+                return sqlparser_window_to_window_function(
+                    window,
+                    dialect,
+                    Expr::Call(FunctionExpr::CountStar),
+                );
             }
-        }
+
+            return Ok(Expr::Call(FunctionExpr::CountStar));
+        };
 
         let (args, distinct, separator) = match args {
             sqlparser::ast::FunctionArguments::List(sqlparser::ast::FunctionArgumentList {
@@ -1492,6 +1582,12 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 value: next_expr()?,
                 allow_duplicate_keys: true,
             })
+        } else if ident.value.eq_ignore_ascii_case("ROW_NUMBER") {
+            Self::Call(FunctionExpr::RowNumber)
+        } else if ident.value.eq_ignore_ascii_case("RANK") {
+            Self::Call(FunctionExpr::Rank)
+        } else if ident.value.eq_ignore_ascii_case("DENSE_RANK") {
+            Self::Call(FunctionExpr::DenseRank)
         } else if ident.value.eq_ignore_ascii_case("JSONB_OBJECT_AGG")
             || ident.value.eq_ignore_ascii_case("JSON_OBJECTAGG")
         {
@@ -1545,7 +1641,65 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 arguments: Some(exprs.try_collect()?),
             })
         };
-        Ok(expr)
+
+        if let Some(window) = over {
+            sqlparser_window_to_window_function(window, dialect, expr)
+        } else {
+            Ok(expr)
+        }
+    }
+}
+
+fn sqlparser_window_to_window_function(
+    window: sqlparser::ast::WindowType,
+    dialect: Dialect,
+    expr: Expr,
+) -> Result<Expr, AstConversionError> {
+    use sqlparser::ast::WindowType;
+    match window {
+        WindowType::NamedWindow(_) => unsupported!("named window"),
+        WindowType::WindowSpec(window) => {
+            let partition_by: Vec<Expr> = window
+                .partition_by
+                .into_iter()
+                .map(|p| p.try_into_dialect(dialect))
+                .try_collect()?;
+
+            let order_by: Vec<(Expr, OrderType, NullOrder)> = window
+                .order_by
+                .into_iter()
+                .map(|o| o.try_into_dialect(dialect))
+                .try_collect()?;
+
+            match expr {
+                Expr::Call(
+                    f @ FunctionExpr::CountStar
+                    | f @ FunctionExpr::RowNumber
+                    | f @ FunctionExpr::Rank
+                    | f @ FunctionExpr::DenseRank
+                    | f @ FunctionExpr::Max(_)
+                    | f @ FunctionExpr::Min(_)
+                    // TODO: We probably can support distinct aggregates
+                    // given that we do have access to the entire window
+                    | f @ FunctionExpr::Sum {
+                        distinct: false, ..
+                    }
+                    | f @ FunctionExpr::Avg {
+                        distinct: false, ..
+                    }
+                    | f @ FunctionExpr::Count {
+                        distinct: false, ..
+                    },
+                ) => Ok(Expr::WindowFunction {
+                    function: f,
+                    partition_by,
+                    order_by,
+                }),
+                _ => {
+                    failed!("{expr:?} is not supported as a window function")
+                }
+            }
+        }
     }
 }
 
@@ -1737,6 +1891,37 @@ impl DialectDisplay for Expr {
             Expr::Variable(var) => write!(f, "{}", var.display(dialect)),
             Expr::Collate { expr, collation } => {
                 write!(f, "{} COLLATE {}", expr.display(dialect), collation)
+            }
+            Expr::WindowFunction {
+                function,
+                partition_by,
+                order_by,
+            } => {
+                write!(f, "{} OVER(", function.display(dialect))?;
+
+                let mut ws_sep = false;
+
+                if !partition_by.is_empty() {
+                    write!(f, "PARTITION BY {}", partition_by.display(dialect))?;
+                    ws_sep = true;
+                }
+
+                if !order_by.is_empty() {
+                    if ws_sep {
+                        write!(f, " ")?;
+                    }
+
+                    write!(f, "ORDER BY ")?;
+                    for (i, (e, o, no)) in order_by.iter().enumerate() {
+                        if i != 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{} {o}({no})", e.display(dialect))?;
+                    }
+                }
+
+                write!(f, ")")?;
+                Ok(())
             }
         })
     }
