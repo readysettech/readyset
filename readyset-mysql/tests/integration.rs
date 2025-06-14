@@ -3005,7 +3005,8 @@ async fn test_default_value_not_null_for_replication() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn create_duplicate_caches() {
+#[tags(serial)]
+async fn create_duplicate_unnamed_caches() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();
 
@@ -3021,6 +3022,61 @@ async fn create_duplicate_caches() {
         .unwrap();
     conn.query_drop("DROP ALL CACHES").await.unwrap();
     conn.query_drop("CREATE CACHE FROM SELECT b FROM foo WHERE a = ?")
+        .await
+        .unwrap();
+
+    let caches: Vec<(String, String, String, String)> = conn.query("SHOW CACHES").await.unwrap();
+    assert_eq!(caches.len(), 1, "unexpected caches: {caches:?}");
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+async fn create_duplicate_named_caches() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let mut conn = Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE foo (a INT, b INT)")
+        .await
+        .unwrap();
+
+    conn.query_drop("CREATE CACHE name1 FROM SELECT b FROM foo WHERE a = ?")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE CACHE name2 FROM SELECT b FROM foo WHERE a IN (?, ?, ?)")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE CACHE name2 FROM SELECT b FROM foo WHERE a IN (?, ?, ?)")
+        .await
+        .unwrap();
+
+    let caches: Vec<(String, String, String, String)> = conn.query("SHOW CACHES").await.unwrap();
+    assert_eq!(caches.len(), 1, "unexpected caches: {caches:?}");
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+async fn create_duplicate_query_id_and_name_caches() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let mut conn = Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE foo (a INT, b INT)")
+        .await
+        .unwrap();
+
+    conn.query_drop("CREATE CACHE name1 FROM SELECT b FROM foo")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE CACHE name2 FROM SELECT b FROM foo WHERE a = ?")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE CACHE name1 FROM SELECT b FROM foo WHERE a IN (?, ?, ?)")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE CACHE name1 FROM SELECT b FROM foo WHERE a IN (?, ?, ?)")
         .await
         .unwrap();
 

@@ -84,6 +84,7 @@ use mysql_common::row::convert::{FromRow, FromRowError};
 use readyset_adapter_types::{DeallocateId, ParsedCommand, PreparedStatementType};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
 use readyset_client::query::*;
+use readyset_client::recipe::CacheExpr;
 use readyset_client::results::Results;
 use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
@@ -1922,22 +1923,36 @@ where
         concurrently: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         adapter_rewrites::process_query(&mut stmt, self.noria.rewrite_params())?;
+        let query_id = QueryId::from_select(&stmt, self.noria.schema_search_path());
+        let requested_name = name.clone();
         let name = match name {
             Some(name) => &*name,
             None => {
-                *name = Some(QueryId::from_select(&stmt, self.noria.schema_search_path()).into());
+                *name = Some(query_id.into());
                 name.as_ref().unwrap()
             }
         };
-        // If we have another query with the same name, drop that query first
-        if let Some(view_request) = self.noria.view_create_request_from_name(name).await {
+
+        // If we have existing caches with the same query_id or name, drop them first.
+        for CacheExpr {
+            name,
+            statement,
+            query_id,
+            ..
+        } in self
+            .noria
+            .verbose_views(Some(query_id), requested_name.as_ref())
+            .await?
+        {
             warn!(
-                statement = %Sensitive(&view_request.statement.display(self.settings.dialect)),
-                name = %name.display(readyset_sql::Dialect::MySQL),
+                query_id = %query_id,
+                name = %name.display(DB::SQL_DIALECT),
+                statement = %Sensitive(&statement.display(self.settings.dialect)),
                 "Dropping previously cached query",
             );
-            self.drop_cached_query(name).await?;
+            self.drop_cached_query(&name).await?;
         }
+
         // Now migrate the new query
         let migration_state = match self
             .noria
