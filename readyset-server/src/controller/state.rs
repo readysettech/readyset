@@ -42,6 +42,7 @@ use readyset_client::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
 use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
 use readyset_client::metrics::recorded;
+use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::recipe::{CacheExpr, ExtendRecipeSpec};
 use readyset_client::{
@@ -263,7 +264,14 @@ impl DfState {
     /// Get a map of all known views created from `CREATE CACHE` statements, mapping the name of the
     /// view to a tuple of (`SelectStatement`, always) where always is a bool that indicates whether
     /// the `CREATE CACHE` statement was created with the optional `ALWAYS` argument.
-    pub(super) fn verbose_views(&self) -> Vec<CacheExpr> {
+    ///
+    /// Optionally, search_query_id and search_name can be passed to filter the results. Passing
+    /// both will include only results that match at least one.
+    pub(super) fn verbose_views(
+        &self,
+        search_query_id: Option<QueryId>,
+        search_name: Option<&Relation>,
+    ) -> Vec<CacheExpr> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -283,12 +291,17 @@ impl DfState {
                             statement,
                             always,
                             query_id,
-                        } => Some(CacheExpr {
-                            name,
-                            statement,
-                            always,
-                            query_id,
-                        }),
+                        } if (search_query_id.is_none() && search_name.is_none())
+                            || (Some(query_id) == search_query_id)
+                            || (Some(&name) == search_name) =>
+                        {
+                            Some(CacheExpr {
+                                name,
+                                statement,
+                                always,
+                                query_id,
+                            })
+                        }
                         _ => None,
                     }
                 } else {

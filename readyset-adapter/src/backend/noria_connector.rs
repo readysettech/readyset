@@ -548,13 +548,21 @@ impl NoriaConnector {
         Ok(QueryResult::from_owned(schema, vec![Results::new(data)]))
     }
 
-    pub(crate) async fn verbose_views(&mut self) -> ReadySetResult<Vec<CacheExpr>> {
-        self.inner.get_mut()?.noria.verbose_views().await
+    pub(crate) async fn verbose_views(
+        &mut self,
+        query_id: Option<QueryId>,
+        name: Option<&Relation>,
+    ) -> ReadySetResult<Vec<CacheExpr>> {
+        self.inner
+            .get_mut()?
+            .noria
+            .verbose_views(query_id, name)
+            .await
     }
 
     pub(crate) async fn list_create_cache_stmts(&mut self) -> ReadySetResult<Vec<String>> {
         Ok(self
-            .verbose_views()
+            .verbose_views(None, None)
             .await?
             .into_iter()
             .map(|stmt| stmt.display(self.parse_dialect).to_string())

@@ -2224,13 +2224,13 @@ where
         &mut self,
         query_id: Option<&str>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let mut views = self.noria.verbose_views().await?;
+        let query_id = match query_id {
+            // Bail if query_id is specificed and invalid.
+            Some(query_id) => Some(query_id.parse()?),
+            None => None,
+        };
 
-        // Filter on query ID
-        if let Some(unparsed_query_id) = query_id {
-            let query_id = unparsed_query_id.parse()?;
-            views.retain(|view| view.query_id == query_id);
-        }
+        let views = self.noria.verbose_views(query_id, None).await?;
 
         let select_schema = if let Some(handle) = self.metrics_handle.as_mut() {
             // Must snapshot histograms to get the latest metrics

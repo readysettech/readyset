@@ -30,6 +30,7 @@ use crate::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use crate::debug::stats;
 use crate::internal::{DomainIndex, ReplicaAddress};
 use crate::metrics::MetricsDump;
+use crate::query::QueryId;
 use crate::recipe::changelist::ChangeList;
 use crate::recipe::{CacheExpr, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use crate::status::ReadySetControllerStatus;
@@ -496,14 +497,20 @@ impl ReadySetHandle {
         self.simple_post_request("views").await
     }
 
-    /// Enumerate all known external views. Includes the SqlQuery that created
-    /// the view and the fallback behavior.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call
-    /// this method.
-    pub async fn verbose_views(&mut self) -> ReadySetResult<Vec<CacheExpr>> {
-        self.simple_post_request("verbose_views").await
-    }
+    simple_request!(
+        /// Enumerate all known external views. Includes the SqlQuery that created
+        /// the view and the fallback behavior.
+        ///
+        /// Optionally, query_id and name can be passed to filter the results. Passing both will
+        /// include only results that match at least one.
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call
+        /// this method.
+        verbose_views(
+            query_id: Option<QueryId>,
+            name: Option<&Relation>,
+        ) -> Vec<CacheExpr>
+    );
 
     simple_request!(
         /// For each of the given list of queries, determine whether that query (or a semantically

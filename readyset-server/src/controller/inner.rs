@@ -456,8 +456,10 @@ impl Leader {
                 return_serialized!(ds.views())
             }
             (&Method::POST, "/verbose_views") => {
+                let (query_id, name): (Option<QueryId>, Option<Relation>) =
+                    bincode::deserialize(&body)?;
                 let ds = self.dataflow_state_handle.read().await;
-                return_serialized!(ds.verbose_views())
+                return_serialized!(ds.verbose_views(query_id, name.as_ref()))
             }
             (&Method::POST, "/view_names") => {
                 let (queries, dialect): (Vec<ViewCreateRequest>, _) = bincode::deserialize(&body)?;
