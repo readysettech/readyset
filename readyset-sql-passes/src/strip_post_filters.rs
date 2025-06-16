@@ -78,8 +78,8 @@ impl StripPostFilters for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::parse_query;
     use readyset_sql::{Dialect, DialectDisplay};
+    use readyset_sql_parsing::parse_query;
 
     use super::*;
 

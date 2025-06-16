@@ -253,11 +253,11 @@ impl ImpliedTableExpansion for SqlQuery {
 mod tests {
     use std::collections::HashMap;
 
-    use nom_sql::parse_query;
     use readyset_sql::ast::{
         BinaryOperator, Column, Expr, FieldDefinitionExpr, SelectStatement, SqlQuery, TableExpr,
     };
     use readyset_sql::{Dialect, DialectDisplay};
+    use readyset_sql_parsing::parse_query;
 
     use super::*;
 
@@ -403,7 +403,7 @@ Dialect::MySQL,
         )
         .unwrap();
         let expected = parse_query(
-Dialect::MySQL,
+            Dialect::MySQL,
             "With votes AS (SELECT COUNT(votes.id) as count, votes.story_id FROM votes GROUP BY votes.story_id )
              SELECT votes.count, stories.title FROM stories JOIN votes ON stories.id = votes.story_id",
         )

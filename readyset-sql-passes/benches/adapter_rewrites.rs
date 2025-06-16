@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Bencher, Criterion};
-use nom_sql::parse_select;
 use readyset_sql::Dialect;
+use readyset_sql_parsing::parse_select;
 use readyset_sql_passes::adapter_rewrites;
 
 fn auto_parameterize_query(c: &mut Criterion) {

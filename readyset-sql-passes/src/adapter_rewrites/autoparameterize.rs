@@ -451,7 +451,7 @@ mod tests {
     use super::*;
 
     fn try_parse_select_statement(q: &str, dialect: Dialect) -> Result<SelectStatement, String> {
-        nom_sql::parse_select(dialect, q)
+        readyset_sql_parsing::parse_select(dialect, q).map_err(|e| e.to_string())
     }
 
     fn parse_select_statement(q: &str, dialect: Dialect) -> SelectStatement {

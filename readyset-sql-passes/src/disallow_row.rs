@@ -66,8 +66,8 @@ impl DisallowRow for SqlQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom_sql::parse_query;
     use readyset_sql::Dialect;
+    use readyset_sql_parsing::parse_query;
 
     #[test]
     fn test_disallow_row_in_projection() {
