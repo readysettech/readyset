@@ -1339,20 +1339,6 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 expr: next_expr()?,
                 distinct,
             })
-        } else if ident.value.eq_ignore_ascii_case("GROUP_CONCAT") {
-            Self::Call(FunctionExpr::GroupConcat {
-                expr: next_expr()?,
-                separator,
-            })
-        } else if ident.value.eq_ignore_ascii_case("MAX") {
-            Self::Call(FunctionExpr::Max(next_expr()?))
-        } else if ident.value.eq_ignore_ascii_case("MIN") {
-            Self::Call(FunctionExpr::Min(next_expr()?))
-        } else if ident.value.eq_ignore_ascii_case("SUM") {
-            Self::Call(FunctionExpr::Sum {
-                expr: next_expr()?,
-                distinct,
-            })
         } else if ident.value.eq_ignore_ascii_case("DATE") {
             // TODO: Arguably, this should be in a SQL rewrite pass to preserve input when rendering
             Self::Cast {
@@ -1360,30 +1346,13 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 ty: crate::ast::SqlType::Date,
                 postgres_style: false,
             }
-        } else if ident.value.eq_ignore_ascii_case("LOWER") {
-            let expr = next_expr()?;
-            match *expr {
-                Self::Collate { expr, collation } => Self::Call(FunctionExpr::Lower {
-                    expr,
-                    collation: Some(collation),
-                }),
-                _ => Self::Call(FunctionExpr::Lower {
-                    expr,
-                    collation: None,
-                }),
-            }
-        } else if ident.value.eq_ignore_ascii_case("UPPER") {
-            let expr = next_expr()?;
-            match *expr {
-                Self::Collate { expr, collation } => Self::Call(FunctionExpr::Upper {
-                    expr,
-                    collation: Some(collation),
-                }),
-                _ => Self::Call(FunctionExpr::Upper {
-                    expr,
-                    collation: None,
-                }),
-            }
+        } else if ident.value.eq_ignore_ascii_case("EXTRACT") {
+            return failed!("{ident} should have been converted earlier");
+        } else if ident.value.eq_ignore_ascii_case("GROUP_CONCAT") {
+            Self::Call(FunctionExpr::GroupConcat {
+                expr: next_expr()?,
+                separator,
+            })
         } else if ident.value.eq_ignore_ascii_case("JSON_OBJECT_AGG") {
             Self::Call(FunctionExpr::JsonObjectAgg {
                 key: next_expr()?,
@@ -1398,8 +1367,44 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 value: next_expr()?,
                 allow_duplicate_keys: false,
             })
-        } else if ident.value.eq_ignore_ascii_case("EXTRACT") {
-            return failed!("{ident} should have been converted earlier");
+        } else if ident.value.eq_ignore_ascii_case("LOWER") {
+            let expr = next_expr()?;
+            match *expr {
+                Self::Collate { expr, collation } => Self::Call(FunctionExpr::Lower {
+                    expr,
+                    collation: Some(collation),
+                }),
+                _ => Self::Call(FunctionExpr::Lower {
+                    expr,
+                    collation: None,
+                }),
+            }
+        } else if ident.value.eq_ignore_ascii_case("MAX") {
+            Self::Call(FunctionExpr::Max(next_expr()?))
+        } else if ident.value.eq_ignore_ascii_case("MIN") {
+            Self::Call(FunctionExpr::Min(next_expr()?))
+        } else if ident.value.eq_ignore_ascii_case("ROW") {
+            Self::Row {
+                explicit: true,
+                exprs: exprs.try_collect()?,
+            }
+        } else if ident.value.eq_ignore_ascii_case("SUM") {
+            Self::Call(FunctionExpr::Sum {
+                expr: next_expr()?,
+                distinct,
+            })
+        } else if ident.value.eq_ignore_ascii_case("UPPER") {
+            let expr = next_expr()?;
+            match *expr {
+                Self::Collate { expr, collation } => Self::Call(FunctionExpr::Upper {
+                    expr,
+                    collation: Some(collation),
+                }),
+                _ => Self::Call(FunctionExpr::Upper {
+                    expr,
+                    collation: None,
+                }),
+            }
         } else {
             ident.value = ident.value.to_lowercase();
             Self::Call(FunctionExpr::Call {
