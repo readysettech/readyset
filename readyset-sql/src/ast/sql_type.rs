@@ -292,6 +292,8 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
             // Databricks-specific datatype
             TimestampNtz => unsupported!("TIMESTAMP_NTZ type"),
             NamedTable { .. } => unsupported!("NAMED TABLE type"),
+            TsQuery => unsupported!("psql TSQUERY type"),
+            TsVector => Ok(Self::Tsvector),
         }
     }
 }
