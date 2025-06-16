@@ -309,8 +309,8 @@ mod tests {
             "DELETE FROM payment WHERE (customer_id = ?)",
         )
         .unwrap();
-        let select_information_schema = parse_query(Dialect::MySQL, "SELECT column_name AS column_name, data_type AS data_type, column_type AS full_data_type, character_maximum_length AS character_maximum_length, numeric_precision AS numeric_precision, numeric_scale AS numeric_scale, datetime_precision AS datetime_precision, column_default AS column_default, is_nullable AS is_nullable, extra AS extra, table_name AS table_name FROM information_schema.columns WHERE (table_schema = ?) ORDER BY ordinal_position ASC").unwrap();
-        let get_weird = parse_query(Dialect::MySQL, "SELECT ?, field1, MyFunc(?) FROM t1 INNER JOIN t2 ON t1.id = t2.id AND t2.name = ? WHERE t1.id = ?").unwrap();
+        let select_information_schema = parse_query( Dialect::MySQL, "SELECT column_name AS column_name, data_type AS data_type, column_type AS full_data_type, character_maximum_length AS character_maximum_length, numeric_precision AS numeric_precision, numeric_scale AS numeric_scale, datetime_precision AS datetime_precision, column_default AS column_default, is_nullable AS is_nullable, extra AS extra, table_name AS table_name FROM information_schema.columns WHERE (table_schema = ?) ORDER BY ordinal_position ASC").unwrap();
+        let get_weird = parse_query( Dialect::MySQL, "SELECT ?, field1, MyFunc(?) FROM t1 INNER JOIN t2 ON t1.id = t2.id AND t2.name = ? WHERE t1.id = ?").unwrap();
 
         let mut session = Session::new();
         session.prepared_statements.insert(common_insert.clone());
@@ -332,7 +332,7 @@ mod tests {
             .unwrap();
         assert_eq!(parsed, &common_insert);
         assert_eq!(values, vec![Integer(1), Integer(2), Integer(3)]);
-        let (parsed, values) = session.find_prepared_statement(&parse_query(Dialect::MySQL, "INSERT INTO payment (customer_id, amount, account_name) VALUES (1, 'str', NULL)").unwrap()).unwrap();
+        let (parsed, values) = session.find_prepared_statement(&parse_query( Dialect::MySQL, "INSERT INTO payment (customer_id, amount, account_name) VALUES (1, 'str', NULL)").unwrap()).unwrap();
         assert_eq!(parsed, &common_insert);
         assert_eq!(values, vec![Integer(1), String("str".to_string()), Null]);
         let (parsed, values) = session
@@ -357,10 +357,10 @@ mod tests {
             .unwrap();
         assert_eq!(parsed, &common_delete);
         assert_eq!(values, vec![Integer(9)]);
-        let (parsed, values) = session.find_prepared_statement(&parse_query(Dialect::MySQL, "SELECT column_name AS column_name, data_type AS data_type, column_type AS full_data_type, character_maximum_length AS character_maximum_length, numeric_precision AS numeric_precision, numeric_scale AS numeric_scale, datetime_precision AS datetime_precision, column_default AS column_default, is_nullable AS is_nullable, extra AS extra, table_name AS table_name FROM information_schema.columns WHERE (table_schema = 'dbtest') ORDER BY ordinal_position ASC").unwrap()).unwrap();
+        let (parsed, values) = session.find_prepared_statement(&parse_query( Dialect::MySQL, "SELECT column_name AS column_name, data_type AS data_type, column_type AS full_data_type, character_maximum_length AS character_maximum_length, numeric_precision AS numeric_precision, numeric_scale AS numeric_scale, datetime_precision AS datetime_precision, column_default AS column_default, is_nullable AS is_nullable, extra AS extra, table_name AS table_name FROM information_schema.columns WHERE (table_schema = 'dbtest') ORDER BY ordinal_position ASC").unwrap()).unwrap();
         assert_eq!(parsed, &select_information_schema);
         assert_eq!(values, vec![String("dbtest".to_string())]);
-        let (parsed, values) = session.find_prepared_statement(&parse_query(Dialect::MySQL, "SELECT 3.14, field1, MyFunc(NULL) FROM t1 INNER JOIN t2 ON t1.id = t2.id AND t2.name = 'somebody' WHERE t1.id = 867").unwrap()).unwrap();
+        let (parsed, values) = session.find_prepared_statement(&parse_query( Dialect::MySQL, "SELECT 3.14, field1, MyFunc(NULL) FROM t1 INNER JOIN t2 ON t1.id = t2.id AND t2.name = 'somebody' WHERE t1.id = 867").unwrap()).unwrap();
         assert_eq!(parsed, &get_weird);
         assert_eq!(
             values,

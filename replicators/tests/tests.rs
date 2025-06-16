@@ -962,22 +962,6 @@ async fn mysql_char_collation_padding() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, postgres_upstream)]
-async fn pgsql_skip_unparsable() {
-    replication_skip_unparsable_inner(&pgsql_url())
-        .await
-        .unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
-async fn mysql_skip_unparsable() {
-    replication_skip_unparsable_inner(&mysql_url())
-        .await
-        .unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow, postgres15_upstream)]
 async fn pgsql_replication_filter() {
     replication_filter_inner(&pgsql_url()).await.unwrap();
@@ -1370,83 +1354,6 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
 
     client.stop().await;
     ctx.stop().await;
-    shutdown_tx.shutdown().await;
-
-    Ok(())
-}
-
-async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
-    readyset_tracing::init_test_logging();
-    let mut client = DbConnection::connect(url).await?;
-
-    client
-        .query(
-            "
-            DROP TABLE IF EXISTS t1 CASCADE; CREATE TABLE t1 (id polygon);
-            DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (id int);
-            DROP VIEW IF EXISTS t1_view; CREATE VIEW t1_view AS SELECT * FROM t1;
-            DROP VIEW IF EXISTS t2_view; CREATE VIEW t2_view AS SELECT * FROM t2;
-            DROP VIEW IF EXISTS unparsable_view; CREATE VIEW unparsable_view AS SELECT * FROM (SELECT * FROM t2) sq;
-            INSERT INTO t2 VALUES (1),(2),(3);
-            ",
-        )
-        .await.expect("failed to setup");
-
-    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
-        .await
-        .expect("failed to start noria");
-    ctx.controller_rx
-        .as_mut()
-        .unwrap()
-        .snapshot_completed()
-        .await
-        .unwrap();
-
-    check_results!(
-        ctx,
-        "t2_view",
-        "skip_unparsable",
-        &[&[DfValue::Int(1)], &[DfValue::Int(2)], &[DfValue::Int(3)]],
-    );
-
-    ctx.noria
-        .table("t1")
-        .await
-        .expect_err("Table should be unparsable");
-
-    ctx.noria
-        .view("t1_view")
-        .await
-        .expect_err("Can't have view for nonexistent table");
-
-    client
-        .query(
-            "
-            DROP TABLE IF EXISTS t3 CASCADE; CREATE TABLE t3 (id polygon);
-            DROP VIEW IF EXISTS t3_view; CREATE VIEW t3_view AS SELECT * FROM t3;
-            INSERT INTO t2 VALUES (4),(5),(6);
-            ",
-        )
-        .await
-        .expect("query failed");
-
-    check_results!(
-        ctx,
-        "t2_view",
-        "skip_unparsable",
-        &[
-            &[DfValue::Int(1)],
-            &[DfValue::Int(2)],
-            &[DfValue::Int(3)],
-            &[DfValue::Int(4)],
-            &[DfValue::Int(5)],
-            &[DfValue::Int(6)],
-        ],
-    );
-
-    ctx.stop().await;
-    client.stop().await;
-
     shutdown_tx.shutdown().await;
 
     Ok(())

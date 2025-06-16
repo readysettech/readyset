@@ -91,7 +91,7 @@ impl FromStr for QuerySpec {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // TODO(mc):  Once Postgres is better supported by benchmarks, try parsing it both ways
-        match readyset_sql_parsing::parse_query(readyset_sql::Dialect::MySQL, s) {
+        match readyset_sql_parsing::parse_query( readyset_sql::Dialect::MySQL, s) {
             Ok(_) => Ok(Self::Query(s.to_owned())),
             Err(_) => Ok(Self::File(QueryFile::from_str(s).map_err(|e| anyhow!("Could not parse '{}' as a query; attempted to load a file at that path, but failed:  {}", s, e))?)),
         }

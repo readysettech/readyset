@@ -6,73 +6,73 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-atoi = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-native-tls = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
-futures = { workspace = true }
-fail = { workspace = true }
+atoi = { workspace = true }
+bit-vec = { workspace = true, features = ["serde"] }
 bytes = { workspace = true }
 chrono = { workspace = true }
+deadpool-postgres = { workspace = true }
+fail = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
 itertools = { workspace = true }
 metrics = { workspace = true }
-tracing = { workspace = true, features = ["release_max_level_debug"] }
-tracing-futures = { workspace = true }
-serde_json = { workspace = true, features = ["arbitrary_precision"] }
-hex = { workspace = true }
-rust_decimal = { workspace = true }
-bit-vec = { workspace = true, features = ["serde"] }
-serde = { workspace = true, features = ["derive"] }
-nom_locate = { workspace = true }
-deadpool-postgres = { workspace = true }
+mysql_async = { workspace = true }
 mysql_common = { workspace = true, features = ["binlog"] }
-
-tokio-postgres = { workspace = true, features = [
-    "with-chrono-0_4",
-    "with-serde_json-1",
-] }
+native-tls = { workspace = true }
+nom_locate = { workspace = true }
+paste = { workspace = true }
+postgres-native-tls = { workspace = true }
+postgres-protocol = { workspace = true }
 postgres-types = { workspace = true, features = [
     "with-chrono-0_4",
     "with-serde_json-1",
 ] }
-postgres-native-tls = { workspace = true }
-postgres-protocol = { workspace = true }
-mysql_async = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["arbitrary_precision"] }
+tokio = { workspace = true, features = ["full"] }
+tokio-postgres = { workspace = true, features = [
+    "with-chrono-0_4",
+    "with-serde_json-1",
+] }
+tracing = { workspace = true, features = ["release_max_level_debug"] }
+tracing-futures = { workspace = true }
 
-nom-sql = { path = "../nom-sql" }
-readyset-client = { path = "../readyset-client" }
-readyset-errors = { path = "../readyset-errors" }
-readyset-sql = { path = "../readyset-sql" }
-readyset-util = { path = "../readyset-util" }
-readyset-tracing = { path = "../readyset-tracing" }
-mysql-time = { path = "../mysql-time" }
-mysql-srv = { path = "../mysql-srv" }
-readyset-data = { path = "../readyset-data" }
 database-utils = { path = "../database-utils" }
 failpoint-macros = { path = "../failpoint-macros" }
+mysql-srv = { path = "../mysql-srv" }
+mysql-time = { path = "../mysql-time" }
+nom-sql = { path = "../nom-sql" }
+readyset-client = { path = "../readyset-client" }
+readyset-data = { path = "../readyset-data" }
+readyset-errors = { path = "../readyset-errors" }
+readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
+readyset-tracing = { path = "../readyset-tracing" }
+readyset-util = { path = "../readyset-util" }
 replication-offset = { path = "../replication-offset" }
 
 [dev-dependencies]
-test-utils = { path = "../test-utils" }
-readyset-server = { path = "../readyset-server" }
-readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = [
-    "test-util",
-] }
+bincode = { workspace = true }
+pretty_assertions = { workspace = true }
+proptest = { workspace = true }
+proptest-stateful = { path = "../proptest-stateful" }
+rand = { workspace = true }
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = [
     "mysql",
     "postgres",
 ] }
-pretty_assertions = { workspace = true }
-proptest-stateful = { path = "../proptest-stateful" }
-rand = { workspace = true }
-proptest = { workspace = true }
-test-strategy = { workspace = true }
-bincode = { workspace = true }
+readyset-server = { path = "../readyset-server" }
+readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = [
+    "test-util",
+] }
 reqwest = { workspace = true }
+test-strategy = { workspace = true }
+test-utils = { path = "../test-utils" }
 
 [features]
 vertical_tests = []

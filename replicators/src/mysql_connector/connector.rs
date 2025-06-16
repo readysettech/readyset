@@ -21,6 +21,7 @@ use mysql_common::constants::ColumnType;
 use mysql_common::{binlog, Value};
 use mysql_srv::ColumnFlags;
 use readyset_data::encoding::{mysql_character_set_name_to_collation_id, Encoding};
+use readyset_sql_parsing::{parse_query_with_config, ParsingPreset};
 use rust_decimal::Decimal;
 use serde_json::Map;
 use tracing::{error, info, warn};
@@ -845,7 +846,8 @@ impl MySqlBinlogConnector {
                 changelist.changes
             }
             Err(error) => {
-                match readyset_sql_parsing::parse_query(
+                match readyset_sql_parsing::parse_query_with_config(
+                    ParsingPreset::for_prod(),
                     readyset_sql::Dialect::MySQL,
                     q_event.query(),
                 ) {
@@ -890,9 +892,8 @@ impl MySqlBinlogConnector {
         is_last: bool,
     ) -> ReadySetResult<ReplicationAction> {
         use readyset_sql::Dialect;
-        use readyset_sql_parsing::parse_query;
 
-        match parse_query(Dialect::MySQL, q_event.query()) {
+        match parse_query_with_config(ParsingPreset::for_prod(), Dialect::MySQL, q_event.query()) {
             Ok(SqlQuery::Commit(_)) if self.report_position_elapsed() || is_last => {
                 Ok(ReplicationAction::LogPosition)
             }

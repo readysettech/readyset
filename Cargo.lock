@@ -5224,6 +5224,7 @@ name = "readyset-sql-parsing"
 version = "0.1.0"
 dependencies = [
  "nom-sql",
+ "paste",
  "pretty_assertions",
  "readyset-sql",
  "sqlparser",
@@ -5476,6 +5477,7 @@ dependencies = [
  "native-tls",
  "nom-sql",
  "nom_locate",
+ "paste",
  "postgres-native-tls",
  "postgres-protocol",
  "postgres-types",

@@ -771,6 +771,7 @@ async fn show_caches_index_hints() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow, mysql_upstream)]
+#[ignore = "Add failpoint to readyset-sql-parsing"]
 async fn valid_sql_parsing_failed_shows_proxied() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();

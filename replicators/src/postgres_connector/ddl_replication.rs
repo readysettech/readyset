@@ -49,7 +49,7 @@ use readyset_sql::ast::{
     Relation, SqlQuery, SqlType, TableKey,
 };
 use readyset_sql::Dialect;
-use readyset_sql_parsing::parse_query;
+use readyset_sql_parsing::{parse_query_with_config, ParsingPreset};
 use serde::{Deserialize, Deserializer};
 use tokio_postgres as pgsql;
 use tracing::info;
@@ -121,12 +121,18 @@ macro_rules! make_fallible_parse_deserialize_with {
         make_fallible_parse_deserialize_with!($name -> $res, $name);
     };
     ($name: ident -> $res: ty, $parser: ident) => {
-        fn $name<'de, D>(deserializer: D) -> Result<Result<$res, String>, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let ty = String::deserialize(deserializer)?;
-            Ok(readyset_sql_parsing::$parser(Dialect::PostgreSQL, ty))
+        paste::paste! {
+            fn $name<'de, D>(deserializer: D) -> Result<Result<$res, String>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let ty = String::deserialize(deserializer)?;
+                Ok(readyset_sql_parsing::[<$parser _with_config>](
+                    ParsingPreset::for_prod(),
+                    Dialect::PostgreSQL,
+                    ty
+                ).map_err(|e| e.to_string()))
+            }
         }
     };
 }
@@ -184,7 +190,8 @@ where
     D: Deserializer<'de>,
 {
     let query = String::deserialize(deserializer)?;
-    parse_query(Dialect::PostgreSQL, query).map_err(serde::de::Error::custom)
+    parse_query_with_config(ParsingPreset::for_prod(), Dialect::PostgreSQL, query)
+        .map_err(serde::de::Error::custom)
 }
 
 impl DdlEvent {

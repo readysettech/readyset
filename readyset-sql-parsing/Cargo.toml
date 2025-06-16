@@ -7,14 +7,13 @@ edition = "2021"
 
 [dependencies]
 nom-sql = { path = "../nom-sql" }
+paste = { workspace = true }
 pretty_assertions = { workspace = true }
 readyset-sql = { path = "../readyset-sql" }
-sqlparser = { workspace = true, optional = true }
+sqlparser = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
-[features]
-sqlparser = ["dep:sqlparser"]
 
 [lints]
 workspace = true

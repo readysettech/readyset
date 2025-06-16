@@ -1,35 +1,147 @@
 use readyset_sql::ast::{
-    AlterTableStatement, CreateTableStatement, CreateViewStatement, Expr, SelectStatement,
-    SqlQuery, SqlType, TableKey,
+    AddTablesStatement, AlterReadysetStatement, AlterTableStatement, CacheInner,
+    CreateTableStatement, CreateViewStatement, DropCacheStatement, Expr, ResnapshotTableStatement,
+    SelectStatement, SqlQuery, SqlType, TableKey,
 };
-use readyset_sql::Dialect;
-
-#[cfg(feature = "sqlparser")]
-use readyset_sql::ast::{
-    AddTablesStatement, AlterReadysetStatement, CacheInner, DropCacheStatement,
-    ResnapshotTableStatement,
-};
-#[cfg(feature = "sqlparser")]
-use readyset_sql::{IntoDialect, TryIntoDialect};
-#[cfg(feature = "sqlparser")]
+use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use sqlparser::{
     keywords::Keyword,
     parser::Parser,
     tokenizer::{Token, TokenWithSpan, Word},
 };
 
-#[cfg(feature = "sqlparser")]
+/// Parsing configuration that determines which parser(s) to use and how to handle conflicts,
+/// errors, and warnings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParsingConfig {
+    nom: bool,
+    sqlparser: bool,
+    prefer_sqlparser: bool,
+    error_on_mismatch: bool,
+    panic_on_mismatch: bool,
+    log_on_mismatch: bool,
+}
+
+impl Default for ParsingConfig {
+    fn default() -> Self {
+        Self {
+            nom: true,
+            sqlparser: true,
+            prefer_sqlparser: false,
+            error_on_mismatch: false,
+            panic_on_mismatch: false,
+            log_on_mismatch: true,
+        }
+    }
+}
+
+impl ParsingConfig {
+    pub fn nom(self, nom: bool) -> Self {
+        Self { nom, ..self }
+    }
+
+    pub fn sqlparser(self, sqlparser: bool) -> Self {
+        Self { sqlparser, ..self }
+    }
+
+    pub fn prefer_sqlparser(self, prefer_sqlparser: bool) -> Self {
+        Self {
+            prefer_sqlparser,
+            ..self
+        }
+    }
+
+    pub fn error_on_mismatch(self, error_on_mismatch: bool) -> Self {
+        Self {
+            error_on_mismatch,
+            ..self
+        }
+    }
+
+    pub fn panic_on_mismatch(self, panic_on_mismatch: bool) -> Self {
+        Self {
+            panic_on_mismatch,
+            ..self
+        }
+    }
+
+    pub fn log_on_mismatch(self, log_on_mismatch: bool) -> Self {
+        Self {
+            log_on_mismatch,
+            ..self
+        }
+    }
+}
+
+/// A preset for parsing that can be turned into a [`ParsingConfig`]. This should be used at the top
+/// level, e.g. in CLI flags and when setting up subsystems like the replication connector.
+/// Subsystems can then turn this into a [`ParsingConfig`] and modify certain settings. For example,
+/// DDL should always log on mismatch, but parsing ad-hoc queries should not, and this way both code
+/// paths can use the same preset as a starting point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParsingPreset {
+    /// Parse only with nom-sql
+    OnlyNom,
+    /// Parse only with sqlparser
+    OnlySqlparser,
+    /// Parse with both, prefer nom-sql, warn if sqlparser errors or differs
+    BothPreferNom,
+    /// Parse with both, prefer sqlparser, warn if nom-sql errors or differs
+    BothPreferSqlparser,
+    /// Parse with both and return an error if they differ.
+    BothErrorOnMismatch,
+    /// Parse with both and panic if they differ; only warns if sqlparser succeeds and nom fails,
+    /// because we don't consider that a regression
+    BothPanicOnMismatch,
+}
+
+impl ParsingPreset {
+    /// The default parsing mode to use in tests.
+    pub fn for_tests() -> Self {
+        Self::BothPanicOnMismatch
+    }
+
+    /// The default parsing mode to use in the actual server. Usage of this will be replaced with a
+    /// runtime-configurable value.
+    pub fn for_prod() -> Self {
+        Self::BothPreferNom
+    }
+
+    pub fn into_config(self) -> ParsingConfig {
+        match self {
+            Self::OnlyNom => ParsingConfig::default().sqlparser(false),
+            Self::OnlySqlparser => ParsingConfig::default().nom(false),
+            Self::BothPreferNom => ParsingConfig::default(),
+            Self::BothPreferSqlparser => ParsingConfig::default().prefer_sqlparser(true),
+            Self::BothErrorOnMismatch => ParsingConfig::default().error_on_mismatch(true),
+            Self::BothPanicOnMismatch => ParsingConfig::default().panic_on_mismatch(true),
+        }
+    }
+}
+
+impl From<ParsingPreset> for ParsingConfig {
+    fn from(value: ParsingPreset) -> Self {
+        value.into_config()
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ReadysetParsingError {
+    #[error("nom-sql error: {0}")]
+    NomError(String),
     #[error("sqlparser error: {0}")]
     SqlparserError(#[from] sqlparser::parser::ParserError),
     #[error("AST conversion error: {0}")]
     AstConversionError(#[from] readyset_sql::AstConversionError),
     #[error("readyset parsing error: {0}")]
     ReadysetParsingError(String),
+    #[error("both parsers failed - nom-sql: {nom_error}, sqlparser: {sqlparser_error}")]
+    BothFailed {
+        nom_error: String,
+        sqlparser_error: String,
+    },
 }
 
-#[cfg(feature = "sqlparser")]
 fn sqlparser_dialect_from_readyset_dialect(
     dialect: Dialect,
 ) -> Box<dyn sqlparser::dialect::Dialect> {
@@ -39,7 +151,6 @@ fn sqlparser_dialect_from_readyset_dialect(
     }
 }
 
-#[cfg(feature = "sqlparser")]
 #[expect(clippy::upper_case_acronyms, reason = "SQL keywords are capitalized")]
 #[derive(Debug, Clone, Copy)]
 enum ReadysetKeyword {
@@ -60,7 +171,6 @@ enum ReadysetKeyword {
     Standard(sqlparser::keywords::Keyword),
 }
 
-#[cfg(feature = "sqlparser")]
 impl ReadysetKeyword {
     fn as_str(&self) -> &str {
         match self {
@@ -87,7 +197,6 @@ impl ReadysetKeyword {
 /// [`Parser::parse_keyword`], but allows for keywords that don't exist in [`Keyword`]: if the next
 /// token matches, it is consumed and `true` is returned; otherwise, it is not consumed and `false`
 /// is returned.
-#[cfg(feature = "sqlparser")]
 fn parse_readyset_keyword(parser: &mut Parser, rs_keyword: ReadysetKeyword) -> bool {
     if let ReadysetKeyword::Standard(keyword) = rs_keyword {
         parser.parse_keyword(keyword)
@@ -115,7 +224,6 @@ fn parse_readyset_keyword(parser: &mut Parser, rs_keyword: ReadysetKeyword) -> b
 /// private `index` field. Our implementation is a little clunky because it replicates that behavior
 /// but without being able to set `index` directly: instead, we just repeatedly set the token to the
 /// previous one until it's back where we started.
-#[cfg(feature = "sqlparser")]
 fn parse_readyset_keywords(parser: &mut Parser, keywords: &[ReadysetKeyword]) -> bool {
     // XXX(mvzink): Ideally, we would mirror the rewinding logic in [`Parser::parse_keywords`] and
     // simply record and reset the [`Parser::index`] field. Since it's private, and the vec of
@@ -147,7 +255,6 @@ fn parse_readyset_keywords(parser: &mut Parser, keywords: &[ReadysetKeyword]) ->
 ///     | ADD TABLES
 ///     | RESNAPSHOT TABLE
 ///     | {ENTER | EXIT} MAINTENANCE MODE
-#[cfg(feature = "sqlparser")]
 fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keyword(parser, ReadysetKeyword::READYSET) {
         if parse_readyset_keywords(
@@ -218,7 +325,6 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
 ///     | CONCURRENTLY
 ///
 /// TODO: support query id instead of select statement
-#[cfg(feature = "sqlparser")]
 fn parse_create_cache(
     parser: &mut Parser,
     dialect: Dialect,
@@ -274,7 +380,6 @@ fn parse_create_cache(
     ))
 }
 
-#[cfg(feature = "sqlparser")]
 fn parse_query_for_create_cache(
     parser: &mut Parser,
     dialect: Dialect,
@@ -290,7 +395,6 @@ fn parse_query_for_create_cache(
         .map(|q| CacheInner::Statement(Box::new(q)))
 }
 
-#[cfg(feature = "sqlparser")]
 fn parse_explain(
     parser: &mut Parser,
     dialect: Dialect,
@@ -354,7 +458,6 @@ fn parse_explain(
 ///     | CACHES
 ///     | CACHED QUERIES
 ///     | PROXIED QUERIES
-#[cfg(feature = "sqlparser")]
 fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keyword(parser, ReadysetKeyword::READYSET) {
         if parser.parse_keyword(Keyword::VERSION) {
@@ -427,7 +530,6 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
 ///   | ALL PROXIED QUERIES
 ///   | ALL CACHES
 ///   | CACHE <query_id>
-#[cfg(feature = "sqlparser")]
 fn parse_drop(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keywords(
         parser,
@@ -459,11 +561,10 @@ fn parse_drop(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
 }
 
 /// Attempts to parse a Readyset-specific statement, and falls back to [`Parser::parse_statement`] if it fails.
-#[cfg(feature = "sqlparser")]
 fn parse_readyset_query(
     parser: &mut Parser,
     dialect: Dialect,
-    input: impl AsRef<str>,
+    input: &str,
 ) -> Result<SqlQuery, ReadysetParsingError> {
     if parser.parse_keyword(Keyword::ALTER) {
         parse_alter(parser, dialect)
@@ -480,20 +581,43 @@ fn parse_readyset_query(
     }
 }
 
-#[cfg(feature = "sqlparser")]
 fn parse_readyset_expr(
     parser: &mut Parser,
     dialect: Dialect,
-    _input: impl AsRef<str>,
+    _input: &str,
 ) -> Result<Expr, ReadysetParsingError> {
     Ok(parser.parse_expr()?.try_into_dialect(dialect)?)
 }
 
-#[cfg(feature = "sqlparser")]
+fn parse_readyset_select(
+    parser: &mut Parser,
+    dialect: Dialect,
+    _input: &str,
+) -> Result<SelectStatement, ReadysetParsingError> {
+    // SQLParser has this weird behaviour where `parse_select` subparser
+    // doesn't parse limits or offsets....
+    Ok(parser.parse_query()?.try_into_dialect(dialect)?)
+}
+
+fn parse_readyset_alter_table(
+    parser: &mut Parser,
+    dialect: Dialect,
+    _input: &str,
+) -> Result<AlterTableStatement, ReadysetParsingError> {
+    // parse_alter expects ALTER keyword to be parsed already
+    if parser.parse_keyword(Keyword::ALTER) {
+        Ok(parser.parse_alter()?.try_into_dialect(dialect)?)
+    } else {
+        Err(ReadysetParsingError::ReadysetParsingError(
+            "expected an ALTER statement".into(),
+        ))
+    }
+}
+
 fn parse_readyset_create_table(
     parser: &mut Parser,
     dialect: Dialect,
-    _input: impl AsRef<str>,
+    _input: &str,
 ) -> Result<CreateTableStatement, ReadysetParsingError> {
     // parse_create expects CREATE keyword to be parsed already
 
@@ -506,193 +630,13 @@ fn parse_readyset_create_table(
     }
 }
 
-#[cfg(feature = "sqlparser")]
-fn parse_both_inner<S, T, NP, SP>(
-    dialect: Dialect,
-    input: S,
-    nom_parser: NP,
-    sqlparser_parser: SP,
-) -> Result<T, String>
-where
-    T: PartialEq + std::fmt::Debug,
-    S: AsRef<str>,
-    for<'a> NP: FnOnce(Dialect, &'a str) -> Result<T, String>,
-    for<'a> SP: FnOnce(&mut Parser, Dialect, &'a str) -> Result<T, ReadysetParsingError>,
-{
-    let nom_result = nom_parser(dialect, input.as_ref());
-    let sqlparser_dialect = sqlparser_dialect_from_readyset_dialect(dialect);
-    let sqlparser_result = Parser::new(sqlparser_dialect.as_ref())
-        .try_with_sql(input.as_ref())
-        .map_err(Into::into)
-        .and_then(|mut p| sqlparser_parser(&mut p, dialect, input.as_ref()));
-
-    match (&nom_result, sqlparser_result) {
-        (Ok(nom_ast), Ok(sqlparser_ast)) => {
-            pretty_assertions::assert_eq!(
-                nom_ast,
-                &sqlparser_ast,
-                "nom-sql AST differs from sqlparser-rs AST for {} input: {:?}",
-                dialect,
-                input.as_ref()
-            );
-        }
-        (Ok(nom_ast), Err(sqlparser_error)) => {
-            if !matches!(
-                sqlparser_error,
-                ReadysetParsingError::AstConversionError(
-                    readyset_sql::AstConversionError::Skipped(_)
-                        | readyset_sql::AstConversionError::Unsupported(_),
-                ),
-            ) {
-                panic!(
-                    "nom-sql succeeded but sqlparser-rs failed: {}\ninput: {}\nnom_ast: {:?}",
-                    sqlparser_error,
-                    input.as_ref(),
-                    nom_ast
-                )
-            }
-        }
-        (Err(nom_error), Ok(sqlparser_ast)) => {
-            tracing::warn!(%nom_error, ?sqlparser_ast, "sqlparser-rs succeeded but nom-sql failed")
-        }
-        (Err(nom_error), Err(sqlparser_error)) => {
-            tracing::warn!(%nom_error, %sqlparser_error, "both nom-sql and sqlparser-rs failed");
-        }
-    };
-    nom_result
-}
-
-#[cfg(feature = "sqlparser")]
-pub fn parse_query(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlQuery, String> {
-    parse_both_inner(
-        dialect,
-        input,
-        |d, s| nom_sql::parse_query(d, s),
-        |p, d, s| parse_readyset_query(p, d, s),
-    )
-}
-
-#[cfg(not(feature = "sqlparser"))]
-pub fn parse_query(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlQuery, String> {
-    nom_sql::parse_query(dialect, input.as_ref())
-}
-
-/// Parses a single expression; only intended for use in tests.
-#[cfg(feature = "sqlparser")]
-pub fn parse_expr(dialect: Dialect, input: impl AsRef<str>) -> Result<Expr, String> {
-    parse_both_inner(
-        dialect,
-        input,
-        |d, s| nom_sql::parse_expr(d, s),
-        |p, d, s| parse_readyset_expr(p, d, s),
-    )
-}
-
-#[cfg(feature = "sqlparser")]
-fn parse_readyset_select(
-    parser: &mut Parser,
-    dialect: Dialect,
-    _input: impl AsRef<str>,
-) -> Result<SelectStatement, ReadysetParsingError> {
-    // SQLParser has this weird behaviour where `parse_select` subparser
-    // doesn't parse limits or offsets....
-    Ok(parser.parse_query()?.try_into_dialect(dialect)?)
-}
-
-#[cfg(not(feature = "sqlparser"))]
-pub fn parse_expr(dialect: Dialect, input: impl AsRef<str>) -> Result<Expr, String> {
-    nom_sql::parse_expr(dialect, input.as_ref())
-}
-
-#[cfg(not(feature = "sqlparser"))]
-pub fn parse_select(dialect: Dialect, input: impl AsRef<str>) -> Result<SelectStatement, String> {
-    nom_sql::parse_select(dialect, input.as_ref())
-}
-
-/// Parses a single expression; only intended for use in tests.
-#[cfg(feature = "sqlparser")]
-pub fn parse_select(dialect: Dialect, input: impl AsRef<str>) -> Result<SelectStatement, String> {
-    parse_both_inner(
-        dialect,
-        input,
-        |d, s| nom_sql::parse_select(d, s),
-        |p, d, s| parse_readyset_select(p, d, s),
-    )
-}
-
-#[cfg(feature = "sqlparser")]
-pub fn parse_alter_table(
-    dialect: Dialect,
-    input: impl AsRef<str>,
-) -> Result<AlterTableStatement, String> {
-    parse_both_inner(
-        dialect,
-        input,
-        |d, s| nom_sql::parse_alter_table(d, s),
-        |p, d, s| parse_readyset_alter_table(p, d, s),
-    )
-}
-
-#[cfg(feature = "sqlparser")]
-fn parse_readyset_alter_table(
-    parser: &mut Parser,
-    dialect: Dialect,
-    _input: impl AsRef<str>,
-) -> Result<AlterTableStatement, ReadysetParsingError> {
-    // parse_alter expects ALTER keyword to be parsed already
-    if parser.parse_keyword(Keyword::ALTER) {
-        Ok(parser.parse_alter()?.try_into_dialect(dialect)?)
-    } else {
-        Err(ReadysetParsingError::ReadysetParsingError(
-            "expected an ALTER statement".into(),
-        ))
-    }
-}
-
-#[cfg(not(feature = "sqlparser"))]
-pub fn parse_alter_table(
-    dialect: Dialect,
-    input: impl AsRef<str>,
-) -> Result<AlterTableStatement, String> {
-    nom_sql::parse_alter_table(dialect, input.as_ref())
-}
-
-#[cfg(not(feature = "sqlparser"))]
-pub fn parse_create_table(
-    dialect: Dialect,
-    input: impl AsRef<str>,
-) -> Result<CreateTableStatement, String> {
-    nom_sql::parse_create_table(dialect, input.as_ref())
-}
-
-#[cfg(feature = "sqlparser")]
-pub fn parse_create_table(
-    dialect: Dialect,
-    input: impl AsRef<str>,
-) -> Result<CreateTableStatement, String> {
-    parse_both_inner(
-        dialect,
-        input,
-        |d, s| nom_sql::parse_create_table(d, s),
-        |p, d, s| parse_readyset_create_table(p, d, s),
-    )
-}
-
-#[cfg(not(feature = "sqlparser"))]
-pub fn parse_create_view(
-    dialect: Dialect,
-    input: impl AsRef<str>,
-) -> Result<CreateViewStatement, String> {
-    nom_sql::parse_create_view(dialect, input.as_ref())
-}
-
-#[cfg(feature = "sqlparser")]
 fn parse_readyset_create_view(
     parser: &mut Parser,
     dialect: Dialect,
-    _input: impl AsRef<str>,
+    _input: &str,
 ) -> Result<CreateViewStatement, ReadysetParsingError> {
     // parse_create expects CREATE keyword to be parsed already
+
     if parser.parse_keyword(Keyword::CREATE) {
         Ok(parser.parse_create()?.try_into_dialect(dialect)?)
     } else {
@@ -702,57 +646,18 @@ fn parse_readyset_create_view(
     }
 }
 
-#[cfg(feature = "sqlparser")]
-pub fn parse_create_view(
-    dialect: Dialect,
-    input: impl AsRef<str>,
-) -> Result<CreateViewStatement, String> {
-    parse_both_inner(
-        dialect,
-        input,
-        |d, s| nom_sql::parse_create_view(d, s),
-        |p, d, s| parse_readyset_create_view(p, d, s),
-    )
-}
-
-#[cfg(not(feature = "sqlparser"))]
-pub fn parse_sql_type(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlType, String> {
-    nom_sql::parse_sql_type(dialect, input.as_ref())
-}
-
-#[cfg(feature = "sqlparser")]
 fn parse_readyset_sql_type(
     parser: &mut Parser,
     dialect: Dialect,
-    _input: impl AsRef<str>,
+    _input: &str,
 ) -> Result<SqlType, ReadysetParsingError> {
-    // parse_create expects CREATE keyword to be parsed already
     Ok(parser.parse_data_type()?.try_into_dialect(dialect)?)
 }
 
-#[cfg(feature = "sqlparser")]
-pub fn parse_sql_type(dialect: Dialect, input: impl AsRef<str>) -> Result<SqlType, String> {
-    parse_both_inner(
-        dialect,
-        input,
-        |d, s| nom_sql::parse_sql_type(d, s),
-        |p, d, s| parse_readyset_sql_type(p, d, s),
-    )
-}
-
-#[cfg(not(feature = "sqlparser"))]
-pub fn parse_key_specification(
-    dialect: Dialect,
-    input: impl AsRef<str>,
-) -> Result<TableKey, String> {
-    nom_sql::parse_key_specification(dialect, input.as_ref())
-}
-
-#[cfg(feature = "sqlparser")]
 fn parse_readyset_key_specification(
     parser: &mut Parser,
     dialect: Dialect,
-    _input: impl AsRef<str>,
+    _input: &str,
 ) -> Result<TableKey, ReadysetParsingError> {
     Ok(parser
         .parse_optional_table_constraint()?
@@ -762,15 +667,213 @@ fn parse_readyset_key_specification(
         .try_into_dialect(dialect)?)
 }
 
-#[cfg(feature = "sqlparser")]
-pub fn parse_key_specification(
+fn parse_sqlparser_inner<S, T, SP>(
     dialect: Dialect,
-    input: impl AsRef<str>,
-) -> Result<TableKey, String> {
-    parse_both_inner(
-        dialect,
-        input,
-        |d, s| nom_sql::parse_key_specification(d, s),
-        |p, d, s| parse_readyset_key_specification(p, d, s),
-    )
+    input: S,
+    sqlparser_parser: SP,
+) -> Result<T, ReadysetParsingError>
+where
+    T: PartialEq + std::fmt::Debug + Clone,
+    S: AsRef<str>,
+    for<'a> SP: FnOnce(&mut Parser, Dialect, &'a str) -> Result<T, ReadysetParsingError>,
+{
+    let sqlparser_dialect = sqlparser_dialect_from_readyset_dialect(dialect);
+    let mut parser = Parser::new(sqlparser_dialect.as_ref())
+        .try_with_sql(input.as_ref())
+        .map_err(ReadysetParsingError::SqlparserError)?;
+    let sqlparser_result = sqlparser_parser(&mut parser, dialect, input.as_ref());
+    // Strip trailing semicolons and make sure we consumed everything by checking for the virtual
+    // EOF token
+    if sqlparser_result.is_ok() {
+        while parser.consume_token(&Token::SemiColon) {}
+        parser.expect_token(&Token::EOF)?;
+    }
+    sqlparser_result
 }
+
+fn parse_both_inner<C, S, T, NP, SP>(
+    config: C,
+    dialect: Dialect,
+    input: S,
+    nom_parser: NP,
+    sqlparser_parser: SP,
+) -> Result<T, ReadysetParsingError>
+where
+    C: Into<ParsingConfig>,
+    T: PartialEq + std::fmt::Debug + Clone,
+    S: AsRef<str>,
+    for<'a> NP: FnOnce(Dialect, &'a str) -> Result<T, String>,
+    for<'a> SP: FnOnce(&mut Parser, Dialect, &'a str) -> Result<T, ReadysetParsingError>,
+{
+    let config: ParsingConfig = config.into();
+    if !config.sqlparser {
+        nom_parser(dialect, input.as_ref()).map_err(ReadysetParsingError::NomError)
+    } else if !config.nom {
+        parse_sqlparser_inner(dialect, input, sqlparser_parser)
+    } else {
+        let nom_result = nom_parser(dialect, input.as_ref());
+        let sqlparser_result = parse_sqlparser_inner(dialect, input.as_ref(), sqlparser_parser);
+
+        match (nom_result, sqlparser_result) {
+            (Ok(nom_ast), Ok(sqlparser_ast)) if nom_ast != sqlparser_ast => {
+                if config.panic_on_mismatch {
+                    panic!(
+                            "nom-sql AST differs from sqlparser-rs AST for {} input: {:?}\nnom: {:?}\nsqlparser: {:?}",
+                            dialect,
+                            input.as_ref(),
+                            nom_ast,
+                            sqlparser_ast
+                        );
+                }
+                if config.log_on_mismatch {
+                    tracing::warn!(
+                        input = %input.as_ref(),
+                        ?nom_ast,
+                        ?sqlparser_ast,
+                        "nom-sql AST differs from sqlparser-rs AST",
+                    );
+                }
+                if config.error_on_mismatch {
+                    Err(ReadysetParsingError::ReadysetParsingError(format!(
+                        "nom-sql AST differs from sqlparser-rs AST for {} input: {:?}",
+                        dialect,
+                        input.as_ref()
+                    )))
+                } else if config.prefer_sqlparser {
+                    Ok(sqlparser_ast)
+                } else {
+                    Ok(nom_ast)
+                }
+            }
+            (Ok(nom_ast), Ok(_)) => Ok(nom_ast),
+            (Ok(nom_ast), Err(sqlparser_error)) => {
+                // Ignore errors that signify we explicitly don't support something, even though nom-sql implements it.
+                if !matches!(
+                    sqlparser_error,
+                    ReadysetParsingError::AstConversionError(
+                        readyset_sql::AstConversionError::Skipped(_)
+                            | readyset_sql::AstConversionError::Unsupported(_),
+                    ),
+                ) {
+                    if config.panic_on_mismatch {
+                        panic!(
+                                "nom-sql succeeded but sqlparser-rs failed: {}\ninput: {}\nnom_ast: {:?}",
+                                sqlparser_error,
+                                input.as_ref(),
+                                nom_ast
+                            );
+                    }
+                    if config.log_on_mismatch {
+                        tracing::warn!(input = %input.as_ref(), %sqlparser_error, ?nom_ast, "sqlparser-rs failed but nom-sql succeeded");
+                    }
+                    if config.error_on_mismatch || config.prefer_sqlparser {
+                        Err(sqlparser_error)
+                    } else {
+                        Ok(nom_ast)
+                    }
+                } else {
+                    Ok(nom_ast)
+                }
+            }
+            (Err(nom_error), Ok(sqlparser_ast)) => {
+                if config.log_on_mismatch {
+                    tracing::debug!(input = %input.as_ref(), %nom_error, ?sqlparser_ast, "nom-sql failed but sqlparser-rs succeeded");
+                }
+                if config.prefer_sqlparser {
+                    Ok(sqlparser_ast)
+                } else {
+                    Err(ReadysetParsingError::NomError(nom_error))
+                }
+            }
+            (Err(nom_error), Err(sqlparser_error)) => {
+                if config.log_on_mismatch {
+                    tracing::debug!(input = %input.as_ref(), %nom_error, %sqlparser_error, "both nom-sql and sqlparser-rs failed");
+                }
+                Err(ReadysetParsingError::BothFailed {
+                    nom_error,
+                    sqlparser_error: format!("{}", sqlparser_error),
+                })
+            }
+        }
+    }
+}
+
+macro_rules! export_parser {
+    ($(#[doc = $doc:expr])+ $parser:ident, $ty:ident) => {
+        paste::paste! {
+            $(
+                #[doc = $doc]
+            )+
+            pub fn [<parse_ $parser _with_config>](
+                config: impl Into<ParsingConfig>,
+                dialect: Dialect,
+                input: impl AsRef<str>,
+            ) -> Result<$ty, ReadysetParsingError> {
+                parse_both_inner(
+                    config,
+                    dialect,
+                    input,
+                    |d, s| nom_sql::[<parse_ $parser>](d, s),
+                    [<parse_readyset_ $parser>],
+                )
+            }
+
+            $(
+                #[doc = $doc]
+            )+
+            ///
+            /// Uses the default parsing config for tests, which can panic (see
+            /// [`ParsingPreset::for_tests()`]); so should only be used in tests; otherwise use
+            #[doc = concat!("[`", stringify!([<parse_ $parser _with_config>]), "`]")]
+            pub fn [<parse_ $parser>](
+                dialect: Dialect,
+                input: impl AsRef<str>,
+            ) -> Result<$ty, ReadysetParsingError> {
+                [<parse_ $parser _with_config>](ParsingPreset::for_tests(), dialect, input)
+            }
+        }
+    };
+}
+
+export_parser!(
+    /// Parse a SQL query, including custom Readyset extension.
+    query,
+    SqlQuery
+);
+export_parser!(
+    /// Parse a single SQL expression.
+    expr,
+    Expr
+);
+export_parser!(
+    /// Parse a select statement. Since sqlparser does not parse LIMIT/OFFSET with the select
+    /// statement subparser, this parses it as a generic query *without* Readyset extensions and
+    /// attempts to convert it to a `SelectStatement`.
+    select,
+    SelectStatement
+);
+export_parser!(
+    /// Parse a blah.
+    alter_table,
+    AlterTableStatement
+);
+export_parser!(
+    /// Parse a blah.
+    create_table,
+    CreateTableStatement
+);
+export_parser!(
+    /// Parse a blah.
+    create_view,
+    CreateViewStatement
+);
+export_parser!(
+    /// Parse a blah.
+    sql_type,
+    SqlType
+);
+export_parser!(
+    /// Parse a blah.
+    key_specification,
+    TableKey
+);

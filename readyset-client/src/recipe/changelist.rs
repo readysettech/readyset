@@ -43,7 +43,7 @@ use readyset_sql::ast::{
     CreateTableStatement, CreateViewStatement, DropTableStatement, DropViewStatement,
     NonReplicatedRelation, Relation, SelectStatement, SqlIdentifier, SqlQuery, TableKey,
 };
-use readyset_sql_parsing::parse_query;
+use readyset_sql_parsing::{parse_query_with_config, ParsingPreset};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -147,10 +147,13 @@ impl ChangeList {
         let mut changes = Vec::new();
 
         for query_str in queries {
-            let parsed = parse_query(Dialect::DEFAULT_MYSQL.into(), &query_str).map_err(|_| {
-                ReadySetError::UnparseableQuery {
-                    query: query_str.as_ref().to_string(),
-                }
+            let parsed = parse_query_with_config(
+                ParsingPreset::BothPreferNom,
+                Dialect::DEFAULT_MYSQL.into(),
+                &query_str,
+            )
+            .map_err(|_| ReadySetError::UnparseableQuery {
+                query: query_str.as_ref().to_string(),
             })?;
 
             match parsed {
@@ -454,7 +457,8 @@ impl Change {
                 })
             };
         }
-        match parse_query(
+        match parse_query_with_config(
+            ParsingPreset::for_prod(),
             ddl_req.dialect.into(),
             &ddl_req.unparsed_stmt,
         ) {

@@ -28,7 +28,6 @@ async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
         .await
 }
 
-#[cfg(feature = "failure_injection")]
 macro_rules! assert_last_statement_matches {
     ($table:expr, $dest:expr, $status:expr, $client:expr) => {
         let (matches, err) = last_statement_matches($dest, $status, $client).await;
@@ -309,15 +308,14 @@ async fn proxy_unsupported_type() {
     shutdown_tx.shutdown().await;
 }
 
-#[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow, postgres_upstream)]
 async fn schema_resolution_with_unreplicated_tables() {
     readyset_tracing::init_test_logging();
-    let (config, mut handle, shutdown_tx) = setup().await;
+    let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
 
-    // s2 will exist in readyset
+    // s2.t will exist in readyset
     client
         .simple_query(
             "CREATE SCHEMA s1; CREATE SCHEMA s2;
@@ -328,24 +326,20 @@ async fn schema_resolution_with_unreplicated_tables() {
 
     sleep().await;
 
-    handle
-        .set_failpoint(failpoints::PARSE_SQL_TYPE, "2*return(fail)")
-        .await;
-
-    // s1 and the insert into it will fail to parse, so it will only exist upstream
+    // s1.t uses an unsupported type, so it will only exist upstream
     client
-        .simple_query("CREATE TABLE s1.t (x INT)")
+        .simple_query("CREATE TABLE s1.t (x INET)")
         .await
         .unwrap();
 
     sleep().await;
 
     client
-        .simple_query("INSERT INTO s1.t (x) VALUES (1)")
+        .simple_query("INSERT INTO s1.t (x) VALUES ('127.0.0.1')")
         .await
         .unwrap();
     client
-        .simple_query("INSERT INTO s2.t (x) VALUES (2)")
+        .simple_query("INSERT INTO s2.t (x) VALUES (42)")
         .await
         .unwrap();
     client
@@ -355,11 +349,11 @@ async fn schema_resolution_with_unreplicated_tables() {
 
     // we should be selecting from s1, which is upstream
     let result = client
-        .query_one("SELECT x FROM t", &[])
+        .query_one("SELECT CAST(x AS TEXT) FROM t", &[])
         .await
         .unwrap()
-        .get::<_, i32>(0);
-    assert_eq!(result, 1);
+        .get::<_, String>(0);
+    assert_eq!(result, "127.0.0.1/32");
 
     // Now drop the non-replicated table, and make sure the next query reads from the second table,
     // against readyset
@@ -370,11 +364,11 @@ async fn schema_resolution_with_unreplicated_tables() {
 
     // we should be selecting from s2 now
     let result = client
-        .query_one("SELECT x FROM t", &[])
+        .query_one("SELECT CAST(x AS TEXT) FROM t", &[])
         .await
         .unwrap()
-        .get::<_, i32>(0);
-    assert_eq!(result, 2);
+        .get::<_, String>(0);
+    assert_eq!(result, "42");
 
     assert_last_statement_matches!("t", "readyset", "ok", &client);
 

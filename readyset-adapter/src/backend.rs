@@ -101,6 +101,7 @@ use readyset_sql::ast::{
     SqlIdentifier, SqlQuery, StatementIdentifier, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay};
+use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::{self, ProcessedQueryParams};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::{RedactedString, Sensitive};
@@ -3189,7 +3190,11 @@ where
 
     fn parse_query(&mut self, query: &str) -> ReadySetResult<SqlQuery> {
         trace!(%query, "Parsing query");
-        match readyset_sql_parsing::parse_query(self.settings.dialect, query) {
+        match readyset_sql_parsing::parse_query_with_config(
+            ParsingPreset::for_prod(),
+            self.settings.dialect,
+            query,
+        ) {
             Ok(parsed_query) => Ok(parsed_query),
             Err(_) => Err(ReadySetError::UnparseableQuery {
                 query: query.to_string(),

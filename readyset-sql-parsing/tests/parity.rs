@@ -10,17 +10,22 @@ use readyset_sql::{
     },
     Dialect,
 };
-use readyset_sql_parsing::parse_query;
+use readyset_sql_parsing::{parse_query_with_config, ParsingPreset};
+
 macro_rules! check_parse_mysql {
     ($sql:expr) => {
-        parse_query(Dialect::MySQL, $sql).expect(&format!("Failed to parse as MySQL: {:?}", $sql))
+        parse_query_with_config(ParsingPreset::BothErrorOnMismatch, Dialect::MySQL, $sql).unwrap()
     };
 }
 
 macro_rules! check_parse_postgres {
     ($sql:expr) => {
-        parse_query(Dialect::PostgreSQL, $sql)
-            .expect(&format!("Failed to parse as Postgres: {:?}", $sql))
+        parse_query_with_config(
+            ParsingPreset::BothErrorOnMismatch,
+            Dialect::PostgreSQL,
+            $sql,
+        )
+        .unwrap()
     };
 }
 
@@ -33,7 +38,7 @@ macro_rules! check_parse_both {
 
 macro_rules! check_parse_fails {
     ($dialect:expr, $sql:expr, $expected_error:expr) => {
-        let result = parse_query($dialect, $sql)
+        let result = parse_query_with_config(ParsingPreset::BothErrorOnMismatch, $dialect, $sql)
             .expect_err(&format!("Expected failure for {:?}: {:?}", $dialect, $sql));
         assert!(
             result.to_string().contains($expected_error),
@@ -284,7 +289,6 @@ fn test_limit_offset_placeholders_should_fail() {
 }
 
 #[test]
-#[cfg(feature = "sqlparser")]
 #[should_panic(expected = "Expected: an expression, found: ?")]
 fn test_mysql_placeholders_fail_in_postgres() {
     // nom-sql, again being very permissive, supports MySQL-style placeholders in PostgreSQL, but
@@ -340,14 +344,20 @@ fn test_empty_insert() {
 }
 
 #[test]
-#[cfg(feature = "sqlparser")]
-#[should_panic(expected = "sqlparser error")]
 fn test_empty_insert_fails_in_postgres() {
     // Invalid postgres syntax, parsed by nom but not by sqlparser
     // Invalid because of empty values list
-    check_parse_postgres!("INSERT INTO t VALUES ()");
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "INSERT INTO t VALUES ()",
+        "sqlparser error"
+    );
     // Invalid because of empty cols list, accepted by mysql thought
-    check_parse_postgres!("INSERT INTO t () VALUES ()");
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "INSERT INTO t () VALUES ()",
+        "sqlparser error"
+    );
 }
 
 #[test]
@@ -361,16 +371,23 @@ fn test_column_default_without_parens() {
 fn test_op_any_all() {
     check_parse_postgres!("SELECT * FROM t WHERE 'abc' NOT ILIKE ANY('{\"aBC\"}')");
     check_parse_postgres!("SELECT * FROM t WHERE 'abc' ILIKE all('{\"aBC\"}')");
+}
 
+#[test]
+fn test_op_any_subquery_unsupported() {
     check_parse_fails!(
         Dialect::PostgreSQL,
         "SELECT * FROM t WHERE a >= ANY(SELECT b FROM t2)",
-        "NomSqlError"
+        "nom-sql error"
     );
+}
+
+#[test]
+fn test_op_all_subquery_unsupported() {
     check_parse_fails!(
         Dialect::PostgreSQL,
         "SELECT * FROM t WHERE a = ALL(SELECT b FROM t2)",
-        "NomSqlError"
+        "nom-sql error"
     );
 }
 
@@ -413,12 +430,14 @@ fn test_unsupported_op() {
 }
 
 #[test]
-#[cfg(feature = "sqlparser")]
-#[should_panic(expected = "sqlparser error")]
 /// Invalid postgres syntax, parsed by nom but not by sqlparser
 fn test_empty_insert_fields_fails_in_postgres() {
     // Invalid because of empty cols list, accepted by mysql though
-    check_parse_postgres!("INSERT INTO t () VALUES ()");
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "INSERT INTO t () VALUES ()",
+        "sqlparser error"
+    );
 }
 
 #[test]
@@ -485,7 +504,6 @@ fn test_compound_select_cases() {
 }
 
 #[test]
-#[cfg(feature = "sqlparser")]
 fn test_fk_index_name() {
     check_parse_mysql!(
         r#"CREATE TABLE child_table (
@@ -499,12 +517,20 @@ fn test_fk_index_name() {
 }
 
 #[test]
-#[cfg(feature = "sqlparser")]
-#[should_panic(expected = "sqlparser error")]
 fn test_tablekey_key_variant() {
-    check_parse_both!("ALTER TABLE t ADD CONSTRAINT c KEY key_name (t1.c1, t2.c2) USING BTREE");
+    check_parse_fails!(
+        Dialect::MySQL,
+        "ALTER TABLE t ADD CONSTRAINT c KEY key_name (t1.c1, t2.c2) USING BTREE",
+        "sqlparser error"
+    );
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "ALTER TABLE t ADD CONSTRAINT c KEY key_name (t1.c1, t2.c2) USING BTREE",
+        "sqlparser error"
+    );
     // why does nom only parse this in psql? it seems closer to mysql syntax
-    check_parse_postgres!(
+    check_parse_fails!(
+        Dialect::MySQL,
         r#"CREATE TABLE "comments" (
             "id" int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
             "hat_id" int,
@@ -515,7 +541,8 @@ fn test_tablekey_key_variant() {
             INDEX "thread_id" ("thread_id"),
             INDEX "index_comments_on_user_id" ("user_id")
         )
-        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"#
+        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"#,
+        "sqlparser error"
     );
 }
 
@@ -546,4 +573,15 @@ fn test_explain_materialization() {
 fn point_types() {
     check_parse_mysql!("CREATE TABLE t (p POINT)");
     check_parse_postgres!("CREATE TABLE t (p GEOMETRY(POINT))");
+}
+
+#[test]
+fn test_trailing_semicolons() {
+    check_parse_both!(r#"SELECT 1;;"#);
+}
+
+#[test]
+fn test_multiple_statements() {
+    check_parse_fails!(Dialect::MySQL, r#"SELECT 1; SELECT 2;"#, "EOF");
+    check_parse_fails!(Dialect::PostgreSQL, r#"SELECT 1; SELECT 2;"#, "EOF");
 }
