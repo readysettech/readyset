@@ -210,7 +210,6 @@ impl CreateTableBody {
                 index_name: new_key.constraint_name().clone(),
                 columns: columns.to_vec(),
                 index_type: None,
-                constraint_name: None,
             };
             self.add_key(target_col_new_key);
         }

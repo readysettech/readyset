@@ -203,7 +203,6 @@ pub enum TableKey {
         on_update: Option<ReferentialAction>,
     },
     CheckConstraint {
-        // NOTE: MySQL doesn't allow the `CONSTRAINT (name)` prefix for a CHECK, but Postgres does
         constraint_name: Option<SqlIdentifier>,
         expr: Expr,
         enforced: Option<bool>,
@@ -331,14 +330,13 @@ impl TableKey {
             TableKey::UniqueKey {
                 constraint_name, ..
             } => *constraint_name = Some(new_constraint_name),
-            TableKey::Key {
-                constraint_name, ..
-            } => *constraint_name = Some(new_constraint_name),
             TableKey::ForeignKey {
                 constraint_name, ..
             } => *constraint_name = Some(new_constraint_name),
-            TableKey::FulltextKey { .. } => (),
-            TableKey::CheckConstraint { .. } => (),
+            TableKey::CheckConstraint {
+                constraint_name, ..
+            } => *constraint_name = Some(new_constraint_name),
+            TableKey::Key { .. } | TableKey::FulltextKey { .. } => (),
         }
     }
 

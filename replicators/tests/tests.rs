@@ -4244,8 +4244,7 @@ async fn mysql_minimal_row_based_blob() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
-#[slow]
+#[tags(serial, slow, mysql_upstream)]
 async fn alter_table_add_key_mysql() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -4352,8 +4351,7 @@ async fn alter_table_add_key_mysql() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, postgres_upstream)]
-#[slow]
+#[tags(serial, slow, postgres_upstream)]
 async fn alter_table_add_key_postgres() {
     readyset_tracing::init_test_logging();
     let url = pgsql_url();
