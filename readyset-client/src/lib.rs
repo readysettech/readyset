@@ -248,7 +248,6 @@ pub mod query;
 pub mod recipe;
 pub mod status;
 mod table;
-pub mod utils;
 mod view;
 
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
