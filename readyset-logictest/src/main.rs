@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use antithesis_sdk::prelude::*;
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, Context};
 use clap::Parser;
 use console::style;
 use database_utils::{DatabaseType, DatabaseURL};
@@ -624,30 +624,42 @@ impl Fuzz {
             .map_err(|err| TestCaseError::fail(format!("{err:#}")))
         });
 
-        if let Err(TestError::Fail(reason, script)) = result {
-            let path = self
-                .output
-                .clone()
-                .unwrap_or_else(|| PathBuf::from("/tmp/readyset-logictest-fuzz.test"));
-            let mut file = OpenOptions::new()
-                .truncate(true)
-                .create(true)
-                .write(true)
-                .open(&path)?;
-            info!(?path, "writing out failing test script");
-            script.write_to(&mut file)?;
-            file.flush()?;
-            assert_unreachable!(
-                "Found failing queries",
-                &json!({
-                    "extract_file": path.to_string_lossy(),
+        let (passed, details) = match result {
+            Err(TestError::Fail(reason, script)) => {
+                let path = self
+                    .output
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from("/tmp/readyset-logictest-fuzz.test"));
+                let mut file = OpenOptions::new()
+                    .truncate(true)
+                    .create(true)
+                    .write(true)
+                    .open(&path)?;
+                info!(?path, "writing out failing test script");
+                script.write_to(&mut file)?;
+                file.flush()?;
+                (
+                    false,
+                    json!({
+                        "failure_kind": "failing_query",
+                        "extract_file": path.to_string_lossy(),
+                        "reason": reason.message(),
+                    }),
+                )
+            }
+            Err(TestError::Abort(reason)) => (
+                false,
+                json!({
+                    "failure_kind": "abort",
                     "reason": reason.message(),
-                })
-            );
-            bail!("Found failing set of queries: {}", reason);
-        }
+                }),
+            ),
+            Ok(()) => (true, json!({})),
+        };
 
-        info!("No bugs found!");
+        assert_always!(passed, "No failing queries found", &details);
+
+        info!("No failing queries found");
 
         Ok(())
     }
