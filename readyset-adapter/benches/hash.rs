@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use lru::LruCache;
-use nom_sql::parse_select_statement;
+use nom_sql::parse_select;
 use readyset_client::query::Query;
 use readyset_client::ViewCreateRequest;
 use xxhash_rust::xxh3;
@@ -14,7 +14,7 @@ fn hash_benchmarks(c: &mut Criterion) {
         .iter()
         .map(|q| {
             Query::Parsed(Arc::new(ViewCreateRequest {
-                statement: parse_select_statement(readyset_sql::Dialect::MySQL, q).unwrap(),
+                statement: parse_select(readyset_sql::Dialect::MySQL, q).unwrap(),
                 schema_search_path: vec!["public".into()],
             }))
         })

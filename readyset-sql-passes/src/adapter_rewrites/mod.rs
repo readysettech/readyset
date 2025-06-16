@@ -639,7 +639,7 @@ mod tests {
     use super::*;
 
     fn try_parse_select_statement(q: &str, dialect: Dialect) -> Result<SelectStatement, String> {
-        nom_sql::parse_select_statement(dialect, q)
+        nom_sql::parse_select(dialect, q)
     }
 
     fn parse_select_statement(q: &str, dialect: Dialect) -> SelectStatement {

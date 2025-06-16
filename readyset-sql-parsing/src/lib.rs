@@ -599,7 +599,7 @@ pub fn parse_expr(dialect: Dialect, input: impl AsRef<str>) -> Result<Expr, Stri
 
 #[cfg(not(feature = "sqlparser"))]
 pub fn parse_select(dialect: Dialect, input: impl AsRef<str>) -> Result<SelectStatement, String> {
-    nom_sql::parse_select_statement(dialect, input.as_ref())
+    nom_sql::parse_select(dialect, input.as_ref())
 }
 
 /// Parses a single expression; only intended for use in tests.
@@ -608,7 +608,7 @@ pub fn parse_select(dialect: Dialect, input: impl AsRef<str>) -> Result<SelectSt
     parse_both_inner(
         dialect,
         input,
-        |d, s| nom_sql::parse_select_statement(d, s),
+        |d, s| nom_sql::parse_select(d, s),
         |p, d, s| parse_readyset_select(p, d, s),
     )
 }
@@ -738,7 +738,7 @@ pub fn parse_key_specification(
     dialect: Dialect,
     input: impl AsRef<str>,
 ) -> Result<TableKey, String> {
-    nom_sql::parse_key_specification_string(dialect, input.as_ref())
+    nom_sql::parse_key_specification(dialect, input.as_ref())
 }
 
 #[cfg(feature = "sqlparser")]
@@ -763,7 +763,7 @@ pub fn parse_key_specification(
     parse_both_inner(
         dialect,
         input,
-        |d, s| nom_sql::parse_key_specification_string(d, s),
+        |d, s| nom_sql::parse_key_specification(d, s),
         |p, d, s| parse_readyset_key_specification(p, d, s),
     )
 }

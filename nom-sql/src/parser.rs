@@ -129,7 +129,7 @@ macro_rules! export_parser {
 }
 
 export_parser!(sql_query -> SqlQuery, parse_query_bytes, parse_query);
-export_parser!(selection -> SelectStatement, parse_select_statement_bytes, parse_select_statement);
+export_parser!(selection -> SelectStatement, parse_select_statement_bytes, parse_select);
 export_parser!(expression -> Expr, parse_expr_bytes, parse_expr);
 export_parser!(create_table -> CreateTableStatement, parse_create_table_bytes, parse_create_table);
 export_parser!(view_creation -> CreateViewStatement, parse_create_view_bytes, parse_create_view);
@@ -141,7 +141,7 @@ export_parser!(
 export_parser!(
     key_specification -> TableKey,
     parse_key_specification_bytes,
-    parse_key_specification_string
+    parse_key_specification
 );
 export_parser!(
     type_identifier -> SqlType,

@@ -1,11 +1,11 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Bencher, Criterion};
-use nom_sql::parse_select_statement;
+use nom_sql::parse_select;
 use readyset_sql::Dialect;
 use readyset_sql_passes::adapter_rewrites;
 
 fn auto_parameterize_query(c: &mut Criterion) {
     let run_benchmark = |b: &mut Bencher, src: &str| {
-        let q = parse_select_statement(Dialect::MySQL, src).unwrap();
+        let q = parse_select(Dialect::MySQL, src).unwrap();
         b.iter_batched(
             || q.clone(),
             |mut q| {

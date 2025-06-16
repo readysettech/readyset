@@ -69,7 +69,7 @@ impl Borrow<SelectStatement> for SelectStatementSkeleton {
 
 #[cfg(test)]
 mod test {
-    use nom_sql::parse_select_statement;
+    use nom_sql::parse_select;
     use readyset_sql::ast::{ItemPlaceholder, Literal};
     use readyset_sql::Dialect;
 
@@ -77,7 +77,7 @@ mod test {
 
     #[test]
     fn strips_all_literals() {
-        let select = parse_select_statement(
+        let select = parse_select(
             Dialect::MySQL,
             "SELECT \"literal\", a FROM t WHERE t.b = 1 OR (2 = 3) LIMIT ? OFFSET ?;",
         )
@@ -96,7 +96,7 @@ mod test {
         );
         assert_eq!(
             stmt.0,
-            parse_select_statement(
+            parse_select(
                 Dialect::MySQL,
                 "SELECT ?, a FROM t WHERE t.b = ? OR (? = ?) LIMIT ? OFFSET ?"
             )
