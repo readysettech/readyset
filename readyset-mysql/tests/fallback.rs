@@ -959,7 +959,13 @@ async fn replication_failure_ignores_table() {
             .unwrap();
         results.sort();
         assert_eq!(results, vec![1, 2]);
-        assert_last_statement_matches(source, "upstream", "ok", &mut client).await;
+        assert_last_statement_matches(
+            source,
+            "readyset_then_upstream",
+            "view destroyed",
+            &mut client,
+        )
+        .await;
     }
 
     shutdown_tx.shutdown().await;

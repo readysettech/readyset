@@ -1051,7 +1051,7 @@ async fn assert_table_ignored(client: &Client) {
         let mut results = vec![c1, c2];
         results.sort();
         assert_eq!(results, vec!["1", "2"]);
-        assert_last_statement_matches!(source, "upstream", "ok", client);
+        assert_last_statement_matches!(source, "readyset_then_upstream", "view destroyed", client);
     }
 }
 
