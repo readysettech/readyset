@@ -5136,7 +5136,6 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-util",
  "mysql_async",
- "nom-sql",
  "parking_lot",
  "petgraph",
  "pin-project",
