@@ -1456,7 +1456,15 @@ mod tests {
                 }),
                 alias: None,
             }],
-            ..Default::default()
+            join: vec![],
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order: None,
+            limit_clause: LimitClause::LimitOffset {
+                limit: None,
+                offset: None,
+            },
         });
         assert_eq!(node_count(query), 6)
     }
@@ -1487,7 +1495,15 @@ mod tests {
                 }),
                 alias: None,
             }],
-            ..Default::default()
+            join: vec![],
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order: None,
+            limit_clause: LimitClause::LimitOffset {
+                limit: None,
+                offset: None,
+            },
         });
         assert_eq!(node_count(query), 9);
     }
@@ -1540,7 +1556,15 @@ mod tests {
                             }),
                             alias: None,
                         }],
-                        ..Default::default()
+                        join: vec![],
+                        where_clause: None,
+                        group_by: None,
+                        having: None,
+                        order: None,
+                        limit_clause: LimitClause::LimitOffset {
+                            limit: None,
+                            offset: None,
+                        },
                     })),
                     alias: Some("s".into()),
                 }),
@@ -1562,7 +1586,14 @@ mod tests {
                     })),
                 }),
             }],
-            ..Default::default()
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order: None,
+            limit_clause: LimitClause::LimitOffset {
+                limit: None,
+                offset: None,
+            },
         });
         assert_eq!(node_count(query), 22)
     }
@@ -1593,11 +1624,15 @@ mod tests {
                 }),
                 alias: None,
             }],
+            join: vec![],
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order: None,
             limit_clause: LimitClause::LimitOffset {
                 limit: Some(LimitValue::Literal(Literal::Integer(3))),
                 offset: None,
             },
-            ..Default::default()
         });
         assert_eq!(node_count(query), 11);
     }
@@ -1628,11 +1663,15 @@ mod tests {
                 }),
                 alias: None,
             }],
+            join: vec![],
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order: None,
             limit_clause: LimitClause::LimitOffset {
                 limit: Some(LimitValue::Literal(Literal::Integer(3))),
                 offset: Some(Literal::Integer(5)),
             },
-            ..Default::default()
         });
         assert_eq!(node_count(query), 13);
     }
@@ -1663,11 +1702,15 @@ mod tests {
                 }),
                 alias: None,
             }],
+            join: vec![],
+            where_clause: None,
+            group_by: None,
+            having: None,
+            order: None,
             limit_clause: LimitClause::OffsetCommaLimit {
                 limit: LimitValue::Literal(Literal::Integer(3)),
                 offset: Literal::Integer(5),
             },
-            ..Default::default()
         });
         assert_eq!(node_count(query), 13);
     }

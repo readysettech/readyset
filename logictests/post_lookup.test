@@ -124,14 +124,6 @@ select sum(val) v from bar where id <= 100 group by val order by v desc limit 1 
 ----
 30
 
-# Aggregated query, range condition, lookup column with distinct values, DESC order
-query I
-select sum(val) v from bar where id <= 100 group by val order by v desc
-----
-40
-30
-20
-
 # Aggregated query, range condition, lookup column with distinct values, ASC order, LIMIT + OFFSET
 query I
 select sum(val) v from bar where id <= 100 group by val order by v asc limit 1 offset 2

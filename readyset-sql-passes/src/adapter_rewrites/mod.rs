@@ -14,7 +14,7 @@ use readyset_errors::{
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
     BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, OrderClause,
-    SelectMetadata, SelectStatement,
+    SelectStatement,
 };
 use readyset_sql::DialectDisplay;
 use serde::{Deserialize, Serialize};
@@ -351,7 +351,6 @@ fn where_in_to_placeholders(
 }
 
 #[derive(Default)]
-/// Please refer to the documentation of [`collapse_where_in`]
 struct CollapseWhereInVisitor {
     leftmost_param_index: usize,
     out: Vec<RewrittenIn>,
@@ -359,19 +358,6 @@ struct CollapseWhereInVisitor {
 
 impl<'ast> VisitorMut<'ast> for CollapseWhereInVisitor {
     type Error = ReadySetError;
-
-    fn visit_select_statement(
-        &mut self,
-        select_statement: &'ast mut SelectStatement,
-    ) -> Result<(), Self::Error> {
-        visit_mut::walk_select_statement(self, select_statement)?;
-        if !self.out.is_empty() {
-            select_statement
-                .metadata
-                .push(SelectMetadata::CollapsedWhereIn)
-        }
-        Ok(())
-    }
 
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         if matches!(literal, Literal::Placeholder(_)) {
@@ -440,18 +426,6 @@ fn collapse_where_in(query: &mut SelectStatement) -> ReadySetResult<Vec<Rewritte
         let mut visitor = CollapseWhereInVisitor::default();
         visitor.visit_expr(w)?;
         res = visitor.out;
-
-        // If a query contains a subquery that uses `WHERE .. IN`, we tag all selects (outer and
-        // sub queries) in the query with `CollapsedWhereIn`.
-        //
-        // While we only need to tag the outer query, there is no issue in tagging other
-        // subqueries, since the outer query is the only one that gets a reader node.
-        //
-        // Also keep in mind, that subqueries get rewritten to joins, so completely ignoring
-        // subqueries's metadata and only focusing on the outer query is fine in this case.
-        if !res.is_empty() {
-            query.metadata.push(SelectMetadata::CollapsedWhereIn);
-        }
 
         if !res.is_empty() && query.distinct {
             unsupported!("DISTINCT with parameterized IN is not supported");
@@ -660,38 +634,6 @@ fn splice_auto_parameters<'param, T: Clone>(
 
 #[cfg(test)]
 mod tests {
-    struct ClearMetadataVisitor;
-
-    impl<'ast> VisitorMut<'ast> for ClearMetadataVisitor {
-        type Error = String;
-        fn visit_select_statement(
-            &mut self,
-            query: &'ast mut SelectStatement,
-        ) -> Result<(), Self::Error> {
-            query.metadata.clear();
-            visit_mut::walk_select_statement(self, query)?;
-            Ok(())
-        }
-    }
-
-    trait ClearMetadata {
-        fn clear_metadata(&mut self);
-    }
-
-    impl ClearMetadata for SelectStatement {
-        /// Asserts that ALL SelectStatements's metadatas contain
-        /// `CollapsedWhereIn`, then clear them.
-        fn clear_metadata(&mut self) {
-            assert!(self
-                .metadata
-                .iter()
-                .contains(&SelectMetadata::CollapsedWhereIn));
-
-            let mut visitor = ClearMetadataVisitor;
-            visitor.visit_select_statement(self).unwrap();
-        }
-    }
-
     use readyset_sql::Dialect;
 
     use super::*;
@@ -727,9 +669,6 @@ mod tests {
                     group_size: 1,
                 }]
             );
-
-            q.clear_metadata();
-
             assert_eq!(
                 q,
                 parse_select_statement_mysql("SELECT * FROM x WHERE x.y = ?")
@@ -745,9 +684,6 @@ mod tests {
                     group_size: 1,
                 }]
             );
-
-            q.clear_metadata();
-
             assert_eq!(
                 q,
                 parse_select_statement_mysql("SELECT * FROM x WHERE y = ?")
@@ -763,9 +699,6 @@ mod tests {
                     group_size: 1,
                 }]
             );
-
-            q.clear_metadata();
-
             assert_eq!(
                 q,
                 parse_select_statement_mysql("SELECT * FROM x WHERE AVG(y) = ?")
@@ -783,9 +716,6 @@ mod tests {
                     group_size: 1,
                 }]
             );
-
-            q.clear_metadata();
-
             assert_eq!(
                 q,
                 parse_select_statement_mysql("SELECT * FROM t WHERE x = ? AND y = ? OR z = ?")
@@ -803,9 +733,6 @@ mod tests {
                     group_size: 1,
                 }]
             );
-
-            q.clear_metadata();
-
             assert_eq!(
                 q,
                 parse_select_statement_mysql(
@@ -825,9 +752,6 @@ mod tests {
                     group_size: 1,
                 }]
             );
-
-            q.clear_metadata();
-
             assert_eq!(
                 q,
                 parse_select_statement_mysql(
@@ -862,8 +786,6 @@ mod tests {
                     group_size: 1,
                 }]
             );
-
-            q.clear_metadata();
             assert_eq!(
                 q,
                 parse_select_statement_mysql("SELECT * FROM x WHERE x.y = ?")
@@ -883,8 +805,6 @@ mod tests {
                     group_size: 1,
                 }]
             );
-
-            q.clear_metadata();
             assert_eq!(
                 q,
                 parse_select_statement_mysql("SELECT * FROM x WHERE y = ?")
@@ -905,8 +825,6 @@ mod tests {
                     group_size: 1,
                 }]
             );
-
-            q.clear_metadata();
             assert_eq!(
                 q,
                 parse_select_statement_mysql("SELECT * FROM x WHERE AVG(y) = ?")
@@ -928,8 +846,6 @@ mod tests {
                     group_size: 1,
                 }]
             );
-
-            q.clear_metadata();
             assert_eq!(
                 q,
                 parse_select_statement_postgres("SELECT * FROM t WHERE x = $1 AND y = ? OR z = $5")
@@ -950,8 +866,6 @@ mod tests {
                     group_size: 1,
                 }]
             );
-
-            q.clear_metadata();
             assert_eq!(
                 q,
                 parse_select_statement_postgres(
@@ -974,7 +888,6 @@ mod tests {
                     group_size: 1,
                 }]
             );
-            q.clear_metadata();
             assert_eq!(
                 q,
                 parse_select_statement_postgres(
@@ -988,7 +901,6 @@ mod tests {
             let mut q =
                 parse_select_statement_mysql("SELECT * FROM t WHERE x IN (?,?) AND y IN (?,?)");
             let rewritten = collapse_where_in(&mut q).unwrap();
-
             assert_eq!(
                 rewritten,
                 vec![
@@ -1004,9 +916,6 @@ mod tests {
                     }
                 ]
             );
-
-            q.clear_metadata();
-
             assert_eq!(
                 q,
                 parse_select_statement_mysql("SELECT * FROM t WHERE x = ? AND y = ?")
@@ -1019,9 +928,6 @@ mod tests {
                 parse_select_statement_mysql("SELECT * FROM t WHERE (x, y) IN ((?, ?), (?,?))");
 
             let _ = collapse_where_in(&mut q).unwrap();
-
-            q.clear_metadata();
-
             assert_eq!(
                 q,
                 parse_select_statement_mysql("SELECT * FROM t WHERE (x, y) = (?, ?)")
@@ -1341,12 +1247,10 @@ mod tests {
 
         #[test]
         fn numbered_where_in_with_auto_params() {
-            let (keys, mut query) = process_and_make_keys_mysql(
+            let (keys, query) = process_and_make_keys_mysql(
                 "SELECT * FROM users WHERE x = ? AND y in (?, ?, ?) AND z = 4 AND w = 5 AND q = ?",
                 vec![0.into(), 1.into(), 2.into(), 3.into(), 6.into()],
             );
-
-            query.clear_metadata();
 
             assert_eq!(
                 query,
@@ -1367,12 +1271,10 @@ mod tests {
 
         #[test]
         fn numbered_auto_parameterized_in() {
-            let (keys, mut query) = process_and_make_keys_mysql(
+            let (keys, query) = process_and_make_keys_mysql(
                 "SELECT * FROM users WHERE x = 1 AND y IN (1, 2, 3) AND z = ?",
                 vec![1.into()],
             );
-
-            query.clear_metadata();
 
             assert_eq!(
                 query,
@@ -1393,12 +1295,10 @@ mod tests {
 
         #[test]
         fn numbered_where_in_with_equal() {
-            let (keys, mut query) = process_and_make_keys_postgres(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT Cats.name FROM Cats WHERE Cats.name = $1 AND Cats.id IN ($2, $3)",
                 vec!["Bob".into(), 1.into(), 2.into()],
             );
-
-            query.clear_metadata();
 
             assert_eq!(
                 query,
@@ -1415,12 +1315,10 @@ mod tests {
 
         #[test]
         fn numbered_point_following_where_in() {
-            let (keys, mut query) = process_and_make_keys_postgres(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT a FROM t WHERE b IN ($1, $2) AND c = $3",
                 vec![1.into(), 2.into(), 3.into()],
             );
-
-            query.clear_metadata();
 
             assert_eq!(
                 query,
@@ -1435,12 +1333,10 @@ mod tests {
 
         #[test]
         fn numbered_point_following_where_in_unordered() {
-            let (keys, mut query) = process_and_make_keys_postgres(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT a FROM t WHERE b IN ($3, $1) AND c = $2",
                 vec![2.into(), 3.into(), 1.into()],
             );
-
-            query.clear_metadata();
 
             assert_eq!(
                 query,
@@ -1455,12 +1351,10 @@ mod tests {
 
         #[test]
         fn numbered_point_following_two_where_in() {
-            let (keys, mut query) = process_and_make_keys_postgres(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT a FROM t WHERE b IN ($1, $2) AND c IN ($3, $4) AND d = $5",
                 vec![1.into(), 2.into(), 3.into(), 4.into(), 5.into()],
             );
-
-            query.clear_metadata();
 
             assert_eq!(
                 query,
@@ -1816,12 +1710,11 @@ mod tests {
 
         #[test]
         fn reuses_params_with_where_in() {
-            let (keys, mut query) = process_and_make_keys_postgres(
+            let (keys, query) = process_and_make_keys_postgres(
                 "SELECT * FROM t WHERE x = $1 AND y IN ($1, $2)",
                 vec![1.into(), 2.into()],
             );
 
-            query.clear_metadata();
             assert_eq!(
                 query,
                 parse_select_statement_postgres("SELECT * FROM t WHERE x = $1 AND y = $2"),

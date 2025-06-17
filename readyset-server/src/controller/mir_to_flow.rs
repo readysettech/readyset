@@ -22,7 +22,6 @@ use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, ProjectExpr, ViewKeyColumn};
 use mir::query::MirQuery;
-use mir::visualize::GraphViz;
 use mir::{Column, DfNodeIndex, NodeIndex as MirNodeIndex};
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
@@ -51,7 +50,6 @@ pub(super) fn mir_query_to_flow_parts(
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeIndex> {
-    println!("Mir Query: {}", mir_query.to_graphviz());
     for n in mir_query.topo_nodes() {
         mir_node_to_flow_parts(mir_query.graph, n, custom_types, mig).map_err(|e| {
             ReadySetError::MirNodeToDataflowFailed {

@@ -325,7 +325,6 @@ pub fn nested_selection(
             having,
             order,
             limit_clause,
-            metadata: vec![],
         };
 
         Ok((i, result))

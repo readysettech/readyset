@@ -356,11 +356,6 @@ impl DialectDisplay for LimitClause {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
-pub enum SelectMetadata {
-    CollapsedWhereIn,
-}
-
 #[derive(
     Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
 )]
@@ -375,8 +370,6 @@ pub struct SelectStatement {
     pub having: Option<Expr>,
     pub order: Option<OrderClause>,
     pub limit_clause: LimitClause,
-    /// Metadata about the original query, before the rewrites
-    pub metadata: Vec<SelectMetadata>,
 }
 
 impl SelectStatement {
@@ -443,7 +436,6 @@ impl TryFromDialect<sqlparser::ast::Select> for SelectStatement {
                 limit: None,
                 offset: None,
             },
-            metadata: vec![],
         })
     }
 }
@@ -583,9 +575,6 @@ impl DialectDisplay for SelectStatement {
             }
             if self.limit_clause.limit().is_some() || self.limit_clause.offset().is_some() {
                 write!(f, " {}", self.limit_clause.display(dialect))?;
-            }
-            if self.metadata.contains(&SelectMetadata::CollapsedWhereIn) {
-                write!(f, " /* COLLAPSED WHERE IN */")?;
             }
 
             Ok(())
