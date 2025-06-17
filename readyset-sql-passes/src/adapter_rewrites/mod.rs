@@ -697,7 +697,7 @@ mod tests {
     use super::*;
 
     fn try_parse_select_statement(q: &str, dialect: Dialect) -> Result<SelectStatement, String> {
-        nom_sql::parse_select(dialect, q)
+        readyset_sql_parsing::parse_select(dialect, q).map_err(|err| err.to_string())
     }
 
     fn parse_select_statement(q: &str, dialect: Dialect) -> SelectStatement {
@@ -932,7 +932,7 @@ mod tests {
             q.clear_metadata();
             assert_eq!(
                 q,
-                parse_select_statement_postgres("SELECT * FROM t WHERE x = $1 AND y = ? OR z = $5")
+                parse_select_statement_mysql("SELECT * FROM t WHERE x = $1 AND y = ? OR z = $5")
             );
 
             let mut q = parse_select_statement_postgres(
@@ -954,7 +954,7 @@ mod tests {
             q.clear_metadata();
             assert_eq!(
                 q,
-                parse_select_statement_postgres(
+                parse_select_statement_mysql(
                     "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y = ? OR z = $4",
                 )
             );
@@ -977,7 +977,7 @@ mod tests {
             q.clear_metadata();
             assert_eq!(
                 q,
-                parse_select_statement_postgres(
+                parse_select_statement_mysql(
                     "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = $1 AND a = ?) OR z = $4",
                 )
             );

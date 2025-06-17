@@ -19,7 +19,6 @@ dataflow-expression = { path = "../dataflow-expression" }
 
 [dev-dependencies]
 criterion = { workspace = true }
-nom-sql = { path = "../nom-sql" }
 pretty_assertions = { workspace = true }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 
