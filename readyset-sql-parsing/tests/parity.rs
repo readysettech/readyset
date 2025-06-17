@@ -479,18 +479,15 @@ fn test_compound_select_cases() {
 
 #[test]
 #[cfg(feature = "sqlparser")]
-#[should_panic(expected = "sqlparser error")]
 fn test_fk_index_name() {
     check_parse_mysql!(
-        r#"
-CREATE TABLE child_table (
-    id INT PRIMARY KEY,
-    parent_id INT,
-    CONSTRAINT fk_child_parent
-        FOREIGN KEY idx_parent_id (parent_id)
-        REFERENCES parent_table(id)
-);
-"#
+        r#"CREATE TABLE child_table (
+            id INT PRIMARY KEY,
+            parent_id INT,
+            CONSTRAINT fk_child_parent
+                FOREIGN KEY idx_parent_id (parent_id)
+                REFERENCES parent_table(id)
+        );"#
     );
 }
 
