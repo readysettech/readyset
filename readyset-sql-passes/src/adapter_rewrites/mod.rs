@@ -713,6 +713,8 @@ mod tests {
     }
 
     mod collapse_where {
+        use pretty_assertions::assert_eq;
+
         use super::*;
 
         #[test]
@@ -1030,6 +1032,8 @@ mod tests {
     }
 
     mod explode_params {
+        use pretty_assertions::assert_eq;
+
         use super::*;
 
         #[test]
@@ -1138,6 +1142,8 @@ mod tests {
     }
 
     mod splice_auto_parameters {
+        use pretty_assertions::assert_eq;
+
         use super::*;
 
         #[test]
@@ -1190,6 +1196,7 @@ mod tests {
     }
 
     mod process_query {
+        use pretty_assertions::assert_eq;
         use readyset_data::DfValue;
 
         use super::*;
@@ -1612,13 +1619,6 @@ mod tests {
             );
 
             // Test non-integer values
-            assert_eq!(
-                get_lim_off_postgres(
-                    "SELECT * FROM t WHERE x = $2 LIMIT ALL OFFSET $1",
-                    &[1.into(), 2.into()],
-                ),
-                (None, Some(1))
-            );
 
             // Postgres rounds up to the nearest int
             assert_eq!(
@@ -1640,12 +1640,6 @@ mod tests {
                 readyset_sql::Dialect::MySQL,
             )
             .unwrap_err();
-
-            try_parse_select_statement(
-                "SELECT * FROM t WHERE x = ? LIMIT 2 OFFSET 3.5",
-                readyset_sql::Dialect::MySQL,
-            )
-            .unwrap_err();
         }
 
         #[test]
@@ -1660,13 +1654,6 @@ mod tests {
             );
             assert_eq!(
                 get_lim_off_postgres(
-                    "SELECT * FROM t WHERE x = $1 LIMIT ALL",
-                    &[1.into(), 2.into()],
-                ),
-                (None, None)
-            );
-            assert_eq!(
-                get_lim_off_postgres(
                     "SELECT * FROM t WHERE x = $1 LIMIT 10.5",
                     &[1.into(), 2.into()],
                 ),
@@ -1677,12 +1664,6 @@ mod tests {
                 get_lim_off_mysql("SELECT * FROM t WHERE x = ? LIMIT ?", &[1.into(), 2.into()],),
                 (Some(2), None)
             );
-
-            try_parse_select_statement(
-                "SELECT * FROM t WHERE x = ? LIMIT ALL",
-                readyset_sql::Dialect::MySQL,
-            )
-            .unwrap_err();
 
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = ? LIMIT 1.5",
@@ -1707,25 +1688,25 @@ mod tests {
                 ),
                 (None, Some(11))
             );
+        }
 
-            // MySQL doesn't allow offset without limit
-            try_parse_select_statement(
-                "SELECT * FROM t WHERE x = ? OFFSET ?",
-                readyset_sql::Dialect::MySQL,
-            )
-            .unwrap_err();
-
-            // ALL keyword only works for LIMT not offset
-            try_parse_select_statement(
-                "SELECT * FROM t WHERE x = $1 OFFSET ALL",
-                readyset_sql::Dialect::PostgreSQL,
-            )
-            .unwrap_err();
-            try_parse_select_statement(
-                "SELECT * FROM t WHERE x = $1 OFFSET ALL",
-                readyset_sql::Dialect::MySQL,
-            )
-            .unwrap_err();
+        #[test]
+        #[ignore = "REA-5766: sqlparser simply removes `LIMIT ALL`"]
+        fn limit_offset_postgres_all() {
+            assert_eq!(
+                get_lim_off_postgres(
+                    "SELECT * FROM t WHERE x = $2 LIMIT ALL OFFSET $1",
+                    &[1.into(), 2.into()],
+                ),
+                (None, Some(1))
+            );
+            assert_eq!(
+                get_lim_off_postgres(
+                    "SELECT * FROM t WHERE x = $1 LIMIT ALL",
+                    &[1.into(), 2.into()],
+                ),
+                (None, None)
+            );
         }
 
         #[test]

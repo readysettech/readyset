@@ -293,6 +293,13 @@ fn test_mysql_placeholders_fail_in_postgres() {
 }
 
 #[test]
+#[ignore = "REA-5766: sqlparser simply removes `LIMIT ALL`"]
+fn test_limit_all_with_placeholder_offset() {
+    check_parse_postgres!("SELECT * FROM t WHERE x = $2 OFFSET $1");
+    check_parse_postgres!("SELECT * FROM t WHERE x = $2 LIMIT ALL OFFSET $1");
+}
+
+#[test]
 fn test_not_like_expressions() {
     check_parse_both!("SELECT * FROM t WHERE a NOT LIKE 'foo';");
     check_parse_both!("SELECT * FROM t WHERE a NOT ILIKE 'foo';");
