@@ -2412,7 +2412,7 @@ impl SqlToMirConverter {
                 let make_topk = offset.is_none();
                 // view key will have the offset parameter if it exists. We must filter it out
                 // of the group by, because the column originates at this node
-                let mut group_by: Vec<Column> = view_key
+                let group_by: Vec<Column> = view_key
                     .columns
                     .iter()
                     .filter_map(|(col, _)| {
@@ -2423,14 +2423,6 @@ impl SqlToMirConverter {
                         }
                     })
                     .collect();
-
-                group_by.extend(query_graph.group_by.iter().filter_map(|expr| {
-                    if let Expr::Column(col) = expr {
-                        Some(Column::from(col.clone()))
-                    } else {
-                        None
-                    }
-                }));
 
                 // Order by expression projections and either a topk or paginate node
                 let paginate_nodes = self.make_paginate_node(
