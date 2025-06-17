@@ -4550,7 +4550,6 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "mysql_common",
- "nom-sql",
  "parking_lot",
  "proptest",
  "rand 0.8.5",

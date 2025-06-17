@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use lru::LruCache;
-use nom_sql::parse_select;
 use readyset_client::query::Query;
 use readyset_client::ViewCreateRequest;
+use readyset_sql_parsing::parse_select;
 use xxhash_rust::xxh3;
 
 fn hash_benchmarks(c: &mut Criterion) {

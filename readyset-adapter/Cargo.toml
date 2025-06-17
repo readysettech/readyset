@@ -57,7 +57,6 @@ database-utils = { path = "../database-utils" }
 
 [dev-dependencies]
 criterion = { workspace = true }
-nom-sql = { path = "../nom-sql" }
 proptest = { workspace = true }
 rand = { workspace = true }
 test-strategy = { workspace = true }
