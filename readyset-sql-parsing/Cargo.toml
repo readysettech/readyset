@@ -9,6 +9,7 @@ edition = "2021"
 nom-sql = { path = "../nom-sql" }
 paste = { workspace = true }
 pretty_assertions = { workspace = true }
+readyset-errors = { path = "../readyset-errors" }
 readyset-sql = { path = "../readyset-sql" }
 sqlparser = { workspace = true }
 thiserror = { workspace = true }

@@ -1,3 +1,4 @@
+use readyset_errors::ReadySetError;
 use readyset_sql::ast::{
     AddTablesStatement, AlterReadysetStatement, AlterTableStatement, CacheInner,
     CreateTableStatement, CreateViewStatement, DropCacheStatement, Expr, ResnapshotTableStatement,
@@ -140,6 +141,22 @@ pub enum ReadysetParsingError {
         nom_error: String,
         sqlparser_error: String,
     },
+}
+
+impl From<ReadysetParsingError> for ReadySetError {
+    fn from(err: ReadysetParsingError) -> Self {
+        // TODO(mvzink): Update or replace [`ReadySetError::UnparseableQuery`] to differentiate
+        // query and error message
+        Self::UnparseableQuery {
+            query: err.to_string(),
+        }
+    }
+}
+
+impl From<ReadysetParsingError> for String {
+    fn from(err: ReadysetParsingError) -> Self {
+        err.to_string()
+    }
 }
 
 fn sqlparser_dialect_from_readyset_dialect(

@@ -5226,6 +5226,7 @@ dependencies = [
  "nom-sql",
  "paste",
  "pretty_assertions",
+ "readyset-errors",
  "readyset-sql",
  "sqlparser",
  "thiserror 1.0.69",

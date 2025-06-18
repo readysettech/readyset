@@ -789,7 +789,7 @@ impl Connector for PostgresWalConnector {
                         return Ok((
                             vec![ReplicationAction::DdlChange {
                                 schema: ddl_event.schema().to_string(),
-                                changes: vec![ddl_event.into_change()],
+                                changes: vec![ddl_event.try_into_change()?],
                             }],
                             cur_pos.with_lsn(lsn).into(),
                         ));

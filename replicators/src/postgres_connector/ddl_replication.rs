@@ -38,6 +38,7 @@
 //!
 //! [dialect]: readyset_sql::Dialect
 
+use itertools::Itertools;
 use pgsql::tls::MakeTlsConnect;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
 use readyset_data::{DfType, PgEnumMetadata};
@@ -45,12 +46,14 @@ use readyset_errors::ReadySetError::ReplicationFailed;
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{
     AlterTableStatement, Column, ColumnConstraint, ColumnSpecification, CreateTableBody,
-    CreateTableStatement, CreateViewStatement, NonReplicatedRelation, NotReplicatedReason,
-    Relation, SqlQuery, SqlType, TableKey,
+    CreateTableStatement, NonReplicatedRelation, NotReplicatedReason, Relation,
 };
 use readyset_sql::Dialect;
-use readyset_sql_parsing::{parse_query_with_config, ParsingPreset};
-use serde::{Deserialize, Deserializer};
+use readyset_sql_parsing::{
+    parse_alter_table_with_config, parse_create_view_with_config,
+    parse_key_specification_with_config, parse_sql_type_with_config, ParsingPreset,
+};
+use serde::Deserialize;
 use tokio_postgres as pgsql;
 use tracing::info;
 
@@ -84,15 +87,13 @@ where
 pub(crate) struct DdlCreateTableColumn {
     attnum: i16,
     name: String,
-    #[serde(deserialize_with = "parse_sql_type")]
-    column_type: Result<SqlType, String>,
+    column_type: String,
     not_null: bool,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub(crate) struct DdlCreateTableConstraint {
-    #[serde(deserialize_with = "parse_table_key")]
-    definition: Result<TableKey, String>,
+    definition: String,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -100,47 +101,6 @@ pub(crate) struct DdlEnumVariant {
     oid: u32,
     pub(crate) label: String,
 }
-
-macro_rules! make_parse_deserialize_with {
-    ($name: ident -> $res: ty) => {
-        make_parse_deserialize_with!($name -> $res, $name);
-    };
-    ($name: ident -> $res: ty, $parser: ident) => {
-        fn $name<'de, D>(deserializer: D) -> Result<$res, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let ty = String::deserialize(deserializer)?;
-            readyset_sql_parsing::$parser(Dialect::PostgreSQL, ty).map_err(serde::de::Error::custom)
-        }
-    };
-}
-
-macro_rules! make_fallible_parse_deserialize_with {
-    ($name: ident -> $res: ty) => {
-        make_fallible_parse_deserialize_with!($name -> $res, $name);
-    };
-    ($name: ident -> $res: ty, $parser: ident) => {
-        paste::paste! {
-            fn $name<'de, D>(deserializer: D) -> Result<Result<$res, String>, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                let ty = String::deserialize(deserializer)?;
-                Ok(readyset_sql_parsing::[<$parser _with_config>](
-                    ParsingPreset::for_prod(),
-                    Dialect::PostgreSQL,
-                    ty
-                ).map_err(|e| e.to_string()))
-            }
-        }
-    };
-}
-
-make_fallible_parse_deserialize_with!(parse_sql_type -> SqlType);
-make_fallible_parse_deserialize_with!(parse_table_key -> TableKey, parse_key_specification);
-make_fallible_parse_deserialize_with!(parse_alter_table_statement -> AlterTableStatement, parse_alter_table);
-make_parse_deserialize_with!(parse_create_view_statement -> CreateViewStatement, parse_create_view);
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub(crate) enum DdlEventData {
@@ -155,10 +115,9 @@ pub(crate) enum DdlEventData {
     },
     AlterTable {
         name: String,
-        #[serde(deserialize_with = "parse_alter_table_statement")]
-        statement: Result<AlterTableStatement, String>,
+        statement: String,
     },
-    CreateView(#[serde(deserialize_with = "parse_create_view_statement")] CreateViewStatement),
+    CreateView(String),
     Drop(String),
     CreateType {
         oid: u32,
@@ -180,24 +139,10 @@ pub(crate) struct DdlEvent {
     pub(crate) data: DdlEventData,
 }
 
-/// This is just an ugly wrapper because `deserialize_with` doesn't play well with Options
-#[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
-pub(crate) struct ParsedStatement(#[serde(deserialize_with = "parse_pgsql")] SqlQuery);
-
-fn parse_pgsql<'de, D>(deserializer: D) -> Result<SqlQuery, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let query = String::deserialize(deserializer)?;
-    parse_query_with_config(ParsingPreset::for_prod(), Dialect::PostgreSQL, query)
-        .map_err(serde::de::Error::custom)
-}
-
 impl DdlEvent {
     /// Convert this [`DdlEvent`] into a SQL DDL statement that can be sent to ReadySet directly
     /// (using the ReadySet-native SQL dialect, not the postgresql dialect!)
-    pub(crate) fn into_change(self) -> Change {
+    pub(crate) fn try_into_change(self) -> ReadySetResult<Change> {
         match self.data {
             DdlEventData::CreateTable {
                 oid,
@@ -223,7 +168,11 @@ impl DdlEvent {
                                 name: col.name.into(),
                                 table: Some(table.clone()),
                             },
-                            sql_type: col.column_type?,
+                            sql_type: parse_sql_type_with_config(
+                                ParsingPreset::for_prod(),
+                                Dialect::PostgreSQL,
+                                col.column_type,
+                            )?,
                             generated: None,
                             constraints: if col.not_null {
                                 vec![ColumnConstraint::NotNull]
@@ -243,15 +192,21 @@ impl DdlEvent {
                                 Some(
                                     constraints
                                         .into_iter()
-                                        .map(|c| c.definition)
-                                        .collect::<Result<_, _>>()?,
+                                        .map(|c| {
+                                            parse_key_specification_with_config(
+                                                ParsingPreset::for_prod(),
+                                                Dialect::PostgreSQL,
+                                                c.definition,
+                                            )
+                                        })
+                                        .try_collect()?,
                                 )
                             },
                         })
                     });
 
                 match create_table_body {
-                    Ok(body) => Change::CreateTable {
+                    Ok(body) => Ok(Change::CreateTable {
                         statement: CreateTableStatement {
                             if_not_exists: false,
                             table,
@@ -259,26 +214,30 @@ impl DdlEvent {
                             options: Ok(vec![]),
                         },
                         pg_meta: Some(PostgresTableMetadata { oid, column_oids }),
-                    },
-                    Err(desc) => Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                    }),
+                    Err(desc) => Ok(Change::AddNonReplicatedRelation(NonReplicatedRelation {
                         name: table,
                         reason: NotReplicatedReason::from_string(&desc),
-                    }),
+                    })),
                 }
             }
             DdlEventData::AddNonReplicatedTable { name } => {
-                Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                Ok(Change::AddNonReplicatedRelation(NonReplicatedRelation {
                     name: Relation {
                         schema: Some(self.schema.into()),
                         name: name.into(),
                     },
                     reason: NotReplicatedReason::Partitioned,
-                })
+                }))
             }
             DdlEventData::AlterTable { name, statement } => {
-                let stmt = match statement {
+                let stmt = match parse_alter_table_with_config(
+                    ParsingPreset::for_prod(),
+                    Dialect::PostgreSQL,
+                    statement,
+                ) {
                     Ok(stmt) => stmt,
-                    Err(unparseable) => {
+                    Err(err) => {
                         // If the *whole* alter table statement failed parsing, just use the name in
                         // the event data to construct a fake AlterTableStatement with the parse
                         // failure in place of the definitions
@@ -287,7 +246,7 @@ impl DdlEvent {
                                 schema: Some(self.schema.into()),
                                 name: name.into(),
                             },
-                            definitions: Err(unparseable),
+                            definitions: Err(err.to_string()),
                             only: false,
                             algorithm: None,
                             lock: None,
@@ -295,19 +254,25 @@ impl DdlEvent {
                     }
                 };
 
-                Change::AlterTable(stmt)
+                Ok(Change::AlterTable(stmt))
             }
-            DdlEventData::CreateView(stmt) => Change::CreateView(stmt),
-            DdlEventData::Drop(name) => Change::Drop {
+            DdlEventData::CreateView(stmt) => {
+                Ok(Change::CreateView(parse_create_view_with_config(
+                    ParsingPreset::for_prod(),
+                    Dialect::PostgreSQL,
+                    stmt,
+                )?))
+            }
+            DdlEventData::Drop(name) => Ok(Change::Drop {
                 name: name.into(),
                 if_exists: false,
-            },
+            }),
             DdlEventData::CreateType {
                 oid,
                 array_oid,
                 name,
                 variants,
-            } => Change::CreateType {
+            } => Ok(Change::CreateType {
                 name: Relation {
                     schema: Some(self.schema.clone().into()),
                     name: name.clone().into(),
@@ -321,13 +286,13 @@ impl DdlEvent {
                         array_oid,
                     }),
                 ),
-            },
+            }),
             DdlEventData::AlterType {
                 name,
                 oid,
                 variants,
                 original_variants,
-            } => Change::AlterType {
+            } => Ok(Change::AlterType {
                 oid,
                 name: Relation {
                     schema: Some(self.schema.clone().into()),
@@ -338,7 +303,7 @@ impl DdlEvent {
                     original_variants: original_variants
                         .map(|vs| vs.into_iter().map(|v| v.label).collect()),
                 },
-            },
+            }),
         }
     }
 
@@ -356,8 +321,9 @@ mod tests {
     use pgsql::NoTls;
     use readyset_sql::ast::{
         AlterTableDefinition, ColumnSpecification, CreateViewStatement, Expr, FieldDefinitionExpr,
-        Relation, SelectSpecification, SqlType, TableExpr, TableKey,
+        Relation, SelectSpecification, SqlType, TableExpr,
     };
+    use readyset_sql_parsing::{parse_alter_table, parse_create_view};
     use test_utils::tags;
     use tokio::task::JoinHandle;
     use tokio::time::sleep;
@@ -541,13 +507,13 @@ mod tests {
                         DdlCreateTableColumn {
                             attnum: 1,
                             name: "id".into(),
-                            column_type: Ok(SqlType::Int(None)),
+                            column_type: "integer".into(),
                             not_null: true
                         },
                         DdlCreateTableColumn {
                             attnum: 2,
                             name: "value".into(),
-                            column_type: Ok(SqlType::Text),
+                            column_type: "text".into(),
                             not_null: false
                         },
                     ]
@@ -556,22 +522,10 @@ mod tests {
                     constraints,
                     vec![
                         DdlCreateTableConstraint {
-                            definition: Ok(TableKey::PrimaryKey {
-                                constraint_name: None,
-                                constraint_timing: None,
-                                index_name: None,
-                                columns: vec!["id".into()]
-                            }),
+                            definition: "PRIMARY KEY (id)".into(),
                         },
                         DdlCreateTableConstraint {
-                            definition: Ok(TableKey::UniqueKey {
-                                constraint_name: None,
-                                constraint_timing: None,
-                                index_name: None,
-                                columns: vec!["value".into()],
-                                index_type: None,
-                                nulls_distinct: None,
-                            })
+                            definition: "UNIQUE (value)".into(),
                         }
                     ]
                 );
@@ -676,7 +630,7 @@ mod tests {
         match ddl.data {
             DdlEventData::AlterTable { name, statement } => {
                 assert_eq!(name, "t");
-                let stmt = statement.unwrap();
+                let stmt = parse_alter_table(Dialect::PostgreSQL, statement).unwrap();
                 assert_eq!(stmt.table.name, "t");
                 assert_eq!(
                     stmt.definitions.unwrap(),
@@ -714,7 +668,7 @@ mod tests {
         match ddl.data {
             DdlEventData::AlterTable { name, statement } => {
                 assert_eq!(name, "t");
-                let stmt = statement.unwrap();
+                let stmt = parse_alter_table(Dialect::PostgreSQL, statement).unwrap();
                 assert_eq!(stmt.table.name, "t");
                 assert_eq!(
                     stmt.definitions.unwrap(),
@@ -750,31 +704,34 @@ mod tests {
         assert_eq!(ddl.schema, "public");
 
         match ddl.data {
-            DdlEventData::CreateView(CreateViewStatement {
-                name, definition, ..
-            }) => {
-                assert_eq!(
-                    name,
-                    Relation {
-                        schema: Some("public".into()),
-                        name: "v".into()
+            DdlEventData::CreateView(statement) => {
+                let CreateViewStatement {
+                    name, definition, ..
+                } = parse_create_view(Dialect::PostgreSQL, statement).unwrap();
+                {
+                    assert_eq!(
+                        name,
+                        Relation {
+                            schema: Some("public".into()),
+                            name: "v".into()
+                        }
+                    );
+                    match *definition.unwrap() {
+                        SelectSpecification::Simple(select_stmt) => {
+                            assert_eq!(
+                                select_stmt.fields,
+                                vec![FieldDefinitionExpr::Expr {
+                                    expr: Expr::Column("t.x".into()),
+                                    alias: None
+                                }]
+                            );
+                            assert_eq!(
+                                select_stmt.tables,
+                                vec![TableExpr::from(Relation::from("t"))]
+                            );
+                        }
+                        _ => panic!(),
                     }
-                );
-                match *definition.unwrap() {
-                    SelectSpecification::Simple(select_stmt) => {
-                        assert_eq!(
-                            select_stmt.fields,
-                            vec![FieldDefinitionExpr::Expr {
-                                expr: Expr::Column("t.x".into()),
-                                alias: None
-                            }]
-                        );
-                        assert_eq!(
-                            select_stmt.tables,
-                            vec![TableExpr::from(Relation::from("t"))]
-                        );
-                    }
-                    _ => panic!(),
                 }
             }
             _ => panic!("Unexpected query type {:?}", ddl.data),
