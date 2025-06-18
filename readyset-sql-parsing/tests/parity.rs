@@ -529,3 +529,8 @@ fn test_create_table_with_data_directory_option() {
 fn test_row() {
     check_parse_both!(r#"SELECT ROW(1, 2, 3);"#);
 }
+
+#[test]
+fn test_explain_materialization() {
+    check_parse_both!("EXPLAIN MATERIALIZATIONS");
+}

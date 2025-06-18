@@ -48,6 +48,7 @@ enum ReadysetKeyword {
     ENTER,
     EXIT,
     MAINTENANCE,
+    MATERIALIZATIONS,
     MIGRATION,
     PROXIED,
     QUERIES,
@@ -68,6 +69,7 @@ impl ReadysetKeyword {
             Self::ENTER => "ENTER",
             Self::EXIT => "EXIT",
             Self::MAINTENANCE => "MAINTENANCE",
+            Self::MATERIALIZATIONS => "MATERIALIZATIONS",
             Self::MIGRATION => "MIGRATION",
             Self::PROXIED => "PROXIED",
             Self::QUERIES => "QUERIES",
@@ -297,6 +299,11 @@ fn parse_explain(
     if parser.parse_keywords(&[Keyword::LAST, Keyword::STATEMENT]) {
         return Ok(SqlQuery::Explain(
             readyset_sql::ast::ExplainStatement::LastStatement,
+        ));
+    }
+    if parse_readyset_keyword(parser, ReadysetKeyword::MATERIALIZATIONS) {
+        return Ok(SqlQuery::Explain(
+            readyset_sql::ast::ExplainStatement::Materializations,
         ));
     }
     let simplified = parse_readyset_keyword(parser, ReadysetKeyword::SIMPLIFIED);
