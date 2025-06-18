@@ -69,7 +69,7 @@ use std::cmp::Ordering;
 use std::io::{self, Read};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{mpsc, Arc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -1836,11 +1836,11 @@ impl PersistentState {
     }
 
     #[allow(clippy::type_complexity)]
-    fn make_channels<T>(num: usize) -> (Vec<Sender<Arc<T>>>, Vec<Receiver<Arc<T>>>) {
+    fn make_channels<T>(num: usize) -> (Vec<SyncSender<Arc<T>>>, Vec<Receiver<Arc<T>>>) {
         let mut txs = Vec::new();
         let mut rxs = Vec::new();
         for _ in 0..num {
-            let (tx, rx) = mpsc::channel();
+            let (tx, rx) = mpsc::sync_channel(INDEX_BATCH_SIZE * 4);
             txs.push(tx);
             rxs.push(rx);
         }
@@ -1916,6 +1916,7 @@ impl PersistentState {
 
             while let (Some(pk), Some(value)) = (iter.key(), iter.value()) {
                 let row = deserialize_row(value);
+                // TODO: only pass data that will be used by any index.
                 let kv = Arc::new(IndexKeyValue::new(pk.to_vec(), row));
                 for tx in &txs {
                     tx.send(Arc::clone(&kv))
