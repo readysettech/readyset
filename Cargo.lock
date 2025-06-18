@@ -5223,6 +5223,7 @@ dependencies = [
 name = "readyset-sql-parsing"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "nom-sql",
  "paste",
  "pretty_assertions",

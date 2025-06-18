@@ -19,6 +19,7 @@ use readyset_data::Dialect;
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_sql::DialectDisplay;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
@@ -165,6 +166,7 @@ impl<'a> NoriaAdapter<'a> {
         telemetry_sender: TelemetrySender,
         server_startup: bool,
         enable_statement_logging: bool,
+        parsing_preset: ParsingPreset,
     ) -> ReadySetResult<std::convert::Infallible> {
         // Resnapshot when restarting the server to apply changes that may have been made to the
         // replication-tables config parameter.
@@ -185,6 +187,7 @@ impl<'a> NoriaAdapter<'a> {
                         enable_statement_logging,
                         full_snapshot,
                         table_filter,
+                        parsing_preset,
                     )
                     .await
                 }
@@ -229,6 +232,7 @@ impl<'a> NoriaAdapter<'a> {
                         repl_slot_name,
                         enable_statement_logging,
                         table_filter,
+                        parsing_preset,
                     )
                     .await
                 }
@@ -279,6 +283,7 @@ impl<'a> NoriaAdapter<'a> {
         enable_statement_logging: bool,
         full_snapshot: bool,
         table_filter: &'a mut TableFilter,
+        parsing_preset: ParsingPreset,
     ) -> ReadySetResult<std::convert::Infallible> {
         use replication_offset::mysql::MySqlPosition;
 
@@ -339,7 +344,11 @@ impl<'a> NoriaAdapter<'a> {
                     .flatten()
                     .unwrap_or_else(|| "unknown".to_owned());
 
-                let replicator = MySqlReplicator { pool, table_filter };
+                let replicator = MySqlReplicator {
+                    pool,
+                    table_filter,
+                    parsing_preset,
+                };
 
                 let snapshot_start = Instant::now();
                 counter!(
@@ -431,6 +440,7 @@ impl<'a> NoriaAdapter<'a> {
                 server_id,
                 enable_statement_logging,
                 table_filter.clone(),
+                parsing_preset,
             )
             .await?,
         );
@@ -493,6 +503,7 @@ impl<'a> NoriaAdapter<'a> {
         repl_slot_name: String,
         enable_statement_logging: bool,
         table_filter: &'a mut TableFilter,
+        parsing_preset: ParsingPreset,
     ) -> ReadySetResult<std::convert::Infallible> {
         set_failpoint_return_err!(failpoints::START_INNER_POSTGRES);
 
@@ -550,6 +561,7 @@ impl<'a> NoriaAdapter<'a> {
                 full_resnapshot,
                 noria.clone(),
                 table_filter.clone(),
+                parsing_preset,
             )
             .await?,
         );

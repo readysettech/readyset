@@ -43,7 +43,7 @@ use readyset_sql::ast::{
     CreateTableStatement, CreateViewStatement, DropTableStatement, DropViewStatement,
     NonReplicatedRelation, Relation, SelectStatement, SqlIdentifier, SqlQuery, TableKey,
 };
-use readyset_sql_parsing::{parse_query_with_config, ParsingPreset};
+use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -138,23 +138,27 @@ impl ChangeList {
         }
     }
 
-    /// Parse a `ChangeList` from the given vector of SQL strings, using the given [`Dialect`]
-    /// for expression evaluation semantics.
+    /// Parse a `ChangeList` from the given vector of SQL strings, using the given [`Dialect`] for
+    /// expression evaluation semantics (but it will be parsed with the canonical MySQL dialect).
     ///
     /// This method processes each string in the vector individually and constructs a list of
     /// changes. If any query fails to parse, the method returns an error.
     pub fn from_strings(queries: Vec<impl AsRef<str>>, dialect: Dialect) -> ReadySetResult<Self> {
-        let mut changes = Vec::new();
+        Self::from_strings_with_config(queries, dialect, ParsingPreset::for_prod().into_config())
+    }
 
+    pub fn from_strings_with_config(
+        queries: Vec<impl AsRef<str>>,
+        dialect: Dialect,
+        parsing_config: ParsingConfig,
+    ) -> ReadySetResult<Self> {
+        let mut changes = Vec::new();
         for query_str in queries {
-            let parsed = parse_query_with_config(
-                ParsingPreset::BothPreferNom,
-                Dialect::DEFAULT_MYSQL.into(),
-                &query_str,
-            )
-            .map_err(|_| ReadySetError::UnparseableQuery {
-                query: query_str.as_ref().to_string(),
-            })?;
+            let parsed =
+                parse_query_with_config(parsing_config, Dialect::DEFAULT_MYSQL.into(), &query_str)
+                    .map_err(|_| ReadySetError::UnparseableQuery {
+                        query: query_str.as_ref().to_string(),
+                    })?;
 
             match parsed {
                 SqlQuery::CreateTable(statement) => changes.push(Change::CreateTable {
@@ -449,6 +453,7 @@ impl Change {
     pub fn from_cache_ddl_request(
         ddl_req: &CacheDDLRequest,
         adapter_rewrite_params: AdapterRewriteParams,
+        parsing_preset: ParsingPreset,
     ) -> ReadySetResult<Self> {
         macro_rules! mk_error {
             ($str:expr) => {
@@ -458,7 +463,7 @@ impl Change {
             };
         }
         match parse_query_with_config(
-            ParsingPreset::for_prod(),
+            parsing_preset.into_config().log_on_mismatch(true),
             ddl_req.dialect.into(),
             &ddl_req.unparsed_stmt,
         ) {

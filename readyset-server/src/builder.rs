@@ -10,6 +10,7 @@ use readyset_client::consensus::{
     Authority, LocalAuthority, LocalAuthorityStore, NodeTypeSchedulingRestriction,
     WorkerSchedulingConfig,
 };
+use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::shutdown::{self, ShutdownSender};
 
@@ -27,6 +28,9 @@ pub struct Builder {
     external_addr: SocketAddr,
     leader_eligible: bool,
     domain_scheduling_config: WorkerSchedulingConfig,
+    /// The parsing preset to use for SQL parsing. Public so we can use it when setting up replication
+    /// separately in tests.
+    pub parsing_preset: ParsingPreset,
     /// The telemetry sender
     pub telemetry: TelemetrySender,
     wait_for_failpoint: bool,
@@ -44,6 +48,7 @@ impl Default for Builder {
             memory_check_frequency: None,
             leader_eligible: true,
             domain_scheduling_config: Default::default(),
+            parsing_preset: ParsingPreset::for_prod(),
             telemetry: TelemetrySender::new_no_op(),
             wait_for_failpoint: false,
             unquery: true,
@@ -131,6 +136,7 @@ impl Builder {
         builder.set_abort_on_task_failure(false);
         builder.set_full_materialization(true);
         builder.set_post_lookup(true);
+        builder.set_parsing_preset(ParsingPreset::BothPanicOnMismatch);
         builder
     }
 
@@ -374,6 +380,10 @@ impl Builder {
         self.config.replicator_statement_logging = value;
     }
 
+    pub fn set_parsing_preset(&mut self, value: ParsingPreset) {
+        self.parsing_preset = value;
+    }
+
     /// Start a server instance and return a handle to it. This method also returns a
     /// [`ShutdownSender`] that should be used to shut down the server when it is no longer needed.
     pub fn start(
@@ -387,6 +397,7 @@ impl Builder {
             memory_limit,
             memory_check_frequency,
             domain_scheduling_config,
+            parsing_preset,
             leader_eligible,
             telemetry,
             wait_for_failpoint,
@@ -403,6 +414,7 @@ impl Builder {
             memory_limit,
             memory_check_frequency,
             domain_scheduling_config,
+            parsing_preset,
             leader_eligible,
             telemetry,
             wait_for_failpoint,
@@ -426,6 +438,7 @@ impl Builder {
             memory_limit,
             memory_check_frequency,
             domain_scheduling_config,
+            parsing_preset,
             leader_eligible,
             telemetry,
             wait_for_failpoint,
@@ -443,6 +456,7 @@ impl Builder {
             memory_limit,
             memory_check_frequency,
             domain_scheduling_config,
+            parsing_preset,
             leader_eligible,
             readers,
             reader_addr,

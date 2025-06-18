@@ -23,6 +23,7 @@ use readyset_client::ControllerDescriptor;
 use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::Relation;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::TelemetrySender;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
@@ -377,6 +378,10 @@ pub struct Controller {
     /// Whether we are the leader and ready to handle requests.
     leader_ready: Arc<AtomicBool>,
 
+    /// Parsing mode for the controller, used in extend_recipe. Not part of the serialized
+    /// [`Config`] so it can be changed on restart.
+    parsing_preset: ParsingPreset,
+
     /// Whether we are in maintenance mode
     maintenance_mode: Arc<AtomicBool>,
 
@@ -409,6 +414,7 @@ impl Controller {
         worker_descriptor: WorkerDescriptor,
         telemetry_sender: TelemetrySender,
         config: Config,
+        parsing_preset: ParsingPreset,
         shutdown_rx: ShutdownReceiver,
     ) -> Self {
         // If we don't have an upstream, we allow permissive writes to base tables.
@@ -425,6 +431,7 @@ impl Controller {
             our_descriptor,
             worker_descriptor,
             config,
+            parsing_preset,
             leader_ready: Arc::new(AtomicBool::new(false)),
             maintenance_mode: Arc::new(AtomicBool::new(false)),
             controller_channel: ControllerChannel::new(),
@@ -534,6 +541,7 @@ impl Controller {
                     self.config.replicator_config.clone(),
                     self.config.worker_request_timeout,
                     self.config.background_recovery_interval,
+                    self.parsing_preset,
                     self.replicator_channel.sender(),
                     self.controller_channel.sender(),
                 );
@@ -855,7 +863,11 @@ impl Controller {
             ddl_reqs
                 .iter()
                 .filter(|req| matches!(
-                    Change::from_cache_ddl_request(req, adapter_rewrite_params),
+                    Change::from_cache_ddl_request(
+                        req,
+                        adapter_rewrite_params,
+                        self.parsing_preset,
+                    ),
                     Ok(Change::Drop { .. })
                 ))
                 .all(|req| req.dialect == ddl_reqs[0].dialect),
@@ -866,7 +878,11 @@ impl Controller {
             ddl_reqs
                 .iter()
                 .filter(|req| matches!(
-                    Change::from_cache_ddl_request(req, adapter_rewrite_params),
+                    Change::from_cache_ddl_request(
+                        req,
+                        adapter_rewrite_params,
+                        self.parsing_preset,
+                    ),
                     Ok(Change::Drop { .. })
                 ))
                 .all(|req| req.schema_search_path.is_empty()),
@@ -877,7 +893,11 @@ impl Controller {
             ddl_reqs
                 .iter()
                 .filter(|req| matches!(
-                    Change::from_cache_ddl_request(req, adapter_rewrite_params),
+                    Change::from_cache_ddl_request(
+                        req,
+                        adapter_rewrite_params,
+                        self.parsing_preset,
+                    ),
                     Ok(Change::CreateCache(_))
                 ))
                 .all(|req| req.dialect == ddl_reqs[0].dialect),
@@ -891,7 +911,11 @@ impl Controller {
         let mut last_was_drop = false;
 
         for ddl_req in ddl_reqs {
-            match Change::from_cache_ddl_request(&ddl_req, adapter_rewrite_params) {
+            match Change::from_cache_ddl_request(
+                &ddl_req,
+                adapter_rewrite_params,
+                self.parsing_preset,
+            ) {
                 Ok(change) => {
                     let is_drop = matches!(change, Change::Drop { .. });
 

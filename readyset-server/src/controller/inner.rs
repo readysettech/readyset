@@ -30,6 +30,7 @@ use readyset_client::{GraphvizOptions, ViewCreateRequest, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::Relation;
 use readyset_sql::Dialect;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::TelemetrySender;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
@@ -93,6 +94,9 @@ pub struct Leader {
     pub(super) replicator_config: UpstreamConfig,
     /// A client to the current authority.
     pub(super) authority: Arc<Authority>,
+
+    /// Parsing mode for the controller (used in extend_recipe and the replicator)
+    parsing_preset: ParsingPreset,
 
     /// A map of currently running migrations.
     ///
@@ -206,6 +210,7 @@ impl Leader {
         let replicator_restart_timeout = self.replicator_config.replicator_restart_timeout;
         let config = self.replicator_config.clone();
         let replicator_statement_logging = self.replicator_statement_logging;
+        let parsing_preset = self.parsing_preset;
 
         // The replication task ideally won't panic, but if it does and we arent replicating, that
         // will mean the data we return, will be more and more stale, and the transaction logs on
@@ -230,6 +235,7 @@ impl Leader {
                         telemetry_sender.clone(),
                         server_startup,
                         replicator_statement_logging,
+                        parsing_preset,
                     )
                     .await
                     {
@@ -1050,6 +1056,7 @@ impl Leader {
         replicator_config: UpstreamConfig,
         worker_request_timeout: Duration,
         background_recovery_interval: Duration,
+        parsing_mode: ParsingPreset,
         replicator_tx: UnboundedSender<ReplicatorMessage>,
         controller_tx: UnboundedSender<ControllerMessage>,
     ) -> Self {
@@ -1069,6 +1076,7 @@ impl Leader {
             worker_request_timeout,
             background_recovery_interval,
             background_recovery_running: Arc::new(AtomicBool::new(false)),
+            parsing_preset: parsing_mode,
             running_migrations: Default::default(),
             background_task_failed,
             running_recovery: None,

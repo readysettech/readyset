@@ -21,7 +21,7 @@ use mysql_common::constants::ColumnType;
 use mysql_common::{binlog, Value};
 use mysql_srv::ColumnFlags;
 use readyset_data::encoding::{mysql_character_set_name_to_collation_id, Encoding};
-use readyset_sql_parsing::{parse_query_with_config, ParsingPreset};
+use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
 use rust_decimal::Decimal;
 use serde_json::Map;
 use tracing::{error, info, warn};
@@ -143,6 +143,8 @@ pub(crate) struct MySqlBinlogConnector {
     /// and referenced if it is not otherwise possible to determine the character set for a text
     /// column, which happens in MySQL 5.7.
     table_schemas: HashMap<Relation, CreateTableBody>,
+    /// Parsing mode that determines which parser(s) to use and how to handle conflicts
+    parsing_config: ParsingConfig,
 }
 
 impl MySqlBinlogConnector {
@@ -227,6 +229,7 @@ impl MySqlBinlogConnector {
         server_id: Option<u32>,
         enable_statement_logging: bool,
         table_filter: TableFilter,
+        parsing_preset: ParsingPreset,
     ) -> ReadySetResult<Self> {
         let mut connector = MySqlBinlogConnector {
             noria,
@@ -240,6 +243,7 @@ impl MySqlBinlogConnector {
                 - std::time::Duration::from_secs(MAX_POSITION_TIME),
             table_filter,
             table_schemas: Default::default(),
+            parsing_config: parsing_preset.into_config(),
         };
 
         connector.register_as_replica().await?;
@@ -789,8 +793,11 @@ impl MySqlBinlogConnector {
             _ => return self.try_non_ddl_action_from_query(q_event, is_last),
         };
 
-        let changes = match ChangeList::from_strings(vec![q_event.query()], Dialect::DEFAULT_MYSQL)
-        {
+        let changes = match ChangeList::from_strings_with_config(
+            vec![q_event.query()],
+            Dialect::DEFAULT_MYSQL,
+            self.parsing_config,
+        ) {
             Ok(mut changelist) => {
                 // During replication of DDL, we don't necessarily have the default charset/collation as part of the
                 // query event.
@@ -847,7 +854,7 @@ impl MySqlBinlogConnector {
             }
             Err(error) => {
                 match readyset_sql_parsing::parse_query_with_config(
-                    ParsingPreset::for_prod(),
+                    self.parsing_config,
                     readyset_sql::Dialect::MySQL,
                     q_event.query(),
                 ) {
@@ -893,7 +900,7 @@ impl MySqlBinlogConnector {
     ) -> ReadySetResult<ReplicationAction> {
         use readyset_sql::Dialect;
 
-        match parse_query_with_config(ParsingPreset::for_prod(), Dialect::MySQL, q_event.query()) {
+        match parse_query_with_config(self.parsing_config, Dialect::MySQL, q_event.query()) {
             Ok(SqlQuery::Commit(_)) if self.report_position_elapsed() || is_last => {
                 Ok(ReplicationAction::LogPosition)
             }

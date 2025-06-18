@@ -1,3 +1,4 @@
+use clap::ValueEnum;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{
     AddTablesStatement, AlterReadysetStatement, AlterTableStatement, CacheInner,
@@ -79,7 +80,7 @@ impl ParsingConfig {
 /// Subsystems can then turn this into a [`ParsingConfig`] and modify certain settings. For example,
 /// DDL should always log on mismatch, but parsing ad-hoc queries should not, and this way both code
 /// paths can use the same preset as a starting point.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ParsingPreset {
     /// Parse only with nom-sql
     OnlyNom,

@@ -18,7 +18,7 @@ use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_server::Builder;
 use readyset_server::NodeIndex;
 use readyset_sql::ast::{NonReplicatedRelation, Relation};
-use readyset_sql_parsing::parse_select;
+use readyset_sql_parsing::{parse_select, ParsingPreset};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
@@ -321,6 +321,7 @@ impl TestHandle {
             ..Default::default()
         };
         builder.set_persistence(persistence);
+        let parsing_preset = builder.parsing_preset;
         let telemetry_sender = builder.telemetry.clone();
         let (noria, shutdown_tx) = builder.start(Arc::clone(&authority)).await.unwrap();
 
@@ -339,7 +340,11 @@ impl TestHandle {
             controller_rx: None,
             replicator_tx: None,
         };
-        handle.replicator_tx = Some(handle.start_repl(config, telemetry_sender, true).await?);
+        handle.replicator_tx = Some(
+            handle
+                .start_repl(config, telemetry_sender, true, parsing_preset)
+                .await?,
+        );
 
         Ok((handle, shutdown_tx))
     }
@@ -363,6 +368,7 @@ impl TestHandle {
         config: Option<Config>,
         telemetry_sender: TelemetrySender,
         server_startup: bool,
+        parsing_preset: ParsingPreset,
     ) -> ReadySetResult<tokio::sync::mpsc::UnboundedSender<ReplicatorMessage>> {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let controller = ReadySetHandle::new(Arc::clone(&self.authority)).await;
@@ -408,6 +414,7 @@ impl TestHandle {
                 telemetry_sender,
                 server_startup,
                 false, // disable statement logging in tests
+                parsing_preset,
             )
             .await;
             error!(%error, "Error in replicator");
@@ -611,9 +618,15 @@ async fn replication_test_inner(url: &str) {
     check_results!(ctx, "noria_view", "Disconnected", TESTS[TESTS.len() - 1].2);
 
     // Resume replication
-    ctx.start_repl(None, TelemetrySender::new_no_op(), false)
-        .await
-        .unwrap();
+    ctx.start_repl(
+        None,
+        TelemetrySender::new_no_op(),
+        false,
+        // TODO(mvzink): Does this need to be configurable by (these) tests?
+        ParsingPreset::BothPanicOnMismatch,
+    )
+    .await
+    .unwrap();
     check_results!(ctx, "noria_view", "Reconnect", RECONNECT_RESULT);
 
     client.stop().await;

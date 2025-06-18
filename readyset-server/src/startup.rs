@@ -59,6 +59,7 @@ use health_reporter::{HealthReporter, State as ServerState};
 use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::{Authority, WorkerSchedulingConfig};
 use readyset_client::{ControllerDescriptor, WorkerDescriptor};
+use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
@@ -150,6 +151,7 @@ fn start_controller(
     controller_rx: Receiver<ControllerRequest>,
     abort_on_task_failure: bool,
     domain_scheduling_config: WorkerSchedulingConfig,
+    parsing_preset: ParsingPreset,
     leader_eligible: bool,
     telemetry_sender: TelemetrySender,
     shutdown_rx: ShutdownReceiver,
@@ -176,6 +178,7 @@ fn start_controller(
         worker_descriptor,
         telemetry_sender,
         config,
+        parsing_preset,
         shutdown_rx,
     );
 
@@ -261,6 +264,7 @@ pub(crate) async fn start_instance_inner(
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
     domain_scheduling_config: WorkerSchedulingConfig,
+    parsing_preset: ParsingPreset,
     leader_eligible: bool,
     readers: Readers,
     reader_addr: SocketAddr,
@@ -323,6 +327,7 @@ pub(crate) async fn start_instance_inner(
         controller_rx,
         abort_on_task_failure,
         domain_scheduling_config,
+        parsing_preset,
         leader_eligible,
         telemetry_sender.clone(),
         shutdown_rx,
@@ -350,6 +355,7 @@ pub(super) async fn start_instance(
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
     domain_scheduling_config: WorkerSchedulingConfig,
+    parsing_preset: ParsingPreset,
     leader_eligible: bool,
     telemetry_sender: TelemetrySender,
     wait_for_failpoint: bool,
@@ -382,6 +388,7 @@ pub(super) async fn start_instance(
         memory_limit,
         memory_check_frequency,
         domain_scheduling_config,
+        parsing_preset,
         leader_eligible,
         readers,
         reader_addr,

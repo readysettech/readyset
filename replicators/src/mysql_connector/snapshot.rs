@@ -21,6 +21,7 @@ use readyset_data::{DfValue, Dialect};
 use readyset_errors::{internal_err, ReadySetResult};
 use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_sql::DialectDisplay;
+use readyset_sql_parsing::ParsingPreset;
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use rust_decimal::Decimal;
@@ -61,6 +62,8 @@ pub(crate) struct MySqlReplicator<'a> {
     pub(crate) pool: mysql::Pool,
     /// Filters out the desired tables to snapshot and replicate
     pub(crate) table_filter: &'a mut TableFilter,
+    /// Base parsing config to use
+    pub(crate) parsing_preset: ParsingPreset,
 }
 
 /// Get the list of tables defined in the database
@@ -213,6 +216,7 @@ impl MySqlReplicator<'_> {
         }
 
         let mut bad_tables = Vec::new();
+        let parsing_config = self.parsing_preset.into_config();
         // Process `CREATE TABLE` statements
         for (db, table) in replicated_tables.iter() {
             let res = create_for_table(&mut tx, db, table, TableKind::BaseTable)
@@ -226,9 +230,10 @@ impl MySqlReplicator<'_> {
                         readyset_sql::Dialect::MySQL,
                     );
 
-                    future::ready(ChangeList::from_strings(
+                    future::ready(ChangeList::from_strings_with_config(
                         vec![create_table],
                         Dialect::DEFAULT_MYSQL,
+                        parsing_config,
                     ))
                 })
                 .and_then(|changelist| {
@@ -280,9 +285,10 @@ impl MySqlReplicator<'_> {
                         create_view.clone(),
                         readyset_sql::Dialect::MySQL,
                     );
-                    future::ready(ChangeList::from_strings(
+                    future::ready(ChangeList::from_strings_with_config(
                         vec![create_view],
                         Dialect::DEFAULT_MYSQL,
+                        parsing_config,
                     ))
                 })
                 .and_then(|changelist| {

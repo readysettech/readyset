@@ -48,6 +48,7 @@ use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use readyset_server::PrometheusBuilder;
 use readyset_sql::ast::Relation;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 #[cfg(feature = "failure_injection")]
@@ -397,6 +398,16 @@ pub struct Options {
     /// ReadySet will not accept TLS connections if there is no identity file specified.
     #[arg(long, env = "READYSET_IDENTITY_FILE")]
     readyset_identity_file: Option<String>,
+
+    /// Parsing mode that determines which parser(s) to use and how to handle conflicts.
+    #[arg(
+        long,
+        env = "PARSING_PRESET",
+        value_enum,
+        default_value = "both-prefer-nom",
+        hide = true
+    )]
+    parsing_preset: ParsingPreset,
 
     /// Password for the pkcs12 identity file used by ReadySet for establishing TLS connections as
     /// the server.
@@ -1241,6 +1252,7 @@ where
                 .allow_cache_ddl(allow_cache_ddl)
                 .require_authentication(!options.allow_unauthenticated_connections)
                 .dialect(self.parse_dialect)
+                .parsing_preset(options.parsing_preset)
                 .query_log_sender(qlog_sender.clone())
                 .query_log_mode(Some(options.query_log_mode))
                 .unsupported_set_mode(options.unsupported_set_mode)

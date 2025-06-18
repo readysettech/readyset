@@ -280,6 +280,7 @@ pub struct BackendBuilder {
     client_addr: SocketAddr,
     slowlog: bool,
     dialect: Dialect,
+    parsing_preset: ParsingPreset,
     users: HashMap<String, String>,
     require_authentication: bool,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
@@ -301,6 +302,7 @@ impl Default for BackendBuilder {
             client_addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0)),
             slowlog: false,
             dialect: Dialect::MySQL,
+            parsing_preset: ParsingPreset::for_prod(),
             users: Default::default(),
             require_authentication: true,
             query_log_sender: None,
@@ -363,6 +365,7 @@ impl BackendBuilder {
             settings: BackendSettings {
                 slowlog: self.slowlog,
                 dialect: self.dialect,
+                parsing_preset: self.parsing_preset,
                 require_authentication: self.require_authentication,
                 unsupported_set_mode: self.unsupported_set_mode,
                 migration_mode: self.migration_mode,
@@ -393,6 +396,11 @@ impl BackendBuilder {
 
     pub fn dialect(mut self, dialect: Dialect) -> Self {
         self.dialect = dialect;
+        self
+    }
+
+    pub fn parsing_preset(mut self, parsing_preset: ParsingPreset) -> Self {
+        self.parsing_preset = parsing_preset;
         self
     }
 
@@ -609,6 +617,8 @@ where
 struct BackendSettings {
     /// SQL dialect to use when parsing queries from clients
     dialect: Dialect,
+    /// Parsing mode that determines which parser(s) to use and how to handle conflicts
+    parsing_preset: ParsingPreset,
     slowlog: bool,
     require_authentication: bool,
     /// How to behave when receiving unsupported `SET` statements
@@ -3191,7 +3201,7 @@ where
     fn parse_query(&mut self, query: &str) -> ReadySetResult<SqlQuery> {
         trace!(%query, "Parsing query");
         match readyset_sql_parsing::parse_query_with_config(
-            ParsingPreset::for_prod(),
+            self.settings.parsing_preset,
             self.settings.dialect,
             query,
         ) {

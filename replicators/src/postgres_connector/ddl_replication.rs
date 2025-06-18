@@ -51,7 +51,7 @@ use readyset_sql::ast::{
 use readyset_sql::Dialect;
 use readyset_sql_parsing::{
     parse_alter_table_with_config, parse_create_view_with_config,
-    parse_key_specification_with_config, parse_sql_type_with_config, ParsingPreset,
+    parse_key_specification_with_config, parse_sql_type_with_config, ParsingConfig,
 };
 use serde::Deserialize;
 use tokio_postgres as pgsql;
@@ -142,7 +142,7 @@ pub(crate) struct DdlEvent {
 impl DdlEvent {
     /// Convert this [`DdlEvent`] into a SQL DDL statement that can be sent to ReadySet directly
     /// (using the ReadySet-native SQL dialect, not the postgresql dialect!)
-    pub(crate) fn try_into_change(self) -> ReadySetResult<Change> {
+    pub(crate) fn try_into_change(self, parsing_config: ParsingConfig) -> ReadySetResult<Change> {
         match self.data {
             DdlEventData::CreateTable {
                 oid,
@@ -169,7 +169,7 @@ impl DdlEvent {
                                 table: Some(table.clone()),
                             },
                             sql_type: parse_sql_type_with_config(
-                                ParsingPreset::for_prod(),
+                                parsing_config,
                                 Dialect::PostgreSQL,
                                 col.column_type,
                             )?,
@@ -194,7 +194,7 @@ impl DdlEvent {
                                         .into_iter()
                                         .map(|c| {
                                             parse_key_specification_with_config(
-                                                ParsingPreset::for_prod(),
+                                                parsing_config,
                                                 Dialect::PostgreSQL,
                                                 c.definition,
                                             )
@@ -232,7 +232,7 @@ impl DdlEvent {
             }
             DdlEventData::AlterTable { name, statement } => {
                 let stmt = match parse_alter_table_with_config(
-                    ParsingPreset::for_prod(),
+                    parsing_config,
                     Dialect::PostgreSQL,
                     statement,
                 ) {
@@ -256,13 +256,9 @@ impl DdlEvent {
 
                 Ok(Change::AlterTable(stmt))
             }
-            DdlEventData::CreateView(stmt) => {
-                Ok(Change::CreateView(parse_create_view_with_config(
-                    ParsingPreset::for_prod(),
-                    Dialect::PostgreSQL,
-                    stmt,
-                )?))
-            }
+            DdlEventData::CreateView(stmt) => Ok(Change::CreateView(
+                parse_create_view_with_config(parsing_config, Dialect::PostgreSQL, stmt)?,
+            )),
             DdlEventData::Drop(name) => Ok(Change::Drop {
                 name: name.into(),
                 if_exists: false,

@@ -6,6 +6,7 @@ authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
+clap = { workspace = true }
 nom-sql = { path = "../nom-sql" }
 paste = { workspace = true }
 pretty_assertions = { workspace = true }

@@ -13,6 +13,7 @@ use readyset_errors::{
     invariant, invariant_eq, set_failpoint_return_err, ReadySetError, ReadySetResult,
 };
 use readyset_sql::ast::Relation;
+use readyset_sql_parsing::{ParsingConfig, ParsingPreset};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use readyset_util::select;
@@ -69,6 +70,8 @@ pub struct PostgresWalConnector {
     had_table_error: bool,
     /// Table Filter
     table_filter: TableFilter,
+    /// Parsing mode that determines which parser(s) to use and how to handle conflicts
+    parsing_config: ParsingConfig,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -128,6 +131,7 @@ impl PostgresWalConnector {
         full_resnapshot: bool,
         controller: ReadySetHandle,
         table_filter: TableFilter,
+        parsing_preset: ParsingPreset,
     ) -> ReadySetResult<Self> {
         if !config.disable_setup_ddl_replication {
             setup_ddl_replication(pg_config.clone(), tls_connector.clone()).await?;
@@ -164,6 +168,7 @@ impl PostgresWalConnector {
             status_update_interval,
             had_table_error: false,
             table_filter,
+            parsing_config: parsing_preset.into_config().log_on_mismatch(true),
         };
 
         if full_resnapshot || next_position.is_none() {
@@ -789,7 +794,7 @@ impl Connector for PostgresWalConnector {
                         return Ok((
                             vec![ReplicationAction::DdlChange {
                                 schema: ddl_event.schema().to_string(),
-                                changes: vec![ddl_event.try_into_change()?],
+                                changes: vec![ddl_event.try_into_change(self.parsing_config)?],
                             }],
                             cur_pos.with_lsn(lsn).into(),
                         ));
