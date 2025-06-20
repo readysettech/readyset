@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::{fmt, str};
 
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::ChangeList;
-use readyset_client::ViewCreateRequest;
+use readyset_client::{TableStatus, ViewCreateRequest};
 use readyset_data::Dialect;
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{Relation, SelectStatement};
@@ -182,12 +183,15 @@ impl Recipe {
     /// state accordingly.
     /// All the MIR graph changes are added to the [`Migration`], but it's up to the caller
     /// to call [`Migration::commit`] to also update the dataflow state.
+    ///
+    /// Collects any table status changes in the table_statuses map, if provided.
     pub(crate) fn activate(
         &mut self,
         mig: &mut Migration<'_>,
         changelist: ChangeList,
+        table_statuses: Option<&mut HashMap<Relation, TableStatus>>,
     ) -> ReadySetResult<()> {
-        self.inc.apply_changelist(changelist, mig)
+        self.inc.apply_changelist(changelist, mig, table_statuses)
     }
 
     /// Helper method to reparent a recipe. This is needed for some of t

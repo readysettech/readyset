@@ -111,7 +111,7 @@ pub struct Leader {
     /// The currently known state for all tables.
     table_statuses: TableStatusState,
     /// Any TableStatus updates sent here will update this controller's state machine.
-    _table_status_tx: UnboundedSender<(Relation, TableStatus)>,
+    table_status_tx: UnboundedSender<(Relation, TableStatus)>,
 }
 
 impl Leader {
@@ -618,7 +618,7 @@ impl Leader {
                     let reader = self.dataflow_state_handle.read().await;
                     reader.clone()
                 };
-                state_copy.extend_recipe(body, true).await?;
+                state_copy.extend_recipe(body, true, None).await?;
                 return_serialized!(ExtendRecipeResult::Done);
             }
             (&Method::GET | &Method::POST, "/adapter_rewrite_params") => {
@@ -660,10 +660,26 @@ impl Leader {
                     // Start the migration running in the background
                     let dataflow_state_handle = Arc::clone(&self.dataflow_state_handle);
                     let authority = Arc::clone(authority);
+                    let table_status_tx = self.table_status_tx.clone();
                     let mut migration = tokio::spawn(async move {
                         let mut writer = dataflow_state_handle.write().await;
-                        writer.as_mut().extend_recipe(body, false).await?;
+                        let mut table_statuses = HashMap::new();
+                        writer
+                            .as_mut()
+                            .extend_recipe(body, false, Some(&mut table_statuses))
+                            .await?;
                         dataflow_state_handle.commit(writer, &authority).await?;
+                        // We've committed.  Send the collected table statuses to the controller.
+                        for (table, status) in table_statuses {
+                            if let Err(err) = table_status_tx.send((table.clone(), status.clone()))
+                            {
+                                error!(
+                                    error = %err,
+                                    table = %table.display_unquoted(),
+                                    "Failed to notify controller of {status} status",
+                                );
+                            }
+                        }
                         Ok(())
                     })
                     .fuse();
@@ -1085,7 +1101,7 @@ impl Leader {
             replicator_tx,
             controller_tx,
             table_statuses,
-            _table_status_tx: table_status_tx,
+            table_status_tx,
         }
     }
 }

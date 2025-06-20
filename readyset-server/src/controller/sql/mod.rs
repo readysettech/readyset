@@ -9,6 +9,7 @@ use petgraph::graph::NodeIndex;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
 use readyset_client::recipe::ChangeList;
+use readyset_client::TableStatus;
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
 use readyset_errors::{
@@ -229,10 +230,14 @@ impl SqlIncorporator {
         })
     }
 
+    /// Apply the change list to the current migration.
+    ///
+    /// Collects any table status changes in the table_statuses map, if provided.
     pub(crate) fn apply_changelist(
         &mut self,
         changelist: ChangeList,
         mig: &mut Migration<'_>,
+        mut _table_statuses: Option<&mut HashMap<Relation, TableStatus>>,
     ) -> ReadySetResult<()> {
         debug!(
             num_queries = self.registry.len(),

@@ -47,8 +47,8 @@ use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::recipe::{CacheExpr, ExtendRecipeSpec};
 use readyset_client::{
-    PersistencePoint, SingleKeyEviction, TableReplicationStatus, ViewCreateRequest, ViewFilter,
-    ViewRequest, ViewSchema,
+    PersistencePoint, SingleKeyEviction, TableReplicationStatus, TableStatus, ViewCreateRequest,
+    ViewFilter, ViewRequest, ViewSchema,
 };
 use readyset_data::{DfValue, Dialect};
 use readyset_errors::{
@@ -1599,10 +1599,14 @@ impl DfState {
             .map(|(di, _)| di)
     }
 
+    /// Apply the change list to this state.
+    ///
+    /// Collects any table status changes in the table_statuses map, if provided.
     pub(super) async fn apply_recipe(
         &mut self,
         changelist: ChangeList,
         dry_run: bool,
+        table_statuses: Option<&mut HashMap<Relation, TableStatus>>,
     ) -> Result<(), ReadySetError> {
         // I hate this, but there's no way around for now, as migrations
         // are super entangled with the recipe and the graph.
@@ -1610,7 +1614,7 @@ impl DfState {
 
         let r = self
             .migrate(dry_run, changelist.dialect, |mig| {
-                new.activate(mig, changelist)
+                new.activate(mig, changelist, table_statuses)
             })
             .await;
 
@@ -1629,10 +1633,14 @@ impl DfState {
         }
     }
 
+    /// Extend our state with a recipe.
+    ///
+    /// Collects any table status changes in the table_statuses map, if provided.
     pub(super) async fn extend_recipe(
         &mut self,
         recipe_spec: ExtendRecipeSpec<'_>,
         dry_run: bool,
+        table_statuses: Option<&mut HashMap<Relation, TableStatus>>,
     ) -> Result<(), ReadySetError> {
         set_failpoint!(failpoints::EXTEND_RECIPE);
         // Drop recipes from the replicator that we have already processed.
@@ -1646,7 +1654,10 @@ impl DfState {
             }
         }
 
-        match self.apply_recipe(recipe_spec.changes, dry_run).await {
+        match self
+            .apply_recipe(recipe_spec.changes, dry_run, table_statuses)
+            .await
+        {
             Ok(x) => {
                 if let Some(offset) = &recipe_spec.replication_offset {
                     debug!(%offset, "Updating schema replication offset");
@@ -1675,7 +1686,7 @@ impl DfState {
             Dialect::DEFAULT_MYSQL,
         );
 
-        if let Err(error) = self.apply_recipe(changelist, false).await {
+        if let Err(error) = self.apply_recipe(changelist, false, None).await {
             error!(%error, "Failed to apply recipe");
             return Err(error);
         }
@@ -1696,6 +1707,7 @@ impl DfState {
         self.apply_recipe(
             ChangeList::from_changes(changes, Dialect::DEFAULT_MYSQL),
             false,
+            None,
         )
         .await
     }

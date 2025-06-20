@@ -838,7 +838,7 @@ impl Controller {
                             let changelist = changelist.clone();
                             let mut writer = inner.dataflow_state_handle.write().await;
                             let ds = writer.as_mut();
-                            ds.extend_recipe(changelist.into(), false).await?;
+                            ds.extend_recipe(changelist.into(), false, None).await?;
                             ReadySetResult::Ok(writer)
                         },
                         retries: 5,
