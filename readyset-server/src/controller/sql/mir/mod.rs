@@ -2633,7 +2633,9 @@ impl SqlToMirConverter {
                 let is_range_query = view_key.index_type == IndexType::BTreeMap;
 
                 let are_post_lookups_required = query_graph.collapsed_where_in
-                    || (order_by.is_some() && !is_topk_query)
+                    // should never find a topk query if topk feature is disabled
+                    // because the adapter checks the topk feature and appropriates the limit
+                    // if it's disabled
                     || (is_topk_query && !self.config.allow_topk)
                     || is_range_query;
 
@@ -2651,11 +2653,6 @@ impl SqlToMirConverter {
                     //   Original: SELECT sum(amount) FROM orders WHERE id IN (1, 2, 3)
                     //   Rewritten: SELECT sum(amount) FROM orders WHERE id = ? (executed 3 times)
                     //   Solution: Sum the results from each execution via post-lookup aggregation
-                    //
-                    // Another scenario is when aggregated results are used in an order by clause
-                    // without a topk node (either because the query didn't have a limit or the
-                    // feature wasn't enabled). In this case, we also need post-lookup aggregation
-                    // for correctness.
                     //
                     // And obviously if the query is a range query, we need post-lookup aggregation
                     // since we can't precompute aggregations over different ranges.
@@ -2935,6 +2932,47 @@ mod tests {
     test_topk_scenario! {
         name: topk_without_where_in,
         query: "SELECT avg(topk_test.a) FROM topk_test WHERE topk_test.b = 5 GROUP BY topk_test.c ORDER BY topk_test.b LIMIT 10",
+        query_name: "q2",
+        collapsed_where_in: false,
+        expect_leaf: {
+            aggregates: false,
+            order_by: true,
+            limit: false
+        },
+        expect_topk_node: true
+    }
+
+    test_topk_scenario! {
+        name: avg_with_no_limit,
+        query: "SELECT avg(topk_test.a) FROM topk_test WHERE topk_test.b = 5 GROUP BY topk_test.c ORDER BY topk_test.b",
+        query_name: "q3",
+        collapsed_where_in: false,
+        expect_leaf: {
+            // aggregate should be handled by the agg node, not the leaf
+            // in post-lookups
+            aggregates: false,
+            order_by: true,
+            limit: false
+        },
+        expect_topk_node: false
+    }
+
+    test_topk_scenario! {
+        name: use_agg_alias_in_order_by,
+        query: "SELECT avg(topk_test.a) as avg_a FROM topk_test WHERE topk_test.b = 5 GROUP BY topk_test.c ORDER BY avg_a",
+        query_name: "q3",
+        collapsed_where_in: false,
+        expect_leaf: {
+            aggregates: false,
+            order_by: true,
+            limit: false
+        },
+        expect_topk_node: false
+    }
+
+    test_topk_scenario! {
+        name: use_agg_alias_in_topk,
+        query: "SELECT avg(topk_test.a) as avg_a FROM topk_test WHERE topk_test.b = 5 GROUP BY topk_test.c ORDER BY avg_a LIMIT 10",
         query_name: "q2",
         collapsed_where_in: false,
         expect_leaf: {
