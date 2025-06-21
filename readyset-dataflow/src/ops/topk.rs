@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::convert::TryInto;
 
 use dataflow_state::PointKey;
@@ -140,8 +140,6 @@ impl TopK {
         let group_start_index = current.len().saturating_sub(self.k);
 
         if original_group_len >= self.k && current.len() < self.k {
-            let diff = self.k - current.len();
-
             // there used to be k things in the group, now there are fewer than k.
             match self.lookup(
                 *self.src,
@@ -157,18 +155,17 @@ impl TopK {
                     )
                 }
                 IngredientLookupResult::Records(rs) => {
+                    let old_current = current.drain().map(|r| r.row).collect::<HashSet<_>>();
+
                     let mut rs = rs.collect::<Result<Vec<_>, _>>()?;
                     rs.sort_unstable_by(|a, b| self.order.cmp(a.as_ref(), b.as_ref()).reverse());
-                    current.extend(
-                        rs.into_iter()
-                            .map(|row| CurrentRecord {
-                                row,
-                                order: &self.order,
-                                is_new: true,
-                            })
-                            .skip(current.len())
-                            .take(diff),
-                    );
+
+                    current.extend(rs.into_iter().take(self.k).map(|row| CurrentRecord {
+                        is_new: !old_current.contains(&row),
+                        row,
+                        order: &self.order,
+                    }));
+
                     lookup = Some(Lookup {
                         on: *self.src,
                         cols: self.group_by.clone(),
