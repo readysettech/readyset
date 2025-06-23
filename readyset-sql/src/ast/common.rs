@@ -159,16 +159,6 @@ impl fmt::Display for NullsDistinct {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub enum TableKeyType {
-    PrimaryKey,
-    UniqueKey,
-    FulltextKey,
-    Key,
-    ForeignKey,
-    CheckConstraint,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum TableKey {
     PrimaryKey {
         constraint_name: Option<SqlIdentifier>,
