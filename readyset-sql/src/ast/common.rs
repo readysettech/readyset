@@ -251,7 +251,7 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 index_type_display: _index_type_display,
             } => Ok(Self::FulltextKey {
                 index_name: opt_index_name.into_dialect(dialect),
-                columns: columns.into_dialect(dialect),
+                columns: columns.try_into_dialect(dialect)?,
             }),
             FulltextOrSpatial {
                 fulltext: false, ..
@@ -263,7 +263,7 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 display_as_key: _display_as_key,
             } => Ok(Self::Key {
                 index_name: name.into_dialect(dialect),
-                columns: columns.into_dialect(dialect),
+                columns: columns.try_into_dialect(dialect)?,
                 index_type: index_type.into_dialect(dialect),
             }),
             PrimaryKey {
@@ -277,7 +277,7 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
             } => Ok(Self::PrimaryKey {
                 constraint_name: name.into_dialect(dialect),
                 index_name: index_name.into_dialect(dialect),
-                columns: columns.into_dialect(dialect),
+                columns: columns.try_into_dialect(dialect)?,
                 constraint_timing: characteristics.map(Into::into),
             }),
             Unique {
@@ -293,7 +293,7 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
             } => Ok(Self::UniqueKey {
                 constraint_name: name.into_dialect(dialect),
                 index_name: index_name.into_dialect(dialect),
-                columns: columns.into_dialect(dialect),
+                columns: columns.try_into_dialect(dialect)?,
                 index_type: index_type.into_dialect(dialect),
                 constraint_timing: characteristics.map(Into::into),
                 nulls_distinct: match nulls_distinct {

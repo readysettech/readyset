@@ -6135,7 +6135,7 @@ dependencies = [
 [[package]]
 name = "sqlparser"
 version = "0.57.0"
-source = "git+https://github.com/apache/datafusion-sqlparser-rs?rev=7865de015f8a45d9545dc7ca0659f37a0c3f7496#7865de015f8a45d9545dc7ca0659f37a0c3f7496"
+source = "git+https://github.com/apache/datafusion-sqlparser-rs?rev=5d63663bc6cd78d63d0cb2581ffc71a1dee3559d#5d63663bc6cd78d63d0cb2581ffc71a1dee3559d"
 dependencies = [
  "log",
  "recursive",

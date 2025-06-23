@@ -585,3 +585,55 @@ fn test_multiple_statements() {
     check_parse_fails!(Dialect::MySQL, r#"SELECT 1; SELECT 2;"#, "EOF");
     check_parse_fails!(Dialect::PostgreSQL, r#"SELECT 1; SELECT 2;"#, "EOF");
 }
+
+#[test]
+fn test_key_part_prefix() {
+    check_parse_mysql!(
+        r#"CREATE TABLE comments (
+            id INT,
+            comment TEXT,
+            FULLTEXT INDEX index_comments_on_comment_prefix (comment(50))
+        );"#
+    );
+    check_parse_mysql!(
+        r#"ALTER TABLE comments ADD FULLTEXT INDEX index_comments_on_comment_prefix (comment(50));"#
+    ); // nom-sql doesn't parse `CREATE INDEX`
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        r#"CREATE INDEX idx_jsonblob_id ON blobs (CAST(jsonblob->>'id' AS INTEGER));"#,
+        "nom-sql: failed to parse query"
+    );
+}
+
+#[test]
+fn test_key_part_expression() {
+    check_parse_fails!(
+        Dialect::MySQL,
+        r#"CREATE TABLE blobs (
+            jsonblob JSON,
+            INDEX index_blobs_on_id ((CAST(jsonblob->>'$.id' AS UNSIGNED)))
+        );"#,
+        "non-column expression"
+    );
+    // We should throw away the unsupported part and succeed overall
+    match check_parse_mysql!(
+        r#"ALTER TABLE blobs ADD INDEX index_blobs_on_id ((CAST(jsonblob->>"$.id" AS UNSIGNED)));"#
+    ) {
+        SqlQuery::AlterTable(AlterTableStatement {
+            table, definitions, ..
+        }) => {
+            assert_eq!(table.name, "blobs");
+            assert!(
+                definitions.is_err(),
+                "Expected unsupported definitions: {definitions:?}"
+            )
+        }
+        stmt => panic!("expected AlterTableStatement, got {stmt:?}"),
+    };
+    // nom-sql doesn't parse `CREATE INDEX`
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        r#"CREATE INDEX idx_jsonblob_id ON blobs (CAST(jsonblob->>'id' AS INTEGER));"#,
+        "nom-sql: failed to parse query"
+    );
+}

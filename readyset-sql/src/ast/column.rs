@@ -89,6 +89,57 @@ impl FromDialect<sqlparser::ast::ViewColumnDef> for Column {
     }
 }
 
+impl TryFromDialect<sqlparser::ast::IndexColumn> for Column {
+    /// Convert an arbitrary key part expression into a simple column reference.
+    ///
+    /// - `column` => `column`
+    /// - `table.column` => `table.column`
+    /// - `column(10)` => `column`
+    /// - `(expr)` => unsupported
+    fn try_from_dialect(
+        value: sqlparser::ast::IndexColumn,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        let sqlparser::ast::IndexColumn {
+            column: sqlparser::ast::OrderByExpr { expr, .. },
+            ..
+        } = value;
+        match expr {
+            sqlparser::ast::Expr::Identifier(ident) => Ok(ident.into_dialect(dialect)),
+            sqlparser::ast::Expr::CompoundIdentifier(idents) => Ok(idents.into_dialect(dialect)),
+            sqlparser::ast::Expr::Function(sqlparser::ast::Function {
+                name,
+                args:
+                    ref arglist @ sqlparser::ast::FunctionArguments::List(
+                        sqlparser::ast::FunctionArgumentList { ref args, .. },
+                    ),
+                ..
+            }) => {
+                if args.len() == 1
+                    && matches!(
+                        args[0],
+                        sqlparser::ast::FunctionArg::Unnamed(
+                            sqlparser::ast::FunctionArgExpr::Expr(sqlparser::ast::Expr::Value(
+                                sqlparser::ast::ValueWithSpan {
+                                    value: sqlparser::ast::Value::Number(..),
+                                    ..
+                                }
+                            ))
+                        )
+                    )
+                {
+                    Ok(name.into_dialect(dialect))
+                } else {
+                    unsupported!(
+                        "function expression used as index column wasn't column prefix: {name}({arglist})"
+                    )
+                }
+            }
+            _ => unsupported!("non-column expression used as index column: {expr}"),
+        }
+    }
+}
+
 impl TryFromDialect<Vec<sqlparser::ast::Assignment>> for Vec<(Column, Expr)> {
     fn try_from_dialect(
         assignments: Vec<sqlparser::ast::Assignment>,
