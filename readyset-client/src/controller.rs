@@ -973,6 +973,11 @@ impl ReadySetHandle {
         evict_single(eviction_request: Option<SingleKeyEviction>) -> Option<SingleKeyEviction>
     );
 
+    simple_request!(
+        /// List all replay paths in the graph
+        replay_paths() -> String
+    );
+
     #[cfg(feature = "failure_injection")]
     simple_request!(
         /// Set a failpoint with provided name and action

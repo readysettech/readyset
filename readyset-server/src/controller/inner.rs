@@ -618,6 +618,10 @@ impl Leader {
                 let supports = ds.recipe.adapter_rewrite_params();
                 return_serialized!(supports)
             }
+            (&Method::GET | &Method::POST, "/replay_paths") => {
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(ds.replay_paths_as_string())
+            }
             (&Method::POST, "/evict_single") => {
                 let body = if body.is_empty() || body.as_ref() == [0] {
                     None
