@@ -36,6 +36,7 @@ strum = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 url = { workspace = true }
 html-escape = { workspace = true }
+enum-kinds = { workspace = true }
 
 # need features
 petgraph = { workspace = true, features = ["serde-1"] }

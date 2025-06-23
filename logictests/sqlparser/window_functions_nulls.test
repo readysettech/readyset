@@ -1,0 +1,538 @@
+statement ok
+CREATE TABLE t (a INT, b INT, c FLOAT, d INT PRIMARY KEY);
+
+statement ok
+INSERT INTO t VALUES (1,1,1.0,1), (1,null,null,2), (1,2,2,3), (2,2,3.0,4), (null,3,4.0,5);
+
+# nulls in partition by
+
+query II rowsort
+SELECT d, count(b) OVER (PARTITION BY a) FROM t;
+----
+1
+2
+2
+2
+3
+2
+4
+1
+5
+1
+
+# nulls in count column should return zero
+query II rowsort
+SELECT d, count(b) OVER (PARTITION BY a ORDER BY b NULLS FIRST) FROM t;
+----
+1
+1
+2
+0
+3
+2
+4
+1
+5
+1
+
+query II rowsort
+select d, min(b) over (partition by a) from t;
+----
+1
+1
+2
+1
+3
+1
+4
+2
+5
+3
+
+query II rowsort
+select d, max(b) over (partition by a) from t;
+----
+1
+2
+2
+2
+3
+2
+4
+2
+5
+3
+
+query II rowsort
+select d, sum(b) over (partition by a) from t;
+----
+1
+3
+2
+3
+3
+3
+4
+2
+5
+3
+
+query IR rowsort
+select d, avg(b) over (partition by a) from t;
+----
+1
+1.5
+2
+1.5
+3
+1.5
+4
+2.0
+5
+3.0
+
+# nulls in order by (mysql defaults: asc > `nulls first`, desc > `nulls last`)
+
+# count * doesn't care about the values
+query II rowsort
+SELECT d, count(*) OVER (PARTITION BY a ORDER BY b NULLS FIRST) FROM t;
+----
+1
+2
+2
+1
+3
+3
+4
+1
+5
+1
+
+# nulls as arguments
+
+# mysql defaults to nulls first on asc
+query II rowsort
+select d, sum(b) over (partition by a order by b NULLS FIRST) from t;
+----
+1
+1
+2
+NULL
+3
+3
+4
+2
+5
+3
+
+query II rowsort
+select d, sum(b) over (partition by a order by b desc NULLS LAST) from t;
+----
+1
+3
+2
+3
+3
+2
+4
+2
+5
+3
+
+query IR rowsort
+select d, avg(b) over (partition by a order by b NULLS FIRST) from t;
+----
+1
+1.0
+2
+NULL
+3
+1.5
+4
+2.0
+5
+3.0
+
+query IR rowsort
+select d, avg(b) over (partition by a order by b desc NULLS LAST) from t;
+----
+1
+1.5
+2
+1.5
+3
+2.0
+4
+2.0
+5
+3.0
+
+
+query II rowsort
+select d, min(b) over (partition by a order by b NULLS FIRST) from t;
+----
+1
+1
+2
+NULL
+3
+1
+4
+2
+5
+3
+
+query II rowsort
+select d, min(b) over (partition by a order by b desc NULLS LAST) from t;
+----
+1
+1
+2
+1
+3
+2
+4
+2
+5
+3
+
+query II rowsort
+select d, max(b) over (partition by a order by b NULLS FIRST) from t;
+----
+1
+1
+2
+NULL
+3
+2
+4
+2
+5
+3
+
+query II rowsort
+select d, max(b) over (partition by a order by b desc NULLS LAST) from t;
+----
+1
+2
+2
+2
+3
+2
+4
+2
+5
+3
+
+query II rowsort
+select d, rank() over (partition by a order by b NULLS FIRST) from t;
+----
+1
+2
+2
+1
+3
+3
+4
+1
+5
+1
+
+query II rowsort
+select d, dense_rank() over (partition by a order by b NULLS FIRST) from t;
+----
+1
+2
+2
+1
+3
+3
+4
+1
+5
+1
+
+query II rowsort
+select d, row_number() over (partition by a order by b NULLS FIRST) from t;
+----
+1
+2
+2
+1
+3
+3
+4
+1
+5
+1
+
+# Edge case: All NULL partition key
+statement ok
+CREATE TABLE t_nullpart (a INT, b INT);
+
+statement ok
+INSERT INTO t_nullpart VALUES (NULL, 1), (NULL, 2);
+
+query II rowsort
+SELECT a, sum(b) OVER (PARTITION BY a) FROM t_nullpart;
+----
+NULL
+3
+NULL
+3
+
+# Edge case: All NULL ORDER BY
+statement ok
+CREATE TABLE t_nullorder (a INT, b INT);
+
+statement ok
+INSERT INTO t_nullorder VALUES (1, NULL), (2, NULL);
+
+query II rowsort
+SELECT a, row_number() OVER (ORDER BY b NULLS FIRST) FROM t_nullorder;
+----
+1
+1
+2
+2
+
+# Edge case: All NULL argument
+statement ok
+CREATE TABLE t_nullarg (a INT, b INT);
+
+statement ok
+INSERT INTO t_nullarg VALUES (1, NULL), (2, NULL);
+
+query II rowsort
+SELECT a, sum(b) OVER (PARTITION BY a) FROM t_nullarg;
+----
+1
+NULL
+2
+NULL
+
+# Edge case: NULLs with DESC ordering
+statement ok
+CREATE TABLE t_descnull (a INT, b INT);
+
+statement ok
+INSERT INTO t_descnull VALUES (1, NULL), (1, 2), (1, 1);
+
+query II rowsort
+SELECT b, rank() OVER (ORDER BY b DESC NULLS LAST) FROM t_descnull;
+----
+1
+2
+2
+1
+NULL
+3
+
+statement ok
+CREATE TABLE nulls(a INT, b INT PRIMARY KEY);
+
+statement ok
+INSERT INTO nulls VALUES (NULL, 1), (NULL, 2), (NULL, 3), (1, 4);
+
+query I rowsort
+SELECT COUNT(*) OVER () FROM nulls;
+----
+4
+4
+4
+4
+
+query I rowsort
+SELECT COUNT(a) OVER () FROM nulls;
+----
+1
+1
+1
+1
+
+# literals
+
+query I rowsort
+SELECT COUNT(1) OVER () FROM nulls;
+----
+4
+4
+4
+4
+
+query I rowsort
+SELECT COUNT(NULL) OVER () FROM nulls;
+----
+0
+0
+0
+0
+
+statement ok
+DELETE FROM nulls WHERE b = 4;
+
+# just nulls
+
+query I rowsort
+SELECT COUNT(a) OVER () FROM nulls;
+----
+0
+0
+0
+
+query I rowsort
+SELECT SUM(a) OVER () FROM nulls;
+----
+NULL
+NULL
+NULL
+
+
+query I rowsort
+SELECT AVG(a) OVER () FROM nulls;
+----
+NULL
+NULL
+NULL
+
+query I rowsort
+SELECT COUNT(*) OVER (ORDER BY b NULLS FIRST) FROM nulls;
+----
+1
+2
+3
+
+query I rowsort
+SELECT COUNT(a) OVER (ORDER BY b NULLS FIRST) FROM nulls;
+----
+0
+0
+0
+
+# NULLS LAST window function tests
+
+query II rowsort
+SELECT d, count(b) OVER (PARTITION BY a ORDER BY b NULLS LAST) FROM t;
+----
+1
+1
+2
+2
+3
+2
+4
+1
+5
+1
+
+query II rowsort
+SELECT d, count(*) OVER (PARTITION BY a ORDER BY b NULLS LAST) FROM t;
+----
+1
+1
+2
+3
+3
+2
+4
+1
+5
+1
+
+query II rowsort
+select d, sum(b) over (partition by a order by b NULLS LAST) from t;
+----
+1
+1
+2
+3
+3
+3
+4
+2
+5
+3
+
+query IR rowsort
+select d, avg(b) over (partition by a order by b NULLS LAST) from t;
+----
+1
+1.0
+2
+1.5
+3
+1.5
+4
+2.0
+5
+3.0
+
+query II rowsort
+select d, min(b) over (partition by a order by b NULLS LAST) from t;
+----
+1
+1
+2
+1
+3
+1
+4
+2
+5
+3
+
+query II rowsort
+select d, max(b) over (partition by a order by b NULLS LAST) from t;
+----
+1
+1
+2
+2
+3
+2
+4
+2
+5
+3
+
+query II rowsort
+select d, rank() over (partition by a order by b NULLS LAST) from t;
+----
+1
+1
+2
+3
+3
+2
+4
+1
+5
+1
+
+query II rowsort
+select d, dense_rank() over (partition by a order by b NULLS LAST) from t;
+----
+1
+1
+2
+3
+3
+2
+4
+1
+5
+1
+
+query II rowsort
+select d, row_number() over (partition by a order by b NULLS LAST) from t;
+----
+1
+1
+2
+3
+3
+2
+4
+1
+5
+1

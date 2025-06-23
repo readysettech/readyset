@@ -14,6 +14,7 @@ use dataflow::node::Column as DfColumn;
 use dataflow::ops::grouped::concat::GroupConcat;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::project::Project;
+use dataflow::ops::window::{Window, WindowOperation, WindowOperationKind};
 use dataflow::ops::Side;
 use dataflow::{node, ops, Expr as DfExpr, PostLookupAggregates, ReaderProcessing};
 use itertools::Itertools;
@@ -26,9 +27,10 @@ use petgraph::graph::NodeIndex;
 use petgraph::Direction;
 use readyset_client::internal::{Index, IndexType};
 use readyset_client::ViewPlaceholder;
-use readyset_data::{Collation, DfType, Dialect};
+use readyset_data::{Collation, DfType, Dialect, SqlEngine};
 use readyset_errors::{
-    internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
+    internal, internal_err, invalid_query, invariant, invariant_eq, unsupported, ReadySetError,
+    ReadySetResult,
 };
 use readyset_sql::ast::{self, ColumnSpecification, Expr, NullOrder, OrderType, Relation};
 use readyset_sql::TryIntoDialect as _;
@@ -136,7 +138,28 @@ pub(super) fn mir_node_to_flow_parts(
                         mig,
                     )?)
                 }
-                MirNodeInner::Window { .. } => unsupported!("lowering window node to flow"),
+                MirNodeInner::Window {
+                    ref partition_by,
+                    ref group_by,
+                    ref order_by,
+                    ref function,
+                    ref args,
+                    ref output_column,
+                } => {
+                    invariant_eq!(ancestors.len(), 1);
+                    Some(make_window_node(
+                        graph,
+                        name,
+                        ancestors[0],
+                        output_column,
+                        group_by,
+                        partition_by,
+                        order_by,
+                        *function,
+                        args,
+                        mig,
+                    )?)
+                }
                 MirNodeInner::Filter { ref conditions } => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];
@@ -554,6 +577,165 @@ fn make_filter_node(
         ops::filter::Filter::new(parent_na.address(), filter_conditions),
     );
     Ok(DfNodeIndex::new(node))
+}
+
+fn make_window_node(
+    graph: &MirGraph,
+    name: Relation,
+    parent: MirNodeIndex,
+    output_column: &Column,
+    group_by: &[Column],
+    partition_by: &[Column],
+    order_by: &[(Column, OrderType, NullOrder)],
+    function: WindowOperationKind,
+    args: &[Column],
+    mig: &mut Migration<'_>,
+) -> ReadySetResult<DfNodeIndex> {
+    use WindowOperationKind::*;
+
+    let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
+        ReadySetError::MirNodeMustHaveDfNodeAssigned {
+            mir_node_index: parent.index(),
+        }
+    })?;
+
+    let output_col_name = &output_column.name;
+
+    let mut cols = mig.dataflow_state.ingredients[parent_na.address()]
+        .columns()
+        .to_vec();
+
+    let find_input_type = || -> ReadySetResult<DfType> {
+        if args.is_empty() {
+            return Err(ReadySetError::Internal(
+                "No args for window function".to_string(),
+            ));
+        }
+
+        let arg_col = &args[0];
+        let arg_col_id = graph.column_id_for_column(parent, arg_col)?;
+        let current_cols = mig.dataflow_state.ingredients[parent_na.address()].columns();
+        if arg_col_id >= current_cols.len() {
+            return Err(ReadySetError::Internal(
+                "Invalid column index for window function".to_string(),
+            ));
+        }
+
+        Ok(current_cols[arg_col_id].ty().clone())
+    };
+
+    let output_type = match function {
+        CountStar | Count | Rank | DenseRank | RowNumber => DfType::BigInt,
+        Avg => {
+            let ty = find_input_type()?;
+
+            match ty {
+                DfType::Int
+                | DfType::TinyInt
+                | DfType::SmallInt
+                | DfType::BigInt
+                | DfType::UnsignedInt
+                | DfType::UnsignedTinyInt
+                | DfType::UnsignedSmallInt
+                | DfType::UnsignedBigInt
+                | DfType::Numeric { .. } => DfType::DEFAULT_NUMERIC,
+                DfType::Float | DfType::Double => DfType::Double,
+                t => unsupported!("Unsupported type {t:?} for AVG window function"),
+            }
+        }
+        Sum => {
+            let ty = find_input_type()?;
+
+            match mig.dialect.engine() {
+                SqlEngine::MySQL => {
+                    if ty.is_any_float() {
+                        DfType::Double
+                    } else if ty.is_any_int() || ty.is_numeric() {
+                        DfType::DEFAULT_NUMERIC
+                    } else {
+                        invalid_query!("Cannot sum over type {}", ty)
+                    }
+                }
+                SqlEngine::PostgreSQL => {
+                    if ty.is_any_normal_int() {
+                        DfType::BigInt
+                    } else if ty.is_any_bigint() || ty.is_numeric() {
+                        DfType::DEFAULT_NUMERIC
+                    } else if ty.is_any_float() {
+                        DfType::Double
+                    } else {
+                        invalid_query!("Cannot sum over type {}", ty)
+                    }
+                }
+            }
+        }
+        Min | Max => {
+            let ty = find_input_type()?;
+
+            match ty {
+                DfType::Int
+                | DfType::TinyInt
+                | DfType::SmallInt
+                | DfType::MediumInt
+                | DfType::BigInt
+                | DfType::UnsignedTinyInt
+                | DfType::UnsignedSmallInt
+                | DfType::UnsignedMediumInt
+                | DfType::UnsignedInt
+                | DfType::UnsignedBigInt
+                | DfType::Float
+                | DfType::Double
+                | DfType::Numeric { .. } => ty,
+                t => unsupported!("Unsupported type {t:?} for Min/Max window functions"),
+            }
+        }
+    };
+
+    cols.push(DfColumn::new(
+        output_col_name.clone(),
+        output_type.clone(),
+        Some(name.clone()),
+    ));
+
+    let group_col_indexes = group_by
+        .iter()
+        .map(|c| graph.column_id_for_column(parent, c))
+        .collect::<ReadySetResult<Vec<_>>>()?;
+
+    let partition_col_indexes = partition_by
+        .iter()
+        .map(|col| graph.column_id_for_column(parent, col))
+        .collect::<ReadySetResult<Vec<_>>>()?;
+
+    let order_col_indexes = order_by
+        .iter()
+        .map(|(col, ord, no)| {
+            graph
+                .column_id_for_column(parent, col)
+                .map(|idx| (idx, *ord, *no))
+        })
+        .collect::<ReadySetResult<Vec<_>>>()?;
+
+    let args_indexes = args
+        .iter()
+        .map(|col| graph.column_id_for_column(parent, col))
+        .collect::<ReadySetResult<Vec<_>>>()?;
+
+    let function = WindowOperation::from_fn(function, args_indexes)?;
+
+    let output_col_index = cols.len() - 1;
+
+    let window = Window::new(
+        parent_na.address(),
+        group_col_indexes,
+        partition_col_indexes,
+        order_col_indexes,
+        function,
+        output_col_index,
+        output_type,
+    )?;
+
+    Ok(DfNodeIndex::new(mig.add_ingredient(name, cols, window)))
 }
 
 fn make_grouped_node(

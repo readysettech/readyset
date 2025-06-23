@@ -1033,4 +1033,16 @@ vertical_tests! {
             key_columns: [0],
         )
     );
+
+    window_function(
+        "SELECT id, name, score, ROW_NUMBER() OVER (PARTITION BY name ORDER BY score DESC) AS window
+         FROM posts
+         WHERE category = ?";
+        "posts" => (
+            "CREATE TABLE posts (id INT, name TEXT, score INT, category TEXT, PRIMARY KEY (id))",
+            schema: [id: i32, name: String, score: i32, category: String],
+            primary_key: 0,
+            key_columns: [3],
+        )
+    );
 }

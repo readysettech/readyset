@@ -4,7 +4,7 @@ use common::{DfValue, IndexType};
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
-use dataflow::ops::window::WindowOperation;
+use dataflow::ops::window::WindowOperationKind;
 use dataflow::PostLookupAggregates;
 use derive_more::From;
 use itertools::Itertools;
@@ -107,7 +107,7 @@ pub enum MirNodeInner {
         partition_by: Vec<Column>,
         order_by: Vec<(Column, OrderType, NullOrder)>,
         output_column: Column,
-        function: WindowOperation,
+        function: WindowOperationKind,
         args: Vec<Column>,
     },
     /// Node that computes the extreme value (minimum or maximum) of a column grouped by another
@@ -455,7 +455,7 @@ impl MirNodeInner {
                 args,
                 ..
             } => {
-                let op_string = format!("{}({})", function, args.iter().join(", "));
+                let op_string = format!("{}({})", function.display(), args.iter().join(", "));
                 let partition_cols = partition_by
                     .iter()
                     .map(|c| c.name.as_str())

@@ -387,7 +387,7 @@ impl GraphViz for MirNodeInner {
                         .iter()
                         .map(|(c, o, no)| format!("{}: {}({})", c.name.as_str(), o, no))
                         .join(", "),
-                    function,
+                    function.display(),
                     args.iter().join(", ")
                 )
             }

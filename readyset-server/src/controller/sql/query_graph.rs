@@ -496,6 +496,7 @@ impl Hash for QueryGraph {
         self.fields.hash(state);
         self.default_row.hash(state);
         self.join_order.hash(state);
+        self.window_functions.hash(state);
         self.global_predicates.hash(state);
         self.having_predicates.hash(state);
         self.order.hash(state);

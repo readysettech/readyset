@@ -59,6 +59,7 @@ pub enum NodeOperator {
     Identity(identity::Identity),
     Filter(filter::Filter),
     TopK(topk::TopK),
+    Window(window::Window),
 }
 
 impl Display for NodeOperator {
@@ -74,6 +75,7 @@ impl Display for NodeOperator {
             NodeOperator::Identity(_) => write!(f, "Identity"),
             NodeOperator::Filter(_) => write!(f, "Filter"),
             NodeOperator::TopK(_) => write!(f, "TopK"),
+            NodeOperator::Window(_) => write!(f, "Window"),
         }
     }
 }
@@ -91,6 +93,7 @@ macro_rules! impl_ingredient_fn_mut {
             NodeOperator::Identity(i) => i.$fn($($arg),*),
             NodeOperator::Filter(i) => i.$fn($($arg),*),
             NodeOperator::TopK(i) => i.$fn($($arg),*),
+            NodeOperator::Window(i) => i.$fn($($arg),*),
         }
     }
 }
@@ -108,6 +111,7 @@ macro_rules! impl_ingredient_fn_ref {
             NodeOperator::Identity(i) => i.$fn($($arg),*),
             NodeOperator::Filter(i) => i.$fn($($arg),*),
             NodeOperator::TopK(i) => i.$fn($($arg),*),
+            NodeOperator::Window(i) => i.$fn($($arg),*),
         }
     }
 }

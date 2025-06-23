@@ -24,6 +24,14 @@ impl Order {
 
         Ordering::Equal
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn columns(&self) -> Vec<usize> {
+        self.0.iter().map(|&(c, _, _)| c).collect()
+    }
 }
 
 impl From<Vec<(usize, OrderType, NullOrder)>> for Order {

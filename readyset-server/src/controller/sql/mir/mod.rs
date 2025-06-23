@@ -9,7 +9,7 @@ use catalog_tables::is_catalog_table;
 use common::IndexType;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::union;
-use dataflow::ops::window::WindowOperation;
+use dataflow::ops::window::WindowOperationKind;
 use lazy_static::lazy_static;
 use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
@@ -2097,7 +2097,7 @@ impl SqlToMirConverter {
 
         let arguments = function.arguments().cloned().collect::<Vec<_>>();
 
-        let function = WindowOperation::from_fn(function)?;
+        let function = WindowOperationKind::from_fn(function)?;
 
         let order_cols = order_by
             .iter()

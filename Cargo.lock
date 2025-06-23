@@ -4751,6 +4751,7 @@ dependencies = [
  "dataflow-expression",
  "dataflow-state",
  "derive_more",
+ "enum-kinds",
  "exponential-backoff",
  "fail",
  "failpoint-macros",

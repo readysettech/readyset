@@ -350,6 +350,9 @@ impl Node {
                 | NodeOperator::Union(_)
                 | NodeOperator::Identity(_)
                 | NodeOperator::Filter(_)
+                // NOTE: probably will need to give window function
+                // an auxiliary state in the future to improve performance
+                | NodeOperator::Window(_)
                 | NodeOperator::TopK(_) => None,
             },
             NodeType::Ingress
