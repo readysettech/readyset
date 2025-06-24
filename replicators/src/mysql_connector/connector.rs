@@ -243,7 +243,7 @@ impl MySqlBinlogConnector {
                 - std::time::Duration::from_secs(MAX_POSITION_TIME),
             table_filter,
             table_schemas: Default::default(),
-            parsing_config: parsing_preset.into_config(),
+            parsing_config: parsing_preset.into_config().rate_limit_logging(false),
         };
 
         connector.register_as_replica().await?;

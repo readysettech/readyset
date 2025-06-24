@@ -168,7 +168,7 @@ impl PostgresWalConnector {
             status_update_interval,
             had_table_error: false,
             table_filter,
-            parsing_config: parsing_preset.into_config().log_on_mismatch(true),
+            parsing_config: parsing_preset.into_config().rate_limit_logging(false),
         };
 
         if full_resnapshot || next_position.is_none() {

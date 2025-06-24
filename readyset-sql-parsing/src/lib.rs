@@ -1,3 +1,7 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::LazyLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use clap::ValueEnum;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{
@@ -22,6 +26,7 @@ pub struct ParsingConfig {
     error_on_mismatch: bool,
     panic_on_mismatch: bool,
     log_on_mismatch: bool,
+    rate_limit_logging: bool,
 }
 
 impl Default for ParsingConfig {
@@ -33,6 +38,7 @@ impl Default for ParsingConfig {
             error_on_mismatch: false,
             panic_on_mismatch: false,
             log_on_mismatch: true,
+            rate_limit_logging: true,
         }
     }
 }
@@ -70,6 +76,13 @@ impl ParsingConfig {
     pub fn log_on_mismatch(self, log_on_mismatch: bool) -> Self {
         Self {
             log_on_mismatch,
+            ..self
+        }
+    }
+
+    pub fn rate_limit_logging(self, rate_limit_logging: bool) -> Self {
+        Self {
+            rate_limit_logging,
             ..self
         }
     }
@@ -125,6 +138,39 @@ impl From<ParsingPreset> for ParsingConfig {
     fn from(value: ParsingPreset) -> Self {
         value.into_config()
     }
+}
+
+static RATE_LIMIT_INTERVAL: LazyLock<Duration> = LazyLock::new(|| {
+    let secs = std::env::var("PARSING_LOG_RATE_LIMIT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(60);
+    Duration::from_secs(secs)
+});
+
+fn check_rate_limit() -> bool {
+    static NEXT_LOG_TIME: AtomicU64 = AtomicU64::new(0);
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Couldn't get system time");
+
+    let next_log = NEXT_LOG_TIME.load(Ordering::Relaxed);
+    let should_log = now.as_secs() >= next_log;
+
+    if should_log {
+        NEXT_LOG_TIME.store((now + *RATE_LIMIT_INTERVAL).as_secs(), Ordering::Relaxed);
+    }
+
+    should_log
+}
+
+macro_rules! rate_limit {
+    ($should_limit:expr, $body:expr) => {
+        if !$should_limit || check_rate_limit() {
+            $body
+        }
+    };
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -744,11 +790,14 @@ where
                         );
                 }
                 if config.log_on_mismatch {
-                    tracing::warn!(
-                        input = %input.as_ref(),
-                        ?nom_ast,
-                        ?sqlparser_ast,
-                        "nom-sql AST differs from sqlparser-rs AST",
+                    rate_limit!(
+                        config.rate_limit_logging,
+                        tracing::warn!(
+                            input = %input.as_ref(),
+                            ?nom_ast,
+                            ?sqlparser_ast,
+                            "nom-sql AST differs from sqlparser-rs AST",
+                        )
                     );
                 }
                 if config.error_on_mismatch {
@@ -782,7 +831,15 @@ where
                             );
                     }
                     if config.log_on_mismatch {
-                        tracing::warn!(input = %input.as_ref(), %sqlparser_error, ?nom_ast, "sqlparser-rs failed but nom-sql succeeded");
+                        rate_limit!(
+                            config.rate_limit_logging,
+                            tracing::warn!(
+                                input = %input.as_ref(),
+                                %sqlparser_error,
+                                ?nom_ast,
+                                "sqlparser-rs failed but nom-sql succeeded"
+                            )
+                        );
                     }
                     if config.error_on_mismatch || config.prefer_sqlparser {
                         Err(sqlparser_error)

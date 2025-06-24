@@ -463,7 +463,7 @@ impl Change {
             };
         }
         match parse_query_with_config(
-            parsing_preset.into_config().log_on_mismatch(true),
+            parsing_preset.into_config().log_on_mismatch(true).rate_limit_logging(false),
             ddl_req.dialect.into(),
             &ddl_req.unparsed_stmt,
         ) {
