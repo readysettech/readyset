@@ -122,12 +122,13 @@ pub enum SqlType {
     Other(Relation),
 }
 
-impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
+impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
     fn try_from_dialect(
         value: sqlparser::ast::DataType,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::DataType::*;
+        use sqlparser::ast::GeometricTypeKind::*;
         match value {
             Int(len) => Ok(Self::Int(len.map(|n| n as u16))),
             TinyInt(len) => Ok(Self::TinyInt(len.map(|n| n as u16))),
@@ -228,7 +229,7 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
             Bytea => Ok(Self::ByteArray),
             Bit(n) => Ok(Self::Bit(n.map(|n| n as u16))),
             BitVarying(n) | VarBit(n) => Ok(Self::VarBit(n.map(|n| n as u16))),
-            Custom(name, _values) => match name.0.iter().exactly_one() {
+            Custom(name, values) => match name.0.iter().exactly_one() {
                 Ok(part) => match part.as_ident().map(|ident| ident.value.as_str()) {
                     Some(name) => {
                         if dialect == Dialect::PostgreSQL && name == "char" {
@@ -245,7 +246,13 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
                             Ok(Self::Serial)
                         } else if name.eq_ignore_ascii_case("point") {
                             Ok(Self::Point)
-                        } else if name.eq_ignore_ascii_case("geometry(point)") {
+                        } else if name.eq_ignore_ascii_case("geometry")
+                            && values
+                                .first()
+                                .cloned()
+                                .unwrap_or_default()
+                                .eq_ignore_ascii_case("point")
+                        {
                             Ok(Self::PostgisPoint)
                         } else {
                             Ok(Self::Other(name.into()))
@@ -280,9 +287,10 @@ impl TryFromDialect<sqlparser::ast::DataType> for crate::ast::SqlType {
             Trigger => skipped!("TRIGGER"),
             AnyType => unsupported!("ANY TYPE"),
             Table(_column_definition_list) => unsupported!("TABLE type"),
-            GeometricType(geometric_type_kind) => {
-                unsupported!("geometric type {geometric_type_kind}")
-            }
+            GeometricType(ty) => match ty {
+                Point => Ok(Self::Point),
+                t => unsupported!("geometric type {t}"),
+            },
             // DuckDB-specific numeric types
             UTinyInt => unsupported!("UTINYINT type"),
             USmallInt => unsupported!("USMALLINT type"),
@@ -356,7 +364,7 @@ impl TryFromDialect<sqlparser::ast::ArrayElemTypeDef> for SqlType {
     }
 }
 
-impl TryFromDialect<Box<sqlparser::ast::DataType>> for crate::ast::SqlType {
+impl TryFromDialect<Box<sqlparser::ast::DataType>> for SqlType {
     fn try_from_dialect(
         value: Box<sqlparser::ast::DataType>,
         dialect: Dialect,

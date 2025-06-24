@@ -541,3 +541,9 @@ fn test_row() {
 fn test_explain_materialization() {
     check_parse_both!("EXPLAIN MATERIALIZATIONS");
 }
+
+#[test]
+fn point_types() {
+    check_parse_mysql!("CREATE TABLE t (p POINT)");
+    check_parse_postgres!("CREATE TABLE t (p GEOMETRY(POINT))");
+}
