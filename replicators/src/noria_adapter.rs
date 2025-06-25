@@ -14,7 +14,7 @@ use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
 use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
 use readyset_client::recipe::changelist::{Change, ChangeList};
-use readyset_client::{ReadySetHandle, Table, TableOperation};
+use readyset_client::{ReadySetHandle, Table, TableOperation, TableStatus};
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
@@ -152,6 +152,8 @@ pub struct NoriaAdapter<'a> {
     table_filter: &'a mut TableFilter,
     /// If the connector can partially resnapshot a database
     supports_resnapshot: bool,
+    /// Any TableStatus updates sent here will update this controller's state machine.
+    _table_status_tx: UnboundedSender<(Relation, TableStatus)>,
 }
 
 impl<'a> NoriaAdapter<'a> {
@@ -167,6 +169,7 @@ impl<'a> NoriaAdapter<'a> {
         server_startup: bool,
         enable_statement_logging: bool,
         parsing_preset: ParsingPreset,
+        table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     ) -> ReadySetResult<std::convert::Infallible> {
         // Resnapshot when restarting the server to apply changes that may have been made to the
         // replication-tables config parameter.
@@ -188,6 +191,7 @@ impl<'a> NoriaAdapter<'a> {
                         full_snapshot,
                         table_filter,
                         parsing_preset,
+                        table_status_tx.clone(),
                     )
                     .await
                 }
@@ -233,6 +237,7 @@ impl<'a> NoriaAdapter<'a> {
                         enable_statement_logging,
                         table_filter,
                         parsing_preset,
+                        table_status_tx.clone(),
                     )
                     .await
                 }
@@ -284,6 +289,7 @@ impl<'a> NoriaAdapter<'a> {
         full_snapshot: bool,
         table_filter: &'a mut TableFilter,
         parsing_preset: ParsingPreset,
+        table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     ) -> ReadySetResult<std::convert::Infallible> {
         use replication_offset::mysql::MySqlPosition;
 
@@ -455,6 +461,7 @@ impl<'a> NoriaAdapter<'a> {
             table_filter,
             supports_resnapshot: true,
             dialect: Dialect::DEFAULT_MYSQL,
+            _table_status_tx: table_status_tx,
         };
 
         let mut current_pos: ReplicationOffset = pos.into();
@@ -513,6 +520,7 @@ impl<'a> NoriaAdapter<'a> {
         enable_statement_logging: bool,
         table_filter: &'a mut TableFilter,
         parsing_preset: ParsingPreset,
+        table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     ) -> ReadySetResult<std::convert::Infallible> {
         set_failpoint_return_err!(failpoints::START_INNER_POSTGRES);
 
@@ -733,6 +741,7 @@ impl<'a> NoriaAdapter<'a> {
             table_filter,
             supports_resnapshot: true,
             dialect: Dialect::DEFAULT_POSTGRESQL,
+            _table_status_tx: table_status_tx,
         };
 
         if min_pos != max_pos {

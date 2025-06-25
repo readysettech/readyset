@@ -425,6 +425,7 @@ impl TestHandle {
                 server_startup,
                 false, // disable statement logging in tests
                 parsing_preset,
+                tokio::sync::mpsc::unbounded_channel().0, // sink; we don't care
             )
             .await;
             error!(%error, "Error in replicator");

@@ -208,6 +208,7 @@ impl Leader {
         let config = self.replicator_config.clone();
         let replicator_statement_logging = self.replicator_statement_logging;
         let parsing_preset = self.parsing_preset;
+        let table_status_tx = self.table_status_tx.clone();
 
         // The replication task ideally won't panic, but if it does and we arent replicating, that
         // will mean the data we return, will be more and more stale, and the transaction logs on
@@ -233,6 +234,7 @@ impl Leader {
                         server_startup,
                         replicator_statement_logging,
                         parsing_preset,
+                        table_status_tx.clone(),
                     )
                     .await
                     {
