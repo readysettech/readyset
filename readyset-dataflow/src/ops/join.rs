@@ -55,6 +55,9 @@ pub struct Join {
     generated_column_buffer: HashMap<(Vec<usize>, Side), Records>,
 
     kind: JoinType,
+    // Indicates if the right side of the join is fully materialized.
+    // If true, its guaranteed that we cannot miss on lookup.
+    rhs_full_mat: bool,
 }
 
 impl Join {
@@ -70,6 +73,7 @@ impl Join {
         kind: JoinType,
         on: Vec<(usize, usize)>,
         emit: Vec<(Side, usize)>,
+        rhs_full_mat: bool,
     ) -> Self {
         let (in_place_left_emit, in_place_right_emit) = {
             let compute_in_place_emit = |side| {
@@ -118,6 +122,7 @@ impl Join {
             in_place_right_emit,
             generated_column_buffer: Default::default(),
             kind,
+            rhs_full_mat,
         }
     }
 
@@ -572,6 +577,12 @@ impl Join {
             Ok(Default::default())
         }
     }
+
+    /// Returns true if the right side of the join is fully materialized.
+    pub fn is_rhs_full_mat(&self) -> bool {
+        // TODO: return the actual value of rhs_full_mat once new sj algorithm is implemented
+        false
+    }
 }
 
 impl Ingredient for Join {
@@ -859,6 +870,7 @@ mod tests {
             JoinType::Left,
             vec![(0, 0)],
             vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+            true,
         );
 
         g.set_op("join", &["j0", "j1", "j2"], j, false);
@@ -1202,6 +1214,7 @@ mod tests {
                     (Side::Left, 2),
                     (Side::Right, 2),
                 ],
+                true,
             );
 
             g.set_op("join", &["j0", "j1", "j2", "j3"], j, false);

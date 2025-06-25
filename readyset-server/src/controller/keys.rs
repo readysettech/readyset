@@ -944,6 +944,7 @@ mod tests {
                     (ops::Side::Left, 1),
                     (ops::Side::Right, 1),
                 ],
+                true,
             )),
         ));
         g.add_edge(a, x, ());
@@ -1058,6 +1059,7 @@ mod tests {
                     (ops::Side::Left, 1),
                     (ops::Side::Right, 1),
                 ],
+                true,
             )),
         ));
         g.add_edge(a, x, ());

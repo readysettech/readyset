@@ -665,6 +665,11 @@ impl Node {
         matches!(self.inner, NodeType::Sharder { .. })
     }
 
+    /// Returns `true` if self is fully materialized.
+    pub fn is_full_mat(&self) -> bool {
+        self.is_base() || self.requires_full_materialization()
+    }
+
     /// Returns `true` if self is a base table node
     pub fn is_base(&self) -> bool {
         matches!(self.inner, NodeType::Base(..))

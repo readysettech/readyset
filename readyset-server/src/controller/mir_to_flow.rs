@@ -785,7 +785,17 @@ fn make_join_node(
 
     set_names(&column_names(columns), &mut cols)?;
 
-    let j = Join::new(left_na.address(), right_na.address(), kind, on_idxs, emit);
+    // we need to check if the rhs parent is fully materialized, as this is needed for straddled join
+    // upquery optimizations.
+    let rhs_full_mat = mig.dataflow_state.ingredients[right_na.address()].is_full_mat();
+    let j = Join::new(
+        left_na.address(),
+        right_na.address(),
+        kind,
+        on_idxs,
+        emit,
+        rhs_full_mat,
+    );
     let n = mig.add_ingredient(name, cols, j);
 
     Ok(DfNodeIndex::new(n))
@@ -893,6 +903,9 @@ fn make_join_aggregates_node(
 
     set_names(&column_names(columns), &mut cols)?;
 
+    // we need to check if the rhs parent is fully materialized, as this is needed for straddled join
+    // upquery optimizations.
+    let rhs_full_mat = mig.dataflow_state.ingredients[right_na.address()].is_full_mat();
     // Always treated as a JoinType::Inner based on joining on group_by cols, which always match
     // between parents.
     let j = Join::new(
@@ -901,6 +914,7 @@ fn make_join_aggregates_node(
         JoinType::Inner,
         on,
         project,
+        rhs_full_mat,
     );
     let n = mig.add_ingredient(name, cols, j);
 

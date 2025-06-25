@@ -223,6 +223,7 @@ async fn broad_recursing_upquery() {
                     JoinType::Left,
                     vec![(1, 0)],
                     vec![(Side::Left, 0), (Side::Left, 1), (Side::Left, 2)],
+                    true,
                 ),
             );
             // reader, sharded by the lookup column, which is the third column on x
@@ -1944,6 +1945,7 @@ async fn votes() {
                 JoinType::Inner,
                 vec![(0, 0)],
                 vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+                true,
             );
             let end = mig.add_ingredient("end", make_columns(&["id", "title", "votes"]), j);
             mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
@@ -2513,6 +2515,7 @@ async fn replay_during_replay() {
                 JoinType::Inner,
                 vec![(0, 0)],
                 vec![(Side::Left, 0), (Side::Right, 1)],
+                true,
             );
             let u = mig.add_ingredient("u", make_columns(&["u", "a"]), j);
             let j = Join::new(
@@ -2521,6 +2524,7 @@ async fn replay_during_replay() {
                 JoinType::Left,
                 vec![(0, 1)],
                 vec![(Side::Left, 0), (Side::Right, 0)],
+                true,
             );
             let end = mig.add_ingredient("end", make_columns(&["a", "u"]), j);
             mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
@@ -2635,6 +2639,7 @@ async fn cascading_replays_with_sharding() {
                 JoinType::Inner,
                 vec![(0, 0)],
                 vec![(Side::Left, 0), (Side::Right, 1), (Side::Left, 1)],
+                true,
             );
             let j = mig.add_ingredient("j", make_columns(&["u", "s", "f2"]), jb);
             // aggregate over the join. this will force a shard merger to be inserted because the
@@ -2918,6 +2923,7 @@ async fn materialization_frontier() {
                 JoinType::Left,
                 vec![(0, 0)],
                 vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+                true,
             );
             let end = mig.add_ingredient("awvc", make_columns(&["id", "title", "votes"]), j);
 
@@ -3187,6 +3193,7 @@ async fn migration_depends_on_unchanged_domain() {
             JoinType::Inner,
             vec![(0, 0)],
             vec![(Side::Left, 0), (Side::Right, 1)],
+            true,
         );
         mig.add_ingredient("join", make_columns(&["a", "b"]), j);
     })
@@ -3233,6 +3240,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
                 JoinType::Left,
                 vec![(0, 0)],
                 vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+                true,
             );
             let end = mig.add_ingredient("awvc", make_columns(&["id", "title", "votes"]), j);
 
@@ -3296,6 +3304,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
                 JoinType::Left,
                 vec![(0, 0)],
                 vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+                true,
             );
             let total = mig.add_ingredient("total", make_columns(&["id", "ratings", "votes"]), j);
 
@@ -3311,6 +3320,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
                     (Side::Right, 1),
                     (Side::Right, 2),
                 ],
+                true,
             );
             let newend =
                 mig.add_ingredient("awr", make_columns(&["id", "title", "ratings", "votes"]), j);
@@ -3515,6 +3525,7 @@ async fn state_replay_migration_query() {
                 JoinType::Inner,
                 vec![(0, 0)],
                 vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+                true,
             );
             let j = mig.add_ingredient("j", make_columns(&["x", "y", "z"]), j);
 
@@ -4957,6 +4968,7 @@ async fn range_upquery_after_point_queries() {
                     JoinType::Inner,
                     vec![(0, 0)],
                     vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+                    true,
                 ),
             );
 
