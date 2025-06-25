@@ -3201,7 +3201,10 @@ where
     fn parse_query(&mut self, query: &str) -> ReadySetResult<SqlQuery> {
         trace!(%query, "Parsing query");
         match readyset_sql_parsing::parse_query_with_config(
-            self.settings.parsing_preset,
+            self.settings
+                .parsing_preset
+                .into_config()
+                .log_only_selects(true),
             self.settings.dialect,
             query,
         ) {

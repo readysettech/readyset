@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -27,6 +28,7 @@ pub struct ParsingConfig {
     panic_on_mismatch: bool,
     log_on_mismatch: bool,
     rate_limit_logging: bool,
+    log_only_selects: bool,
 }
 
 impl Default for ParsingConfig {
@@ -39,6 +41,7 @@ impl Default for ParsingConfig {
             panic_on_mismatch: false,
             log_on_mismatch: true,
             rate_limit_logging: true,
+            log_only_selects: false,
         }
     }
 }
@@ -83,6 +86,13 @@ impl ParsingConfig {
     pub fn rate_limit_logging(self, rate_limit_logging: bool) -> Self {
         Self {
             rate_limit_logging,
+            ..self
+        }
+    }
+
+    pub fn log_only_selects(self, log_only_selects: bool) -> Self {
+        Self {
+            log_only_selects,
             ..self
         }
     }
@@ -755,6 +765,17 @@ where
     sqlparser_result
 }
 
+/// If this is a [`SqlQuery`], only log if it's not a SELECT statement. We use some dynamic type
+/// nonsense to do so because I can't think of a better way that doesn't involve lots of plumbing.
+/// As far as I can tell, monomorphization does the right thing and there's no overhead. If it's not
+/// a [`SqlQuery`], we are in test code and always want to log it.
+fn is_not_query_or_should_log<T: Any>(ast: &T) -> bool {
+    let ast: &dyn Any = ast;
+    ast.downcast_ref::<SqlQuery>()
+        .map(|query| query.is_select() || query.is_readyset_extension())
+        .unwrap_or(true)
+}
+
 fn parse_both_inner<C, S, T, NP, SP>(
     config: C,
     dialect: Dialect,
@@ -764,7 +785,7 @@ fn parse_both_inner<C, S, T, NP, SP>(
 ) -> Result<T, ReadysetParsingError>
 where
     C: Into<ParsingConfig>,
-    T: PartialEq + std::fmt::Debug + Clone,
+    T: PartialEq + std::fmt::Debug + Clone + Any,
     S: AsRef<str>,
     for<'a> NP: FnOnce(Dialect, &'a str) -> Result<T, String>,
     for<'a> SP: FnOnce(&mut Parser, Dialect, &'a str) -> Result<T, ReadysetParsingError>,
@@ -789,7 +810,11 @@ where
                             sqlparser_ast
                         );
                 }
-                if config.log_on_mismatch {
+                if config.log_on_mismatch
+                    && (!config.log_only_selects
+                        || (is_not_query_or_should_log(&nom_ast)
+                            || is_not_query_or_should_log(&sqlparser_ast)))
+                {
                     rate_limit!(
                         config.rate_limit_logging,
                         tracing::warn!(
@@ -830,7 +855,9 @@ where
                                 nom_ast
                             );
                     }
-                    if config.log_on_mismatch {
+                    if config.log_on_mismatch
+                        && (!config.log_only_selects || is_not_query_or_should_log(&nom_ast))
+                    {
                         rate_limit!(
                             config.rate_limit_logging,
                             tracing::warn!(
@@ -851,7 +878,9 @@ where
                 }
             }
             (Err(nom_error), Ok(sqlparser_ast)) => {
-                if config.log_on_mismatch {
+                if config.log_on_mismatch
+                    && (!config.log_only_selects || is_not_query_or_should_log(&sqlparser_ast))
+                {
                     tracing::debug!(input = %input.as_ref(), %nom_error, ?sqlparser_ast, "nom-sql failed but sqlparser-rs succeeded");
                 }
                 if config.prefer_sqlparser {
