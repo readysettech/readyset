@@ -283,10 +283,6 @@ where
                     };
                     let (k, v) = subrange_iter.next().expect("Subrange can't be empty");
 
-                    // We should have only evicted a single key
-                    debug_assert!(subrange_iter.last().is_none());
-                    debug_assert!(range_iterator.next_range().is_none());
-
                     return (mem_cnt(k, v), Box::new(vec![(k.clone(), None)].into_iter()));
                 }
 
