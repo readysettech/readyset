@@ -307,3 +307,21 @@ pub fn arbitrary_ipinet() -> impl Strategy<Value = IpInet> {
 
     prop_oneof![ipv4, ipv6]
 }
+
+/// Strategy to generate an arbitrary string from a reasonable subset of UTF-8.
+///
+/// A string of arbitrary codepoints will generate a bunch of stuff we don't necessarily want,
+/// to wit:  control codes, unassigned codepoints, combining accents with no preceding base
+/// character.  Also, ICU4X collation doesn't exactly match that of MySQL.  We restrict the
+/// codepoint space to a subset of what is likely to be used soon.
+pub fn arbitrary_collatable_string() -> impl Strategy<Value = String> {
+    String::arbitrary_with(
+        concat!(
+            "[\u{0020}-\u{007e}",  // basic latin, excluding control codes
+            "\u{00a0}-\u{02ff}",   // extended latin
+            "\u{4e00}-\u{9fff}",   // cjk unified ideographs
+            "\u{ac00}-\u{d7af}]*"  // hangul syllables
+        )
+        .into(),
+    )
+}

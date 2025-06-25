@@ -49,8 +49,9 @@ use proptest_stateful::{
 use readyset_client::SingleKeyEviction;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
-use readyset_data::DfValue;
+use readyset_data::{Collation, DfValue};
 use readyset_server::Handle;
+use readyset_util::arbitrary::arbitrary_collatable_string;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use test_utils::tags;
@@ -807,6 +808,14 @@ macro_rules! vertical_tests {
         ColumnStrategy::Value(Just(DfValue::try_from($value).unwrap()).boxed())
     };
 
+    (@column_strategy string()) => {
+        ColumnStrategy::Value(
+            arbitrary_collatable_string()
+                .prop_map(|s| DfValue::from_str_and_collation(&s, Collation::Utf8AiCi))
+                .boxed()
+        )
+    };
+
     (@column_strategy $schema_type: ty) => {
         ColumnStrategy::Value(any::<$schema_type>().prop_map_into::<DfValue>().boxed())
     };
@@ -942,7 +951,7 @@ vertical_tests! {
         "SELECT id, name, score FROM posts WHERE name = ? AND score > ?";
         "posts" => (
             "CREATE TABLE posts (id INT, name TEXT, score INT, PRIMARY KEY (id))",
-            schema: [id: i32, name: String, score: i32],
+            schema: [id: i32, name: string(), score: i32],
             primary_key: 0,
             key_columns: [1, 2],
         )
@@ -976,7 +985,7 @@ vertical_tests! {
         "posts" => (
             "CREATE TABLE posts
              (id INT, name TEXT, score1 SMALLINT, score2 SMALLINT, PRIMARY KEY (id))",
-            schema: [id: i32, name: String, score1: i16, score2: i16],
+            schema: [id: i32, name: string(), score1: i16, score2: i16],
             primary_key: 0,
             key_columns: [1],
         )
