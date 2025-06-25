@@ -60,9 +60,6 @@ pub enum Collation {
 
     /// The binary collation, that simply compares bytes.
     Binary,
-
-    /// Temporary
-    OldCitext,
 }
 
 impl Display for Collation {
@@ -72,7 +69,6 @@ impl Display for Collation {
             Self::Citext => write!(f, "citext"),
             Self::Utf8AiCi => write!(f, "utf8_ai_ci"),
             Self::Binary => write!(f, "binary"),
-            Self::OldCitext => write!(f, "old_citext"),
         }
     }
 }
@@ -90,7 +86,6 @@ impl Collation {
             Self::Citext => UTF8_CI.with(cmp),
             Self::Utf8AiCi => UTF8_AI_CI.with(cmp),
             Self::Binary => a.as_ref().cmp(b.as_ref()),
-            Self::OldCitext => a.as_ref().to_lowercase().cmp(&b.as_ref().to_lowercase()),
         }
     }
 
@@ -104,7 +99,7 @@ impl Collation {
         let len = match self {
             Self::Utf8 => s.len() * 4,
             Self::Citext => s.len() * 2,
-            Self::Utf8AiCi | Self::Binary | Self::OldCitext => s.len(),
+            Self::Utf8AiCi | Self::Binary => s.len(),
         };
 
         let mut out = Vec::with_capacity(len); // just a close guess
@@ -117,10 +112,6 @@ impl Collation {
                 out.extend_from_slice(s.as_bytes());
                 Ok(())
             }
-            Self::OldCitext => {
-                out.extend_from_slice(s.to_lowercase().as_bytes());
-                Ok(())
-            }
         };
 
         out
@@ -130,14 +121,14 @@ impl Collation {
     pub fn default_for(dialect: Dialect) -> Self {
         match dialect.engine() {
             SqlEngine::PostgreSQL => Self::Utf8,
-            SqlEngine::MySQL => Self::OldCitext,
+            SqlEngine::MySQL => Self::Utf8AiCi,
         }
     }
 
     /// Map a dialect's collation name to our internal collation if a mapping exists.
     fn try_get(dialect: Dialect, collation: &str) -> Option<Self> {
         match (dialect.engine(), collation) {
-            (SqlEngine::MySQL, "utf8mb4_0900_ai_ci") => Some(Self::OldCitext),
+            (SqlEngine::MySQL, "utf8mb4_0900_ai_ci") => Some(Self::Utf8AiCi),
             (SqlEngine::MySQL, "utf8mb4_0900_as_cs") => Some(Self::Utf8),
             (SqlEngine::MySQL, "binary") => Some(Self::Binary),
             (_, _) => None,

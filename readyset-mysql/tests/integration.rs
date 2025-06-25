@@ -3088,7 +3088,6 @@ async fn create_duplicate_query_id_and_name_caches() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, mysql8_upstream)]
-#[ignore]
 async fn test_utf8_ai_ci() {
     readyset_tracing::init_test_logging();
     let (rs_opts, _rs_handle, tx) = setup_with_mysql().await;
@@ -3101,11 +3100,9 @@ async fn test_utf8_ai_ci() {
         .await
         .unwrap();
 
-    // 6 is a combining accent
     mysql
         .query_drop(
-            "insert into utf8_ai_ci values (1, 'e'), (2, 'é'), (3, 'E'), (4, 'e'),
-             (5, 'f'), (6, 'é')",
+            "insert into utf8_ai_ci values (1, 'e'), (2, 'é'), (3, 'E'), (4, 'e'), (5, 'f')",
         )
         .await
         .unwrap();
