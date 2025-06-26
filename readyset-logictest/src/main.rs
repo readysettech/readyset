@@ -643,7 +643,9 @@ impl Fuzz {
                     json!({
                         "failure_kind": "failing_query",
                         "extract_file": path.to_string_lossy(),
-                        "reason": reason.message(),
+                        // Truncate reason (which includes the query) because especially large
+                        // queries are useless to log here. The query will be in the file.
+                        "reason": reason.message()[..256],
                     }),
                 )
             }
