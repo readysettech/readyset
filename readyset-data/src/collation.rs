@@ -4,10 +4,10 @@ use std::hash::Hash;
 
 use icu::collator::options::{CollatorOptions, Strength};
 use icu::collator::{Collator, CollatorBorrowed};
+use log_once::error_once;
 use serde::{Deserialize, Serialize};
 use strum::{EnumCount, FromRepr};
 use test_strategy::Arbitrary;
-use tracing::error;
 
 use crate::{Dialect, SqlEngine};
 
@@ -148,7 +148,7 @@ impl Collation {
     /// return a reasonable default for the dialect.
     pub fn get_or_default(dialect: Dialect, collation: &str) -> Self {
         Self::try_get(dialect, collation).unwrap_or_else(|| {
-            error!("Unknown {} collation {}", dialect.engine(), collation);
+            error_once!("Unknown {} collation {}", dialect.engine(), collation);
             Self::default_for(dialect)
         })
     }

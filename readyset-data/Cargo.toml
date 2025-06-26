@@ -45,6 +45,7 @@ cidr = { workspace = true }
 postgres-types = { workspace = true, features = ["with-cidr-0_2"] }
 vec1 = { workspace = true }
 yore = { workspace = true }
+log-once = { workspace = true }
 
 # Local dependencies
 nom-sql = { path = "../nom-sql" }
