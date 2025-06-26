@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/rust:1.87.0
+FROM public.ecr.aws/docker/library/rust:1.88.0
 
 WORKDIR /tmp
 

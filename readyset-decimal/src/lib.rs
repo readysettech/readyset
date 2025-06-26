@@ -520,7 +520,7 @@ impl<'de> Deserialize<'de> for Decimal {
                     (DecimalDiscriminants::Number, variant) => {
                         let decimal_str = variant.newtype_variant::<String>()?;
                         let big_decimal = decimal_str.parse::<BigDecimal>().map_err(|e| {
-                            de::Error::custom(format!("Invalid decimal format: {}", e))
+                            de::Error::custom(format!("Invalid decimal format: {e}"))
                         })?;
                         Ok(Decimal::Number(big_decimal))
                     }

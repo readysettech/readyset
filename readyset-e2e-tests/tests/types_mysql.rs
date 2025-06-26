@@ -25,7 +25,7 @@ use test_strategy::proptest;
 use test_utils::tags;
 
 fn get_value(results: &[Row], expected_value: &Value) -> Value {
-    let err = || panic!("No row found for value: {:?}", expected_value);
+    let err = || panic!("No row found for value: {expected_value:?}");
     results
         .first()
         .and_then(|row| row.get::<Value, usize>(0))

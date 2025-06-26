@@ -1524,9 +1524,9 @@ impl DfState {
         let mut result = String::new();
         let mut iter = output.into_values();
         if let Some(first) = iter.next() {
-            write!(result, "{}", first).unwrap();
+            write!(result, "{first}").unwrap();
             for path in iter {
-                write!(result, "\n{}", path).unwrap();
+                write!(result, "\n{path}").unwrap();
             }
         }
         result

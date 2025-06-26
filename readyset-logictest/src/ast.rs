@@ -410,7 +410,7 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             Type::BIT | Type::VARBIT => Ok(Self::BitVector(BitVec::from_sql(ty, raw)?)),
             ref ty if ty.name() == "geometry" => Ok(Self::Text(format!(
                 "0x{}",
-                raw.iter().map(|b| format!("{:02X}", b)).join("")
+                raw.iter().map(|b| format!("{b:02X}")).join("")
             ))),
             _ => Err("Invalid type".into()),
         }

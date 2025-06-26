@@ -905,7 +905,7 @@ where
                 }
                 Err(ReadysetParsingError::BothFailed {
                     nom_error,
-                    sqlparser_error: format!("{}", sqlparser_error),
+                    sqlparser_error: format!("{sqlparser_error}"),
                 })
             }
         }

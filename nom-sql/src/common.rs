@@ -1240,7 +1240,7 @@ mod tests {
                 }
                 .display(dialect)
                 .to_string();
-                assert_eq!(expected, actual, "dialect: {}", dialect);
+                assert_eq!(expected, actual, "dialect: {dialect}");
             }
 
             test(Dialect::PostgreSQL, "lower", "AbC", Some("es_ES"));
