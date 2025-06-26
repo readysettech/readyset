@@ -39,8 +39,6 @@ use std::collections::HashSet;
 
 const RS_BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to ReadySet
 
-const MAX_SNAPSHOT_BATCH: usize = 8; // How many tables to snapshot at the same time
-
 /// A list of databases MySQL uses internally, they should not be replicated
 pub const MYSQL_INTERNAL_DBS: &[&str] =
     &["mysql", "information_schema", "performance_schema", "sys"];
@@ -558,7 +556,7 @@ impl MySqlReplicator<'_> {
         db_schemas: &mut DatabaseSchemas,
         snapshot_report_interval_secs: u16,
         full_snapshot: bool,
-        _max_parallel_snapshot_tables: usize, // TODO: limit parallelism for MySQL
+        max_parallel_snapshot_tables: usize,
     ) -> ReadySetResult<()> {
         let result = self
             .replicate_to_noria_with_table_locks(
@@ -566,6 +564,7 @@ impl MySqlReplicator<'_> {
                 db_schemas,
                 snapshot_report_interval_secs,
                 full_snapshot,
+                max_parallel_snapshot_tables,
             )
             .await;
 
@@ -585,6 +584,7 @@ impl MySqlReplicator<'_> {
         db_schemas: &mut DatabaseSchemas,
         snapshot_report_interval_secs: u16,
         full_snapshot: bool,
+        max_parallel_snapshot_tables: usize,
     ) -> ReadySetResult<()> {
         // NOTE: There are two ways to prevent DDL changes in MySQL:
         // `FLUSH TABLES WITH READ LOCK` or `LOCK INSTANCE FOR BACKUP`. Both are not
@@ -628,6 +628,7 @@ impl MySqlReplicator<'_> {
             table_list,
             &replication_offsets,
             snapshot_report_interval_secs,
+            max_parallel_snapshot_tables,
         )
         .await
     }
@@ -678,6 +679,7 @@ impl MySqlReplicator<'_> {
         mut table_list: Vec<Relation>,
         replication_offsets: &ReplicationOffsets,
         snapshot_report_interval_secs: u16,
+        max_parallel_snapshot_tables: usize,
     ) -> ReadySetResult<()> {
         let mut replication_tasks = FuturesUnordered::new();
         let mut compacting_tasks = FuturesUnordered::new();
@@ -698,7 +700,7 @@ impl MySqlReplicator<'_> {
                 );
             }
 
-            if replication_tasks.len() == MAX_SNAPSHOT_BATCH {
+            if replication_tasks.len() == max_parallel_snapshot_tables {
                 break;
             }
         }
@@ -745,7 +747,7 @@ impl MySqlReplicator<'_> {
             }
 
             // If still have tables to snapshot add them to the task list
-            while replication_tasks.len() < MAX_SNAPSHOT_BATCH && !table_list.is_empty() {
+            while replication_tasks.len() < max_parallel_snapshot_tables && !table_list.is_empty() {
                 let table = table_list.pop().expect("Not empty");
                 if replication_offsets.has_table(&table) {
                     info!(

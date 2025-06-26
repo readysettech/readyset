@@ -135,7 +135,7 @@ pub struct UpstreamConfig {
     pub snapshot_report_interval_secs: u16,
 
     /// The maximum number of relations that will be snapshotted in parallel from the upstream
-    #[arg(long, hide = true)]
+    #[arg(long, env = "MAX_PARALLEL_SNAPSHOT_TABLES")]
     #[serde(default = "default_max_parallel_snapshot_tables")]
     pub max_parallel_snapshot_tables: Option<usize>,
 
