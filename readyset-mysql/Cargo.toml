@@ -50,6 +50,7 @@ test-strategy = { workspace = true }
 readyset-tracing = { path = "../readyset-tracing" }
 reqwest = { workspace = true }
 regex = { workspace = true }
+yore = { workspace = true }
 
 [features]
 vertical_tests = []

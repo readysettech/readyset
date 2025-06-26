@@ -22,6 +22,7 @@ readyset-errors = { path = "../readyset-errors" }
 deadpool-postgres = { workspace = true }
 num_cpus = { workspace = true }
 icu = { workspace = true }
+yore = { workspace = true }
 
 [lints]
 workspace = true

@@ -11,6 +11,9 @@ use test_strategy::Arbitrary;
 
 use crate::{Dialect, SqlEngine};
 
+mod mysql_latin1_swedish_ci;
+mod mysql_latin1_swedish_ci_weights;
+
 thread_local! {
     static UTF8: CollatorBorrowed<'static> = Collator::try_new(
         Default::default(),
@@ -60,6 +63,9 @@ pub enum Collation {
 
     /// The binary collation, that simply compares bytes.
     Binary,
+
+    /// Collation that matches the old MySQL default of latin1_swedish_ci.
+    Latin1SwedishCi,
 }
 
 impl Display for Collation {
@@ -69,6 +75,7 @@ impl Display for Collation {
             Self::Citext => write!(f, "citext"),
             Self::Utf8AiCi => write!(f, "utf8_ai_ci"),
             Self::Binary => write!(f, "binary"),
+            Self::Latin1SwedishCi => write!(f, "latin1_swedish_ci"),
         }
     }
 }
@@ -80,12 +87,14 @@ impl Collation {
         A: AsRef<str>,
         B: AsRef<str>,
     {
-        let cmp = |c: &CollatorBorrowed| c.compare(a.as_ref(), b.as_ref());
+        let (a, b) = (a.as_ref(), b.as_ref());
+        let cmp = |c: &CollatorBorrowed| c.compare(a, b);
         match self {
             Self::Utf8 => UTF8.with(cmp),
             Self::Citext => UTF8_CI.with(cmp),
             Self::Utf8AiCi => UTF8_AI_CI.with(cmp),
-            Self::Binary => a.as_ref().cmp(b.as_ref()),
+            Self::Binary => a.cmp(b),
+            Self::Latin1SwedishCi => mysql_latin1_swedish_ci::compare(a, b),
         }
     }
 
@@ -99,7 +108,7 @@ impl Collation {
         let len = match self {
             Self::Utf8 => s.len() * 4,
             Self::Citext => s.len() * 2,
-            Self::Utf8AiCi | Self::Binary => s.len(),
+            Self::Utf8AiCi | Self::Binary | Self::Latin1SwedishCi => s.len(),
         };
 
         let mut out = Vec::with_capacity(len); // just a close guess
@@ -110,6 +119,10 @@ impl Collation {
             Self::Utf8AiCi => UTF8_AI_CI.with(make),
             Self::Binary => {
                 out.extend_from_slice(s.as_bytes());
+                Ok(())
+            }
+            Self::Latin1SwedishCi => {
+                mysql_latin1_swedish_ci::key(s, &mut out);
                 Ok(())
             }
         };
@@ -131,6 +144,7 @@ impl Collation {
             (SqlEngine::MySQL, "utf8mb4_0900_ai_ci") => Some(Self::Utf8AiCi),
             (SqlEngine::MySQL, "utf8mb4_0900_as_cs") => Some(Self::Utf8),
             (SqlEngine::MySQL, "binary") => Some(Self::Binary),
+            (SqlEngine::MySQL, "latin1_swedish_ci") => Some(Self::Latin1SwedishCi),
             (_, _) => None,
         }
     }
@@ -211,5 +225,16 @@ mod tests {
         assert_eq!(col.compare("e", "é"), Ordering::Equal);
         assert_eq!(col.compare("é", "é"), Ordering::Equal); // second has combining accent
         assert_eq!(col.compare("é", "f"), Ordering::Less);
+    }
+
+    #[test]
+    fn latin1_pad_space() {
+        let col = Collation::Latin1SwedishCi;
+        assert_eq!(col.compare("a", "a "), Ordering::Equal);
+        assert_eq!(col.key("a"), col.key("a "));
+        assert_eq!(col.compare("a ", "a"), Ordering::Equal);
+        assert_eq!(col.key("a "), col.key("a"));
+        assert_eq!(col.compare("a", "b"), Ordering::Less);
+        assert!(col.key("a").lt(&col.key("b")));
     }
 }

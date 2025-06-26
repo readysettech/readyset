@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use mysql_async::prelude::Queryable;
-use mysql_async::{Conn, OptsBuilder, Row, Value};
+use mysql_async::prelude::*;
+use mysql_async::{params, Conn, OptsBuilder, Row, Value};
 use readyset_adapter::backend::noria_connector::ReadBehavior;
 use readyset_adapter::backend::{MigrationMode, QueryInfo};
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
@@ -3118,6 +3118,69 @@ async fn test_utf8_ai_ci() {
     )
     .await;
     assert_eq!(m, r);
+
+    tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, mysql_upstream)]
+async fn test_latin1_swedish_ci() {
+    readyset_tracing::init_test_logging();
+    let (rs_opts, _rs_handle, tx) = setup_with_mysql().await;
+    sleep().await;
+    let mut mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut rs = Conn::new(rs_opts).await.unwrap();
+
+    mysql
+        .query_drop(
+            "create table swedish (
+                 a int primary key,
+                 b varchar(1) character set latin1 collate latin1_swedish_ci
+             )",
+        )
+        .await
+        .unwrap();
+
+    for i in 0..=255 {
+        mysql
+            .query_drop(format!(
+                "insert into swedish values ({i}, _latin1 x'{i:02x}')"
+            ))
+            .await
+            .unwrap();
+    }
+    sleep().await;
+
+    rs.query_drop("create cache from select * from swedish order by b, a")
+        .await
+        .unwrap();
+    rs.query_drop("create cache from select * from swedish where b = ? order by a")
+        .await
+        .unwrap();
+    sleep().await;
+
+    let (m, r) = query_both(&mut mysql, &mut rs, "select * from swedish order by b, a").await;
+    assert_eq!(m, r);
+
+    async fn run(db: &mut Conn, i: u8) -> Vec<(u8, String)> {
+        let i = yore::code_pages::CP1252.decode(&[i]).to_string();
+        "select * from swedish where b = :i order by a"
+            .with(params! {
+                "i" => i,
+            })
+            .run(db)
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap()
+    }
+
+    for i in 0..=255 {
+        let m = run(&mut mysql, i).await;
+        let r = run(&mut rs, i).await;
+        assert_eq!(m, r, "on codepoint {i}");
+    }
 
     tx.shutdown().await;
 }
