@@ -66,6 +66,9 @@ pub enum Collation {
 
     /// Collation that matches the old MySQL default of latin1_swedish_ci.
     Latin1SwedishCi,
+
+    /// A binary collation that compares codepoints.
+    Utf8Binary,
 }
 
 impl Display for Collation {
@@ -76,6 +79,7 @@ impl Display for Collation {
             Self::Utf8AiCi => write!(f, "utf8_ai_ci"),
             Self::Binary => write!(f, "binary"),
             Self::Latin1SwedishCi => write!(f, "latin1_swedish_ci"),
+            Self::Utf8Binary => write!(f, "utf8_binary"),
         }
     }
 }
@@ -95,6 +99,7 @@ impl Collation {
             Self::Utf8AiCi => UTF8_AI_CI.with(cmp),
             Self::Binary => a.cmp(b),
             Self::Latin1SwedishCi => mysql_latin1_swedish_ci::compare(a, b),
+            Self::Utf8Binary => a.chars().cmp(b.chars()),
         }
     }
 
@@ -106,7 +111,7 @@ impl Collation {
     {
         let s = s.as_ref();
         let len = match self {
-            Self::Utf8 => s.len() * 4,
+            Self::Utf8 | Self::Utf8Binary => s.len() * 4,
             Self::Citext => s.len() * 2,
             Self::Utf8AiCi | Self::Binary | Self::Latin1SwedishCi => s.len(),
         };
@@ -123,6 +128,13 @@ impl Collation {
             }
             Self::Latin1SwedishCi => {
                 mysql_latin1_swedish_ci::key(s, &mut out);
+                Ok(())
+            }
+            Self::Utf8Binary => {
+                for c in s.chars() {
+                    // big endian because sort keys are compared byte by byte
+                    out.extend_from_slice(&(c as u32).to_be_bytes());
+                }
                 Ok(())
             }
         };
@@ -145,6 +157,7 @@ impl Collation {
             (SqlEngine::MySQL, "utf8mb4_0900_as_cs") => Some(Self::Utf8),
             (SqlEngine::MySQL, "binary") => Some(Self::Binary),
             (SqlEngine::MySQL, "latin1_swedish_ci") => Some(Self::Latin1SwedishCi),
+            (SqlEngine::MySQL, "utf8mb4_bin") => Some(Self::Utf8Binary),
             (_, _) => None,
         }
     }

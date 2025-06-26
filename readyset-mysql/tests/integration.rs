@@ -3184,3 +3184,77 @@ async fn test_latin1_swedish_ci() {
 
     tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, mysql8_upstream)]
+async fn test_utf8mb4_bin() {
+    readyset_tracing::init_test_logging();
+    let (rs_opts, _rs_handle, tx) = setup_with_mysql().await;
+    sleep().await;
+    let mut mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut rs = Conn::new(rs_opts).await.unwrap();
+
+    fn utf8_str_for(i: u32) -> String {
+        let mut buf = [0; 8];
+        let buf = char::from_u32(i).unwrap().encode_utf8(&mut buf);
+        let buf = buf
+            .as_bytes()
+            .iter()
+            .map(|x| format!("{x:02x}"))
+            .collect::<Vec<_>>();
+        format!("_utf8 x'{}'", buf.join(""))
+    }
+
+    mysql
+        .query_drop(
+            "create table utf8_bin (
+                 a int primary key,
+                 b varchar(1) collate utf8mb4_bin
+             )",
+        )
+        .await
+        .unwrap();
+
+    // this range in UCA has several codepoints that aren't in numerical order
+    for i in 16..=255 {
+        let utf = utf8_str_for(i);
+        mysql
+            .query_drop(format!("insert into utf8_bin values ({i}, {utf})"))
+            .await
+            .unwrap();
+    }
+    sleep().await;
+
+    rs.query_drop("create cache from select * from utf8_bin order by b, a")
+        .await
+        .unwrap();
+    rs.query_drop("create cache from select * from utf8_bin where b = ? order by a")
+        .await
+        .unwrap();
+    sleep().await;
+
+    let (m, r) = query_both(&mut mysql, &mut rs, "select * from utf8_bin order by b, a").await;
+    assert_eq!(m, r);
+
+    async fn run(db: &mut Conn, i: u8) -> Vec<(u8, String)> {
+        let i = yore::code_pages::CP1252.decode(&[i]).to_string();
+        "select * from utf8_bin where b = :i order by a"
+            .with(params! {
+                "i" => i,
+            })
+            .run(db)
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap()
+    }
+
+    for i in 16..=255 {
+        let m = run(&mut mysql, i).await;
+        let r = run(&mut rs, i).await;
+        assert_eq!(m, r, "on codepoint {i}");
+    }
+
+    tx.shutdown().await;
+}
