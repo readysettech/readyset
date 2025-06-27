@@ -779,13 +779,20 @@ impl<'a> NoriaAdapter<'a> {
         changelist = changelist.with_schema_search_path(vec![schema.clone().into()]);
 
         // Collect a list of all tables we're creating for later
-        let tables = changelist
-            .changes()
-            .filter_map(|change| match change {
-                Change::CreateTable { statement, .. } => Some(statement.table.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+        let mut added_tables = HashSet::new();
+        for change in changelist.changes() {
+            let mut table = match change {
+                Change::CreateTable { statement, .. } => statement.table.clone(),
+                Change::AddNonReplicatedRelation(table) => table.name.clone(),
+                _ => continue,
+            };
+            table.schema.get_or_insert_with(|| (&schema).into());
+            if matches!(change, Change::CreateTable { .. }) {
+                added_tables.insert(table);
+            } else {
+                added_tables.remove(&table);
+            }
+        }
 
         match self
             .noria
@@ -801,6 +808,7 @@ impl<'a> NoriaAdapter<'a> {
                 let changes = mem::take(changelist.changes_mut());
                 // If something went wrong, mark all the tables and views that we just tried to
                 // create as non-replicated
+                added_tables.clear();
                 changelist
                     .changes_mut()
                     .extend(changes.into_iter().filter_map(|change| {
@@ -833,7 +841,7 @@ impl<'a> NoriaAdapter<'a> {
 
         // Set the replication offset for each table we just created to this replication offset
         // (since otherwise they'll get initialized without an offset)
-        for table in &tables {
+        for table in &added_tables {
             self.replication_offsets
                 .tables
                 .insert(table.clone(), Some(pos.clone()));
