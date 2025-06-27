@@ -1,4 +1,3 @@
-use std::env;
 use std::fmt::Display;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,9 +16,6 @@ use crate::metrics::{
 };
 use crate::{Builder, Handle, ReuseConfigType};
 
-// Settle time must be longer than the leader state check interval
-// when using a local authority.
-pub const DEFAULT_SETTLE_TIME_MS: u64 = 1500;
 pub const DEFAULT_SHARDING: usize = 2;
 
 /// PersistenceParameters with a log_name on the form of `prefix` + timestamp,
@@ -125,21 +121,6 @@ pub async fn build_custom(
     } else {
         builder.start(authority.clone()).await.unwrap()
     }
-}
-
-pub fn get_settle_time() -> Duration {
-    let settle_time: u64 = match env::var("SETTLE_TIME") {
-        Ok(value) => value.parse().unwrap(),
-        Err(_) => DEFAULT_SETTLE_TIME_MS,
-    };
-
-    Duration::from_millis(settle_time)
-}
-
-/// Sleeps for either DEFAULT_SETTLE_TIME_MS milliseconds, or
-/// for the value given through the SETTLE_TIME environment variable.
-pub async fn sleep() {
-    tokio::time::sleep(get_settle_time()).await;
 }
 
 /// Initializes the metrics recorder if it has not been initialized yet. This

@@ -424,6 +424,7 @@ pub mod manual {
     pub use crate::controller::migrate::Migration;
 }
 
+use std::env;
 use std::net::{IpAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -765,6 +766,25 @@ impl WorkerOptions {
 // TODO(justin): Change VolumeId type when we know this fixed size.
 /// Id associated with the worker server's volume.
 pub type VolumeId = String;
+
+// Settle time must be longer than the leader state check interval
+// // when using a local authority.
+const DEFAULT_SETTLE_TIME_MS: u64 = 1500;
+
+pub(crate) fn get_settle_time() -> Duration {
+    let settle_time: u64 = match env::var("SETTLE_TIME") {
+        Ok(value) => value.parse().unwrap(),
+        Err(_) => DEFAULT_SETTLE_TIME_MS,
+    };
+
+    Duration::from_millis(settle_time)
+}
+
+/// Sleeps for either DEFAULT_SETTLE_TIME_MS milliseconds, or
+/// for the value given through the SETTLE_TIME environment variable.
+pub async fn sleep() {
+    tokio::time::sleep(get_settle_time()).await;
+}
 
 #[cfg(test)]
 mod tests {

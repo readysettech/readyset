@@ -20,7 +20,7 @@ use readyset_data::{DfValue, Dialect};
 use rusty_fork::rusty_fork_test;
 
 use crate::integration_utils::*;
-use crate::{get_col, Builder};
+use crate::{get_col, sleep, Builder};
 
 rusty_fork_test! {
     #[test]

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use async_trait::async_trait;
 use database_utils::{DatabaseURL, ReplicationServerId};
@@ -34,9 +34,7 @@ pub mod mysql_helpers;
 #[cfg(feature = "postgres")]
 pub mod psql_helpers;
 
-pub async fn sleep() {
-    tokio::time::sleep(Duration::from_millis(200)).await;
-}
+pub use readyset_server::sleep;
 
 static UNIQUE_SERVER_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 

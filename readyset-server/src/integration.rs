@@ -47,7 +47,7 @@ use vec1::vec1;
 
 use crate::controller::sql::SqlIncorporator;
 use crate::integration_utils::*;
-use crate::{get_col, Builder};
+use crate::{get_col, get_settle_time, sleep, Builder};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_completes() {
