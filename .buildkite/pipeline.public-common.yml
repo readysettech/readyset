@@ -224,8 +224,7 @@ steps:
       - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/psql --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria'
       - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/postgis --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria'
       - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/mysql --database-type mysql --replication-url mysql://root:noria@mysql/noria'
-      # TODO: Re-enable once --parsing-preset flag is implemented for logictests
-      # - 'cargo --locked run --bin readyset-logictest --features readyset-sql-parsing/sqlparser -- verify logictests/sqlparser'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests/sqlparser --parsing-preset=only-sqlparser'
     timeout_in_minutes: 60
     plugins:
       - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:

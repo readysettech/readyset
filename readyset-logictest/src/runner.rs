@@ -30,6 +30,7 @@ use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_server::{Builder, LocalAuthority, ReuseConfigType};
 use readyset_sql::ast::Relation;
 use readyset_sql::Dialect;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_util::retry_with_exponential_backoff;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
@@ -90,6 +91,7 @@ pub struct RunOptions {
     pub database_type: DatabaseType,
     pub upstream_database_url: Option<DatabaseURL>,
     pub replication_url: Option<String>,
+    pub parsing_preset: ParsingPreset,
     pub enable_reuse: bool,
     pub time: bool,
     pub verbose: bool,
@@ -103,6 +105,7 @@ impl Default for RunOptions {
             time: false,
             replication_url: None,
             database_type: DatabaseType::MySQL,
+            parsing_preset: ParsingPreset::for_tests(),
             verbose: false,
         }
     }
@@ -540,6 +543,7 @@ impl TestScript {
             builder.set_straddled_joins(true);
             builder.set_post_lookup(true);
             builder.set_topk(false); // TODO: fails on generated tests
+            builder.set_parsing_preset(run_opts.parsing_preset);
 
             if run_opts.enable_reuse {
                 builder.set_reuse(Some(ReuseConfigType::Finkelstein))
@@ -603,6 +607,7 @@ impl TestScript {
 
         let adapter_rewrite_params = rh.adapter_rewrite_params().await.unwrap();
         let adapter_start_time = SystemTime::now();
+        let parsing_preset = run_opts.parsing_preset;
 
         let task = tokio::spawn(async move {
             let (s, _) = listener.accept().await.unwrap();
@@ -661,6 +666,7 @@ impl TestScript {
                     BackendBuilder::new()
                         .require_authentication(false)
                         .dialect($dialect)
+                        .parsing_preset(parsing_preset)
                         .build::<_, $handler>(
                             noria,
                             upstream,

@@ -21,6 +21,7 @@ use proptest::strategy::Strategy;
 use proptest::test_runner::{self, TestCaseError, TestError, TestRng, TestRunner};
 use query_generator::{QueryOperationArgs, QuerySeed};
 use readyset_client::consensus::AuthorityType;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
 use serde_json::json;
 use tokio::sync::Mutex;
@@ -261,6 +262,15 @@ struct Verify {
     /// The value should be a database URL starting with either postgresql:// or mysql://
     #[arg(long)]
     replication_url: Option<String>,
+
+    #[arg(
+        long,
+        env = "PARSING_PRESET",
+        value_enum,
+        default_value = "both-prefer-nom",
+        hide = true
+    )]
+    parsing_preset: ParsingPreset,
 
     /// Type of database to use for the adapter.
     ///
@@ -540,6 +550,7 @@ impl From<&Verify> for RunOptions {
             database_type: verify.database_type,
             enable_reuse: verify.enable_reuse,
             upstream_database_url: verify.database_url().cloned(),
+            parsing_preset: verify.parsing_preset,
             replication_url: verify.replication_url.clone(),
             time: verify.time,
             verbose: verify.verbose,
