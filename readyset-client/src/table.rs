@@ -33,7 +33,7 @@ use tower_service::Service;
 use tracing::{debug_span, error, trace, trace_span, Span};
 use vec_map::VecMap;
 
-use crate::internal::*;
+use crate::{internal::*, CONNECTION_MAGIC_NUMBER};
 use crate::{Tagged, Tagger, CONNECTION_FROM_BASE};
 
 // TODO(justin): Make write propagation sample rate configurable.
@@ -189,6 +189,7 @@ impl Service<()> for Endpoint {
         Box::pin(async move {
             let mut s = tokio::time::timeout(timeout, f).await??;
             s.set_nodelay(true)?;
+            s.write_all(&CONNECTION_MAGIC_NUMBER).await?;
             s.write_all(&[CONNECTION_FROM_BASE]).await?;
             s.flush().await?;
             let s = AsyncBincodeStream::from(s).for_async();

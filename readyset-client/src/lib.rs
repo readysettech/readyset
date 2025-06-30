@@ -229,6 +229,10 @@ pub(crate) const VIEW_POOL_SIZE: usize = 16;
 /// batch less work, which means lower overall efficiency.
 pub(crate) const PENDING_LIMIT: usize = 8192;
 
+/// A MAGIC 4 byte number to be written over a newly-established connection to a domain to indicate that the
+/// connection is originating from Readyset.
+pub const CONNECTION_MAGIC_NUMBER: [u8; 4] = [0x52, 0x53, 0x30, 0x31];
+
 /// A tag to be written over a newly-established connection to a domain to indicate that the
 /// connection is originating from a base table domain.
 pub const CONNECTION_FROM_BASE: u8 = 1;

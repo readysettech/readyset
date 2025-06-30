@@ -14,7 +14,7 @@ use futures_util::sink::{Sink, SinkExt};
 use metrics::{gauge, Gauge};
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
-use readyset_client::{CONNECTION_FROM_BASE, CONNECTION_FROM_DOMAIN};
+use readyset_client::{CONNECTION_FROM_BASE, CONNECTION_FROM_DOMAIN, CONNECTION_MAGIC_NUMBER};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use strum::{EnumCount, IntoEnumIterator};
 use tokio::io::BufWriter;
@@ -165,6 +165,7 @@ impl DomainConnectionBuilder<Remote> {
         let mut s = TcpSender::connect_from(self.sport, &self.addr)?;
         {
             let s = s.get_mut();
+            s.write_all(&CONNECTION_MAGIC_NUMBER)?;
             s.write_all(&[if self.is_for_base {
                 CONNECTION_FROM_BASE
             } else {

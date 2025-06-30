@@ -12,8 +12,10 @@ use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::StreamExt;
 use futures_util::FutureExt;
 use readyset_client::internal::ReplicaAddress;
-use readyset_client::{KeyComparison, PacketData, PacketPayload, Tagged, CONNECTION_FROM_BASE};
-use readyset_errors::ReadySetResult;
+use readyset_client::{
+    KeyComparison, PacketData, PacketPayload, Tagged, CONNECTION_FROM_BASE, CONNECTION_MAGIC_NUMBER,
+};
+use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_util::time_scope;
 use strawpoll::Strawpoll;
 use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
@@ -141,10 +143,24 @@ impl Replica {
         )
     }
 
-    /// Read the first byte of a connection to determine if it is from a base node, and convert
-    /// it to a DualTcpStream, returning a unique token for the connection together with the
-    /// upgraded connection
+    /// Read the first 4 bytes of a connection to determine if it has the correct magic number,
+    /// and then read the next byte to determine if it is from a base node. If it is, convert it to
+    /// a DualTcpStream, returning a unique token for the connection together with the upgraded
+    /// connection.
     async fn handle_new_connection(mut stream: TcpStream) -> ReadySetResult<(u64, DualTcpStream)> {
+        let mut magic: [u8; 4] = [0; 4];
+        stream.read_exact(&mut magic).await?;
+        if magic != CONNECTION_MAGIC_NUMBER {
+            warn!(
+                "Replica received connection from unknown source: Magic: {:?} Address: {:?}",
+                magic,
+                stream.peer_addr().unwrap()
+            );
+            return Err(ReadySetError::TcpSendError(
+                "Replica received connection from unknown source".to_string(),
+            ));
+        }
+
         let mut tag: u8 = 0;
         stream.read_exact(std::slice::from_mut(&mut tag)).await?;
         let is_base = tag == CONNECTION_FROM_BASE;
