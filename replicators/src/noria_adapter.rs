@@ -469,9 +469,13 @@ impl<'a> NoriaAdapter<'a> {
             Some(max) if max > &current_pos => {
                 info!(start = %current_pos, end = %max, "Catching up");
                 let max = max.clone();
-                adapter
+                if let Err(err) = adapter
                     .main_loop(&mut current_pos, Some(max), controller_tx, replicator_rx)
-                    .await?;
+                    .await
+                {
+                    warn!(position = %current_pos, "Replicator stopped during catch-up phase");
+                    return Err(err);
+                }
             }
             _ => {}
         }
@@ -481,9 +485,13 @@ impl<'a> NoriaAdapter<'a> {
         let _ = controller_tx.send(ControllerMessage::SnapshotDone);
 
         info!(position = %current_pos, "Streaming replication started");
-        adapter
+        if let Err(err) = adapter
             .main_loop(&mut current_pos, None, controller_tx, replicator_rx)
-            .await?;
+            .await
+        {
+            warn!(position = %current_pos, "Replicator stopped during streaming replication");
+            return Err(err);
+        }
 
         unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
     }
@@ -719,9 +727,13 @@ impl<'a> NoriaAdapter<'a> {
 
         if min_pos != max_pos {
             info!(start = %min_pos, end = %max_pos, "Catching up");
-            adapter
+            if let Err(err) = adapter
                 .main_loop(&mut min_pos, Some(max_pos), controller_tx, replicator_rx)
-                .await?;
+                .await
+            {
+                warn!(position = %min_pos, "Replicator stopped during catch-up phase");
+                return Err(err);
+            }
         }
 
         // Let Controller know that the initial snapshotting is complete. Ignores the error, which
@@ -729,9 +741,13 @@ impl<'a> NoriaAdapter<'a> {
         let _ = controller_tx.send(ControllerMessage::SnapshotDone);
 
         info!(position = %min_pos, "Streaming replication started");
-        adapter
+        if let Err(err) = adapter
             .main_loop(&mut min_pos, None, controller_tx, replicator_rx)
-            .await?;
+            .await
+        {
+            warn!(position = %min_pos, "Replicator stopped during streaming replication");
+            return Err(err);
+        }
 
         unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
     }

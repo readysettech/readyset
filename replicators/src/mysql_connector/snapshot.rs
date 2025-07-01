@@ -716,7 +716,9 @@ impl MySqlReplicator<'_> {
                             "Compacting table",
                             table = %table.display(readyset_sql::Dialect::MySQL)
                         );
-                        span.in_scope(|| info!("Setting replication offset"));
+                        span.in_scope(
+                            || info!(repl_offset = %repl_offset, "Setting replication offset"),
+                        );
                         noria_table
                             .set_replication_offset(repl_offset)
                             .map_err(log_err)
