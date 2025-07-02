@@ -237,7 +237,7 @@ pub fn arbitrary_json_without_f64() -> impl Strategy<Value = serde_json::Value> 
         Just(serde_json::Value::Null),
         any::<bool>().prop_map(serde_json::Value::from),
         any::<i64>().prop_map(serde_json::Value::from),
-        "[^\u{0}]*".prop_map(serde_json::Value::from),
+        "[^\u{0}]{0,100}".prop_map(serde_json::Value::from),
     ];
     leaf.prop_recursive(
         3,   // 8 levels deep
@@ -247,7 +247,7 @@ pub fn arbitrary_json_without_f64() -> impl Strategy<Value = serde_json::Value> 
             prop_oneof![
                 // Take the inner strategy and make the two recursive cases.
                 prop::collection::vec(inner.clone(), 0..10).prop_map(serde_json::Value::from),
-                prop::collection::hash_map("[^\u{0}]*", inner, 0..10).prop_map(|h| {
+                prop::collection::hash_map("[^\u{0}]{0,100}", inner, 0..10).prop_map(|h| {
                     serde_json::Value::from(serde_json::Map::from_iter(
                         h.iter().map(|(s, v)| (s.clone(), v.clone())),
                     ))
@@ -264,7 +264,7 @@ pub fn arbitrary_json() -> impl Strategy<Value = serde_json::Value> {
         any::<bool>().prop_map(serde_json::Value::from),
         any::<i64>().prop_map(serde_json::Value::from),
         any::<f64>().prop_map(serde_json::Value::from),
-        "[^\u{0}]*".prop_map(serde_json::Value::from),
+        "[^\u{0}]{0,100}".prop_map(serde_json::Value::from),
     ];
     leaf.prop_recursive(
         3,   // 8 levels deep
@@ -274,7 +274,7 @@ pub fn arbitrary_json() -> impl Strategy<Value = serde_json::Value> {
             prop_oneof![
                 // Take the inner strategy and make the two recursive cases.
                 prop::collection::vec(inner.clone(), 0..10).prop_map(serde_json::Value::from),
-                prop::collection::hash_map("[^\u{0}]*", inner, 0..10).prop_map(|h| {
+                prop::collection::hash_map("[^\u{0}]{0,100}", inner, 0..10).prop_map(|h| {
                     serde_json::Value::from(serde_json::Map::from_iter(
                         h.iter().map(|(s, v)| (s.clone(), v.clone())),
                     ))
