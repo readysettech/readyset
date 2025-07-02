@@ -34,7 +34,7 @@ use readyset_data::{Bound, Collation, DfType, DfValue, Dialect, IntoBoundedRange
 use readyset_decimal::Decimal;
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_sql::ast;
-use readyset_sql::ast::{OrderType, Relation, SqlQuery};
+use readyset_sql::ast::{NullOrder, OrderType, Relation, SqlQuery};
 use readyset_sql_parsing::{parse_create_table, parse_create_view, parse_query, parse_select};
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
@@ -5212,7 +5212,7 @@ async fn post_read_ilike() {
                 a,
                 &Index::btree_map(vec![0]),
                 ReaderProcessing::new(
-                    Some(vec![(1, OrderType::OrderAscending)]),
+                    Some(vec![(1, OrderType::OrderAscending, NullOrder::NullsFirst)]),
                     None,
                     None,
                     None,

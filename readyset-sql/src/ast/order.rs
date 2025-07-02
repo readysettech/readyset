@@ -46,18 +46,32 @@ pub enum NullOrder {
 }
 
 impl NullOrder {
-    /// Returns `true` if this is the default null order for the given order type.
+    /// Assign a default value based on the dialect and order type
     ///
-    /// From [the postgres docs][pg-docs]:
+    /// For MySQL, the default for `OrderType::OrderAscending` is `NullOrder::NullsFirst` and
+    /// `OrderType::OrderDescending` is `NullOrder::NullsLast`.
     ///
-    /// > By default, null values sort as if larger than any non-null value; that is, `NULLS FIRST`
-    /// > is the default for `DESC` order, and `NULLS LAST` otherwise.
+    /// For PostgreSQL, the default for `OrderType::OrderAscending` is `NullOrder::NullsLast` and
+    /// `OrderType::OrderDescending` is `NullOrder::NullsFirst`.
     ///
-    /// [pg-docs]: https://www.postgresql.org/docs/current/queries-order.html
-    pub fn is_default_for(self, ot: OrderType) -> bool {
-        self == match ot {
-            OrderType::OrderDescending => Self::NullsFirst,
-            OrderType::OrderAscending => Self::NullsLast,
+    /// [https://dev.mysql.com/doc/refman/8.0/en/problems-with-null.html]
+    /// [https://www.postgresql.org/docs/current/queries-order.html]
+    pub fn default_for(dialect: Dialect, order_type: &OrderType) -> Self {
+        match (dialect, order_type) {
+            (Dialect::PostgreSQL, OrderType::OrderDescending) => NullOrder::NullsFirst,
+            (Dialect::PostgreSQL, OrderType::OrderAscending) => NullOrder::NullsLast,
+            (Dialect::MySQL, OrderType::OrderDescending) => NullOrder::NullsLast,
+            (Dialect::MySQL, OrderType::OrderAscending) => NullOrder::NullsFirst,
+        }
+    }
+
+    pub fn apply(&self, a_null: bool, b_null: bool) -> Ordering {
+        match (a_null, b_null) {
+            (true, false) if self == &NullOrder::NullsFirst => Ordering::Less,
+            (true, false) => Ordering::Greater,
+            (false, true) if self == &NullOrder::NullsLast => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            (false, false) | (true, true) => Ordering::Equal,
         }
     }
 }
@@ -75,7 +89,9 @@ impl fmt::Display for NullOrder {
 pub struct OrderBy {
     pub field: FieldReference,
     pub order_type: Option<OrderType>,
-    pub null_order: Option<NullOrder>,
+    /// Not an Option because it is assigned a default value
+    /// during parsing as the default value differs between dialects
+    pub null_order: NullOrder,
 }
 
 impl TryFromDialect<sqlparser::ast::OrderByExpr> for OrderBy {
@@ -88,22 +104,34 @@ impl TryFromDialect<sqlparser::ast::OrderByExpr> for OrderBy {
             options,
             with_fill: _,
         } = value;
+
+        let order_type = options.asc.map(|asc| {
+            if asc {
+                OrderType::OrderAscending
+            } else {
+                OrderType::OrderDescending
+            }
+        });
+
+        let null_order = options.nulls_first.map(|first| {
+            if first {
+                NullOrder::NullsFirst
+            } else {
+                NullOrder::NullsLast
+            }
+        });
+
         Ok(Self {
             field: expr.try_into_dialect(dialect)?,
-            order_type: options.asc.map(|asc| {
-                if asc {
-                    OrderType::OrderAscending
-                } else {
-                    OrderType::OrderDescending
-                }
-            }),
-            null_order: options.nulls_first.map(|nulls_first| {
-                if nulls_first {
-                    NullOrder::NullsFirst
-                } else {
-                    NullOrder::NullsLast
-                }
-            }),
+            order_type,
+            // TODO: We assign a default here because the default value differs between dialects
+            // Maybe it's better to assign the default in MIR lowering; however,
+            // that requires plumbing the dialect through all the way to MIR
+            // which doesn't seem trivial at the moment
+            null_order: null_order.unwrap_or(NullOrder::default_for(
+                dialect,
+                &order_type.unwrap_or(OrderType::OrderAscending),
+            )),
         })
     }
 }
@@ -115,6 +143,8 @@ impl OrderBy {
             if let Some(ot) = self.order_type {
                 write!(f, " {ot}")?;
             }
+
+            write!(f, " {}", self.null_order)?;
 
             Ok(())
         })

@@ -16,8 +16,9 @@ use readyset_sql::analysis::visit_mut::{walk_expr, VisitorMut};
 use readyset_sql::analysis::{is_aggregate, ReferredColumns};
 use readyset_sql::ast::{
     self, BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
-    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderBy,
-    OrderType, Relation, SelectMetadata, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, NullOrder,
+    OrderBy, OrderType, Relation, SelectMetadata, SelectStatement, SqlIdentifier, TableExpr,
+    TableExprInner,
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::{is_correlated, is_predicate, map_aggregates, LogicalOp};
@@ -235,7 +236,7 @@ pub enum QueryGraphEdge {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pagination {
-    pub order: Option<Vec<(Expr, OrderType)>>,
+    pub order: Option<Vec<(Expr, OrderType, NullOrder)>>,
     pub limit: usize,
     pub offset: Option<ViewPlaceholder>,
 }
@@ -289,7 +290,7 @@ pub struct QueryGraph {
     /// HAVING predicates (like global predicates, but applied after aggregate functions)
     pub having_predicates: Vec<Expr>,
     /// The list of columns and directionsj that the query is ordering by, if any
-    pub order: Option<Vec<(Column, OrderType)>>,
+    pub order: Option<Vec<(Column, OrderType, NullOrder)>>,
     /// The pagination (order, limit, offset) for the query, if any
     pub pagination: Option<Pagination>,
     /// True if the query is correlated (is a subquery that refers to columns in an outer query)
@@ -1422,11 +1423,6 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                          null_order,
                      }| {
                         let order_type = order_type.unwrap_or(OrderType::OrderAscending);
-                        if let Some(null_order) = null_order {
-                            if !null_order.is_default_for(order_type) {
-                                unsupported!("Non-default NULLS FIRST/LAST is not yet supported");
-                            }
-                        }
 
                         Ok((
                             match field {
@@ -1444,6 +1440,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                                 }
                             },
                             order_type,
+                            null_order,
                         ))
                     },
                 )
@@ -1470,13 +1467,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                                  }| {
                                     let order_type =
                                         order_type.unwrap_or(OrderType::OrderAscending);
-                                    if let Some(null_order) = null_order {
-                                        if !null_order.is_default_for(order_type) {
-                                            unsupported!(
-                                                "Non-default NULLS FIRST/LAST is not yet supported"
-                                            );
-                                        }
-                                    }
+
                                     Ok((
                                         match field {
                                             FieldReference::Numeric(_) => {
@@ -1487,6 +1478,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                                             FieldReference::Expr(expr) => expr,
                                         },
                                         order_type,
+                                        null_order,
                                     ))
                                 },
                             )

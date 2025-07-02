@@ -7,7 +7,7 @@ use dataflow_state::PointKey;
 use itertools::Itertools;
 use readyset_client::internal;
 use readyset_errors::{internal, internal_err, invariant, ReadySetResult};
-use readyset_sql::ast::OrderType;
+use readyset_sql::ast::{NullOrder, OrderType};
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use tracing::trace;
@@ -94,7 +94,7 @@ impl TopK {
     /// * `k` - the maximum number of results per group.
     pub fn new(
         src: NodeIndex,
-        order: Vec<(usize, OrderType)>,
+        order: Vec<(usize, OrderType, NullOrder)>,
         group_by: Vec<usize>,
         k: usize,
     ) -> Self {
@@ -451,9 +451,9 @@ mod tests {
 
     fn setup(reversed: bool) -> (ops::test::MockGraph, IndexPair) {
         let cmp_rows = if reversed {
-            vec![(2, OrderType::OrderDescending)]
+            vec![(2, OrderType::OrderDescending, NullOrder::NullsLast)]
         } else {
-            vec![(2, OrderType::OrderAscending)]
+            vec![(2, OrderType::OrderAscending, NullOrder::NullsFirst)]
         };
 
         let mut g = ops::test::MockGraph::new();

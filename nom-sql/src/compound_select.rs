@@ -317,7 +317,7 @@ mod tests {
                 order_by: vec![OrderBy {
                     field: FieldReference::Expr(Expr::Column(Column::from("id"))),
                     order_type: Some(OrderType::OrderAscending),
-                    null_order: None,
+                    null_order: NullOrder::NullsFirst,
                 }],
             }),
             limit_clause: LimitClause::LimitOffset {
@@ -363,7 +363,7 @@ mod tests {
                 order_by: vec![OrderBy {
                     field: FieldReference::Expr(Expr::Column(Column::from("id"))),
                     order_type: Some(OrderType::OrderAscending),
-                    null_order: None,
+                    null_order: NullOrder::NullsFirst,
                 }],
             }),
             limit_clause: LimitClause::LimitOffset {

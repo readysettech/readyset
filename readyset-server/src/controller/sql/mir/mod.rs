@@ -28,8 +28,8 @@ use readyset_sql::analysis::{self, ReferredColumns};
 use readyset_sql::ast::{
     self, BinaryOperator, CaseWhenBranch, ColumnSpecification, CompoundSelectOperator,
     CreateTableBody, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
-    InValue, LimitClause, Literal, NonReplicatedRelation, OrderBy, OrderClause, OrderType,
-    Relation, SelectStatement, SqlIdentifier, TableExprInner, TableKey, UnaryOperator,
+    InValue, LimitClause, Literal, NonReplicatedRelation, NullOrder, OrderBy, OrderClause,
+    OrderType, Relation, SelectStatement, SqlIdentifier, TableExprInner, TableKey, UnaryOperator,
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::{is_correlated, outermost_table_exprs};
@@ -309,13 +309,7 @@ impl SqlToMirConverter {
                                      }| {
                                         let order_type =
                                             order_type.unwrap_or(OrderType::OrderAscending);
-                                        if let Some(null_order) = null_order {
-                                            if !null_order.is_default_for(order_type) {
-                                                unsupported!(
-                                                 "Non-default NULLS FIRST/LAST is not yet supported"
-                                             );
-                                            }
-                                        }
+
                                         Ok((
                                             match field {
                                                 FieldReference::Numeric(_) => internal!(
@@ -324,6 +318,7 @@ impl SqlToMirConverter {
                                                 FieldReference::Expr(e) => e.clone(),
                                             },
                                             order_type,
+                                            *null_order,
                                         ))
                                     },
                                 )
@@ -1304,7 +1299,7 @@ impl SqlToMirConverter {
         name: SqlIdentifier,
         mut parent: NodeIndex,
         group_by: Vec<Column>,
-        order: &Option<Vec<(Expr, OrderType)>>,
+        order: &Option<Vec<(Expr, OrderType, NullOrder)>>,
         limit: usize,
         is_topk: bool,
         outputs: Option<&Vec<OutputColumn>>,
@@ -1322,7 +1317,7 @@ impl SqlToMirConverter {
             .clone()
             .unwrap_or_default()
             .iter()
-            .map(|(expr, ot)| {
+            .map(|(expr, ot, no)| {
                 let col = match expr {
                     Expr::Column(col) => {
                         let col = Column::from(col);
@@ -1386,7 +1381,7 @@ impl SqlToMirConverter {
                     }
                 }?;
 
-                Ok((col, *ot))
+                Ok((col, *ot, *no))
             })
             .collect::<ReadySetResult<Vec<_>>>()?;
 
@@ -2659,10 +2654,12 @@ impl SqlToMirConverter {
                     None
                 };
 
-                let order_by = query_graph
-                    .order
-                    .as_ref()
-                    .map(|order| order.iter().map(|(c, ot)| (Column::from(c), *ot)).collect());
+                let order_by = query_graph.order.as_ref().map(|order| {
+                    order
+                        .iter()
+                        .map(|(c, ot, no)| (Column::from(c), *ot, *no))
+                        .collect()
+                });
                 let mut limit = query_graph.pagination.as_ref().map(|p| p.limit);
                 let offset = query_graph.pagination.as_ref().and_then(|p| p.offset);
                 let is_topk_query = order_by.is_some() && limit.is_some() && offset.is_none();

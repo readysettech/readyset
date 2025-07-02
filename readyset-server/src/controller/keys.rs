@@ -594,7 +594,7 @@ mod tests {
     use dataflow::utils::make_columns;
     use dataflow::{node, ops, Expr};
     use readyset_data::DfType;
-    use readyset_sql::ast::OrderType;
+    use readyset_sql::ast::{NullOrder, OrderType};
 
     use super::*;
 
@@ -1156,7 +1156,7 @@ mod tests {
             make_columns(&["a1", "a2", "__page_number"]),
             ops::NodeOperator::Paginate(ops::paginate::Paginate::new(
                 a,
-                vec![(0, OrderType::OrderAscending)],
+                vec![(0, OrderType::OrderAscending, NullOrder::NullsFirst)],
                 vec![1],
                 3,
             )),

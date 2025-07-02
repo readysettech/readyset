@@ -123,7 +123,9 @@ mod tests {
         use dataflow::ops::grouped::extremum::Extremum;
         use dataflow::ops::union::DuplicateMode;
         use readyset_client::ViewPlaceholder;
-        use readyset_sql::ast::{BinaryOperator, ColumnSpecification, Expr, OrderType, SqlType};
+        use readyset_sql::ast::{
+            BinaryOperator, ColumnSpecification, Expr, NullOrder, OrderType, SqlType,
+        };
 
         use super::*;
         use crate::graph::MirGraph;
@@ -368,7 +370,11 @@ mod tests {
         #[test]
         fn topk() {
             same_columns_as_parent(MirNodeInner::TopK {
-                order: vec![(Column::new(Some("base"), "a"), OrderType::OrderAscending)],
+                order: vec![(
+                    Column::new(Some("base"), "a"),
+                    OrderType::OrderAscending,
+                    NullOrder::NullsFirst,
+                )],
                 group_by: vec![Column::new(Some("base"), "b")],
                 limit: 3,
             })
@@ -378,7 +384,11 @@ mod tests {
         fn paginate() {
             has_columns_single_parent(
                 MirNodeInner::Paginate {
-                    order: vec![(Column::new(Some("base"), "a"), OrderType::OrderAscending)],
+                    order: vec![(
+                        Column::new(Some("base"), "a"),
+                        OrderType::OrderAscending,
+                        NullOrder::NullsFirst,
+                    )],
                     group_by: vec![Column::new(Some("base"), "b")],
                     limit: 3,
                 },

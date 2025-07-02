@@ -259,7 +259,7 @@ impl GraphViz for MirNodeInner {
                         "\\norder_by: {}",
                         order_by
                             .iter()
-                            .map(|(col, ot)| format!("{col} {ot}"))
+                            .map(|(col, ot, no)| format!("{col} {ot}({no})"))
                             .join(", ")
                     )?;
                 }
@@ -335,7 +335,7 @@ impl GraphViz for MirNodeInner {
             } => {
                 let order = order
                     .iter()
-                    .map(|(c, o)| format!("{}: {}", c.name.as_str(), o))
+                    .map(|(c, o, no)| format!("{}: {o}({no})", c.name.as_str()))
                     .collect::<Vec<_>>()
                     .join(", ");
                 write!(f, "Paginate [limit: {limit}; {order}]")
@@ -347,7 +347,7 @@ impl GraphViz for MirNodeInner {
             } => {
                 let order = order
                     .iter()
-                    .map(|(c, o)| format!("{}: {}", c.name.as_str(), o))
+                    .map(|(c, o, no)| format!("{}: {o}({no})", c.name.as_str()))
                     .collect::<Vec<_>>()
                     .join(", ");
                 write!(f, "TopK [k: {limit}; {order}]")

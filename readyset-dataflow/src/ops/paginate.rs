@@ -6,7 +6,7 @@ use std::mem;
 
 use dataflow_state::PointKey;
 use itertools::Itertools;
-use readyset_sql::ast::OrderType;
+use readyset_sql::ast::{NullOrder, OrderType};
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 
@@ -89,7 +89,7 @@ pub struct Paginate {
 impl Paginate {
     pub fn new(
         src: NodeIndex,
-        order: Vec<(usize, OrderType)>,
+        order: Vec<(usize, OrderType, NullOrder)>,
         group_by: Vec<usize>,
         limit: usize,
     ) -> Self {
@@ -374,7 +374,7 @@ mod tests {
             &["x", "y", "page"],
             Paginate::new(
                 s.as_global(),
-                vec![(0, OrderType::OrderDescending)],
+                vec![(0, OrderType::OrderDescending, NullOrder::NullsLast)],
                 vec![1],
                 3,
             ),

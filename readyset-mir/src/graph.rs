@@ -217,7 +217,7 @@ impl MirGraph {
                 columns.extend(
                     keys.iter()
                         .map(|(c, _)| c.clone())
-                        .chain(order_by.iter().flatten().map(|(c, _)| c.clone()))
+                        .chain(order_by.iter().flatten().map(|(c, _, _)| c.clone()))
                         .chain(returned_cols.iter().flatten().cloned())
                         .chain(aggregates.iter().flat_map(|aggs| {
                             aggs.group_by
@@ -250,7 +250,7 @@ impl MirGraph {
                 order, group_by, ..
             } => {
                 let mut columns = self.columns(node);
-                columns.extend(order.iter().map(|(c, _)| c.clone()));
+                columns.extend(order.iter().map(|(c, _, _)| c.clone()));
                 // group by cols are pulled through by default; however, there are some cases
                 // where a group by wouldn't be specified, in these cases a bogokey is used
                 // which needs to be pulled through

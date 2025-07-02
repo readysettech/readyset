@@ -6,7 +6,7 @@ use std::sync::Arc;
 use partial_map::InsertionOrder;
 use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetResult};
-use readyset_sql::ast::OrderType;
+use readyset_sql::ast::{NullOrder, OrderType};
 use serde::{Deserialize, Serialize};
 
 /// Representation of an aggregate function
@@ -120,7 +120,7 @@ pub struct ReaderProcessing {
 impl ReaderProcessing {
     /// Constructs a new [`PostLookup`]
     pub fn new(
-        order_by: Option<Vec<(usize, OrderType)>>,
+        order_by: Option<Vec<(usize, OrderType, NullOrder)>>,
         limit: Option<usize>,
         returned_cols: Option<Vec<usize>>,
         default_row: Option<Vec<DfValue>>,
@@ -171,7 +171,7 @@ pub struct PostLookup {
     /// Column indices to order by, and whether or not to reverse order on each index.
     ///
     /// If an empty `Vec` is specified, rows are sorted in lexicographic order.
-    pub order_by: Option<Vec<(usize, OrderType)>>,
+    pub order_by: Option<Vec<(usize, OrderType, NullOrder)>>,
     /// Maximum number of records to return
     pub limit: Option<usize>,
     /// Indices of the columns requested in the query. Reader will filter out all other projected
@@ -192,7 +192,7 @@ pub struct PreInsertion {
     /// Column indices to order by, and whether or not to reverse order on each index.
     ///
     /// If an empty `Vec` is specified, rows are sorted in lexicographic order.
-    order_by: Option<Vec<(usize, OrderType)>>,
+    order_by: Option<Vec<(usize, OrderType, NullOrder)>>,
     /// The set of column indices to group the aggregate by, `group_by` takes precedence over
     /// `order_by` when determining row order, so that aggregates are processed one by one.
     group_by: Option<Vec<usize>>,
@@ -212,7 +212,11 @@ impl InsertionOrder<Box<[DfValue]>> for PreInsertion {
         } else if let Some(indices) = self.order_by.as_deref() {
             indices
                 .iter()
-                .map(|&(idx, order_type)| order_type.apply(a[idx].cmp(&b[idx])))
+                .map(|&(idx, order_type, null_order)| {
+                    null_order
+                        .apply(a[idx].is_none(), b[idx].is_none())
+                        .then(order_type.apply(a[idx].cmp(&b[idx])))
+                })
                 .try_fold(Ordering::Equal, |acc, next| match acc {
                     Ordering::Equal => Ok(next),
                     ord => Err(ord),

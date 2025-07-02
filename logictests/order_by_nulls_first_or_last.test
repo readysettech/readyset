@@ -1,0 +1,105 @@
+statement ok
+CREATE TABLE t (a INT PRIMARY KEY, b INT);
+
+statement ok
+INSERT INTO t VALUES (1, 1), (2, 2), (3, null), (4, null), (5, null);
+
+query II
+SELECT a, b FROM t ORDER BY b DESC NULLS FIRST, a DESC;
+----
+5
+NULL
+4
+NULL
+3
+NULL
+2
+2
+1
+1
+
+query II
+SELECT a, b FROM t ORDER BY b DESC NULLS LAST, a DESC;
+----
+2
+2
+1
+1
+5
+NULL
+4
+NULL
+3
+NULL
+
+query II
+SELECT a, b FROM t ORDER BY b ASC NULLS FIRST, a ASC;
+----
+3
+NULL
+4
+NULL
+5
+NULL
+1
+1
+2
+2
+
+query II
+SELECT a, b FROM t ORDER BY b ASC NULLS LAST, a ASC;
+----
+1
+1
+2
+2
+3
+NULL
+4
+NULL
+5
+NULL
+
+# these tests run with MySQL, which defaults to nulls
+# first when ASC and nulls last when DESC
+
+query II
+SELECT a, b FROM t ORDER BY b DESC, a DESC;
+----
+2
+2
+1
+1
+5
+NULL
+4
+NULL
+3
+NULL
+
+query II
+SELECT a, b FROM t ORDER BY b ASC, a ASC;
+----
+3
+NULL
+4
+NULL
+5
+NULL
+1
+1
+2
+2
+
+
+# test topk
+
+query II
+SELECT a, b FROM t ORDER BY b DESC NULLS FIRST, a DESC LIMIT 3;
+----
+5
+NULL
+4
+NULL
+3
+NULL

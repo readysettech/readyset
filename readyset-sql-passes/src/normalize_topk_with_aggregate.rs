@@ -106,7 +106,7 @@ impl NormalizeTopKWithAggregate for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use readyset_sql::ast::{Expr, LimitValue, OrderClause, OrderType};
+    use readyset_sql::ast::{Expr, LimitValue, NullOrder, OrderClause, OrderType};
     use readyset_sql::Dialect;
     use readyset_sql_parsing::parse_query;
 
@@ -188,7 +188,7 @@ mod tests {
                         order_by: vec![OrderBy {
                             field: FieldReference::Expr(Expr::Column("column_3".into())),
                             order_type: Some(OrderType::OrderAscending),
-                            null_order: None
+                            null_order: NullOrder::NullsFirst
                         }]
                     })
                 );

@@ -30,7 +30,7 @@ use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
 };
-use readyset_sql::ast::{self, ColumnSpecification, Expr, OrderType, Relation};
+use readyset_sql::ast::{self, ColumnSpecification, Expr, NullOrder, OrderType, Relation};
 use readyset_sql::TryIntoDialect as _;
 
 use crate::controller::Migration;
@@ -1125,7 +1125,7 @@ fn make_paginate_or_topk_node(
     name: Relation,
     parent: MirNodeIndex,
     columns: &[Column],
-    order: &[(Column, OrderType)],
+    order: &[(Column, OrderType, NullOrder)],
     group_by: &[Column],
     limit: usize,
     is_topk: bool,
@@ -1165,16 +1165,22 @@ fn make_paginate_or_topk_node(
 
     let cmp_rows = order
         .iter()
-        .map(|(c, order_type)| {
+        .map(|(c, order_type, null_ordering)| {
             // SQL and Readyset disagree on what ascending and descending order means, so do the
             // conversion here.
             let reversed_order_type = match *order_type {
                 OrderType::OrderAscending => OrderType::OrderDescending,
                 OrderType::OrderDescending => OrderType::OrderAscending,
             };
+
+            let reversed_null_ordering = match *null_ordering {
+                NullOrder::NullsFirst => NullOrder::NullsLast,
+                NullOrder::NullsLast => NullOrder::NullsFirst,
+            };
+
             graph
                 .column_id_for_column(parent, c)
-                .map(|id| (id, reversed_order_type))
+                .map(|id| (id, reversed_order_type, reversed_null_ordering))
         })
         .collect::<ReadySetResult<Vec<_>>>()?;
 
@@ -1198,7 +1204,7 @@ fn make_paginate_or_topk_node(
 fn make_reader_processing(
     graph: &MirGraph,
     parent: &MirNodeIndex,
-    order_by: &Option<Vec<(Column, OrderType)>>,
+    order_by: &Option<Vec<(Column, OrderType, NullOrder)>>,
     limit: Option<usize>,
     returned_cols: &Option<Vec<Column>>,
     default_row: Option<Vec<DfValue>>,
@@ -1208,8 +1214,12 @@ fn make_reader_processing(
         Some(
             order
                 .iter()
-                .map(|(col, ot)| graph.column_id_for_column(*parent, col).map(|id| (id, *ot)))
-                .collect::<ReadySetResult<Vec<(usize, OrderType)>>>()?,
+                .map(|(col, ot, no)| {
+                    graph
+                        .column_id_for_column(*parent, col)
+                        .map(|id| (id, *ot, *no))
+                })
+                .collect::<ReadySetResult<Vec<_>>>()?,
         )
     } else {
         None

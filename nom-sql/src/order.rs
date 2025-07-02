@@ -31,6 +31,16 @@ fn order_by(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
         let (i, field) = field_reference(dialect)(i)?;
         let (i, order_type) = opt(preceded(whitespace1, order_type))(i)?;
         let (i, null_order) = opt(preceded(whitespace1, null_order))(i)?;
+
+        // TODO: We assign a default here because the default value differs between dialects
+        // Maybe it's better to assign the default in MIR lowering; however,
+        // that requires plumbing the dialect through all the way to MIR
+        // which doesn't seem trivial at the moment
+        let null_order = null_order.unwrap_or(NullOrder::default_for(
+            dialect,
+            &order_type.unwrap_or(OrderType::OrderAscending),
+        ));
+
         Ok((
             i,
             OrderBy {
@@ -75,7 +85,7 @@ mod tests {
             order_by: vec![OrderBy {
                 field: FieldReference::Expr(Expr::Column("name".into())),
                 order_type: Some(OrderType::OrderDescending),
-                null_order: None,
+                null_order: NullOrder::NullsLast,
             }],
         };
         let expected_ord2 = OrderClause {
@@ -83,12 +93,12 @@ mod tests {
                 OrderBy {
                     field: FieldReference::Expr(Expr::Column("name".into())),
                     order_type: Some(OrderType::OrderAscending),
-                    null_order: None,
+                    null_order: NullOrder::NullsFirst,
                 },
                 OrderBy {
                     field: FieldReference::Expr(Expr::Column("age".into())),
                     order_type: Some(OrderType::OrderDescending),
-                    null_order: None,
+                    null_order: NullOrder::NullsLast,
                 },
             ],
         };
@@ -96,7 +106,7 @@ mod tests {
             order_by: vec![OrderBy {
                 field: FieldReference::Expr(Expr::Column("name".into())),
                 order_type: None,
-                null_order: None,
+                null_order: NullOrder::NullsFirst,
             }],
         };
 
@@ -120,7 +130,7 @@ mod tests {
             vec![OrderBy {
                 field: FieldReference::Expr(Expr::Column("t1.x".into())),
                 order_type: Some(OrderType::OrderAscending),
-                null_order: Some(NullOrder::NullsFirst)
+                null_order: NullOrder::NullsFirst
             }]
         )
     }
@@ -134,12 +144,12 @@ mod tests {
                 order_by: vec![OrderBy {
                     field: FieldReference::Expr(Expr::Column("t.n".into())),
                     order_type: Some(OrderType::OrderDescending),
-                    null_order: None,
+                    null_order: NullOrder::NullsFirst,
                 }],
             };
             assert_eq!(
                 clause.display(Dialect::MySQL).to_string(),
-                "ORDER BY `t`.`n` DESC"
+                "ORDER BY `t`.`n` DESC NULLS FIRST"
             );
         }
     }
@@ -153,12 +163,12 @@ mod tests {
                 order_by: vec![OrderBy {
                     field: FieldReference::Expr(Expr::Column("t.n".into())),
                     order_type: Some(OrderType::OrderDescending),
-                    null_order: None,
+                    null_order: NullOrder::NullsLast,
                 }],
             };
             assert_eq!(
                 clause.display(Dialect::PostgreSQL).to_string(),
-                "ORDER BY \"t\".\"n\" DESC"
+                "ORDER BY \"t\".\"n\" DESC NULLS LAST"
             );
         }
     }

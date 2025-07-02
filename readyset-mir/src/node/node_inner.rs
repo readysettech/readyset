@@ -10,7 +10,7 @@ use itertools::Itertools;
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{internal, ReadySetResult};
 use readyset_sql::ast::{
-    BinaryOperator, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier,
+    BinaryOperator, ColumnSpecification, Expr, NullOrder, OrderType, Relation, SqlIdentifier,
 };
 use readyset_sql::DialectDisplay;
 use serde::{Deserialize, Serialize};
@@ -255,7 +255,7 @@ pub enum MirNodeInner {
     /// [`Paginate`]: dataflow::ops::paginate::Paginate
     Paginate {
         /// Set of columns used for ordering the results
-        order: Vec<(Column, OrderType)>,
+        order: Vec<(Column, OrderType, NullOrder)>,
         /// Set of columns that are indexed to form a unique grouping of results
         group_by: Vec<Column>,
         /// How many rows per page
@@ -268,7 +268,7 @@ pub enum MirNodeInner {
     /// [`TopK`]: dataflow::ops::topk::TopK
     TopK {
         /// Set of columns used for ordering the results
-        order: Vec<(Column, OrderType)>,
+        order: Vec<(Column, OrderType, NullOrder)>,
         /// Set of columns that are indexed to form a unique grouping of results
         group_by: Vec<Column>,
         /// Numeric literal that determines the number of results stored per group. Taken from the
@@ -302,7 +302,7 @@ pub enum MirNodeInner {
         lowered_to_df: bool,
 
         /// Optional set of columns and direction to order the results of lookups to this leaf
-        order_by: Option<Vec<(Column, OrderType)>>,
+        order_by: Option<Vec<(Column, OrderType, NullOrder)>>,
         /// Optional limit for the set of results to lookups to this leaf
         limit: Option<usize>,
         /// Optional set of expression columns requested in the original query

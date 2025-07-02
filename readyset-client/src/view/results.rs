@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use dataflow_expression::{Expr, PostLookup, PostLookupAggregates};
 use readyset_data::DfValue;
-use readyset_sql::ast::OrderType;
+use readyset_sql::ast::{NullOrder, OrderType};
 use smallvec::SmallVec;
 use streaming_iterator::StreamingIterator;
 use tournament_kway::{Comparator, StreamingTournament};
@@ -123,17 +123,18 @@ struct MergeIterator {
 
 #[derive(Clone, Debug)]
 struct RowComparator {
-    order_by: Arc<[(usize, OrderType)]>,
+    order_by: Arc<[(usize, OrderType, NullOrder)]>,
 }
 
-impl<T> Comparator<[T]> for RowComparator
-where
-    T: Ord,
-{
-    fn cmp(&self, a: &[T], b: &[T]) -> Ordering {
+impl Comparator<[DfValue]> for RowComparator {
+    fn cmp(&self, a: &[DfValue], b: &[DfValue]) -> Ordering {
         self.order_by
             .iter()
-            .map(|&(idx, order_type)| order_type.apply(a[idx].cmp(&b[idx])))
+            .map(|&(idx, order_type, null_order)| {
+                null_order
+                    .apply(a[idx].is_none(), b[idx].is_none())
+                    .then(order_type.apply(a[idx].cmp(&b[idx])))
+            })
             .fold(Ordering::Equal, |acc, next| acc.then(next))
     }
 }
@@ -214,7 +215,7 @@ impl ResultIterator {
                         order_by: aggregates
                             .group_by
                             .iter()
-                            .map(|&col| (col, OrderType::OrderAscending))
+                            .map(|&col| (col, OrderType::OrderAscending, NullOrder::NullsFirst))
                             .collect(),
                     };
 
@@ -246,7 +247,7 @@ impl ResultIterator {
                     order_by: aggregates
                         .group_by
                         .iter()
-                        .map(|&col| (col, OrderType::OrderAscending))
+                        .map(|&col| (col, OrderType::OrderAscending, NullOrder::NullsFirst))
                         .collect(),
                 };
 
@@ -276,7 +277,11 @@ impl ResultIterator {
                 results.sort_by(|a, b| {
                     order_by
                         .iter()
-                        .map(|&(idx, order_type)| order_type.apply(a[idx].cmp(&b[idx])))
+                        .map(|&(idx, order_type, null_order)| {
+                            null_order
+                                .apply(a[idx].is_none(), b[idx].is_none())
+                                .then(order_type.apply(a[idx].cmp(&b[idx])))
+                        })
                         .fold(Ordering::Equal, |acc, next| acc.then(next))
                 });
 

@@ -89,8 +89,8 @@ use readyset_sql::ast::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
     CreateTableBody, CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
     InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause,
-    LimitValue, Literal, OrderBy, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier,
-    SqlType, SqlTypeArbitraryOptions, TableExpr, TableExprInner, TableKey,
+    LimitValue, Literal, NullOrder, OrderBy, OrderClause, OrderType, Relation, SelectStatement,
+    SqlIdentifier, SqlType, SqlTypeArbitraryOptions, TableExpr, TableExprInner, TableKey,
 };
 use readyset_sql::{Dialect as ParseDialect, TryFromDialect as _, TryIntoDialect as _};
 use readyset_sql_passes::outermost_table_exprs;
@@ -1969,7 +1969,7 @@ impl QueryOperation {
                     order_by: vec![OrderBy {
                         field: FieldReference::Expr(Expr::Column(column.clone())),
                         order_type: Some(*order_type),
-                        null_order: None,
+                        null_order: NullOrder::NullsFirst,
                     }],
                 });
 
@@ -2007,7 +2007,7 @@ impl QueryOperation {
                     order_by: vec![OrderBy {
                         field: FieldReference::Expr(Expr::Column(column.clone())),
                         order_type: Some(*order_type),
-                        null_order: None,
+                        null_order: NullOrder::NullsFirst,
                     }],
                 });
 

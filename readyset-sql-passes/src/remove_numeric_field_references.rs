@@ -70,7 +70,7 @@ impl RemoveNumericFieldReferences for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use readyset_sql::ast::{Expr, GroupByClause, OrderClause, OrderType};
+    use readyset_sql::ast::{Expr, GroupByClause, NullOrder, OrderClause, OrderType};
 
     use super::*;
     use crate::util::parse_select_statement;
@@ -97,7 +97,7 @@ mod tests {
                 order_by: vec![OrderBy {
                     field: FieldReference::Expr(Expr::Column("id".into())),
                     order_type: Some(OrderType::OrderAscending),
-                    null_order: None
+                    null_order: NullOrder::NullsFirst
                 }]
             })
         )
