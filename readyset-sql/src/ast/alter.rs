@@ -247,7 +247,7 @@ pub struct AlterTableStatement {
     /// [`String`] that could not be parsed.
     pub definitions: Result<Vec<AlterTableDefinition>, String>,
     pub only: bool,
-    /// [DEFAULT | INPLACE | COPY]
+    /// [DEFAULT | INPLACE | COPY | INSTANT]
     pub algorithm: Option<String>,
     /// [DEFAULT | NONE | SHARED | EXCLUSIVE]
     pub lock: Option<String>,
@@ -272,9 +272,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for AlterTableStatement {
                 table: name.into_dialect(dialect),
                 only,
                 algorithm: operations.iter().find_map(|op| match op {
-                    sqlparser::ast::AlterTableOperation::Algorithm { algorithm, .. }
-                        if algorithm != &sqlparser::ast::AlterTableAlgorithm::Instant =>
-                    {
+                    sqlparser::ast::AlterTableOperation::Algorithm { algorithm, .. } => {
                         Some(algorithm.to_string())
                     }
                     _ => None,

@@ -278,6 +278,7 @@ pub fn parse_algorithm(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], String> {
         value(String::from("DEFAULT"), tag_no_case("default")),
         value(String::from("INPLACE"), tag_no_case("inplace")),
         value(String::from("COPY"), tag_no_case("copy")),
+        value(String::from("INSTANT"), tag_no_case("instant")),
     ))(i)?;
     Ok((i, algorithm))
 }
@@ -921,6 +922,24 @@ mod tests {
                     alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
                 assert_eq!(result.unwrap().1, expected);
             });
+            let qstring = b"ALTER TABLE `t` ADD COLUMN c INT, ALGORITHM = INSTANT";
+            let res = test_parse!(alter_table_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterTableStatement {
+                    table: Relation::from("t"),
+                    definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
+                        column: Column::from("c"),
+                        sql_type: SqlType::Int(None),
+                        generated: None,
+                        constraints: vec![],
+                        comment: None,
+                    })]),
+                    only: false,
+                    algorithm: Some("INSTANT".into()),
+                    lock: None,
+                }
+            );
         }
     }
 
