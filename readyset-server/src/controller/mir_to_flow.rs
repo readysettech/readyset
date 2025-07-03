@@ -136,6 +136,7 @@ pub(super) fn mir_node_to_flow_parts(
                         mig,
                     )?)
                 }
+                MirNodeInner::Window { .. } => unsupported!("lowering window node to flow"),
                 MirNodeInner::Filter { ref conditions } => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];

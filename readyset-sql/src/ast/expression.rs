@@ -1495,7 +1495,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             .exactly_one()
             .map_err(|_| unsupported_err!("non-builtin function (UDF)"))?;
 
-        // Special case for `COUNT(*)`, unless used in a window function
+        // Special case for `COUNT(*)`
         if ident.value.eq_ignore_ascii_case("COUNT")
             && matches!(
                 args,

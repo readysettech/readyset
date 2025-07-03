@@ -16,6 +16,7 @@ fn commutes_with(conditions: &Expr, inner: &MirNodeInner) -> bool {
         | MirNodeInner::Paginate { group_by, .. }
         | MirNodeInner::TopK { group_by, .. }
         | MirNodeInner::Distinct { group_by, .. }
+        | MirNodeInner::Window { group_by, .. }
         | MirNodeInner::Extremum { group_by, .. } => conditions
             .referred_columns()
             .all(|col| group_by.iter().any(|c| c == col)),

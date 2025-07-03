@@ -9,6 +9,7 @@ use catalog_tables::is_catalog_table;
 use common::IndexType;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::union;
+use dataflow::ops::window::WindowOperation;
 use lazy_static::lazy_static;
 use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
@@ -24,7 +25,7 @@ use readyset_errors::{
     unsupported_err, ReadySetError, ReadySetResult,
 };
 use readyset_sql::analysis::visit::{walk_expr, Visitor};
-use readyset_sql::analysis::{self, ReferredColumns};
+use readyset_sql::analysis::{self, is_aggregate, ReferredColumns};
 use readyset_sql::ast::{
     self, BinaryOperator, CaseWhenBranch, ColumnSpecification, CompoundSelectOperator,
     CreateTableBody, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
@@ -47,6 +48,7 @@ use crate::controller::sql::query_graph::{
     to_query_graph, ExprColumn, OutputColumn, Pagination, QueryGraph,
 };
 use crate::controller::sql::query_signature::Signature;
+use crate::sql::query_graph::WindowFunction;
 
 mod grouped;
 mod join;
@@ -2065,6 +2067,134 @@ impl SqlToMirConverter {
         Ok(leaf)
     }
 
+    fn make_window_node(
+        &mut self,
+        query_name: &Relation,
+        name: Relation,
+        mut parent: NodeIndex,
+        funcs: &[WindowFunction],
+        group_by: Vec<Column>,
+    ) -> ReadySetResult<NodeIndex> {
+        if funcs.is_empty() {
+            return Ok(parent);
+        } else if funcs.len() != 1 {
+            // TOOD(mohamed): On paper, it should be possible by simply connecting the
+            // window functions in series (fn1 -> fn2 -> fn3 -> ... -> reader)
+            // However, the performance will be so bad that we rather just not support
+            // it for now. Making the execution "smarter" with how it handles
+            // its inputs and outputs will make this possible, but should be left
+            // as a future improvement
+            unsupported!("Multiple window functions not yet supported");
+        }
+
+        let dialect = readyset_sql::Dialect::MySQL;
+        let WindowFunction {
+            function,
+            partition_by,
+            order_by,
+            alias,
+        } = funcs.first().unwrap().clone();
+
+        let arguments = function.arguments().cloned().collect::<Vec<_>>();
+
+        let function = WindowOperation::from_fn(function)?;
+
+        let order_cols = order_by
+            .iter()
+            .map(|(e, _, _)| e)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let has_agg = |e: &Expr| matches!(e, Expr::Call(f) if is_aggregate(f));
+        if partition_by.iter().any(has_agg)
+            || arguments.iter().any(has_agg)
+            || order_cols.iter().any(has_agg)
+        {
+            unsupported!("Aggregates in window functions not yet supported");
+        }
+
+        // if the partition, ordering cols, or args require projection,
+        // create a projection node and use that as a parent
+        // TODO: do we need to make this strict? i.e. only project certain
+        // Expr variants?
+        let p = |e: &Expr| !matches!(e, Expr::Column(_));
+        let needs_proj_node =
+            partition_by.iter().any(p) || arguments.iter().any(p) || order_cols.iter().any(p);
+
+        if needs_proj_node {
+            let node_name = format!(
+                "{}_window_project_n{}",
+                name.display_unquoted(),
+                self.mir_graph.node_count()
+            );
+
+            let node = self.make_project_node(
+                query_name,
+                node_name.into(),
+                parent,
+                partition_by
+                    .iter()
+                    .chain(arguments.iter())
+                    .chain(order_cols.iter())
+                    .cloned()
+                    .map(|e| -> ReadySetResult<_> {
+                        Ok(ProjectExpr::Expr {
+                            alias: e
+                                .alias(dialect)
+                                // returns None if e is a placeholder or a variable
+                                .ok_or_else(|| {
+                                    unsupported_err!("Placeholders not allowed in this context")
+                                })?,
+                            expr: e,
+                        })
+                    })
+                    .collect::<ReadySetResult<Vec<_>>>()?,
+            );
+            parent = node;
+        }
+
+        let output_column = Column::named(alias);
+
+        let partition_by = partition_by
+            .iter()
+            .map(|e| e.alias(dialect).unwrap())
+            .map(|e| Column::named(e))
+            .collect();
+
+        let order_by = order_by
+            .into_iter()
+            .map(|(e, order, no)| (Column::named(e.alias(dialect).unwrap()), order, no))
+            .collect();
+
+        let args = arguments
+            .iter()
+            .map(|e| e.alias(dialect).unwrap())
+            .map(|e| Column::named(e))
+            .collect();
+
+        let node_name = format!(
+            "{}_window_n{}",
+            name.display_unquoted(),
+            self.mir_graph.node_count()
+        );
+
+        Ok(self.add_query_node(
+            query_name.clone(),
+            MirNode::new(
+                node_name.into(),
+                MirNodeInner::Window {
+                    group_by,
+                    partition_by,
+                    order_by,
+                    output_column,
+                    function,
+                    args,
+                },
+            ),
+            &[parent],
+        ))
+    }
+
     fn predicates_above_group_by<'a>(
         &mut self,
         query_name: &Relation,
@@ -2370,7 +2500,21 @@ impl SqlToMirConverter {
                 prev_node = subquery_leaf;
             }
 
-            // 8. Add function and grouped nodes
+            // 8. Add window functions or grouped nodes (mutually exclusive for now)
+            if !query_graph.aggregates.is_empty() && !query_graph.window_functions.is_empty() {
+                unsupported!("Mixing window functions and aggregates is not supported yet")
+            };
+
+            let group_by: Vec<_> = view_key.columns.iter().map(|(c, _)| c.clone()).collect();
+
+            prev_node = self.make_window_node(
+                query_name,
+                format!("q_{:x}", query_graph.signature().hash).into(),
+                prev_node,
+                &query_graph.window_functions,
+                group_by,
+            )?;
+
             let mut func_nodes: Vec<NodeIndex> = make_grouped(
                 self,
                 query_name,
@@ -2619,6 +2763,10 @@ impl SqlToMirConverter {
 
                 let are_repeat_reads_required =
                     query_graph.collapsed_where_in || view_key.index_type == IndexType::BTreeMap;
+
+                if are_repeat_reads_required && !query_graph.window_functions.is_empty() {
+                    unsupported!("Post-lookups are not supported for window functions");
+                }
 
                 let post_lookup_aggregates = if are_repeat_reads_required {
                     // When a query contains WHERE col IN (?, ?, ...), it gets rewritten

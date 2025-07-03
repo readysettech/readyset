@@ -4,6 +4,7 @@ use common::{DfValue, IndexType};
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
+use dataflow::ops::window::WindowOperation;
 use dataflow::PostLookupAggregates;
 use derive_more::From;
 use itertools::Itertools;
@@ -97,6 +98,17 @@ pub enum MirNodeInner {
         column_specs: Vec<ColumnSpecification>,
         primary_key: Option<Box<[Column]>>,
         unique_keys: Box<[Box<[Column]>]>,
+    },
+    /// Node that evaluates Window Functions over a window.
+    /// PARTITIONS and ORDER BY can be expressions, but should
+    /// be evaluated by a parent node before getting passed here.
+    Window {
+        group_by: Vec<Column>,
+        partition_by: Vec<Column>,
+        order_by: Vec<(Column, OrderType, NullOrder)>,
+        output_column: Column,
+        function: WindowOperation,
+        args: Vec<Column>,
     },
     /// Node that computes the extreme value (minimum or maximum) of a column grouped by another
     /// set of columns, outputting its result as an additional column.
@@ -435,6 +447,27 @@ impl MirNodeInner {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{op_string} γ[{group_cols}]")
+            }
+            MirNodeInner::Window {
+                partition_by,
+                order_by,
+                function,
+                args,
+                ..
+            } => {
+                let op_string = format!("{}({})", function, args.iter().join(", "));
+                let partition_cols = partition_by
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let order_cols = order_by
+                    .iter()
+                    .map(|(c, o, no)| format!("{c} {o}({no})"))
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .join(", ");
+                format!("{op_string} Over[{partition_cols}; {order_cols}]")
             }
             MirNodeInner::Base {
                 column_specs,

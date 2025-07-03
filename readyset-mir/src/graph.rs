@@ -335,6 +335,10 @@ impl MirGraph {
                 .into_iter()
                 .chain(iter::once(MirColumn::named(&*PAGE_NUMBER_COL)))
                 .collect(),
+            MirNodeInner::Window { output_column, .. } => parent_columns()
+                .into_iter()
+                .chain(iter::once(output_column.clone()))
+                .collect(),
             MirNodeInner::Distinct { group_by } => group_by
                 .iter()
                 .cloned()

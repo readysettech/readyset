@@ -21,6 +21,7 @@ pub mod project;
 pub mod topk;
 pub mod union;
 pub(crate) mod utils;
+pub mod window;
 
 use crate::ops::grouped::concat::GroupConcat;
 use crate::processing::{

@@ -254,6 +254,10 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
                     // TODO: figure out what to do about unions
                     continue 'filter;
                 }
+                MirNodeInner::Window { .. } => {
+                    // TODO: figure out what to do about windows
+                    continue 'filter;
+                }
                 MirNodeInner::Join { .. } => {
                     let join_parents = query.ancestors(ancestor_idx)?;
                     let left_parent = *join_parents

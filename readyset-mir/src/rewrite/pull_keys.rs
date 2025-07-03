@@ -39,6 +39,7 @@ fn push_view_key(query: &mut MirQuery<'_>, node_idx: NodeIndex) -> ReadySetResul
         | MirNodeInner::Extremum { group_by, .. }
         | MirNodeInner::Distinct { group_by }
         | MirNodeInner::Paginate { group_by, .. }
+        | MirNodeInner::Window { group_by, .. }
         | MirNodeInner::TopK { group_by, .. } => {
             for ViewKeyColumn { column, op, .. } in &key {
                 invariant_eq!(

@@ -370,6 +370,27 @@ impl GraphViz for MirNodeInner {
             MirNodeInner::AliasTable { ref table } => {
                 write!(f, "AliasTable [{}]", table.display_unquoted())
             }
+            MirNodeInner::Window {
+                group_by,
+                partition_by,
+                order_by,
+                function,
+                args,
+                ..
+            } => {
+                write!(
+                    f,
+                    "Window [key: {}, p: {}, o: {}, f: {}, args: {}]",
+                    group_by.iter().join(", "),
+                    partition_by.iter().join(", "),
+                    order_by
+                        .iter()
+                        .map(|(c, o, no)| format!("{}: {}({})", c.name.as_str(), o, no))
+                        .join(", "),
+                    function,
+                    args.iter().join(", ")
+                )
+            }
         }
     }
 }
