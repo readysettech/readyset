@@ -10,6 +10,7 @@ A real-time SQL caching engine for Postgres and MySQL."""
 
 
 [dependencies]
+antithesis_sdk = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 crossbeam-skiplist = { workspace = true }

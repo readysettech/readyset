@@ -4415,6 +4415,7 @@ dependencies = [
 name = "readyset"
 version = "1.17.0"
 dependencies = [
+ "antithesis_sdk",
  "anyhow",
  "clap",
  "criterion",
