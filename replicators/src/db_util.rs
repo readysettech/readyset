@@ -5,18 +5,21 @@ use std::fmt;
 
 use readyset_errors::ReadySetError;
 use readyset_sql::{Dialect, DialectDisplay};
+use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DatabaseSchemas {
     schemas: HashMap<String, CreateSchema>,
+    parsing_preset: ParsingPreset,
 }
 
 impl DatabaseSchemas {
-    pub fn new() -> Self {
+    pub fn new(parsing_preset: ParsingPreset) -> Self {
         Self {
             schemas: HashMap::new(),
+            parsing_preset,
         }
     }
 
@@ -30,7 +33,7 @@ impl DatabaseSchemas {
         let create_schema = self
             .schemas
             .entry(create_schema_name.clone())
-            .or_insert_with(|| CreateSchema::new(create_schema_name, dialect));
+            .or_insert_with(|| CreateSchema::new(create_schema_name, self.parsing_preset, dialect));
         create_schema.add_table_create(table_name, create_table);
     }
 
@@ -44,7 +47,7 @@ impl DatabaseSchemas {
         let create_schema = self
             .schemas
             .entry(create_schema_name.clone())
-            .or_insert_with(|| CreateSchema::new(create_schema_name, dialect));
+            .or_insert_with(|| CreateSchema::new(create_schema_name, self.parsing_preset, dialect));
         create_schema.add_view_create(view_name, create_view);
     }
 
@@ -69,14 +72,16 @@ pub struct CreateSchema {
     table_creates: HashMap<String, String>,
     /// Map of view name to view create statements
     view_creates: HashMap<String, String>,
-    /// Postgres or MySQL
+    /// Parsing preset for re-parsing CREATE TABLE/VIEW statements before anonymizing them
+    parsing_preset: ParsingPreset,
     dialect: Dialect,
 }
 
 impl CreateSchema {
-    pub fn new(name: String, dialect: Dialect) -> Self {
+    pub fn new(name: String, parsing_preset: ParsingPreset, dialect: Dialect) -> Self {
         Self {
             name,
+            parsing_preset,
             dialect,
             table_creates: HashMap::new(),
             view_creates: HashMap::new(),
@@ -114,7 +119,11 @@ impl CreateSchema {
                 // until we handle formatting by dialect correctly
                 strip_backticks(table);
             }
-            *table = match readyset_sql_parsing::parse_create_table(self.dialect, table.clone()) {
+            *table = match readyset_sql_parsing::parse_create_table_with_config(
+                self.parsing_preset,
+                self.dialect,
+                table.clone(),
+            ) {
                 Ok(mut parsed_table) => {
                     parsed_table.anonymize(anonymizer);
                     // FIXME(ENG-1860): Use correct dialect.
@@ -131,7 +140,11 @@ impl CreateSchema {
     fn anonymize_views(&mut self, anonymizer: &mut Anonymizer) {
         for (_, view) in self.view_creates.iter_mut() {
             tracing::trace!("create view: {view:?}");
-            *view = match readyset_sql_parsing::parse_create_view(self.dialect, view.clone()) {
+            *view = match readyset_sql_parsing::parse_create_view_with_config(
+                self.parsing_preset,
+                self.dialect,
+                view.clone(),
+            ) {
                 Ok(mut parsed_view) => {
                     parsed_view.anonymize(anonymizer);
                     parsed_view
@@ -213,7 +226,11 @@ mod tests {
     fn test_anonymize_create_schema() {
         readyset_tracing::init_test_logging();
 
-        let mut create_schema = CreateSchema::new("foobar".to_string(), Dialect::MySQL);
+        let mut create_schema = CreateSchema::new(
+            "foobar".to_string(),
+            ParsingPreset::for_tests(),
+            Dialect::MySQL,
+        );
 
         let users_create_table = "CREATE TABLE `Users` ( `UserId` int NOT NULL,
                                    `PostId` int DEFAULT NULL,
@@ -270,7 +287,11 @@ mod tests {
     fn create_table_parse_failed_fully_anonymized() {
         readyset_tracing::init_test_logging();
 
-        let mut create_schema = CreateSchema::new("table_fail_parse".to_string(), Dialect::MySQL);
+        let mut create_schema = CreateSchema::new(
+            "table_fail_parse".to_string(),
+            ParsingPreset::for_tests(),
+            Dialect::MySQL,
+        );
         let users_create_table = "CREATE TABLE not valid syntax will fail to parse".to_string();
         create_schema.add_table_create("Users".to_string(), users_create_table);
         create_schema.anonymize();
@@ -286,7 +307,11 @@ mod tests {
     fn create_view_parse_failed_fully_anonymized() {
         readyset_tracing::init_test_logging();
 
-        let mut create_schema = CreateSchema::new("view_fail_parse".to_string(), Dialect::MySQL);
+        let mut create_schema = CreateSchema::new(
+            "view_fail_parse".to_string(),
+            ParsingPreset::for_tests(),
+            Dialect::MySQL,
+        );
         let view_create = "CREATE VIEW not valid syntax will fail to parse".to_string();
         create_schema.add_view_create("foobar".to_string(), view_create);
         create_schema.anonymize();

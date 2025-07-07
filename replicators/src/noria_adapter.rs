@@ -311,7 +311,7 @@ impl<'a> NoriaAdapter<'a> {
             (None, _) | (_, true) => {
                 let span = info_span!("taking database snapshot");
 
-                let mut db_schemas = DatabaseSchemas::new();
+                let mut db_schemas = DatabaseSchemas::new(parsing_preset);
 
                 // The default min is already 10, so we keep that the same to reduce complexity
                 // overhead of too many flags.
@@ -632,8 +632,11 @@ impl<'a> NoriaAdapter<'a> {
             }
         };
 
-        let mut create_schema =
-            CreateSchema::new(dbname.to_string(), readyset_sql::Dialect::PostgreSQL);
+        let mut create_schema = CreateSchema::new(
+            dbname.to_string(),
+            parsing_preset,
+            readyset_sql::Dialect::PostgreSQL,
+        );
 
         if let Some(replication_slot) = replication_slot {
             set_failpoint!(failpoints::POSTGRES_SNAPSHOT_START);
