@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
-use std::error::Error;
 use std::fmt::{self, Display};
 use std::future;
 use std::time::Instant;
@@ -9,7 +8,7 @@ use failpoint_macros::set_failpoint;
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use postgres_types::{accepts, FromSql, Kind, Type};
+use postgres_types::{Kind, Type};
 use readyset_client::recipe::changelist::{Change, ChangeList, PostgresTableMetadata};
 use readyset_client::TableOperation;
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
@@ -20,8 +19,8 @@ use readyset_sql::ast::{
 };
 use readyset_sql::Dialect;
 use readyset_sql::DialectDisplay;
-use readyset_sql_parsing::parse_key_specification;
-use readyset_sql_parsing::parse_sql_type;
+use readyset_sql_parsing::parse_sql_type_with_config;
+use readyset_sql_parsing::{parse_key_specification_with_config, ParsingPreset};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use replication_offset::postgres::PostgresPosition;
@@ -53,6 +52,8 @@ pub struct PostgresReplicator<'a> {
     pub(crate) noria: &'a mut readyset_client::ReadySetHandle,
     /// Filters out tables we are not interested in
     pub(crate) table_filter: &'a mut TableFilter,
+    /// Parsing preset to use for parsing SQL types and key specifications
+    pub(crate) parsing_preset: ParsingPreset,
 }
 
 #[derive(Debug)]
@@ -120,22 +121,6 @@ struct CustomTypeEntry {
     schema: String,
 }
 
-/// Newtype struct to allow converting TableKey from a SQL column in a way that lets us wrap the
-/// error in a pgsql::Error
-struct ConstraintDefinition(TableKey);
-
-impl<'a> FromSql<'a> for ConstraintDefinition {
-    fn from_sql(ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn Error + Sync + Send>> {
-        let s = String::from_sql(ty, raw)?;
-        Ok(ConstraintDefinition(parse_key_specification(
-            Dialect::PostgreSQL,
-            s,
-        )?))
-    }
-
-    accepts!(TEXT);
-}
-
 impl TryFrom<pgsql::Row> for ColumnEntry {
     type Error = ReadySetError;
 
@@ -199,11 +184,15 @@ impl Display for ColumnEntry {
     }
 }
 
-impl TryFrom<pgsql::Row> for ConstraintEntry {
-    type Error = pgsql::Error;
+impl ConstraintEntry {
+    fn try_from_row_with_config(
+        parsing_preset: ParsingPreset,
+        row: pgsql::Row,
+    ) -> ReadySetResult<Self> {
+        let s: String = row.try_get(1)?;
 
-    fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
-        let ConstraintDefinition(definition) = row.try_get(1)?;
+        let definition =
+            parse_key_specification_with_config(parsing_preset, Dialect::PostgreSQL, s)?;
 
         Ok(ConstraintEntry {
             name: row.try_get(0)?,
@@ -332,7 +321,8 @@ impl TableEntry {
     async fn get_constraints<'a>(
         oid: u32,
         transaction: &'a pgsql::Transaction<'a>,
-    ) -> Result<Vec<ConstraintEntry>, pgsql::Error> {
+        parsing_preset: ParsingPreset,
+    ) -> ReadySetResult<Vec<ConstraintEntry>> {
         let query = r"
             SELECT c2.relname, pg_catalog.pg_get_constraintdef(con.oid, true), contype
             FROM pg_catalog.pg_class c, pg_catalog.pg_class c2, pg_catalog.pg_index i
@@ -345,12 +335,16 @@ impl TableEntry {
             ";
 
         let constraints = transaction.query(query, &[&oid]).await?;
-        constraints.into_iter().map(TryInto::try_into).collect()
+        constraints
+            .into_iter()
+            .map(|row| ConstraintEntry::try_from_row_with_config(parsing_preset, row))
+            .try_collect()
     }
 
     async fn get_table<'a>(
         &self,
         transaction: &'a pgsql::Transaction<'a>,
+        parsing_preset: ParsingPreset,
     ) -> Result<TableDescription, ReadySetError> {
         let columns = Self::get_columns(self.oid, transaction)
             .await
@@ -364,7 +358,7 @@ impl TableEntry {
                 }
                 .context("when loading columns for the table")
             })?;
-        let constraints = Self::get_constraints(self.oid, transaction)
+        let constraints = Self::get_constraints(self.oid, transaction, parsing_preset)
             .await
             .map_err(|e| {
                 ReadySetError::TableError {
@@ -434,7 +428,7 @@ impl TableDescription {
             .ok_or_else(|| internal_err!("All tables must have a schema in the replicator"))
     }
 
-    fn try_into_change(self) -> ReadySetResult<Change> {
+    fn try_into_change(self, parsing_preset: ParsingPreset) -> ReadySetResult<Change> {
         Ok(Change::CreateTable {
             pg_meta: Some(PostgresTableMetadata {
                 oid: self.oid,
@@ -457,8 +451,12 @@ impl TableDescription {
                                     name: c.name.into(),
                                     table: Some(self.name.clone()),
                                 },
-                                sql_type: parse_sql_type(Dialect::PostgreSQL, c.sql_type)
-                                    .map_err(|e| internal_err!("Could not parse SQL type: {e}"))?,
+                                sql_type: parse_sql_type_with_config(
+                                    parsing_preset,
+                                    Dialect::PostgreSQL,
+                                    c.sql_type,
+                                )
+                                .map_err(|e| internal_err!("Could not parse SQL type: {e}"))?,
                                 generated: None,
                                 constraints: if c.not_null {
                                     vec![ColumnConstraint::NotNull]
@@ -614,6 +612,7 @@ impl<'a> PostgresReplicator<'a> {
         pool: deadpool_postgres::Pool,
         noria: &'a mut readyset_client::ReadySetHandle,
         table_filter: &'a mut TableFilter,
+        parsing_preset: ParsingPreset,
     ) -> ReadySetResult<PostgresReplicator<'a>> {
         let transaction = Some(
             client
@@ -629,6 +628,7 @@ impl<'a> PostgresReplicator<'a> {
             pool,
             noria,
             table_filter,
+            parsing_preset,
         })
     }
 
@@ -825,12 +825,12 @@ impl<'a> PostgresReplicator<'a> {
         for table in table_list {
             let table_name = &table.name.clone().to_string();
             let res = table
-                .get_table(get_transaction!(self))
+                .get_table(get_transaction!(self), self.parsing_preset)
                 .and_then(|create_table| {
                     future::ready(
                         create_table
                             .clone()
-                            .try_into_change()
+                            .try_into_change(self.parsing_preset)
                             .map(move |change| (change, create_table)),
                     )
                 })
@@ -893,7 +893,7 @@ impl<'a> PostgresReplicator<'a> {
                 .and_then(|create_view| {
                     create_schema.add_view_create(view_name.clone(), create_view.clone());
                     future::ready(
-                        readyset_sql_parsing::parse_create_view(Dialect::PostgreSQL, &create_view)
+                        readyset_sql_parsing::parse_create_view_with_config(self.parsing_preset, Dialect::PostgreSQL, &create_view)
                             .map_err(|_| ReadySetError::UnparseableQuery { query: create_view }),
                     )
                 })

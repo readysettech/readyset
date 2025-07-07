@@ -649,8 +649,14 @@ impl<'a> NoriaAdapter<'a> {
                 .and_then(|row| row.try_get::<_, String>(0))
                 .unwrap_or_else(|_| "unknown".to_owned());
 
-            let mut replicator =
-                PostgresReplicator::new(&mut client, pool, &mut noria, table_filter).await?;
+            let mut replicator = PostgresReplicator::new(
+                &mut client,
+                pool,
+                &mut noria,
+                table_filter,
+                parsing_preset,
+            )
+            .await?;
 
             let snapshot_result = replicator
                 .snapshot_to_noria(
