@@ -292,6 +292,10 @@ inherits = "release"
 debug = false
 strip = "debuginfo"
 
+[profile.antithesis]
+inherits = "release"
+lto = "off"
+
 [workspace.lints.clippy]
 dbg_macro = "warn"
 todo = "deny"
