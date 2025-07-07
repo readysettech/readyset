@@ -409,6 +409,7 @@ pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use petgraph::graph::NodeIndex;
 pub use readyset_client::consensus::{Authority, LocalAuthority};
 pub use readyset_client::*;
+use readyset_sql_parsing::ParsingPreset;
 
 pub use crate::builder::Builder;
 pub use crate::handle::Handle;
@@ -686,6 +687,16 @@ pub struct WorkerOptions {
         hide = true
     )]
     feature_post_lookup: bool,
+
+    /// Parsing mode that determines which parser(s) to use and how to handle conflicts.
+    #[arg(
+        long,
+        env = "PARSING_PRESET",
+        value_enum,
+        default_value = "both-prefer-nom",
+        hide = true
+    )]
+    pub parsing_preset: ParsingPreset,
 
     /// Directory in which to store replicated table data. If not specified, defaults to the
     /// current working directory.

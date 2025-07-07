@@ -16,7 +16,6 @@ use readyset_server::metrics::{
 };
 use readyset_server::PrometheusBuilder;
 use readyset_server::{resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions};
-use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer};
 use readyset_version::*;
 use tracing::{error, info};
@@ -148,17 +147,6 @@ struct Options {
     /// impact startup.
     #[arg(long, hide = true)]
     wait_for_failpoint: bool,
-
-    /// Parsing mode that determines which parser(s) to use and how to handle conflicts.
-    /// Options: only-nom, only-sqlparser, prefer-nom, prefer-sqlparser, panic
-    #[arg(
-        long,
-        env = "PARSING_PRESET",
-        value_enum,
-        default_value = "both-prefer-nom",
-        hide = true
-    )]
-    parsing_preset: ParsingPreset,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -259,7 +247,6 @@ fn main() -> anyhow::Result<()> {
     builder.set_telemetry_sender(telemetry_sender.clone());
     builder.set_wait_for_failpoint(opts.wait_for_failpoint);
     builder.set_replicator_statement_logging(opts.tracing.statement_logging);
-    builder.set_parsing_preset(opts.parsing_preset);
 
     if opts.cannot_become_leader {
         builder.cannot_become_leader();

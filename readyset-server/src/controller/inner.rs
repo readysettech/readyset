@@ -1056,7 +1056,7 @@ impl Leader {
         replicator_config: UpstreamConfig,
         worker_request_timeout: Duration,
         background_recovery_interval: Duration,
-        parsing_mode: ParsingPreset,
+        parsing_preset: ParsingPreset,
         replicator_tx: UnboundedSender<ReplicatorMessage>,
         controller_tx: UnboundedSender<ControllerMessage>,
     ) -> Self {
@@ -1076,7 +1076,7 @@ impl Leader {
             worker_request_timeout,
             background_recovery_interval,
             background_recovery_running: Arc::new(AtomicBool::new(false)),
-            parsing_preset: parsing_mode,
+            parsing_preset,
             running_migrations: Default::default(),
             background_task_failed,
             running_recovery: None,
