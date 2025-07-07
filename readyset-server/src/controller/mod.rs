@@ -785,9 +785,12 @@ impl Controller {
             }
         }
 
-        if let Err(error) = self.authority.surrender_leadership().await {
-            error!(%error, "failed to surrender leadership");
-            internal!("failed to surrender leadership: {}", error)
+        // Only surrender leadership if we are the leader
+        if self.inner.read().await.is_some() {
+            if let Err(error) = self.authority.surrender_leadership().await {
+                error!(%error, "failed to surrender leadership");
+                internal!("failed to surrender leadership: {}", error)
+            }
         }
         Ok(())
     }

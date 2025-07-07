@@ -1435,7 +1435,6 @@ async fn mutator_churn() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn view_connection_churn() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
@@ -1446,6 +1445,8 @@ async fn view_connection_churn() {
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("view_connection_churn"));
     let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
+
+    sleep().await;
 
     g.extend_recipe(
         ChangeList::from_strings(
