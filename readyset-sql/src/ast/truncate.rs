@@ -1,6 +1,10 @@
 use std::fmt;
 
 use itertools::Itertools;
+use proptest::{
+    prelude::{Just, Strategy as _, any, any_with},
+    sample::size_range,
+};
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -10,16 +14,21 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-
+#[arbitrary(args = Option<Dialect>)]
 pub struct TruncateTable {
     pub relation: Relation,
+    #[strategy(if args == &Some(Dialect::PostgreSQL) { any::<bool>().boxed() } else { Just(false).boxed() })]
     pub only: bool,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+#[arbitrary(args = Option<Dialect>)]
 pub struct TruncateStatement {
+    #[strategy(any_with::<Vec<TruncateTable>>((size_range(1..=(if args == &Some(Dialect::PostgreSQL) { 16 } else { 1 })), *args)))]
     pub tables: Vec<TruncateTable>,
+    #[strategy(if args == &Some(Dialect::PostgreSQL) { any::<bool>().boxed() } else { Just(false).boxed() })]
     pub restart_identity: bool,
+    #[strategy(if args == &Some(Dialect::PostgreSQL) { any::<bool>().boxed() } else { Just(false).boxed() })]
     pub cascade: bool,
 }
 

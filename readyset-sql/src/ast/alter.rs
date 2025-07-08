@@ -1,6 +1,10 @@
 use std::fmt;
 
 use itertools::Itertools;
+use proptest::{
+    prelude::{Strategy as _, any_with},
+    sample::size_range,
+};
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -68,8 +72,12 @@ impl fmt::Display for DropBehavior {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ReplicaIdentity {
     Default,
-    UsingIndex { index_name: SqlIdentifier },
+    UsingIndex {
+        index_name: SqlIdentifier,
+    },
     Full,
+    // FIXME(REA-5862): Not correctly parsed by sqlparser
+    #[weight(0)]
     Nothing,
 }
 
@@ -245,6 +253,7 @@ pub struct AlterTableStatement {
     /// If the parsing succeeded, then this will be an `Ok` result with the list of
     /// [`AlterTableDefinition`]s.  If it failed to parse, this will be an `Err` with the remainder
     /// [`String`] that could not be parsed.
+    #[strategy(any_with::<Vec<AlterTableDefinition>>(size_range(1..16).lift()).prop_map(Ok))]
     pub definitions: Result<Vec<AlterTableDefinition>, String>,
     pub only: bool,
     /// [DEFAULT | INPLACE | COPY | INSTANT]

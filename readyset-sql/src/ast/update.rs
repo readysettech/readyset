@@ -1,6 +1,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use proptest::sample::size_range;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -10,6 +11,7 @@ use crate::{AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryInto
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct UpdateStatement {
     pub table: Relation,
+    #[any(size_range(1..16).lift())]
     pub fields: Vec<(Column, Expr)>,
     pub where_clause: Option<Expr>,
 }

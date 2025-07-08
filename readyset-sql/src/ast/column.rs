@@ -224,8 +224,8 @@ impl Column {
 pub enum ColumnConstraint {
     Null,
     NotNull,
-    CharacterSet(String),
-    Collation(String),
+    CharacterSet(#[any(r"[a-zA-Z_][a-zA-Z0-9_]{0,10}".into())] String),
+    Collation(#[any(r"[a-zA-Z_][a-zA-Z0-9_]{0,10}".into())] String),
     DefaultValue(Expr),
     AutoIncrement,
     PrimaryKey,

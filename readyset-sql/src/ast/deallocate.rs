@@ -1,10 +1,11 @@
 use std::fmt;
 
+use proptest::prelude::{Strategy as _, any};
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{Dialect, DialectDisplay};
+use crate::{Dialect, DialectDisplay, ast::SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct DeallocateStatement {
@@ -13,7 +14,7 @@ pub struct DeallocateStatement {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum StatementIdentifier {
-    SingleStatement(String),
+    SingleStatement(#[strategy(any::<SqlIdentifier>().prop_map(|id| id.to_string()))] String),
     AllStatements,
 }
 

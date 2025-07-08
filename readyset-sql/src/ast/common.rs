@@ -1,6 +1,10 @@
 use std::fmt;
 
 use itertools::Itertools;
+use proptest::{
+    prelude::{Just, Strategy as _, any},
+    sample::size_range,
+};
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -159,35 +163,45 @@ impl fmt::Display for NullsDistinct {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+#[arbitrary(args = Option<Dialect>)]
 pub enum TableKey {
     PrimaryKey {
         constraint_name: Option<SqlIdentifier>,
+        #[strategy(if *args_shared == Some(Dialect::PostgreSQL) { any::<Option<ConstraintTiming>>().boxed() } else { Just(None).boxed() })]
         constraint_timing: Option<ConstraintTiming>,
         index_name: Option<SqlIdentifier>,
+        #[any(size_range(1..10).lift())]
         columns: Vec<Column>,
     },
     UniqueKey {
         constraint_name: Option<SqlIdentifier>,
+        #[strategy(if *args_shared == Some(Dialect::PostgreSQL) { any::<Option<ConstraintTiming>>().boxed() } else { Just(None).boxed() })]
         constraint_timing: Option<ConstraintTiming>,
         index_name: Option<SqlIdentifier>,
+        #[any(size_range(1..10).lift())]
         columns: Vec<Column>,
         index_type: Option<IndexType>,
+        #[strategy(if *args_shared == Some(Dialect::PostgreSQL) { any::<Option<NullsDistinct>>().boxed() } else { Just(None).boxed() })]
         nulls_distinct: Option<NullsDistinct>,
     },
     FulltextKey {
         index_name: Option<SqlIdentifier>,
+        #[any(size_range(1..10).lift())]
         columns: Vec<Column>,
     },
     Key {
         index_name: Option<SqlIdentifier>,
+        #[any(size_range(1..10).lift())]
         columns: Vec<Column>,
         index_type: Option<IndexType>,
     },
     ForeignKey {
         constraint_name: Option<SqlIdentifier>,
         index_name: Option<SqlIdentifier>,
+        #[any(size_range(1..10).lift())]
         columns: Vec<Column>,
         target_table: Relation,
+        #[any(size_range(1..10).lift())]
         target_columns: Vec<Column>,
         on_delete: Option<ReferentialAction>,
         on_update: Option<ReferentialAction>,

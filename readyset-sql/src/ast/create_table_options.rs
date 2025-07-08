@@ -1,5 +1,6 @@
 use std::fmt;
 
+use proptest::{option, prelude::any_with};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
@@ -8,12 +9,19 @@ use crate::ast::*;
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum CreateTableOption {
     AutoIncrement(u64),
-    Engine(Option<String>),
+    Engine(
+        #[strategy(option::of(any_with::<String>(r#"[a-zA-Z0-9_]{1,16}"#.into())))] Option<String>,
+    ),
     Charset(CharsetName),
     Collate(CollationName),
     Comment(String),
     DataDirectory(String),
-    Other { key: String, value: String },
+    Other {
+        #[any("[a-zA-Z0-9_]+".into())]
+        key: String,
+        #[any("[a-zA-Z0-9_]+".into())]
+        value: String,
+    },
 }
 
 impl fmt::Display for CreateTableOption {

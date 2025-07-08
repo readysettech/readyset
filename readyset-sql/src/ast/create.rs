@@ -5,6 +5,10 @@ use std::{
 
 use derive_more::From;
 use itertools::Itertools;
+use proptest::{
+    prelude::{Strategy as _, any},
+    sample::size_range,
+};
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
@@ -87,6 +91,7 @@ pub struct CreateDatabaseStatement {
     /// If parsing succeeded, then this will be an `Ok` result with the create options. If
     /// it failed to parse, this will be an `Err` with the remainder [`String`] that could not
     /// be parsed.
+    #[strategy(any::<Vec<CreateDatabaseOption>>().prop_map(Ok))]
     pub options: Result<Vec<CreateDatabaseOption>, String>,
 }
 
@@ -118,6 +123,7 @@ impl DialectDisplay for CreateDatabaseStatement {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct CreateTableBody {
+    #[any(size_range(1..16).lift())]
     pub fields: Vec<ColumnSpecification>,
     pub keys: Option<Vec<TableKey>>,
 }
@@ -274,12 +280,14 @@ pub struct CreateTableStatement {
     /// If parsing succeeded, then this will be an `Ok` result with the body of the statement. If
     /// it failed to parse, this will be an `Err` with the remainder [`String`] that could not
     /// be parsed.
+    #[strategy(any::<CreateTableBody>().prop_map(Ok))]
     pub body: Result<CreateTableBody, String>,
     /// The result of parsing the options for the `CREATE TABLE` statement.
     ///
     /// If parsing succeeded, then this will be an `Ok` result with the options for the statement.
     /// If it failed to parse, this will be an `Err` with the remainder [`String`] that could not
     /// be parsed.
+    #[strategy(any::<Vec<CreateTableOption>>().prop_map(Ok))]
     pub options: Result<Vec<CreateTableOption>, String>,
 }
 
@@ -598,6 +606,7 @@ pub struct CreateViewStatement {
     /// If parsing succeeded, then this will be an `Ok` result with the definition of the
     /// statement. If it failed to parse, this will be an `Err` with the remainder [`String`]
     /// that could not be parsed.
+    #[strategy(any::<Box<SelectSpecification>>().prop_map(Ok))]
     pub definition: Result<Box<SelectSpecification>, String>,
 }
 
@@ -686,6 +695,7 @@ pub struct CreateCacheStatement {
     /// If parsing succeeded, then this will be an `Ok` result with the definition of the
     /// statement. If it failed to parse, this will be an `Err` with the remainder [`String`]
     /// that could not be parsed.
+    #[strategy(any::<CacheInner>().prop_map(Ok))]
     pub inner: Result<CacheInner, String>,
     /// A full copy of the original 'create cache' statement that can be used to re-create the
     /// cache after an upgrade

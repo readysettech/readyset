@@ -3,7 +3,10 @@ use std::{fmt, iter, mem};
 use concrete_iter::concrete_iter;
 use derive_more::derive::From;
 use itertools::Itertools;
-use proptest::prelude::{Arbitrary, BoxedStrategy};
+use proptest::{
+    prelude::{Arbitrary, BoxedStrategy, Just, Strategy as _},
+    prop_oneof,
+};
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -324,9 +327,7 @@ impl DialectDisplay for FunctionExpr {
 ///
 /// Note that because all binary operators have expressions on both sides, SQL `IN` is not a binary
 /// operator - since it must have either a subquery or a list of expressions on its right-hand side
-#[derive(
-    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
-)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum BinaryOperator {
     /// `AND`
     And,
@@ -436,6 +437,68 @@ pub enum BinaryOperator {
     /// Postgres-specific JSONB operator. Behaves like [`BinaryOperator::AtArrowRight`] with
     /// switched sides for the operands.
     AtArrowLeft,
+}
+
+#[derive(Default)]
+pub struct BinaryOperatorParameters {
+    /// Only generate operaters that are valid for Postgres `ANY`/`SOME`/`ALL` according to
+    /// sqlparser, which only allows these: [=, >, <, =>, =<, !=]. Others are allowed by Postgres,
+    /// so this may be changed. See: https://github.com/apache/datafusion-sqlparser-rs/issues/1841
+    pub for_op_all_any: bool,
+}
+
+impl Arbitrary for BinaryOperator {
+    type Parameters = BinaryOperatorParameters;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        if args.for_op_all_any {
+            prop_oneof![
+                Just(Self::Equal),
+                Just(Self::NotEqual),
+                Just(Self::Greater),
+                Just(Self::GreaterOrEqual),
+                Just(Self::Less),
+                Just(Self::LessOrEqual),
+            ]
+            .boxed()
+        } else {
+            prop_oneof![
+                Just(Self::Add),
+                Just(Self::And),
+                Just(Self::Or),
+                Just(Self::Like),
+                Just(Self::NotLike),
+                Just(Self::ILike),
+                Just(Self::NotILike),
+                Just(Self::Equal),
+                Just(Self::NotEqual),
+                Just(Self::Greater),
+                Just(Self::GreaterOrEqual),
+                Just(Self::Less),
+                Just(Self::LessOrEqual),
+                Just(Self::Is),
+                Just(Self::IsNot),
+                Just(Self::Add),
+                Just(Self::Subtract),
+                Just(Self::AtTimeZone),
+                Just(Self::HashSubtract),
+                Just(Self::Multiply),
+                Just(Self::Divide),
+                Just(Self::QuestionMark),
+                Just(Self::QuestionMarkPipe),
+                Just(Self::QuestionMarkAnd),
+                Just(Self::DoublePipe),
+                Just(Self::Arrow1),
+                Just(Self::Arrow2),
+                Just(Self::HashArrow1),
+                Just(Self::HashArrow2),
+                Just(Self::AtArrowRight),
+                Just(Self::AtArrowLeft),
+            ]
+            .boxed()
+        }
+    }
 }
 
 impl BinaryOperator {
@@ -1709,11 +1772,11 @@ impl Expr {
 }
 
 impl Arbitrary for Expr {
-    type Parameters = ();
+    type Parameters = Option<Dialect>;
 
     type Strategy = BoxedStrategy<Expr>;
 
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         use proptest::option;
         use proptest::prelude::*;
 
@@ -1722,97 +1785,167 @@ impl Arbitrary for Expr {
             any::<Column>().prop_map(Expr::Column),
             any::<Variable>().prop_map(Expr::Variable),
         ]
-        .prop_recursive(4, 8, 4, |element| {
+        .prop_recursive(4, 8, 4, move |element| {
             let box_expr = element.clone().prop_map(Box::new);
-            prop_oneof![
-                prop_oneof![
-                    (box_expr.clone(), any::<bool>())
-                        .prop_map(|(expr, distinct)| FunctionExpr::Avg { expr, distinct }),
-                    (box_expr.clone(), any::<bool>())
-                        .prop_map(|(expr, distinct)| FunctionExpr::Count { expr, distinct }),
-                    Just(FunctionExpr::CountStar),
-                    (box_expr.clone(), any::<bool>())
-                        .prop_map(|(expr, distinct)| FunctionExpr::Sum { expr, distinct }),
-                    (box_expr.clone(), any::<TimestampField>())
-                        .prop_map(|(expr, field)| FunctionExpr::Extract { expr, field }),
-                    box_expr.clone().prop_map(FunctionExpr::Max),
-                    box_expr.clone().prop_map(FunctionExpr::Min),
-                    (box_expr.clone(), any::<Option<String>>()).prop_map(|(expr, separator)| {
-                        FunctionExpr::GroupConcat { expr, separator }
-                    }),
-                    (
-                        box_expr.clone(),
-                        option::of(box_expr.clone()),
-                        option::of(box_expr.clone())
-                    )
-                        .prop_map(|(string, pos, len)| {
-                            FunctionExpr::Substring { string, pos, len }
-                        }),
-                    (
-                        any::<SqlIdentifier>(),
-                        proptest::collection::vec(element.clone(), 0..24)
-                    )
-                        .prop_map(|(name, arguments)| FunctionExpr::Call {
-                            name,
-                            arguments: Some(arguments)
-                        })
-                ]
-                .prop_map(Expr::Call),
-                (box_expr.clone(), any::<BinaryOperator>(), box_expr.clone(),)
-                    .prop_map(|(lhs, op, rhs)| Expr::BinaryOp { lhs, op, rhs },),
-                (box_expr.clone(), any::<BinaryOperator>(), box_expr.clone(),)
-                    .prop_map(|(lhs, op, rhs)| Expr::OpAny { lhs, op, rhs },),
-                (box_expr.clone(), any::<BinaryOperator>(), box_expr.clone(),)
-                    .prop_map(|(lhs, op, rhs)| Expr::OpSome { lhs, op, rhs },),
-                (box_expr.clone(), any::<BinaryOperator>(), box_expr.clone(),)
-                    .prop_map(|(lhs, op, rhs)| Expr::OpAll { lhs, op, rhs },),
-                (any::<UnaryOperator>(), box_expr.clone(),)
-                    .prop_map(|(op, rhs)| Expr::UnaryOp { op, rhs },),
-                (
-                    proptest::collection::vec(
-                        (element.clone(), element.clone())
-                            .prop_map(|(condition, body)| CaseWhenBranch { condition, body }),
-                        1..24
-                    ),
-                    option::of(box_expr.clone())
-                )
-                    .prop_map(|(branches, else_expr)| Expr::CaseWhen {
-                        branches,
-                        else_expr
-                    }),
+            let call = prop_oneof![
+                (box_expr.clone(), any::<bool>())
+                    .prop_map(|(expr, distinct)| FunctionExpr::Avg { expr, distinct }),
+                (box_expr.clone(), any::<bool>())
+                    .prop_map(|(expr, distinct)| FunctionExpr::Count { expr, distinct }),
+                Just(FunctionExpr::CountStar),
+                (box_expr.clone(), any::<bool>())
+                    .prop_map(|(expr, distinct)| FunctionExpr::Sum { expr, distinct }),
+                (box_expr.clone(), any::<TimestampField>())
+                    .prop_map(|(expr, field)| FunctionExpr::Extract { expr, field }),
+                box_expr.clone().prop_map(FunctionExpr::Max),
+                box_expr.clone().prop_map(FunctionExpr::Min),
+                (box_expr.clone(), any::<Option<String>>()).prop_map(|(expr, separator)| {
+                    FunctionExpr::GroupConcat { expr, separator }
+                }),
                 (
                     box_expr.clone(),
+                    option::of(box_expr.clone()),
+                    option::of(box_expr.clone())
+                )
+                    .prop_map(|(string, pos, len)| {
+                        FunctionExpr::Substring { string, pos, len }
+                    }),
+                (
+                    any::<SqlIdentifier>(),
+                    proptest::collection::vec(element.clone(), 0..24)
+                )
+                    .prop_map(|(name, arguments)| FunctionExpr::Call {
+                        name,
+                        arguments: Some(arguments)
+                    })
+            ]
+            .prop_map(Expr::Call)
+            .boxed();
+            let case_when = (
+                proptest::collection::vec(
+                    (element.clone(), element.clone())
+                        .prop_map(|(condition, body)| CaseWhenBranch { condition, body }),
+                    1..24,
+                ),
+                option::of(box_expr.clone()),
+            )
+                .prop_map(|(branches, else_expr)| Expr::CaseWhen {
+                    branches,
+                    else_expr,
+                });
+            let base = call
+                .clone()
+                .prop_union(
+                    (any::<UnaryOperator>(), box_expr.clone())
+                        .prop_map(|(op, rhs)| Expr::UnaryOp { op, rhs })
+                        .boxed(),
+                )
+                .or(case_when.clone().boxed())
+                .or((
+                    // FIXME(mvzink): This should be switched back to `box_expr` to test
+                    // recursive/nested expressions left of `BETWEEN` once we are no longer testing
+                    // `nom-sql`, which doesn't support all expressions in that position.
+                    prop_oneof![
+                        any::<Literal>().prop_map(Expr::Literal),
+                        any::<Column>().prop_map(Expr::Column),
+                        call.clone(),
+                        case_when.clone(),
+                    ],
                     box_expr.clone(),
                     box_expr.clone(),
                     any::<bool>(),
                 )
                     .prop_map(|(operand, min, max, negated)| Expr::Between {
-                        operand,
+                        operand: Box::new(operand),
                         min,
                         max,
-                        negated
-                    }),
-                (
+                        negated,
+                    })
+                    .boxed())
+                .or((
                     box_expr.clone(),
                     /* TODO: IN (subquery) */
                     proptest::collection::vec(element.clone(), 1..24).prop_map(InValue::List),
                     any::<bool>(),
                 )
-                    .prop_map(|(lhs, rhs, negated)| Expr::In { lhs, rhs, negated }),
-                (box_expr, any::<SqlType>(), any::<bool>()).prop_map(
-                    |(expr, ty, postgres_style)| {
-                        Expr::Cast {
-                            expr,
-                            ty,
-                            postgres_style,
-                        }
-                    }
-                ),
-                proptest::collection::vec(element, 0..24).prop_map(Expr::Array),
-                // TODO: once we have Arbitrary for SelectStatement
-                // any::<Box<SelectStatement>>().prop_map(Expr::NestedSelect),
-                // any::<Box<SelectStatement>>().prop_map(Expr::Exists),
-            ]
+                    .prop_map(|(lhs, rhs, negated)| Expr::In { lhs, rhs, negated })
+                    .boxed())
+                .or((
+                    box_expr.clone(),
+                    any_with::<SqlType>(SqlTypeArbitraryOptions {
+                        generate_unsupported: true,
+                        dialect: params,
+                        ..Default::default()
+                    }),
+                    any::<bool>(),
+                )
+                    .prop_map(|(expr, ty, postgres_style)| Expr::Cast {
+                        expr,
+                        ty,
+                        postgres_style,
+                    })
+                    .boxed())
+                .or(proptest::collection::vec(element, 0..24)
+                    .prop_map(Expr::Array)
+                    .boxed());
+            // TODO: once we have Arbitrary for SelectStatement
+            // any::<Box<SelectStatement>>().prop_map(Expr::NestedSelect),
+            // any::<Box<SelectStatement>>().prop_map(Expr::Exists),
+            if params == Some(Dialect::PostgreSQL) {
+                base.or(prop_oneof![
+                    (
+                        box_expr.clone(),
+                        any_with::<BinaryOperator>(BinaryOperatorParameters {
+                            for_op_all_any: true
+                        }),
+                        box_expr.clone(),
+                    )
+                        .prop_map(|(lhs, op, rhs)| Expr::BinaryOp {
+                            lhs,
+                            op,
+                            rhs
+                        },),
+                    (
+                        box_expr.clone(),
+                        any_with::<BinaryOperator>(BinaryOperatorParameters {
+                            for_op_all_any: true
+                        }),
+                        box_expr.clone(),
+                    )
+                        .prop_map(|(lhs, op, rhs)| Expr::OpAny {
+                            lhs,
+                            op,
+                            rhs
+                        },),
+                    (
+                        box_expr.clone(),
+                        any_with::<BinaryOperator>(BinaryOperatorParameters {
+                            for_op_all_any: true
+                        }),
+                        box_expr.clone(),
+                    )
+                        .prop_map(|(lhs, op, rhs)| Expr::OpSome {
+                            lhs,
+                            op,
+                            rhs
+                        },),
+                    (
+                        box_expr.clone(),
+                        any_with::<BinaryOperator>(BinaryOperatorParameters {
+                            for_op_all_any: true
+                        }),
+                        box_expr.clone(),
+                    )
+                        .prop_map(|(lhs, op, rhs)| Expr::OpAll {
+                            lhs,
+                            op,
+                            rhs
+                        },),
+                ]
+                .boxed())
+            } else {
+                base
+            }
         })
         .boxed()
     }

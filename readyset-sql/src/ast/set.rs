@@ -1,6 +1,9 @@
 use std::fmt;
 
 use itertools::Itertools;
+use proptest::option;
+use proptest::prelude::{any, any_with};
+use proptest::{collection::vec, prelude::Strategy as _};
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -429,6 +432,7 @@ impl TryFromDialect<sqlparser::ast::ObjectName> for Variable {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct SetVariables {
     /// A list of variables and their assigned values
+    #[strategy(vec(any::<(Variable, Literal)>().prop_map(|(var, lit)| (var, lit.into())), 1..=10))]
     pub variables: Vec<(Variable, Expr)>,
 }
 
@@ -482,7 +486,9 @@ impl DialectDisplay for SetVariables {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct SetNames {
+    #[any(r#"\w{1,16}"#.into())]
     pub charset: String,
+    #[strategy(option::of(any_with::<String>(r#"\w{1,16}"#.into())))]
     pub collation: Option<String>,
 }
 

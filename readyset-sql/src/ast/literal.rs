@@ -84,7 +84,7 @@ pub enum Literal {
     /// When parsing, we default to signed integer if the integer value has no sign, because mysql
     /// does that and postgres doesn't have unsigned integers
     UnsignedInteger(u64),
-    Number(#[strategy(arbitrary_decimal_string_with_digits(u16::MAX, u8::MAX))] String),
+    Number(#[strategy(arbitrary_decimal_string_with_digits(65, 30))] String),
     String(String),
     #[weight(0)]
     Blob(Vec<u8>),

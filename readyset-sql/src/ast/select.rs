@@ -2,7 +2,8 @@ use std::fmt::{self, Display as _};
 
 use itertools::Itertools;
 use proptest::option;
-use proptest::prelude::{Arbitrary, BoxedStrategy};
+use proptest::prelude::{Arbitrary, BoxedStrategy, Just};
+use proptest::sample::size_range;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -365,10 +366,18 @@ pub enum SelectMetadata {
     Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
 )]
 pub struct SelectStatement {
+    // TODO(mvzink): Allow generating CTEs with low frequency. Even using a conservative strategy
+    // like `vec(0..1, any())` recurses too much (50% of the time) and easily overflows the stack.
+    // We might be able to use prop_oneof! to weight it to generate a/some CTEs less frequently.
+    #[strategy(Just(vec![]))]
     pub ctes: Vec<CommonTableExpr>,
     pub distinct: bool,
     pub lateral: bool,
     pub fields: Vec<FieldDefinitionExpr>,
+    // TODO(mvzink): It may be legit to test parsing `SELECT` with no `FROM` clause, but then we
+    // have to do other stuff like ensure there is no `WHERE` clause, and it doesn't seem
+    // worthwhile.
+    #[any(size_range(1..16).lift())]
     pub tables: Vec<TableExpr>,
     pub join: Vec<JoinClause>,
     pub where_clause: Option<Expr>,

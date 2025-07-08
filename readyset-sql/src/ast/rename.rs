@@ -1,6 +1,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use proptest::sample::size_range;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::RenameTable;
@@ -10,6 +11,7 @@ use crate::{AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDia
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct RenameTableStatement {
+    #[any(size_range(1..10).lift())]
     pub ops: Vec<RenameTableOperation>,
 }
 

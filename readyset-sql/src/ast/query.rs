@@ -11,8 +11,10 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+#[arbitrary(args = Option<Dialect>)]
 #[allow(clippy::large_enum_variant)]
 pub enum SqlQuery {
+    #[weight(0)]
     CreateDatabase(CreateDatabaseStatement),
     CreateTable(CreateTableStatement),
     CreateView(CreateViewStatement),
@@ -37,10 +39,22 @@ pub enum SqlQuery {
     Use(UseStatement),
     Show(ShowStatement),
     Explain(ExplainStatement),
+    // Unfortunately, weight(0) is a special case that removes this option from the generated
+    // `prop_oneof!`, but actually having a weight of 0 is not supported. If that worked, we could
+    // generate this only for PostgreSQL like so:
+    //
+    // ```
+    // #[weight(u32::from(*args_shared == Some(Dialect::PostgreSQL)))]
+    // ```
+    //
+    // We don't really care about round-tripping these statements, but could fix this later.
+    #[weight(0)]
     Comment(CommentStatement),
     Deallocate(DeallocateStatement),
-    Truncate(TruncateStatement),
+    Truncate(#[any(*args_shared)] TruncateStatement),
+    #[weight(0)]
     CreateRls(CreateRlsStatement),
+    #[weight(0)]
     DropRls(DropRlsStatement),
 }
 
@@ -172,6 +186,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
             alter @ AlterTable { .. } => Ok(Self::AlterTable(alter.try_into_dialect(dialect)?)),
             truncate @ Truncate { .. } => Ok(Self::Truncate(truncate.try_into_dialect(dialect)?)),
             CreateDatabase { .. } => skipped!("CREATE DATABASE"),
+            CreateSchema { .. } => skipped!("CREATE SCHEMA"),
             Deallocate { name, prepare: _ } => {
                 let identifier = if name.value.eq_ignore_ascii_case("ALL") {
                     StatementIdentifier::AllStatements
