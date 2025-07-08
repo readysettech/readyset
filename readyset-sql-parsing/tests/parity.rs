@@ -648,3 +648,11 @@ fn test_create_cache() {
     check_parse_both!("CREATE CACHE CONCURRENTLY foobar FROM SELECT * FROM users WHERE id = $1");
     check_parse_both!("CREATE CACHE FROM q_29697d90bc73217f");
 }
+
+#[test]
+fn test_is_or_is_not_true_or_false() {
+    check_parse_both!("SELECT * FROM users WHERE active IS FALSE");
+    check_parse_both!("SELECT * FROM users WHERE active IS NOT FALSE");
+    check_parse_both!("SELECT * FROM users WHERE active IS TRUE");
+    check_parse_both!("SELECT * FROM users WHERE active IS NOT TRUE");
+}
