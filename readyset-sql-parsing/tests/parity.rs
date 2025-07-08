@@ -799,3 +799,12 @@ fn regression_numeric_with_no_leading_digit() {
 fn show_connections() {
     check_parse_both!("SHOW CONNECTIONS");
 }
+
+#[test]
+fn where_not_in_not_between() {
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "SELECT * FROM users WHERE status NOT IN (1, 2, 3) NOT BETWEEN true AND true;",
+        "nom-sql error"
+    );
+}
