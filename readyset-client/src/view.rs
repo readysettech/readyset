@@ -22,7 +22,6 @@ use futures_util::{future, ready, Stream};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use rand::prelude::IteratorRandom;
-use rand::thread_rng;
 use readyset_data::{
     Bound, BoundedRange, Collation, DfType, DfValue, IntoBoundedRange, RangeBounds,
 };
@@ -969,7 +968,7 @@ impl ReaderHandleBuilder {
                 .replica_shard_addrs
                 .rows()
                 .filter(|a| a.iter().all(|addr| addr.is_some()))
-                .choose(&mut thread_rng()),
+                .choose(&mut rand::rng()),
         }
         .ok_or_else(|| {
             if replica.is_none() && self.replica_shard_addrs.num_rows() != 1 {

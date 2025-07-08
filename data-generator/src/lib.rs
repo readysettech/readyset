@@ -6,11 +6,11 @@ use std::sync::Arc;
 use bit_vec::BitVec;
 use chrono::{Duration, FixedOffset, NaiveDate, NaiveTime, TimeZone};
 use eui48::{MacAddress, MacAddressFormat};
-use rand::distributions::uniform::SampleRange as _;
-use rand::distributions::{Standard, Uniform};
+use rand::distr::uniform::SampleRange as _;
+use rand::distr::{StandardUniform, Uniform};
 use rand::prelude::Distribution;
 use rand::seq::SliceRandom;
-use rand::{thread_rng, Rng, RngCore};
+use rand::{Rng, RngCore};
 use rand_distr::Zipf;
 use readyset_data::{encoding::Encoding, DfType, DfValue, Dialect};
 use readyset_decimal::Decimal;
@@ -205,7 +205,7 @@ impl<S: AsRef<str>> From<S> for RandomStringGenerator {
 
 impl RandomStringGenerator {
     pub fn gen(&self) -> DfValue {
-        let val: String = rand::thread_rng().sample(&self.inner);
+        let val: String = rand::rng().sample(&self.inner);
         val.into()
     }
 }
@@ -330,12 +330,12 @@ impl ZipfianGenerator {
         let (num_elements, mapping): (u64, Vec<DfValue>) = match (&min, &max) {
             (DfValue::Int(i), DfValue::Int(j)) => {
                 let mut mapping: Vec<_> = (*i..*j).map(DfValue::Int).collect();
-                mapping.shuffle(&mut rand::thread_rng());
+                mapping.shuffle(&mut rand::rng());
                 ((j - i) as u64, mapping)
             }
             (DfValue::UnsignedInt(i), DfValue::UnsignedInt(j)) => {
                 let mut mapping: Vec<_> = (*i..*j).map(DfValue::UnsignedInt).collect();
-                mapping.shuffle(&mut rand::thread_rng());
+                mapping.shuffle(&mut rand::rng());
                 ((j - i), mapping)
             }
             (_, _) => unimplemented!("DfValues unsupported for discrete zipfian value generation"),
@@ -351,7 +351,7 @@ impl ZipfianGenerator {
     }
 
     pub fn gen(&mut self) -> DfValue {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let offset = self.dist.sample(&mut rng);
         self.mapping.get(offset.round() as usize).unwrap().clone()
     }
@@ -378,7 +378,7 @@ impl From<SqlType> for RandomGenerator {
 
 impl RandomGenerator {
     pub fn gen(&self) -> DfValue {
-        random_value_of_type(&self.sql_type, thread_rng())
+        random_value_of_type(&self.sql_type, rand::rng())
     }
 }
 
@@ -454,9 +454,11 @@ impl RandomCharsGenerator {
     }
 
     pub fn gen(&self) -> DfValue {
-        let mut rng = rand::thread_rng();
-        let len = (self.min_length..self.max_length).sample_single(&mut rng);
-        let sampler = Uniform::new_inclusive(self.low, self.high);
+        let mut rng = rand::rng();
+        let len = (self.min_length..self.max_length)
+            .sample_single(&mut rng)
+            .unwrap();
+        let sampler = Uniform::new_inclusive(self.low, self.high).unwrap();
         let bytes: Vec<u8> = (0..len).map(|_| sampler.sample(&mut rng)).collect();
 
         // XXX: Hack alert! This goes through [`benchmarks::utils::generate::load_table_part`] as a
@@ -557,31 +559,31 @@ where
 {
     match typ {
         SqlType::Char(Some(x)) | SqlType::VarChar(Some(x)) => {
-            let length: usize = rng.gen_range(1..=*x).into();
+            let length: usize = rng.random_range(1..=*x).into();
             "a".repeat(length).into()
         }
-        SqlType::QuotedChar => rng.gen::<i8>().into(),
+        SqlType::QuotedChar => rng.random::<i8>().into(),
         SqlType::Char(None) => "a".into(),
         SqlType::TinyBlob | SqlType::TinyText => {
             // 2^8 bytes
-            let length: usize = rng.gen_range(1..256);
+            let length: usize = rng.random_range(1..256);
             "a".repeat(length).into()
         }
         SqlType::Blob | SqlType::Text | SqlType::Citext | SqlType::VarChar(None) => {
             // 2^16 bytes
-            let length: usize = rng.gen_range(1..65536);
+            let length: usize = rng.random_range(1..65536);
             "a".repeat(length).into()
         }
         SqlType::MediumBlob | SqlType::MediumText => {
             // 2^24 bytes
             // Currently capped at 65536 as these are generated in memory.
-            let length: usize = rng.gen_range(1..65536);
+            let length: usize = rng.random_range(1..65536);
             "a".repeat(length).into()
         }
         SqlType::LongBlob | SqlType::LongText => {
             // 2^32 bytes
             // Currently capped at 65536 as these are generated in memory.
-            let length: usize = rng.gen_range(1..65536);
+            let length: usize = rng.random_range(1..65536);
             "a".repeat(length).into()
         }
         SqlType::Binary(None) => {
@@ -589,31 +591,31 @@ where
             b"b".to_vec().into()
         }
         SqlType::Binary(Some(x)) | SqlType::VarBinary(x) => {
-            let length: usize = rng.gen_range(1..=*x).into();
+            let length: usize = rng.random_range(1..=*x).into();
             b"b".repeat(length).to_vec().into()
         }
         SqlType::ByteArray => {
-            let length = rng.gen_range(1..10);
+            let length = rng.random_range(1..10);
             let mut array = Vec::new();
             for _ in 0..length {
-                array.push(rng.gen::<u8>());
+                array.push(rng.random::<u8>());
             }
             DfValue::ByteArray(Arc::new(array))
         }
-        SqlType::Int(_) | SqlType::Int4 => rng.gen::<i32>().into(),
+        SqlType::Int(_) | SqlType::Int4 => rng.random::<i32>().into(),
         SqlType::BigInt(_) | SqlType::Int8 | SqlType::Signed | SqlType::SignedInteger => {
-            rng.gen::<i64>().into()
+            rng.random::<i64>().into()
         }
         SqlType::BigIntUnsigned(_) | SqlType::Unsigned | SqlType::UnsignedInteger => {
-            rng.gen::<u64>().into()
+            rng.random::<u64>().into()
         }
-        SqlType::IntUnsigned(_) => rng.gen::<u32>().into(),
-        SqlType::TinyInt(_) => rng.gen::<i8>().into(),
-        SqlType::TinyIntUnsigned(_) => rng.gen::<u8>().into(),
-        SqlType::SmallInt(_) | SqlType::Int2 => rng.gen::<i16>().into(),
-        SqlType::SmallIntUnsigned(_) => rng.gen::<u16>().into(),
-        SqlType::MediumInt(_) => rng.gen_range((-1i32 << 23)..(1i32 << 23)).into(),
-        SqlType::MediumIntUnsigned(_) => rng.gen_range(0..(1u32 << 24)).into(),
+        SqlType::IntUnsigned(_) => rng.random::<u32>().into(),
+        SqlType::TinyInt(_) => rng.random::<i8>().into(),
+        SqlType::TinyIntUnsigned(_) => rng.random::<u8>().into(),
+        SqlType::SmallInt(_) | SqlType::Int2 => rng.random::<i16>().into(),
+        SqlType::SmallIntUnsigned(_) => rng.random::<u16>().into(),
+        SqlType::MediumInt(_) => rng.random_range((-1i32 << 23)..(1i32 << 23)).into(),
+        SqlType::MediumIntUnsigned(_) => rng.random_range(0..(1u32 << 24)).into(),
         SqlType::Float | SqlType::Double => 1.5f64.try_into().unwrap(),
         SqlType::Real => 1.5f32.try_into().unwrap(),
         SqlType::Decimal(prec, scale) => {
@@ -626,7 +628,7 @@ where
         )),
         SqlType::DateTime(_) | SqlType::Timestamp => {
             // Generate a random month and day within the same year.
-            NaiveDate::from_ymd_opt(2020, rng.gen_range(1..12), rng.gen_range(1..28))
+            NaiveDate::from_ymd_opt(2020, rng.random_range(1..12), rng.random_range(1..28))
                 .unwrap()
                 .and_hms_opt(12, 30, 45)
                 .into()
@@ -634,18 +636,25 @@ where
         SqlType::TimestampTz => DfValue::from(
             FixedOffset::west_opt(18_000)
                 .unwrap()
-                .with_ymd_and_hms(2020, rng.gen_range(1..12), rng.gen_range(1..28), 12, 30, 45)
+                .with_ymd_and_hms(
+                    2020,
+                    rng.random_range(1..12),
+                    rng.random_range(1..28),
+                    12,
+                    30,
+                    45,
+                )
                 .single(),
         ),
         SqlType::Time => NaiveTime::from_hms_opt(12, 30, 45).into(),
         SqlType::Date => {
-            NaiveDate::from_ymd_opt(2020, rng.gen_range(1..12), rng.gen_range(1..28)).into()
+            NaiveDate::from_ymd_opt(2020, rng.random_range(1..12), rng.random_range(1..28)).into()
         }
-        SqlType::Bool => DfValue::from(rng.gen_bool(0.5)),
+        SqlType::Bool => DfValue::from(rng.random_bool(0.5)),
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Json | SqlType::Jsonb => DfValue::from(format!(
             "{{\"k\":\"{}\"}}",
-            "a".repeat(rng.gen_range(1..255))
+            "a".repeat(rng.random_range(1..255))
         )),
         SqlType::MacAddr => {
             let mut bytes = [0_u8; 6];
@@ -660,7 +669,13 @@ where
             )
         }
         SqlType::Inet => DfValue::from(
-            IpAddr::V4(Ipv4Addr::new(rng.gen(), rng.gen(), rng.gen(), rng.gen())).to_string(),
+            IpAddr::V4(Ipv4Addr::new(
+                rng.random(),
+                rng.random(),
+                rng.random(),
+                rng.random(),
+            ))
+            .to_string(),
         ),
         SqlType::Uuid => {
             let mut bytes = [0_u8; 16];
@@ -668,20 +683,20 @@ where
             DfValue::from(uuid::Uuid::from_bytes(bytes).to_string())
         }
         SqlType::Bit(size_opt) => DfValue::from(BitVec::from_iter(
-            rng.sample_iter(Standard)
+            rng.sample_iter(StandardUniform)
                 .take(size_opt.unwrap_or(1) as usize)
                 .collect::<Vec<bool>>(),
         )),
         SqlType::VarBit(max_size) => {
-            let size = rng.gen_range(0..max_size.unwrap_or(u16::MAX));
+            let size = rng.random_range(0..max_size.unwrap_or(u16::MAX));
             DfValue::from(BitVec::from_iter(
-                rng.sample_iter(Standard)
+                rng.sample_iter(StandardUniform)
                     .take(size as usize)
                     .collect::<Vec<bool>>(),
             ))
         }
-        SqlType::Serial => ((rng.gen::<u32>() + 1) as i32).into(),
-        SqlType::BigSerial => ((rng.gen::<u64>() + 1) as i64).into(),
+        SqlType::Serial => ((rng.random::<u32>() + 1) as i32).into(),
+        SqlType::BigSerial => ((rng.random::<u64>() + 1) as i64).into(),
         SqlType::Interval { .. } => unimplemented!(),
         SqlType::Array(_) => unimplemented!(),
         SqlType::Other(_) => unimplemented!(),
@@ -695,10 +710,10 @@ where
 /// [`SqlType`] for a given range of values.If the range of `min` and `max`
 /// exceeds the storage of the type, this truncates to fit.
 fn uniform_random_value(min: &DfValue, max: &DfValue) -> DfValue {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     match (min, max) {
-        (DfValue::Int(i), DfValue::Int(j)) => rng.gen_range(*i..*j).into(),
-        (DfValue::UnsignedInt(i), DfValue::UnsignedInt(j)) => rng.gen_range(*i..*j).into(),
+        (DfValue::Int(i), DfValue::Int(j)) => rng.random_range(*i..*j).into(),
+        (DfValue::UnsignedInt(i), DfValue::UnsignedInt(j)) => rng.random_range(*i..*j).into(),
         (_, _) => unimplemented!("DfValues unsupported for random uniform value generation"),
     }
 }

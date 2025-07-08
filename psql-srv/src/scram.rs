@@ -484,10 +484,10 @@ pub struct ServerFirstMessage {
 impl ServerFirstMessage {
     pub fn new(client_first_message: ClientFirstMessage, password: &[u8]) -> Result<Self> {
         // rand 0.5's ThreadRng is cryptographically secure
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let server_nonce = (0..NONCE_LENGTH)
             .map(|_| {
-                let mut v = rng.gen_range(0x21u8..0x7e);
+                let mut v = rng.random_range(0x21u8..0x7e);
                 if v == 0x2c {
                     v = 0x7e
                 }

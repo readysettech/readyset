@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use common::{IndexType, SizeOf};
 use itertools::Either;
+use rand::distr::Uniform;
 use readyset_client::internal::Index;
 use readyset_client::KeyComparison;
 use readyset_data::{Bound, DfValue, RangeBounds};
@@ -362,10 +363,12 @@ impl SingleState {
         &mut self,
         rng: &mut R,
     ) -> Option<(Vec<DfValue>, Rows)> {
-        self.state.evict_with_seed(rng.gen()).map(|(rows, key)| {
-            self.row_count = self.row_count.saturating_sub(rows.len());
-            (key, rows)
-        })
+        self.state
+            .evict_with_seed(rng.sample(Uniform::new_inclusive(usize::MIN, usize::MAX).unwrap()))
+            .map(|(rows, key)| {
+                self.row_count = self.row_count.saturating_sub(rows.len());
+                (key, rows)
+            })
     }
 
     /// Evicts a specified key from this state, returning the removed rows
@@ -514,7 +517,7 @@ mod tests {
             state.insert_row(Row::from(vec![1.into(), 2.into()]));
             state.insert_row(Row::from(vec![1.into(), 3.into()]));
             assert_eq!(state.row_count, 2);
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             state.evict_random(&mut rng);
             assert!(state.is_empty());
         }

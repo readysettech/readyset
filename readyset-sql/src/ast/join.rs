@@ -1,6 +1,7 @@
 use std::{fmt, iter, str};
 
 use itertools::{Either, Itertools};
+use proptest::sample::size_range;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -15,8 +16,7 @@ pub enum JoinRightSide {
     /// A single table expression.
     Table(TableExpr),
     /// A comma-separated (and implicitly joined) sequence of tables.
-    #[strategy(size_range(1..12))]
-    Tables(Vec<TableExpr>),
+    Tables(#[any(size_range(0..16).lift())] Vec<TableExpr>),
 }
 
 impl JoinRightSide {

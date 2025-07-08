@@ -83,7 +83,6 @@ use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::sample::Select;
 use proptest::strategy::{BoxedStrategy, Strategy};
-use rand::thread_rng;
 use readyset_data::{Collation, DfType, DfValue, Dialect};
 use readyset_sql::analysis::{contains_aggregate, ReferredColumns};
 use readyset_sql::ast::{
@@ -565,7 +564,7 @@ impl TableSpec {
                             .nth(index / 2 % expected_values.len())
                             .unwrap()
                             .clone(),
-                        _ if random => random_value_of_type(col_type, thread_rng()),
+                        _ if random => random_value_of_type(col_type, rand::rng()),
                         ColumnGenerator::Constant(c) => c.gen(),
                         ColumnGenerator::Uniform(u) => u.gen(),
                         ColumnGenerator::Random(r) => r.gen(),
@@ -1037,7 +1036,7 @@ fn min_max_arg_type(dialect: ParseDialect) -> impl Strategy<Value = SqlType> {
 #[arbitrary(args = QueryDialect)]
 pub enum AggregateType {
     Count {
-        #[any(generate_arrays = false, dialect = Some(args.0))]
+        #[any(generate_arrays = false, dialect = Some(args_shared.0))]
         column_type: SqlType,
         distinct: bool,
     },
@@ -1051,7 +1050,7 @@ pub enum AggregateType {
         column_type: SqlType,
         distinct: bool,
     },
-    #[weight(u32::from(*args == ParseDialect::MySQL))]
+    #[weight(u32::from(*args_shared == ParseDialect::MySQL))]
     GroupConcat,
     Max {
         #[strategy(min_max_arg_type(args.0))]
@@ -1303,8 +1302,8 @@ pub struct QueryOperationArgs {
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 #[arbitrary(args = QueryOperationArgs)]
 pub enum QueryOperation {
-    ColumnAggregate(#[any(args.dialect)] AggregateType),
-    Filter(#[any(args.dialect)] Filter),
+    ColumnAggregate(#[any(args_shared.dialect)] AggregateType),
+    Filter(#[any(args_shared.dialect)] Filter),
     Distinct,
     Join(JoinOperator),
     ProjectLiteral,
@@ -1316,7 +1315,7 @@ pub enum QueryOperation {
     },
     RangeParameter,
     MultipleRangeParameters,
-    ProjectBuiltinFunction(#[any(args.dialect)] BuiltinFunction),
+    ProjectBuiltinFunction(#[any(args_shared.dialect)] BuiltinFunction),
     TopK {
         order_type: OrderType,
         #[strategy(0..=100u64)]

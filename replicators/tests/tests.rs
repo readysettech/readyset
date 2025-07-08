@@ -8,7 +8,7 @@ use database_utils::{DatabaseURL, ReplicationServerId, UpstreamConfig as Config}
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use mysql_time::MySqlTime;
-use rand::distributions::Alphanumeric;
+use rand::distr::Alphanumeric;
 use rand::{Rng, SeedableRng};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};

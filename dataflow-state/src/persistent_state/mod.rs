@@ -517,7 +517,7 @@ impl WalFlusher {
         // Sleep for a random number of seconds between 1 and 10 to introduce jitter to
         // stagger flushes across different base tables
         let jitter = Duration::from_secs_f64(
-            rand::thread_rng().gen_range(0.0..self.flush_interval.as_secs_f64()),
+            rand::rng().random_range(0.0..self.flush_interval.as_secs_f64()),
         );
 
         // We use recv_timeout for interruptible sleep. If recv_timeout() returns `Ok`, it means

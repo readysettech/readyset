@@ -103,7 +103,7 @@ where
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
         any_with::<T>(args)
             .prop_perturb(|inner, mut rng| {
-                if rng.gen_bool(0.5) {
+                if rng.random_bool(0.5) {
                     Bound::Included(inner)
                 } else {
                     Bound::Excluded(inner)

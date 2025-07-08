@@ -15,8 +15,8 @@ use clap::{Parser, ValueEnum};
 use database_utils::{DatabaseConnection, DatabaseStatement, DatabaseType, QueryableConnection};
 use hdrhistogram::Histogram;
 use metrics::Unit;
-use rand::distributions::Uniform;
-use rand_distr::weighted_alias::WeightedAliasIndex;
+use rand::distr::Uniform;
+use rand_distr::weighted::WeightedAliasIndex;
 use rand_distr::{Distribution, Zipf};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_sql::ast::SqlType;
@@ -285,7 +285,7 @@ impl QuerySet {
             return &self.queries[0];
         }
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         &self.queries[self.weights.sample(&mut rng)]
     }
 
@@ -336,7 +336,7 @@ impl Query {
 
     pub fn get_params(&self) -> Vec<DfValue> {
         let mut ret = Vec::with_capacity(self.cols.len());
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let mut last_row: &Vec<DfValue> = &vec![];
         let mut last_set: Option<Arc<_>> = None;

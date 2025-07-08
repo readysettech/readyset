@@ -325,7 +325,7 @@ dependencies = [
  "nom_locate",
  "proptest",
  "query-generator",
- "rand 0.8.5",
+ "rand 0.9.1",
  "rand_distr",
  "readyset-client",
  "readyset-data",
@@ -1111,7 +1111,7 @@ dependencies = [
  "growable-bloom-filter",
  "mysql_async",
  "proptest",
- "rand 0.8.5",
+ "rand 0.9.1",
  "rand_distr",
  "rand_regex",
  "readyset-data",
@@ -1203,7 +1203,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "proptest-stateful",
- "rand 0.8.5",
+ "rand 0.9.1",
  "readyset-alloc",
  "readyset-client",
  "readyset-common",
@@ -1276,6 +1276,18 @@ checksum = "9c9e6a11ca8224451684bc0d7d5a7adbf8f2fd6887261a1cfc3c0432f9d4068e"
 dependencies = [
  "powerfmt",
  "serde",
+]
+
+[[package]]
+name = "derive-ex"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bba95f299f6b9cd47f68a847eca2ae9060a2713af532dc35c342065544845407"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "structmeta",
+ "syn 2.0.101",
 ]
 
 [[package]]
@@ -1839,9 +1851,9 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73fea8450eea4bac3940448fb7ae50d91f034f941199fcd9d909a5a07aa455f0"
+checksum = "26145e563e54f2cadc477553f1ec5ee650b00862f0a58bcd12cbdc5f0ea2d2f4"
 dependencies = [
  "cfg-if",
  "libc",
@@ -2805,7 +2817,7 @@ version = "0.1.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38f262f097c174adebe41eb73d66ae9c06b2844fb0da69969647bbddd9b0538a"
 dependencies = [
- "getrandom 0.3.2",
+ "getrandom 0.3.3",
  "libc",
 ]
 
@@ -3260,7 +3272,7 @@ dependencies = [
  "chrono",
  "crc32fast",
  "flate2",
- "getrandom 0.3.2",
+ "getrandom 0.3.3",
  "mysql-common-derive",
  "num-bigint",
  "num-traits",
@@ -4049,17 +4061,17 @@ dependencies = [
 
 [[package]]
 name = "proptest"
-version = "1.6.0"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14cae93065090804185d3b75f0bf93b8eeda30c7a9b4a33d3bdb3988d6229e50"
+checksum = "6fcdab19deb5195a31cf7726a210015ff1496ba1464fd42cb4f537b8b01b471f"
 dependencies = [
  "bit-set",
  "bit-vec 0.8.0",
  "bitflags 2.9.1",
  "lazy_static",
  "num-traits",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
+ "rand 0.9.1",
+ "rand_chacha 0.9.0",
  "rand_xorshift",
  "regex-syntax 0.8.5",
  "rusty-fork",
@@ -4073,7 +4085,7 @@ version = "0.1.3"
 dependencies = [
  "async-trait",
  "proptest",
- "rand 0.8.5",
+ "rand 0.9.1",
  "tokio",
 ]
 
@@ -4129,7 +4141,7 @@ dependencies = [
  "postgres-native-tls",
  "postgres-protocol",
  "postgres-types",
- "rand 0.8.5",
+ "rand 0.9.1",
  "readyset-adapter-types",
  "readyset-data",
  "readyset-decimal",
@@ -4179,7 +4191,7 @@ dependencies = [
  "mysql_async",
  "parking_lot",
  "proptest",
- "rand 0.8.5",
+ "rand 0.9.1",
  "readyset-data",
  "readyset-sql",
  "readyset-sql-passes",
@@ -4300,36 +4312,36 @@ version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "99d9a13982dcf210057a8a78572b2217b667c3beacbf3a0d8b454f6f82837d38"
 dependencies = [
- "getrandom 0.3.2",
+ "getrandom 0.3.3",
 ]
 
 [[package]]
 name = "rand_distr"
-version = "0.4.3"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
+checksum = "6a8615d50dcf34fa31f7ab52692afec947c4dd0ab803cc87cb3b0b4570ff7463"
 dependencies = [
  "num-traits",
- "rand 0.8.5",
+ "rand 0.9.1",
 ]
 
 [[package]]
 name = "rand_regex"
-version = "0.17.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bfbd599a8c757f89100e3ae559fb1ef9efa1cfd9276136862e3089dec627b31"
+checksum = "04db2e382d13679a1e42400e90e306cdbb79dc5cd41bb035ba4eae72e78cdf37"
 dependencies = [
- "rand 0.8.5",
+ "rand 0.9.1",
  "regex-syntax 0.8.5",
 ]
 
 [[package]]
 name = "rand_xorshift"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d25bf25ec5ae4a3f1b92f929810509a2f53d7dca2f50b794ff57e3face536c8f"
+checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
 dependencies = [
- "rand_core 0.6.4",
+ "rand_core 0.9.3",
 ]
 
 [[package]]
@@ -4389,7 +4401,7 @@ dependencies = [
  "petgraph",
  "proptest",
  "quanta",
- "rand 0.8.5",
+ "rand 0.9.1",
  "readyset-client",
  "readyset-util",
  "smallvec",
@@ -4476,7 +4488,7 @@ dependencies = [
  "mysql_common",
  "parking_lot",
  "proptest",
- "rand 0.8.5",
+ "rand 0.9.1",
  "readyset-adapter-types",
  "readyset-alloc",
  "readyset-client",
@@ -4561,7 +4573,7 @@ dependencies = [
  "parking_lot",
  "petgraph",
  "proptest",
- "rand 0.8.5",
+ "rand 0.9.1",
  "readyset-data",
  "readyset-errors",
  "readyset-sql",
@@ -4644,7 +4656,7 @@ dependencies = [
  "itertools 0.13.0",
  "jobserver",
  "mysql_async",
- "rand 0.8.5",
+ "rand 0.9.1",
  "readyset-adapter",
  "readyset-client",
  "readyset-client-metrics",
@@ -4771,7 +4783,7 @@ dependencies = [
  "petgraph",
  "pin-project",
  "proptest",
- "rand 0.8.5",
+ "rand 0.9.1",
  "reader-map",
  "readyset-alloc",
  "readyset-client",
@@ -5088,7 +5100,7 @@ dependencies = [
  "pin-project",
  "quanta",
  "querystring",
- "rand 0.8.5",
+ "rand 0.9.1",
  "readyset-alloc",
  "readyset-alloc-metrics",
  "readyset-client",
@@ -5264,7 +5276,7 @@ dependencies = [
  "postgres",
  "pprof",
  "proptest",
- "rand 0.8.5",
+ "rand 0.9.1",
  "readyset-decimal",
  "serde",
  "serde_json",
@@ -5414,7 +5426,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "proptest-stateful",
- "rand 0.8.5",
+ "rand 0.9.1",
  "readyset-client",
  "readyset-client-test-helpers",
  "readyset-data",
@@ -6077,25 +6089,25 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "structmeta"
-version = "0.1.6"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "104842d6278bf64aa9d2f182ba4bde31e8aec7a131d29b7f444bb9b344a09e2a"
+checksum = "2e1575d8d40908d70f6fd05537266b90ae71b15dbbe7a8b7dffa2b759306d329"
 dependencies = [
  "proc-macro2",
  "quote",
  "structmeta-derive",
- "syn 1.0.109",
+ "syn 2.0.101",
 ]
 
 [[package]]
 name = "structmeta-derive"
-version = "0.1.6"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24420be405b590e2d746d83b01f09af673270cf80e9b003a5fa7b651c58c7d93"
+checksum = "152a0b65a590ff6c3da95cabe2353ee04e6167c896b28e3b14478c2636c922fc"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.101",
 ]
 
 [[package]]
@@ -6287,7 +6299,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7437ac7763b9b123ccf33c338a5cc1bac6f69b45a136c19bdd8a65e3916435bf"
 dependencies = [
  "fastrand",
- "getrandom 0.3.2",
+ "getrandom 0.3.3",
  "once_cell",
  "rustix",
  "windows-sys 0.59.0",
@@ -6325,14 +6337,15 @@ dependencies = [
 
 [[package]]
 name = "test-strategy"
-version = "0.2.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62d6408d1406657be2f9d1701fbae379331d30d2f6e92050710edb0d34eeb480"
+checksum = "43b12f9683de37f9980e485167ee624bfaa0b6b04da661e98e25ef9c2669bc1b"
 dependencies = [
+ "derive-ex",
  "proc-macro2",
  "quote",
  "structmeta",
- "syn 1.0.109",
+ "syn 2.0.101",
 ]
 
 [[package]]

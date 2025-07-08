@@ -25,7 +25,7 @@ use async_trait::async_trait;
 use proptest::prelude::*;
 use proptest::strategy::{NewTree, ValueTree};
 use proptest::test_runner::TestRunner;
-use rand::distributions::{Distribution, Uniform};
+use rand::distr::{Distribution, Uniform};
 
 /// Used by the caller of [`test()`] for providing config options.
 pub struct ProptestStatefulConfig {
@@ -291,7 +291,9 @@ where
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
         let mut symbolic_state = self.model_state.clone();
 
-        let size = Uniform::new_inclusive(self.min_ops, self.max_ops).sample(runner.rng());
+        let size = Uniform::new_inclusive(self.min_ops, self.max_ops)
+            .unwrap()
+            .sample(runner.rng());
         let ops = (0..size)
             .map(|_| {
                 let mut possible_ops = symbolic_state.op_generators();
@@ -302,7 +304,7 @@ where
                 // it directly. It's important to use the RNG from `runner` though
                 // to ensure test runs are deterministic based on the seed from proptest.
                 let op_gen =
-                    possible_ops.swap_remove(runner.rng().gen_range(0..possible_ops.len()));
+                    possible_ops.swap_remove(runner.rng().random_range(0..possible_ops.len()));
                 let next_op = op_gen.new_tree(runner).unwrap().current();
                 symbolic_state.next_state(&next_op);
                 next_op

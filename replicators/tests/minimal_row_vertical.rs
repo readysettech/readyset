@@ -40,7 +40,7 @@ use proptest::{collection, sample};
 use proptest_stateful::{
     proptest_config_with_local_failure_persistence, ModelState, ProptestStatefulConfig,
 };
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom as _;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::{mysql_helpers, TestBuilder};
 use readyset_data::DfValue;
@@ -600,8 +600,7 @@ impl ModelState for DDLModelState {
                                 "utf8mb4_0900_as_cs",
                                 // "binary", // Disabled due to REA-5707
                             ];
-                            let random_collation =
-                                collations.choose(&mut rand::thread_rng()).unwrap();
+                            let random_collation = collations.choose(&mut rand::rng()).unwrap();
                             if random_collation != &"" {
                                 col_def.push_str(&format!(" COLLATE {random_collation}"));
                             }

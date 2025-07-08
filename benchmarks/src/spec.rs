@@ -101,8 +101,9 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use database_utils::{DatabaseConnection, QueryableConnection};
+use rand::distr::Uniform;
 use rand::Rng;
-use rand_distr::{Uniform, WeightedAliasIndex, Zipf};
+use rand_distr::{weighted::WeightedAliasIndex, Zipf};
 use readyset_data::DfValue;
 use readyset_sql::{ast::*, Dialect, DialectDisplay};
 use readyset_sql_parsing::parse_query;
@@ -220,13 +221,13 @@ impl WorkloadSpec {
                 WorkloadDistributionSource::Pair {
                     pair: Pair { range, distance },
                 } => {
-                    let mut rng = rand::thread_rng();
+                    let mut rng = rand::rng();
                     range
                         .clone()
                         .map(|n| {
                             vec![
                                 DfValue::from(n),
-                                DfValue::from(n + rng.gen_range(distance.clone())),
+                                DfValue::from(n + rng.random_range(distance.clone())),
                             ]
                         })
                         .collect()
@@ -243,7 +244,7 @@ impl WorkloadSpec {
 
             let generator = match distribution {
                 WorkloadDistributionKind::Uniform { .. } => {
-                    Sampler::Uniform(Uniform::new(0, data.len() - 1))
+                    Sampler::Uniform(Uniform::new(0, data.len() - 1)?)
                 }
                 WorkloadDistributionKind::Zipf { zipf } => {
                     Sampler::Zipf(Zipf::new((data.len() - 1) as _, *zipf).unwrap())

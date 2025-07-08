@@ -4500,7 +4500,7 @@ impl Domain {
                                 key_evicted,
                                 bytes_freed,
                             }) = {
-                                let mut rng = rand::thread_rng();
+                                let mut rng = rand::rng();
                                 self.state[destination].evict_random(tag, &mut rng)
                             } {
                                 Some((index, bytes_freed, key_evicted))

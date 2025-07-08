@@ -1556,8 +1556,8 @@ impl DfState {
                 }
 
                 let idx = {
-                    let mut rng = rand::thread_rng();
-                    rng.gen_range(0..tags.len())
+                    let mut rng = rand::rng();
+                    rng.random_range(0..tags.len())
                 };
 
                 let (ni, tag) = tags.get(idx).ok_or_else(|| internal_err!())?;

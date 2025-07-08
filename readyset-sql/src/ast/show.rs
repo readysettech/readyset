@@ -1,6 +1,6 @@
 use std::fmt;
 
-use proptest::{option, string::string_regex};
+use proptest::option;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -80,7 +80,7 @@ impl DialectDisplay for ShowStatement {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct ProxiedQueriesOptions {
-    #[strategy(option::of(string_regex("q_{a-z}{16}").unwrap()))]
+    #[strategy(option::of("q_{a-z}{16}"))]
     pub query_id: Option<String>,
     pub only_supported: bool,
     pub limit: Option<u64>,

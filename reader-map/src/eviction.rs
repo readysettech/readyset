@@ -216,7 +216,7 @@ impl LRUEviction {
         // timestamp via a very approximate process.  Choose a sub-linear fraction to sample
         // and a random starting point.
         let step = data.len() / ((nkeys as f64).sqrt() as usize).max(1);
-        let skip = rand::thread_rng().gen_range(0..step);
+        let skip = rand::rng().random_range(0..step);
         (step, skip)
     }
 

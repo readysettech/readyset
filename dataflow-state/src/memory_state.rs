@@ -255,8 +255,8 @@ impl State for MemoryState {
     /// strongly referenced `state`, then they are removed from the weakly referenced
     /// `weak_indices`.
     fn evict_bytes(&mut self, bytes: usize) -> Option<EvictBytesResult> {
-        let mut rng = rand::thread_rng();
-        let state_index = rng.gen_range(0..self.state.len());
+        let mut rng = rand::rng();
+        let state_index = rng.random_range(0..self.state.len());
         let mut bytes_freed = 0;
         let mut keys_evicted = Vec::new();
 
@@ -820,7 +820,7 @@ mod tests {
                 state.mark_filled(KeyComparison::from(vec1![DfValue::from(0)]), tag_2);
 
                 // Evict a random key for Tag 1
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
                 state.evict_random(tag_1, &mut rng);
                 let lookup_1 = state.lookup(&[0], &PointKey::Single(DfValue::from(0)));
                 let lookup_2 = state.lookup(&[0], &PointKey::Single(DfValue::from(1)));

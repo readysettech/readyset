@@ -477,8 +477,8 @@ impl DeploymentBuilder {
 
         // Append the deployment name with a random number to prevent state collisions
         // on test repeats with failed teardowns.
-        let mut rng = rand::thread_rng();
-        let name = name.to_string() + &rng.gen::<u32>().to_string();
+        let mut rng = rand::rng();
+        let name = name.to_string() + &rng.random::<u32>().to_string();
 
         // Depending on what type of upstream we have, use the mysql or posgresql host/ports.
         let (user, pass, host, port) = match database_type {

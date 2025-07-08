@@ -980,8 +980,8 @@ mod tests {
 
     use futures::stream::FuturesUnordered;
     use futures::StreamExt;
-    use rand::distributions::Alphanumeric;
-    use rand::{thread_rng, Rng};
+    use rand::distr::Alphanumeric;
+    use rand::Rng;
     use readyset_data::Dialect;
     use reqwest::Url;
     use test_utils::tags;
@@ -1406,7 +1406,7 @@ mod tests {
         let returned = authority.get_controller_state_value().await.unwrap();
         assert_eq!(None, returned);
 
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let big_bytes: String = iter::repeat(())
             .map(|()| rng.sample(Alphanumeric))
             .map(char::from)
@@ -1451,7 +1451,7 @@ mod tests {
         let returned = authority.get_controller_state_value().await.unwrap();
         assert_eq!(None, returned);
 
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let big_bytes: String = iter::repeat(())
             .map(|()| rng.sample(Alphanumeric))
             .map(char::from)
@@ -1496,7 +1496,7 @@ mod tests {
         let returned = authority.get_controller_state_value().await.unwrap();
         assert_eq!(None, returned);
 
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let small_bytes: String = iter::repeat(())
             .map(|()| rng.sample(Alphanumeric))
             .map(char::from)
@@ -1565,8 +1565,8 @@ mod tests {
                         move |n: Option<String>| -> Result<String, ()> {
                             assert_eq!(n, last_bytes);
 
-                            let mut rng = thread_rng();
-                            let length = rng.gen_range(0..CHUNK_SIZE * 3);
+                            let mut rng = rand::rng();
+                            let length = rng.random_range(0..CHUNK_SIZE * 3);
                             Ok(iter::repeat(())
                                 .map(|()| rng.sample(Alphanumeric))
                                 .map(char::from)

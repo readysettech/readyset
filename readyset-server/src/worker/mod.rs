@@ -804,7 +804,7 @@ impl BarrierManager {
     async fn create(&self, split: usize) -> Barrier {
         let mut barriers = self.barriers.lock().await;
         let id = loop {
-            let id = rand::thread_rng().gen();
+            let id = rand::rng().random();
             let None = barriers.get(&id) else {
                 continue;
             };
