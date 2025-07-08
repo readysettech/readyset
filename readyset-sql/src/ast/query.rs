@@ -163,9 +163,14 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
             alter @ AlterTable { .. } => Ok(Self::AlterTable(alter.try_into_dialect(dialect)?)),
             truncate @ Truncate { .. } => Ok(Self::Truncate(truncate.try_into_dialect(dialect)?)),
             CreateDatabase { .. } => skipped!("CREATE DATABASE"),
-            Deallocate { name, prepare: _ } => Ok(Self::Deallocate(DeallocateStatement {
-                identifier: StatementIdentifier::SingleStatement(name.to_string()),
-            })),
+            Deallocate { name, prepare: _ } => {
+                let identifier = if name.value.eq_ignore_ascii_case("ALL") {
+                    StatementIdentifier::AllStatements
+                } else {
+                    StatementIdentifier::SingleStatement(name.value)
+                };
+                Ok(Self::Deallocate(DeallocateStatement { identifier }))
+            }
             Comment {
                 object_type: sqlparser::ast::CommentObject::Table,
                 object_name,

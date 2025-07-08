@@ -200,7 +200,12 @@ fn test_on_update_current_timestamp() {
 
 #[test]
 fn test_deallocate() {
-    check_parse_mysql!("DEALLOCATE pdo_stmt_00000001;");
+    check_parse_both!("DEALLOCATE pdo_stmt_00000001;");
+    check_parse_mysql!("DEALLOCATE `pdo_stmt_00000001`;");
+    check_parse_mysql!("DEALLOCATE PREPARE pdo_stmt_00000001;");
+    check_parse_mysql!("DEALLOCATE PREPARE `pdo_stmt_00000001`;");
+    check_parse_postgres!(r#"DEALLOCATE "pdo_stmt_00000001";"#);
+    check_parse_postgres!(r"DEALLOCATE ALL;");
 }
 
 #[test]
