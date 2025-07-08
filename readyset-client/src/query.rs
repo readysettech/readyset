@@ -248,14 +248,6 @@ impl QueryStatus {
         matches!(self.migration_state, MigrationState::Unsupported(_))
     }
 
-    /// Returns true if this query status represents an [dropped][] query
-    ///
-    /// [unsupported]: MigrationState::Dropped
-    #[must_use]
-    pub fn is_dropped(&self) -> bool {
-        self.migration_state == MigrationState::Dropped
-    }
-
     /// Returns true if this query status represents a [successfully dry-run][] query
     ///
     /// [successfully dry-run]: MigrationState::DryRunSucceeded
@@ -267,10 +259,7 @@ impl QueryStatus {
     /// Returns true if the query should be considered "denied"
     #[must_use]
     pub fn is_denied(&self) -> bool {
-        self.is_unsupported()
-            || self.is_pending()
-            || self.is_dry_run_succeeded()
-            || self.is_dropped()
+        self.is_unsupported() || self.is_pending() || self.is_dry_run_succeeded()
     }
 }
 
@@ -355,10 +344,6 @@ pub enum MigrationState {
     /// Indicates that a dry run of the query has succeeded. It's very likely but not guaranteed
     /// that migration of the query will succeed if it's attempted.
     DryRunSucceeded,
-    /// Indicates that the query was dropped by the user.
-    ///
-    /// This state allows users to deny-list queries in async or implicit caching modes.
-    Dropped,
 }
 
 impl MigrationState {
@@ -390,7 +375,7 @@ impl MigrationState {
     pub fn is_supported(&self) -> bool {
         matches!(
             self,
-            MigrationState::Dropped | MigrationState::DryRunSucceeded | MigrationState::Successful
+            MigrationState::DryRunSucceeded | MigrationState::Successful
         )
     }
 }
@@ -409,7 +394,6 @@ impl Display for MigrationState {
                 0u64 => write!(f, "pending inlining"),
                 _ => write!(f, "successfully inlined"),
             },
-            MigrationState::Dropped => write!(f, "dropped"),
         }
     }
 }

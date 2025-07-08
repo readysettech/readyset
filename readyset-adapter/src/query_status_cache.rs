@@ -128,7 +128,7 @@ impl PersistentStatusCacheHandle {
             MigrationStyle::Async | MigrationStyle::InRequestPath => statuses
                 .iter()
                 .filter_map(|(query_id, (query, status))| {
-                    if status.is_unsupported() || status.is_dropped() {
+                    if status.is_unsupported() {
                         Some(DeniedQuery {
                             id: *query_id,
                             query: query.clone(),
@@ -521,9 +521,6 @@ impl QueryStatusCache {
     where
         Q: QueryStatusKey,
     {
-        // Dropped should not be set manually
-        debug_assert!(!matches!(m, MigrationState::Dropped));
-
         let should_insert = q.with_mut_status(self, |s| {
             match s {
                 Some(s) => {
@@ -574,33 +571,6 @@ impl QueryStatusCache {
                 false
             }
         })
-    }
-
-    /// Marks a query as dropped by the user.
-    ///
-    /// NOTE: this should only be called after we successfully remove a View for this query. This is
-    /// relevant because we report that dropped queries are supported by ReadySet.
-    pub fn drop_query<Q>(&self, q: &Q)
-    where
-        Q: QueryStatusKey,
-    {
-        let should_insert = q.with_mut_status(self, |s| match s {
-            Some(s) => {
-                s.migration_state = MigrationState::Dropped;
-                false
-            }
-            None => true,
-        });
-        if should_insert {
-            self.insert_with_status(
-                q.clone(),
-                QueryStatus {
-                    migration_state: MigrationState::Dropped,
-                    execution_info: None,
-                    always: false,
-                },
-            );
-        }
     }
 
     /// This function is called if we attempted to create an inlined migration but received an
@@ -670,9 +640,6 @@ impl QueryStatusCache {
     }
 
     /// Clear all queries currently marked as successful from the cache.
-    ///
-    /// NOTE: We do not mark cleared queries as dropped, since we are not explicitly deny-listing
-    /// cleared queries.
     pub fn clear(&self) {
         self.id_to_status
             .iter_mut()
@@ -1263,27 +1230,6 @@ mod tests {
         assert_eq!(pending[0].literals().len(), 2);
         assert!(pending[0].literals().contains(&vec![DfValue::Max]));
         assert!(pending[0].literals().contains(&vec![DfValue::None]));
-    }
-
-    #[test]
-    fn drop_query() {
-        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
-        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
-
-        // Assert that if we have not seen this query, the query is marked as dropped. This may be
-        // relevant to multiple adapter configurations, or just after an adapter restart.
-        cache.drop_query(&q);
-        assert_eq!(cache.query_migration_state(&q).1, MigrationState::Dropped);
-
-        // Assert that we can drop a Successful query
-        cache.update_query_migration_state(&q, MigrationState::Successful);
-        cache.drop_query(&q);
-        assert_eq!(cache.query_migration_state(&q).1, MigrationState::Dropped);
-
-        // Assert that cleared queries are not marked as Dropped.
-        cache.update_query_migration_state(&q, MigrationState::Successful);
-        cache.clear();
-        assert_eq!(cache.query_migration_state(&q).1, MigrationState::Pending);
     }
 
     #[test]

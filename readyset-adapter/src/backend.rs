@@ -1171,10 +1171,8 @@ where
         if self.state.proxy_state == ProxyState::ProxyAlways && !status.always {
             PrepareMeta::Proxy
         } else {
-            let should_do_readyset = !matches!(
-                status.migration_state,
-                MigrationState::Unsupported(_) | MigrationState::Dropped
-            );
+            let should_do_readyset =
+                !matches!(status.migration_state, MigrationState::Unsupported(_));
             PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
                 rewritten,
@@ -2031,9 +2029,7 @@ where
         migration_state: Option<MigrationState>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let (supported, migration_state) = match migration_state {
-            Some(m @ MigrationState::Unsupported(_)) | Some(m @ MigrationState::Dropped) => {
-                ("no", m)
-            }
+            Some(m @ MigrationState::Unsupported(_)) => ("no", m),
             // If the migration state is "Inlined", we need to let the migration handler process
             // the inlined migrations in the background until we can report whether the query is
             // supported with certainty
@@ -2087,8 +2083,9 @@ where
         let maybe_view_request = self.noria.view_create_request_from_name(name).await;
         let result = self.noria.drop_view(name).await?;
         if let Some(view_request) = maybe_view_request {
-            // drop_query() should not be called if we have no view for this query.
-            self.state.query_status_cache.drop_query(&view_request);
+            self.state
+                .query_status_cache
+                .update_query_migration_state(&view_request, MigrationState::Pending);
             self.state
                 .query_status_cache
                 .always_attempt_readyset(&view_request, false);
@@ -2174,9 +2171,9 @@ where
             .into_iter()
             .map(|DeniedQuery { id, query, status }| {
                 let s = match status.migration_state {
-                    MigrationState::DryRunSucceeded
-                    | MigrationState::Successful
-                    | MigrationState::Dropped => "yes".to_string(),
+                    MigrationState::DryRunSucceeded | MigrationState::Successful => {
+                        "yes".to_string()
+                    }
                     MigrationState::Pending | MigrationState::Inlined(_) => "pending".to_string(),
                     MigrationState::Unsupported(reason) if reason.is_empty() => {
                         "unsupported: unknown reason".to_string()
@@ -2647,10 +2644,7 @@ where
         let upstream_exists = upstream.is_some();
         let proxy_out_of_band = settings.migration_mode != MigrationMode::InRequestPath
             && status.migration_state != MigrationState::Successful;
-        let unsupported_or_dropped = matches!(
-            &status.migration_state,
-            MigrationState::Unsupported(_) | MigrationState::Dropped
-        );
+        let unsupported = matches!(&status.migration_state, MigrationState::Unsupported(_));
         let exceeded_network_failure = status
             .execution_info
             .as_mut()
@@ -2658,8 +2652,7 @@ where
             .unwrap_or(false);
 
         if !status.always
-            && (upstream_exists
-                && (proxy_out_of_band || unsupported_or_dropped || exceeded_network_failure))
+            && (upstream_exists && (proxy_out_of_band || unsupported || exceeded_network_failure))
         {
             if did_work {
                 #[allow(clippy::unwrap_used)] // Validated by did_work.
