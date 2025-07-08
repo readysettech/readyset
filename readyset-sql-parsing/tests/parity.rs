@@ -14,14 +14,14 @@ use readyset_sql_parsing::{parse_query_with_config, ParsingPreset};
 
 macro_rules! check_parse_mysql {
     ($sql:expr) => {
-        parse_query_with_config(ParsingPreset::BothErrorOnMismatch, Dialect::MySQL, $sql).unwrap()
+        parse_query_with_config(ParsingPreset::BothPanicOnMismatch, Dialect::MySQL, $sql).unwrap()
     };
 }
 
 macro_rules! check_parse_postgres {
     ($sql:expr) => {
         parse_query_with_config(
-            ParsingPreset::BothErrorOnMismatch,
+            ParsingPreset::BothPanicOnMismatch,
             Dialect::PostgreSQL,
             $sql,
         )
@@ -636,4 +636,15 @@ fn test_key_part_expression() {
         r#"CREATE INDEX idx_jsonblob_id ON blobs (CAST(jsonblob->>'id' AS INTEGER));"#,
         "nom-sql: failed to parse query"
     );
+}
+
+#[test]
+fn test_create_cache() {
+    check_parse_mysql!("CREATE CACHE FROM SELECT * FROM users WHERE id = ?");
+    check_parse_both!("CREATE CACHE FROM SELECT * FROM users WHERE id = $1");
+    check_parse_both!("CREATE CACHE ALWAYS FROM SELECT * FROM users WHERE id = $1");
+    check_parse_both!("CREATE CACHE CONCURRENTLY ALWAYS FROM SELECT * FROM users WHERE id = $1");
+    check_parse_both!("CREATE CACHE ALWAYS CONCURRENTLY FROM SELECT * FROM users WHERE id = $1");
+    check_parse_both!("CREATE CACHE CONCURRENTLY foobar FROM SELECT * FROM users WHERE id = $1");
+    check_parse_both!("CREATE CACHE FROM q_29697d90bc73217f");
 }

@@ -458,15 +458,21 @@ fn parse_query_for_create_cache(
     parser: &mut Parser,
     dialect: Dialect,
 ) -> Result<CacheInner, String> {
-    parser
-        .parse_statement()
-        .map_err(|e| format!("failed to parse statement: {e}"))
-        .and_then(|q| {
-            q.try_into_dialect(dialect)
-                .map_err(|e| format!("failed to convert AST: {e}"))
-        })
-        .and_then(|q: SqlQuery| q.into_select().ok_or_else(|| "expected SELECT".into()))
-        .map(|q| CacheInner::Statement(Box::new(q)))
+    if let Ok(statement) = parser.try_parse(|p| p.parse_statement()) {
+        let query: SqlQuery = statement
+            .try_into_dialect(dialect)
+            .map_err(ReadysetParsingError::from)?;
+        let select = query
+            .into_select()
+            .ok_or_else(|| "expected SELECT".to_string())?;
+        Ok(CacheInner::Statement(Box::new(select)))
+    } else {
+        let id = parser
+            .parse_identifier()
+            .map_err(ReadysetParsingError::from)?
+            .into_dialect(dialect);
+        Ok(CacheInner::Id(id))
+    }
 }
 
 fn parse_explain(
