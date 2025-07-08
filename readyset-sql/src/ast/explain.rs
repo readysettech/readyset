@@ -1,4 +1,7 @@
-use std::fmt;
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+};
 
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
@@ -9,7 +12,7 @@ use crate::{ast::*, Dialect, DialectDisplay};
 /// EXPLAIN statements
 ///
 /// This is a non-standard ReadySet-specific extension to SQL
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
 pub enum ExplainStatement {
     /// Print a graphviz representation of the current query graph to stdout
     Graphviz {
@@ -42,8 +45,62 @@ pub enum ExplainStatement {
     },
 }
 
-impl ExplainStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+impl PartialEq for ExplainStatement {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ExplainStatement::LastStatement, ExplainStatement::LastStatement) => true,
+            (ExplainStatement::Domains, ExplainStatement::Domains) => true,
+            (ExplainStatement::Caches, ExplainStatement::Caches) => true,
+            (ExplainStatement::Materializations, ExplainStatement::Materializations) => true,
+            (
+                ExplainStatement::Graphviz {
+                    simplified: sa,
+                    for_cache: ca,
+                },
+                ExplainStatement::Graphviz {
+                    simplified: sb,
+                    for_cache: cb,
+                },
+            ) => sa == sb && ca == cb,
+            (
+                ExplainStatement::CreateCache {
+                    inner: ia,
+                    unparsed_explain_create_cache_statement: _,
+                },
+                ExplainStatement::CreateCache {
+                    inner: ib,
+                    unparsed_explain_create_cache_statement: _,
+                },
+            ) => ia == ib,
+            (_, _) => false,
+        }
+    }
+}
+
+impl Eq for ExplainStatement {}
+
+impl Hash for ExplainStatement {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+        match self {
+            ExplainStatement::CreateCache {
+                inner,
+                unparsed_explain_create_cache_statement: _,
+            } => inner.hash(state),
+            ExplainStatement::Graphviz {
+                simplified,
+                for_cache,
+            } => {
+                simplified.hash(state);
+                for_cache.hash(state);
+            }
+            _ => {}
+        }
+    }
+}
+
+impl DialectDisplay for ExplainStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(f, "EXPLAIN ")?;
             match self {

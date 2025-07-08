@@ -508,18 +508,22 @@ fn parse_explain(
             "unexpected SIMPLIFIED without GRAPHVIZ".into(),
         ));
     }
-    if parser.parse_keywords(&[Keyword::CREATE, Keyword::CACHE, Keyword::FROM]) {
-        return Ok(SqlQuery::Explain(
-            readyset_sql::ast::ExplainStatement::CreateCache {
-                inner: parse_query_for_create_cache(parser, dialect),
-                unparsed_explain_create_cache_statement: input
-                    .as_ref()
-                    .strip_prefix("EXPLAIN ")
-                    .unwrap()
-                    .trim()
-                    .to_string(),
-            },
-        ));
+    if parser.parse_keywords(&[Keyword::CREATE, Keyword::CACHE]) {
+        return match parse_create_cache(parser, dialect, input)? {
+            SqlQuery::CreateCache(inner) => {
+                return Ok(SqlQuery::Explain(
+                    readyset_sql::ast::ExplainStatement::CreateCache {
+                        inner: inner.inner,
+                        unparsed_explain_create_cache_statement: inner
+                            .unparsed_create_cache_statement
+                            .unwrap_or_default(),
+                    },
+                ))
+            }
+            _ => Err(ReadysetParsingError::ReadysetParsingError(
+                "unexpected statement after CREATE CACHE".into(),
+            )),
+        };
     }
     Ok(parser
         .parse_explain(sqlparser::ast::DescribeAlias::Explain)?

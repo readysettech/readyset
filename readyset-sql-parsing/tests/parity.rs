@@ -650,6 +650,31 @@ fn test_create_cache() {
 }
 
 #[test]
+fn test_explain_create_cache() {
+    check_parse_mysql!("EXPLAIN CREATE CACHE FROM SELECT * FROM users WHERE id = ?");
+    check_parse_mysql!("EXPLAIN\nCREATE CACHE FROM SELECT * FROM users WHERE id = ?");
+    check_parse_both!("EXPLAIN CREATE CACHE FROM SELECT * FROM users WHERE id = $1");
+    check_parse_both!("EXPLAIN\nCREATE CACHE FROM SELECT * FROM users WHERE id = $1");
+    check_parse_both!("EXPLAIN CREATE CACHE FROM q_29697d90bc73217f");
+    check_parse_both!("EXPLAIN\nCREATE CACHE FROM q_29697d90bc73217f");
+}
+
+#[test]
+#[ignore = "nom-sql doesn't support these options"]
+fn test_explain_create_cache_options() {
+    check_parse_both!("EXPLAIN CREATE CACHE ALWAYS FROM SELECT * FROM users WHERE id = $1");
+    check_parse_both!(
+        "EXPLAIN CREATE CACHE CONCURRENTLY ALWAYS FROM SELECT * FROM users WHERE id = $1"
+    );
+    check_parse_both!(
+        "EXPLAIN CREATE CACHE ALWAYS CONCURRENTLY FROM SELECT * FROM users WHERE id = $1"
+    );
+    check_parse_both!(
+        "EXPLAIN CREATE CACHE CONCURRENTLY foobar FROM SELECT * FROM users WHERE id = $1"
+    );
+}
+
+#[test]
 fn test_is_or_is_not_true_or_false() {
     check_parse_both!("SELECT * FROM users WHERE active IS FALSE");
     check_parse_both!("SELECT * FROM users WHERE active IS NOT FALSE");
