@@ -1,7 +1,25 @@
-use readyset_sql::{Dialect, DialectDisplay};
+use readyset_sql::{Dialect, DialectDisplay, ast::SqlQuery};
 use readyset_sql_parsing::{ParsingPreset, parse_query_with_config};
+use test_strategy::proptest;
+use test_utils::tags;
 
 mod utils;
+
+#[tags(slow)]
+#[proptest]
+#[ignore = "WIP REA-5456"]
+fn arbitrary_query_mysql(#[any(Some(Dialect::MySQL))] q: SqlQuery) {
+    let sql = q.display(Dialect::MySQL).to_string();
+    check_parse_mysql!(&sql);
+}
+
+#[tags(slow)]
+#[proptest]
+#[ignore = "WIP REA-5456"]
+fn arbitrary_query_postgres(#[any(Some(Dialect::PostgreSQL))] q: SqlQuery) {
+    let sql = q.display(Dialect::PostgreSQL).to_string();
+    check_parse_postgres!(&sql);
+}
 
 #[test]
 fn bare_functions() {

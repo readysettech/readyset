@@ -5157,10 +5157,13 @@ dependencies = [
  "nom-sql",
  "paste",
  "pretty_assertions",
+ "proptest",
  "readyset-errors",
  "readyset-sql",
  "serde",
  "sqlparser",
+ "test-strategy",
+ "test-utils",
  "thiserror 1.0.69",
  "tracing",
 ]
