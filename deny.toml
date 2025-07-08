@@ -168,7 +168,10 @@ unknown-git = "warn"
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
-allow-git = ["git+https://github.com/apache/datafusion-sqlparser-rs"]
+allow-git = [
+    "git+https://github.com/apache/datafusion-sqlparser-rs",
+    "git+https://github.com/unicode-org/icu4x.git",
+]
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
