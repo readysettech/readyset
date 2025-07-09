@@ -1,5 +1,11 @@
 FROM public.ecr.aws/docker/library/rust:1.88.0
 
+ARG TARGETARCH
+
+# If not using buildx with --platform, TARGETARCH will be undefined and the build will fail.  Assume
+# x86 as the default in that case.
+ENV TARGETARCH=${TARGETARCH:-amd64}
+
 WORKDIR /tmp
 
 RUN set -eux; \
@@ -39,17 +45,23 @@ ENV RUSTC_WRAPPER=sccache
 
 # Install cargo-nextest
 RUN set -eux; \
-    ARCH="$(uname -m)"; \
     VERSION="0.9.87"; \
-    if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then \
-        PLATFORM="linux-arm"; \
-    elif [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64"]; then \
-        PLATFORM="linux"; \
-    else \
-        echo "Unsupported architecture: $ARCH"; exit 1; \
-    fi; \
+    case "${TARGETARCH}" in \
+      "arm64") PLATFORM="linux-arm";; \
+      "amd64") PLATFORM="linux";; \
+      *) echo "Unsupported architecture: ${TARGETARCH}"; exit 1;; \
+    esac; \
     # CARGO_HOME is set by the nightly container to be /usr/local/cargo.
     # This is where it reads configs from for cargo and where cargo installs binaries.
     curl -LsSf "https://get.nexte.st/${VERSION}/${PLATFORM}" | tar zxf - -C ${CARGO_HOME}/bin
 
-RUN printf '[build]\nrustflags = ["-C", "link-arg=-fuse-ld=lld"]' > ${CARGO_HOME}/config.toml
+# Set some rustflags.  For info on the graviton flag, see:
+#   https://github.com/aws/aws-graviton-getting-started/blob/main/rust.md
+RUN linker_flag='"-C", "link-arg=-fuse-ld=lld"' \
+    && graviton_flag='"-C", "target-feature=+lse"' \
+    && if [ "${TARGETARCH}" = "arm64" ]; then \
+         rustflags="${linker_flag}, ${graviton_flag}"; \
+       else \
+         rustflags="${linker_flag}"; \
+       fi \
+    && printf '[build]\nrustflags = [%s]\n' "${rustflags}" > ${CARGO_HOME}/config.toml
