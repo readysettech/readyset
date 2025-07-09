@@ -24,6 +24,14 @@ pub enum JoinType {
     Inner,
 }
 
+/// Execution mode for joins.
+pub enum JoinExecutionMode {
+    /// Regular Join, with upquery in one side and lookup using ON keys on other side.
+    RegularLookup,
+    /// Straddled with two upqueries. Execute a hash join once both sides arrive.
+    StraddledHashJoin,
+}
+
 /// Join rows between two nodes based on a (compound) equal join key
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Join {
@@ -36,8 +44,7 @@ pub struct Join {
     // Which columns to emit
     emit: Vec<(Side, usize)>,
 
-    // Which columns to emit when the left/right row is being modified in place. True means the
-    // column is from the left parent, false means from the right
+    // Which columns to emit when the left/right row is being modified in place.
     in_place_left_emit: Vec<(Side, usize)>,
     in_place_right_emit: Vec<(Side, usize)>,
 
@@ -216,6 +223,15 @@ impl Join {
             .collect()
     }
 
+    /// Given a list of column indices, split them into left and right columns.
+    ///
+    /// # Arguments
+    ///
+    /// * `col` - the column index to resolve.
+    ///
+    /// # Returns
+    ///
+    /// A tuple of (left column index, right column index).
     fn resolve_col(&self, col: usize) -> (Option<usize>, Option<usize>) {
         let (side, pcol) = self.emit[col];
 
@@ -241,39 +257,98 @@ impl Join {
             (None, Some(pcol))
         }
     }
-}
 
-impl Ingredient for Join {
-    fn ancestors(&self) -> Vec<NodeIndex> {
-        vec![self.left.as_global(), self.right.as_global()]
+    /// Given a replay and the node this replay is from, determine the JoinExecutionMode.
+    /// If we can trace all the replay columns to a single side of the join, we can execute a regular join. (The
+    /// predicates come from this side and all we need to do is to lookup the other side based on the ON keys).
+    /// If we cannot trace all the replay columns to a single side of the join, we are executing a straddled join.
+    /// If the right side is fully materialized, we trigger just a single upquery and we can lookup the right side
+    /// using the ON keys + the predicates we are missing on. Otherwise (rhs not fully materialized), we expect two
+    /// upquery responses. We will buffer the first response and execute a hash join once the second response arrives.
+    ///
+    /// # Parameters
+    /// - replay: The replay context.
+    /// - from: The node this replay is from.
+    ///
+    /// # Returns
+    /// - The JoinExecutionMode.
+    fn execution_type_for_replay(
+        &self,
+        replay: &ReplayContext<'_>,
+        from: LocalNodeIndex,
+    ) -> JoinExecutionMode {
+        match self.trace_replay_column_source(replay, from) {
+            Ok(_) => JoinExecutionMode::RegularLookup,
+            Err(_) => JoinExecutionMode::StraddledHashJoin,
+        }
     }
 
-    fn is_join(&self) -> bool {
-        true
+    /// Translate the replay column index into the columns indexes in the parent table.
+    /// If any of the columns are generated, or if we have multiple columns and they come
+    /// from different sides of the join (Straddled Joins), return an error.
+    fn trace_replay_column_source(
+        &self,
+        replay: &ReplayContext<'_>,
+        from: LocalNodeIndex,
+    ) -> Result<Option<Vec<usize>>, ()> {
+        replay
+            .cols()
+            .map(|cols| {
+                cols.iter()
+                    .map(|&col| -> Result<usize, ()> {
+                        match self.emit[col] {
+                            (Side::Left, l) if from == *self.left => return Ok(l),
+                            (Side::Right, r) if from == *self.right => return Ok(r),
+                            (Side::Left, l) => {
+                                if let Some(r) =
+                                    self.on.iter().find_map(
+                                        |(on_l, r)| {
+                                            if *on_l == l {
+                                                Some(r)
+                                            } else {
+                                                None
+                                            }
+                                        },
+                                    )
+                                {
+                                    // since we didn't hit the case above, we know that the
+                                    // message
+                                    // *isn't* from left.
+                                    return Ok(*r);
+                                }
+                            }
+                            (Side::Right, r) => {
+                                if let Some(l) =
+                                    self.on.iter().find_map(
+                                        |(l, on_r)| {
+                                            if *on_r == r {
+                                                Some(l)
+                                            } else {
+                                                None
+                                            }
+                                        },
+                                    )
+                                {
+                                    // same
+                                    return Ok(*l);
+                                }
+                            }
+                        }
+                        Err(())
+                    })
+                    .collect()
+            })
+            .transpose()
     }
 
-    fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
-        Some(Some(self.left.as_global()).into_iter().collect())
-    }
-
-    fn on_connected(&mut self, _g: &Graph) {}
-
-    impl_replace_sibling!(left, right);
-
-    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
-        self.left.remap(remap);
-        self.right.remap(remap);
-    }
-
-    #[allow(clippy::cognitive_complexity)]
-    fn on_input(
+    /// Execute a regular lookup for a join. This happens when we have predicates only on one side of the join.
+    fn execute_regular_lookup(
         &mut self,
+        replay: &ReplayContext<'_>,
         from: LocalNodeIndex,
         rs: Records,
-        replay: &ReplayContext<'_>,
         nodes: &DomainNodes,
         state: &StateMap,
-        _auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
@@ -282,88 +357,16 @@ impl Ingredient for Join {
 
         let other = if from_left { *self.right } else { *self.left };
 
-        let (from_key, other_key): (Vec<usize>, Vec<usize>) = if from_left {
+        let replay_key_cols = self.trace_replay_column_source(replay, from);
+
+        // On clause columns from this side (ts) and other side (os)
+        let (on_cols_ts, on_cols_os): (Vec<usize>, Vec<usize>) = if from_left {
             self.on.iter().copied().unzip()
         } else {
-            let (other_key, from_key) = self.on.iter().copied().unzip();
-            (from_key, other_key)
+            let (on_cols_os, on_cols_ts) = self.on.iter().copied().unzip();
+            (on_cols_ts, on_cols_os)
         };
-
-        let orkc = replay.key();
-
-        let replay_key_cols: Result<Option<Vec<usize>>, ()> =
-            replay
-                .key()
-                .map(|cols| {
-                    cols.iter()
-                        .map(|&col| -> Result<usize, ()> {
-                            match self.emit[col] {
-                                (Side::Left, l) if from == *self.left => return Ok(l),
-                                (Side::Right, r) if from == *self.right => return Ok(r),
-                                (Side::Left, l) => {
-                                    if let Some(r) = self.on.iter().find_map(|(on_l, r)| {
-                                        if *on_l == l {
-                                            Some(r)
-                                        } else {
-                                            None
-                                        }
-                                    }) {
-                                        // since we didn't hit the case above, we know that the
-                                        // message
-                                        // *isn't* from left.
-                                        return Ok(*r);
-                                    }
-                                }
-                                (Side::Right, r) => {
-                                    if let Some(l) = self.on.iter().find_map(|(l, on_r)| {
-                                        if *on_r == r {
-                                            Some(l)
-                                        } else {
-                                            None
-                                        }
-                                    }) {
-                                        // same
-                                        return Ok(*l);
-                                    }
-                                }
-                            }
-                            Err(())
-                        })
-                        .collect()
-                })
-                .transpose();
-
-        let replay_key_cols = match replay_key_cols {
-            Ok(v) => v,
-            Err(_) => {
-                // columns generated!
-                let orkc = orkc.unwrap();
-                let is_left = from == *self.left;
-                return if let Some(other) = self.generated_column_buffer.remove(&(
-                    orkc.to_vec(),
-                    if is_left { Side::Right } else { Side::Left },
-                )) {
-                    // we have both sides now
-                    let (left, right) = if is_left { (rs, other) } else { (other, rs) };
-                    let ret = self.hash_join(left, right)?;
-                    Ok(ProcessingResult {
-                        results: ret,
-                        ..Default::default()
-                    })
-                } else {
-                    // store the records for when we get the other upquery response
-                    self.generated_column_buffer.insert(
-                        (
-                            orkc.to_vec(),
-                            if is_left { Side::Left } else { Side::Right },
-                        ),
-                        rs,
-                    );
-                    Ok(Default::default())
-                };
-            }
-        };
-
+        let replay_key_cols = replay_key_cols.unwrap();
         if rs.is_empty() {
             return Ok(ProcessingResult {
                 results: rs,
@@ -373,9 +376,12 @@ impl Ingredient for Join {
 
         let mut ret: Vec<Record> = Vec::with_capacity(rs.len());
 
-        let grouped_records = rs
-            .into_iter()
-            .chunk_by(|rec| from_key.iter().map(|i| rec[*i].clone()).collect::<Vec<_>>());
+        let grouped_records = rs.into_iter().chunk_by(|rec| {
+            on_cols_ts
+                .iter()
+                .map(|i| rec[*i].clone())
+                .collect::<Vec<_>>()
+        });
 
         let is_replay = replay_key_cols.is_some();
 
@@ -450,7 +456,7 @@ impl Ingredient for Join {
                 true => IngredientLookupResult::empty(),
                 false => self.lookup(
                     other,
-                    &other_key,
+                    &on_cols_os,
                     &PointKey::from(join_key.iter().cloned()),
                     nodes,
                     state,
@@ -464,8 +470,8 @@ impl Ingredient for Join {
                     misses.extend(group.map(|record| {
                         Miss::builder()
                             .on(other)
-                            .lookup_idx(other_key.clone())
-                            .lookup_key(from_key.clone())
+                            .lookup_idx(on_cols_os.clone())
+                            .lookup_key(on_cols_ts.clone())
                             .replay(replay)
                             .replay_key_cols(replay_key_cols.as_deref())
                             .record(record.into_row())
@@ -478,7 +484,7 @@ impl Ingredient for Join {
             if is_replay && !nulls {
                 lookups.push(Lookup {
                     on: other,
-                    cols: other_key.clone(),
+                    cols: on_cols_os.clone(),
                     key: join_key
                         .try_into()
                         .map_err(|_| internal_err!("Empty join key"))?,
@@ -530,6 +536,85 @@ impl Ingredient for Join {
             lookups,
             misses,
         })
+    }
+
+    /// Based on replay, check if we are ready to execute a hash join.
+    /// For hash join, we originally trigger upquery for both sides of the join.
+    /// One side will arrive and we will buffer it. Once the other side arrives, we can execute the hash join.
+    fn execute_or_buffer_straddled_hash_join(
+        &mut self,
+        replay: &ReplayContext<'_>,
+        from: LocalNodeIndex,
+        rs: Records,
+    ) -> ReadySetResult<ProcessingResult> {
+        let cols = replay.cols().unwrap();
+        let is_left = from == *self.left;
+        if let Some(other) = self.generated_column_buffer.remove(&(
+            cols.to_vec(),
+            if is_left { Side::Right } else { Side::Left },
+        )) {
+            // we have both sides now
+            let (left, right) = if is_left { (rs, other) } else { (other, rs) };
+            let ret = self.hash_join(left, right)?;
+            Ok(ProcessingResult {
+                results: ret,
+                ..Default::default()
+            })
+        } else {
+            // store the records for when we get the other upquery response
+            self.generated_column_buffer.insert(
+                (
+                    cols.to_vec(),
+                    if is_left { Side::Left } else { Side::Right },
+                ),
+                rs,
+            );
+            Ok(Default::default())
+        }
+    }
+}
+
+impl Ingredient for Join {
+    fn ancestors(&self) -> Vec<NodeIndex> {
+        vec![self.left.as_global(), self.right.as_global()]
+    }
+
+    fn is_join(&self) -> bool {
+        true
+    }
+
+    fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
+        Some(Some(self.left.as_global()).into_iter().collect())
+    }
+
+    fn on_connected(&mut self, _g: &Graph) {}
+
+    impl_replace_sibling!(left, right);
+
+    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
+        self.left.remap(remap);
+        self.right.remap(remap);
+    }
+
+    #[allow(clippy::cognitive_complexity)]
+    fn on_input(
+        &mut self,
+        from: LocalNodeIndex,
+        rs: Records,
+        replay: &ReplayContext<'_>,
+        nodes: &DomainNodes,
+        state: &StateMap,
+        _auxiliary_node_states: &mut AuxiliaryNodeStateMap,
+    ) -> ReadySetResult<ProcessingResult> {
+        let join_execution_mode = self.execution_type_for_replay(replay, from);
+        match join_execution_mode {
+            JoinExecutionMode::RegularLookup => {
+                self.execute_regular_lookup(replay, from, rs, nodes, state)
+            }
+            JoinExecutionMode::StraddledHashJoin => {
+                self.execute_or_buffer_straddled_hash_join(replay, from, rs)
+            }
+        }
     }
 
     fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
@@ -697,6 +782,17 @@ impl Ingredient for Join {
         ])
     }
 
+    /// Based on a list of input column indices, get a list of column outputs required to fulfill the join
+    ///
+    /// # Arguments
+    ///
+    /// * `cols` - A list of column indices to get the column source for. Based on the join PREDICATES
+    ///
+    /// # Returns
+    ///
+    /// A `ColumnSource` object that represents the column source for the given column indices
+    /// In case of a straddled join, we return the mapping from cols (input) tracing if they came
+    /// from left or right, and also the ON columns so we can do a single lookup with PREDICATE + ON columns
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
         // NOTE: This function relies pretty heavily on the fact that upqueries for NULLs are not
         // possible. If they were possible, you could return incorrect results, because

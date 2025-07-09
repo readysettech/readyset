@@ -324,7 +324,11 @@ pub(crate) enum ReplayContext<'a> {
 }
 
 impl<'a> ReplayContext<'a> {
-    pub(crate) fn key(&self) -> Option<&'a [usize]> {
+    // Return the columns used for the replay
+    ///
+    /// This is only valid for [`ReplayContext::Partial`], and will return `None` for
+    /// other variants.
+    pub(crate) fn cols(&self) -> Option<&'a [usize]> {
         if let ReplayContext::Partial { key_cols, .. } = *self {
             Some(key_cols)
         } else {
