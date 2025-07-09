@@ -1093,8 +1093,11 @@ mod tests {
                     Index::hash_map(vec![0, 1])
                 )])
                 .with_extension(vec![IndexRef::partial(x, Index::hash_map(vec![0, 1, 2]))]),
-                RawReplayPath::from_replay(vec1![IndexRef::partial(b, Index::hash_map(vec![1])),])
-                    .with_extension(vec![IndexRef::partial(x, Index::hash_map(vec![0, 1, 2]))]),
+                RawReplayPath::from_replay(vec1![IndexRef::partial(
+                    b,
+                    Index::hash_map(vec![0, 1])
+                ),])
+                .with_extension(vec![IndexRef::partial(x, Index::hash_map(vec![0, 1, 2]))]),
             ]
         );
 
@@ -1114,8 +1117,11 @@ mod tests {
             vec![
                 RawReplayPath::from_replay(vec1![IndexRef::partial(a, Index::hash_map(vec![0])),])
                     .with_extension(vec![IndexRef::partial(x, Index::hash_map(vec![0, 2]))]),
-                RawReplayPath::from_replay(vec1![IndexRef::partial(b, Index::hash_map(vec![1])),])
-                    .with_extension(vec![IndexRef::partial(x, Index::hash_map(vec![0, 2]))]),
+                RawReplayPath::from_replay(vec1![IndexRef::partial(
+                    b,
+                    Index::hash_map(vec![0, 1])
+                ),])
+                .with_extension(vec![IndexRef::partial(x, Index::hash_map(vec![0, 2]))]),
             ]
         );
 

@@ -4796,6 +4796,7 @@ dependencies = [
  "replication-offset",
  "serde",
  "serde_with 3.12.0",
+ "smallvec",
  "socket2",
  "strum",
  "test-strategy",

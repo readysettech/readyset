@@ -336,6 +336,18 @@ impl<'a> ReplayContext<'a> {
         }
     }
 
+    /// Return the keys used for the replay
+    ///
+    /// This is only valid for [`ReplayContext::Partial`], and will return `None` for
+    /// other variants.
+    pub(crate) fn keys(&self) -> Option<&'a HashSet<KeyComparison>> {
+        if let ReplayContext::Partial { keys, .. } = *self {
+            Some(keys)
+        } else {
+            None
+        }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn tag(&self) -> Option<Tag> {
         match self {

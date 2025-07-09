@@ -41,6 +41,7 @@ html-escape = { workspace = true }
 petgraph = { workspace = true, features = ["serde-1"] }
 serde = { workspace = true, features = ["rc"] }
 timekeeper = { workspace = true }
+smallvec = { workspace = true }
 
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }

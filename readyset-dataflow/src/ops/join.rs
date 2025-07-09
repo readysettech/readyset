@@ -7,6 +7,8 @@ use readyset_client::KeyComparison;
 use readyset_errors::{internal_err, ReadySetResult};
 use readyset_util::intervals::into_bound_endpoint;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
+use tracing::trace;
 use vec1::{vec1, Vec1};
 
 use super::Side;
@@ -25,11 +27,14 @@ pub enum JoinType {
 }
 
 /// Execution mode for joins.
+#[derive(Debug)]
 pub enum JoinExecutionMode {
     /// Regular Join, with upquery in one side and lookup using ON keys on other side.
     RegularLookup,
     /// Straddled with two upqueries. Execute a hash join once both sides arrive.
     StraddledHashJoin,
+    /// Straddled with one upquery and state lookups on other side. This is done when the right side is fully materialized and we are guaranteed to not miss on lookup.
+    StraddledRegularLookup,
 }
 
 /// Join rows between two nodes based on a (compound) equal join key
@@ -235,7 +240,7 @@ impl Join {
             .collect()
     }
 
-    /// Given a list of column indices, split them into left and right columns.
+    /// Given a column index, check if it comes from the left or the right side of the join.
     ///
     /// # Arguments
     ///
@@ -270,6 +275,21 @@ impl Join {
         }
     }
 
+    /// Given a list of column indices, resolve them into left and right key column indices.
+    fn resolve_cols(&self, cols: &[usize]) -> (SmallVec<[usize; 8]>, SmallVec<[usize; 8]>) {
+        let mut left_cols = SmallVec::<[usize; 8]>::new();
+        let mut right_cols = SmallVec::<[usize; 8]>::new();
+        for col in cols {
+            let (left_idx, right_idx) = self.resolve_col(*col);
+            if let Some(li) = left_idx {
+                left_cols.push(li);
+            } else if let Some(ri) = right_idx {
+                right_cols.push(ri);
+            }
+        }
+        (left_cols, right_cols)
+    }
+
     /// Given a replay and the node this replay is from, determine the JoinExecutionMode.
     /// If we can trace all the replay columns to a single side of the join, we can execute a regular join. (The
     /// predicates come from this side and all we need to do is to lookup the other side based on the ON keys).
@@ -291,7 +311,13 @@ impl Join {
     ) -> JoinExecutionMode {
         match self.trace_replay_column_source(replay, from) {
             Ok(_) => JoinExecutionMode::RegularLookup,
-            Err(_) => JoinExecutionMode::StraddledHashJoin,
+            Err(_) => {
+                if self.rhs_full_mat {
+                    JoinExecutionMode::StraddledRegularLookup
+                } else {
+                    JoinExecutionMode::StraddledHashJoin
+                }
+            }
         }
     }
 
@@ -415,7 +441,6 @@ impl Join {
         });
 
         let is_replay = replay_key_cols.is_some();
-
         // Only do a lookup into a weak index if we're processing regular updates,
         // not if we're processing a replay, since regular updates should represent
         // all rows that won't hit holes downstream but replays need to have *all*
@@ -604,10 +629,253 @@ impl Join {
         }
     }
 
+    /// Given a node index where the replay is coming from, return the side of
+    /// the join that the replay is coming from, the other side of the join as
+    /// node index and a pair of vectors of ON clause columns from this side
+    /// (ts) and other side (os).
+    fn get_side_and_on_cols(
+        &self,
+        from: LocalNodeIndex,
+    ) -> (Side, LocalNodeIndex, (Vec<usize>, Vec<usize>)) {
+        if from == *self.left {
+            (Side::Left, *self.right, self.on.iter().copied().unzip())
+        } else {
+            let (on_cols_os, on_cols_ts): (Vec<usize>, Vec<usize>) =
+                self.on.iter().copied().unzip();
+            (Side::Right, *self.left, (on_cols_ts, on_cols_os))
+        }
+    }
+
+    /// Execute a straddled lookup. One side of the join has arrived. We need to figure out which records
+    /// from the other side to lookup. See [the docs section on straddled joins][straddled-joins] for more
+    /// information about how we handle the execution.
+    ///
+    /// [straddled-joins]: http://docs/dataflow/replay_paths.html#straddled-joins
+    fn execute_straddled_regular_lookup(
+        &mut self,
+        replay: &ReplayContext<'_>,
+        from: LocalNodeIndex,
+        rs: Records,
+        nodes: &DomainNodes,
+        state: &StateMap,
+    ) -> ReadySetResult<ProcessingResult> {
+        if rs.is_empty() {
+            return Ok(ProcessingResult {
+                results: rs,
+                ..Default::default()
+            });
+        }
+        let mut lookups = Vec::with_capacity(rs.len());
+        let mut results = Records::from(Vec::<Record>::with_capacity(rs.len() * 2));
+        let mut os_key_buffer = Vec::with_capacity(8);
+        let (side, os_node, (on_cols_idx_ts, on_cols_idx_os)) = self.get_side_and_on_cols(from);
+
+        // 1. From replay.cols which columns come from this side of the join
+        let (left_key_cols, right_key_cols) = self.resolve_cols(replay.cols().unwrap());
+
+        // 2. Pre-group records by replay key and join key
+        let grouped_records = Self::group_records_by_replay_key(
+            &rs,
+            &left_key_cols,
+            &right_key_cols,
+            &on_cols_idx_ts,
+            side,
+        );
+
+        // 3. Process each replay key using pre-grouped records.
+        // TODO: One optimization is to key group_records by replay key and join key, so we don't need to skip the ones
+        //that don't match the current key.
+        let replay_keys = replay.keys().unwrap();
+        for key in replay_keys {
+            let other_predicate = self
+                .missing_upqueries
+                .remove(&(vec![key.clone()], side))
+                .ok_or_else(|| internal_err!("No missing keys found for key {:?}", key))?;
+
+            let mut os_key_col_idx = SmallVec::<[usize; 8]>::from_slice(&on_cols_idx_os);
+
+            // We have an invariant that the columns we are missing on are the same for all
+            // entries in the missing_upqueries map. Safe to extract columns from first entry
+            os_key_col_idx.extend_from_slice(&other_predicate[0].column_indices);
+
+            // 4. For each record, we need to build the new lookup key, based on the record ON column + the original predicate from the other side of the join.
+            // Process pre-grouped records directly to avoid extra memory allocation
+            for ((group_replay_key, join_key), group_records) in &grouped_records {
+                if !key.contains(group_replay_key) {
+                    continue;
+                }
+                // Process each predicate key
+                for missing_key in &other_predicate {
+                    os_key_buffer.clear();
+                    os_key_buffer.extend_from_slice(join_key);
+
+                    // 5. Execute the lookup for the new key & generate the result set.
+                    let other_side_records = self.lookup_other_side_records(
+                        missing_key,
+                        &mut os_key_buffer,
+                        &mut lookups,
+                        os_node,
+                        &os_key_col_idx,
+                        nodes,
+                        state,
+                        &on_cols_idx_os,
+                    )?;
+
+                    for other_row in &other_side_records {
+                        for row in group_records {
+                            results
+                                .push((self.generate_row(row.row(), other_row.row()), true).into());
+                        }
+                    }
+                }
+            }
+        }
+        Ok(ProcessingResult {
+            results,
+            lookups,
+            misses: Vec::new(),
+        })
+    }
+
+    /// Group records by replay key and join key.
+    ///
+    /// # Arguments
+    /// * `rs` - A reference to the records to group.
+    /// * `left_key_cols` - The column indices from replay that come from the left side of the join.
+    /// * `right_key_cols` - The column indices from replay that come from the right side of the join.
+    /// * `on_cols_ts` - The column indices from the ON clause that come from the this side of the join.
+    /// * `side` - The side of the join that the records are coming from.
+    ///
+    /// # Returns
+    /// A map of (replay key, join key) to a reference list of records.
+    fn group_records_by_replay_key<'a>(
+        rs: &'a Records,
+        left_key_cols: &[usize],
+        right_key_cols: &[usize],
+        on_cols_ts: &[usize],
+        side: Side,
+    ) -> HashMap<(Vec<DfValue>, Vec<DfValue>), Vec<&'a Record>> {
+        let mut grouped_records: HashMap<(Vec<DfValue>, Vec<DfValue>), Vec<&'a Record>> =
+            HashMap::new();
+
+        for rec in rs {
+            // Extract replay key columns
+            let replay_key_values: Vec<DfValue> = if side == Side::Left {
+                left_key_cols.iter().map(|i| rec[*i].clone()).collect()
+            } else {
+                right_key_cols.iter().map(|i| rec[*i].clone()).collect()
+            };
+
+            // Extract join key columns
+            let join_key_values: Vec<DfValue> =
+                on_cols_ts.iter().map(|i| rec[*i].clone()).collect();
+
+            grouped_records
+                .entry((replay_key_values, join_key_values))
+                .or_default()
+                .push(rec);
+        }
+        grouped_records
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn lookup_other_side_records(
+        &self,
+        missing_key: &ColumnMiss,
+        os_key_buffer: &mut Vec<DfValue>,
+        lookups: &mut Vec<Lookup>,
+        os_node: LocalNodeIndex,
+        os_key_cols: &[usize],
+        nodes: &DomainNodes,
+        state: &StateMap,
+        on_cols_os: &[usize],
+    ) -> ReadySetResult<Records> {
+        match missing_key.missed_keys.first() {
+            KeyComparison::Equal(_) => {
+                // ICP: Since join keys are always equal, we can perform index condition pushdown and lookup on disk ON and predicate keys.
+                os_key_buffer.extend(missing_key.missed_keys.iter().flat_map(|k| match k {
+                    KeyComparison::Equal(values) => values.iter().cloned(),
+                    KeyComparison::Range(_) => {
+                        unreachable!("all missed keys should be equal")
+                    }
+                }));
+                lookups.push(Lookup {
+                    on: os_node,
+                    cols: os_key_cols.to_vec(),
+                    key: KeyComparison::from(Vec1::try_from(os_key_buffer.clone()).unwrap()),
+                });
+                self.lookup_key_from_cache(
+                    os_key_buffer,
+                    os_key_cols,
+                    os_node,
+                    nodes,
+                    state,
+                    LookupMode::Strict, // SJ will always be strict
+                )
+            }
+            KeyComparison::Range(_) => {
+                lookups.push(Lookup {
+                    on: os_node,
+                    cols: os_key_cols.to_vec(),
+                    key: KeyComparison::from(Vec1::try_from(os_key_buffer.clone()).unwrap()),
+                });
+                let records = self.lookup_key_from_cache(
+                    os_key_buffer,
+                    on_cols_os,
+                    os_node,
+                    nodes,
+                    state,
+                    LookupMode::Strict, // SJ will always be strict
+                )?;
+                // Apply filter for range queries
+                Ok(records
+                    .iter()
+                    .filter(|r| {
+                        missing_key.missed_keys.iter().all(|k| {
+                            let record_values: SmallVec<[DfValue; 4]> = missing_key
+                                .column_indices
+                                .iter()
+                                .map(|i| r[*i].clone())
+                                .collect();
+
+                            match k {
+                                KeyComparison::Equal(_) => {
+                                    unreachable!("Equality not supported")
+                                }
+                                KeyComparison::Range(_) => k.contains(&record_values),
+                            }
+                        })
+                    })
+                    .cloned()
+                    .collect::<Records>())
+            }
+        }
+    }
+
+    /// Lookup a key in the materialized state.
+    fn lookup_key_from_cache(
+        &self,
+        os_key: &[DfValue],
+        os_key_cols: &[usize],
+        os_node: LocalNodeIndex,
+        nodes: &DomainNodes,
+        state: &StateMap,
+        lookup_mode: LookupMode,
+    ) -> ReadySetResult<Records> {
+        let lookup_key = PointKey::from(os_key.to_vec());
+        let lookup = self.lookup(os_node, os_key_cols, &lookup_key, nodes, state, lookup_mode)?;
+        match lookup {
+            IngredientLookupResult::Records(records) => records
+                .map(|r| r.map(|row| Record::Positive(row.to_vec())))
+                .collect::<Result<Records, ReadySetError>>(),
+            IngredientLookupResult::Miss => {
+                unreachable!("Straddled lookup should not miss");
+            }
+        }
+    }
     /// Returns true if the right side of the join is fully materialized.
     pub fn is_rhs_full_mat(&self) -> bool {
-        // TODO: return the actual value of rhs_full_mat once new sj algorithm is implemented
-        false
+        self.rhs_full_mat
     }
 
     /// Returns the side of the join that is more efficient to trigger an upquery in case of a straddled join.
@@ -652,12 +920,21 @@ impl Ingredient for Join {
         _auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         let join_execution_mode = self.execution_type_for_replay(replay, from);
+        trace!(
+            "on_input join_execution_mode: {:?} for from: {:?} for replay: {:?}",
+            join_execution_mode,
+            from,
+            replay
+        );
         match join_execution_mode {
             JoinExecutionMode::RegularLookup => {
                 self.execute_regular_lookup(replay, from, rs, nodes, state)
             }
             JoinExecutionMode::StraddledHashJoin => {
                 self.execute_or_buffer_straddled_hash_join(replay, from, rs)
+            }
+            JoinExecutionMode::StraddledRegularLookup => {
+                self.execute_straddled_regular_lookup(replay, from, rs, nodes, state)
             }
         }
     }
@@ -874,16 +1151,31 @@ impl Ingredient for Join {
                 .filter_map(|(idx, col)| col.filter(|_| left_cols[idx].is_none()))
                 .collect::<Vec<_>>();
             let left_cols = left_cols.into_iter().flatten().collect::<Vec<_>>();
-            ColumnSource::GeneratedFromColumns(vec1![
-                ColumnRef {
-                    node: self.left.as_global(),
-                    columns: left_cols
-                },
-                ColumnRef {
-                    node: self.right.as_global(),
-                    columns: right_cols
-                },
-            ])
+            if self.is_rhs_full_mat() {
+                let mut join_right_cols = self.on.iter().map(|(_l, r)| *r).collect::<Vec<_>>();
+                join_right_cols.extend(right_cols.iter().copied());
+                return ColumnSource::GeneratedFromColumns(vec1![
+                    ColumnRef {
+                        node: self.left.as_global(),
+                        columns: left_cols
+                    },
+                    ColumnRef {
+                        node: self.right.as_global(),
+                        columns: join_right_cols
+                    }
+                ]);
+            } else {
+                return ColumnSource::GeneratedFromColumns(vec1![
+                    ColumnRef {
+                        node: self.left.as_global(),
+                        columns: left_cols
+                    },
+                    ColumnRef {
+                        node: self.right.as_global(),
+                        columns: right_cols
+                    },
+                ]);
+            }
         }
     }
 }
