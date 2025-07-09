@@ -116,7 +116,7 @@ run_script() {
                         send \"\r\"
                     }
                     -re \".*error:,*\" {
-                      send_user -- psql error encountered
+                      send_user -- \"psql error encountered\n\"
                       exit 2
                     }
                   }
@@ -153,7 +153,7 @@ run_script() {
 
         expect {
           -re \"Join us on slack:\" {
-            send_user -- \"PASS: Test reached the expected end\"
+            send_user -- \"PASS: Test reached the expected end\n\"
             exit 42
           }
         }
@@ -165,9 +165,16 @@ run_script() {
     if [[ $ret -eq 42 ]]; then
       return 0
     else
-      # If we are going to fail, dump some debug information that may be useful to look at
+      echo "FAIL: Combination exited with unexpected status code $ret"
+      echo "+++ Dumping debug info after failure"
+      echo "Status code: $ret"
+      echo ''
       show_docker_info
+      echo ''
+      echo '🪵 Readyset logs:'
       docker logs readyset-cache-1
+      echo ''
+      echo 'Stopping Docker'
       docker-compose -f readyset.compose.yml down -v > /dev/null 2>&1
       # The return code could have been 0, so exit with 1 explicitly
       exit 1
@@ -185,17 +192,12 @@ test_combination() {
 }
 
 show_docker_info() {
-  echo 'Containers:'
-  docker ps        --format '{{.Names}}'
-  echo ''
-
-  echo 'Volumes:'
-  docker volume ls --format '{{.Name}}'
-  echo ''
-
-  echo 'Networks:'
-  docker network ls --format '{{.Name}}'
-  echo ''
+  echo '🚢 Docker status:'
+  set -x
+  docker ps
+  docker volume ls
+  docker network ls
+  set +x
 }
 
 # If testing locally, it's convenient to automatically reset the initial state by
@@ -210,7 +212,7 @@ reset_deployment_state() {
 
   # Try to stop any docker containers that could have been made by previous runs.
   # This is because we sometimes see a previous docker container still running at the beginning of a retry
-  echo "Cleaning up any stale docker containers, volumes, and networks:"
+  echo "Cleaning up any stale docker containers, volumes, and networks"
   show_docker_info
   docker ps         --format '{{.Names}}' | grep 'readyset' | xargs -I {} docker stop {}
   docker ps -a      --format '{{.Names}}' | grep 'readyset' | xargs -I {} docker container rm -f -v {}
