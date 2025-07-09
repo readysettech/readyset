@@ -59,6 +59,7 @@ use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
 use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender};
 use crate::node::special::EgressTx;
 use crate::node::{Column, NodeProcessingResult, ProcessEnv};
+use crate::ops::Side;
 use crate::payload::{
     self, Eviction, MaterializedState, PacketDiscriminants, PrepareStateKind, PrettyReplayPath,
     ReplayPieceContext, SenderReplication, SourceSelection,
@@ -952,14 +953,42 @@ impl Domain {
             };
             let misses = if is_generated {
                 // If these columns were generated, ask the node to remap them for us
-                let misses = self.nodes[miss_in].borrow_mut().handle_upquery(miss)?;
-                trace!(?misses, "Remapped misses on generated columns");
+                let remapped = self.nodes[miss_in].borrow_mut().handle_upquery(miss)?;
+                trace!(?remapped, "Remapped misses on generated columns");
+
+                // For straddled joins, handle_upquery return a pair of misses. One from left and one for right.
+                // We only take the first miss/upquery path (left) and the other side will be triggered in on_input
+                // when we have the join conditions.
+                let lhs_misses = if let NodeOperator::Join(join) =
+                    self.nodes[miss_in].borrow_mut().as_mut_internal().unwrap()
+                {
+                    if !join.is_rhs_full_mat() {
+                        remapped.clone()
+                    } else {
+                        debug_assert!(remapped.len() == 2);
+                        let side = join.side_to_trigger_upquery();
+                        let (this_key, other_key) = match side {
+                            Side::Left => (remapped[0].clone(), remapped[1].clone()),
+                            Side::Right => (remapped[1].clone(), remapped[0].clone()),
+                        };
+
+                        // Handle the case where multiple entries for the same column may exist in an IN(?, ?, ?)
+                        join.add_missing_upquery(
+                            this_key.missed_keys.clone().to_vec(),
+                            side,
+                            other_key,
+                        );
+                        vec![this_key]
+                    }
+                } else {
+                    remapped.clone()
+                };
 
                 // Record that we remapped these keys, so that any evictions on the upstream keys
                 // can be translated into the original keys.  If the node we missed in is fully
                 // materialized, we don't need to record the remaps, since we're guaranteed not
                 // to get any evictions on the upstream keys
-                for upstream_miss in &misses {
+                for upstream_miss in &remapped {
                     let Some(state) = self.state.get(upstream_miss.node) else {
                         continue;
                     };
@@ -974,12 +1003,12 @@ impl Domain {
                 }
 
                 invariant!(
-                    !misses.is_empty(),
+                    !lhs_misses.is_empty(),
                     "columns {:?} in {} are generated, but could not remap an upquery",
                     miss_columns,
                     miss_in
                 );
-                misses
+                lhs_misses
             } else {
                 vec![miss]
             };

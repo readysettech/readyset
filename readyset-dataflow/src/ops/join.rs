@@ -58,6 +58,12 @@ pub struct Join {
     // Indicates if the right side of the join is fully materialized.
     // If true, its guaranteed that we cannot miss on lookup.
     rhs_full_mat: bool,
+
+    /// Missing upqueries for the other side of the join. The key is (column index,
+    /// side).
+    // We skip serde since we don't want the state of the node, just the configuration.
+    #[serde(skip)]
+    pub missing_upqueries: HashMap<(Vec<KeyComparison>, Side), Vec<ColumnMiss>>,
 }
 
 impl Join {
@@ -123,6 +129,7 @@ impl Join {
             generated_column_buffer: Default::default(),
             kind,
             rhs_full_mat,
+            missing_upqueries: Default::default(),
         }
     }
 
@@ -344,6 +351,25 @@ impl Join {
                     .collect()
             })
             .transpose()
+    }
+
+    /// Add a missing upquery for the other side of the join.
+    pub fn add_missing_upquery(
+        &mut self,
+        key_cols: Vec<KeyComparison>,
+        side: Side,
+        missed_keys: ColumnMiss,
+    ) {
+        self.missing_upqueries
+            .entry((key_cols, side))
+            .and_modify(|entry| {
+                // Ensure all existing entries have the same column indices as the new one
+                debug_assert!(entry
+                    .iter()
+                    .all(|miss| { miss.column_indices == missed_keys.column_indices }));
+                entry.push(missed_keys.clone());
+            })
+            .or_insert_with(|| vec![missed_keys.clone()]);
     }
 
     /// Execute a regular lookup for a join. This happens when we have predicates only on one side of the join.
@@ -582,6 +608,14 @@ impl Join {
     pub fn is_rhs_full_mat(&self) -> bool {
         // TODO: return the actual value of rhs_full_mat once new sj algorithm is implemented
         false
+    }
+
+    /// Returns the side of the join that is more efficient to trigger an upquery in case of a straddled join.
+    /// At the moment, we always trigger the upquery from the left side.
+    /// Once we have some planner logic, based on stats, we can adjust side to dynamically
+    /// choose which side to query first.
+    pub fn side_to_trigger_upquery(&self) -> Side {
+        Side::Left
     }
 }
 
