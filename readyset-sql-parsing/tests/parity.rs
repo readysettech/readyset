@@ -14,7 +14,8 @@ use readyset_sql_parsing::{parse_query_with_config, ParsingPreset};
 
 macro_rules! check_parse_mysql {
     ($sql:expr) => {
-        parse_query_with_config(ParsingPreset::BothPanicOnMismatch, Dialect::MySQL, $sql).unwrap()
+        parse_query_with_config(ParsingPreset::BothPanicOnMismatch, Dialect::MySQL, $sql)
+            .expect(&format!("Failed to parse MySQL query: {}", $sql))
     };
 }
 
@@ -25,7 +26,7 @@ macro_rules! check_parse_postgres {
             Dialect::PostgreSQL,
             $sql,
         )
-        .unwrap()
+        .expect(&format!("Failed to parse PostgreSQL query: {}", $sql))
     };
 }
 
