@@ -903,7 +903,7 @@ mod tests {
                 ", ALGORITHM INPLACE, LOCK DEFAULT",
                 ",ALGORITHM INPLACE,LOCK DEFAULT",
             ];
-            algorithm_lock_combinations.map(|qstring| {
+            algorithm_lock_combinations.iter().for_each(|qstring| {
                 let expected = AlterTableStatement {
                     table: Relation {
                         name: "t".into(),

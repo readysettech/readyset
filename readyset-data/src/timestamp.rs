@@ -589,7 +589,7 @@ impl Eq for TimestampTz {}
 
 impl PartialOrd for TimestampTz {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.to_chrono().cmp(&other.to_chrono()))
+        Some(self.cmp(other))
     }
 }
 

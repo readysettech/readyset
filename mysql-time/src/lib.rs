@@ -555,20 +555,19 @@ impl From<MySqlTime> for NaiveTime {
     }
 }
 
-impl TryFrom<MySqlTime> for Value {
-    type Error = std::convert::Infallible;
-    fn try_from(mysql_time: MySqlTime) -> Result<Self, Self::Error> {
+impl From<MySqlTime> for Value {
+    fn from(mysql_time: MySqlTime) -> Self {
         let total_hours = mysql_time.hour();
         let days = (total_hours / 24) as u32;
         let hours = (total_hours % 24) as u8;
-        Ok(Value::Time(
+        Value::Time(
             !mysql_time.is_positive(),
             days,
             hours,
             mysql_time.minutes(),
             mysql_time.seconds(),
             mysql_time.microseconds(),
-        ))
+        )
     }
 }
 
