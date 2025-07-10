@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::slice;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{iter, thread};
@@ -92,7 +93,7 @@ async fn it_completes() {
     muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
     eventually!(
         run_test: {
-            cq.lookup(&[id.clone()], true).await.unwrap().into_vec()
+            cq.lookup(slice::from_ref(&id), true).await.unwrap().into_vec()
         },
         then_assert: |results| {
             assert_eq!(results, vec![vec![1.into(), 2.into()]])
@@ -101,7 +102,7 @@ async fn it_completes() {
     mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
     eventually!(
         run_test: {
-            cq.lookup(&[id.clone()], true).await.unwrap().into_vec()
+            cq.lookup(slice::from_ref(&id), true).await.unwrap().into_vec()
         },
         then_assert: |res| {
             assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
@@ -111,7 +112,7 @@ async fn it_completes() {
     muta.delete(vec![id.clone()]).await.unwrap();
     eventually!(
         run_test: {
-            cq.lookup(&[id.clone()], true).await.unwrap().into_vec()
+            cq.lookup(slice::from_ref(&id), true).await.unwrap().into_vec()
         },
         then_assert: |results| {
             assert_eq!(results, vec![vec![1.into(), 4.into()]])
@@ -429,11 +430,17 @@ async fn shared_interdomain_ancestor() {
     muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
     sleep().await;
     assert_eq!(
-        bq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        bq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), 2.into()]]
     );
     assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), 2.into()]]
     );
 
@@ -442,11 +449,17 @@ async fn shared_interdomain_ancestor() {
     muta.insert(vec![id.clone(), 4.into()]).await.unwrap();
     sleep().await;
     assert_eq!(
-        bq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        bq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), 4.into()]]
     );
     assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), 4.into()]]
     );
 
@@ -487,7 +500,11 @@ async fn it_works_w_mat() {
 
     // send a query to c
     // we should see all the a values
-    let res = cq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 3);
     assert!(res.iter().any(|r| *r == vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
@@ -502,7 +519,11 @@ async fn it_works_w_mat() {
     sleep().await;
 
     // check that value was updated again
-    let res = cq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 6);
     assert!(res.iter().any(|r| *r == vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
@@ -558,7 +579,11 @@ async fn it_works_w_partial_mat() {
     assert_eq!(cq.len().await.unwrap(), 0);
 
     // now do some reads
-    let res = cq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 3);
     assert!(res.iter().any(|r| *r == vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
@@ -607,7 +632,11 @@ async fn it_works_w_partial_mat_below_empty() {
     assert_eq!(cq.len().await.unwrap(), 0);
 
     // now do some reads
-    let res = cq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 3);
     assert!(res.iter().any(|r| *r == vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
@@ -1734,7 +1763,11 @@ async fn it_works_with_simple_arithmetic() {
     sleep().await;
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let result = getter
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], 246.into());
 
@@ -1768,7 +1801,11 @@ async fn it_works_with_multiple_arithmetic_expressions() {
     sleep().await;
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let result = getter
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], 100.into());
     assert_eq!(result[0][1], 246.into());
@@ -1940,7 +1977,7 @@ async fn votes() {
     // query articles to see that it was updated
     assert_eq!(
         articleq
-            .lookup(&[a1.clone()], true)
+            .lookup(slice::from_ref(&a1), true)
             .await
             .unwrap()
             .into_vec(),
@@ -1957,7 +1994,7 @@ async fn votes() {
     // and that the old one is still present
     assert_eq!(
         articleq
-            .lookup(&[a1.clone()], true)
+            .lookup(slice::from_ref(&a1), true)
             .await
             .unwrap()
             .into_vec(),
@@ -1965,7 +2002,7 @@ async fn votes() {
     );
     assert_eq!(
         articleq
-            .lookup(&[a2.clone()], true)
+            .lookup(slice::from_ref(&a2), true)
             .await
             .unwrap()
             .into_vec(),
@@ -1979,12 +2016,20 @@ async fn votes() {
     sleep().await;
 
     // query vote count to see that the count was updated
-    let res = vcq.lookup(&[a1.clone()], true).await.unwrap().into_vec();
+    let res = vcq
+        .lookup(slice::from_ref(&a1), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(res.iter().all(|r| r[0] == a1.clone() && r[1] == 1.into()));
     assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
-    let res = endq.lookup(&[a1.clone()], true).await.unwrap().into_vec();
+    let res = endq
+        .lookup(slice::from_ref(&a1), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(
         res.iter()
             .any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
@@ -1993,7 +2038,11 @@ async fn votes() {
     assert_eq!(res.len(), 1);
 
     // check that article 2 doesn't have any votes
-    let res = endq.lookup(&[a2.clone()], true).await.unwrap().into_vec();
+    let res = endq
+        .lookup(slice::from_ref(&a2), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(res.len() <= 1); // could be 1 if we had zero-rows
 
     shutdown_tx.shutdown().await;
@@ -2033,7 +2082,10 @@ async fn empty_migration() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -2044,7 +2096,11 @@ async fn empty_migration() {
     sleep().await;
 
     // check that value was updated again
-    let res = cq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| *r == vec![id.clone(), 4.into()]));
 
@@ -2076,7 +2132,10 @@ async fn simple_migration() {
 
     // check that a got it
     assert_eq!(
-        aq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        aq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -2100,7 +2159,10 @@ async fn simple_migration() {
 
     // check that b got it
     assert_eq!(
-        bq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        bq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 4.into()]]
     );
 
@@ -2133,7 +2195,10 @@ async fn add_columns() {
 
     // check that a got it
     assert_eq!(
-        aq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        aq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), "y".into()]]
     );
 
@@ -2149,7 +2214,11 @@ async fn add_columns() {
     sleep().await;
 
     // check that a got it, and added the new, third column's default
-    let res = aq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = aq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), "y".into()]));
     assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
@@ -2162,7 +2231,11 @@ async fn add_columns() {
     sleep().await;
 
     // check that a got it, and included the third column
-    let res = aq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = aq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 3);
     assert!(res.contains(&vec![id.clone(), "y".into()]));
     assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
@@ -2233,7 +2306,11 @@ async fn migrate_added_columns() {
 
     // we should now see the pre-migration write and the old post-migration write with the default
     // value, and the new post-migration write with the value it contained.
-    let res = bq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = bq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 3);
     assert_eq!(
         res.iter()
@@ -2272,7 +2349,11 @@ async fn migrate_drop_columns() {
 
     // check that it's there
     sleep().await;
-    let res = aq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = aq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 1);
     assert!(res.contains(&vec![id.clone(), "bx".into()]));
 
@@ -2290,7 +2371,11 @@ async fn migrate_drop_columns() {
 
     // so two rows now!
     sleep().await;
-    let res = aq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = aq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), "bx".into()]));
     assert!(res.contains(&vec![id.clone(), "b".into()]));
@@ -2312,7 +2397,11 @@ async fn migrate_drop_columns() {
     muta2.insert(vec![id.clone()]).await.unwrap();
     sleep().await;
 
-    let res = aq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = aq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 5);
     // NOTE: if we *hadn't* read bx and b above, they would have also have c because it would have
     // been added when the lookups caused partial backfills.
@@ -2924,7 +3013,10 @@ async fn crossing_migration() {
     sleep().await;
 
     assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), 2.into()]]
     );
 
@@ -2932,7 +3024,11 @@ async fn crossing_migration() {
     mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
     sleep().await;
 
-    let res = cq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), 2.into()]));
     assert!(res.contains(&vec![id.clone(), 4.into()]));
@@ -2965,7 +3061,10 @@ async fn independent_domain_migration() {
 
     // check that a got it
     assert_eq!(
-        aq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        aq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -2989,7 +3088,10 @@ async fn independent_domain_migration() {
 
     // check that a got it
     assert_eq!(
-        bq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        bq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 4.into()]]
     );
 
@@ -3030,7 +3132,10 @@ async fn domain_amend_migration() {
     sleep().await;
 
     assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), 2.into()]]
     );
 
@@ -3038,7 +3143,11 @@ async fn domain_amend_migration() {
     mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
     sleep().await;
 
-    let res = cq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), 2.into()]));
     assert!(res.contains(&vec![id.clone(), 4.into()]));
@@ -3587,7 +3696,10 @@ async fn node_removal() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -3600,7 +3712,7 @@ async fn node_removal() {
     sleep().await;
 
     // // check that value was updated again
-    // let res = cq.lookup(&[id.clone()], true).await.unwrap();
+    // let res = cq.lookup(slice::from_ref(&id), true).await.unwrap();
     // assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
     // assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 
@@ -3612,7 +3724,7 @@ async fn node_removal() {
 
     // // send a query to c
     // assert_eq!(
-    //     cq.lookup(&[id.clone()], true).await,
+    //     cq.lookup(slice::from_ref(&id), true).await,
     //     Ok(vec![vec![1.into(), 4.into()]])
     // );
 

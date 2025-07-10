@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::slice;
 
 use assert_approx_eq::assert_approx_eq;
 use common::Index;
@@ -115,7 +116,10 @@ async fn it_works_basic_impl() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -151,7 +155,11 @@ async fn it_works_basic_impl() {
     sleep().await;
 
     // check that value was updated again
-    let res = cq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| *r == vec![id.clone(), 4.into()]));
 
@@ -189,7 +197,10 @@ async fn it_works_basic_impl() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 4.into()]]
     );
 
@@ -202,7 +213,7 @@ async fn it_works_basic_impl() {
     //sleep().await;
 
     // send a query to c
-    //assert_eq!(cq.lookup(&[id.clone()], true).await, Ok(vec![vec![1.into(), 6.into()]]));
+    //assert_eq!(cq.lookup(slice::from_ref(&id), true).await, Ok(vec![vec![1.into(), 6.into()]]));
 
     shutdown_tx.shutdown().await;
 }
@@ -282,7 +293,10 @@ async fn it_works_basic_standalone_impl() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), true)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -300,7 +314,11 @@ async fn it_works_basic_standalone_impl() {
     // Check that everything was restored properly
     let mut cq = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
-    let res = cq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), true)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(
         res,
         vec![vec![id.clone(), 2.into()], vec![id.clone(), 4.into()]]
