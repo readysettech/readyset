@@ -270,13 +270,13 @@ pub struct Options {
     ///
     /// The possible values are:
     ///
-    /// * "error" (default) - return an error to the client
-    /// * "proxy" - proxy all subsequent statements
+    /// * "error" - return an error to the client
+    /// * "proxy" (default) - proxy all subsequent statements
     /// * "allow" - allow and ignore all unsupported set statements
     #[arg(
         long,
         env = "UNSUPPORTED_SET_MODE",
-        default_value = "error",
+        default_value = "proxy",
         hide = true
     )]
     unsupported_set_mode: UnsupportedSetMode,
