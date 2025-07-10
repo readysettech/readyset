@@ -143,7 +143,7 @@ impl ClientChannelBindingSupport<'_> {
     }
 }
 
-fn unescape_username(username: &str) -> Result<Cow<str>> {
+fn unescape_username(username: &str) -> Result<Cow<'_, str>> {
     let mut equals_sign_positions = username
         .chars()
         .enumerate()
@@ -187,7 +187,7 @@ mod parse {
 
     use super::*;
 
-    fn client_channel_binding_support(i: &[u8]) -> IResult<&[u8], ClientChannelBindingSupport> {
+    fn client_channel_binding_support(i: &[u8]) -> IResult<&[u8], ClientChannelBindingSupport<'_>> {
         use ClientChannelBindingSupport::*;
 
         alt((
@@ -212,7 +212,7 @@ mod parse {
         move |i| map(verify(attribute_pair, |(k, _)| *k == attr), |(_, v)| v)(i)
     }
 
-    fn gs2_header(i: &[u8]) -> IResult<&[u8], Gs2Header> {
+    fn gs2_header(i: &[u8]) -> IResult<&[u8], Gs2Header<'_>> {
         let (i, channel_binding_support) = client_channel_binding_support(i)?;
         let (i, _) = tag(",")(i)?;
         let (i, authzid) = opt(map_res(
@@ -230,7 +230,7 @@ mod parse {
         ))
     }
 
-    pub(super) fn client_first_message(i: &[u8]) -> IResult<&[u8], ClientFirstMessage> {
+    pub(super) fn client_first_message(i: &[u8]) -> IResult<&[u8], ClientFirstMessage<'_>> {
         all_consuming(|i| {
             let (i, gs2_header) = gs2_header(i)?;
             let (i, bare) = map_res(peek(rest), str::from_utf8)(i)?;
@@ -265,7 +265,7 @@ mod parse {
         })(i)
     }
 
-    pub(super) fn client_final_message(i: &[u8]) -> IResult<&[u8], ClientFinalMessage> {
+    pub(super) fn client_final_message(i: &[u8]) -> IResult<&[u8], ClientFinalMessage<'_>> {
         all_consuming(|i| {
             let parse_without_proof = |i| {
                 let (i, cbind_input_base64) = map_res(
@@ -436,7 +436,7 @@ impl<'a> ClientFinalMessage<'a> {
 // Mostly adapted from the (private) function of the same name in postgres_protocol::sasl
 //
 // This name is taken from the RFC - see that for more information
-fn normalize(pass: &[u8]) -> Cow<[u8]> {
+fn normalize(pass: &[u8]) -> Cow<'_, [u8]> {
     let pass = match str::from_utf8(pass) {
         Ok(pass) => pass,
         Err(_) => return pass.into(),

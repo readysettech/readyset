@@ -43,7 +43,7 @@ pub struct MirQuery<'a> {
 
 impl MirQuery<'_> {
     /// Creates a new [`MirQuery`]
-    pub fn new(name: Relation, leaf: NodeIndex, graph: &mut MirGraph) -> MirQuery {
+    pub fn new(name: Relation, leaf: NodeIndex, graph: &mut MirGraph) -> MirQuery<'_> {
         MirQuery { name, leaf, graph }
     }
 

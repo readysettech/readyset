@@ -186,7 +186,7 @@ impl<T> NodeMap<T> {
     }
 
     /// Construct an iterator visiting all key-value pairs in order.
-    pub fn iter(&self) -> Iter<T> {
+    pub fn iter(&self) -> Iter<'_, T> {
         Iter {
             inner: self.contents.iter().enumerate(),
         }
@@ -194,7 +194,7 @@ impl<T> NodeMap<T> {
 
     /// Construct an iterator visiting all key-value pairs in order, with mutable references to the
     /// values.
-    pub fn iter_mut(&mut self) -> IterMut<T> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
         IterMut {
             inner: self.contents.iter_mut().enumerate(),
         }

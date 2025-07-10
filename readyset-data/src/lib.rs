@@ -780,7 +780,7 @@ impl DfValue {
     /// serialize(d2.transform_for_serialized_key())`, which is not necessarily the case for eg
     /// `serialize(d1) == serialize(d2)`.
     #[inline]
-    pub fn transform_for_serialized_key(&self) -> Cow<Self> {
+    pub fn transform_for_serialized_key(&self) -> Cow<'_, Self> {
         match self.as_str_and_collation() {
             Some((s, collation)) => Cow::Owned(collation.key(s).into()),
             None => match self {

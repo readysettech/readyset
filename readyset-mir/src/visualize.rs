@@ -48,7 +48,7 @@ where
 
 pub trait GraphViz {
     fn graphviz_fmt(&self, f: &mut fmt::Formatter) -> fmt::Result;
-    fn to_graphviz(&self) -> GraphVizzed<Self> {
+    fn to_graphviz(&self) -> GraphVizzed<'_, Self> {
         GraphVizzed(self)
     }
 }

@@ -693,7 +693,7 @@ impl GeneratorState {
     }
 
     /// Generate a new query using the given [`QuerySeed`]
-    pub fn generate_query(&mut self, seed: QuerySeed) -> Query {
+    pub fn generate_query(&mut self, seed: QuerySeed) -> Query<'_> {
         let mut state = self.new_query();
         let query = seed.generate(&mut state);
 

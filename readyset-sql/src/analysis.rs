@@ -300,19 +300,19 @@ impl<'a> Iterator for ReferredColumnsMut<'a> {
 }
 
 pub trait ReferredColumns {
-    fn referred_columns(&self) -> ReferredColumnsIter;
+    fn referred_columns(&self) -> ReferredColumnsIter<'_>;
     fn referred_columns_mut(&mut self) -> ReferredColumnsMut<'_>;
 }
 
 impl ReferredColumns for Expr {
-    fn referred_columns(&self) -> ReferredColumnsIter {
+    fn referred_columns(&self) -> ReferredColumnsIter<'_> {
         ReferredColumnsIter {
             exprs_to_visit: vec![self],
             columns_to_visit: vec![],
         }
     }
 
-    fn referred_columns_mut(&mut self) -> ReferredColumnsMut {
+    fn referred_columns_mut(&mut self) -> ReferredColumnsMut<'_> {
         ReferredColumnsMut {
             exprs_to_visit: vec![self],
             columns_to_visit: vec![],
@@ -321,7 +321,7 @@ impl ReferredColumns for Expr {
 }
 
 impl ReferredColumns for FunctionExpr {
-    fn referred_columns(&self) -> ReferredColumnsIter {
+    fn referred_columns(&self) -> ReferredColumnsIter<'_> {
         let mut iter = ReferredColumnsIter {
             exprs_to_visit: vec![],
             columns_to_visit: vec![],
@@ -331,7 +331,7 @@ impl ReferredColumns for FunctionExpr {
         iter
     }
 
-    fn referred_columns_mut(&mut self) -> ReferredColumnsMut {
+    fn referred_columns_mut(&mut self) -> ReferredColumnsMut<'_> {
         let mut iter = ReferredColumnsMut {
             exprs_to_visit: vec![],
             columns_to_visit: vec![],
@@ -345,7 +345,7 @@ impl ReferredColumns for FunctionExpr {
 impl SelectStatement {
     /// Construct an iterator over all the columns referred to in self, without recursing into
     /// subqueries in any position.
-    pub fn outermost_referred_columns(&self) -> ReferredColumnsIter {
+    pub fn outermost_referred_columns(&self) -> ReferredColumnsIter<'_> {
         let mut columns_to_visit = vec![];
         let exprs_to_visit = self
             .fields
@@ -555,7 +555,7 @@ impl Expr {
     /// Construct an iterator over all *recursive* subexpressions of the given Expr, excluding
     /// the expression itself. Iteration order is unspecified.
     #[inline]
-    pub fn recursive_subexpressions(&self) -> Subexpressions {
+    pub fn recursive_subexpressions(&self) -> Subexpressions<'_> {
         let mut subexpr_iterators = VecDeque::with_capacity(1);
         subexpr_iterators.push_back(self.immediate_subexpressions());
         Subexpressions { subexpr_iterators }

@@ -105,7 +105,7 @@ impl<K, V> PartialMap<K, V> {
     ///
     /// Note that this does *not* consider ranges, since iteration is not well-defined for certain
     /// types of keys (floating points, strings, etc.)
-    pub fn keys(&self) -> Keys<K, V> {
+    pub fn keys(&self) -> Keys<'_, K, V> {
         self.map.keys()
     }
 
@@ -113,7 +113,7 @@ impl<K, V> PartialMap<K, V> {
     ///
     /// Note that this does *not* consider ranges, since iteration is not well-defined for certain
     /// types of keys (floating points, strings, etc.)
-    pub fn iter(&self) -> Iter<K, V> {
+    pub fn iter(&self) -> Iter<'_, K, V> {
         self.map.iter()
     }
 
@@ -327,7 +327,7 @@ where
     ///
     /// Note that this does *not* consider ranges, since iteration is not well-defined for certain
     /// types of keys (floating points, strings, etc.)
-    pub fn values(&self) -> Values<K, V> {
+    pub fn values(&self) -> Values<'_, K, V> {
         self.map.values()
     }
 
@@ -335,7 +335,7 @@ where
     ///
     /// Note that this does *not* consider ranges, since iteration is not well-defined for certain
     /// types of keys (floating points, strings, etc.)
-    pub fn values_mut(&mut self) -> ValuesMut<K, V> {
+    pub fn values_mut(&mut self) -> ValuesMut<'_, K, V> {
         self.map.values_mut()
     }
 

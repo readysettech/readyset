@@ -254,7 +254,7 @@ impl State for MemoryState {
     /// Evicts `bytes` by evicting random keys from the state. The key are first evicted from the
     /// strongly referenced `state`, then they are removed from the weakly referenced
     /// `weak_indices`.
-    fn evict_bytes(&mut self, bytes: usize) -> Option<EvictBytesResult> {
+    fn evict_bytes(&mut self, bytes: usize) -> Option<EvictBytesResult<'_>> {
         let mut rng = rand::rng();
         let state_index = rng.random_range(0..self.state.len());
         let mut bytes_freed = 0;
@@ -288,7 +288,7 @@ impl State for MemoryState {
     }
 
     /// Evicts the given `keys` for the state associated with the target of the given `tag`
-    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<EvictKeysResult> {
+    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<EvictKeysResult<'_>> {
         // we may be told to evict from a tag that add_index hasn't been called for yet
         // this can happen if an upstream domain issues an eviction for a replay path that we have
         // been told about, but that has not yet been finalized.
@@ -315,7 +315,11 @@ impl State for MemoryState {
     }
 
     /// Randomly evict a single key from the state associated with the target of the given `tag`
-    fn evict_random<R: rand::Rng>(&mut self, tag: Tag, rng: &mut R) -> Option<EvictRandomResult> {
+    fn evict_random<R: rand::Rng>(
+        &mut self,
+        tag: Tag,
+        rng: &mut R,
+    ) -> Option<EvictRandomResult<'_>> {
         self.by_tag.get(&tag).cloned().and_then(move |state_index| {
             self.state[state_index]
                 .evict_random(rng)

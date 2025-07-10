@@ -31,7 +31,7 @@ struct ErrorBackend(ErrorPosition);
 impl PsqlBackend for ErrorBackend {
     type Resultset = stream::Iter<vec::IntoIter<Result<PsqlSrvRow, psql_srv::Error>>>;
 
-    fn credentials_for_user(&self, _user: &str) -> Option<Credentials> {
+    fn credentials_for_user(&self, _user: &str) -> Option<Credentials<'_>> {
         Some(Credentials::Any)
     }
 

@@ -66,7 +66,7 @@ impl PersistentStateHandle {
     /// to expose the ability to acquire a read lock on the shared state alone was deliberate:
     /// by requiring that a thread already have a read lock on the RocksDB handle before
     /// acquiring a read lock on the shared state, we eliminate the potential for deadlocks.
-    pub(super) fn inner(&self) -> PersistentStateReadGuard {
+    pub(super) fn inner(&self) -> PersistentStateReadGuard<'_> {
         PersistentStateReadGuard {
             db: self.db.read(),
             shared_state: self.shared_state.read(),
@@ -77,7 +77,7 @@ impl PersistentStateHandle {
     /// to expose the ability to acquire a write lock on the shared state alone was deliberate:
     /// by requiring that a thread already have a write lock on the RocksDB handle before
     /// acquiring a write lock on the shared state, we eliminate the potential for deadlocks.
-    pub(super) fn inner_mut(&self) -> PersistentStateWriteGuard {
+    pub(super) fn inner_mut(&self) -> PersistentStateWriteGuard<'_> {
         PersistentStateWriteGuard {
             db: self.db.write(),
             shared_state: self.shared_state.write(),
@@ -90,11 +90,11 @@ impl PersistentStateHandle {
 
     /// Perform a lookup for multiple equal keys at once. The results are returned in the order
     /// of the original keys.
-    pub(super) fn lookup_multi<'a>(
-        &'a self,
+    pub(super) fn lookup_multi(
+        &self,
         columns: &[usize],
         keys: &[PointKey],
-    ) -> Vec<RecordResult<'a>> {
+    ) -> Vec<RecordResult<'_>> {
         if keys.is_empty() {
             return vec![];
         }

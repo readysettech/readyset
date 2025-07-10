@@ -447,7 +447,7 @@ impl<T> Array2<T> {
     /// ```
     #[must_use]
     #[inline]
-    pub fn columns(&self) -> Columns<T> {
+    pub fn columns(&self) -> Columns<'_, T> {
         Columns { col: 0, arr2: self }
     }
 
@@ -466,7 +466,7 @@ impl<T> Array2<T> {
     /// ```
     #[must_use]
     #[inline]
-    pub fn get_column(&self, col: usize) -> Option<Column<T>> {
+    pub fn get_column(&self, col: usize) -> Option<Column<'_, T>> {
         if col >= self.row_size() {
             None
         } else {

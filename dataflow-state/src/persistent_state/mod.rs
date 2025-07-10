@@ -714,11 +714,11 @@ impl State for PersistentState {
         }
     }
 
-    fn lookup(&self, columns: &[usize], key: &PointKey) -> LookupResult {
+    fn lookup(&self, columns: &[usize], key: &PointKey) -> LookupResult<'_> {
         self.db.lookup(columns, key)
     }
 
-    fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
+    fn lookup_range(&self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'_> {
         self.db.lookup_range(columns, key)
     }
 
@@ -826,19 +826,19 @@ impl State for PersistentState {
 
     /// Panics if called
     #[allow(clippy::unreachable)] // this should never happen!
-    fn evict_bytes(&mut self, _: usize) -> Option<super::EvictBytesResult> {
+    fn evict_bytes(&mut self, _: usize) -> Option<super::EvictBytesResult<'_>> {
         unreachable!("can't evict keys from PersistentState")
     }
 
     /// Panics if called
     #[allow(clippy::unreachable)] // this should never happen!
-    fn evict_keys(&mut self, _: Tag, _: &[KeyComparison]) -> Option<EvictKeysResult> {
+    fn evict_keys(&mut self, _: Tag, _: &[KeyComparison]) -> Option<EvictKeysResult<'_>> {
         unreachable!("can't evict keys from PersistentState")
     }
 
     /// Panics if called
     #[allow(clippy::unreachable)] // this should never happen!
-    fn evict_random<R: rand::Rng>(&mut self, _: Tag, _: &mut R) -> Option<EvictRandomResult> {
+    fn evict_random<R: rand::Rng>(&mut self, _: Tag, _: &mut R) -> Option<EvictRandomResult<'_>> {
         unreachable!("can't evict keys from PersistentState")
     }
 
@@ -852,7 +852,7 @@ impl State for PersistentState {
         self.add_index(index, None);
     }
 
-    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &PointKey) -> Option<RecordResult<'a>> {
+    fn lookup_weak(&self, columns: &[usize], key: &PointKey) -> Option<RecordResult<'_>> {
         self.db.lookup_weak(columns, key)
     }
 
@@ -944,14 +944,14 @@ impl State for PersistentStateHandle {
 
     fn mark_hole(&mut self, _: &KeyComparison, _: Tag) {}
 
-    fn lookup(&self, columns: &[usize], key: &PointKey) -> LookupResult {
+    fn lookup(&self, columns: &[usize], key: &PointKey) -> LookupResult<'_> {
         match self.do_lookup(columns, key) {
             Some(result) => LookupResult::Some(result.into()),
             None => LookupResult::Missing,
         }
     }
 
-    fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
+    fn lookup_range(&self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'_> {
         let inner = self.inner();
         if self.replication_offset < inner.shared_state.replication_offset {
             debug!("Consistency miss in PersistentStateHandle");
@@ -1062,7 +1062,7 @@ impl State for PersistentStateHandle {
         RangeLookupResult::Some(RecordResult::Owned(rows))
     }
 
-    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &PointKey) -> Option<RecordResult<'a>> {
+    fn lookup_weak(&self, columns: &[usize], key: &PointKey) -> Option<RecordResult<'_>> {
         self.lookup(columns, key).records()
     }
 
@@ -1085,15 +1085,15 @@ impl State for PersistentStateHandle {
         crate::AllRecords::Persistent(AllRecords(self.clone()))
     }
 
-    fn evict_bytes(&mut self, _: usize) -> Option<crate::EvictBytesResult> {
+    fn evict_bytes(&mut self, _: usize) -> Option<crate::EvictBytesResult<'_>> {
         None
     }
 
-    fn evict_keys(&mut self, _: Tag, _: &[KeyComparison]) -> Option<EvictKeysResult> {
+    fn evict_keys(&mut self, _: Tag, _: &[KeyComparison]) -> Option<EvictKeysResult<'_>> {
         None
     }
 
-    fn evict_random<R: rand::Rng>(&mut self, _: Tag, _: &mut R) -> Option<EvictRandomResult> {
+    fn evict_random<R: rand::Rng>(&mut self, _: Tag, _: &mut R) -> Option<EvictRandomResult<'_>> {
         None
     }
 

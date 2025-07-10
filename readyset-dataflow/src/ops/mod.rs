@@ -546,11 +546,11 @@ pub mod test {
             self.nut.expect("set_op not called")
         }
 
-        pub fn node(&self) -> cell::Ref<Node> {
+        pub fn node(&self) -> cell::Ref<'_, Node> {
             self.nodes[*self.nut.unwrap()].borrow()
         }
 
-        pub fn node_mut(&self) -> cell::RefMut<Node> {
+        pub fn node_mut(&self) -> cell::RefMut<'_, Node> {
             self.nodes[*self.nut.unwrap()].borrow_mut()
         }
 

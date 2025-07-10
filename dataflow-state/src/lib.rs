@@ -248,15 +248,19 @@ pub trait State: SizeOf + Send {
 
     /// Evict up to `bytes` by randomly selected keys, returning a struct representing the index
     /// chosen to evict from along with the keys evicted and the number of bytes evicted.
-    fn evict_bytes(&mut self, bytes: usize) -> Option<EvictBytesResult>;
+    fn evict_bytes(&mut self, bytes: usize) -> Option<EvictBytesResult<'_>>;
 
     /// Evict the listed keys from the materialization targeted by `tag`, returning the index chosen
     /// to evict from and the number of bytes evicted.
-    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<EvictKeysResult>;
+    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<EvictKeysResult<'_>>;
 
     /// Evict a random key from the materialization targeted by `tag`, returning the index chosen to
     /// evict from and the number of bytes evicted.
-    fn evict_random<R: rand::Rng>(&mut self, tag: Tag, rng: &mut R) -> Option<EvictRandomResult>;
+    fn evict_random<R: rand::Rng>(
+        &mut self,
+        tag: Tag,
+        rng: &mut R,
+    ) -> Option<EvictRandomResult<'_>>;
 
     /// Remove all rows from this state
     fn clear(&mut self);
@@ -467,7 +471,7 @@ impl State for MaterializedNodeState {
         }
     }
 
-    fn evict_bytes(&mut self, bytes: usize) -> Option<EvictBytesResult> {
+    fn evict_bytes(&mut self, bytes: usize) -> Option<EvictBytesResult<'_>> {
         match self {
             MaterializedNodeState::Memory(ms) => ms.evict_bytes(bytes),
             MaterializedNodeState::Persistent(ps) => ps.evict_bytes(bytes),
@@ -475,7 +479,7 @@ impl State for MaterializedNodeState {
         }
     }
 
-    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<EvictKeysResult> {
+    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<EvictKeysResult<'_>> {
         match self {
             MaterializedNodeState::Memory(ms) => ms.evict_keys(tag, keys),
             MaterializedNodeState::Persistent(ps) => ps.evict_keys(tag, keys),
@@ -483,7 +487,11 @@ impl State for MaterializedNodeState {
         }
     }
 
-    fn evict_random<R: rand::Rng>(&mut self, tag: Tag, rng: &mut R) -> Option<EvictRandomResult> {
+    fn evict_random<R: rand::Rng>(
+        &mut self,
+        tag: Tag,
+        rng: &mut R,
+    ) -> Option<EvictRandomResult<'_>> {
         match self {
             MaterializedNodeState::Memory(ms) => ms.evict_random(tag, rng),
             MaterializedNodeState::Persistent(ps) => ps.evict_random(tag, rng),

@@ -228,11 +228,11 @@ impl QueryExecutionEvent {
         }
     }
 
-    pub fn start_upstream_timer(&mut self) -> QueryExecutionTimerHandle {
+    pub fn start_upstream_timer(&mut self) -> QueryExecutionTimerHandle<'_> {
         QueryExecutionTimerHandle::new(&mut self.upstream_duration)
     }
 
-    pub fn start_parse_timer(&mut self) -> QueryExecutionTimerHandle {
+    pub fn start_parse_timer(&mut self) -> QueryExecutionTimerHandle<'_> {
         QueryExecutionTimerHandle::new(&mut self.parse_duration)
     }
 

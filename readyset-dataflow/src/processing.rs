@@ -238,7 +238,7 @@ impl Miss {
 
     /// Return a reference to the key used to perform the lookup that resulted in this miss
     #[allow(clippy::unwrap_used)] // invariants on the fields
-    pub(crate) fn lookup_key(&self) -> Cow<KeyComparison> {
+    pub(crate) fn lookup_key(&self) -> Cow<'_, KeyComparison> {
         match &self.lookup_key {
             MissLookupKey::Key(lk) => Cow::Borrowed(lk),
             MissLookupKey::RecordColumns(cols) => Cow::Owned(

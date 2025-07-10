@@ -49,15 +49,15 @@ mod parse {
 
     use super::Command;
 
-    pub(super) fn command(i: &str) -> IResult<&str, Command> {
+    pub(super) fn command(i: &str) -> IResult<&str, Command<'_>> {
         all_consuming(alt((help, prepare, execute, normal)))(i)
     }
 
-    fn help(i: &str) -> IResult<&str, Command> {
+    fn help(i: &str) -> IResult<&str, Command<'_>> {
         value(Command::Help, tag("help"))(i)
     }
 
-    fn prepare(i: &str) -> IResult<&str, Command> {
+    fn prepare(i: &str) -> IResult<&str, Command<'_>> {
         let (i, _) = tag("prepare")(i)?;
         let (i, _) = multispace1(i)?;
         let (i, type_oids) = opt(terminated(prepare_params, multispace1))(i)?;
@@ -77,7 +77,7 @@ mod parse {
         Ok((i, params))
     }
 
-    fn execute(i: &str) -> IResult<&str, Command> {
+    fn execute(i: &str) -> IResult<&str, Command<'_>> {
         let (i, _) = tag("execute")(i)?;
         let (i, _) = multispace1(i)?;
         let (i, statement_id) = map_res(take_while1(|c| !is_space(c as u8)), |s: &str| {
@@ -97,7 +97,7 @@ mod parse {
         ))
     }
 
-    fn normal(i: &str) -> IResult<&str, Command> {
+    fn normal(i: &str) -> IResult<&str, Command<'_>> {
         Ok(("", Command::Normal(i.trim_end_matches(';'))))
     }
 }

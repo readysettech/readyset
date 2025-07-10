@@ -88,7 +88,7 @@ pub trait PsqlBackend {
     async fn on_init(&mut self, database: &str) -> Result<CredentialsNeeded, Error>;
 
     /// Look up authentication credentials for the given user
-    fn credentials_for_user(&self, user: &str) -> Option<Credentials>;
+    fn credentials_for_user(&self, user: &str) -> Option<Credentials<'_>>;
 
     /// Performs the specified SQL query.
     ///

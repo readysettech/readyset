@@ -111,7 +111,7 @@ impl Array {
     }
 
     /// Returns an iterator over subviews of the array's outermost dimension.
-    pub fn outer_dimension(&self) -> impl Iterator<Item = ArrayView> {
+    pub fn outer_dimension(&self) -> impl Iterator<Item = ArrayView<'_>> {
         self.contents
             .outer_iter()
             .map(|contents| ArrayView { contents })

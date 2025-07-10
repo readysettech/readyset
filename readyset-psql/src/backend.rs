@@ -131,7 +131,7 @@ impl ps::PsqlBackend for Backend {
         self.inner.version()
     }
 
-    fn credentials_for_user(&self, user: &str) -> Option<ps::Credentials> {
+    fn credentials_for_user(&self, user: &str) -> Option<ps::Credentials<'_>> {
         self.users
             .get(user)
             .map(|pw| ps::Credentials::CleartextPassword(pw))

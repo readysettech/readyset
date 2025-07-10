@@ -1293,7 +1293,7 @@ mod tests {
             }
         }
 
-        fn credentials_for_user(&self, _user: &str) -> Option<Credentials> {
+        fn credentials_for_user(&self, _user: &str) -> Option<Credentials<'_>> {
             self.needed_credentials
         }
 
