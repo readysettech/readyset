@@ -806,8 +806,8 @@ impl MySqlBinlogConnector {
                     .status_vars()
                     .get_status_var(binlog::consts::StatusVarKey::Charset);
 
-                if charset.is_some() {
-                    let default_server_charset = match charset.unwrap().get_value().unwrap() {
+                if let Some(charset) = charset {
+                    let default_server_charset = match charset.get_value().unwrap() {
                         StatusVarVal::Charset {
                             charset_client: _,
                             collation_connection: _,

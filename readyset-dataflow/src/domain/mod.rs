@@ -3514,7 +3514,7 @@ impl Domain {
                 }
 
                 // if we missed during replay, we need to do another replay
-                if backfill_keys.is_some() && !misses.is_empty() {
+                if let (Some(backfill_keys), false) = (&mut backfill_keys, misses.is_empty()) {
                     // so, in theory, unishard can be changed by n.process. however, it
                     // will only ever be changed by a union, which can't cause misses.
                     // since we only enter this branch in the cases where we have a miss,
@@ -3547,11 +3547,7 @@ impl Domain {
                     }));
 
                     // we should only finish the replays for keys that *didn't* miss
-                    #[allow(clippy::unwrap_used)] // We already checked it's Some
-                    backfill_keys
-                        .as_mut()
-                        .unwrap()
-                        .retain(|k| !missed_on.contains(k));
+                    backfill_keys.retain(|k| !missed_on.contains(k));
 
                     // prune all replayed records for keys where any replayed record for
                     // that key missed.

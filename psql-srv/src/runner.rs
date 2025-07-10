@@ -26,6 +26,7 @@ pub struct Runner<B: PsqlBackend, C> {
 
 /// Indicates whether the client is initiating a TLS connection, or the client has closed the
 /// stream.
+#[derive(Clone, Copy)]
 enum MainLoopStatus {
     // The stream has closed
     Terminate,
@@ -61,8 +62,7 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
         // Connection has closed or is waiting for tls handshake
         let loop_status = runner.main_loop().await;
 
-        if matches!(loop_status, MainLoopStatus::RestartWithTls) && tls_acceptor.is_some() {
-            let acceptor = tls_acceptor.unwrap(); // just checked
+        if let (MainLoopStatus::RestartWithTls, Some(acceptor)) = (loop_status, &tls_acceptor) {
             let backend = runner.backend;
             let stream = runner.channel.into_inner();
             let mut protocol = runner.protocol;
@@ -98,7 +98,7 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
                     error!(%error);
                 }
             }
-        } else if matches!(loop_status, MainLoopStatus::RestartWithTls) && tls_acceptor.is_none() {
+        } else if let (MainLoopStatus::RestartWithTls, None) = (loop_status, &tls_acceptor) {
             // Nothing to do, but warn client that ReadySet experienced an internal error.
             let _ = runner
                 .handle_error(Error::InternalError(

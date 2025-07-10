@@ -595,7 +595,10 @@ impl FailedOpLogger {
                         EitherOrBoth::Left(d) => (Some(d), None),
                         EitherOrBoth::Right(c) => (None, Some(c)),
                     };
-                    if del.is_some() && del != cur {
+                    if del == cur {
+                        continue;
+                    }
+                    if let Some(del) = del {
                         error!(
                             concat!(
                                 "{}Attempted to delete row, but there was a data mismatch in ",
@@ -605,7 +608,7 @@ impl FailedOpLogger {
                         );
                         *self
                             .delete_row_data_mismatch
-                            .entry((col, DfValueKind::from(del.unwrap())))
+                            .entry((col, DfValueKind::from(del)))
                             .or_default() += 1;
                     }
                 }
