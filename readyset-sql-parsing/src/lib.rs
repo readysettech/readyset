@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::num::ParseIntError;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -216,6 +217,12 @@ impl From<ReadysetParsingError> for String {
     }
 }
 
+impl From<ParseIntError> for ReadysetParsingError {
+    fn from(value: ParseIntError) -> Self {
+        Self::ReadysetParsingError(value.to_string())
+    }
+}
+
 fn sqlparser_dialect_from_readyset_dialect(
     dialect: Dialect,
 ) -> Box<dyn sqlparser::dialect::Dialect> {
@@ -240,6 +247,7 @@ enum ReadysetKeyword {
     READYSET,
     RESNAPSHOT,
     SIMPLIFIED,
+    SUPPORTED,
     /// To match both Readyset and sqlparser keywords in one go, we want to be able to accept both
     /// in the same function. So here we just allow falling back to a sqlparser keyword.
     Standard(sqlparser::keywords::Keyword),
@@ -260,6 +268,7 @@ impl ReadysetKeyword {
             Self::READYSET => "READYSET",
             Self::RESNAPSHOT => "RESNAPSHOT",
             Self::SIMPLIFIED => "SIMPLIFIED",
+            Self::SUPPORTED => "SUPPORTED",
             Self::Standard(_) => panic!(
                 "Standard sqlparser keywords should only be used with `parse_keyword`, not string comparison"
             ),
@@ -581,17 +590,36 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
                     .into(),
             ))
         }
-    } else if parse_readyset_keywords(
-        parser,
-        &[ReadysetKeyword::PROXIED, ReadysetKeyword::QUERIES],
-    ) {
-        // TODO: Parse extra options
+    } else if parse_readyset_keyword(parser, ReadysetKeyword::PROXIED) {
+        let only_supported = parse_readyset_keyword(parser, ReadysetKeyword::SUPPORTED);
+        if !parse_readyset_keyword(parser, ReadysetKeyword::QUERIES) {
+            return Err(ReadysetParsingError::ReadysetParsingError(
+                "expected QUERIES after PROXIED [SUPPORTED]".into(),
+            ));
+        }
+        let query_id = if parser.parse_keyword(Keyword::WHERE) {
+            let lhs = parser.parse_identifier()?;
+            if lhs.value != "query_id" {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "expected 'query_id' after WHERE".into(),
+                ));
+            }
+            parser.expect_token(&Token::Eq)?;
+            Some(parser.parse_identifier()?.value)
+        } else {
+            None
+        };
+        let limit = if parser.parse_keyword(Keyword::LIMIT) {
+            Some(parser.parse_number()?.to_string().parse()?)
+        } else {
+            None
+        };
         Ok(SqlQuery::Show(
             readyset_sql::ast::ShowStatement::ProxiedQueries(
                 readyset_sql::ast::ProxiedQueriesOptions {
-                    query_id: None,
-                    only_supported: false,
-                    limit: None,
+                    query_id,
+                    only_supported,
+                    limit,
                 },
             ),
         ))

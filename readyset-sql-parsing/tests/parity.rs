@@ -743,3 +743,13 @@ fn test_is_or_is_not_true_or_false() {
     check_parse_both!("SELECT * FROM users WHERE active IS TRUE");
     check_parse_both!("SELECT * FROM users WHERE active IS NOT TRUE");
 }
+
+#[test]
+fn test_show_proxied_queries() {
+    check_parse_both!("SHOW PROXIED QUERIES");
+    check_parse_both!("SHOW PROXIED QUERIES LIMIT 10");
+    check_parse_both!("SHOW PROXIED SUPPORTED QUERIES");
+    check_parse_both!("SHOW PROXIED SUPPORTED QUERIES LIMIT 10");
+    check_parse_both!("SHOW PROXIED SUPPORTED QUERIES WHERE query_id = 'q_29697d90bc73217f'");
+    check_parse_both!("SHOW PROXIED QUERIES WHERE query_id = 'q_29697d90bc7317f' LIMIT 1000");
+}

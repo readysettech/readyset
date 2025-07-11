@@ -47,11 +47,14 @@ impl DialectDisplay for ShowStatement {
                     if options.only_supported {
                         write!(f, "SUPPORTED ")?;
                     }
+                    write!(f, "QUERIES")?;
                     if let Some(query_id) = &options.query_id {
-                        write!(f, "QUERIES WHERE query_id = {query_id}")
-                    } else {
-                        write!(f, "QUERIES")
+                        write!(f, " WHERE query_id = '{query_id}'")?;
                     }
+                    if let Some(limit) = &options.limit {
+                        write!(f, " LIMIT {limit}")?;
+                    }
+                    Ok(())
                 }
                 Self::ReadySetStatus => write!(f, "READYSET STATUS"),
                 Self::ReadySetStatusAdapter => write!(f, "READYSET STATUS ADAPTER"),
