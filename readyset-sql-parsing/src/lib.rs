@@ -626,9 +626,20 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
     } else if parse_readyset_keyword(parser, ReadysetKeyword::CACHES)
         || parse_readyset_keywords(parser, &[ReadysetKeyword::CACHED, ReadysetKeyword::QUERIES])
     {
-        // TODO: Parse extra options
+        let query_id = if parser.parse_keyword(Keyword::WHERE) {
+            let lhs = parser.parse_identifier()?;
+            if lhs.value != "query_id" {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "expected 'query_id' after WHERE".into(),
+                ));
+            }
+            parser.expect_token(&Token::Eq)?;
+            Some(parser.parse_identifier()?.value)
+        } else {
+            None
+        };
         Ok(SqlQuery::Show(
-            readyset_sql::ast::ShowStatement::CachedQueries(None),
+            readyset_sql::ast::ShowStatement::CachedQueries(query_id),
         ))
     } else {
         Ok(parser.parse_show()?.try_into_dialect(dialect)?)

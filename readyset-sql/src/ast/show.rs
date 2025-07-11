@@ -37,7 +37,7 @@ impl DialectDisplay for ShowStatement {
                 Self::Tables(tables) => write!(f, "{}", tables.display(dialect)),
                 Self::CachedQueries(maybe_query_id) => {
                     if let Some(query_id) = maybe_query_id {
-                        write!(f, "CACHES WHERE query_id = {query_id}")
+                        write!(f, "CACHES WHERE query_id = '{query_id}'")
                     } else {
                         write!(f, "CACHES")
                     }

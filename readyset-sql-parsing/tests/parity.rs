@@ -753,3 +753,9 @@ fn test_show_proxied_queries() {
     check_parse_both!("SHOW PROXIED SUPPORTED QUERIES WHERE query_id = 'q_29697d90bc73217f'");
     check_parse_both!("SHOW PROXIED QUERIES WHERE query_id = 'q_29697d90bc7317f' LIMIT 1000");
 }
+
+#[test]
+fn test_show_caches() {
+    check_parse_both!("SHOW CACHES");
+    check_parse_both!("SHOW CACHES WHERE query_id = 'q_29697d90bc73217f'");
+}
