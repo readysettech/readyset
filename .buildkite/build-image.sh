@@ -84,7 +84,7 @@ docker buildx create \
 "${build_cmd[@]}"
 tags_to_push=("$image:$tag_version")
 
-if [[ "${BUILDKITE_BRANCH:-}" == "refs/heads/main" && -n "${MULTIARCH:-}" ]]; then
+if [[ "${BUILDKITE_BRANCH:-}" == "refs/heads/main" && -z "${MULTIARCH:-}" ]]; then
     # If this is main and we're not building multi-arch image, then we need to push "latest".
     # Multi-arch images require a later manifest creation step which will be pushed as "latest".
     docker tag "$image:$tag_version" "$image:latest"
