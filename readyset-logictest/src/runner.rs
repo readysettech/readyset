@@ -390,7 +390,7 @@ impl TestScript {
                             };
                             Ok(())
                         }
-                        Err(e) => Err(anyhow!("Query failed after {retries} retries: {e}")),
+                        Err(e) => Err(e.context(format!("Query failed after {retries} retries"))),
                     }?
                 }
                 Record::HashThreshold(_) => {}

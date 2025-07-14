@@ -642,7 +642,7 @@ impl Fuzz {
                 },
                 Default::default(),
             ))
-            .map_err(|err| TestCaseError::fail(format!("{err:#}")))
+            .map_err(|err| TestCaseError::fail(format!("{:#}", err.root_cause())))
         });
 
         let (passed, details) = match result {
@@ -659,6 +659,7 @@ impl Fuzz {
                 info!(?path, "writing out failing test script");
                 script.write_to(&mut file)?;
                 file.flush()?;
+                let message = reason.message();
                 (
                     false,
                     json!({
@@ -666,7 +667,7 @@ impl Fuzz {
                         "extract_file": path.to_string_lossy(),
                         // Truncate reason (which includes the query) because especially large
                         // queries are useless to log here. The query will be in the file.
-                        "reason": reason.message()[..256],
+                        "reason": message[..256.min(message.len())],
                     }),
                 )
             }
@@ -677,12 +678,13 @@ impl Fuzz {
                     "reason": reason.message(),
                 }),
             ),
-            Ok(()) => (true, json!({})),
+            Ok(()) => {
+                info!("No failing queries found");
+                (true, json!({}))
+            }
         };
 
         assert_always!(passed, "No failing queries found", &details);
-
-        info!("No failing queries found");
 
         Ok(())
     }
@@ -748,7 +750,7 @@ impl<'a> From<&'a Fuzz> for test_runner::Config {
 }
 
 fn main() -> anyhow::Result<()> {
-    antithesis_sdk::antithesis_init();
+    antithesis_init();
     init_test_logging();
     let opts = Opts::parse();
     opts.subcommand.run()
