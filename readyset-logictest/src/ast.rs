@@ -282,8 +282,10 @@ impl TryFrom<Literal> for Value {
             Literal::UnsignedInteger(v) => Value::UnsignedInteger(v),
             Literal::Float(float) => real_value!(float.value, float.precision),
             Literal::Double(double) => real_value!(double.value, double.precision),
-            Literal::Numeric(mantissa, scale) => {
-                Value::Numeric(Decimal::new(mantissa, scale as i64))
+            Literal::Numeric(s) => {
+                Value::Numeric(Decimal::from_str(&s).map_err(|e| {
+                    ValueConversionError(format!("Invalid numeric value '{s}': {e}"))
+                })?)
             }
             Literal::String(v) => Value::Text(v),
             Literal::Blob(v) => {

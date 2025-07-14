@@ -158,7 +158,7 @@ impl ProcessedQueryParams {
                 Literal::Float(_)
                 | Literal::Double(_)
                 | Literal::String(_)
-                | Literal::Numeric(_, _) => {
+                | Literal::Numeric(_) => {
                     // All of those are invalid in MySQL, but Postgres coerces to integer
                     match DfValue::try_from(lit)?
                         .coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown)?

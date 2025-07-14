@@ -87,8 +87,8 @@ pub fn arbitrary_duration_without_microseconds() -> impl Strategy<Value = Durati
 
 ///Generate an arbitrary [`Decimal`] within a given valid range.
 pub fn arbitrary_decimal(precision: u16, scale: u8) -> impl Strategy<Value = Decimal> {
-    arbitrary_decimal_bytes_with_digits(precision, scale)
-        .prop_map(|bytes| Decimal::from_str(std::str::from_utf8(&bytes).unwrap()).unwrap())
+    arbitrary_decimal_string_with_digits(precision, scale)
+        .prop_map(|s| Decimal::from_str(&s).unwrap())
 }
 
 /// Generate an arbitrary `Vec<u8>` which is the string representation of a [`Decimal`] with up to
@@ -101,6 +101,12 @@ pub fn arbitrary_decimal_bytes_with_digits(m: u16, d: u8) -> impl Strategy<Value
         .prop_filter("Should specify at least one digit", |s| {
             s[..] != b"."[..] && s[..] != b"-."[..]
         })
+}
+
+/// Generate an arbitrary `String` which is the string representation of a [`Decimal`] with up to
+/// the given number of digits.
+pub fn arbitrary_decimal_string_with_digits(m: u16, d: u8) -> impl Strategy<Value = String> {
+    arbitrary_decimal_bytes_with_digits(m, d).prop_map(|bytes| String::from_utf8(bytes).unwrap())
 }
 
 /// Strategy to generate an arbitrary [`NaiveDateTime`]

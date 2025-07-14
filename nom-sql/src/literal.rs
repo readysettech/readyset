@@ -336,7 +336,7 @@ mod tests {
     fn literal_to_string_parse_round_trip(lit: Literal) {
         prop_assume!(!matches!(
             lit,
-            Literal::Double(_) | Literal::Float(_) | Literal::Numeric(_, _) | Literal::ByteArray(_)
+            Literal::Double(_) | Literal::Float(_) | Literal::Numeric(_) | Literal::ByteArray(_)
         ));
         match lit {
             Literal::BitVector(_) => {

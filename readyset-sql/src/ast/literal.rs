@@ -1,17 +1,15 @@
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::str::FromStr as _;
 
 use bit_vec::BitVec;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use proptest::prelude::Strategy;
-use readyset_decimal::Decimal;
 use readyset_util::arbitrary::{
-    arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipinet, arbitrary_json,
-    arbitrary_naive_time, arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time,
-    arbitrary_uuid,
+    arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal_string_with_digits, arbitrary_ipinet,
+    arbitrary_json, arbitrary_naive_time, arbitrary_positive_naive_date,
+    arbitrary_timestamp_naive_date_time, arbitrary_uuid,
 };
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
@@ -179,8 +177,7 @@ pub enum Literal {
     /// didn't exist.
     Float(Float),
     Double(Double),
-    #[weight(0)]
-    Numeric(i128, u32),
+    Numeric(#[strategy(arbitrary_decimal_string_with_digits(u16::MAX, u8::MAX))] String),
     String(String),
     #[weight(0)]
     Blob(Vec<u8>),
@@ -270,13 +267,8 @@ impl TryFrom<sqlparser::ast::Value> for Literal {
                         value: f,
                         precision: s.find('.').map(|i| (s.len() - i - 1) as u8).unwrap_or(0),
                     }))
-                } else if let Ok(Some((mantissa, scale))) =
-                    Decimal::from_str(&s).map(|d| d.mantissa_and_scale())
-                {
-                    // Seems like this will later get re-parsed the same way, which is unfortunate
-                    Ok(Self::Numeric(mantissa, scale as u32))
                 } else {
-                    failed!("failed to parse number: {s}")
+                    Ok(Self::Numeric(s))
                 }
             }
             Value::EscapedStringLiteral(s) => Ok(Self::String(s)),
@@ -352,10 +344,8 @@ impl DialectDisplay for Literal {
                 Literal::UnsignedInteger(i) => write!(f, "{i}"),
                 Literal::Float(float) => write_real!(float.value, float.precision),
                 Literal::Double(double) => write_real!(double.value, double.precision),
-                Literal::Numeric(val, scale) => {
-                    write!(f, "{}", Decimal::new(*val, (*scale).into()))
-                }
-                Literal::String(ref s) => match dialect {
+                Literal::Numeric(s) => write!(f, "{s}"),
+                Literal::String(s) => match dialect {
                     Dialect::MySQL => display_string_literal(f, s),
                     Dialect::PostgreSQL => {
                         let escaped = escape_string_literal(s);
@@ -454,23 +444,17 @@ impl Literal {
             | SqlType::VarBinary(_) => any::<Vec<u8>>().prop_map(Self::Blob).boxed(),
             SqlType::Float => any::<Float>().prop_map(Self::Float).boxed(),
             SqlType::Double | SqlType::Real => any::<Double>().prop_map(Self::Double).boxed(),
-            SqlType::Decimal(prec, scale) => arbitrary_decimal(*prec as u16, *scale)
-                .prop_map(|d| {
-                    d.mantissa_and_scale()
-                        .map(|(mantissa, scale)| Self::Numeric(mantissa, scale as u32))
-                        .unwrap()
-                })
-                .boxed(),
+            SqlType::Decimal(prec, scale) => {
+                arbitrary_decimal_string_with_digits(*prec as u16, *scale)
+                    .prop_map(Self::Numeric)
+                    .boxed()
+            }
             SqlType::Numeric(prec_scale) => {
                 let (prec, scale) = prec_scale
                     .map(|(p, s)| (p, s.unwrap_or(p.min(30) as u8)))
                     .unwrap_or((65, 30));
-                arbitrary_decimal(prec, scale)
-                    .prop_map(|d| {
-                        d.mantissa_and_scale()
-                            .map(|(mantissa, scale)| Self::Numeric(mantissa, scale as u32))
-                            .unwrap()
-                    })
+                arbitrary_decimal_string_with_digits(prec, scale)
+                    .prop_map(Self::Numeric)
                     .boxed()
             }
             SqlType::Date => arbitrary_positive_naive_date()

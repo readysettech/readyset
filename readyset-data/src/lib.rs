@@ -4,6 +4,7 @@ use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Div, Mul, Sub};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::{fmt, io, str};
 
@@ -1358,7 +1359,7 @@ impl<'a> TryFrom<&'a Literal> for DfValue {
             Literal::String(s) => Ok(s.as_str().into()),
             Literal::Float(ref float) => Ok(DfValue::Float(float.value)),
             Literal::Double(ref double) => Ok(DfValue::Double(double.value)),
-            Literal::Numeric(i, s) => Ok(DfValue::Numeric(Arc::new(Decimal::new(*i, *s as i64)))),
+            Literal::Numeric(s) => Ok(DfValue::Numeric(Arc::new(Decimal::from_str(s)?))),
             Literal::Blob(b) => Ok(DfValue::from(b.to_vec())),
             Literal::ByteArray(b) => Ok(DfValue::ByteArray(Arc::new(b.clone()))),
             Literal::BitVector(b) => Ok(DfValue::from(b)),
@@ -1402,10 +1403,7 @@ impl TryFrom<DfValue> for Literal {
                 value.coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)?,
             )?)),
             DfValue::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
-            DfValue::Numeric(ref d) => Ok(d
-                .mantissa_and_scale()
-                .map(|(mantissa, scale)| Literal::Numeric(mantissa, scale as u32))
-                .unwrap_or_else(|| Literal::String(d.to_string()))),
+            DfValue::Numeric(ref d) => Ok(Literal::Numeric(d.to_string())),
             DfValue::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().clone())),
             DfValue::Array(_) => unsupported!("Arrays not implemented yet"),
             DfValue::PassThrough(_) => internal!("PassThrough has no representation as a literal"),
