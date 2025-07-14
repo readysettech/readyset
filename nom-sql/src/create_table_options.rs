@@ -6,7 +6,7 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{alphanumeric1, digit1};
 use nom::combinator::{map, map_res, opt};
 use nom::multi::separated_list0;
-use nom::sequence::{separated_pair, tuple};
+use nom::sequence::{delimited, separated_pair, tuple};
 use nom_locate::LocatedSpan;
 use readyset_sql::{ast::*, Dialect};
 
@@ -163,8 +163,7 @@ fn create_option_auto_increment(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Cr
 }
 
 fn charset_prefix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
-    let (i, _) = whitespace0(i)?;
-    let (i, _) = tag_no_case("default")(i)?;
+    let (i, _) = opt(delimited(whitespace0, tag_no_case("default"), whitespace1))(i)?;
     let (i, _) = whitespace0(i)?;
     alt((
         map(tag_no_case("charset"), |i: LocatedSpan<&[u8]>| *i),
@@ -194,6 +193,8 @@ fn create_option_collate(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateTableOption> {
     move |i| {
+        let (i, _) = opt(delimited(whitespace0, tag_no_case("default"), whitespace1))(i)?;
+        let (i, _) = whitespace0(i)?;
         alt((
             map(
                 create_option_equals_pair(tag_no_case("collate"), collation_name(dialect)),
@@ -450,6 +451,52 @@ mod tests {
             vec![CreateTableOption::DataDirectory(
                 "/var/lib/mysql/".to_string(),
             )],
+        );
+    }
+
+    #[test]
+    fn create_table_default_charset_and_collate() {
+        should_parse_all(
+            "DEFAULT CHARSET=utf8mb4",
+            vec![CreateTableOption::Charset(CharsetName::Unquoted(
+                "utf8mb4".into(),
+            ))],
+        );
+        should_parse_all(
+            "DEFAULT CHARSET utf8mb4",
+            vec![CreateTableOption::Charset(CharsetName::Unquoted(
+                "utf8mb4".into(),
+            ))],
+        );
+        should_parse_all(
+            " CHARSET=utf8mb4",
+            vec![CreateTableOption::Charset(CharsetName::Unquoted(
+                "utf8mb4".into(),
+            ))],
+        );
+        should_parse_all(
+            "CHARSET utf8mb4",
+            vec![CreateTableOption::Charset(CharsetName::Unquoted(
+                "utf8mb4".into(),
+            ))],
+        );
+        should_parse_all(
+            "CHARSET=utf8mb4 DEFAULT COLLATE=utf8mb4_unicode_520_ci",
+            vec![
+                CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                CreateTableOption::Collate(CollationName::Unquoted(
+                    "utf8mb4_unicode_520_ci".into(),
+                )),
+            ],
+        );
+        should_parse_all(
+            "CHARSET=utf8mb4 COLLATE utf8mb4_unicode_520_ci",
+            vec![
+                CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                CreateTableOption::Collate(CollationName::Unquoted(
+                    "utf8mb4_unicode_520_ci".into(),
+                )),
+            ],
         );
     }
 }

@@ -566,6 +566,62 @@ fn test_create_table_with_data_directory_option() {
 }
 
 #[test]
+fn test_create_table_with_charset_option() {
+    check_parse_mysql!(
+        r#"CREATE TABLE t (
+            id INT PRIMARY KEY
+        )
+        CHARSET=utf8mb4;"#
+    );
+    check_parse_mysql!(
+        r#"CREATE TABLE t (
+            id INT PRIMARY KEY
+        )
+        DEFAULT CHARSET=utf8mb4;"#
+    );
+    check_parse_mysql!(
+        r#"CREATE TABLE t (
+            id INT PRIMARY KEY
+        )
+        CHARACTER SET=utf8mb4;"#
+    );
+    check_parse_mysql!(
+        r#"CREATE TABLE t (
+            id INT PRIMARY KEY
+        )
+        DEFAULT CHARACTER SET=utf8mb4;"#
+    );
+    check_parse_mysql!(
+        r#"CREATE TABLE t (
+            id INT PRIMARY KEY
+        )
+        DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"#
+    );
+    check_parse_mysql!(
+        r#"CREATE TABLE t (
+            id INT PRIMARY KEY
+        )
+        DEFAULT CHARACTER SET=utf8mb4 DEFAULT COLLATE=utf8mb4_unicode_ci;"#
+    );
+}
+
+#[test]
+fn test_create_table_with_collate_option() {
+    check_parse_mysql!(
+        r#"CREATE TABLE t (
+            id INT PRIMARY KEY
+        )
+        COLLATE=utf8mb4_unicode_ci;"#
+    );
+    check_parse_mysql!(
+        r#"CREATE TABLE t (
+            id INT PRIMARY KEY
+        )
+        DEFAULT COLLATE=utf8mb4_unicode_ci;"#
+    );
+}
+
+#[test]
 fn test_row() {
     check_parse_both!(r#"SELECT ROW(1, 2, 3);"#);
 }

@@ -323,7 +323,7 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                         "DEFAULT CHARSET"
                         | "CHARSET"
                         | "DEFAULT CHARACTER SET"
-                        | "CHARACTER SETS" => match value {
+                        | "CHARACTER SET" => match value {
                             sqlparser::ast::Expr::Value(ValueWithSpan {
                                 value: Value::SingleQuotedString(v),
                                 ..
