@@ -321,9 +321,8 @@ impl From<Value> for mysql_async::Value {
             // Though `BitVec` is really PostgreSQL-specific, it's useful to compare bitstrings for
             // non-utf8 bytes.
             Value::BitVector(bv) => mysql_async::Value::Bytes(bv.to_bytes()),
-            // These types are PostgreSQL-specific
-            Value::ByteArray(_) => unimplemented!(),
-            Value::TimestampTz(_) => unimplemented!(),
+            Value::ByteArray(bytes) => mysql_async::Value::Bytes(bytes),
+            Value::TimestampTz(_) => unimplemented!("PostgreSQL-specific"),
         }
     }
 }
