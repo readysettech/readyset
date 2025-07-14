@@ -2361,10 +2361,8 @@ where
                                 match self.state.query_status_cache.query(id.as_str()) {
                                     Some(q) => match q {
                                         Query::Parsed(view_request) => (*view_request).clone(),
-                                        Query::ParseFailed(q, _) => {
-                                            return Err(ReadySetError::UnparseableQuery {
-                                                query: (*q).clone(),
-                                            });
+                                        Query::ParseFailed(_, err) => {
+                                            return Err(ReadySetError::UnparseableQuery(err));
                                         }
                                     },
                                     None => {
@@ -2396,9 +2394,7 @@ where
                         self.explain_create_cache(id, view_request, migration_state)
                             .await
                     }
-                    Err(query) => Err(ReadySetError::UnparseableQuery {
-                        query: query.clone(),
-                    }),
+                    Err(err) => Err(ReadySetError::UnparseableQuery(err.clone())),
                 }
             }
             SqlQuery::CreateCache(CreateCacheStatement {
@@ -2420,16 +2416,14 @@ where
                                     view_request.statement.clone(),
                                     Some(view_request.schema_search_path.clone()),
                                 )),
-                                Query::ParseFailed(q, _) => Err(ReadySetError::UnparseableQuery {
-                                    query: (*q).clone(),
-                                }),
+                                Query::ParseFailed(_, err) => {
+                                    Err(ReadySetError::UnparseableQuery(err))
+                                }
                             },
                             None => Err(ReadySetError::NoQueryForId { id: id.to_string() }),
                         }
                     }
-                    Err(query) => Err(ReadySetError::UnparseableQuery {
-                        query: query.clone(),
-                    }),
+                    Err(err) => Err(ReadySetError::UnparseableQuery(err.clone())),
                 }?;
 
                 // Log a telemetry event
@@ -3193,19 +3187,15 @@ where
 
     fn parse_query(&mut self, query: &str) -> ReadySetResult<SqlQuery> {
         trace!(%query, "Parsing query");
-        match readyset_sql_parsing::parse_query_with_config(
+        readyset_sql_parsing::parse_query_with_config(
             self.settings
                 .parsing_preset
                 .into_config()
                 .log_only_selects(true),
             self.settings.dialect,
             query,
-        ) {
-            Ok(parsed_query) => Ok(parsed_query),
-            Err(_) => Err(ReadySetError::UnparseableQuery {
-                query: query.to_string(),
-            }),
-        }
+        )
+        .map_err(Into::into)
     }
 
     pub fn does_require_authentication(&self) -> bool {

@@ -203,11 +203,7 @@ pub enum ReadysetParsingError {
 
 impl From<ReadysetParsingError> for ReadySetError {
     fn from(err: ReadysetParsingError) -> Self {
-        // TODO(mvzink): Update or replace [`ReadySetError::UnparseableQuery`] to differentiate
-        // query and error message
-        Self::UnparseableQuery {
-            query: err.to_string(),
-        }
+        Self::UnparseableQuery(err.into())
     }
 }
 

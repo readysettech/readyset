@@ -390,11 +390,8 @@ pub enum ReadySetError {
     /// The query provided by the user could not be parsed by `nom-sql`.
     ///
     /// TODO(eta): extend nom-sql to be able to provide more granular parse failure information.
-    #[error("Query failed to parse: {}", Sensitive(query))]
-    UnparseableQuery {
-        /// The SQL of the query.
-        query: String,
-    },
+    #[error("Query failed to parse: {0}")]
+    UnparseableQuery(String),
 
     /// Manipulating a base table failed.
     #[error("Failed to manipulate table {}: {source}", table.display_unquoted())]

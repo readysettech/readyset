@@ -22,7 +22,7 @@ impl From<Error> for ps::Error {
         use Error::*;
         match e {
             Io(e) => ps::Error::IoError(e),
-            ReadySet(ReadySetError::UnparseableQuery { query }) => ps::Error::ParseError(query),
+            ReadySet(ReadySetError::UnparseableQuery(err)) => ps::Error::ParseError(err),
             ReadySet(ReadySetError::PreparedStatementMissing { statement_id }) => {
                 ps::Error::MissingPreparedStatement(statement_id.to_string())
             }

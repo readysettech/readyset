@@ -155,10 +155,7 @@ impl ChangeList {
         let mut changes = Vec::new();
         for query_str in queries {
             let parsed =
-                parse_query_with_config(parsing_config, Dialect::DEFAULT_MYSQL.into(), &query_str)
-                    .map_err(|_| ReadySetError::UnparseableQuery {
-                        query: query_str.as_ref().to_string(),
-                    })?;
+                parse_query_with_config(parsing_config, Dialect::DEFAULT_MYSQL.into(), &query_str)?;
 
             match parsed {
                 SqlQuery::CreateTable(statement) => changes.push(Change::CreateTable {
@@ -184,7 +181,7 @@ impl ChangeList {
                                          the adapter"
                             );
                         }
-                        Err(query) => return Err(ReadySetError::UnparseableQuery { query }),
+                        Err(err) => return Err(ReadySetError::UnparseableQuery(err)),
                     };
                     changes.push(Change::CreateCache(CreateCache {
                         name,
@@ -455,63 +452,51 @@ impl Change {
         adapter_rewrite_params: AdapterRewriteParams,
         parsing_preset: ParsingPreset,
     ) -> ReadySetResult<Self> {
-        macro_rules! mk_error {
-            ($str:expr) => {
-                Err(ReadySetError::UnparseableQuery {
-                    query: $str.to_string(),
-                })
-            };
-        }
         match parse_query_with_config(
             parsing_preset.into_config().log_on_mismatch(true).rate_limit_logging(false),
             ddl_req.dialect.into(),
             &ddl_req.unparsed_stmt,
-        ) {
-            Result::Err(_) => mk_error!(ddl_req.unparsed_stmt),
-            Result::Ok(parsed) => {
-                Ok(match parsed {
-                    SqlQuery::CreateCache(CreateCacheStatement {
-                        name,
-                        inner,
-                        always,
-                        ..
-                    }) => {
-                        let mut statement = match inner {
-                            Ok(CacheInner::Statement(stmt)) => stmt,
-                            Ok(CacheInner::Id(id)) => {
-                                error!(
-                                    %id,
-                                    "attempted to issue CREATE CACHE with an id"
-                                );
-                                internal!(
-                                    "CREATE CACHE should've had its ID resolved by \
-                                        the adapter"
-                                );
-                            }
-                            Err(query) => return Err(ReadySetError::UnparseableQuery { query }),
-                        };
-
-                        adapter_rewrites::process_query(
-                            &mut statement,
-                            adapter_rewrite_params
-                        )?;
-
-                        Change::CreateCache(CreateCache {
-                            name,
-                            statement,
-                            always,
-                        })
+        )? {
+            SqlQuery::CreateCache(CreateCacheStatement {
+                name,
+                inner,
+                always,
+                ..
+            }) => {
+                let mut statement = match inner {
+                    Ok(CacheInner::Statement(stmt)) => stmt,
+                    Ok(CacheInner::Id(id)) => {
+                        error!(
+                            %id,
+                            "attempted to issue CREATE CACHE with an id"
+                        );
+                        internal!(
+                            "CREATE CACHE should've had its ID resolved by \
+                                the adapter"
+                        );
                     }
-                    SqlQuery::DropCache(dcs) => Change::Drop {
-                        name: dcs.name,
-                        if_exists: false,
-                    },
-                    _ => unsupported!(
-                        "CacheDDLRequests can only contain `CREATE CACHE` or `DROP CACHE` statements (got {})",
-                        parsed.query_type()
-                    ),
-                })
-            }
+                    Err(err) => return Err(ReadySetError::UnparseableQuery(err)),
+                };
+
+                adapter_rewrites::process_query(
+                    &mut statement,
+                    adapter_rewrite_params
+                )?;
+
+                Ok(Change::CreateCache(CreateCache {
+                    name,
+                    statement,
+                    always,
+                }))
+            },
+            SqlQuery::DropCache(dcs) => Ok(Change::Drop {
+                name: dcs.name,
+                if_exists: false,
+            }),
+            parsed => unsupported!(
+                "CacheDDLRequests can only contain `CREATE CACHE` or `DROP CACHE` statements (got {})",
+                parsed.query_type()
+            ),
         }
     }
 }

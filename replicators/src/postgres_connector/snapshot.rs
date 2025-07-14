@@ -894,7 +894,7 @@ impl<'a> PostgresReplicator<'a> {
                     create_schema.add_view_create(view_name.clone(), create_view.clone());
                     future::ready(
                         readyset_sql_parsing::parse_create_view_with_config(self.parsing_preset, Dialect::PostgreSQL, &create_view)
-                            .map_err(|_| ReadySetError::UnparseableQuery { query: create_view }),
+                            .map_err(Into::into),
                     )
                 })
                 .and_then(|view| {
