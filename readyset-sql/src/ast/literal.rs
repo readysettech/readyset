@@ -463,7 +463,7 @@ impl Literal {
                 .boxed(),
             SqlType::Numeric(prec_scale) => {
                 let (prec, scale) = prec_scale
-                    .map(|(p, s)| (p, s.unwrap_or(30)))
+                    .map(|(p, s)| (p, s.unwrap_or(p.min(30) as u8)))
                     .unwrap_or((65, 30));
                 arbitrary_decimal(prec, scale)
                     .prop_map(|d| {
