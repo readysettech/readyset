@@ -607,6 +607,15 @@ pub struct Fuzz {
     /// If not specified, test scripts will be written to a temporary file
     #[arg(long, short = 'o')]
     output: Option<PathBuf>,
+
+    #[arg(
+        long,
+        env = "PARSING_PRESET",
+        value_enum,
+        default_value = "both-panic-on-mismatch",
+        hide = true
+    )]
+    parsing_preset: ParsingPreset,
 }
 
 impl Fuzz {
@@ -628,6 +637,7 @@ impl Fuzz {
                 RunOptions {
                     database_type: DatabaseURL::from_str(&self.compare_to)?.database_type(),
                     replication_url: Some(self.compare_to.clone()),
+                    parsing_preset: self.parsing_preset,
                     ..Default::default()
                 },
                 Default::default(),
