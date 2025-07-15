@@ -521,7 +521,7 @@ dependencies = [
 [[package]]
 name = "calendrical_calculations"
 version = "0.2.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "core_maths",
  "displaydoc",
@@ -1639,7 +1639,7 @@ dependencies = [
 [[package]]
 name = "fixed_decimal"
 version = "0.7.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "smallvec",
@@ -2126,7 +2126,7 @@ dependencies = [
 [[package]]
 name = "icu"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "icu_calendar",
  "icu_casemap",
@@ -2149,7 +2149,7 @@ dependencies = [
 [[package]]
 name = "icu_calendar"
 version = "2.0.2"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "calendrical_calculations",
  "displaydoc",
@@ -2160,18 +2160,18 @@ dependencies = [
  "ixdtf",
  "tinystr 0.8.1",
  "writeable 0.6.1",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_calendar_data"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "icu_casemap"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "icu_casemap_data",
@@ -2181,18 +2181,18 @@ dependencies = [
  "icu_provider 2.0.0",
  "potential_utf",
  "writeable 0.6.1",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_casemap_data"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "icu_collator"
 version = "2.0.1"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "icu_collator_data",
@@ -2206,13 +2206,13 @@ dependencies = [
  "utf16_iter",
  "utf8_iter",
  "write16",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_collator_data"
 version = "2.0.1"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "icu_collections"
@@ -2229,19 +2229,19 @@ dependencies = [
 [[package]]
 name = "icu_collections"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "potential_utf",
  "yoke 0.8.0",
- "zerofrom 0.1.6 (git+https://github.com/unicode-org/icu4x.git)",
- "zerovec 0.11.2",
+ "zerofrom 0.1.6 (git+https://github.com/rs-sac/icu4x.git?branch=infer)",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_datetime"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "either",
@@ -2259,18 +2259,18 @@ dependencies = [
  "smallvec",
  "tinystr 0.8.1",
  "writeable 0.6.1",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_datetime_data"
-version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+version = "2.0.2"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "icu_decimal"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "fixed_decimal",
@@ -2281,18 +2281,18 @@ dependencies = [
  "serde",
  "tinystr 0.8.1",
  "writeable 0.6.1",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_decimal_data"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "icu_experimental"
 version = "0.4.0-dev"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "either",
@@ -2317,20 +2317,20 @@ dependencies = [
  "smallvec",
  "tinystr 0.8.1",
  "writeable 0.6.1",
- "zerofrom 0.1.6 (git+https://github.com/unicode-org/icu4x.git)",
+ "zerofrom 0.1.6 (git+https://github.com/rs-sac/icu4x.git?branch=infer)",
  "zerotrie",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_experimental_data"
 version = "0.3.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "icu_list"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "icu_list_data",
@@ -2339,18 +2339,18 @@ dependencies = [
  "regex-automata 0.4.9",
  "serde",
  "writeable 0.6.1",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_list_data"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "icu_locale"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "icu_collections 2.0.0",
@@ -2359,25 +2359,25 @@ dependencies = [
  "icu_provider 2.0.0",
  "potential_utf",
  "tinystr 0.8.1",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_locale_core"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "litemap 0.8.0",
  "tinystr 0.8.1",
  "writeable 0.6.1",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_locale_data"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "icu_locid"
@@ -2433,7 +2433,7 @@ dependencies = [
 [[package]]
 name = "icu_normalizer"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "icu_collections 2.0.0",
@@ -2444,7 +2444,7 @@ dependencies = [
  "utf16_iter",
  "utf8_iter",
  "write16",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
@@ -2456,37 +2456,37 @@ checksum = "c5e8338228bdc8ab83303f16b797e177953730f601a96c25d10cb3ab0daa0cb7"
 [[package]]
 name = "icu_normalizer_data"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "icu_pattern"
 version = "0.4.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "either",
  "writeable 0.6.1",
  "yoke 0.8.0",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_plurals"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "fixed_decimal",
  "icu_locale",
  "icu_plurals_data",
  "icu_provider 2.0.0",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_plurals_data"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "icu_properties"
@@ -2506,7 +2506,7 @@ dependencies = [
 [[package]]
 name = "icu_properties"
 version = "2.0.1"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "icu_collections 2.0.0",
@@ -2515,7 +2515,7 @@ dependencies = [
  "icu_provider 2.0.0",
  "potential_utf",
  "zerotrie",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
@@ -2527,7 +2527,7 @@ checksum = "85fb8799753b75aee8d2a21d7c14d9f38921b54b3dbda10f5a3c7a7b82dba5e2"
 [[package]]
 name = "icu_properties_data"
 version = "2.0.1"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "icu_provider"
@@ -2549,7 +2549,7 @@ dependencies = [
 [[package]]
 name = "icu_provider"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "icu_locale_core",
@@ -2557,9 +2557,9 @@ dependencies = [
  "tinystr 0.8.1",
  "writeable 0.6.1",
  "yoke 0.8.0",
- "zerofrom 0.1.6 (git+https://github.com/unicode-org/icu4x.git)",
+ "zerofrom 0.1.6 (git+https://github.com/rs-sac/icu4x.git?branch=infer)",
  "zerotrie",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
@@ -2576,7 +2576,7 @@ dependencies = [
 [[package]]
 name = "icu_segmenter"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "core_maths",
  "displaydoc",
@@ -2587,18 +2587,18 @@ dependencies = [
  "icu_segmenter_data",
  "potential_utf",
  "utf8_iter",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_segmenter_data"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "icu_time"
 version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "calendrical_calculations",
  "displaydoc",
@@ -2611,13 +2611,13 @@ dependencies = [
  "tinystr 0.8.1",
  "writeable 0.6.1",
  "zerotrie",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
 name = "icu_time_data"
-version = "2.0.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+version = "2.0.2"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "ident_case"
@@ -2806,7 +2806,7 @@ checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 [[package]]
 name = "ixdtf"
 version = "0.6.0-dev"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
 ]
@@ -2957,7 +2957,7 @@ checksum = "23fb14cb19457329c82206317a5663005a4d404783dc74f4252769b0d5f42856"
 [[package]]
 name = "litemap"
 version = "0.8.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 
 [[package]]
 name = "lock_api"
@@ -3945,10 +3945,10 @@ dependencies = [
 [[package]]
 name = "potential_utf"
 version = "0.1.2"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "serde",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
@@ -6522,10 +6522,10 @@ dependencies = [
 [[package]]
 name = "tinystr"
 version = "0.8.1"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
- "zerovec 0.11.2",
+ "zerovec 0.11.3-dev",
 ]
 
 [[package]]
@@ -7583,7 +7583,7 @@ checksum = "1e9df38ee2d2c3c5948ea468a8406ff0db0b29ae1ffde1bcf20ef305bcc95c51"
 [[package]]
 name = "writeable"
 version = "0.6.1"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "either",
 ]
@@ -7624,12 +7624,12 @@ dependencies = [
 [[package]]
 name = "yoke"
 version = "0.8.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "serde",
  "stable_deref_trait",
  "yoke-derive 0.8.0",
- "zerofrom 0.1.6 (git+https://github.com/unicode-org/icu4x.git)",
+ "zerofrom 0.1.6 (git+https://github.com/rs-sac/icu4x.git?branch=infer)",
 ]
 
 [[package]]
@@ -7647,7 +7647,7 @@ dependencies = [
 [[package]]
 name = "yoke-derive"
 version = "0.8.0"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7716,9 +7716,9 @@ dependencies = [
 [[package]]
 name = "zerofrom"
 version = "0.1.6"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
- "zerofrom-derive 0.1.6 (git+https://github.com/unicode-org/icu4x.git)",
+ "zerofrom-derive 0.1.6 (git+https://github.com/rs-sac/icu4x.git?branch=infer)",
 ]
 
 [[package]]
@@ -7736,7 +7736,7 @@ dependencies = [
 [[package]]
 name = "zerofrom-derive"
 version = "0.1.6"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7747,11 +7747,11 @@ dependencies = [
 [[package]]
 name = "zerotrie"
 version = "0.2.2"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "displaydoc",
  "yoke 0.8.0",
- "zerofrom 0.1.6 (git+https://github.com/unicode-org/icu4x.git)",
+ "zerofrom 0.1.6 (git+https://github.com/rs-sac/icu4x.git?branch=infer)",
 ]
 
 [[package]]
@@ -7767,11 +7767,11 @@ dependencies = [
 
 [[package]]
 name = "zerovec"
-version = "0.11.2"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+version = "0.11.3-dev"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "yoke 0.8.0",
- "zerofrom 0.1.6 (git+https://github.com/unicode-org/icu4x.git)",
+ "zerofrom 0.1.6 (git+https://github.com/rs-sac/icu4x.git?branch=infer)",
  "zerovec-derive 0.11.1",
 ]
 
@@ -7789,7 +7789,7 @@ dependencies = [
 [[package]]
 name = "zerovec-derive"
 version = "0.11.1"
-source = "git+https://github.com/unicode-org/icu4x.git#07f2e004c90f5f43f95e88d5d1c50ec9b83c92e0"
+source = "git+https://github.com/rs-sac/icu4x.git?branch=infer#e15da0667a712f82b70d82b20c085a6b2f6e54f4"
 dependencies = [
  "proc-macro2",
  "quote",
