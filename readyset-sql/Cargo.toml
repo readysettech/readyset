@@ -9,6 +9,7 @@ bit-vec = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
 derive_more = { workspace = true }
 eui48 = { workspace = true }
+hex = { workspace = true }
 itertools = { workspace = true }
 proptest = { workspace = true }
 serde = { workspace = true }

@@ -759,3 +759,8 @@ fn test_show_caches() {
     check_parse_both!("SHOW CACHES");
     check_parse_both!("SHOW CACHES WHERE query_id = 'q_29697d90bc73217f'");
 }
+
+#[test]
+fn test_hex_string_literal() {
+    check_parse_both!("SELECT * FROM users WHERE id = X'abcd1234'");
+}

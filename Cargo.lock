@@ -5156,6 +5156,7 @@ dependencies = [
  "concrete-iter",
  "derive_more",
  "eui48",
+ "hex",
  "itertools 0.13.0",
  "proptest",
  "readyset-decimal",

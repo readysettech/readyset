@@ -279,6 +279,11 @@ impl TryFrom<sqlparser::ast::Value> for Literal {
                 }
                 Ok(Self::BitVector(bitvec))
             }
+            Value::HexStringLiteral(s) => {
+                Ok(Self::ByteArray(hex::decode(s).map_err(|e| {
+                    failed_err!("Failed to parse hex literal: {e}")
+                })?))
+            }
             _ => failed!("unsupported literal {value:?}"),
         }
     }
