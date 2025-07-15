@@ -277,7 +277,7 @@ impl Seed {
 
         info!("Running original test script");
         self.script
-            .run_on_database(&Default::default(), &mut conn, None)
+            .run_on_database(&Default::default(), &mut conn, None, false)
             .await?;
 
         info!(count = insert_statements.len(), "Running insert statements");

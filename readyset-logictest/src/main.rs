@@ -244,43 +244,58 @@ struct Verify {
     input_opts: InputFileOptions,
 
     /// If passed, connect to and run verification against the database with the given URL, which
-    /// should start with either postgresql:// or mysql://, rather than using noria.
-    #[arg(long)]
+    /// should start with either postgresql:// or mysql://, rather than using an in-process Readyset
+    /// instance.
+    #[arg(long, conflicts_with_all = ["readyset_url", "mysql", "postgresql"])]
     database_url: Option<DatabaseURL>,
 
+    /// If passed, connect to and run verification against the remote Readyset instance.
+    #[arg(long, conflicts_with_all = ["database_url", "mysql", "postgresql"])]
+    readyset_url: Option<DatabaseURL>,
+
     /// Shorthand for `--database-url mysql://root:noria@localhost:3306/sqllogictest`
-    #[arg(long, conflicts_with = "database_url")]
+    #[arg(long, conflicts_with_all = ["database_url", "readyset_url", "postgresql"])]
     mysql: bool,
 
     /// Shorthand for `--database-url postgresql://postgres:noria@localhost:5432/sqllogictest`
-    #[arg(long, conflicts_with = "database_url")]
+    #[arg(long, conflicts_with_all = ["database_url", "readyset_url", "mysql"])]
     postgresql: bool,
 
     /// Enable an upstream database backend for the client, with replication to ReadySet.  All
     /// writes will pass through to the given database and be replicated to ReadySet.
     ///
     /// The value should be a database URL starting with either postgresql:// or mysql://
-    #[arg(long)]
+    ///
+    /// Only relevant for in-process Readyset instance.
+    #[arg(long, conflicts_with_all = ["database_url", "readyset_url", "mysql", "postgresql"])]
     replication_url: Option<String>,
 
+    /// The parsing preset to configure Readyset with if using an in-process instance.
     #[arg(
         long,
         env = "PARSING_PRESET",
         value_enum,
         default_value = "both-prefer-nom",
-        hide = true
+        hide = true,
+        conflicts_with_all = ["database_url", "readyset_url", "mysql", "postgresql"],
     )]
     parsing_preset: ParsingPreset,
 
     /// Type of database to use for the adapter.
     ///
-    /// Ignored if --database-url is passed, must match the database type of --replication-url if
-    /// both are passed
-    #[arg(long, default_value = "mysql", value_enum)]
+    /// Only relevant for in-process Readyset instance; should match --replication-url if present.
+    #[arg(
+        long,
+        default_value = "mysql",
+        value_enum,
+        conflicts_with_all = ["database_url", "readyset_url", "mysql", "postgresql"],
+    )]
     database_type: DatabaseType,
 
-    /// Enable query graph reuse
-    #[arg(long)]
+    /// Enable query graph reuse in Readyset.
+    ///
+    /// Only relevant for in-process Readyset instance.
+    #[arg(long, conflicts_with_all = ["database_url", "readyset_url", "mysql", "postgresql"])]
     enable_reuse: bool,
 
     /// Number of parallel tasks to use to run tests. Ignored if --binlog-mysql is passed
@@ -312,11 +327,25 @@ struct Verify {
     /// authority is "local".
     // TODO(justin): The default address should depend on the authority
     // value.
-    #[arg(long, short = 'z', env = "AUTHORITY_ADDRESS", default_value = "")]
+    ///
+    /// Only relevant for in-process Readyset instance.
+    #[arg(
+        long,
+        short = 'z',
+        env = "AUTHORITY_ADDRESS",
+        default_value = "",
+        conflicts_with_all = ["database_url", "readyset_url", "mysql", "postgresql"],
+    )]
     authority_address: String,
 
     /// The authority to use. Possible values: consul, local.
-    #[arg(long, env = "AUTHORITY", default_value = "local", value_enum)]
+    #[arg(
+        long,
+        env = "AUTHORITY",
+        default_value = "local",
+        value_enum,
+        conflicts_with_all = ["database_url", "readyset_url", "mysql", "postgresql"],
+    )]
     authority: AuthorityType,
 }
 
@@ -394,11 +423,13 @@ lazy_static! {
 }
 
 impl Verify {
-    fn database_url(&self) -> Option<&DatabaseURL> {
+    fn target_database_url(&self) -> Option<&DatabaseURL> {
         if self.mysql {
             Some(&*DEFAULT_MYSQL_URL)
         } else if self.postgresql {
             Some(&*DEFAULT_POSTGRESQL_URL)
+        } else if self.readyset_url.is_some() {
+            self.readyset_url.as_ref()
         } else {
             self.database_url.as_ref()
         }
@@ -549,7 +580,8 @@ impl From<&Verify> for RunOptions {
         Self {
             database_type: verify.database_type,
             enable_reuse: verify.enable_reuse,
-            upstream_database_url: verify.database_url().cloned(),
+            upstream_database_url: verify.target_database_url().cloned(),
+            upstream_database_is_readyset: verify.readyset_url.is_some(),
             parsing_preset: verify.parsing_preset,
             replication_url: verify.replication_url.clone(),
             time: verify.time,
@@ -602,6 +634,11 @@ pub struct Fuzz {
     #[arg(long)]
     compare_to: String,
 
+    /// URL of a remote Readyset to test; if absent, an in-process server and adapter will be
+    /// started for each test.
+    #[arg(long)]
+    readyset_url: Option<String>,
+
     /// Write generated test scripts to this file.
     ///
     /// If not specified, test scripts will be written to a temporary file
@@ -630,12 +667,19 @@ impl Fuzz {
             "logictest-type": "fuzz",
         }));
 
+        let readyset_url = self
+            .readyset_url
+            .as_ref()
+            .map(|url| DatabaseURL::from_str(url).unwrap());
+
         let result = runner.run(&self.test_script_strategy(), move |mut test_script| {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let _guard = rt.enter();
             rt.block_on(test_script.run(
                 RunOptions {
                     database_type: DatabaseURL::from_str(&self.compare_to)?.database_type(),
+                    upstream_database_url: readyset_url.clone(),
+                    upstream_database_is_readyset: readyset_url.is_some(),
                     replication_url: Some(self.compare_to.clone()),
                     parsing_preset: self.parsing_preset,
                     ..Default::default()

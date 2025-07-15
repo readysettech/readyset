@@ -90,6 +90,10 @@ impl Display for TestScript {
 pub struct RunOptions {
     pub database_type: DatabaseType,
     pub upstream_database_url: Option<DatabaseURL>,
+    /// Should be set to true if `upstream_database_url` points to an existing Readyset instance, in
+    /// which case we should not attempt to start a new in-process Readyset instance to test and
+    /// should directly test the existing instance.
+    pub upstream_database_is_readyset: bool,
     pub replication_url: Option<String>,
     pub parsing_preset: ParsingPreset,
     pub enable_reuse: bool,
@@ -101,6 +105,7 @@ impl Default for RunOptions {
     fn default() -> Self {
         Self {
             upstream_database_url: None,
+            upstream_database_is_readyset: false,
             enable_reuse: false,
             time: false,
             replication_url: None,
@@ -209,7 +214,8 @@ impl TestScript {
                 .await
                 .with_context(|| "connecting to upstream database")?;
 
-            self.run_on_database(&opts, &mut conn, None).await?;
+            self.run_on_database(&opts, &mut conn, None, opts.upstream_database_is_readyset)
+                .await?;
         } else {
             if let Some(replication_url) = &opts.replication_url {
                 recreate_test_database(&replication_url.parse()?).await?;
@@ -245,7 +251,7 @@ impl TestScript {
         };
 
         if let Err(e) = self
-            .run_on_database(opts, &mut conn, noria_handle.c.clone())
+            .run_on_database(opts, &mut conn, noria_handle.c.clone(), true)
             .await
         {
             shutdown_tx.shutdown().await;
@@ -301,8 +307,8 @@ impl TestScript {
         opts: &RunOptions,
         conn: &mut DatabaseConnection,
         mut noria: Option<ReadySetHandle>,
+        is_readyset: bool,
     ) -> anyhow::Result<()> {
-        let is_readyset = noria.is_some();
         let conditional_skip = |conditionals: &[Conditional]| {
             conditionals.iter().any(|s| match s {
                 Conditional::SkipIf(c) if c == "readyset" => is_readyset,
