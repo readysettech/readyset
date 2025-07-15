@@ -2622,24 +2622,10 @@ impl SqlToMirConverter {
                     project_order,
                 );
 
-                let order_by = query_graph
-                    .order
-                    .as_ref()
-                    .map(|order| order.iter().map(|(c, ot)| (Column::from(c), *ot)).collect());
+                let are_repeat_reads_required =
+                    query_graph.collapsed_where_in || view_key.index_type == IndexType::BTreeMap;
 
-                let mut limit = query_graph.pagination.as_ref().map(|p| p.limit);
-                let offset = query_graph.pagination.as_ref().and_then(|p| p.offset);
-                let is_topk_query = order_by.is_some() && limit.is_some() && offset.is_none();
-                let is_range_query = view_key.index_type == IndexType::BTreeMap;
-
-                let are_post_lookups_required = query_graph.collapsed_where_in
-                    // should never find a topk query if topk feature is disabled
-                    // because the adapter checks the topk feature and appropriates the limit
-                    // if it's disabled
-                    || (is_topk_query && !self.config.allow_topk)
-                    || is_range_query;
-
-                let mut post_lookup_aggregates = if are_post_lookups_required {
+                let post_lookup_aggregates = if are_repeat_reads_required {
                     // When a query contains WHERE col IN (?, ?, ...), it gets rewritten
                     // (or collapsed) to WHERE col = ? during SQL parsing, with the
                     // collapsed_where_in flag set to indicate this transformation.
@@ -2659,40 +2645,39 @@ impl SqlToMirConverter {
                     //
                     // Note: Post-lookup operations have performance overhead, so they're gated behind
                     // the allow_post_lookup config flag.
-                    if self.config.allow_post_lookup {
-                        post_lookup_aggregates(query_graph, query_name)?
-                    } else {
-                        unsupported!(
-                            "Queries which perform operations post-lookup are not supported"
-                        );
+                    match post_lookup_aggregates(query_graph, query_name)? {
+                        Some(agg) if self.config.allow_post_lookup => Some(agg),
+                        Some(_) => {
+                            unsupported!(
+                                "Queries which perform operations post-lookup are not supported"
+                            );
+                        }
+                        // repeat reads with no aggregates, no problem
+                        None => None,
                     }
                 } else {
                     None
                 };
 
+                let order_by = query_graph
+                    .order
+                    .as_ref()
+                    .map(|order| order.iter().map(|(c, ot)| (Column::from(c), *ot)).collect());
+                let mut limit = query_graph.pagination.as_ref().map(|p| p.limit);
+                let offset = query_graph.pagination.as_ref().and_then(|p| p.offset);
+                let is_topk_query = order_by.is_some() && limit.is_some() && offset.is_none();
+
                 // If the query is a topk query, and the user has opted in to using
-                // topk feature, remove the limit, order by and agg from the post-lookup
-                // operations UNLESS the original query had a WHERE IN. In that case,
-                // post-lookups are required for correctness.
-                if self.config.allow_topk && is_topk_query && !are_post_lookups_required {
+                // topk feature, remove the limit from the post-lookup as TopK node
+                // will handle it UNLESS the original query requires repeated reads.
+                // In that case, limit is required for correctness.
+                if self.config.allow_topk && is_topk_query && !are_repeat_reads_required {
                     limit = None;
-                    post_lookup_aggregates = None;
                     // TODO: even though we are doing topk, we still need the reader
                     // to order stuff. Becuase TopK communictes the diff,
                     // and the reader keeps the values in ASC order if ORDER BY
                     // is not specified. Please refer to [reader_map::Values] struct.
                     // order_by = None;
-                }
-
-                // order_by is required by almost all queries. Only complain if it does
-                // aggregations as well.
-                // If a query contains just a limit without an order by, the adapter will
-                // automatically remove the limit and keep it for itself, so the server won't have
-                // to worry about it.
-                if !self.config.allow_post_lookup
-                    && ((post_lookup_aggregates.is_some() && order_by.is_some()) || limit.is_some())
-                {
-                    unsupported!("Queries which perform operations post-lookup are not supported");
                 }
 
                 self.add_query_node(
@@ -2768,14 +2753,14 @@ impl SqlToMirConverter {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::{
-        controller::sql::mir::SqlToMirConverter,
-        sql::mir::{Config, LeafBehavior},
-    };
+    use crate::controller::sql::mir::SqlToMirConverter;
+    use crate::sql::mir::{Config, LeafBehavior};
     use mir::node::MirNodeInner;
     use mir::NodeIndex;
     use readyset_errors::ReadySetResult;
-    use readyset_sql::ast::{Column, ColumnSpecification, Relation, SelectMetadata, SqlType};
+    use readyset_sql::ast::{
+        Column, ColumnSpecification, Relation, SelectMetadata, SqlType, TableKey,
+    };
 
     use crate::controller::sql::query_graph::to_query_graph;
     use readyset_sql_parsing::parse_select;
@@ -2783,6 +2768,9 @@ mod tests {
     fn sql_to_mir_test(
         name: &str,
         qg: crate::sql::query_graph::QueryGraph,
+        table_name: &str,
+        columns: &[ColumnSpecification],
+        keys: Option<&Vec<TableKey>>,
     ) -> ReadySetResult<(SqlToMirConverter, NodeIndex)> {
         let mut converter = SqlToMirConverter::default();
         converter.set_config(Config {
@@ -2791,33 +2779,7 @@ mod tests {
             ..Default::default()
         });
 
-        let _ = converter.make_base_node(
-            &Relation::from("topk_test"),
-            &[
-                ColumnSpecification {
-                    column: Column::from("topk_test.a"),
-                    sql_type: SqlType::Int(None),
-                    generated: None,
-                    constraints: vec![],
-                    comment: None,
-                },
-                ColumnSpecification {
-                    column: Column::from("topk_test.b"),
-                    sql_type: SqlType::Int(None),
-                    generated: None,
-                    constraints: vec![],
-                    comment: None,
-                },
-                ColumnSpecification {
-                    column: Column::from("topk_test.c"),
-                    sql_type: SqlType::Int(None),
-                    generated: None,
-                    constraints: vec![],
-                    comment: None,
-                },
-            ],
-            None,
-        )?;
+        let _ = converter.make_base_node(&Relation::from(table_name), columns, keys)?;
 
         let node = converter.named_query_to_mir(
             &Relation::from(name),
@@ -2851,8 +2813,35 @@ mod tests {
                     query.metadata.push(SelectMetadata::CollapsedWhereIn);
                 }
 
+                let table_name = "topk_test";
+
+                let columns = &[
+                    ColumnSpecification {
+                        column: Column::from("topk_test.a"),
+                        sql_type: SqlType::Int(None),
+                        generated: None,
+                        constraints: vec![],
+                        comment: None,
+                    },
+                    ColumnSpecification {
+                        column: Column::from("topk_test.b"),
+                        sql_type: SqlType::Int(None),
+                        generated: None,
+                        constraints: vec![],
+                        comment: None,
+                    },
+                    ColumnSpecification {
+                        column: Column::from("topk_test.c"),
+                        sql_type: SqlType::Int(None),
+                        generated: None,
+                        constraints: vec![],
+                        comment: None,
+                    },
+                ];
+
                 let qg = to_query_graph(query).unwrap();
-                let (mut converter, node) = sql_to_mir_test($query_name, qg)?;
+                let (mut converter, node) =
+                    sql_to_mir_test($query_name, qg, table_name, columns, None)?;
                 let query = converter.make_mir_query($query_name.into(), node);
 
                 // Check leaf node properties
@@ -2994,5 +2983,146 @@ mod tests {
             limit: true
         },
         expect_topk_node: true
+    }
+
+    macro_rules! test_mir_with_config {
+        (
+            name: $test_name:ident,
+            query: $query_str:literal,
+            collapsed_where_in: $collapsed:expr,
+            config: $config:expr,
+            expect_success: $expect_success:expr
+        ) => {
+            #[test]
+            fn $test_name() {
+                let mut query =
+                    parse_select(readyset_sql::Dialect::PostgreSQL, $query_str).unwrap();
+
+                if $collapsed {
+                    query.metadata.push(SelectMetadata::CollapsedWhereIn);
+                }
+
+                let qg = to_query_graph(query).unwrap();
+
+                let table_name = "test_table";
+                let columns = &[
+                    ColumnSpecification {
+                        column: Column::from("test_table.a"),
+                        sql_type: SqlType::Int(None),
+                        generated: None,
+                        constraints: vec![],
+                        comment: None,
+                    },
+                    ColumnSpecification {
+                        column: Column::from("test_table.b"),
+                        sql_type: SqlType::Int(None),
+                        generated: None,
+                        constraints: vec![],
+                        comment: None,
+                    },
+                    ColumnSpecification {
+                        column: Column::from("test_table.c"),
+                        sql_type: SqlType::Int(None),
+                        generated: None,
+                        constraints: vec![],
+                        comment: None,
+                    },
+                ];
+
+                let mut converter = SqlToMirConverter::default();
+                converter.set_config($config);
+                let result = converter
+                    .make_base_node(&table_name.into(), columns, None)
+                    .and_then(|_| {
+                        converter.named_query_to_mir(
+                            &"q1".into(),
+                            &qg,
+                            &HashMap::new(),
+                            LeafBehavior::Leaf,
+                        )
+                    });
+                if $expect_success {
+                    assert!(
+                        result.is_ok(),
+                        "Expected MIR lowering to succeed, but it failed: {:?}",
+                        result.err()
+                    );
+                } else {
+                    assert!(
+                        result.is_err(),
+                        "Expected MIR lowering to fail, but it succeeded"
+                    );
+                }
+            }
+        };
+    }
+
+    test_mir_with_config! {
+        name: where_in_without_post_lookup,
+        query: "SELECT a FROM test_table WHERE b = 5",
+        collapsed_where_in: true,
+        config: Config::default(),
+        expect_success: true
+    }
+
+    test_mir_with_config! {
+        name: range_queries_without_post_lookup,
+        query: "SELECT a FROM test_table WHERE test_table.b > $1",
+        collapsed_where_in: false,
+        config: Config::default(),
+        expect_success: true
+    }
+
+    test_mir_with_config! {
+        name: agg_with_range_queries,
+        query: "SELECT a FROM test_table WHERE test_table.b >= $1 ORDER BY a LIMIT 10",
+        collapsed_where_in: false,
+        config: Config {
+            allow_topk: true,
+            ..Default::default()
+        },
+        expect_success: true
+    }
+
+    test_mir_with_config! {
+        name: range_queries_with_agg,
+        query: "SELECT sum(test_table.a) FROM test_table WHERE test_table.b <= $1",
+        collapsed_where_in: false,
+        config: Config {
+            allow_post_lookup: true,
+            ..Default::default()
+        },
+        expect_success: true
+    }
+
+    test_mir_with_config! {
+        name: order_by_without_post_lookup,
+        query: "SELECT a FROM test_table WHERE test_table.b < $1 ORDER BY a",
+        collapsed_where_in: false,
+        config: Config::default(),
+        expect_success: true
+    }
+
+    test_mir_with_config! {
+        name: topk_with_repeated_reads,
+        query: "SELECT a FROM test_table WHERE b = 5 ORDER BY a LIMIT 10",
+        collapsed_where_in: true,
+        config: Config {
+            allow_topk: true,
+            ..Default::default()
+        },
+        expect_success: true
+    }
+
+    test_mir_with_config! {
+        name: aggs_with_topk,
+        query: "SELECT sum(a) FROM test_table WHERE b = 5 ORDER BY a LIMIT 10",
+        collapsed_where_in: true,
+        config: Config {
+            allow_topk: true,
+            ..Default::default()
+        },
+        // post-lookups not enabled
+        expect_success: false
     }
 }
