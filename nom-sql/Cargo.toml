@@ -42,7 +42,7 @@ harness = false
 
 [features]
 debug = []
-failure_injection = ["fail/failpoints"]
+failure_injection = ["fail/failpoints", "readyset-util/failure_injection"]
 
 [lints]
 workspace = true
