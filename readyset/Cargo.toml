@@ -73,10 +73,11 @@ failure_injection = [
     "readyset-util/failure_injection",
 ]
 
+# see https://github.com/cat-in-136/cargo-generate-rpm
 [package.metadata.generate-rpm]
 assets = [
     { source = "target/release/readyset", dest = "/usr/bin/readyset", mode = "755" },
-    { source = "pkg/common/readyset.conf", dest = "/etc/readyset/readyset.conf", mode = "600", config = true },
+    { source = "pkg/common/readyset.conf", dest = "/etc/readyset/readyset.conf", mode = "600", config = "noreplace" },
     { source = "pkg/common/readyset.service", dest = "/lib/systemd/system/readyset.service", mode = "644" },
 ]
 # These get set using cargo-generate-rpm --metadata-overwrite=<SCRIPTLETS.TOML> at package build time.
@@ -85,6 +86,7 @@ assets = [
 #post_uninstall_script = ...
 
 
+# see https://github.com/kornelski/cargo-deb
 [package.metadata.deb]
 maintainer = "Readyset Technology <info@readyset.io>"
 copyright = "2024, Readyset Technology, Inc."
