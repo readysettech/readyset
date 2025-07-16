@@ -69,23 +69,17 @@ macro_rules! test_format_parse_round_trip {
             // Display level.
             // For example, a Numeric(1) could be displayed as `1` and then parsed as an Integer
             let parsed = $parser($dialect)(LocatedSpan::new(displayed.as_bytes()));
-            if parsed.is_err() {
-                println!("{}", displayed);
-                println!("{:?}", &s);
-            }
             let (_, parsed) = parsed.unwrap();
             let displayed = parsed.display($dialect).to_string();
             let round_trip = $parser($dialect)(LocatedSpan::new(displayed.as_bytes()));
-            if round_trip.is_err() {
-                println!("{}", displayed);
-                println!("{:?}", &s);
-            }
 
-            let (_, round_trip) = round_trip.unwrap();
-            if round_trip != parsed {
-                println!("{}", displayed);
-            }
-            assert_eq!(round_trip, parsed);
+            let (_, round_trip) = round_trip
+                .expect(&format!("Round trip parsing failed for displayed sql: {displayed:?}; value: {s:?}"));
+            assert_eq!(
+                round_trip,
+                parsed,
+                "Round trip parsing didn't match input for displayed sql: {displayed:?}; value: {s:?}"
+            );
         }
     };
 }
