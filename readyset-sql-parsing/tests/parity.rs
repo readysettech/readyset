@@ -794,3 +794,8 @@ fn regression_numeric_with_no_leading_digit() {
     check_parse_both!("SELECT -0");
     check_parse_both!("SELECT -.0");
 }
+
+#[test]
+fn show_connections() {
+    check_parse_both!("SHOW CONNECTIONS");
+}
