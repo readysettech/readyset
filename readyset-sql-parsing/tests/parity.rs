@@ -52,37 +52,37 @@ macro_rules! check_parse_fails {
 }
 
 #[test]
-fn test_select_query_parsing() {
+fn select_query_parsing() {
     let sql = "SELECT * FROM users WHERE age > 18;";
     check_parse_both!(sql);
 }
 
 #[test]
-fn test_insert_query_parsing() {
+fn insert_query_parsing() {
     let sql = "INSERT INTO users (name, email) VALUES ('John', 'john@example.com');";
     check_parse_both!(sql);
 }
 
 #[test]
-fn test_update_query_parsing() {
+fn update_query_parsing() {
     let sql = "UPDATE users SET status = 'active' WHERE id = 123;";
     check_parse_both!(sql);
 }
 
 #[test]
-fn test_delete_query_parsing() {
+fn delete_query_parsing() {
     let sql = "DELETE FROM users WHERE last_login < '2023-01-01';";
     check_parse_both!(sql);
 }
 
 #[test]
-fn test_create_table_parsing() {
+fn create_table_parsing() {
     let sql = "CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, price REAL);";
     check_parse_both!(sql);
 }
 
 #[test]
-fn test_complex_join_parsing() {
+fn complex_join_parsing() {
     let sql = "
             SELECT u.name, o.order_date
             FROM users u
@@ -94,7 +94,7 @@ fn test_complex_join_parsing() {
 }
 
 #[test]
-fn test_cast_with_mysql_integer_types() {
+fn cast_with_mysql_integer_types() {
     check_parse_mysql!("SELECT CAST(123 AS SIGNED);");
     check_parse_mysql!("SELECT CAST(123 AS SIGNED INTEGER);");
     check_parse_mysql!("SELECT CAST(123 AS UNSIGNED);");
@@ -102,19 +102,19 @@ fn test_cast_with_mysql_integer_types() {
 }
 
 #[test]
-fn test_cast_with_float_types() {
+fn cast_with_float_types() {
     let sql = "SELECT CAST(123.45 AS FLOAT);";
     check_parse_both!(sql);
 }
 
 #[test]
-fn test_cast_with_double_types() {
+fn cast_with_double_types() {
     let sql = "SELECT CAST(123.45 AS DOUBLE);";
     check_parse_both!(sql);
 }
 
 #[test]
-fn test_union() {
+fn union() {
     check_parse_both!("SELECT a FROM b UNION SELECT c FROM d;");
     check_parse_both!("SELECT a FROM b UNION DISTINCT SELECT c FROM d;");
     check_parse_both!("SELECT a FROM b UNION ALL SELECT c FROM d;");
@@ -124,7 +124,7 @@ fn test_union() {
 }
 
 #[test]
-fn test_union_with_limit_offset_precedence() {
+fn union_with_limit_offset_precedence() {
     check_parse_both!("SELECT a FROM b UNION SELECT c FROM d LIMIT 1 OFFSET 1;");
     check_parse_both!("SELECT a FROM b UNION (SELECT c FROM d LIMIT 1 OFFSET 1);");
 }
@@ -143,7 +143,7 @@ fn check_mysql_variable_scope(sql: &str, expected_scopes: &[VariableScope]) {
 }
 
 #[test]
-fn test_mysql_variable_scope() {
+fn mysql_variable_scope() {
     check_mysql_variable_scope("SET var = 1;", &[VariableScope::Local]);
     check_mysql_variable_scope("SET @var = 1;", &[VariableScope::User]);
     check_mysql_variable_scope("SET @@var = 1;", &[VariableScope::Session]);
@@ -156,7 +156,7 @@ fn test_mysql_variable_scope() {
 }
 
 #[test]
-fn test_mysql_multiple_variables() {
+fn mysql_multiple_variables() {
     let sql = "SET @var1 = 1, @@global.var2 = 2, @@session.var3 = 3, @@local.var4 = 4, LOCAL var5 = 5, SESSION var6 = 6, GLOBAL var7 = 7;";
     let expected_scopes = vec![
         VariableScope::User,
@@ -180,7 +180,7 @@ fn check_postgres_variable_scope(sql: &str, expected_scope: Option<PostgresParam
 }
 
 #[test]
-fn test_postgres_variable_scope() {
+fn postgres_variable_scope() {
     check_postgres_variable_scope("SET var = 1;", None);
     check_postgres_variable_scope("SET LOCAL var = 1;", Some(PostgresParameterScope::Local));
     check_postgres_variable_scope(
@@ -190,7 +190,7 @@ fn test_postgres_variable_scope() {
 }
 
 #[test]
-fn test_on_update_current_timestamp() {
+fn on_update_current_timestamp() {
     check_parse_mysql!(
         r#"CREATE TABLE users (
             id INTEGER PRIMARY KEY AUTO_INCREMENT,
@@ -201,7 +201,7 @@ fn test_on_update_current_timestamp() {
 }
 
 #[test]
-fn test_deallocate() {
+fn deallocate() {
     check_parse_both!("DEALLOCATE pdo_stmt_00000001;");
     check_parse_mysql!("DEALLOCATE `pdo_stmt_00000001`;");
     check_parse_mysql!("DEALLOCATE PREPARE pdo_stmt_00000001;");
@@ -211,18 +211,18 @@ fn test_deallocate() {
 }
 
 #[test]
-fn test_function_casing() {
+fn function_casing() {
     check_parse_both!("SELECT setval('users_uid_seq', GREATEST(MAX(uid), '1')) FROM users");
 }
 
 #[test]
-fn test_select_limit_without_table() {
+fn select_limit_without_table() {
     check_parse_mysql!("select @@version_comment limit 1");
     check_parse_both!("select now() order by 1 limit 1");
 }
 
 #[test]
-fn test_alter_drop_foreign_key() {
+fn alter_drop_foreign_key() {
     assert_eq!(
         SqlQuery::AlterTable(AlterTableStatement {
             table: readyset_sql::ast::Relation {
@@ -241,23 +241,23 @@ fn test_alter_drop_foreign_key() {
 }
 
 #[test]
-fn test_set_names() {
+fn set_names() {
     check_parse_mysql!("SET NAMES 'utf8mb4' COLLATE 'utf8_general_ci'");
     check_parse_postgres!("SET NAMES 'UTF8'");
 }
 
 #[test]
-fn test_set_names_default() {
+fn set_names_default() {
     check_parse_both!("SET NAMES DEFAULT");
 }
 
 #[test]
-fn test_set_names_unquoted() {
+fn set_names_unquoted() {
     check_parse_mysql!("SET NAMES utf8mb4 COLLATE utf8_general_ci");
 }
 
 #[test]
-fn test_limit_offset() {
+fn limit_offset() {
     check_parse_both!("select * from users limit 10");
     check_parse_both!("select * from users limit 10 offset 10");
     check_parse_mysql!("select * from users limit 5, 10");
@@ -266,14 +266,14 @@ fn test_limit_offset() {
 
 #[test]
 #[ignore = "sqlparser-rs ignores explicit LIMIT ALL"]
-fn test_postgres_limit_all() {
+fn postgres_limit_all() {
     check_parse_postgres!("select * from users limit all");
     check_parse_postgres!("select * from users limit all offset 10");
     check_parse_postgres!("select * from users limit all");
 }
 
 #[test]
-fn test_limit_offset_placeholders() {
+fn limit_offset_placeholders() {
     check_parse_mysql!("select * from users limit 10 offset ?");
     check_parse_mysql!("select * from users limit 5, ?");
     check_parse_postgres!("select * from users offset $1");
@@ -281,7 +281,7 @@ fn test_limit_offset_placeholders() {
 }
 
 #[test]
-fn test_limit_offset_placeholders_should_fail() {
+fn limit_offset_placeholders_should_fail() {
     // Should fail, but both nom-sql and sqlparser-rs are apparently pretty permissive and allow
     // dollar and colon placeholders in both MySQL and PostgreSQL:
     check_parse_mysql!("select * from users limit 5, $1");
@@ -297,7 +297,7 @@ fn test_limit_offset_placeholders_should_fail() {
 
 #[test]
 #[should_panic(expected = "Expected: an expression, found: ?")]
-fn test_mysql_placeholders_fail_in_postgres() {
+fn mysql_placeholders_fail_in_postgres() {
     // nom-sql, again being very permissive, supports MySQL-style placeholders in PostgreSQL, but
     // sqlparser-rs does not:
     check_parse_postgres!("select * from users offset ?");
@@ -305,38 +305,38 @@ fn test_mysql_placeholders_fail_in_postgres() {
 
 #[test]
 #[ignore = "REA-5766: sqlparser simply removes `LIMIT ALL`"]
-fn test_limit_all_with_placeholder_offset() {
+fn limit_all_with_placeholder_offset() {
     check_parse_postgres!("SELECT * FROM t WHERE x = $2 OFFSET $1");
     check_parse_postgres!("SELECT * FROM t WHERE x = $2 LIMIT ALL OFFSET $1");
 }
 
 #[test]
-fn test_not_like_expressions() {
+fn not_like_expressions() {
     check_parse_both!("SELECT * FROM t WHERE a NOT LIKE 'foo';");
     check_parse_both!("SELECT * FROM t WHERE a NOT ILIKE 'foo';");
 }
 
 #[test]
-fn test_comment_on_table() {
+fn comment_on_table() {
     check_parse_postgres!(
         r#"COMMENT ON TABLE "config" IS 'The base table for configuration data.'"#
     );
 }
 
 #[test]
-fn test_comment_on_column() {
+fn comment_on_column() {
     check_parse_postgres!(
         r#"COMMENT ON COLUMN "config"."id" IS 'The unique identifier for the configuration.'"#
     );
 }
 
 #[test]
-fn test_convert_mysql_style() {
+fn convert_mysql_style() {
     check_parse_mysql!("SELECT CONVERT('foo', CHAR)");
 }
 
 #[test]
-fn test_convert_with_using() {
+fn convert_with_using() {
     check_parse_fails!(
         Dialect::MySQL,
         "SELECT CONVERT('foo' USING latin1)",
@@ -345,13 +345,13 @@ fn test_convert_with_using() {
 }
 
 #[test]
-fn test_empty_insert() {
+fn empty_insert() {
     // MySQL parses `insert into t () VALUES ...` into `insert into t VALUES ...`
     check_parse_mysql!("INSERT INTO t VALUES ()");
 }
 
 #[test]
-fn test_empty_insert_fails_in_postgres() {
+fn empty_insert_fails_in_postgres() {
     // Invalid postgres syntax, parsed by nom but not by sqlparser
     // Invalid because of empty values list
     check_parse_fails!(
@@ -368,20 +368,20 @@ fn test_empty_insert_fails_in_postgres() {
 }
 
 #[test]
-fn test_column_default_without_parens() {
+fn column_default_without_parens() {
     check_parse_both!(
         "CREATE TABLE IF NOT EXISTS m (version VARCHAR(50) PRIMARY KEY NOT NULL, run_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);"
     );
 }
 
 #[test]
-fn test_op_any_all() {
+fn op_any_all() {
     check_parse_postgres!("SELECT * FROM t WHERE 'abc' NOT ILIKE ANY('{\"aBC\"}')");
     check_parse_postgres!("SELECT * FROM t WHERE 'abc' ILIKE all('{\"aBC\"}')");
 }
 
 #[test]
-fn test_op_any_subquery_unsupported() {
+fn op_any_subquery_unsupported() {
     check_parse_fails!(
         Dialect::PostgreSQL,
         "SELECT * FROM t WHERE a >= ANY(SELECT b FROM t2)",
@@ -390,7 +390,7 @@ fn test_op_any_subquery_unsupported() {
 }
 
 #[test]
-fn test_op_all_subquery_unsupported() {
+fn op_all_subquery_unsupported() {
     check_parse_fails!(
         Dialect::PostgreSQL,
         "SELECT * FROM t WHERE a = ALL(SELECT b FROM t2)",
@@ -399,7 +399,7 @@ fn test_op_all_subquery_unsupported() {
 }
 
 #[test]
-fn test_substring() {
+fn substring() {
     check_parse_both!("SELECT substring('foo', 1, 2) FROM t");
     check_parse_both!("SELECT substr('foo', 1, 2) FROM t");
     check_parse_both!("SELECT substring('foo' FROM 1 FOR 2) FROM t");
@@ -407,7 +407,7 @@ fn test_substring() {
 }
 
 #[test]
-fn test_empty_insert_fields() {
+fn empty_insert_fields() {
     // psql doesn't allow `VALUES ()`
     check_parse_mysql!("INSERT INTO t VALUES ()");
     // psql doesn't allow empty cols list
@@ -419,7 +419,7 @@ fn test_empty_insert_fields() {
 }
 
 #[test]
-fn test_alter_table_rename_col() {
+fn alter_table_rename_col() {
     check_parse_both!("ALTER TABLE t RENAME COLUMN a TO b");
 
     // COLUMN keyword is optional in psql, but required in mysql
@@ -427,7 +427,7 @@ fn test_alter_table_rename_col() {
 }
 
 #[test]
-fn test_unsupported_op() {
+fn unsupported_op() {
     // Even though the operator is not supported, we store the err
     // in the CreateCacheStatement. We error when creating the cache/lowering.
     //
@@ -438,7 +438,7 @@ fn test_unsupported_op() {
 
 #[test]
 /// Invalid postgres syntax, parsed by nom but not by sqlparser
-fn test_empty_insert_fields_fails_in_postgres() {
+fn empty_insert_fields_fails_in_postgres() {
     // Invalid because of empty cols list, accepted by mysql though
     check_parse_fails!(
         Dialect::PostgreSQL,
@@ -448,30 +448,30 @@ fn test_empty_insert_fields_fails_in_postgres() {
 }
 
 #[test]
-fn test_point_columns() {
+fn point_columns() {
     check_parse_mysql!("CREATE TABLE t (p POINT)");
 }
 
 #[test]
-fn test_point_columns_srid() {
+fn point_columns_srid() {
     check_parse_mysql!("CREATE TABLE t (p POINT SRID 4326)");
 }
 
 #[test]
-fn test_column_spec_charset_collation_quotation() {
+fn column_spec_charset_collation_quotation() {
     check_parse_mysql!(
         "CREATE TABLE t (a VARCHAR(10) CHARACTER SET 'utf8mb4' COLLATE 'utf8mb4_unicode_ci')"
     );
 }
 
 #[test]
-fn test_psql_lower_upper_collations() {
+fn psql_lower_upper_collations() {
     check_parse_postgres!(r#"SELECT lower('A' COLLATE "en_US.utf8");"#);
     check_parse_postgres!(r#"SELECT upper('a' COLLATE "en_US.utf8");"#);
 }
 
 #[test]
-fn test_wildcard_various_positions() {
+fn wildcard_various_positions() {
     check_parse_mysql!("SELECT * FROM t WHERE a = ?;");
     check_parse_mysql!("SELECT t.* FROM t WHERE t.id = ?;");
     check_parse_mysql!("SELECT *, id FROM users;");
@@ -480,19 +480,19 @@ fn test_wildcard_various_positions() {
 }
 
 #[test]
-fn test_charset_introducers() {
+fn charset_introducers() {
     check_parse_mysql!("SELECT _utf8'hello';");
     check_parse_mysql!("SELECT _utf8mb4'hello' AS greeting;");
     check_parse_mysql!("SELECT _binary'123';");
 }
 
 #[test]
-fn test_psql_escape_literal() {
+fn psql_escape_literal() {
     check_parse_postgres!("SELECT E'\\n';");
 }
 
 #[test]
-fn test_compound_select_cases() {
+fn compound_select_cases() {
     check_parse_both!(
         "WITH cte1 AS (SELECT id FROM users), cte2 AS (SELECT id FROM admins)
         SELECT * FROM cte1 UNION SELECT * FROM cte2;"
@@ -511,7 +511,7 @@ fn test_compound_select_cases() {
 }
 
 #[test]
-fn test_fk_index_name() {
+fn fk_index_name() {
     check_parse_mysql!(
         r#"CREATE TABLE child_table (
             id INT PRIMARY KEY,
@@ -524,7 +524,7 @@ fn test_fk_index_name() {
 }
 
 #[test]
-fn test_tablekey_key_variant() {
+fn tablekey_key_variant() {
     check_parse_fails!(
         Dialect::MySQL,
         "ALTER TABLE t ADD CONSTRAINT c KEY key_name (t1.c1, t2.c2) USING BTREE",
@@ -554,7 +554,7 @@ fn test_tablekey_key_variant() {
 }
 
 #[test]
-fn test_create_table_with_data_directory_option() {
+fn create_table_with_data_directory_option() {
     check_parse_mysql!(
         r#"CREATE TABLE comments (
             id INT PRIMARY KEY,
@@ -567,7 +567,7 @@ fn test_create_table_with_data_directory_option() {
 }
 
 #[test]
-fn test_create_table_with_charset_option() {
+fn create_table_with_charset_option() {
     check_parse_mysql!(
         r#"CREATE TABLE t (
             id INT PRIMARY KEY
@@ -607,7 +607,7 @@ fn test_create_table_with_charset_option() {
 }
 
 #[test]
-fn test_create_table_with_collate_option() {
+fn create_table_with_collate_option() {
     check_parse_mysql!(
         r#"CREATE TABLE t (
             id INT PRIMARY KEY
@@ -623,12 +623,12 @@ fn test_create_table_with_collate_option() {
 }
 
 #[test]
-fn test_row() {
+fn row() {
     check_parse_both!(r#"SELECT ROW(1, 2, 3);"#);
 }
 
 #[test]
-fn test_explain_materialization() {
+fn explain_materialization() {
     check_parse_both!("EXPLAIN MATERIALIZATIONS");
 }
 
@@ -639,18 +639,18 @@ fn point_types() {
 }
 
 #[test]
-fn test_trailing_semicolons() {
+fn trailing_semicolons() {
     check_parse_both!(r#"SELECT 1;;"#);
 }
 
 #[test]
-fn test_multiple_statements() {
+fn multiple_statements() {
     check_parse_fails!(Dialect::MySQL, r#"SELECT 1; SELECT 2;"#, "EOF");
     check_parse_fails!(Dialect::PostgreSQL, r#"SELECT 1; SELECT 2;"#, "EOF");
 }
 
 #[test]
-fn test_key_part_prefix() {
+fn key_part_prefix() {
     check_parse_mysql!(
         r#"CREATE TABLE comments (
             id INT,
@@ -669,7 +669,7 @@ fn test_key_part_prefix() {
 }
 
 #[test]
-fn test_key_part_expression() {
+fn key_part_expression() {
     check_parse_fails!(
         Dialect::MySQL,
         r#"CREATE TABLE blobs (
@@ -702,7 +702,7 @@ fn test_key_part_expression() {
 }
 
 #[test]
-fn test_create_cache() {
+fn create_cache() {
     check_parse_mysql!("CREATE CACHE FROM SELECT * FROM users WHERE id = ?");
     check_parse_both!("CREATE CACHE FROM SELECT * FROM users WHERE id = $1");
     check_parse_both!("CREATE CACHE ALWAYS FROM SELECT * FROM users WHERE id = $1");
@@ -713,7 +713,7 @@ fn test_create_cache() {
 }
 
 #[test]
-fn test_explain_create_cache() {
+fn explain_create_cache() {
     check_parse_mysql!("EXPLAIN CREATE CACHE FROM SELECT * FROM users WHERE id = ?");
     check_parse_mysql!("EXPLAIN\nCREATE CACHE FROM SELECT * FROM users WHERE id = ?");
     check_parse_both!("EXPLAIN CREATE CACHE FROM SELECT * FROM users WHERE id = $1");
@@ -724,7 +724,7 @@ fn test_explain_create_cache() {
 
 #[test]
 #[ignore = "nom-sql doesn't support these options"]
-fn test_explain_create_cache_options() {
+fn explain_create_cache_options() {
     check_parse_both!("EXPLAIN CREATE CACHE ALWAYS FROM SELECT * FROM users WHERE id = $1");
     check_parse_both!(
         "EXPLAIN CREATE CACHE CONCURRENTLY ALWAYS FROM SELECT * FROM users WHERE id = $1"
@@ -738,7 +738,7 @@ fn test_explain_create_cache_options() {
 }
 
 #[test]
-fn test_is_or_is_not_true_or_false() {
+fn is_or_is_not_true_or_false() {
     check_parse_both!("SELECT * FROM users WHERE active IS FALSE");
     check_parse_both!("SELECT * FROM users WHERE active IS NOT FALSE");
     check_parse_both!("SELECT * FROM users WHERE active IS TRUE");
@@ -746,7 +746,7 @@ fn test_is_or_is_not_true_or_false() {
 }
 
 #[test]
-fn test_show_proxied_queries() {
+fn show_proxied_queries() {
     check_parse_both!("SHOW PROXIED QUERIES");
     check_parse_both!("SHOW PROXIED QUERIES LIMIT 10");
     check_parse_both!("SHOW PROXIED SUPPORTED QUERIES");
@@ -756,13 +756,13 @@ fn test_show_proxied_queries() {
 }
 
 #[test]
-fn test_show_caches() {
+fn show_caches() {
     check_parse_both!("SHOW CACHES");
     check_parse_both!("SHOW CACHES WHERE query_id = 'q_29697d90bc73217f'");
 }
 
 #[test]
-fn test_hex_string_literal() {
+fn hex_string_literal() {
     check_parse_both!("SELECT * FROM users WHERE id = X'abcd1234'");
 }
 
