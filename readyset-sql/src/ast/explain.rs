@@ -122,7 +122,7 @@ impl DialectDisplay for ExplainStatement {
                 ExplainStatement::Caches => write!(f, "CACHES;"),
                 ExplainStatement::Materializations => write!(f, "MATERIALIZATIONS;"),
                 ExplainStatement::CreateCache { inner, .. } => {
-                    write!(f, "EXPLAIN CREATE CACHE FROM ")?;
+                    write!(f, "CREATE CACHE FROM ")?;
 
                     match inner {
                         Ok(inner) => write!(f, "{}", inner.display(dialect)),
