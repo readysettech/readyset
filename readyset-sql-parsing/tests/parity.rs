@@ -4,14 +4,14 @@
 //! tests of actual relevant cache functionality.
 
 use readyset_sql::{
+    Dialect, DialectDisplay,
     ast::{
         AlterTableDefinition, AlterTableStatement, Expr, FieldDefinitionExpr, Literal,
         PostgresParameterScope, SelectStatement, SetPostgresParameter, SetStatement, SetVariables,
         SqlIdentifier, SqlQuery, VariableScope,
     },
-    Dialect, DialectDisplay,
 };
-use readyset_sql_parsing::{parse_query_with_config, ParsingPreset};
+use readyset_sql_parsing::{ParsingPreset, parse_query_with_config};
 
 macro_rules! check_parse_mysql {
     ($sql:expr) => {
@@ -498,7 +498,9 @@ fn compound_select_cases() {
         SELECT * FROM cte1 UNION SELECT * FROM cte2;"
     );
     check_parse_both!("SELECT id FROM users UNION SELECT id FROM admins;");
-    check_parse_both!("SELECT name FROM employees UNION ALL SELECT name FROM contractors ORDER BY name LIMIT 5 OFFSET 2;");
+    check_parse_both!(
+        "SELECT name FROM employees UNION ALL SELECT name FROM contractors ORDER BY name LIMIT 5 OFFSET 2;"
+    );
     check_parse_both!("SELECT 1 EXCEPT SELECT 2 LIMIT 1;");
     check_parse_both!(
         "WITH cte AS (SELECT id FROM users) SELECT id FROM cte UNION SELECT id FROM admins;"

@@ -3,7 +3,7 @@ use std::ops::Deref;
 
 use itertools::Itertools;
 use proptest::{
-    prelude::{any_with, Arbitrary, BoxedStrategy, Strategy},
+    prelude::{Arbitrary, BoxedStrategy, Strategy, any_with},
     sample::SizeRange,
 };
 use readyset_util::fmt::fmt_with;
@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use triomphe::ThinArc;
 
 use crate::{
-    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
-    TryIntoDialect,
+    AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, TryIntoDialect,
+    ast::*,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -411,9 +411,9 @@ impl Arbitrary for SqlType {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        use SqlType::*;
         use proptest::option;
         use proptest::prelude::*;
-        use SqlType::*;
 
         let precision_range = match args.dialect {
             Some(Dialect::PostgreSQL) => 1..=1000u16,

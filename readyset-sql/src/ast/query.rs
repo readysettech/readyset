@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::{
-    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
-    TryIntoDialect,
+    AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, TryIntoDialect,
+    ast::*,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]

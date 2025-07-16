@@ -5,7 +5,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{AstConversionError, Dialect, DialectDisplay, ast::*};
 
 /// Type of index hint.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]

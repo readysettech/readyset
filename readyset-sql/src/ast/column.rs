@@ -7,8 +7,8 @@ use sqlparser::ast::ObjectName;
 use test_strategy::Arbitrary;
 
 use crate::{
-    ast::*, AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
-    TryIntoDialect,
+    AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
+    TryIntoDialect, ast::*,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
@@ -345,7 +345,7 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
                             let arg = match args {
                                 FunctionArguments::None => None,
                                 FunctionArguments::Subquery(_query) => {
-                                    return failed!("subquery argument to CURRENT_TIMESTAMP")
+                                    return failed!("subquery argument to CURRENT_TIMESTAMP");
                                 }
                                 FunctionArguments::List(FunctionArgumentList { args, .. }) => {
                                     match args.into_iter().exactly_one().map_err(|_| {
@@ -444,7 +444,7 @@ impl ColumnSpecification {
 
     pub fn has_default(&self) -> Option<&Literal> {
         self.constraints.iter().find_map(|c| match c {
-            ColumnConstraint::DefaultValue(Expr::Literal(ref l)) => Some(l),
+            ColumnConstraint::DefaultValue(Expr::Literal(l)) => Some(l),
             _ => None,
         })
     }
@@ -463,7 +463,7 @@ impl ColumnSpecification {
             return None;
         }
         self.constraints.iter().find_map(|c| match c {
-            ColumnConstraint::CharacterSet(ref charset) => Some(charset.as_str()),
+            ColumnConstraint::CharacterSet(charset) => Some(charset.as_str()),
             _ => None,
         })
     }
@@ -475,14 +475,14 @@ impl ColumnSpecification {
             return None;
         }
         self.constraints.iter().find_map(|c| match c {
-            ColumnConstraint::Collation(ref collation) => Some(collation.as_str()),
+            ColumnConstraint::Collation(collation) => Some(collation.as_str()),
             _ => None,
         })
     }
 
     pub fn get_default_value(&self) -> Option<&Literal> {
         self.constraints.iter().find_map(|c| match c {
-            ColumnConstraint::DefaultValue(Expr::Literal(ref l)) => Some(l),
+            ColumnConstraint::DefaultValue(Expr::Literal(l)) => Some(l),
             _ => None,
         })
     }

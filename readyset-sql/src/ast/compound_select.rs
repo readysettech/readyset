@@ -4,7 +4,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
+use crate::{AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect, ast::*};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize, Arbitrary)]
 pub enum CompoundSelectOperator {
@@ -106,7 +106,7 @@ fn flatten_set_expr(
             let mut right_vec = flatten_set_expr(right, dialect)?;
 
             // The right part gets the operator in nom-sql
-            if let Some((ref mut right_op @ None, _stmt)) = right_vec.first_mut() {
+            if let Some((right_op @ None, _stmt)) = right_vec.first_mut() {
                 right_op.replace((op, set_quantifier).try_into()?);
             }
 

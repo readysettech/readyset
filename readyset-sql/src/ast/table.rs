@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::{
-    ast::*, AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
-    TryIntoDialect,
+    AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
+    TryIntoDialect, ast::*,
 };
 
 /// A (potentially schema-qualified) name for a relation
@@ -73,16 +73,15 @@ impl FromDialect<sqlparser::ast::ObjectName> for Relation {
             .into_iter()
             .map(|ObjectNamePart::Identifier(ident)| ident.into_dialect(dialect));
         let first = identifiers.next().unwrap_or_default();
-        if let Some(second) = identifiers.next() {
-            Self {
+        match identifiers.next() {
+            Some(second) => Self {
                 name: second,
                 schema: Some(first),
-            }
-        } else {
-            Self {
+            },
+            _ => Self {
                 name: first,
                 schema: None,
-            }
+            },
         }
     }
 }
@@ -213,15 +212,16 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
                 alias,
                 lateral: _lateral, // XXX We don't support this
             } => {
-                if let crate::ast::SqlQuery::Select(subselect) =
-                    subquery.try_into_dialect(dialect)?
-                {
-                    Ok(Self {
-                        inner: TableExprInner::Subquery(Box::new(subselect)),
-                        alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)), // XXX we don't support [`TableAlias::columns`]
-                    })
-                } else {
-                    failed!("unexpected non-SELECT subquery in table expression")
+                match subquery.try_into_dialect(dialect)? {
+                    crate::ast::SqlQuery::Select(subselect) => {
+                        Ok(Self {
+                            inner: TableExprInner::Subquery(Box::new(subselect)),
+                            alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)), // XXX we don't support [`TableAlias::columns`]
+                        })
+                    }
+                    _ => {
+                        failed!("unexpected non-SELECT subquery in table expression")
+                    }
                 }
             }
             _ => unsupported!("table expression {value:?}"),

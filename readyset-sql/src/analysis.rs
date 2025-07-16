@@ -516,10 +516,12 @@ mod tests {
 
         #[test]
         fn literal() {
-            assert!(LitExpr(Literal::Integer(1))
-                .referred_columns()
-                .next()
-                .is_none());
+            assert!(
+                LitExpr(Literal::Integer(1))
+                    .referred_columns()
+                    .next()
+                    .is_none()
+            );
         }
 
         #[test]

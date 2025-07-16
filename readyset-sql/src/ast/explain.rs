@@ -7,7 +7,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, Dialect, DialectDisplay};
+use crate::{Dialect, DialectDisplay, ast::*};
 
 /// EXPLAIN statements
 ///

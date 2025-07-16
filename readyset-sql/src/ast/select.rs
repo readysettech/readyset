@@ -9,8 +9,8 @@ use test_strategy::Arbitrary;
 
 use crate::dialect_display::CommaSeparatedList;
 use crate::{
-    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
-    TryIntoDialect,
+    AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, TryIntoDialect,
+    ast::*,
 };
 
 #[derive(
@@ -218,8 +218,8 @@ impl Arbitrary for LimitClause {
     type Strategy = BoxedStrategy<LimitClause>;
 
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
         use LimitClause::*;
+        use proptest::prelude::*;
 
         match args.dialect {
             Some(Dialect::PostgreSQL) => {

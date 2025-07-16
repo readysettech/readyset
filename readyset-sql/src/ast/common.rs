@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::{
-    ast::*, AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
-    TryIntoDialect,
+    AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
+    TryIntoDialect, ast::*,
 };
 
 /// TODO(mvzink): Could be deleted in favor of directly using [`sqlparser::ast::IndexType`]

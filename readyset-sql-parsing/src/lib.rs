@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::num::ParseIntError;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::ValueEnum;
@@ -523,7 +523,7 @@ fn parse_explain(
                             .unparsed_create_cache_statement
                             .unwrap_or_default(),
                     },
-                ))
+                ));
             }
             _ => Err(ReadysetParsingError::ReadysetParsingError(
                 "unexpected statement after CREATE CACHE".into(),
@@ -848,12 +848,12 @@ where
             (Ok(nom_ast), Ok(sqlparser_ast)) if nom_ast != sqlparser_ast => {
                 if config.panic_on_mismatch {
                     panic!(
-                            "nom-sql AST differs from sqlparser-rs AST for {} input: {:?}\nnom: {:?}\nsqlparser: {:?}",
-                            dialect,
-                            input.as_ref(),
-                            nom_ast,
-                            sqlparser_ast
-                        );
+                        "nom-sql AST differs from sqlparser-rs AST for {} input: {:?}\nnom: {:?}\nsqlparser: {:?}",
+                        dialect,
+                        input.as_ref(),
+                        nom_ast,
+                        sqlparser_ast
+                    );
                 }
                 if config.log_on_mismatch
                     && (!config.log_only_selects
@@ -894,11 +894,11 @@ where
                 ) {
                     if config.panic_on_mismatch {
                         panic!(
-                                "nom-sql succeeded but sqlparser-rs failed: {}\ninput: {}\nnom_ast: {:?}",
-                                sqlparser_error,
-                                input.as_ref(),
-                                nom_ast
-                            );
+                            "nom-sql succeeded but sqlparser-rs failed: {}\ninput: {}\nnom_ast: {:?}",
+                            sqlparser_error,
+                            input.as_ref(),
+                            nom_ast
+                        );
                     }
                     if config.log_on_mismatch
                         && (!config.log_only_selects || is_not_query_or_should_log(&nom_ast))

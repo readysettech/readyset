@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::{
-    ast::*, AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect,
-    TryIntoDialect,
+    AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, TryIntoDialect,
+    ast::*,
 };
 
 /// Function call expressions
@@ -194,9 +194,11 @@ impl FunctionExpr {
             FunctionExpr::CountStar => concrete_iter!(iter::empty()),
             FunctionExpr::Call { arguments, .. } => concrete_iter!(arguments),
             FunctionExpr::Substring { string, pos, len } => {
-                concrete_iter!(iter::once(string.as_ref())
-                    .chain(pos.iter().map(|p| p.as_ref()))
-                    .chain(len.iter().map(|p| p.as_ref())))
+                concrete_iter!(
+                    iter::once(string.as_ref())
+                        .chain(pos.iter().map(|p| p.as_ref()))
+                        .chain(len.iter().map(|p| p.as_ref()))
+                )
             }
         }
     }

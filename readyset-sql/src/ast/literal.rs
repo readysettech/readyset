@@ -15,7 +15,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay};
+use crate::{AstConversionError, Dialect, DialectDisplay, ast::*};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
 pub struct Float {
@@ -365,7 +365,7 @@ impl DialectDisplay for Literal {
                         }
                     }
                 },
-                Literal::Blob(ref bv) => write!(
+                Literal::Blob(bv) => write!(
                     f,
                     "{}",
                     bv.iter()
@@ -382,7 +382,7 @@ impl DialectDisplay for Literal {
                     }
                 },
                 Literal::Placeholder(item) => write!(f, "{item}"),
-                Literal::BitVector(ref b) => {
+                Literal::BitVector(b) => {
                     write!(
                         f,
                         "B'{}'",
@@ -403,7 +403,9 @@ fn escape_string_literal(s: &str) -> String {
 }
 
 impl Literal {
-    pub fn arbitrary_with_type(sql_type: &SqlType) -> impl Strategy<Value = Self> + 'static {
+    pub fn arbitrary_with_type(
+        sql_type: &SqlType,
+    ) -> impl Strategy<Value = Self> + 'static + use<> {
         use proptest::prelude::*;
 
         match sql_type {

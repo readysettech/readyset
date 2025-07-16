@@ -5,7 +5,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{ast::*, AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
+use crate::{AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect, ast::*};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Arbitrary)]
 pub struct ReadySetTablesOptions {
