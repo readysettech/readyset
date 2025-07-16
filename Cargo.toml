@@ -193,7 +193,7 @@ pratt = "0.4.0"
 pretty_assertions = "1.4.0"
 prettytable = "0.10.0"
 proc-macro2 = "1"
-proptest = "1.7.0"
+proptest = { version = "1.7.0", features = ["handle-panics"] }
 quanta = { version = "0.12", default-features = false }
 querystring = "1.1.0"
 quote = "1.0.36"
