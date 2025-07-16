@@ -263,10 +263,14 @@ impl TryFrom<sqlparser::ast::Value> for Literal {
                 } else if let Ok(i) = s.parse::<u64>() {
                     Ok(Self::UnsignedInteger(i))
                 } else if let Ok(f) = s.parse::<f64>() {
-                    Ok(Self::Double(crate::ast::Double {
-                        value: f,
-                        precision: s.find('.').map(|i| (s.len() - i - 1) as u8).unwrap_or(0),
-                    }))
+                    if f.is_infinite() || f.is_nan() {
+                        Ok(Self::Numeric(s))
+                    } else {
+                        Ok(Self::Double(crate::ast::Double {
+                            value: f,
+                            precision: s.find('.').map(|i| (s.len() - i - 1) as u8).unwrap_or(0),
+                        }))
+                    }
                 } else {
                     Ok(Self::Numeric(s))
                 }
