@@ -218,3 +218,11 @@ fn column_postgres() {
         r#"ALTER TABLE t1 ADD "created_at" timestamp NOT NULL DEFAULT current_timestamp()"#
     );
 }
+
+#[test]
+fn comment_postgres() {
+    check_parse_postgres!("COMMENT ON TABLE test IS 'this is a comment'");
+    check_parse_postgres!("COMMENT ON COLUMN test_table.test_column IS 'this is a comment'");
+    check_parse_postgres!(r#"COMMENT ON COLUMN "test_table"."test_column" IS 'this is a comment'"#);
+    check_parse_postgres!(r#"COMMENT ON TABLE "test_table" IS 'this is a comment'"#);
+}
