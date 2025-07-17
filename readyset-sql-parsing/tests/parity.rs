@@ -856,3 +856,25 @@ fn column_varying_binary() {
     check_parse_mysql!("CREATE TABLE t (c varchar(255) binary)");
     check_parse_mysql!("CREATE TABLE t (c varchar(255) binary NOT NULL default '')");
 }
+
+#[test]
+fn check_not_enforced_table_modifier() {
+    check_parse_mysql!("CREATE TABLE t (x INT, CHECK (x > 1))");
+    check_parse_mysql!("CREATE TABLE t (x INT, CHECK (x > 1) ENFORCED)");
+    check_parse_mysql!("CREATE TABLE t (x INT, CHECK (x > 1) NOT ENFORCED)");
+}
+
+#[test]
+#[ignore = "REA-5845"]
+fn check_not_enforced_column_modifier() {
+    check_parse_mysql!("CREATE TABLE t (x INT CHECK (x > 1))");
+    check_parse_mysql!("CREATE TABLE t (x INT CHECK (x > 1) ENFORCED)");
+    check_parse_mysql!("CREATE TABLE t (x INT CHECK (x > 1) NOT ENFORCED)");
+}
+#[test]
+#[ignore = "REA-5846"]
+fn check_not_enforced_anonymous_table_modifier() {
+    check_parse_mysql!("CREATE TABLE t (x INT, CONSTRAINT CHECK (x > 1))");
+    check_parse_mysql!("CREATE TABLE t (x INT, CONSTRAINT CHECK (x > 1) ENFORCED)");
+    check_parse_mysql!("CREATE TABLE t (x INT, CONSTRAINT CHECK (x > 1) NOT ENFORCED)");
+}

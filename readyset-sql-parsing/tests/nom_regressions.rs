@@ -752,3 +752,33 @@ fn create_mysql_unsupported() {
         check_parse_mysql!(sql);
     }
 }
+
+#[test]
+fn constraint_check() {
+    for constraint in [
+        "CHECK (x > 1)",
+        "CHECK (x > 1) NOT ENFORCED",
+        // REA-5846
+        // "CONSTRAINT CHECK (x > 1)",
+        "CONSTRAINT foo CHECK (x > 1)",
+        "CONSTRAINT foo CHECK (x > 1) NOT ENFORCED",
+    ] {
+        check_parse_both!(format!("CREATE TABLE t (x INT, {constraint})"));
+    }
+}
+
+#[test]
+fn constraint_check_on_column() {
+    // nom-sql doesn't support CHECK constraints on columns
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE TABLE t (x INT CHECK (x > 1))",
+        "nom-sql error"
+    );
+    // REA-5845
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE TABLE t (x INT CHECK (x > 1) NOT ENFORCED)",
+        "both parsers failed"
+    );
+}
