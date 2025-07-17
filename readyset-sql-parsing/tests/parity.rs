@@ -811,3 +811,48 @@ fn rename_table() {
         "sql parser error: Expected: TO, found: tb2"
     );
 }
+
+#[test]
+#[ignore = "REA-5840"]
+fn create_with_index_type() {
+    check_parse_mysql!("CREATE TABLE foo (x int, UNIQUE KEY USING HASH (x))");
+    check_parse_mysql!("CREATE TABLE foo (x int, UNIQUE KEY USING BTREE (x))");
+}
+
+#[test]
+#[ignore = "REA-5841"]
+fn create_with_unique_key_on_column() {
+    check_parse_mysql!("CREATE TABLE foo (x int UNIQUE)");
+    check_parse_mysql!("CREATE TABLE foo (x int UNIQUE KEY)");
+}
+
+#[test]
+#[ignore = "REA-5842"]
+fn create_with_unique_key_using_suffix() {
+    check_parse_mysql!("CREATE TABLE users (id int, UNIQUE KEY id_k (id) USING HASH);");
+    check_parse_mysql!("CREATE TABLE users (id int, UNIQUE KEY id_k (id) USING BTREE);");
+}
+
+#[test]
+#[ignore = "REA-5843"]
+fn create_table_options_comma_separated() {
+    check_parse_mysql!("CREATE TABLE t (x int) AUTO_INCREMENT=1 COLLATE=utf8mb4_general_ci");
+    check_parse_mysql!("CREATE TABLE t (x int) AUTO_INCREMENT=1, COLLATE=utf8mb4_general_ci");
+    check_parse_mysql!("CREATE TABLE t (x int) AUTO_INCREMENT 1, COLLATE utf8mb4_general_ci");
+}
+
+#[test]
+fn create_table_options_without_equals() {
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE TABLE t (x int) AUTO_INCREMENT 1 COLLATE utf8mb4_general_ci",
+        "nom-sql error"
+    );
+}
+
+#[test]
+#[ignore = "REA-5844"]
+fn column_varying_binary() {
+    check_parse_mysql!("CREATE TABLE t (c varchar(255) binary)");
+    check_parse_mysql!("CREATE TABLE t (c varchar(255) binary NOT NULL default '')");
+}
