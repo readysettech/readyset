@@ -233,6 +233,7 @@ fn sqlparser_dialect_from_readyset_dialect(
 enum ReadysetKeyword {
     CACHED,
     CACHES,
+    DOMAINS,
     ENTER,
     EXIT,
     MAINTENANCE,
@@ -254,6 +255,7 @@ impl ReadysetKeyword {
         match self {
             Self::CACHED => "CACHED",
             Self::CACHES => "CACHES",
+            Self::DOMAINS => "DOMAINS",
             Self::ENTER => "ENTER",
             Self::EXIT => "EXIT",
             Self::MAINTENANCE => "MAINTENANCE",
@@ -529,6 +531,11 @@ fn parse_explain(
                 "unexpected statement after CREATE CACHE".into(),
             )),
         };
+    }
+    if parse_readyset_keyword(parser, ReadysetKeyword::DOMAINS) {
+        return Ok(SqlQuery::Explain(
+            readyset_sql::ast::ExplainStatement::Domains,
+        ));
     }
     Ok(parser
         .parse_explain(sqlparser::ast::DescribeAlias::Explain)?
