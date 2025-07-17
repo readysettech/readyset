@@ -782,3 +782,53 @@ fn constraint_check_on_column() {
         "both parsers failed"
     );
 }
+
+#[test]
+fn create_table_options_mysql() {
+    for options in [
+        "DEFAULT CHARSET 'utf8mb4' COLLATE 'utf8mb4_unicode_520_ci'",
+        "DEFAULT CHARSET 'utf8mb4' COLLATE utf8mb4_unicode_520_ci",
+        "DEFAULT CHARSET utf8mb4 COLLATE 'utf8mb4_unicode_520_ci'",
+        "DEFAULT  CHARSET  utf8mb4  COLLATE  utf8mb4_unicode_520_ci",
+        "ENGINE=InnoDB AUTO_INCREMENT=44782967 \
+            DEFAULT CHARSET=binary ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8",
+        "DEFAULT CHARSET  utf8mb4",
+        "DEFAULT CHARACTER   SET  utf8mb4",
+        "COMMENT 'foobar'",
+        "COMMENT='foobar'",
+        "COMMENT='foo''bar'",
+        r#"COMMENT='foo""bar'"#,
+        "DATA DIRECTORY = '/var/lib/mysql/'",
+        "DATA DIRECTORY '/var/lib/mysql/'",
+        "DEFAULT CHARSET=utf8mb4",
+        "DEFAULT CHARSET utf8mb4",
+        " CHARSET=utf8mb4",
+        "CHARSET utf8mb4",
+        "CHARSET=utf8mb4 DEFAULT COLLATE=utf8mb4_unicode_520_ci",
+        "CHARSET=utf8mb4 COLLATE utf8mb4_unicode_520_ci",
+    ] {
+        check_parse_mysql!(format!("CREATE TABLE foo (x TEXT) {options}"));
+    }
+}
+
+#[test]
+fn create_table_options_unsupported() {
+    // REA-5843
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE TABLE foo (x TEXT) AUTO_INCREMENT=1,ENGINE=,KEY_BLOCK_SIZE=8",
+        "sqlparser error"
+    );
+
+    // REA-5847
+    check_parse_fails!(
+        Dialect::MySQL,
+        r#"CREATE TABLE foo (x TEXT) COMMENT="foo""bar""#,
+        "Expected: Token::SingleQuotedString"
+    );
+    check_parse_fails!(
+        Dialect::MySQL,
+        r#"CREATE TABLE foo (x TEXT) COMMENT="foo''bar""#,
+        "Expected: Token::SingleQuotedString"
+    );
+}

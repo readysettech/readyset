@@ -8,7 +8,7 @@ use nom::combinator::{map, map_res, opt};
 use nom::multi::separated_list0;
 use nom::sequence::{delimited, separated_pair, tuple};
 use nom_locate::LocatedSpan;
-use readyset_sql::{ast::*, Dialect};
+use readyset_sql::{ast::*, Dialect, DialectDisplay};
 
 use crate::common::{charset_name, collation_name, ws_sep_comma, ws_sep_equals};
 use crate::dialect::DialectParser;
@@ -34,18 +34,36 @@ fn create_option(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateTableOption> {
     move |i| {
         alt((
-            map(create_option_type, |_| CreateTableOption::Other),
-            map(create_option_pack_keys, |_| CreateTableOption::Other),
+            map(create_option_type, |v| CreateTableOption::Other {
+                key: "TYPE".to_string(),
+                value: String::from_utf8_lossy(v).into_owned(),
+            }),
+            map(create_option_pack_keys, |v| CreateTableOption::Other {
+                key: "PACK_KEYS".to_string(),
+                value: String::from_utf8_lossy(v).into_owned(),
+            }),
             create_option_engine,
             create_option_auto_increment,
             create_option_default_charset(dialect),
             create_option_collate(dialect),
             create_option_comment(dialect),
             create_option_data_directory(dialect),
-            map(create_option_max_rows, |_| CreateTableOption::Other),
-            map(create_option_avg_row_length, |_| CreateTableOption::Other),
-            map(create_option_row_format, |_| CreateTableOption::Other),
-            map(create_option_key_block_size, |_| CreateTableOption::Other),
+            map(create_option_max_rows, |v| CreateTableOption::Other {
+                key: "MAX_ROWS".to_string(),
+                value: v.display(dialect).to_string(),
+            }),
+            map(create_option_avg_row_length, |v| CreateTableOption::Other {
+                key: "AVG_ROW_LENGTH".to_string(),
+                value: v.display(dialect).to_string(),
+            }),
+            map(create_option_row_format, |v| CreateTableOption::Other {
+                key: "ROW_FORMAT".to_string(),
+                value: String::from_utf8_lossy(v).into_owned(),
+            }),
+            map(create_option_key_block_size, |v| CreateTableOption::Other {
+                key: "KEY_BLOCK_SIZE".to_string(),
+                value: v.display(dialect).to_string(),
+            }),
         ))(i)
     }
 }
@@ -364,8 +382,14 @@ mod tests {
                 CreateTableOption::Engine(Some("InnoDB".to_string())),
                 CreateTableOption::AutoIncrement(44782967),
                 CreateTableOption::Charset(CharsetName::Unquoted("binary".into())),
-                CreateTableOption::Other,
-                CreateTableOption::Other,
+                CreateTableOption::Other {
+                    key: "ROW_FORMAT".into(),
+                    value: "COMPRESSED".into(),
+                },
+                CreateTableOption::Other {
+                    key: "KEY_BLOCK_SIZE".into(),
+                    value: "8".into(),
+                },
             ],
         );
     }
@@ -397,7 +421,10 @@ mod tests {
             vec![
                 CreateTableOption::AutoIncrement(1),
                 CreateTableOption::Engine(None),
-                CreateTableOption::Other,
+                CreateTableOption::Other {
+                    key: "KEY_BLOCK_SIZE".into(),
+                    value: "8".into(),
+                },
             ],
         );
     }

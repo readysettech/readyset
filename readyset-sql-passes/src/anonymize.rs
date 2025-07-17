@@ -182,7 +182,7 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
             | CreateTableOption::AutoIncrement(_)
             | CreateTableOption::Engine(_)
             | CreateTableOption::Charset(_)
-            | CreateTableOption::Other => {}
+            | CreateTableOption::Other { .. } => {}
         }
         Ok(())
     }

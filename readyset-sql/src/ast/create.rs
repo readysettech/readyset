@@ -332,9 +332,7 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                             sqlparser::ast::Expr::Identifier(Ident { value: v, .. }) => options
                                 .push(CreateTableOption::Charset(CharsetName::Unquoted(v.into()))),
                             v => {
-                                return Err(AstConversionError::Failed(format!(
-                                    "Unsupported charset option {v}"
-                                )));
+                                return failed!("Unsupported charset option {v}");
                             }
                         },
                         "COLLATE" | "DEFAULT COLLATE" => match value {
@@ -348,9 +346,7 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                                     v.into(),
                                 ))),
                             v => {
-                                return Err(AstConversionError::Failed(format!(
-                                    "Unsupported collate value {v}"
-                                )));
+                                return failed!("Unsupported collate value {v}");
                             }
                         },
                         "DATA DIRECTORY" => match value {
@@ -358,17 +354,12 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                                 value: Value::SingleQuotedString(v),
                                 ..
                             }) => options.push(CreateTableOption::DataDirectory(v)),
-                            _ => {
-                                return Err(AstConversionError::Failed(format!(
-                                    "Unsupported table option {key}"
-                                )));
-                            }
+                            _ => options.push(CreateTableOption::DataDirectory(value.to_string())),
                         },
-                        _ => {
-                            return Err(AstConversionError::Failed(format!(
-                                "Unsupported table option {key}"
-                            )));
-                        }
+                        _ => options.push(CreateTableOption::Other {
+                            key: key.to_string(),
+                            value: value.to_string(),
+                        }),
                     },
 
                     SqlOption::NamedParenthesizedList(NamedParenthesizedList {
@@ -383,9 +374,7 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                         CommentDef::WithEq(comment) | CommentDef::WithoutEq(comment),
                     ) => options.push(CreateTableOption::Comment(comment)),
                     e => {
-                        return Err(AstConversionError::Failed(format!(
-                            "Unsupported table option {e}"
-                        )));
+                        return failed!("Unsupported table option {e}");
                     }
                 }
             }

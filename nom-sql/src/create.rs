@@ -1836,7 +1836,10 @@ mod tests {
                         ],
                         keys: None,
                     }),
-                    options: Ok(vec![CreateTableOption::Other]),
+                    options: Ok(vec![CreateTableOption::Other {
+                        key: "TYPE".into(),
+                        value: "MyISAM".into()
+                    }]),
                 }
             );
         }
@@ -2341,7 +2344,10 @@ mod tests {
                         ],
                         keys: None,
                     }),
-                    options: Ok(vec![CreateTableOption::Other]),
+                    options: Ok(vec![CreateTableOption::Other {
+                        key: "TYPE".into(),
+                        value: "MyISAM".into()
+                    }]),
                 }
             );
         }

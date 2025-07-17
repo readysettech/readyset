@@ -13,9 +13,7 @@ pub enum CreateTableOption {
     Collate(CollationName),
     Comment(String),
     DataDirectory(String),
-    /// Any currently uncotegorized option falls here
-    /// TODO: implement other options
-    Other,
+    Other { key: String, value: String },
 }
 
 impl fmt::Display for CreateTableOption {
@@ -29,7 +27,7 @@ impl fmt::Display for CreateTableOption {
             CreateTableOption::Collate(c) => write!(f, "COLLATE={c}"),
             CreateTableOption::Comment(c) => write!(f, "COMMENT='{c}'"),
             CreateTableOption::DataDirectory(d) => write!(f, "DATA DIRECTORY='{d}'"),
-            CreateTableOption::Other => Ok(()),
+            CreateTableOption::Other { key, value } => write!(f, "{key}={value}"),
         }
     }
 }
