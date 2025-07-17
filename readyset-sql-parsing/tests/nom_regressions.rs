@@ -226,3 +226,94 @@ fn comment_postgres() {
     check_parse_postgres!(r#"COMMENT ON COLUMN "test_table"."test_column" IS 'this is a comment'"#);
     check_parse_postgres!(r#"COMMENT ON TABLE "test_table" IS 'this is a comment'"#);
 }
+
+#[test]
+fn expr_both() {
+    for expr in [
+        "coalesce(a,b,c)",
+        "coalesce (a,b,c)",
+        "coalesce(a ,b,c)",
+        "coalesce(a, b,c)",
+        "max(min(foo))",
+        "max(cast(foo as int))",
+        "ifnull(x, 0)",
+        "substr(a from 1 for 7)",
+        "substring(a from 1 for 7)",
+        "substr(a from 1)",
+        "substr(a for 7)",
+        "substring(a,1,7)",
+        "count(*)",
+        "count (*)",
+        "count ( * )",
+        "cast(lp.start_ddtm as date)",
+        r#"coalesce("a",b,c)"#,
+        r#"coalesce ("a",b,c)"#,
+        r#"coalesce("a" ,b,c)"#,
+        r#"coalesce("a", b,c)"#,
+        "coalesce('a',b,c)",
+        "coalesce ('a',b,c)",
+        "coalesce('a' ,b,c)",
+        "coalesce('a', b,c)",
+        "lower(AbC)",
+        "upper(AbC)",
+        "lower('AbC')",
+        "upper('AbC')",
+    ] {
+        check_parse_both!(format!("SELECT {expr}"));
+        check_parse_both!(format!("SELECT {expr} AS expr"));
+    }
+}
+
+#[test]
+fn expr_mysql() {
+    for expr in [
+        "group_concat(x separator ', ')",
+        "group_concat('a')",
+        "group_concat (a)",
+        "group_concat ( a )",
+        "cast(`lp`.`start_ddtm` as date)",
+    ] {
+        check_parse_mysql!(format!("SELECT {expr}"));
+    }
+}
+
+#[test]
+fn expr_postgres() {
+    for expr in [
+        r#"cast("lp"."start_ddtm" as date)"#,
+        r#"lower('AbC' COLLATE "es_ES")"#,
+        r#"upper('AbC' COLLATE "es_ES")"#,
+    ] {
+        check_parse_postgres!(format!("SELECT {expr}"));
+    }
+}
+#[test]
+fn extract() {
+    for component in [
+        "CENTURY",
+        "DECADE",
+        "DOW",
+        "DOY",
+        "EPOCH",
+        "HOUR",
+        "ISODOW",
+        "ISOYEAR",
+        "JULIAN",
+        "MICROSECONDS",
+        "MILLENNIUM",
+        "MILLISECONDS",
+        "MINUTE",
+        "MONTH",
+        "QUARTER",
+        "SECOND",
+        "TIMEZONE_HOUR",
+        "TIMEZONE_MINUTE",
+        "TIMEZONE",
+        "WEEK",
+        "YEAR",
+    ] {
+        check_parse_both!(format!(r#"SELECT extract({component} FROM col) FROM t"#));
+        check_parse_mysql!(format!("SELECT extract({component} FROM `col`) FROM t"));
+        check_parse_postgres!(format!(r#"SELECT extract({component} FROM "col") FROM t"#));
+    }
+}
