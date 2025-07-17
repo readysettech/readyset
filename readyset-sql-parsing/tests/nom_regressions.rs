@@ -832,3 +832,22 @@ fn create_table_options_unsupported() {
         "Expected: Token::SingleQuotedString"
     );
 }
+
+#[test]
+fn deallocate_mysql() {
+    check_parse_mysql!("DEALLOCATE PREPARE a42");
+    check_parse_mysql!("DEALLOCATE PREPARE a42");
+    // REA-5807
+    check_parse_fails!(
+        Dialect::MySQL,
+        "DROP PREPARE a42",
+        "after DROP, found: PREPARE"
+    );
+}
+
+#[test]
+fn deallocate_postgres() {
+    check_parse_postgres!("DEALLOCATE a42");
+    check_parse_postgres!("DEALLOCATE ALL");
+    check_parse_postgres!("DEALLOCATE PREPARE ALL");
+}

@@ -878,3 +878,9 @@ fn check_not_enforced_anonymous_table_modifier() {
     check_parse_mysql!("CREATE TABLE t (x INT, CONSTRAINT CHECK (x > 1) ENFORCED)");
     check_parse_mysql!("CREATE TABLE t (x INT, CONSTRAINT CHECK (x > 1) NOT ENFORCED)");
 }
+
+#[test]
+#[ignore = "REA-5848"]
+fn drop_prepare() {
+    check_parse_mysql!("DROP PREPARE a42");
+}
