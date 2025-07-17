@@ -112,7 +112,7 @@ fn push_dependent_filter(
             true
         }
         inner => unsupported!(
-            "Don't know how to push filter below {} to decorrelate",
+            "Can't decorrelate subquery containing {}",
             inner.description()
         ),
     };
