@@ -847,12 +847,12 @@ where
         match (nom_result, sqlparser_result) {
             (Ok(nom_ast), Ok(sqlparser_ast)) if nom_ast != sqlparser_ast => {
                 if config.panic_on_mismatch {
-                    panic!(
-                        "nom-sql AST differs from sqlparser-rs AST for {} input: {:?}\nnom: {:?}\nsqlparser: {:?}",
-                        dialect,
-                        input.as_ref(),
+                    pretty_assertions::assert_eq!(
                         nom_ast,
-                        sqlparser_ast
+                        sqlparser_ast,
+                        "nom-sql AST differs from sqlparser-rs AST for {} input: {:?}",
+                        dialect,
+                        input.as_ref()
                     );
                 }
                 if config.log_on_mismatch
@@ -863,6 +863,7 @@ where
                     rate_limit!(
                         config.rate_limit_logging,
                         tracing::warn!(
+                            ?dialect,
                             input = %input.as_ref(),
                             ?nom_ast,
                             ?sqlparser_ast,
@@ -894,7 +895,8 @@ where
                 ) {
                     if config.panic_on_mismatch {
                         panic!(
-                            "nom-sql succeeded but sqlparser-rs failed: {}\ninput: {}\nnom_ast: {:?}",
+                            "nom-sql succeeded but sqlparser-rs failed for {}: {}\ninput: {}\nnom_ast: {:?}",
+                            dialect,
                             sqlparser_error,
                             input.as_ref(),
                             nom_ast
@@ -906,6 +908,7 @@ where
                         rate_limit!(
                             config.rate_limit_logging,
                             tracing::warn!(
+                                ?dialect,
                                 input = %input.as_ref(),
                                 %sqlparser_error,
                                 ?nom_ast,
@@ -926,7 +929,13 @@ where
                 if config.log_on_mismatch
                     && (!config.log_only_selects || is_not_query_or_should_log(&sqlparser_ast))
                 {
-                    tracing::debug!(input = %input.as_ref(), %nom_error, ?sqlparser_ast, "nom-sql failed but sqlparser-rs succeeded");
+                    tracing::debug!(
+                        ?dialect,
+                        input = %input.as_ref(),
+                        %nom_error,
+                        ?sqlparser_ast,
+                        "nom-sql failed but sqlparser-rs succeeded"
+                    );
                 }
                 if config.prefer_sqlparser {
                     Ok(sqlparser_ast)
@@ -936,7 +945,13 @@ where
             }
             (Err(nom_error), Err(sqlparser_error)) => {
                 if config.log_on_mismatch {
-                    tracing::debug!(input = %input.as_ref(), %nom_error, %sqlparser_error, "both nom-sql and sqlparser-rs failed");
+                    tracing::debug!(
+                        ?dialect,
+                        input = %input.as_ref(),
+                        %nom_error,
+                        %sqlparser_error,
+                        "both nom-sql and sqlparser-rs failed"
+                    );
                 }
                 Err(ReadysetParsingError::BothFailed {
                     nom_error,
