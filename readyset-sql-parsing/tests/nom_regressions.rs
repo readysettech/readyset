@@ -851,3 +851,12 @@ fn deallocate_postgres() {
     check_parse_postgres!("DEALLOCATE ALL");
     check_parse_postgres!("DEALLOCATE PREPARE ALL");
 }
+
+#[test]
+fn delete() {
+    check_parse_both!("DELETE FROM users;");
+    check_parse_both!("DELETE FROM db1.users;");
+    check_parse_both!("DELETE FROM users WHERE id = 1;");
+    check_parse_mysql!("DELETE FROM `users` WHERE (`id` = 1)");
+    check_parse_postgres!(r#"DELETE FROM "users" WHERE ("id" = 1)"#);
+}
