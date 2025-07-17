@@ -884,3 +884,10 @@ fn check_not_enforced_anonymous_table_modifier() {
 fn drop_prepare() {
     check_parse_mysql!("DROP PREPARE a42");
 }
+
+#[test]
+#[ignore = "REA-5850"]
+fn postgres_octal_escape() {
+    check_parse_postgres!("SELECT E'\\0'");
+    check_parse_postgres!("SELECT E'\\1'");
+}

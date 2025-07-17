@@ -1,5 +1,5 @@
 use readyset_sql::Dialect;
-use readyset_sql_parsing::{ParsingPreset, parse_query_with_config};
+use readyset_sql_parsing::{ParsingPreset, parse_expr, parse_query_with_config};
 
 mod utils;
 
@@ -859,4 +859,49 @@ fn delete() {
     check_parse_both!("DELETE FROM users WHERE id = 1;");
     check_parse_mysql!("DELETE FROM `users` WHERE (`id` = 1)");
     check_parse_postgres!(r#"DELETE FROM "users" WHERE ("id" = 1)"#);
+}
+
+#[test]
+fn string_literal_backslash_escape_mysql() {
+    use readyset_sql::ast::{Expr, Literal};
+
+    let all_escaped = r#"\0\'\"\b\n\r\t\Z\\\%\_"#;
+    let expected = "\0\'\"\x08\n\r\t\x1a\\\\%\\_";
+    for quote in ['\'', '"'] {
+        let expr = parse_expr(Dialect::MySQL, format!("{quote}{all_escaped}{quote}")).unwrap();
+        if let Expr::Literal(Literal::String(result)) = expr {
+            assert_eq!(result, expected);
+        } else {
+            panic!("Expected Expr::Literal(Literal::String)");
+        }
+    }
+}
+
+#[test]
+fn string_literal_backslash_no_escape_postgres() {
+    use readyset_sql::ast::{Expr, Literal};
+
+    let all_escaped = r#"\0\"\b\n\r\t\Z\\\%\_"#;
+    let expr = parse_expr(Dialect::PostgreSQL, format!("'{all_escaped}'")).unwrap();
+    if let Expr::Literal(Literal::String(result)) = expr {
+        assert_eq!(result, all_escaped);
+    } else {
+        panic!("Expected Expr::Literal(Literal::String)");
+    }
+}
+
+#[test]
+fn string_literal_backslash_escape_postgres() {
+    use readyset_sql::ast::{Expr, Literal};
+
+    // Note: This is missing \0 due to REA-5850 and \Z is in the original nom-sql test but it's not
+    // actually supported by PostgreSQL.
+    let all_escaped = r#"\'\"\b\n\r\t\\\%\_"#;
+    let expected = "\'\"\x08\n\r\t\\%_";
+    let expr = parse_expr(Dialect::PostgreSQL, format!("E'{all_escaped}'")).unwrap();
+    if let Expr::Literal(Literal::String(result)) = expr {
+        assert_eq!(result, expected);
+    } else {
+        panic!("Expected Expr::Literal(Literal::String)");
+    }
 }
