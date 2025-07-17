@@ -181,3 +181,40 @@ fn alter_readyset() {
     check_parse_both!("ALTER READYSET ENTER MAINTENANCE MODE;");
     check_parse_both!("ALTER READYSET EXIT MAINTENANCE MODE;");
 }
+
+#[test]
+fn column_mysql() {
+    for col in [
+        "foo INT AS (1 + 1) STORED",
+        "foo INT GENERATED ALWAYS AS (1 + 1) STORED",
+        "foo INT GENERATED ALWAYS AS (1 + 1) VIRTUAL",
+        "foo INT GENERATED ALWAYS AS (1 + 1)",
+        "`col1` INT GENERATED ALWAYS AS (1 + 1) VIRTUAL NOT NULL",
+        "`col1` INT GENERATED ALWAYS AS (1 + 1) VIRTUAL NOT NULL PRIMARY KEY",
+        "`created_at` timestamp NOT NULL DEFAULT current_timestamp()",
+        "`c` INT(32) NULL",
+        "`c` bool DEFAULT FALSE",
+        "`c` bool DEFAULT true",
+        "`lastModified` DATETIME(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE CURRENT_TIMESTAMP",
+        "`lastModified` DATETIME(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE CURRENT_TIMESTAMP(6)",
+        "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP (6) ",
+        "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP( 6 )",
+        "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6 ) ",
+        "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP ( 6)",
+        "c varchar(255) CHARACTER SET 'utf8mb4' COLLATE 'utf8mb4_unicode_ci'",
+        "c timestamp NOT NULL DEFAULT NOW()",
+    ] {
+        check_parse_mysql!(format!("CREATE TABLE t1 ({})", col));
+        check_parse_mysql!(format!("ALTER TABLE t1 ADD {}", col));
+    }
+}
+
+#[test]
+fn column_postgres() {
+    check_parse_postgres!(
+        r#"CREATE TABLE t1 ("created_at" timestamp NOT NULL DEFAULT current_timestamp())"#
+    );
+    check_parse_postgres!(
+        r#"ALTER TABLE t1 ADD "created_at" timestamp NOT NULL DEFAULT current_timestamp()"#
+    );
+}
