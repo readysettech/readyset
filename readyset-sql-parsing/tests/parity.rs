@@ -891,3 +891,32 @@ fn postgres_octal_escape() {
     check_parse_postgres!("SELECT E'\\0'");
     check_parse_postgres!("SELECT E'\\1'");
 }
+
+#[test]
+fn postgres_bytea_casts() {
+    // nom-sql turns $1::bytea into a byte array literal, while sqlparser leaves it as a cast. The
+    // sqlparser behavior is desirable as it will make implementing REA-2574 easier.
+    for sql in [
+        "SELECT E'\\\\x0008275c6480'::bytea",
+        "SELECT E'\\\\x'::bytea",
+    ] {
+        check_parse_fails!(
+            Dialect::PostgreSQL,
+            sql,
+            "nom-sql AST differs from sqlparser-rs AST"
+        );
+    }
+    // For some reason nom-sql doesn't do this conversion if the string is not hex
+    check_parse_postgres!("SELECT E'\\\\'::bytea");
+}
+
+#[test]
+fn postgres_hex_bytes_odd_digits() {
+    check_parse_postgres!("SELECT X'0008275c6480';");
+    check_parse_postgres!("SELECT X'0008275c6480';");
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        format!("SELECT X'D617263656C6F'"),
+        "Odd number of digits"
+    );
+}

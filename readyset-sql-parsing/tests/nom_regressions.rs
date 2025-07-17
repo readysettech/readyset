@@ -905,3 +905,55 @@ fn string_literal_backslash_escape_postgres() {
         panic!("Expected Expr::Literal(Literal::String)");
     }
 }
+
+#[test]
+fn identifiers() {
+    for identifier in [
+        "foo",
+        "f_o_o",
+        "foo12",
+        "FoO",
+        "foO",
+        "`foO`",
+        "`primary`",
+        "`state-province`",
+        "````",
+        "```i`",
+    ] {
+        check_parse_mysql!(format!("SELECT {identifier} FROM {identifier}"));
+    }
+    for identifier in [
+        "foo",
+        "f_o_o",
+        "foo12",
+        "FoO",
+        "foO",
+        r#""foO""#,
+        r#""primary""#,
+        r#""state-province""#,
+    ] {
+        check_parse_postgres!(format!("SELECT {identifier} FROM {identifier}"));
+    }
+}
+
+#[test]
+fn string_literals_mysql() {
+    for literal in [
+        "_utf8mb4'noria'",
+        r#""a""b""#,
+        "X'0008275c6480'",
+        "x'0008275c6480'",
+        "0x0008275c6480",
+        "0x6D617263656C6F",
+        "X''",
+        "''",
+    ] {
+        check_parse_mysql!(format!("SELECT {literal}"));
+    }
+
+    check_parse_fails!(
+        Dialect::MySQL,
+        format!("SELECT 0x123"),
+        "Odd number of digits"
+    );
+}
