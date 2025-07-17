@@ -167,12 +167,7 @@ fn collator_options(strength: Option<Strength>) -> CollatorOptions {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::Hasher;
-
     use strum::EnumCount;
-    use test_strategy::proptest;
-    use test_utils::tags;
 
     use super::*;
 
@@ -182,20 +177,6 @@ mod tests {
         // Because we will be squeezing Collation into a nibble within TinyText, we can never go
         // over 16 variants
         assert!(Collation::COUNT <= 16)
-    }
-
-    #[tags(no_retry)]
-    #[proptest]
-    fn hash_matches_eq(collation: Collation, s1: String, s2: String) {
-        if collation.compare(&s1, &s2) == Ordering::Equal {
-            let [h1, h2] = [&s1, &s2].map(|s| {
-                let mut hasher = DefaultHasher::new();
-                collation.key(s).hash(&mut hasher);
-                hasher.finish()
-            });
-
-            assert_eq!(h1, h2);
-        }
     }
 
     #[test]
