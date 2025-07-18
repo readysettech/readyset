@@ -975,3 +975,16 @@ fn drop() {
     check_parse_postgres!("DROP TABLE IF EXISTS \"users\", \"posts\"");
     check_parse_postgres!("DROP VIEW IF EXISTS \"v1\", \"v2\"");
 }
+
+#[test]
+fn explain() {
+    check_parse_both!("explain graphviz;");
+    check_parse_both!("explain graphviz for cache q");
+    check_parse_both!("explain last statement;");
+    check_parse_both!("explain domains;");
+    check_parse_both!("explain caches;");
+    check_parse_both!("explain   mAtERIaLIZAtIOns");
+    check_parse_both!("EXPLAIN CREATE CACHE FROM SELECT id FROM users WHERE name = $1");
+    check_parse_mysql!("EXPLAIN CREATE CACHE FROM SELECT id FROM users WHERE name = ?");
+    check_parse_both!("EXPLAIN CREATE CACHE FROM q_000000000000");
+}
