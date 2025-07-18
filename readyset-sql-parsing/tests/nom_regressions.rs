@@ -1214,3 +1214,13 @@ fn literals() {
         check_parse_both!(format!("SELECT {} as literal", literal));
     }
 }
+
+#[test]
+fn order() {
+    check_parse_both!("select * from users order by name desc");
+    check_parse_both!("select * from users order by name asc, age desc");
+    check_parse_both!("select * from users order by name");
+    check_parse_both!("SELECT * FROM users ORDER BY t1.x ASC NULLS FIRST");
+    check_parse_mysql!("SELECT * FROM users ORDER BY `t`.`n` DESC");
+    check_parse_postgres!("SELECT * FROM users ORDER BY \"t\".\"n\" DESC");
+}
