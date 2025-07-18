@@ -182,9 +182,10 @@ impl Aggregator {
         match &self.out_ty {
             DfType::BigInt => Ok(DfValue::Int(Default::default())),
             DfType::Double => Ok(DfValue::Double(Default::default())),
+            DfType::Float => Ok(DfValue::Float(Default::default())),
             DfType::Numeric { .. } => Ok(DfValue::Numeric(Default::default())),
             DfType::Text { .. } => Ok(DfValue::from("" /* TODO(aspen): Use collation here */)),
-            _ => internal!(),
+            e => unsupported!("Unsupported output type for aggregation: {}", e),
         }
     }
 }
