@@ -1192,3 +1192,25 @@ fn joins() {
         r#"SELECT "tags".* FROM "tags" INNER JOIN "taggings" ON ("tags"."id" = "taggings"."tag_id")"#
     );
 }
+
+#[test]
+fn literals() {
+    for literal in [
+        "1.5",
+        "0.0",
+        "1.500000000000000000000000000000",
+        &(i64::MAX as u64 + 1).to_string(),
+        &(i64::MIN).to_string(),
+        "true",
+        "True",
+        "TruE",
+        "TRUE",
+        "false",
+        "False",
+        "FalsE",
+        "FALSE",
+        "X'01aF'",
+    ] {
+        check_parse_both!(format!("SELECT {} as literal", literal));
+    }
+}
