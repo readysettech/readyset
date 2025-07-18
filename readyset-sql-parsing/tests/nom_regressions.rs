@@ -1011,6 +1011,14 @@ fn delete() {
     check_parse_both!("DELETE FROM users WHERE id = 1;");
     check_parse_mysql!("DELETE FROM `users` WHERE (`id` = 1)");
     check_parse_postgres!(r#"DELETE FROM "users" WHERE ("id" = 1)"#);
+    check_parse_mysql!("delete from articles where `key`='aaa'");
+    check_parse_mysql!("delete from `where` where user=?");
+    check_parse_mysql!("DELETE FROM `articles` WHERE (`key` = 'aaa')");
+    check_parse_mysql!("DELETE FROM `where` WHERE (`user` = ?)");
+    check_parse_postgres!(r#"delete from articles where "key"='aaa'"#);
+    check_parse_postgres!(r#"delete from "where" where user=$1"#);
+    check_parse_postgres!(r#"DELETE FROM "articles" WHERE ("key" = 'aaa')"#);
+    check_parse_postgres!(r#"DELETE FROM "where" WHERE ("user" = $1)"#);
 }
 
 #[test]
@@ -1117,6 +1125,7 @@ fn drop() {
     check_parse_both!("DROP CACHE test");
     check_parse_mysql!("DROP CACHE `test`");
     check_parse_postgres!(r#"DROP CACHE "test""#);
+    check_parse_both!("drOP ALL    caCHEs");
     check_parse_both!("DroP   ViEw  v ;");
     check_parse_both!("DroP   ViEw  if EXISTS v ;");
     check_parse_both!("DroP   ViEw  v1,   v2, v3 ;");
@@ -1180,6 +1189,10 @@ fn inserts() {
             ON DUPLICATE KEY UPDATE "value" = "value" + 1"#
     );
     check_parse_both!("INSERT INTO users (id, name) VALUES ( 42, 'test');");
+    check_parse_both!("   INSERT INTO users VALUES (42, \"test\");     ");
+    check_parse_both!("INSERT INTO users VALUES (42, \"test\");");
+    check_parse_both!("INSERT INTO users VALUES (42, \"test\");");
+    check_parse_both!("INSERT INTO users VALUES (42, \"test\");");
 }
 
 #[test]
@@ -1223,4 +1236,76 @@ fn order() {
     check_parse_both!("SELECT * FROM users ORDER BY t1.x ASC NULLS FIRST");
     check_parse_mysql!("SELECT * FROM users ORDER BY `t`.`n` DESC");
     check_parse_postgres!("SELECT * FROM users ORDER BY \"t\".\"n\" DESC");
+}
+
+#[test]
+fn misc_parser() {
+    check_parse_mysql!("SELECT * FROM `users`");
+    check_parse_mysql!("SELECT * FROM `users` AS `u`");
+    check_parse_mysql!("SELECT `name`, `password` FROM `users` AS `u`");
+    check_parse_mysql!("SELECT `name`, `password` FROM `users` AS `u` WHERE (`user_id` = '1')");
+    check_parse_mysql!(
+        "SELECT `name`, `password` FROM `users` AS `u` WHERE ((`user` = 'aaa') AND (`password` = 'xxx'))"
+    );
+    check_parse_mysql!("SELECT (`name` * 2) AS `double_name` FROM `users`");
+    check_parse_both!("select * from users u");
+    check_parse_both!("select name,password from users u;");
+    check_parse_both!("select name,password from users u WHERE user_id='1'");
+    check_parse_mysql!("SELECT * FROM `users` AS `u`");
+    check_parse_mysql!("SELECT `name`, `password` FROM `users` AS `u`");
+    check_parse_mysql!("SELECT `name`, `password` FROM `users` AS `u` WHERE (`user_id` = '1')");
+    check_parse_mysql!(
+        "select name, password from users as u where user='aaa' and password= 'xxx'"
+    );
+    check_parse_both!("select name, password from users as u where user='aaa' and password= 'xxx'");
+    check_parse_mysql!("select name, password from users as u where user=? and password =?");
+    check_parse_mysql!("select name, password from users as u where user=? and password =?");
+    check_parse_mysql!(
+        "SELECT `name`, `password` FROM `users` AS `u` WHERE ((`user` = 'aaa') AND (`password` = 'xxx'))"
+    );
+    check_parse_mysql!(
+        "SELECT `name`, `password` FROM `users` AS `u` WHERE ((`user` = ?) AND (`password` = ?))"
+    );
+    check_parse_both!("select count(*) from users");
+    check_parse_mysql!("SELECT count(*) FROM `users`");
+    check_parse_both!("INSERT INTO users (name, password) VALUES ('aaa', 'xxx')");
+    check_parse_mysql!("INSERT INTO `users` (`name`, `password`) VALUES ('aaa', 'xxx')");
+    check_parse_both!("INSERT INTO users VALUES ('aaa', 'xxx')");
+    check_parse_mysql!("INSERT INTO `users` () VALUES ('aaa', 'xxx')");
+    check_parse_both!("insert into users (name, password) values ('aaa', 'xxx')");
+    check_parse_mysql!("INSERT INTO `users` (`name`, `password`) VALUES ('aaa', 'xxx')");
+    check_parse_both!("update users set name=42, password='xxx' where id=1");
+    check_parse_mysql!("UPDATE `users` SET `name` = 42, `password` = 'xxx' WHERE (`id` = 1)");
+    check_parse_both!("delete from users where user='aaa' and password= 'xxx'");
+    check_parse_mysql!("delete from users where user=? and password =?");
+    check_parse_mysql!("DELETE FROM `users` WHERE ((`user` = 'aaa') AND (`password` = 'xxx'))");
+    check_parse_mysql!("DELETE FROM `users` WHERE ((`user` = ?) AND (`password` = ?))");
+}
+
+#[test]
+fn select_modifiers() {
+    let index_hint_type_list = ["USE", "IGNORE", "FORCE"];
+    let index_or_key_list = ["INDEX", "KEY"];
+    let index_for_list = ["", " FOR JOIN", " FOR ORDER BY", " FOR GROUP BY"];
+    let index_name_list = ["index_name", "primary", "index_name1"];
+    for hint_type in index_hint_type_list {
+        for index_or_key in index_or_key_list.iter() {
+            for index_for in index_for_list.iter() {
+                let mut formatted_index_list_str = String::new();
+                let mut index_list = vec![];
+                for n in index_name_list.iter() {
+                    index_list.push(n);
+                    if formatted_index_list_str.is_empty() {
+                        formatted_index_list_str = n.to_string();
+                    } else {
+                        formatted_index_list_str = format!("{formatted_index_list_str}, {n}");
+                    }
+                    let index_hint_str = format!(
+                        "{hint_type} {index_or_key}{index_for} ({formatted_index_list_str})"
+                    );
+                    check_parse_mysql!(format!("SELECT * FROM `users` {index_hint_str}"));
+                }
+            }
+        }
+    }
 }
