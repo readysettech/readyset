@@ -806,6 +806,11 @@ fn explain_domains() {
 }
 
 #[test]
+fn explain_caches() {
+    check_parse_both!("EXPLAIN CACHES");
+}
+
+#[test]
 fn where_not_in_not_between() {
     check_parse_fails!(
         Dialect::PostgreSQL,

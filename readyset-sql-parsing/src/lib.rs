@@ -537,6 +537,11 @@ fn parse_explain(
             readyset_sql::ast::ExplainStatement::Domains,
         ));
     }
+    if parse_readyset_keyword(parser, ReadysetKeyword::CACHES) {
+        return Ok(SqlQuery::Explain(
+            readyset_sql::ast::ExplainStatement::Caches,
+        ));
+    }
     Ok(parser
         .parse_explain(sqlparser::ast::DescribeAlias::Explain)?
         .try_into_dialect(dialect)?)
