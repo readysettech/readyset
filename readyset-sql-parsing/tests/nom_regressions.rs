@@ -1181,3 +1181,14 @@ fn inserts() {
     );
     check_parse_both!("INSERT INTO users (id, name) VALUES ( 42, 'test');");
 }
+
+#[test]
+fn joins() {
+    check_parse_both!("SELECT tags.* FROM tags INNER JOIN taggings ON (tags.id = taggings.tag_id)");
+    check_parse_mysql!(
+        "SELECT `tags`.* FROM `tags` INNER JOIN `taggings` ON (`tags`.`id` = `taggings`.`tag_id`)"
+    );
+    check_parse_postgres!(
+        r#"SELECT "tags".* FROM "tags" INNER JOIN "taggings" ON ("tags"."id" = "taggings"."tag_id")"#
+    );
+}
