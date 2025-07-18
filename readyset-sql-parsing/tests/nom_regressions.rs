@@ -957,3 +957,21 @@ fn string_literals_mysql() {
         "Odd number of digits"
     );
 }
+
+#[test]
+fn drop() {
+    check_parse_both!("DROP TABLE users;");
+    check_parse_both!("DROP TABLE schema1.t1, schema2.t2");
+    check_parse_both!("DROP CACHE test");
+    check_parse_mysql!("DROP CACHE `test`");
+    check_parse_postgres!(r#"DROP CACHE "test""#);
+    check_parse_both!("DroP   ViEw  v ;");
+    check_parse_both!("DroP   ViEw  if EXISTS v ;");
+    check_parse_both!("DroP   ViEw  v1,   v2, v3 ;");
+    check_parse_both!("DroP    aLl       PrOXied      querIES");
+    check_parse_mysql!("DROP TABLE IF EXISTS users,posts;");
+    check_parse_mysql!("DROP TABLE IF EXISTS `users`, `posts`");
+    check_parse_mysql!("DROP VIEW IF EXISTS `v1`, `v2`");
+    check_parse_postgres!("DROP TABLE IF EXISTS \"users\", \"posts\"");
+    check_parse_postgres!("DROP VIEW IF EXISTS \"v1\", \"v2\"");
+}
