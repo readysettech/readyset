@@ -258,9 +258,55 @@ fn expr_both() {
         "upper(AbC)",
         "lower('AbC')",
         "upper('AbC')",
+        "x",
+        "(x + 1) IN (2)",
+        "1 + 2 * 3",
+        "(1 + (2 * 3))",
+        "x between y and z or w",
+        "(x between y and z) or w",
+        "(table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5)",
+        "(table_1.column_2 NOT BETWEEN 1 AND 5) OR (table_1.column_2 NOT BETWEEN 1 AND 5)",
+        "x + 1 in (2)",
+        "((x + 1) in (2))",
+        "CAST(-128 AS TEXT)",
+        "DATE('2024-01-01 23:59:59')",
+        "x + 3",
+        "( x - 2 )",
+        "( x * 5 )",
+        "x * 3 = 21",
+        "(x - 7 = 15)",
+        "( x + 2) = 15",
+        "( x + 2) =(x*3)",
+        "foo >= 42",
+        "foo <= 5",
+        "foo = ''",
+        "not bar = 12 or foobar = 'a'",
+        "bar in (select col from foo)",
+        "exists (  select col from foo  )",
+        "not exists (select col from foo)",
+        "paperId in (select paperId from PaperConflict) and size > 0",
+        "name ILIKE $1",
+        "(foo = $1 or bar = 12) and foobar = 'a'",
+        "foo = $1 and bar = 12 or foobar = 'a'",
+        "bar in (0, 1)",
+        "bar IS NULL",
+        "bar IS NOT NULL",
+        "foo between 1 and 2",
+        "foo not between 1 and 2",
+        "f(foo, bar) between 1 and 2",
+        "foo between (1 + 2) and 3 + 5",
+        "x and not y",
+        "-256",
+        "x + -y",
+        "NOT -id",
+        "NOT -1",
+        "nullable",
+        "id not in (1,2)",
     ] {
         check_parse_both!(format!("SELECT {expr}"));
+        check_parse_both!(format!("SELECT {expr} expr"));
         check_parse_both!(format!("SELECT {expr} AS expr"));
+        check_parse_both!(format!("SELECT * FROM t WHERE {expr}"));
     }
 }
 
@@ -272,8 +318,35 @@ fn expr_mysql() {
         "group_concat (a)",
         "group_concat ( a )",
         "cast(`lp`.`start_ddtm` as date)",
+        "CAST(-128 AS UNSIGNED)",
+        "`id` NOT IN (1, 2)",
+        "CASE WHEN (`foo` = 0) THEN `foo` ELSE 1 END",
+        "CASE WHEN (`foo` = 0) THEN `foo` END",
+        "CASE WHEN (`foo` = 0) THEN `foo` WHEN (`foo` = 7) THEN `foo` END",
+        "group_concat(`x` separator 'a')",
+        "group_concat(`x` separator '''')",
+        "group_concat(`x`)",
+        "name ILIKE ?",
+        "(foo = ? or bar = 12) and foobar = 'a'",
+        "foo = ? and bar = 12 or foobar = 'a'",
+        "--1",
+        "`h`.`x` is null and month(`a`.`b`) between `t2`.`start` and `t2`.`end` and dayofweek(`c`.`d`) between 1 and 3",
+        "((`h`.`x` is null) and (month(`a`.`b`) between `t2`.`start` and `t2`.`end`) and (dayofweek(`c`.`d`) between 1 and 3))",
+        "`read_ribbons`.`is_following` = 1 \
+            AND `comments`.`user_id` <> `read_ribbons`.`user_id` \
+            AND `saldo` >= 0 \
+            AND ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` \
+            OR ( `parent_comments`.`user_id` IS NULL \
+            AND `stories`.`user_id` = `read_ribbons`.`user_id` ) ) \
+            AND ( `parent_comments`.`id` IS NULL \
+            OR `saldo` >= 0 ) \
+            AND `read_ribbons`.`user_id` = ?",
+        "foo = 42",
     ] {
         check_parse_mysql!(format!("SELECT {expr}"));
+        check_parse_mysql!(format!("SELECT {expr} expr"));
+        check_parse_mysql!(format!("SELECT {expr} AS expr"));
+        check_parse_mysql!(format!("SELECT * FROM t WHERE {expr}"));
     }
 }
 
@@ -283,8 +356,87 @@ fn expr_postgres() {
         r#"cast("lp"."start_ddtm" as date)"#,
         r#"lower('AbC' COLLATE "es_ES")"#,
         r#"upper('AbC' COLLATE "es_ES")"#,
+        "'a'::abc < all('{b,c}')",
+        "515*128::TEXT",
+        "(515*128)::TEXT",
+        r#"foo = "hello""#,
+        "id not in (1,2)",
+        r#""id" NOT IN (1, 2)"#,
+        r#"CASE WHEN ("foo" = 0) THEN "foo" ELSE 1 END"#,
+        r#"CASE WHEN ("foo" = 0) THEN "foo" END"#,
+        r#"CASE WHEN ("foo" = 0) THEN "foo" WHEN ("foo" = 7) THEN "foo" END"#,
+        "x = ANY('foo')",
+        "x = SOME ('foo')",
+        "x = aLL ('foo')",
+        "x <= ANY('foo')",
+        "1 = ANY('{1,2}') = true",
+        "1 = ANY('{1,2}') and y = 4",
+        r#""h"."x" is null and month("a"."b") between "t2"."start" and "t2"."end" and dayofweek("c"."d") between 1 and 3"#,
+        r#"(("h"."x" is null) and (month("a"."b") between "t2"."start" and "t2"."end") and (dayofweek("c"."d") between 1 and 3))"#,
+        "'[1, 2, 3]'::json -> 0 = '[3, 2, 1]'::json -> 2",
+        "('[1, 2, 3]'::json -> 0) = ('[3, 2, 1]'::json -> 2)",
+        "'[[1, 2, 3]]'::json -> 1 - 1 -> 1",
+        "'[[1, 2, 3]]'::json -> (1 - 1) -> 1",
+        "'[[1, 2, 3]]'::json -> 1 * 0 -> 1",
+        "'[[1, 2, 3]]'::json -> (1 * 0) -> 1",
+        "'[1, 2, 3]'::json ->> 0 like '[3, 2, 1]'::json ->> 2",
+        "('[1, 2, 3]'::json ->> 0) like ('[3, 2, 1]'::json ->> 2)",
+        "lhs IN (ROW(rhs1, rhs2))",
+        r#"'{"abc": 42}' ? 'abc'"#,
+        r#"'{"abc": 42}' ?| ARRAY['abc', 'def']"#,
+        r#"'{"abc": 42}' ?& ARRAY['abc', 'def']"#,
+        r#"'["a", "b"]'::jsonb || '["c", "d"]'"#,
+        "'[1, 2, 2]' @> '2'",
+        "'2' <@ '[1, 2, 2]'",
+        r#""read_ribbons"."is_following" = 1
+            AND "comments"."user_id" <> "read_ribbons"."user_id"
+            AND "saldo" >= 0
+            AND ( "parent_comments"."user_id" = "read_ribbons"."user_id"
+            OR ( "parent_comments"."user_id" IS NULL
+            AND "stories"."user_id" = "read_ribbons"."user_id" ) )
+            AND ( "parent_comments"."id" IS NULL
+            OR "saldo" >= 0 )
+            AND "read_ribbons"."user_id" = $1"#,
+        "foo = 42",
+        "foo = 'hello'",
+        "'[1, 2, 3]' -> 2",
+        "'[1, 2, 3]' ->> 2",
+        "'[1, 2, 3]' #> array['2']",
+        "'[1, 2, 3]' #>> array['2']",
+        "'[1, 2, 3]' #- array['2']",
+        "ARRAY[[1, '2'::int], array[3]]",
+        "ARRAY[[1,('2'::INT)]]",
     ] {
         check_parse_postgres!(format!("SELECT {expr}"));
+        check_parse_postgres!(format!("SELECT {expr} as expr"));
+        check_parse_postgres!(format!("SELECT {expr} expr"));
+        check_parse_postgres!(format!("SELECT * FROM t WHERE {expr}"));
+    }
+
+    // See the FIXME(sqlparser) comments in `AutoParameterizeVisitor::visit_expr`: nom-sql strips
+    // the extra parens on the right side of the `IN`
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "SELECT lhs IN ((rhs1, rhs2))",
+        "nom-sql AST differs from sqlparser-rs AST"
+    );
+}
+
+#[test]
+fn expr_postgres_with_alias() {
+    // For some reason, nom-sql can't handle these with an explicit alias
+    for expr in ["-128::INTEGER", "200*postgres.column::DOUBLE PRECISION"] {
+        check_parse_postgres!(format!("SELECT {expr}"));
+        check_parse_fails!(
+            Dialect::PostgreSQL,
+            format!("SELECT {expr} AS expr"),
+            "nom-sql error"
+        );
+        check_parse_fails!(
+            Dialect::PostgreSQL,
+            format!("SELECT {expr} expr"),
+            "nom-sql error"
+        );
     }
 }
 #[test]
@@ -987,4 +1139,11 @@ fn explain() {
     check_parse_both!("EXPLAIN CREATE CACHE FROM SELECT id FROM users WHERE name = $1");
     check_parse_mysql!("EXPLAIN CREATE CACHE FROM SELECT id FROM users WHERE name = ?");
     check_parse_both!("EXPLAIN CREATE CACHE FROM q_000000000000");
+}
+
+#[test]
+fn placeholders() {
+    check_parse_mysql!("SELECT * FROM t WHERE foo = ?");
+    check_parse_both!("SELECT * FROM t WHERE foo = :12");
+    check_parse_both!("SELECT * FROM t WHERE foo = $12");
 }

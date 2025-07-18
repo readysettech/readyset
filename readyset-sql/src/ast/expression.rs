@@ -869,8 +869,18 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 left,
                 compare_op,
                 right,
-                is_some: _,
+                is_some: false,
             } => Ok(Self::OpAny {
+                lhs: left.try_into_dialect(dialect)?,
+                op: compare_op.try_into()?,
+                rhs: right.try_into_dialect(dialect)?,
+            }),
+            AnyOp {
+                left,
+                compare_op,
+                right,
+                is_some: true,
+            } => Ok(Self::OpSome {
                 lhs: left.try_into_dialect(dialect)?,
                 op: compare_op.try_into()?,
                 rhs: right.try_into_dialect(dialect)?,
