@@ -1147,3 +1147,37 @@ fn placeholders() {
     check_parse_both!("SELECT * FROM t WHERE foo = :12");
     check_parse_both!("SELECT * FROM t WHERE foo = $12");
 }
+
+#[test]
+fn inserts() {
+    check_parse_mysql!("INSERT INTO users (id, name) VALUES (?, ?);");
+    check_parse_both!("INSERT INTO users (id, name) VALUES ($1, $1);");
+    check_parse_both!("INSERT INTO users VALUES (42, \"test\");");
+    check_parse_both!("INSERT INTO users VALUES (42, 'test', 'test', CURRENT_TIMESTAMP);");
+    check_parse_both!("INSERT INTO users (id, name) VALUES (42, 'test');");
+    check_parse_both!("INSERT INTO users(id, name) VALUES(42, 'test');");
+    check_parse_both!("INSERT INTO db1.users VALUES (42, \"test\");");
+    check_parse_both!("INSERT INTO users (id, name) VALUES (42, \"test\"),(21, \"test2\");");
+    check_parse_mysql!(
+        "INSERT INTO keystores (`key`, `value`) VALUES ($1, :2) \
+            ON DUPLICATE KEY UPDATE `value` = `value` + 1"
+    );
+    check_parse_postgres!(
+        r#"INSERT INTO keystores ("key", "value") VALUES ($1, :2)
+            ON DUPLICATE KEY UPDATE "value" = "value" + 1"#
+    );
+    check_parse_both!("INSERT INTO users (id, name) VALUES ( 42, \"test\");");
+    check_parse_mysql!("INSERT INTO users (`id`, `name`, `key`) VALUES (1, 'bob', 1);");
+    check_parse_postgres!(r#"INSERT INTO users ("id", "name", "key") VALUES (1, 'bob', 1);"#);
+    check_parse_both!("INSERT INTO users VALUES (42, 'test');");
+    check_parse_both!("INSERT INTO users VALUES (42, 'test', 'test', CURRENT_TIMESTAMP);");
+    check_parse_both!("INSERT INTO users (id, name) VALUES (42, 'test');");
+    check_parse_both!("INSERT INTO users(id, name) VALUES(42, 'test');");
+    check_parse_both!("INSERT INTO db1.users VALUES (42, 'test');");
+    check_parse_both!("INSERT INTO users (id, name) VALUES (42, 'test'),(21, 'test2');");
+    check_parse_postgres!(
+        r#"INSERT INTO keystores ("key", "value") VALUES ($1, :2)
+            ON DUPLICATE KEY UPDATE "value" = "value" + 1"#
+    );
+    check_parse_both!("INSERT INTO users (id, name) VALUES ( 42, 'test');");
+}
