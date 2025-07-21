@@ -1186,6 +1186,14 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 op: sqlparser::ast::UnaryOperator::Minus,
                 expr,
             } => match expr.try_into_dialect(dialect)? {
+                Expr::Literal(Literal::UnsignedInteger(i)) => {
+                    let literal = i64::try_from(i)
+                        .ok()
+                        .and_then(|i| i.checked_neg())
+                        .map(Literal::Integer)
+                        .unwrap_or_else(|| Literal::Numeric(format!("-{i}")));
+                    Ok(Self::Literal(literal))
+                }
                 Expr::Literal(Literal::Integer(i)) => Ok(Self::Literal(Literal::Integer(-i))),
                 Expr::Literal(Literal::Double(Double { value, precision })) => {
                     Ok(Self::Literal(Literal::Double(Double {

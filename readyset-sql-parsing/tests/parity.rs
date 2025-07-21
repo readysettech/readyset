@@ -796,6 +796,18 @@ fn regression_numeric_with_no_leading_digit() {
 }
 
 #[test]
+fn negating_large_numeric_literal() {
+    check_parse_both!(format!("SELECT -{}", u64::MAX));
+    check_parse_both!(format!("SELECT 1-{}", u64::MAX));
+    // nom-sql can't handle numbers outside the u64 range, so it parses it as a column name
+    check_parse_fails!(
+        Dialect::MySQL,
+        format!("SELECT -{}", u64::MAX as u128 + 1),
+        "nom-sql AST differs from sqlparser-rs AST"
+    );
+}
+
+#[test]
 fn show_connections() {
     check_parse_both!("SHOW CONNECTIONS");
 }

@@ -472,7 +472,12 @@ where
         if op == UnaryOperator::Neg {
             match rhs {
                 Expr::Literal(Literal::UnsignedInteger(i)) => {
-                    Ok(Expr::Literal(Literal::Integer(-(i as i64))))
+                    let literal = i64::try_from(i)
+                        .ok()
+                        .and_then(|i| i.checked_neg())
+                        .map(Literal::Integer)
+                        .unwrap_or_else(|| Literal::Numeric(format!("-{i}")));
+                    Ok(Expr::Literal(literal))
                 }
                 Expr::Literal(Literal::Integer(i)) => Ok(Expr::Literal(Literal::Integer(-i))),
                 Expr::Literal(Literal::Float(Float { value, precision })) => {
