@@ -208,6 +208,9 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
                     comment: comment.unwrap_or("".to_owned()),
                 }))
             }
+            RenameTable(rename) => Ok(Self::RenameTable(RenameTableStatement {
+                ops: rename.try_into_dialect(dialect)?,
+            })),
             _ => not_yet_implemented!("other query: {value:?}"),
         }
     }

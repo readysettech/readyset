@@ -818,3 +818,15 @@ fn where_not_in_not_between() {
         "nom-sql error"
     );
 }
+
+#[test]
+fn rename_table() {
+    check_parse_both!("RENAME TABLE tb1 TO tb2");
+    check_parse_both!("ALTER TABLE tb1 RENAME TO tb2");
+    // disabled as sqlparser does not currently support this syntax
+    check_parse_fails!(
+        Dialect::MySQL,
+        "ALTER TABLE tb1 RENAME AS tb2",
+        "sql parser error: Expected: TO, found: tb2"
+    );
+}

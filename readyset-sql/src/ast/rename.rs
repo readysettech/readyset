@@ -3,9 +3,10 @@ use std::fmt;
 use itertools::Itertools;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use sqlparser::ast::RenameTable;
 use test_strategy::Arbitrary;
 
-use crate::{Dialect, DialectDisplay, ast::*};
+use crate::{AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, ast::*};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct RenameTableStatement {
@@ -28,6 +29,19 @@ impl DialectDisplay for RenameTableStatement {
 pub struct RenameTableOperation {
     pub from: Relation,
     pub to: Relation,
+}
+
+impl TryFromDialect<sqlparser::ast::RenameTable> for RenameTableOperation {
+    fn try_from_dialect(
+        value: sqlparser::ast::RenameTable,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        let RenameTable { old_name, new_name } = value;
+        Ok(Self {
+            from: old_name.into_dialect(dialect),
+            to: new_name.into_dialect(dialect),
+        })
+    }
 }
 
 impl DialectDisplay for RenameTableOperation {
