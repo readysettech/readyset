@@ -802,13 +802,13 @@ impl SqlToMirConverter {
                 vec![ProjectExpr::Expr {
                     expr: Expr::Call(Call {
                         name: "coalesce".into(),
-                        arguments: vec![
+                        arguments: Some(vec![
                             Expr::Column(ast::Column {
                                 table: over_col.table.clone(),
                                 name: over_col.name.clone(),
                             }),
                             Expr::Literal(0.into()),
-                        ],
+                        ]),
                     }),
                     alias: coalesce_alias.clone(),
                 }],

@@ -570,7 +570,13 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
         FunctionExpr::Max(expr) => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Min(expr) => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::GroupConcat { expr, .. } => visitor.visit_expr(expr.as_mut()),
-        FunctionExpr::Call { arguments, .. } => {
+        FunctionExpr::Call {
+            arguments: None, ..
+        } => Ok(()),
+        FunctionExpr::Call {
+            arguments: Some(arguments),
+            ..
+        } => {
             for arg in arguments {
                 visitor.visit_expr(arg)?;
             }

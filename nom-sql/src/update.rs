@@ -189,11 +189,11 @@ mod tests {
                         Column::from("permission"),
                         Expr::Call(FunctionExpr::Call {
                             name: "replace".into(),
-                            arguments: vec![
+                            arguments: Some(vec![
                                 Expr::Column(Column::from("permission")),
                                 Expr::Literal(Literal::String("viewDiscussions".into())),
                                 Expr::Literal(Literal::String("viewForum".into())),
-                            ]
+                            ])
                         })
                     )],
                     where_clause: Some(Expr::BinaryOp {

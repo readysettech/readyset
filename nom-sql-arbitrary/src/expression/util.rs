@@ -79,7 +79,7 @@ where
     (expr_or_null, expr).prop_map(|(e1, e2)| {
         Expr::Call(FunctionExpr::Call {
             name: "ifnull".into(),
-            arguments: vec![e1, e2],
+            arguments: Some(vec![e1, e2]),
         })
     })
 }
@@ -106,7 +106,7 @@ where
         arguments.push(expr);
         Expr::Call(FunctionExpr::Call {
             name: "coalesce".into(),
-            arguments,
+            arguments: Some(arguments),
         })
     })
 }

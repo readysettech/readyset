@@ -1091,10 +1091,14 @@ impl Expr {
                 name: fname,
                 arguments,
             }) => {
-                let args = arguments
-                    .into_iter()
-                    .map(|arg| Self::lower(arg, dialect, context))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let args = if let Some(arguments) = arguments {
+                    arguments
+                        .into_iter()
+                        .map(|arg| Self::lower(arg, dialect, context))
+                        .collect::<Result<Vec<_>, _>>()?
+                } else {
+                    vec![]
+                };
                 let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args, dialect)?;
                 Ok(Self::Call {
                     func: Box::new(func),
@@ -1676,7 +1680,10 @@ pub(crate) mod tests {
     fn call_coalesce() {
         let input = AstExpr::Call(FunctionExpr::Call {
             name: "coalesce".into(),
-            arguments: vec![AstExpr::Column("t.x".into()), AstExpr::Literal(2.into())],
+            arguments: Some(vec![
+                AstExpr::Column("t.x".into()),
+                AstExpr::Literal(2.into()),
+            ]),
         });
 
         let result = Expr::lower(
@@ -1916,7 +1923,7 @@ pub(crate) mod tests {
         fn infers_type(args: Vec<Literal>, dialect: Dialect, expected_ty: DfType) {
             let input = AstExpr::Call(FunctionExpr::Call {
                 name: "greatest".into(),
-                arguments: args.into_iter().map(AstExpr::Literal).collect(),
+                arguments: Some(args.into_iter().map(AstExpr::Literal).collect()),
             });
             let result = Expr::lower(input, dialect, &no_op_lower_context()).unwrap();
             assert_eq!(result.ty(), &expected_ty);
@@ -2001,7 +2008,7 @@ pub(crate) mod tests {
         fn compares_as(args: Vec<Literal>, dialect: Dialect, expected_ty: DfType) {
             let input = AstExpr::Call(FunctionExpr::Call {
                 name: "greatest".into(),
-                arguments: args.into_iter().map(AstExpr::Literal).collect(),
+                arguments: Some(args.into_iter().map(AstExpr::Literal).collect()),
             });
             let result = Expr::lower(input, dialect, &no_op_lower_context()).unwrap();
             let compare_as = match result {

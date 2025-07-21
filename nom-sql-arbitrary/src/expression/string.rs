@@ -64,7 +64,7 @@ mod call {
             exprs.insert(0, s);
             Expr::Call(FunctionExpr::Call {
                 name: "concat".into(),
-                arguments: exprs,
+                arguments: Some(exprs),
             })
         })
     }
@@ -75,7 +75,7 @@ mod call {
         (es.string.clone(), es.string.clone(), es.integer).prop_map(|(s1, s2, int)| {
             Expr::Call(FunctionExpr::Call {
                 name: "split_part".into(),
-                arguments: vec![s1, s2, int],
+                arguments: Some(vec![s1, s2, int]),
             })
         })
     }
@@ -95,7 +95,7 @@ mod call {
             }
             Expr::Call(FunctionExpr::Call {
                 name: "substring".into(),
-                arguments: args,
+                arguments: Some(args),
             })
         })
     }

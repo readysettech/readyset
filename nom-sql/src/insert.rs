@@ -150,7 +150,7 @@ mod tests {
                         Expr::Literal("test".into()),
                         Expr::Call(FunctionExpr::Call {
                             name: "current_timestamp".into(),
-                            arguments: vec![]
+                            arguments: None,
                         }),
                     ],],
                     on_duplicate: None,
@@ -325,7 +325,7 @@ mod tests {
                         Expr::Literal("test".into()),
                         Expr::Call(FunctionExpr::Call {
                             name: "current_timestamp".into(),
-                            arguments: vec![],
+                            arguments: None,
                         }),
                     ],],
                     on_duplicate: None,

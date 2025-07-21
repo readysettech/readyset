@@ -3,7 +3,7 @@ use std::str;
 use std::str::FromStr;
 
 use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case};
+use nom::bytes::complete::{tag, tag_no_case, take_while1};
 use nom::character::complete::{char, digit1, line_ending};
 use nom::combinator::{map, map_res, not, opt, peek};
 use nom::error::{ErrorKind, ParseError};
@@ -13,7 +13,7 @@ use nom::{IResult, InputLength, InputTake};
 use nom_locate::LocatedSpan;
 use readyset_sql::{ast::*, Dialect};
 
-use crate::dialect::DialectParser;
+use crate::dialect::{is_sql_identifier, DialectParser};
 use crate::expression::expression;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::NomSqlResult;
@@ -131,19 +131,44 @@ fn delim_fx_args(
 }
 
 fn function_call_without_parens(
-    _dialect: Dialect,
+    dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
     move |i| {
-        // Some functions can be called without parentheses, in both mysql and postgres
-        let (i, name) = map(
+        let common_funcs = move |i| {
             alt((
-                tag_no_case("now"),
                 tag_no_case("current_date"),
                 tag_no_case("current_timestamp"),
                 tag_no_case("current_time"),
                 tag_no_case("localtimestamp"),
                 tag_no_case("localtime"),
-            )),
+            ))(i)
+        };
+        let funcs = move |i| {
+            if dialect == Dialect::PostgreSQL {
+                alt((
+                    common_funcs,
+                    // XXX: This list is not complete because it is, frankly, only here to match the
+                    // list that sqlparser-rs recognizes. Other stuff will get turned into a column
+                    // reference, and that's okay.
+                    tag_no_case("user"),
+                    tag_no_case("current_user"),
+                    tag_no_case("session_user"),
+                    tag_no_case("current_catalog"),
+                ))(i)
+            } else {
+                common_funcs(i)
+            }
+        };
+        // Some functions can be called without parentheses, in both mysql and postgres
+        let (i, name) = map(
+            terminated(
+                funcs,
+                // Without this, a column named `username` would parse as `user` and then error.
+                // Since we don't have a lexer/tokenizer, we can't check for a word boundary or make
+                // this list into keywords; so just check for things that can't be parts of
+                // identifiers.
+                not(peek(take_while1(is_sql_identifier))),
+            ),
             |n: LocatedSpan<&[u8]>| {
                 String::from_utf8(n.to_vec())
                     .expect("Only constant string literals")
@@ -156,7 +181,7 @@ fn function_call_without_parens(
             i,
             FunctionExpr::Call {
                 name,
-                arguments: vec![],
+                arguments: None,
             },
         ))
     }
@@ -319,7 +344,7 @@ fn function_call(
             i,
             FunctionExpr::Call {
                 name: name.to_lowercase().into(),
-                arguments,
+                arguments: Some(arguments),
             },
         ))
     }
@@ -796,11 +821,11 @@ mod tests {
             let res = to_nom_result(function_expr(Dialect::MySQL)(LocatedSpan::new(q)));
             let expected = FunctionExpr::Call {
                 name: "coalesce".into(),
-                arguments: vec![
+                arguments: Some(vec![
                     Expr::Column(Column::from("a")),
                     Expr::Column(Column::from("b")),
                     Expr::Column(Column::from("c")),
-                ],
+                ]),
             };
             assert_eq!(res, Ok((&b""[..], expected)));
         }
@@ -837,10 +862,10 @@ mod tests {
             res,
             FunctionExpr::Call {
                 name: "ifnull".into(),
-                arguments: vec![
+                arguments: Some(vec![
                     Expr::Column(Column::from("x")),
                     Expr::Literal(Literal::Integer(0))
-                ]
+                ])
             }
         );
     }
@@ -925,11 +950,11 @@ mod tests {
             res,
             FunctionExpr::Call {
                 name: "substring".into(),
-                arguments: vec![
+                arguments: Some(vec![
                     Expr::Column("a".into()),
                     Expr::Literal(1.into()),
                     Expr::Literal(7.into()),
-                ]
+                ])
             }
         );
     }
@@ -1015,11 +1040,11 @@ mod tests {
                 let res = to_nom_result(function_expr(Dialect::MySQL)(LocatedSpan::new(q)));
                 let expected = FunctionExpr::Call {
                     name: "coalesce".into(),
-                    arguments: vec![
+                    arguments: Some(vec![
                         Expr::Literal(Literal::String("a".to_owned())),
                         Expr::Column(Column::from("b")),
                         Expr::Column(Column::from("c")),
-                    ],
+                    ]),
                 };
                 assert_eq!(res, Ok((&b""[..], expected)));
             }
@@ -1050,18 +1075,6 @@ mod tests {
             };
             assert_eq!(res1, expected);
             assert_eq!(res2, expected);
-        }
-
-        #[test]
-        fn call_now_without_parens() {
-            let res = test_parse!(function_expr(Dialect::MySQL), b"NOW");
-            assert_eq!(
-                res,
-                FunctionExpr::Call {
-                    name: "now".into(),
-                    arguments: vec![]
-                }
-            );
         }
 
         #[test]
@@ -1115,11 +1128,11 @@ mod tests {
                 let res = to_nom_result(function_expr(Dialect::PostgreSQL)(LocatedSpan::new(q)));
                 let expected = FunctionExpr::Call {
                     name: "coalesce".into(),
-                    arguments: vec![
+                    arguments: Some(vec![
                         Expr::Literal(Literal::String("a".to_owned())),
                         Expr::Column(Column::from("b")),
                         Expr::Column(Column::from("c")),
-                    ],
+                    ]),
                 };
                 assert_eq!(res, Ok((&b""[..], expected)));
             }

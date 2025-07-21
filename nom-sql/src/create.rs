@@ -2696,7 +2696,7 @@ PRIMARY KEY (`id`));";
                             ColumnConstraint::NotNull,
                             ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
                                 name: "current_timestamp".into(),
-                                arguments: vec![Expr::Literal(Literal::Integer(6,),),],
+                                arguments: Some(vec![Expr::Literal(Literal::Integer(6,),),]),
                             },),),
                             ColumnConstraint::OnUpdateCurrentTimestamp(Some(Literal::Integer(6)),),
                         ],

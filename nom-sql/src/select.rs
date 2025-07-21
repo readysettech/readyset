@@ -1122,7 +1122,7 @@ mod tests {
         let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         let agg_expr = FunctionExpr::Call {
             name: "coalesce".into(),
-            arguments: vec![
+            arguments: Some(vec![
                 Expr::Column(Column {
                     name: "a".into(),
                     table: None,
@@ -1135,7 +1135,7 @@ mod tests {
                     name: "c".into(),
                     table: None,
                 }),
-            ],
+            ]),
         };
         let expected_stmt = SelectStatement {
             tables: vec![TableExpr::from(Relation::from("sometable"))],
@@ -1627,11 +1627,11 @@ mod tests {
                             alias: Some("created_day".into()),
                             expr: Expr::Call(FunctionExpr::Call {
                                 name: "coalesce".into(),
-                                arguments: vec![
+                                arguments: Some(vec![
                                     Expr::Column(Column::from("a")),
                                     Expr::Literal(Literal::String("b".to_owned())),
                                     Expr::Column(Column::from("c"))
-                                ]
+                                ])
                             }),
                         },
                     ],
@@ -1660,7 +1660,7 @@ mod tests {
                         ),
                         FieldDefinitionExpr::from(Expr::Call(FunctionExpr::Call {
                             name: "current_time".into(),
-                            arguments: vec![]
+                            arguments: None,
                         })),
                     ],
                     ..Default::default()
@@ -1860,11 +1860,11 @@ mod tests {
                             alias: Some("created_day".into()),
                             expr: Expr::Call(FunctionExpr::Call {
                                 name: "coalesce".into(),
-                                arguments: vec![
+                                arguments: Some(vec![
                                     Expr::Column(Column::from("a")),
                                     Expr::Literal(Literal::String("b".to_owned())),
                                     Expr::Column(Column::from("c"))
-                                ]
+                                ])
                             }),
                         },
                     ],
@@ -1893,7 +1893,7 @@ mod tests {
                         ),
                         FieldDefinitionExpr::from(Expr::Call(FunctionExpr::Call {
                             name: "current_time".into(),
-                            arguments: vec![]
+                            arguments: None,
                         })),
                     ],
                     ..Default::default()

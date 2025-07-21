@@ -144,7 +144,7 @@ pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
         }
         Expr::Call(FunctionExpr::Call {
             name,
-            arguments: exprs,
+            arguments: Some(exprs),
         }) if matches!(name.as_str(), "round") => {
             let expr = exprs
                 .first_mut()

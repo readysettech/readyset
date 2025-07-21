@@ -89,8 +89,11 @@ pub enum FunctionExpr {
 
     /// Generic function call expression
     Call {
+        /// Name of the function, always lowercased even if we don't recognize it.
         name: SqlIdentifier,
-        arguments: Vec<Expr>,
+        /// Arguments to the function, or `None` if called without parentheses. With parens but no
+        /// arguments is `Some(vec![])`.
+        arguments: Option<Vec<Expr>>,
     },
 }
 
@@ -158,7 +161,14 @@ impl FunctionExpr {
                 )
             }
             FunctionExpr::CountStar => "count(*)".to_string(),
-            FunctionExpr::Call { name, arguments } => format!(
+            FunctionExpr::Call {
+                name,
+                arguments: None,
+            } => name.to_string(),
+            FunctionExpr::Call {
+                name,
+                arguments: Some(arguments),
+            } => format!(
                 "{}({})",
                 name,
                 arguments
@@ -192,7 +202,13 @@ impl FunctionExpr {
                 concrete_iter!(iter::once(key.as_ref()).chain(iter::once(value.as_ref())))
             }
             FunctionExpr::CountStar => concrete_iter!(iter::empty()),
-            FunctionExpr::Call { arguments, .. } => concrete_iter!(arguments),
+            FunctionExpr::Call {
+                arguments: None, ..
+            } => concrete_iter!(iter::empty()),
+            FunctionExpr::Call {
+                arguments: Some(arguments),
+                ..
+            } => concrete_iter!(arguments),
             FunctionExpr::Substring { string, pos, len } => {
                 concrete_iter!(
                     iter::once(string.as_ref())
@@ -236,7 +252,14 @@ impl DialectDisplay for FunctionExpr {
                 }
                 write!(f, ")")
             }
-            FunctionExpr::Call { name, arguments } => {
+            FunctionExpr::Call {
+                name,
+                arguments: None,
+            } => write!(f, "{name}"),
+            FunctionExpr::Call {
+                name,
+                arguments: Some(arguments),
+            } => {
                 write!(
                     f,
                     "{}({})",
@@ -794,9 +817,10 @@ impl Expr {
     fn extract_all_any_op(self) -> Result<Self, AstConversionError> {
         if let Expr::BinaryOp { lhs, op, rhs } = self {
             match *rhs {
-                Expr::Call(FunctionExpr::Call { name, arguments })
-                    if name.eq_ignore_ascii_case("ALL") =>
-                {
+                Expr::Call(FunctionExpr::Call {
+                    name,
+                    arguments: Some(arguments),
+                }) if name.eq_ignore_ascii_case("ALL") => {
                     Ok(Self::OpAll {
                         lhs,
                         op,
@@ -805,9 +829,10 @@ impl Expr {
                         })?),
                     })
                 }
-                Expr::Call(FunctionExpr::Call { name, arguments })
-                    if name.eq_ignore_ascii_case("ANY") =>
-                {
+                Expr::Call(FunctionExpr::Call {
+                    name,
+                    arguments: Some(arguments),
+                }) if name.eq_ignore_ascii_case("ANY") => {
                     Ok(Self::OpAny {
                         lhs,
                         op,
@@ -1164,7 +1189,10 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 } else {
                     "substring".into_dialect(dialect)
                 };
-                Ok(Self::Call(FunctionExpr::Call { name, arguments }))
+                Ok(Self::Call(FunctionExpr::Call {
+                    name,
+                    arguments: Some(arguments),
+                }))
             }
             Trim {
                 expr: _,
@@ -1339,7 +1367,13 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                     _ => None,
                 }),
             ),
-            sqlparser::ast::FunctionArguments::None => (vec![], false, None),
+            sqlparser::ast::FunctionArguments::None => {
+                ident.value.make_ascii_lowercase();
+                return Ok(Self::Call(FunctionExpr::Call {
+                    name: ident.into_dialect(dialect),
+                    arguments: None,
+                }));
+            }
             other => {
                 return not_yet_implemented!(
                     "subquery function call argument for {ident}: {other:?}"
@@ -1432,10 +1466,10 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 }),
             }
         } else {
-            ident.value = ident.value.to_lowercase();
+            ident.value.make_ascii_lowercase();
             Self::Call(FunctionExpr::Call {
                 name: ident.into_dialect(dialect),
-                arguments: exprs.try_collect()?,
+                arguments: Some(exprs.try_collect()?),
             })
         };
         Ok(expr)
@@ -1708,7 +1742,10 @@ impl Arbitrary for Expr {
                         any::<SqlIdentifier>(),
                         proptest::collection::vec(element.clone(), 0..24)
                     )
-                        .prop_map(|(name, arguments)| FunctionExpr::Call { name, arguments })
+                        .prop_map(|(name, arguments)| FunctionExpr::Call {
+                            name,
+                            arguments: Some(arguments)
+                        })
                 ]
                 .prop_map(Expr::Call),
                 (box_expr.clone(), any::<BinaryOperator>(), box_expr.clone(),)

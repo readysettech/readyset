@@ -126,7 +126,7 @@ pub(super) fn make_expressions_above_grouped(
                             "jsonb_build_object"
                         }
                         .into(),
-                        arguments: vec![*key.clone(), *value.clone()],
+                        arguments: Some(vec![*key.clone(), *value.clone()]),
                     }),
                 )),
                 _ => None,

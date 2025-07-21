@@ -1525,10 +1525,10 @@ mod tests {
             let expected = Expr::Between {
                 operand: Box::new(Expr::Call(FunctionExpr::Call {
                     name: "f".into(),
-                    arguments: vec![
+                    arguments: Some(vec![
                         Expr::Column(Column::from("foo")),
                         Expr::Column(Column::from("bar")),
-                    ],
+                    ]),
                 })),
                 min: Box::new(Expr::Literal(1.into())),
                 max: Box::new(Expr::Literal(2.into())),

@@ -55,21 +55,23 @@ impl FunctionProcessor<'_> {
             | FunctionExpr::Upper { expr, .. }
             | FunctionExpr::Extract { expr, .. }
             | FunctionExpr::Substring { string: expr, .. } => expr,
-            FunctionExpr::Call { name, arguments }
-                if matches!(
-                    name.as_str(),
-                    // TODO: Support more ?
-                    "ascii"
-                        | "substring"
-                        | "substr"
-                        | "lower"
-                        | "upper"
-                        | "length"
-                        | "octet_length"
-                        | "char_length"
-                        | "character_length"
-                        | "hex"
-                ) =>
+            FunctionExpr::Call {
+                name,
+                arguments: Some(arguments),
+            } if matches!(
+                name.as_str(),
+                // TODO: Support more ?
+                "ascii"
+                    | "substring"
+                    | "substr"
+                    | "lower"
+                    | "upper"
+                    | "length"
+                    | "octet_length"
+                    | "char_length"
+                    | "character_length"
+                    | "hex"
+            ) =>
             {
                 arguments.first().ok_or_else(|| {
                     internal_err!(

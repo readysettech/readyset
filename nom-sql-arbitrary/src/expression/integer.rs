@@ -85,7 +85,7 @@ mod call {
         es.timestamp.prop_map(|dt| {
             Expr::Call(FunctionExpr::Call {
                 name: "dayofweek".into(),
-                arguments: vec![dt],
+                arguments: Some(vec![dt]),
             })
         })
     }
@@ -96,7 +96,7 @@ mod call {
         es.timestamp.prop_map(|dt| {
             Expr::Call(FunctionExpr::Call {
                 name: "month".into(),
-                arguments: vec![dt],
+                arguments: Some(vec![dt]),
             })
         })
     }
@@ -110,11 +110,14 @@ mod call {
             prop_oneof![
                 Just(Expr::Call(FunctionExpr::Call {
                     name: "round".into(),
-                    arguments: vec![n1.clone(), Expr::Literal(Literal::Integer(neg_or_zero))],
+                    arguments: Some(vec![
+                        n1.clone(),
+                        Expr::Literal(Literal::Integer(neg_or_zero))
+                    ]),
                 })),
                 Just(Expr::Call(FunctionExpr::Call {
                     name: "round".into(),
-                    arguments: vec![n1]
+                    arguments: Some(vec![n1])
                 }))
             ]
         })

@@ -85,7 +85,7 @@ mod call {
         (es.float, es.integer).prop_map(|(f, n)| {
             Expr::Call(FunctionExpr::Call {
                 name: "round".into(),
-                arguments: vec![f, n],
+                arguments: Some(vec![f, n]),
             })
         })
     }

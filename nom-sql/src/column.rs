@@ -279,7 +279,7 @@ mod tests {
                         ColumnConstraint::NotNull,
                         ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
                             name: "current_timestamp".into(),
-                            arguments: vec![]
+                            arguments: Some(vec![])
                         })),
                     ]
                 }
@@ -335,7 +335,7 @@ mod tests {
                     ColumnConstraint::NotNull,
                     ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
                         name: "current_timestamp".into(),
-                        arguments: vec![Expr::Literal(Literal::Integer(6))],
+                        arguments: Some(vec![Expr::Literal(Literal::Integer(6))]),
                     })),
                     ColumnConstraint::OnUpdateCurrentTimestamp(None),
                 ],
@@ -371,7 +371,7 @@ mod tests {
                         ColumnConstraint::NotNull,
                         ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
                             name: "current_timestamp".into(),
-                            arguments: vec![Expr::Literal(Literal::Integer(6))],
+                            arguments: Some(vec![Expr::Literal(Literal::Integer(6))]),
                         })),
                         ColumnConstraint::OnUpdateCurrentTimestamp(Some(Literal::Integer(6))),
                     ],
@@ -430,7 +430,7 @@ mod tests {
                         ColumnConstraint::NotNull,
                         ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
                             name: "current_timestamp".into(),
-                            arguments: vec![]
+                            arguments: Some(vec![])
                         })),
                     ]
                 }
@@ -458,7 +458,7 @@ mod tests {
                         ColumnConstraint::NotNull,
                         ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
                             name: "now".into(),
-                            arguments: vec![]
+                            arguments: Some(vec![])
                         })),
                     ]
                 }

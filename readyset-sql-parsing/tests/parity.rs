@@ -13,43 +13,7 @@ use readyset_sql::{
 };
 use readyset_sql_parsing::{ParsingPreset, parse_query_with_config};
 
-macro_rules! check_parse_mysql {
-    ($sql:expr) => {
-        parse_query_with_config(ParsingPreset::BothPanicOnMismatch, Dialect::MySQL, $sql)
-            .expect(&format!("Failed to parse MySQL query: {}", $sql))
-    };
-}
-
-macro_rules! check_parse_postgres {
-    ($sql:expr) => {
-        parse_query_with_config(
-            ParsingPreset::BothPanicOnMismatch,
-            Dialect::PostgreSQL,
-            $sql,
-        )
-        .expect(&format!("Failed to parse PostgreSQL query: {}", $sql))
-    };
-}
-
-macro_rules! check_parse_both {
-    ($sql:expr) => {{
-        check_parse_mysql!($sql);
-        check_parse_postgres!($sql)
-    }};
-}
-
-macro_rules! check_parse_fails {
-    ($dialect:expr, $sql:expr, $expected_error:expr) => {
-        let result = parse_query_with_config(ParsingPreset::BothErrorOnMismatch, $dialect, $sql)
-            .expect_err(&format!("Expected failure for {:?}: {:?}", $dialect, $sql));
-        assert!(
-            result.to_string().contains($expected_error),
-            "Expected error '{}' not found: got {}",
-            $expected_error,
-            result
-        );
-    };
-}
+mod utils;
 
 #[test]
 fn select_query_parsing() {

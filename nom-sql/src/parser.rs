@@ -467,7 +467,7 @@ mod tests {
         #[test]
         fn format_query_with_escaped_keyword() {
             let qstring0 = "delete from articles where \"key\"='aaa'";
-            let qstring1 = "delete from \"where\" where user=?";
+            let qstring1 = "delete from \"where\" where \"user\"=?";
 
             let expected0 = "DELETE FROM \"articles\" WHERE (\"key\" = 'aaa')";
             let expected1 = "DELETE FROM \"where\" WHERE (\"user\" = ?)";
@@ -573,8 +573,9 @@ mod tests {
         #[test]
         fn format_select_query_with_where_clause() {
             let qstring0 =
-                "select name, password from users as u where user='aaa' and password= 'xxx'";
-            let qstring1 = "select name, password from users as u where user=? and password =?";
+                r#"select name, password from users as u where "user"='aaa' and password= 'xxx'"#;
+            let qstring1 =
+                r#"select name, password from users as u where "user"=? and password =?"#;
 
             let expected0 =
             "SELECT \"name\", \"password\" FROM \"users\" AS \"u\" WHERE ((\"user\" = 'aaa') AND (\"password\" = 'xxx'))";
@@ -659,8 +660,8 @@ mod tests {
 
         #[test]
         fn format_delete_query_with_where_clause() {
-            let qstring0 = "delete from users where user='aaa' and password= 'xxx'";
-            let qstring1 = "delete from users where user=? and password =?";
+            let qstring0 = r#"delete from users where "user"='aaa' and password= 'xxx'"#;
+            let qstring1 = r#"delete from users where "user"=? and password =?"#;
 
             let expected0 =
                 "DELETE FROM \"users\" WHERE ((\"user\" = 'aaa') AND (\"password\" = 'xxx'))";

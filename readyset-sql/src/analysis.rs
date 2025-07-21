@@ -104,7 +104,13 @@ impl<'a> ReferredColumnsIter<'a> {
             Max(arg) => self.visit_expr(arg),
             Min(arg) => self.visit_expr(arg),
             GroupConcat { expr, .. } => self.visit_expr(expr),
-            Call { arguments, .. } => arguments.first().and_then(|first_arg| {
+            Call {
+                arguments: None, ..
+            } => None,
+            Call {
+                arguments: Some(arguments),
+                ..
+            } => arguments.first().and_then(|first_arg| {
                 if arguments.len() >= 2 {
                     self.exprs_to_visit.extend(arguments.iter().skip(1));
                 }
@@ -219,7 +225,13 @@ impl<'a> ReferredColumnsMut<'a> {
             Max(arg) => self.visit_expr(arg),
             Min(arg) => self.visit_expr(arg),
             GroupConcat { expr, .. } => self.visit_expr(expr),
-            Call { arguments, .. } => arguments.split_first_mut().and_then(|(first_arg, args)| {
+            Call {
+                arguments: None, ..
+            } => None,
+            Call {
+                arguments: Some(arguments),
+                ..
+            } => arguments.split_first_mut().and_then(|(first_arg, args)| {
                 self.exprs_to_visit.extend(args);
                 self.visit_expr(first_arg)
             }),
@@ -552,10 +564,10 @@ mod tests {
             assert_eq!(
                 Call(FunctionExpr::Call {
                     name: "ifnull".into(),
-                    arguments: vec![
+                    arguments: Some(vec![
                         Expr::Column(Column::from("col1")),
                         Expr::Column(Column::from("col2")),
-                    ]
+                    ])
                 })
                 .referred_columns()
                 .collect::<Vec<_>>(),
@@ -569,10 +581,10 @@ mod tests {
                 Call(FunctionExpr::Count {
                     expr: Box::new(Expr::Call(FunctionExpr::Call {
                         name: "ifnull".into(),
-                        arguments: vec![
+                        arguments: Some(vec![
                             Expr::Column(Column::from("col1")),
                             Expr::Column(Column::from("col2")),
-                        ]
+                        ])
                     })),
                     distinct: false,
                 })

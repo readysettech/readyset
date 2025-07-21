@@ -153,7 +153,10 @@ mod tests {
                         alias: "c0".into(),
                         expr: Expr::Call(FunctionExpr::Call {
                             name: "ifnull".into(),
-                            arguments: vec![Expr::Column("c".into()), Expr::Literal(0.into())],
+                            arguments: Some(vec![
+                                Expr::Column("c".into()),
+                                Expr::Literal(0.into()),
+                            ]),
                         }),
                     },
                 ],

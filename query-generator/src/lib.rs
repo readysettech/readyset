@@ -1899,7 +1899,7 @@ impl QueryOperation {
                         add_builtin!(@args_to_expr, table, arguments, $($arg)*);
                         let expr = Expr::Call(FunctionExpr::Call {
                             name: stringify!($fname).into(),
-                            arguments,
+                            arguments: Some(arguments),
                         });
                         let alias = state.fresh_alias();
                         query.fields.push(FieldDefinitionExpr::Expr {

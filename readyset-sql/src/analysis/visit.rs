@@ -554,7 +554,13 @@ pub fn walk_function_expr<'ast, V: Visitor<'ast>>(
         FunctionExpr::Extract { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Lower { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Upper { expr, .. } => visitor.visit_expr(expr.as_ref()),
-        FunctionExpr::Call { arguments, .. } => {
+        FunctionExpr::Call {
+            arguments: None, ..
+        } => Ok(()),
+        FunctionExpr::Call {
+            arguments: Some(arguments),
+            ..
+        } => {
             for arg in arguments {
                 visitor.visit_expr(arg)?;
             }
