@@ -135,6 +135,9 @@ deny = [
 skip = [
     { name = "bit-vec", version = "0.6.3" },
     { name = "uuid", version = "0.8.2" },
+    # tokio-postgres uses 0.11, chrono-tz uses 0.12
+    { name = "phf", version = "0.11.3" },
+    { name = "phf_shared", version = "0.11.3" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
