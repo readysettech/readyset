@@ -55,21 +55,6 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
         let was_supported = self.in_supported_position;
         if was_supported {
             match expression {
-                Expr::Between { min, max, negated: false, .. } => {
-                    // only parameterize if both min and max are literals and not negated
-                    // (negations will rewrite the condition into an OR which is not supported)
-                    if self.autoparameterize_ranges {
-                        match (min.as_mut(), max.as_mut()) {
-                            (Expr::Literal(Literal::Placeholder(_)), Expr::Literal(Literal::Placeholder(_))) => {},
-                            (Expr::Literal(a), Expr::Literal(b)) => {
-                                self.replace_literal(a);
-                                self.replace_literal(b);
-                            }
-                            _ => {}
-                        }
-                    }
-                    return Ok(());
-                }
                 Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_mut(), op, rhs.as_mut()) {
                     (Expr::Column(_), BinaryOperator::Equal, Expr::Literal(Literal::Placeholder(_))) => {}
                     (Expr::Row { .. }, BinaryOperator::Equal, Expr::Row { exprs, .. }) => {
@@ -973,24 +958,6 @@ mod tests {
                 "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = 1 AND age > 21",
                 "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = ? AND age > ?",
                 vec![(0, 1.into()), (1, 21.into())],
-            )
-        }
-
-        #[test]
-        fn supported_between() {
-            test_auto_parameterize_mysql(
-                "SELECT id FROM users WHERE id BETWEEN 1 AND 10",
-                "SELECT id FROM users WHERE id BETWEEN ? AND ?",
-                vec![(0, 1.into()), (1, 10.into())],
-            )
-        }
-
-        #[test]
-        fn not_supported_negated_between() {
-            test_auto_parameterize_mysql(
-                "SELECT id FROM users WHERE id NOT BETWEEN 1 AND 10",
-                "SELECT id FROM users WHERE id NOT BETWEEN 1 AND 10",
-                vec![],
             )
         }
 
