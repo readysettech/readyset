@@ -1740,3 +1740,25 @@ fn truncate() {
     );
     check_parse_postgres!(r#"TRUNCATE "t1", ONLY "t2" RESTART IDENTITY CASCADE"#);
 }
+
+#[test]
+fn update() {
+    check_parse_both!("UPDATE users SET id = 42, name = 'test'");
+    check_parse_both!("UPDATE users SET id = 42, name = 'test' WHERE id = 1");
+    check_parse_mysql!("UPDATE users SET karma = karma + 1 WHERE users.id = ?;");
+    check_parse_both!("UPDATE users SET karma = karma + 1 WHERE users.id = $1;");
+    check_parse_mysql!("UPDATE `stories` SET `hotness` = -19216.5479744 WHERE `stories`.`id` = ?");
+    check_parse_both!("UPDATE users SET karma = karma + 1;");
+    check_parse_both!("UPDATE users SET id = 42, name = 'test' WHERE id = 1");
+    check_parse_mysql!("UPDATE `users` SET `id` = 42, `name` = 'test' WHERE (`id` = 1)");
+    check_parse_mysql!(
+        "update `group_permission` set `permission` = REPLACE(permission,  'viewDiscussions', 'viewForum') where `permission` LIKE '%viewDiscussions'"
+    );
+    check_parse_postgres!(
+        r#"update "group_permission" set "permission" = REPLACE(permission,  'viewDiscussions', 'viewForum') where "permission" LIKE '%viewDiscussions'"#
+    );
+    check_parse_postgres!(
+        "UPDATE \"stories\" SET \"hotness\" = -19216.5479744 WHERE \"stories\".\"id\" = $1"
+    );
+    check_parse_postgres!("UPDATE \"users\" SET \"id\" = 42, \"name\" = 'test' WHERE (\"id\" = 1)");
+}
