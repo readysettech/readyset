@@ -1309,3 +1309,22 @@ fn select_modifiers() {
         }
     }
 }
+
+#[test]
+fn rename() {
+    check_parse_mysql!("RENAME TABLE t1 TO t2");
+    check_parse_mysql!("RENAME TABLE `t1` TO `t2`");
+    check_parse_mysql!("RENAME TABLE `from` TO `to`");
+    check_parse_mysql!("RENAME TABLE `from` TO `to`");
+    check_parse_mysql!("RENAME TABLE t1 TO t2, `change` to t3, t4 to `select`");
+    check_parse_mysql!("rename table `posts_likes` to `post_likes`");
+    check_parse_mysql!("RENAME TABLE `posts_likes` TO `post_likes`");
+    check_parse_postgres!(r#"RENAME TABLE t1 TO t2"#);
+    check_parse_postgres!(r#"RENAME TABLE "t1" TO "t2""#);
+    check_parse_postgres!(r#"RENAME TABLE "from" TO "to""#);
+    check_parse_postgres!(r#"RENAME TABLE "from" TO "to""#);
+    check_parse_postgres!(r#"RENAME TABLE t1 TO t2, "change" to t3, t4 to "select""#);
+    check_parse_postgres!(r#"RENAME TABLE "t1" TO "t2", "change" TO "t3", "t4" TO "select""#);
+    check_parse_postgres!(r#"rename table "posts_likes" to "post_likes""#);
+    check_parse_postgres!(r#"RENAME TABLE "posts_likes" TO "post_likes""#);
+}
