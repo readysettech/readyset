@@ -1337,6 +1337,8 @@ fn rls() {
     );
     check_parse_postgres!(r#"DROP RLS ON "public"."rls_test""#);
     check_parse_postgres!("DROP ALL RLS");
+    check_parse_postgres!("SHOW RLS ON public.test");
+    check_parse_postgres!("SHOW ALL RLS");
 }
 
 #[test]
@@ -1580,4 +1582,38 @@ fn set() {
     check_parse_postgres!("SET SESSION timezone = DEFAULT");
     check_parse_postgres!("SET LOCAL whatever = 'x', 1, hi");
     check_parse_postgres!("SET standard_conforming_strings = on");
+}
+
+#[test]
+fn show() {
+    check_parse_both!("SHOW TABLES");
+    check_parse_both!("SHOW FULL TABLES");
+    check_parse_both!("SHOW TABLES FROM db1");
+    check_parse_both!("SHOW TABLES LIKE 'm%'");
+    check_parse_both!("SHOW TABLES FROM db1 WHERE Tables_in_db1 = 't1'");
+    check_parse_both!("SHOW EVENTS");
+    check_parse_both!("SHOW\tEVENTS");
+    check_parse_both!("SHOW CACHES");
+    check_parse_both!("SHOW\tCACHES\t");
+    check_parse_both!("SHOW CACHES where query_id = 'test'");
+    check_parse_both!("SHOW PROXIED QUERIES");
+    check_parse_both!("SHOW\tPROXIED\tQUERIES");
+    check_parse_both!("SHOW PROXIED SUPPORTED QUERIES");
+    check_parse_both!("SHOW\tPROXIED\tSUPPORTED\tQUERIES");
+    check_parse_both!("SHOW PROXIED QUERIES LIMIT 10");
+    check_parse_both!("SHOW\tPROXIED\tSUPPORTED\tQUERIES LIMIT 20");
+    check_parse_both!("SHOW PROXIED QUERIES where query_id = 'test'");
+    check_parse_both!("SHOW PROXIED SUPPORTED QUERIES where query_id = 'test'");
+    check_parse_both!("SHOW PROXIED QUERIES where query_id = 'other'");
+    check_parse_both!("SHOW PROXIED SUPPORTED QUERIES where query_id = 'other'");
+    check_parse_both!("SHOW PROXIED QUERIES where query_id = 'test' LIMIT 10");
+    check_parse_both!("SHOW PROXIED SUPPORTED QUERIES where query_id = 'test' LIMIT 20");
+    check_parse_both!("SHOW READYSET STATUS");
+    check_parse_both!("SHOW\tREADYSET\tSTATUS");
+    check_parse_both!("SHOW READYSET VERSION");
+    check_parse_both!("SHOW\tREADYSET\tVERSION");
+    check_parse_both!("SHOW READYSET TABLES");
+    check_parse_both!("SHOW READYSET ALL TABLES");
+    check_parse_both!("SHOW\t READYSET\t MIGRATION\t STATUS\t 123456");
+    check_parse_both!("SHOW CONNECTIONS");
 }
