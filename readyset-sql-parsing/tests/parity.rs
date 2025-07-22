@@ -777,6 +777,11 @@ fn show_connections() {
 }
 
 #[test]
+fn show_events() {
+    check_parse_both!("SHOW EVENTS");
+}
+
+#[test]
 fn explain_domains() {
     check_parse_both!("EXPLAIN DOMAINS");
 }

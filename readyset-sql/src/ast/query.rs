@@ -98,10 +98,13 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
         match value {
             Query(query) => Ok(query.try_into_dialect(dialect)?),
             ShowVariable { variable } => {
-                if let Some(name) = variable.first()
-                    && name.value.eq_ignore_ascii_case("CONNECTIONS")
-                {
+                let Some(name) = variable.first() else {
+                    return not_yet_implemented!("unsupported SHOW variable with no variable");
+                };
+                if name.value.eq_ignore_ascii_case("CONNECTIONS") {
                     Ok(Self::Show(ShowStatement::Connections))
+                } else if name.value.eq_ignore_ascii_case("EVENTS") {
+                    Ok(Self::Show(ShowStatement::Events))
                 } else {
                     not_yet_implemented!("unsupported SHOW variable name {variable:?}")
                 }
