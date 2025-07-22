@@ -1550,3 +1550,34 @@ fn select() {
         "NomSqlError"
     );
 }
+
+#[test]
+fn set() {
+    check_parse_both!("SET SQL_AUTO_IS_NULL = 0;");
+    check_parse_mysql!("SET @var = 123;");
+    check_parse_both!("set autocommit=1");
+    check_parse_mysql!("SET @@LOCAL.autocommit = 1");
+    check_parse_mysql!("set gloBal var = 2");
+    check_parse_mysql!("set @@gLobal.var = 2");
+    check_parse_mysql!("SET @@GLOBAL.var = 2");
+    check_parse_mysql!("set @@Session.var = 1");
+    check_parse_mysql!("set @@var = 1");
+    check_parse_both!("set SeSsion var = 1");
+    check_parse_mysql!("SET @@SESSION.var = 1");
+    check_parse_both!("set lOcal var = 2");
+    check_parse_mysql!("set @@local.var = 2");
+    check_parse_mysql!("SET @@LOCAL.var = 2");
+    check_parse_both!("SET NAMES 'iso8660'");
+    check_parse_both!("set names 'utf8mb4' collate 'utf8mb4_unicode_ci'");
+    check_parse_both!("SET NAMES iso8660");
+    check_parse_both!("set names utf8mb4 collate utf8mb4_unicode_ci");
+    check_parse_mysql!("SET @myvar = 100 + 200;");
+    check_parse_mysql!("SET @myvar = 100 + 200, @@notmyvar = 'value', @@Global.g = @@global.V;");
+    check_parse_postgres!("SET client_min_messages TO 'warning'");
+    check_parse_postgres!("SET SESSION timezone TO 'UTC'");
+    check_parse_both!("SET NAMES 'UTF8'");
+    check_parse_postgres!("SET SESSION timezone TO DEFAULT");
+    check_parse_postgres!("SET SESSION timezone = DEFAULT");
+    check_parse_postgres!("SET LOCAL whatever = 'x', 1, hi");
+    check_parse_postgres!("SET standard_conforming_strings = on");
+}
