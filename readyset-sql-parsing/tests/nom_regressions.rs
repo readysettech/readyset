@@ -1712,3 +1712,31 @@ fn transactions() {
     check_parse_both!("    ROLLBACK ");
     check_parse_both!("    ROLLBACK       WORK   ");
 }
+
+#[test]
+fn truncate() {
+    check_parse_both!("truncate mytable");
+    check_parse_both!("tRUNcate mydb.mytable");
+    check_parse_both!("truncate table mytable");
+    check_parse_postgres!("truncate t1, t2");
+    check_parse_postgres!("truncate t1 restart identity");
+    check_parse_postgres!("truncate t1 cascade");
+    check_parse_both!("trunCATe mytable");
+    check_parse_both!("truncate mydb.mytable");
+    check_parse_both!("truncate table mytable");
+    check_parse_postgres!("truncate table table1, table2");
+    check_parse_postgres!("truncate ONLY mytable");
+    check_parse_postgres!("truncate t1, only t2");
+    check_parse_postgres!("truncate mytable continue identity");
+    check_parse_postgres!("truncate mytable restart identity");
+    check_parse_postgres!("truncate mytable restrict");
+    check_parse_postgres!("truncate mytable cascade");
+    check_parse_postgres!("truncate mytable restart identity cascade");
+    // REA-5858
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "truncate t1 *, t2*, t3",
+        "sqlparser error"
+    );
+    check_parse_postgres!(r#"TRUNCATE "t1", ONLY "t2" RESTART IDENTITY CASCADE"#);
+}

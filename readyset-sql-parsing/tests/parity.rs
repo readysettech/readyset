@@ -932,3 +932,10 @@ fn interval_type() {
         "sqlparser error"
     );
 }
+
+#[test]
+#[ignore = "REA-5858"]
+fn truncate_restart() {
+    check_parse_postgres!("truncate t1 *");
+    check_parse_postgres!("truncate t1 *, t2*, t3");
+}
