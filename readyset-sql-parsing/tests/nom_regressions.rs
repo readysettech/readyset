@@ -1762,3 +1762,13 @@ fn update() {
     );
     check_parse_postgres!("UPDATE \"users\" SET \"id\" = 42, \"name\" = 'test' WHERE (\"id\" = 1)");
 }
+
+#[test]
+fn use_() {
+    check_parse_both!("USE db1");
+    check_parse_mysql!("use `db2`");
+    check_parse_mysql!("USE `test`");
+    check_parse_postgres!(r#"use "db2""#);
+    check_parse_postgres!(r#"USE "test""#);
+    check_parse_both!("use noria");
+}
