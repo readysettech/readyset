@@ -1328,3 +1328,13 @@ fn rename() {
     check_parse_postgres!(r#"rename table "posts_likes" to "post_likes""#);
     check_parse_postgres!(r#"RENAME TABLE "posts_likes" TO "post_likes""#);
 }
+
+#[test]
+#[ignore = "REA-5855"]
+fn rls() {
+    check_parse_postgres!(
+        r#"CREATE RLS ON "public"."rls_test" IF NOT EXISTS USING ("auth_id", "user_id") = (my.var_auth_id, my.var_user_id)"#
+    );
+    check_parse_postgres!(r#"DROP RLS ON "public"."rls_test""#);
+    check_parse_postgres!("DROP ALL RLS");
+}
