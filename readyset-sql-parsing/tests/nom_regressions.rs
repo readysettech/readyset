@@ -1338,3 +1338,215 @@ fn rls() {
     check_parse_postgres!(r#"DROP RLS ON "public"."rls_test""#);
     check_parse_postgres!("DROP ALL RLS");
 }
+
+#[test]
+fn select() {
+    check_parse_both!("SELECT id, name FROM users;");
+    check_parse_fails!(
+        Dialect::MySQL,
+        "SELECT * FROM;",
+        "Expected: identifier, found: ;"
+    );
+    check_parse_both!("SELECT 1");
+    check_parse_both!("SELECT 1 ORDER BY 1 LIMIT 1");
+    check_parse_both!("SELECT users.id, users.name FROM users;");
+    check_parse_both!("SELECT * FROM users;");
+    check_parse_both!("SELECT users.* FROM users, votes;");
+    check_parse_both!("SELECT id,name FROM users;");
+    check_parse_both!("select id, name from users;");
+    check_parse_both!("SELECT id, name FROM users;");
+    check_parse_both!("select id, name from users;");
+    check_parse_both!("select id, name from users");
+    check_parse_both!("select id, name from users\n");
+    check_parse_both!("select id, name from users\n;");
+    check_parse_mysql!("select * from ContactInfo where email=?;");
+    check_parse_both!("select * from ContactInfo where email= $3;");
+    check_parse_both!("select * from ContactInfo where email= :5;");
+    check_parse_both!("select * from users limit 10\n");
+    check_parse_both!("select * from users limit 10 offset 10\n");
+    check_parse_mysql!("select * from users limit 5, 10\n");
+
+    // REA-5766
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "select * from users limit all\n",
+        "nom-sql AST differs from sqlparser-rs AST"
+    );
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "select * from users limit all offset 10\n",
+        "nom-sql AST differs from sqlparser-rs AST"
+    );
+
+    check_parse_postgres!("select * from users offset 10\n");
+    check_parse_both!("select * from PaperTag as t;");
+    check_parse_both!("select * from db1.PaperTag as t;");
+    check_parse_both!("select name as TagName from PaperTag;");
+    check_parse_both!("select PaperTag.name as TagName from PaperTag;");
+    check_parse_both!("select name TagName from PaperTag;");
+    check_parse_both!("select PaperTag.name TagName from PaperTag;");
+    check_parse_mysql!("select distinct tag from PaperTag where paperId=?;");
+    check_parse_mysql!("select data from Records where ROW(recordId, recordType) = (?, ?);");
+    check_parse_mysql!("select infoJson from PaperStorage where paperId=? and paperStorageId=?;");
+    check_parse_mysql!("select * from users where id = ? limit 10\n");
+    check_parse_mysql!("select * from users limit ?");
+    check_parse_both!("select distinct tag from PaperTag where paperId=$1;");
+    check_parse_both!("select data from Records where ROW(recordId, recordType) = ($1, $2);");
+    check_parse_both!("select infoJson from PaperStorage where paperId=$1 and paperStorageId=$2;");
+    check_parse_both!("select * from users where id = $1 limit 10\n");
+    check_parse_both!("select * from users limit $1");
+    check_parse_both!("SELECT max(addr_id) FROM address;");
+    check_parse_both!("SELECT max(addr_id) AS max_addr FROM address;");
+    check_parse_both!("SELECT COUNT(*) FROM votes GROUP BY aid;");
+    check_parse_both!("SELECT COUNT(DISTINCT vote_id) FROM votes GROUP BY aid;");
+    check_parse_both!(
+        "SELECT COUNT(CASE WHEN vote_id > 10 THEN vote_id END) FROM votes GROUP BY aid;"
+    );
+    check_parse_both!("SELECT SUM(CASE WHEN sign = 1 THEN vote_id END) FROM votes GROUP BY aid;");
+    check_parse_both!("SELECT SUM(CASE WHEN sign = 1 THEN vote_id END) FROM votes GROUP BY aid;");
+    check_parse_both!(
+        "SELECT SUM(CASE WHEN sign = 1 THEN vote_id ELSE 6 END) FROM votes GROUP BY aid;"
+    );
+    check_parse_both!(
+        "SELECT
+            COUNT(CASE WHEN votes.story_id IS NULL AND votes.vote = 0 THEN votes.vote END) as votes
+            FROM votes
+            GROUP BY votes.comment_id;"
+    );
+    check_parse_both!("SELECT coalesce(a, b,c) as x,d FROM sometable;");
+    check_parse_mysql!(
+        "SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND \
+        item.i_subject = ? ORDER BY item.i_title limit 50;"
+    );
+    check_parse_postgres!(
+        "SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND \
+        item.i_subject = $1 ORDER BY item.i_title limit 50;"
+    );
+    check_parse_both!("select paperId from PaperConflict join PCMember using (contactId);");
+    // slightly simplified from
+    // "select PCMember.contactId, group_concat(reviewType separator '')
+    // from PCMember left join PaperReview on (PCMember.contactId=PaperReview.contactId)
+    // group by PCMember.contactId"
+    check_parse_both!(
+        "select PCMember.contactId \
+               from PCMember \
+               join PaperReview on PCMember.contactId=PaperReview.contactId \
+               order by contactId;"
+    );
+    // simplified from
+    // "select max(conflictType), PaperReview.contactId as reviewer, PCMember.contactId as
+    //  pcMember, ChairAssistant.contactId as assistant, Chair.contactId as chair,
+    //  max(PaperReview.reviewNeedsSubmit) as reviewNeedsSubmit from ContactInfo
+    //  left join PaperReview using (contactId) left join PaperConflict using (contactId)
+    //  left join PCMember using (contactId) left join ChairAssistant using (contactId)
+    //  left join Chair using (contactId) where ContactInfo.contactId=?
+    //  group by ContactInfo.contactId;";
+    check_parse_mysql!(
+        "select PCMember.contactId, ChairAssistant.contactId, \
+               Chair.contactId from ContactInfo left join PaperReview using (contactId) \
+               left join PaperConflict using (contactId) left join PCMember using \
+               (contactId) left join ChairAssistant using (contactId) left join Chair \
+               using (contactId) where ContactInfo.contactId=?;"
+    );
+    check_parse_both!(
+        "select PCMember.contactId, ChairAssistant.contactId, \
+               Chair.contactId from ContactInfo left join PaperReview using (contactId) \
+               left join PaperConflict using (contactId) left join PCMember using \
+               (contactId) left join ChairAssistant using (contactId) left join Chair \
+               using (contactId) where ContactInfo.contactId=$1;"
+    );
+    check_parse_both!(
+        "SELECT ol_i_id FROM orders, order_line \
+            WHERE orders.o_c_id IN (SELECT o_c_id FROM orders, order_line \
+            WHERE orders.o_id = order_line.ol_o_id);"
+    );
+    check_parse_both!(
+        "SELECT ol_i_id FROM orders, order_line WHERE orders.o_c_id \
+            IN (SELECT o_c_id FROM orders, order_line \
+            WHERE orders.o_id = order_line.ol_o_id \
+            AND orders.o_id > (SELECT MAX(o_id) FROM orders));"
+    );
+    check_parse_both!("SELECT x FROM (SELECT x FROM t) sq WHERE x = 1");
+    check_parse_both!(
+        "SELECT o_id, ol_i_id FROM orders JOIN \
+            (SELECT ol_i_id FROM order_line) AS ids \
+            ON (orders.o_id = ids.ol_i_id);"
+    );
+    check_parse_both!("SELECT MAX(o_id)-3333 FROM orders;");
+    check_parse_both!("SELECT max(o_id) * 2 as double_max FROM orders;");
+    check_parse_mysql!("SELECT * FROM x WHERE AVG(y) IN (?, ?, ?)");
+    check_parse_both!("SELECT * FROM x WHERE AVG(y) IN ($1, $2, $3)");
+    check_parse_mysql!(
+        "SELECT id, CAST(created_at AS date) AS created_day FROM users WHERE id = ?;"
+    );
+    check_parse_both!(
+        "SELECT id, CAST(created_at AS date) AS created_day FROM users WHERE id = $1;"
+    );
+    check_parse_both!(
+        "WITH max_val AS (SELECT max(value) as value FROM t1)
+            SELECT name FROM t2 JOIN max_val ON max_val.value = t2.value"
+    );
+    check_parse_both!(
+        "WITH
+            max_val AS (SELECT max(value) as value FROM t1),
+            min_val AS (SELECT min(value) as value FROM t1)
+        SELECT name FROM t2
+            JOIN max_val ON max_val.value = t2.max_value
+            JOIN min_val ON min_val.value = t2.min_value"
+    );
+    check_parse_both!("SELECT id, coalesce(a, \"b\",c) AS created_day FROM users;");
+    check_parse_both!("SELECT NULL, 1, \"foo\", CURRENT_TIME FROM users;");
+    // SQL        let qstring = "SELECT NULL, 1, \"foo\";";
+    check_parse_mysql!(
+        "SELECT `auth_permission`.`content_type_id`, `auth_permission`.`codename`
+           FROM `auth_permission`
+           JOIN `django_content_type`
+             ON ( `auth_permission`.`content_type_id` = `django_content_type`.`id` )
+           WHERE `auth_permission`.`content_type_id` IN (0);"
+    );
+    check_parse_both!("SELECT id, count(*) FROM t GROUP BY 1");
+    check_parse_both!("SELECT id FROM t ORDER BY 1");
+    check_parse_mysql!("WITH `foo` AS (SELECT `x` FROM `t`) SELECT `x` FROM `foo`");
+    check_parse_mysql!("SELECT `x` FROM `t` LIMIT 10 OFFSET 0");
+    check_parse_both!("select x, count(*) from t having count(*) > 1");
+    check_parse_mysql!("SELECT `x`, count(*) FROM `t` HAVING (count(*) > 1)");
+    check_parse_both!("select * from t1 left join t2 on x inner join t3 on z");
+    check_parse_both!("SELECT id, coalesce(a, 'b',c) AS created_day FROM users;");
+    check_parse_both!("SELECT NULL, 1, 'foo', CURRENT_TIME FROM users;");
+    // SQL        let qstring = "SELECT NULL, 1, \"foo\";";
+    check_parse_postgres!(
+        "SELECT \"auth_permission\".\"content_type_id\", \"auth_permission\".\"codename\"
+           FROM \"auth_permission\"
+           JOIN \"django_content_type\"
+             ON ( \"auth_permission\".\"content_type_id\" = \"django_content_type\".\"id\" )
+          WHERE \"auth_permission\".\"content_type_id\" IN (0);"
+    );
+    check_parse_postgres!("WITH \"foo\" AS (SELECT \"x\" FROM \"t\") SELECT \"x\" FROM \"foo\"");
+    check_parse_both!("select x, count(*) from t having count(*) > 1");
+    check_parse_postgres!("SELECT \"x\", count(*) FROM \"t\" HAVING (count(*) > 1)");
+    check_parse_postgres!(
+        "select exists(select * from \"groups\" where \"id\" = $1) as \"exists\""
+    );
+    check_parse_postgres!(
+        "SELECT EXISTS (SELECT * FROM \"groups\" WHERE (\"id\" = $1)) AS \"exists\""
+    );
+    check_parse_postgres!(
+        r#"SELECT "public"."User"."id", "public"."User"."email", "public"."User"."name" FROM "public"."User" WHERE 1=1 OFFSET $1"#
+    );
+    check_parse_postgres!("SELECT id FROM a OFFSET 5");
+    check_parse_postgres!("SELECT id FROM a LIMIT 0.0");
+    check_parse_postgres!("SELECT id FROM a LIMIT 0.;");
+    check_parse_postgres!("SELECT id FROM a LIMIT 1.1");
+    check_parse_postgres!("SELECT id FROM a LIMIT 1.");
+    check_parse_postgres!("SELECT id FROM a LIMIT -0.0");
+    check_parse_postgres!("SELECT id FROM a LIMIT 3791947566539531989 OFFSET -0.0");
+    check_parse_postgres!("select a::numeric as n from t");
+    check_parse_postgres!("select a::numeric(1,2) as n from t");
+    // This is technically fine syntax, i.e. there could be a custom type named numericas, but
+    // nom-sql doesn't parse it.
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "select a::numericas n from t",
+        "NomSqlError"
+    );
+}
