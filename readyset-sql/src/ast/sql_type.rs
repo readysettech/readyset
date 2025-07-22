@@ -220,7 +220,10 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
                 sqlparser::ast::TimezoneInfo::WithoutTimeZone => Ok(Self::Timestamp),
                 sqlparser::ast::TimezoneInfo::Tz => Ok(Self::TimestampTz),
             },
-            Interval => Ok(Self::Time),
+            Interval => Ok(Self::Interval {
+                fields: None,
+                precision: None,
+            }),
             JSON => Ok(Self::Json),
             JSONB => Ok(Self::Jsonb),
             Regclass => unsupported!("REGCLASS type"),

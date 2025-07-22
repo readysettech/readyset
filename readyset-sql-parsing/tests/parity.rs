@@ -920,3 +920,15 @@ fn postgres_hex_bytes_odd_digits() {
         "Odd number of digits"
     );
 }
+
+#[test]
+fn interval_type() {
+    check_parse_type_postgres!("interval");
+    // REA-5857
+    check_parse_type_fails!(Dialect::PostgreSQL, "interval day", "sqlparser error");
+    check_parse_type_fails!(
+        Dialect::PostgreSQL,
+        "INTERVAL HOUR TO MINUTE (4)",
+        "sqlparser error"
+    );
+}

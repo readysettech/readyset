@@ -67,3 +67,43 @@ macro_rules! check_rt_both {
         $crate::check_rt_postgres!($sql);
     };
 }
+
+#[macro_export]
+macro_rules! check_parse_type_mysql {
+    ($ty:expr) => {
+        check_parse_mysql!(concat!("CREATE TABLE t (x ", $ty, ")"));
+        check_parse_mysql!(concat!("ALTER TABLE t ADD x ", $ty));
+    };
+}
+
+#[macro_export]
+macro_rules! check_parse_type_postgres {
+    ($ty:expr) => {
+        check_parse_postgres!(concat!("CREATE TABLE t (x ", $ty, ")"));
+        check_parse_postgres!(concat!("ALTER TABLE t ADD x ", $ty));
+    };
+}
+
+#[macro_export]
+macro_rules! check_parse_type_both {
+    ($ty:expr) => {
+        check_parse_type_mysql!($ty);
+        check_parse_type_postgres!($ty);
+    };
+}
+
+#[macro_export]
+macro_rules! check_parse_type_fails {
+    ($dialect:expr, $ty:expr, $expected_error:expr) => {
+        check_parse_fails!(
+            $dialect,
+            concat!("CREATE TABLE t (x ", $ty, ")"),
+            $expected_error
+        );
+        check_parse_fails!(
+            $dialect,
+            concat!("ALTER TABLE t ADD x ", $ty),
+            $expected_error
+        );
+    };
+}

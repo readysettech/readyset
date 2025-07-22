@@ -1617,3 +1617,80 @@ fn show() {
     check_parse_both!("SHOW\t READYSET\t MIGRATION\t STATUS\t 123456");
     check_parse_both!("SHOW CONNECTIONS");
 }
+
+#[test]
+fn types() {
+    check_parse_type_both!("bigint(20)");
+    check_parse_type_both!("bool");
+    check_parse_type_both!("integer(16)");
+    check_parse_type_both!("datetime(16)");
+    check_parse_type_both!("boolean");
+    check_parse_type_both!("json");
+    check_parse_type_both!("double(16,12)");
+    check_parse_type_mysql!("mediumint(8)");
+    check_parse_type_mysql!("mediumint");
+    check_parse_type_both!("point");
+    check_parse_type_mysql!("point srid 4326");
+    check_parse_type_both!("NUMERIC");
+    check_parse_type_both!("NUMERIC(10)");
+    check_parse_type_both!("NUMERIC(10, 20)");
+    check_parse_type_postgres!("\"char\"");
+    check_parse_type_both!("macaddr");
+    check_parse_type_both!("inet");
+    check_parse_type_both!("uuid");
+    check_parse_type_both!("jsonb");
+    check_parse_type_both!("geometry(point)");
+    check_parse_type_both!("geometry(point, 4326)");
+    check_parse_type_both!("bit");
+    check_parse_type_both!("bit(10)");
+    check_parse_type_both!("bit varying");
+    check_parse_type_both!("bit varying(10)");
+    check_parse_type_both!("timestamp");
+    check_parse_type_both!("timestamp (5)");
+    check_parse_type_both!("timestamp without time zone");
+    check_parse_type_both!("timestamp (5)   without time zone");
+    check_parse_type_both!("timestamp with time zone");
+    check_parse_type_both!("timestamptz");
+    check_parse_type_both!("timestamp (5)    with time zone");
+    check_parse_type_both!("serial");
+    check_parse_type_both!("bigserial");
+    check_parse_type_both!("varchar");
+    check_parse_type_both!("character varying");
+    check_parse_type_both!("character varying(20)");
+    check_parse_type_both!("character(16)");
+    check_parse_type_both!("time without time zone");
+    check_parse_type_postgres!("unsupportedtype");
+    check_parse_type_postgres!("foo.custom");
+    check_parse_type_postgres!("int[]");
+    check_parse_type_postgres!("text[][]");
+    check_parse_type_postgres!("float[4][5]");
+    check_parse_type_both!("citext");
+    check_parse_type_both!("int2");
+    check_parse_type_both!("int4");
+    check_parse_type_both!("int8");
+    check_parse_type_both!("interval");
+    check_parse_type_postgres!("tsvector");
+}
+
+#[test]
+#[ignore = "REA-5844"]
+fn binary_modifier() {
+    check_parse_type_mysql!("varchar(255) binary");
+}
+
+#[test]
+#[ignore = "REA-5856"]
+fn signed_modifier() {
+    check_parse_type_mysql!("bigint(20) unsigned");
+    check_parse_type_mysql!("bigint(20) signed");
+    check_parse_type_mysql!("decimal(6,2) unsigned");
+    check_parse_type_mysql!("numeric(2) unsigned");
+    check_parse_type_mysql!("float unsigned");
+}
+
+#[test]
+#[ignore = "REA-5857"]
+fn interval_type() {
+    check_parse_type_both!("interval dAY");
+    check_parse_type_both!("INTERVAL hour to mINuTe (4)");
+}
