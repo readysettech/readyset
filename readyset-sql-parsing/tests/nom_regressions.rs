@@ -1694,3 +1694,21 @@ fn interval_type() {
     check_parse_type_both!("interval dAY");
     check_parse_type_both!("INTERVAL hour to mINuTe (4)");
 }
+
+#[test]
+fn transactions() {
+    check_parse_both!("    START       TRANSACTION ;  ");
+    check_parse_postgres!(" BEGIN  TRANSACTION; ");
+    check_parse_both!("    BEGIN       WORK;   ");
+    check_parse_both!("    BEGIN;   ");
+    check_parse_both!("    COMMIT");
+    check_parse_both!("    COMMIT       WORK   ");
+    check_parse_both!("    COMMIT");
+    check_parse_both!("    COMMIT       WORK   ");
+    check_parse_postgres!("    COMMIT       TRANSACTION   ");
+    check_parse_postgres!("    END");
+    check_parse_postgres!("    END       WORK   ");
+    check_parse_postgres!("    END       TRANSACTION   ");
+    check_parse_both!("    ROLLBACK ");
+    check_parse_both!("    ROLLBACK       WORK   ");
+}
