@@ -649,6 +649,11 @@ impl DfValue {
             (DfValue::Double(v), int_types!()) => {
                 return_error_if_disallowed_float!(v);
             }
+            (v @ DfValue::Numeric(_), int_types!()) => {
+                if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown)? {
+                    return_error_if_disallowed_float!(v);
+                }
+            }
             (DfValue::TinyText(v), int_types!()) => {
                 if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown)? {
                     return_error_if_disallowed_float!(v);
@@ -4112,6 +4117,55 @@ mod tests {
                     )
                     .unwrap(),
                 DfValue::from(vec![DfValue::from(1u64)])
+            );
+        }
+
+        macro_rules! check_comparison {
+            ($a:expr, $ty:expr, invalid $(,)?) => {
+                match $a.coerce_for_comparison(&$ty) {
+                    Ok(v) => panic!("Expected error, got {v:?}"),
+                    Err(err) => assert!(
+                        matches!(err, ReadySetError::DfValueConversionError { .. }),
+                        "Unexpected error: {err}"
+                    ),
+                }
+            };
+            ($a:expr, $ty:expr, $($b:expr $(,)?)+) => {
+                let a = $a
+                    .coerce_for_comparison(&$ty)
+                    .expect("Failed to coerce value");
+                $(
+                    assert_eq!(a, $b);
+                )+
+            };
+        }
+
+        #[test]
+        fn float_and_numeric_conversions() {
+            check_comparison!(DfValue::Float(42.1), DfType::BigInt, invalid);
+            check_comparison!(DfValue::Double(42.1), DfType::BigInt, invalid);
+            check_comparison!(
+                DfValue::Numeric(Decimal::try_from(42.1).unwrap().into()),
+                DfType::BigInt,
+                invalid,
+            );
+            check_comparison!(
+                DfValue::Numeric(Decimal::try_from(42.0).unwrap().into()),
+                DfType::BigInt,
+                DfValue::Int(42),
+                DfValue::UnsignedInt(42),
+            );
+            check_comparison!(
+                DfValue::Float(42.0),
+                DfType::BigInt,
+                DfValue::Int(42),
+                DfValue::UnsignedInt(42),
+            );
+            check_comparison!(
+                DfValue::Double(42.0),
+                DfType::BigInt,
+                DfValue::Int(42),
+                DfValue::UnsignedInt(42),
             );
         }
     }
