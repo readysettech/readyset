@@ -137,10 +137,7 @@ mod tests {
                     table: Relation::from("stories"),
                     fields: vec![(
                         Column::from("hotness"),
-                        Expr::Literal(Literal::Double(Double {
-                            value: -19216.5479744,
-                            precision: 7,
-                        }))
+                        Expr::Literal(Literal::Number("-19216.5479744".into())),
                     )],
                     where_clause: expected_where_cond,
                 }
@@ -229,10 +226,7 @@ mod tests {
                     table: Relation::from("stories"),
                     fields: vec![(
                         Column::from("hotness"),
-                        Expr::Literal(Literal::Double(Double {
-                            value: -19216.5479744,
-                            precision: 7,
-                        }))
+                        Expr::Literal(Literal::Number("-19216.5479744".into())),
                     ),],
                     where_clause: expected_where_cond,
                 }

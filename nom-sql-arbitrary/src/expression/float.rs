@@ -54,10 +54,7 @@ fn op(es: ExprStrategy) -> impl Strategy<Value = Expr> {
         1 => es.float.prop_map(|f| Expr::BinaryOp {
             lhs: Box::new(f),
             op: BinaryOperator::Divide,
-            rhs: Box::new(Expr::Literal(Literal::Float(Float {
-                value: 0.0,
-                precision: u8::MAX
-            }))),
+            rhs: Box::new(Expr::Literal(Literal::Number("0.0".into()))),
         })
     ]
 }

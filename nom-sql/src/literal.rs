@@ -1,4 +1,3 @@
-use std::num::ParseFloatError;
 use std::str;
 use std::str::FromStr;
 
@@ -54,23 +53,9 @@ pub fn float(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Option<&[u8]>, &[u8]
 // Floating point literal value
 #[allow(clippy::type_complexity)]
 pub fn float_literal(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
-    map_res(
-        pair(
-            peek(float),
-            map_res(recognize(float), |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
-        ),
-        |(parts, s)| {
-            let f = f64::from_str(s)?;
-            if f.is_infinite() || f.is_nan() {
-                Ok::<_, ParseFloatError>(Literal::Numeric(s.to_string()))
-            } else {
-                let (_, _, _, frac) = parts;
-                Ok(Literal::Double(Double {
-                    value: f,
-                    precision: frac.len() as _,
-                }))
-            }
-        },
+    map(
+        map_res(recognize(float), |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
+        |s| Literal::Number(s.to_string()),
     )(i)
 }
 
@@ -268,44 +253,12 @@ pub fn embedded_literal(
 
 #[cfg(test)]
 mod tests {
-    use assert_approx_eq::assert_approx_eq;
     use proptest::prop_assume;
     use readyset_sql::DialectDisplay;
-    use readyset_util::hash::hash;
     use test_strategy::proptest;
     use test_utils::tags;
 
     use super::*;
-
-    #[test]
-    fn float_formatting_strips_trailing_zeros() {
-        let f = Literal::Double(Double {
-            value: 1.5,
-            precision: u8::MAX,
-        });
-        assert_eq!(f.display(Dialect::MySQL).to_string(), "1.5");
-    }
-
-    #[test]
-    fn float_formatting_leaves_zero_after_dot() {
-        let f = Literal::Double(Double {
-            value: 0.0,
-            precision: u8::MAX,
-        });
-        assert_eq!(f.display(Dialect::MySQL).to_string(), "0.0");
-    }
-
-    #[test]
-    fn float_lots_of_zeros() {
-        let res = float_literal(LocatedSpan::new(b"1.500000000000000000000000000000"))
-            .unwrap()
-            .1;
-        if let Literal::Double(Double { value, .. }) = res {
-            assert_approx_eq!(value, 1.5);
-        } else {
-            unreachable!()
-        }
-    }
 
     #[test]
     fn larger_than_i64_max_parses_to_unsigned() {
@@ -328,19 +281,8 @@ mod tests {
 
     #[tags(no_retry)]
     #[proptest]
-    fn real_hash_matches_eq(real1: Double, real2: Double) {
-        if real1 == real2 {
-            assert_eq!(hash(&real1), hash(&real2));
-        }
-    }
-
-    #[tags(no_retry)]
-    #[proptest]
     fn literal_to_string_parse_round_trip(lit: Literal) {
-        prop_assume!(!matches!(
-            lit,
-            Literal::Double(_) | Literal::Float(_) | Literal::Numeric(_) | Literal::ByteArray(_)
-        ));
+        prop_assume!(!matches!(lit, Literal::Number(_) | Literal::ByteArray(_)));
         match lit {
             Literal::BitVector(_) => {
                 let s = lit.display(Dialect::MySQL).to_string();
@@ -442,7 +384,7 @@ mod tests {
             };
             let bytes = input.as_bytes();
             let result = test_parse!(literal(Dialect::PostgreSQL), bytes);
-            assert_eq!(result, Literal::Numeric(input.to_string()))
+            assert_eq!(result, Literal::Number(input.to_string()))
         }
     }
 

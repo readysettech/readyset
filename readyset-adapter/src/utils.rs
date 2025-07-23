@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
 
 use itertools::Itertools;
 use readyset_client::{ColumnSchema, Modification, Operation};
@@ -13,8 +12,10 @@ use readyset_sql::ast::{
     self, BinaryOperator, Column, ColumnConstraint, CreateTableBody, DeleteStatement, Expr,
     InValue, InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
+use readyset_sql::{Dialect as SqlDialect, TryFromDialect as _, TryIntoDialect as _};
 
 fn flatten_column_literal(
+    dialect: SqlDialect,
     pkey: &[&Column],
     flattened: &mut HashSet<Vec<(String, DfValue)>>,
     c: &Column,
@@ -28,7 +29,7 @@ fn flatten_column_literal(
             unsupported!("UPDATE/DELETE contains references to another table")
         }
 
-        let value = DfValue::try_from(l)?;
+        let value = DfValue::try_from_dialect(l, dialect)?;
         // We want to look through our existing keys and see if any of them
         // are missing any columns. In that case we'll add the one we're looking
         // at now there.
@@ -71,6 +72,7 @@ fn flatten_column_literal(
 /// Then we'll check the right side, which will find a "hole" in the first key,
 /// and we'll get {[(aid, 1), (uid, 2)]}.
 fn do_flatten_conditional(
+    dialect: SqlDialect,
     cond: &Expr,
     pkey: &[&Column],
     flattened: &mut HashSet<Vec<(String, DfValue)>>,
@@ -83,7 +85,7 @@ fn do_flatten_conditional(
                 Expr::Column(ref c),
                 BinaryOperator::Is,
                 Expr::Literal(ref l @ Literal::Null | ref l @ Literal::Boolean(_)),
-            ) => flatten_column_literal(pkey, flattened, c, l)?,
+            ) => flatten_column_literal(dialect, pkey, flattened, c, l)?,
             (Expr::Literal(ref l), BinaryOperator::Equal, Expr::Literal(ref r)) => l == r,
             (lhs, BinaryOperator::And, rhs) => {
                 // When checking ANDs we want to make sure that both sides refer to the same key,
@@ -92,15 +94,15 @@ fn do_flatten_conditional(
                 // WHERE A.a = AND a.b = 2
                 // but also bogus stuff like `WHERE 1 = 1 AND 2 = 2`.
                 let pre_count = flattened.len();
-                do_flatten_conditional(lhs, pkey, flattened)? && {
+                do_flatten_conditional(dialect, lhs, pkey, flattened)? && {
                     let count = flattened.len();
-                    let valid = do_flatten_conditional(rhs, pkey, flattened)?;
+                    let valid = do_flatten_conditional(dialect, rhs, pkey, flattened)?;
                     valid && (pre_count == flattened.len() || count == flattened.len())
                 }
             }
             (lhs, BinaryOperator::Or, rhs) => {
-                do_flatten_conditional(lhs, pkey, flattened)?
-                    && do_flatten_conditional(rhs, pkey, flattened)?
+                do_flatten_conditional(dialect, lhs, pkey, flattened)?
+                    && do_flatten_conditional(dialect, rhs, pkey, flattened)?
             }
             _ => false,
         },
@@ -117,28 +119,31 @@ fn do_flatten_conditional(
 pub(crate) fn flatten_conditional(
     cond: &Expr,
     pkey: &[&Column],
+    dialect: Dialect,
 ) -> ReadySetResult<Option<Vec<Vec<DfValue>>>> {
     let mut flattened = HashSet::new();
-    Ok(if do_flatten_conditional(cond, pkey, &mut flattened)? {
-        let keys = flattened
-            .into_iter()
-            .map(|key| {
-                // This will be the case if we got a cond without any primary keys,
-                // or if we have a multi-column primary key and the cond only covers part of it.
-                if key.len() != pkey.len() {
-                    unsupported!(
-                        "UPDATE/DELETE requires all columns of a compound key to be present"
-                    );
-                }
+    Ok(
+        if do_flatten_conditional(dialect.into(), cond, pkey, &mut flattened)? {
+            let keys = flattened
+                .into_iter()
+                .map(|key| {
+                    // This will be the case if we got a cond without any primary keys,
+                    // or if we have a multi-column primary key and the cond only covers part of it.
+                    if key.len() != pkey.len() {
+                        unsupported!(
+                            "UPDATE/DELETE requires all columns of a compound key to be present"
+                        );
+                    }
 
-                Ok(key.into_iter().map(|(_c, v)| v).collect())
-            })
-            .collect::<ReadySetResult<Vec<_>>>()?;
+                    Ok(key.into_iter().map(|(_c, v)| v).collect())
+                })
+                .collect::<ReadySetResult<Vec<_>>>()?;
 
-        Some(keys)
-    } else {
-        None
-    })
+            Some(keys)
+        } else {
+            None
+        },
+    )
 }
 
 // Finds the primary for the given table, both by looking at constraints on individual
@@ -351,6 +356,7 @@ fn walk_pkey_where<I>(
     col2v: &mut HashMap<String, DfValue>,
     params: &mut Option<I>,
     expr: Expr,
+    dialect: SqlDialect,
 ) -> ReadySetResult<()>
 where
     I: Iterator<Item = DfValue>,
@@ -371,7 +377,7 @@ where
                             bad_request_err("Not enough parameter values given in EXECUTE")
                         })?,
 
-                    v => DfValue::try_from(v)?,
+                    v => DfValue::try_from_dialect(v, dialect)?,
                 };
                 let oldv = col2v.insert(c.name.to_string(), v);
                 invariant!(oldv.is_none());
@@ -383,8 +389,8 @@ where
             lhs,
             rhs,
         } => {
-            walk_pkey_where(col2v, params, *lhs)?;
-            walk_pkey_where(col2v, params, *rhs)?;
+            walk_pkey_where(col2v, params, *lhs, dialect)?;
+            walk_pkey_where(col2v, params, *rhs, dialect)?;
             return Ok(());
         }
         _ => (),
@@ -430,7 +436,8 @@ where
                         i,
                         // Coercing from a literal, so no "from" type to pass to coerce_to
                         Modification::Set(
-                            DfValue::try_from(v)?.coerce_to(&target_type, &DfType::Unknown)?,
+                            DfValue::try_from_dialect(v, dialect.into())?
+                                .coerce_to(&target_type, &DfType::Unknown)?,
                         ),
                     ));
                 }
@@ -440,10 +447,20 @@ where
                         // TODO(ENG-142): Handle nested arithmetic
                         invariant_eq!(c, &field.column);
                         match op {
-                            BinaryOperator::Add => updates
-                                .push((i, Modification::Apply(Operation::Add, l.try_into()?))),
-                            BinaryOperator::Subtract => updates
-                                .push((i, Modification::Apply(Operation::Sub, l.try_into()?))),
+                            BinaryOperator::Add => updates.push((
+                                i,
+                                Modification::Apply(
+                                    Operation::Add,
+                                    l.try_into_dialect(dialect.into())?,
+                                ),
+                            )),
+                            BinaryOperator::Subtract => updates.push((
+                                i,
+                                Modification::Apply(
+                                    Operation::Sub,
+                                    l.try_into_dialect(dialect.into())?,
+                                ),
+                            )),
                             _ => unsupported!(),
                         }
                     }
@@ -460,13 +477,14 @@ pub(crate) fn extract_pkey_where<I>(
     where_clause: Expr,
     mut params: Option<I>,
     schema: &CreateTableBody,
+    dialect: Dialect,
 ) -> ReadySetResult<Vec<DfValue>>
 where
     I: Iterator<Item = DfValue>,
 {
     let pkey = get_primary_key(schema);
     let mut col_to_val: HashMap<_, _> = HashMap::new();
-    walk_pkey_where(&mut col_to_val, &mut params, where_clause)?;
+    walk_pkey_where(&mut col_to_val, &mut params, where_clause, dialect.into())?;
     pkey.iter()
         .map(|&(_, c)| {
             col_to_val.remove(c.name.as_str()).ok_or_else(|| {
@@ -493,7 +511,7 @@ where
     let where_clause = q
         .where_clause
         .ok_or_else(|| unsupported_err!("UPDATE without WHERE is not supported"))?;
-    let key = extract_pkey_where(where_clause, params, schema)?;
+    let key = extract_pkey_where(where_clause, params, schema, dialect)?;
     Ok((key, updates?))
 }
 
@@ -501,6 +519,7 @@ pub(crate) fn extract_delete<I>(
     q: DeleteStatement,
     params: Option<I>,
     schema: &CreateTableBody,
+    dialect: Dialect,
 ) -> ReadySetResult<Vec<DfValue>>
 where
     I: Iterator<Item = DfValue>,
@@ -508,7 +527,7 @@ where
     let where_clause = q
         .where_clause
         .ok_or_else(|| unsupported_err!("DELETE without WHERE is not supported"))?;
-    extract_pkey_where(where_clause, params, schema)
+    extract_pkey_where(where_clause, params, schema, dialect)
 }
 
 /// Extract the rows for an INSERT statement from a list of params, coercing them to the expected
@@ -662,7 +681,9 @@ mod tests {
             .collect();
 
         let pkey_ref = pkey.iter().collect::<Vec<_>>();
-        if let Some(mut actual) = flatten_conditional(&cond, &pkey_ref).unwrap() {
+        if let Some(mut actual) =
+            flatten_conditional(&cond, &pkey_ref, readyset_data::Dialect::DEFAULT_MYSQL).unwrap()
+        {
             let mut expected: Vec<Vec<DfValue>> = expected
                 .unwrap()
                 .into_iter()

@@ -265,24 +265,12 @@ impl TryFrom<mysql_async::Value> for Value {
 impl TryFrom<Literal> for Value {
     type Error = ValueConversionError;
     fn try_from(value: Literal) -> Result<Self, Self::Error> {
-        macro_rules! real_value {
-            ($real:expr, $prec:expr) => {{
-                let integral = $real as i64;
-                Value::Real(
-                    integral,
-                    ((($real as f64) - (integral as f64)) * (10_u64.pow($prec as u32) as f64))
-                        as u64,
-                )
-            }};
-        }
         Ok(match value {
             Literal::Null => Value::Null,
             Literal::Boolean(b) => Value::Integer(i64::from(b)),
             Literal::Integer(v) => Value::Integer(v),
             Literal::UnsignedInteger(v) => Value::UnsignedInteger(v),
-            Literal::Float(float) => real_value!(float.value, float.precision),
-            Literal::Double(double) => real_value!(double.value, double.precision),
-            Literal::Numeric(s) => {
+            Literal::Number(s) => {
                 Value::Numeric(Decimal::from_str(&s).map_err(|e| {
                     ValueConversionError(format!("Invalid numeric value '{s}': {e}"))
                 })?)

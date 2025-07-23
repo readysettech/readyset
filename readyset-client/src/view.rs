@@ -32,6 +32,7 @@ use readyset_sql::ast::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, ItemPlaceholder, Literal,
     Relation, SelectStatement, SqlIdentifier, SqlType,
 };
+use readyset_sql::TryFromDialect as _;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_tracing::child_span;
 use readyset_tracing::presampled::instrument_if_enabled;
@@ -1624,7 +1625,7 @@ impl<'a> KeyComparisonBuilder<'a> {
                             "Key remapping for ReusedReaderHandle contains non-numbered placeholder"
                         )
                     }
-                    literal => &DfValue::try_from(literal)?,
+                    literal => &DfValue::try_from_dialect(literal, self.dialect.into())?,
                 }
             }
             None => key.get(*idx - 1).ok_or_else(|| {
@@ -1838,7 +1839,7 @@ impl ReusedReaderHandle {
                     )
                 })?;
                 // Return None if keys do not satisfy the required values
-                if DfValue::try_from(val)? != *client_val {
+                if DfValue::try_from_dialect(val, dialect.into())? != *client_val {
                     return Ok(None);
                 }
             }

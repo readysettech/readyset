@@ -1219,15 +1219,15 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                         .ok()
                         .and_then(|i| i.checked_neg())
                         .map(Literal::Integer)
-                        .unwrap_or_else(|| Literal::Numeric(format!("-{i}")));
+                        .unwrap_or_else(|| Literal::Number(format!("-{i}")));
                     Ok(Self::Literal(literal))
                 }
                 Expr::Literal(Literal::Integer(i)) => Ok(Self::Literal(Literal::Integer(-i))),
-                Expr::Literal(Literal::Double(Double { value, precision })) => {
-                    Ok(Self::Literal(Literal::Double(Double {
-                        value: -value,
-                        precision,
-                    })))
+                Expr::Literal(Literal::Number(s)) if !s.starts_with('-') => {
+                    Ok(Self::Literal(Literal::Number(format!("-{s}"))))
+                }
+                Expr::Literal(Literal::Number(s)) if s.starts_with('-') => {
+                    Ok(Self::Literal(Literal::Number(s[1..].to_string())))
                 }
                 expr => Ok(Self::UnaryOp {
                     op: UnaryOperator::Neg,

@@ -2044,13 +2044,7 @@ mod tests {
                 tables: vec![TableExpr::from(Relation::from("a"))],
                 fields: columns(&["id"]),
                 limit_clause: LimitClause::LimitOffset {
-                    limit: Some(
-                        Literal::Double(Double {
-                            value: 0.0,
-                            precision: 1,
-                        })
-                        .into(),
-                    ),
+                    limit: Some(Literal::Number("0.0".into()).into()),
                     offset: None,
                 },
                 ..Default::default()
@@ -2066,13 +2060,7 @@ mod tests {
                 tables: vec![TableExpr::from(Relation::from("a"))],
                 fields: columns(&["id"]),
                 limit_clause: LimitClause::LimitOffset {
-                    limit: Some(
-                        Literal::Double(Double {
-                            value: 0.0,
-                            precision: 0,
-                        })
-                        .into(),
-                    ),
+                    limit: Some(Literal::Number("0.".into()).into()),
                     offset: None,
                 },
                 ..Default::default()
@@ -2088,13 +2076,7 @@ mod tests {
                 tables: vec![TableExpr::from(Relation::from("a"))],
                 fields: columns(&["id"]),
                 limit_clause: LimitClause::LimitOffset {
-                    limit: Some(
-                        Literal::Double(Double {
-                            value: 1.1,
-                            precision: 1,
-                        })
-                        .into(),
-                    ),
+                    limit: Some(Literal::Number("1.1".into()).into()),
                     offset: None,
                 },
                 ..Default::default()
@@ -2110,13 +2092,7 @@ mod tests {
                 tables: vec![TableExpr::from(Relation::from("a"))],
                 fields: columns(&["id"]),
                 limit_clause: LimitClause::LimitOffset {
-                    limit: Some(
-                        Literal::Double(Double {
-                            value: 1.0,
-                            precision: 0,
-                        })
-                        .into(),
-                    ),
+                    limit: Some(Literal::Number("1.".into()).into()),
                     offset: None,
                 },
                 ..Default::default()
@@ -2133,13 +2109,7 @@ mod tests {
                 tables: vec![TableExpr::from(Relation::from("a"))],
                 fields: columns(&["id"]),
                 limit_clause: LimitClause::LimitOffset {
-                    limit: Some(
-                        Literal::Double(Double {
-                            value: -0.0,
-                            precision: 1,
-                        })
-                        .into(),
-                    ),
+                    limit: Some(Literal::Number("-0.0".into()).into()),
                     offset: None,
                 },
                 ..Default::default()
@@ -2157,10 +2127,7 @@ mod tests {
                 fields: columns(&["id"]),
                 limit_clause: LimitClause::LimitOffset {
                     limit: Some(Literal::Integer(3791947566539531989).into()),
-                    offset: Some(Literal::Double(Double {
-                        value: -0.0,
-                        precision: 1,
-                    })),
+                    offset: Some(Literal::Number("-0.0".into())),
                 },
                 ..Default::default()
             };

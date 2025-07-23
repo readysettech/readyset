@@ -756,6 +756,10 @@ pub enum ReadySetError {
     /// Error parsing, converting, or performing operations on a decimal value
     #[error("Error with decimal: {0}")]
     DecimalError(String),
+
+    /// Error converting to or from an AST node
+    #[error("Error converting to or from an AST node: {0}")]
+    AstConversionError(String),
 }
 
 impl ReadySetError {
@@ -1233,6 +1237,7 @@ impl_from_to_string!(consulrs::error::ClientError, ConsulError);
 impl_from_to_string!(tokio_native_tls::native_tls::Error, NativeTlsError);
 impl_from_to_string!(hyper::Error, HttpError);
 impl_from_to_string!(readyset_decimal::ReadysetDecimalError, DecimalError);
+impl_from_to_string!(readyset_sql::AstConversionError, AstConversionError);
 
 impl From<Size0Error> for ReadySetError {
     fn from(_: Size0Error) -> Self {

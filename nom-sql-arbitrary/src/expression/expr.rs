@@ -103,20 +103,10 @@ pub(super) fn generate_base_expr(params: ExprSpec) -> BoxedStrategy<Expr> {
             }).prop_map(|timezone| Expr::Literal(Literal::String(timezone))).boxed()
         }
         ExprSpec::Float(f) => f
-            .prop_map(|f| {
-                Expr::Literal(Literal::Float(Float {
-                    value: f,
-                    precision: u8::MAX,
-                }))
-            })
+            .prop_map(|f| Expr::Literal(Literal::Number(f.to_string())))
             .boxed(),
         ExprSpec::Double(d) => d
-            .prop_map(|d| {
-                Expr::Literal(Literal::Double(Double {
-                    value: d,
-                    precision: u8::MAX,
-                }))
-            })
+            .prop_map(|d| Expr::Literal(Literal::Number(d.to_string())))
             .boxed(),
         ExprSpec::String(string) => string
             .prop_map(|s| Expr::Literal(Literal::String(s)))

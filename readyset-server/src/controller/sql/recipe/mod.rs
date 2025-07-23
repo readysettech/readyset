@@ -98,19 +98,20 @@ impl Recipe {
 
     /// Creates a blank recipe. This is useful for bootstrapping, e.g., in interactive
     /// settings, and for temporary recipes.
-    pub(crate) fn blank() -> Recipe {
+    pub(crate) fn new(dialect: Dialect) -> Recipe {
         Recipe {
-            inc: SqlIncorporator::new(),
+            inc: SqlIncorporator::new(dialect),
         }
     }
 
     /// Creates a new blank recipe with the given SQL configuration and MIR configuration
     pub(crate) fn with_config(
+        dialect: Dialect,
         sql_config: super::Config,
         mir_config: super::mir::Config,
         permissive_writes: bool,
     ) -> Self {
-        let mut res = Recipe::blank();
+        let mut res = Recipe::new(dialect);
         res.set_permissive_writes(permissive_writes);
         res.set_sql_config(sql_config);
         res.set_mir_config(mir_config);
@@ -223,10 +224,16 @@ impl Recipe {
     /// Returns the adapter rewrite params stored in the config
     pub(crate) fn adapter_rewrite_params(&self) -> AdapterRewriteParams {
         AdapterRewriteParams {
+            dialect: self.dialect().into(),
             server_supports_topk: self.mir_config().allow_topk,
             server_supports_mixed_comparisons: self.mir_config().allow_mixed_comparisons,
             server_supports_pagination: self.mir_config().allow_paginate
                 && self.mir_config().allow_topk,
         }
+    }
+
+    /// The dialect used for converting SQL and making semantic decisions
+    pub(crate) fn dialect(&self) -> Dialect {
+        self.inc.dialect
     }
 }

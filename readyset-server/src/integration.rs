@@ -3624,7 +3624,7 @@ async fn finkelstein1982_queries() {
     // set up graph
     let (mut g, shutdown_tx) = start_simple_unsharded("finkelstein1982_queries").await;
     g.migrate(|mig| {
-        let mut inc = SqlIncorporator::default();
+        let mut inc = SqlIncorporator::new(Dialect::DEFAULT_MYSQL);
         let mut f = File::open("tests/finkelstein82.txt").unwrap();
         let mut s = String::new();
 

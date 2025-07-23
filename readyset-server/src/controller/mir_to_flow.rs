@@ -7,7 +7,6 @@
 )]
 
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::mem;
 
 use common::DfValue;
@@ -32,6 +31,7 @@ use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
 };
 use readyset_sql::ast::{self, ColumnSpecification, Expr, OrderType, Relation};
+use readyset_sql::TryIntoDialect as _;
 
 use crate::controller::Migration;
 use crate::manual::ops::grouped::aggregate::Aggregation;
@@ -378,7 +378,7 @@ fn make_base_node(
                 .map(|collation| Collation::get_or_default(mig.dialect, collation));
             if let Some(dv) = cs.get_default_value() {
                 let df: DfValue = dv
-                    .try_into()
+                    .try_into_dialect(mig.dialect.into())
                     .map_err(|e| internal_err!("Failed to convert default value: {}", e))?;
                 let dftype_to =
                     DfType::from_sql_type(&cs.sql_type, mig.dialect, |_| None, collation).map_err(

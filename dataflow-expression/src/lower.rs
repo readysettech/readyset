@@ -12,7 +12,7 @@ use readyset_sql::ast::{
     BinaryOperator as SqlBinaryOperator, CollationName, Column, Expr as AstExpr, FunctionExpr,
     InValue, Relation, UnaryOperator,
 };
-use readyset_sql::DialectDisplay;
+use readyset_sql::{DialectDisplay, TryIntoDialect as _};
 use readyset_util::redacted::Sensitive;
 use vec1::Vec1;
 
@@ -1159,7 +1159,7 @@ impl Expr {
             ),
             AstExpr::Literal(lit) => {
                 let is_string_literal = lit.is_string();
-                let val: DfValue = lit.try_into()?;
+                let val: DfValue = lit.try_into_dialect(dialect.into())?;
                 // TODO: Infer type from SQL
                 let ty = if is_string_literal && dialect.engine() == SqlEngine::PostgreSQL {
                     DfType::Unknown
@@ -1548,7 +1548,7 @@ impl Expr {
 pub(crate) mod tests {
     use pretty_assertions::assert_eq;
     use readyset_data::{Collation, PgEnumMetadata};
-    use readyset_sql::ast::{BinaryOperator as AstBinaryOperator, Float, Literal};
+    use readyset_sql::ast::{BinaryOperator as AstBinaryOperator, Literal};
     use readyset_sql::Dialect as ParserDialect;
     use readyset_sql_parsing::parse_expr;
 
@@ -1954,17 +1954,9 @@ pub(crate) mod tests {
         );
 
         infers_type(
-            vec![
-                "123".into(),
-                Literal::Float(Float {
-                    value: 1.23,
-                    precision: 2,
-                }),
-            ],
+            vec!["123".into(), Literal::Number("1.23".into())],
             Dialect::DEFAULT_POSTGRESQL,
-            // TODO: should actually be DfType::Numeric { prec: 10, scale: 0 }, but our type
-            // inference for float literals in pg is (currently) wrong
-            DfType::Float,
+            DfType::DEFAULT_NUMERIC,
         );
 
         infers_type(
@@ -1975,13 +1967,7 @@ pub(crate) mod tests {
         infers_type(vec![Null, Null], Dialect::DEFAULT_MYSQL, DfType::Binary(0));
 
         infers_type(
-            vec![
-                "123".into(),
-                Literal::Float(Float {
-                    value: 1.23,
-                    precision: 2,
-                }),
-            ],
+            vec!["123".into(), Literal::Number("1.23".into())],
             Dialect::DEFAULT_MYSQL,
             DfType::DEFAULT_TEXT,
         );

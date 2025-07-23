@@ -62,7 +62,7 @@ mod types;
 
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::error::Error;
 use std::hash::Hash;
 use std::iter::{self, FromIterator};
@@ -92,7 +92,7 @@ use readyset_sql::ast::{
     LimitValue, Literal, OrderBy, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier,
     SqlType, SqlTypeArbitraryOptions, TableExpr, TableExprInner, TableKey,
 };
-use readyset_sql::Dialect as ParseDialect;
+use readyset_sql::{Dialect as ParseDialect, TryFromDialect as _, TryIntoDialect as _};
 use readyset_sql_passes::outermost_table_exprs;
 use readyset_util::intervals::{BoundPair, IterBoundPair};
 use serde::{Deserialize, Serialize};
@@ -292,9 +292,9 @@ impl From<CreateTableStatement> for TableSpec {
                     )
                     .unwrap();
 
-                    let generator = if let Some(d) =
-                        field.has_default().and_then(|l| DfValue::try_from(l).ok())
-                    {
+                    let generator = if let Some(d) = field.has_default().and_then(|l| {
+                        DfValue::try_from_dialect(l, Dialect::DEFAULT_MYSQL.into()).ok()
+                    }) {
                         // Prefer the specified default value for a field
                         ColumnGenerator::Constant(
                             d.coerce_to(&df_type, &DfType::Unknown).unwrap().into(),
@@ -1683,7 +1683,12 @@ impl QueryOperation {
 
                 let mut filter_rhs_to_expr = |rhs: &FilterRHS| match rhs {
                     FilterRHS::Constant(val) => {
-                        tbl.expect_value(col.clone(), val.clone().try_into().unwrap());
+                        tbl.expect_value(
+                            col.clone(),
+                            val.clone()
+                                .try_into_dialect(Dialect::DEFAULT_MYSQL.into())
+                                .unwrap(),
+                        );
                         Expr::Literal(val.clone())
                     }
                     FilterRHS::Column => {

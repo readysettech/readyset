@@ -741,7 +741,7 @@ fn regression_large_numeric_rt() {
     let result = check_parse_both!(&input);
     if let SqlQuery::Select(SelectStatement { ref fields, .. }) = result {
         if let FieldDefinitionExpr::Expr { ref expr, .. } = fields[0] {
-            assert_eq!(expr, &Expr::Literal(Literal::Numeric(literal.to_string())));
+            assert_eq!(expr, &Expr::Literal(Literal::Number(literal.to_string())));
         } else {
             panic!("Expected expr in field list, got {fields:?}");
         }

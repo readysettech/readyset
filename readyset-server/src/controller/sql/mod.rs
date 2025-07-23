@@ -95,7 +95,7 @@ pub(crate) struct BaseSchema {
 /// * [`add_table`][Self::add_table], to add a new `TABLE`
 /// * [`add_view`][Self::add_view], to add a new `VIEW`
 /// * [`add_query`][Self::add_query], to add a new cached query
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct SqlIncorporator {
     mir_converter: SqlToMirConverter,
     leaf_addresses: HashMap<Relation, NodeIndex>,
@@ -126,6 +126,9 @@ pub(crate) struct SqlIncorporator {
 
     pub(crate) config: Config,
 
+    /// SQL dialect affecting interpretation of AST nodes and some semantics
+    pub(crate) dialect: Dialect,
+
     /// A structure which keeps track of all the raw AST expressions in the schema, and their
     /// dependencies on each other
     registry: ExprRegistry,
@@ -136,8 +139,22 @@ pub(crate) struct SqlIncorporator {
 
 impl SqlIncorporator {
     /// Creates a new `SqlIncorporator` for an empty flow graph.
-    pub(super) fn new() -> Self {
-        Default::default()
+    pub fn new(dialect: Dialect) -> Self {
+        Self {
+            mir_converter: Default::default(),
+            leaf_addresses: Default::default(),
+            named_queries: Default::default(),
+            num_queries: Default::default(),
+            uncompiled_views: Default::default(),
+            base_schemas: Default::default(),
+            view_schemas: Default::default(),
+            custom_types: Default::default(),
+            custom_types_by_oid: Default::default(),
+            config: Default::default(),
+            dialect,
+            registry: Default::default(),
+            permissive_writes: Default::default(),
+        }
     }
 
     /// Set the MIR configuration for future migrations

@@ -130,7 +130,17 @@ impl ControllerState {
         let cc = Arc::new(ChannelCoordinator::new());
         assert_ne!(config.min_workers, 0);
 
+        // TODO(mvzink): There may be a more principled way to determine this, without defaulting to
+        // MySQL if no upstream is configured.
+        let dialect = config
+            .replicator_config
+            .get_cdc_db_url()
+            .map(|url| url.database_type().into())
+            .unwrap_or(readyset_sql::Dialect::MySQL)
+            .into();
+
         let recipe = Recipe::with_config(
+            dialect,
             crate::sql::Config {
                 reuse_type: config.reuse,
                 ..Default::default()

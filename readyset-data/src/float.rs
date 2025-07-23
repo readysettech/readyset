@@ -192,6 +192,14 @@ pub(crate) fn coerce_decimal(
         details: "out of bounds".to_string(),
     };
 
+    // Although in `ROUND()`, both MySQL and PostgreSQL use "banker's rounding", when casting to
+    // integer types, they round away from zero if the fractional part is .5 or more.
+    let val = if to_ty.is_any_int() {
+        &val.round_dp_with_strategy(0, readyset_decimal::RoundingMode::HalfUp)
+    } else {
+        val
+    };
+
     match *to_ty {
         DfType::Numeric { .. } => Ok(DfValue::from(val.clone())),
 
@@ -206,11 +214,7 @@ pub(crate) fn coerce_decimal(
             if ((-1 << 23)..(1 << 23)).contains(&i) {
                 Ok(DfValue::from(i))
             } else {
-                Err(ReadySetError::DfValueConversionError {
-                    src_type: "Decimal".to_string(),
-                    target_type: to_ty.to_string(),
-                    details: "out of bounds".to_string(),
-                })
+                Err(err())
             }
         }
         DfType::UnsignedMediumInt => {
@@ -218,17 +222,23 @@ pub(crate) fn coerce_decimal(
             if i < (1 << 24) {
                 Ok(DfValue::from(i))
             } else {
-                Err(ReadySetError::DfValueConversionError {
-                    src_type: "Decimal".to_string(),
-                    target_type: to_ty.to_string(),
-                    details: "out of bounds".to_string(),
-                })
+                Err(err())
             }
         }
         DfType::Int => i32::try_from(val).map_err(Into::into).map(DfValue::from),
         DfType::UnsignedInt => u32::try_from(val).map_err(Into::into).map(DfValue::from),
         DfType::BigInt => i64::try_from(val).map_err(Into::into).map(DfValue::from),
-        DfType::UnsignedBigInt => u64::try_from(val).map_err(Into::into).map(DfValue::from),
+        DfType::UnsignedBigInt => match u64::try_from(val) {
+            Ok(i) => Ok(DfValue::from(i)),
+            Err(e1) => match i64::try_from(val) {
+                Ok(i) => Ok(DfValue::from(i as u64)),
+                Err(e2) => Err(ReadySetError::DfValueConversionError {
+                    src_type: "Decimal".to_string(),
+                    target_type: to_ty.to_string(),
+                    details: format!("out of bounds: e1 = {e1}; e2 = {e2}"),
+                }),
+            },
+        },
 
         DfType::Float => f32::try_from(val)
             .map_err(Into::into)

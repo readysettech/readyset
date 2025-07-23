@@ -6,3 +6,5 @@
 # everyone who runs the test benefits from these saved cases.
 cc 0c0fea23dee5f322dfcdca9ef021a72e2c1d1309c497b1d154bdaabd85458301 # shrinks to input = _LiteralToStringParseRoundTripArgs { lit: String("'") }
 cc 7fc9ed79b062e0865b88b96e13fce9c56b54f1b3dedda08165f81ea8a96b30a2 # shrinks to input = _RtLiteralArgs { s: String("\\") }
+cc 8a4a8320ffecd29928bd574dd9eabcaa1bf4e6b98adf2815ef7f055925007de2 # shrinks to input = _TestArgs { s: Numeric(".567463742306280220000000000") }
+cc a163a4b15249d4810e5478bd29db25b0dc018b447c72663683aa43a16ad4284b # shrinks to input = _TestArgs { s: Numeric(".223725996056789490000000000000") }

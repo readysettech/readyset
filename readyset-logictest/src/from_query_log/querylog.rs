@@ -281,7 +281,7 @@ impl<R: AsyncBufRead + Unpin> Stream<R> {
 
 #[cfg(test)]
 mod tests {
-    use readyset_sql::{ast, Dialect};
+    use readyset_sql::Dialect;
     use readyset_sql_parsing::parse_query;
 
     use super::*;
@@ -365,10 +365,7 @@ mod tests {
         assert_eq!(
             values,
             vec![
-                Literal::Double(ast::Double {
-                    value: 3.14,
-                    precision: 2,
-                }),
+                Literal::Number("3.14".into()),
                 Null,
                 String("somebody".to_string()),
                 Integer(867)

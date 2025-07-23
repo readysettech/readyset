@@ -16,9 +16,10 @@ pub enum AstConversionError {
     Skipped(String),
 }
 
+#[macro_export]
 macro_rules! ast_conversion_err {
     ($kind:ident, $e:expr) => {
-        AstConversionError::$kind(format!(
+        $crate::AstConversionError::$kind(format!(
             "at {}:{}:{}: {}",
             std::file!(),
             std::line!(),
@@ -28,51 +29,59 @@ macro_rules! ast_conversion_err {
     };
 }
 
+#[macro_export]
 macro_rules! failed_err {
     ($($format_args:tt)*) => {
-        ast_conversion_err!(Failed, format!($($format_args)*))
+        $crate::ast_conversion_err!(Failed, format!($($format_args)*))
     };
 }
 
+#[macro_export]
 macro_rules! failed {
     ($($format_args:tt)*) => {
-        Err(failed_err!($($format_args)*))
+        Err($crate::failed_err!($($format_args)*))
     };
 }
 
+#[macro_export]
 macro_rules! unsupported_err {
     ($($format_args:tt)*) => {
-        ast_conversion_err!(Unsupported, format!($($format_args)*))
+        $crate::ast_conversion_err!(Unsupported, format!($($format_args)*))
     };
 }
 
+#[macro_export]
 macro_rules! unsupported {
     ($($format_args:tt)*) => {
-        Err(unsupported_err!($($format_args)*))
+        Err($crate::unsupported_err!($($format_args)*))
     };
 }
 
+#[macro_export]
 macro_rules! not_yet_implemented_err {
     ($($format_args:tt)*) => {
-        ast_conversion_err!(NotYetImplemented, format!($($format_args)*))
+        $crate::ast_conversion_err!(NotYetImplemented, format!($($format_args)*))
     };
 }
 
+#[macro_export]
 macro_rules! not_yet_implemented {
     ($($format_args:tt)*) => {
-        Err(not_yet_implemented_err!($($format_args)*))
+        Err($crate::not_yet_implemented_err!($($format_args)*))
     };
 }
 
+#[macro_export]
 macro_rules! skipped_err {
     ($($format_args:tt)*) => {
-        ast_conversion_err!(Skipped, format!($($format_args)*))
+        $crate::ast_conversion_err!(Skipped, format!($($format_args)*))
     };
 }
 
+#[macro_export]
 macro_rules! skipped {
     ($($format_args:tt)*) => {
-        Err(skipped_err!($($format_args)*))
+        Err($crate::skipped_err!($($format_args)*))
     };
 }
 

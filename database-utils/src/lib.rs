@@ -387,6 +387,15 @@ impl Display for DatabaseType {
     }
 }
 
+impl From<DatabaseType> for readyset_sql::Dialect {
+    fn from(value: DatabaseType) -> Self {
+        match value {
+            DatabaseType::MySQL => Dialect::MySQL,
+            DatabaseType::PostgreSQL => Dialect::PostgreSQL,
+        }
+    }
+}
+
 /// URL for an upstream database.
 ///
 /// [`DatabaseURL`]s can be constructed directly via the [`From`] implementations, or parsed from a

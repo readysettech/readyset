@@ -256,7 +256,7 @@ impl DialectParser for Dialect {
                         failed!(i);
                     }
                 },
-                Literal::Numeric(..) | Literal::Float(_) | Literal::Double(_) => match self {
+                Literal::Number(..) => match self {
                     Dialect::PostgreSQL => literal,
                     Dialect::MySQL => {
                         failed!(i);

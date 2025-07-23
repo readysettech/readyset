@@ -1,6 +1,5 @@
-use std::cmp::Ordering;
 use std::fmt;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 use bit_vec::BitVec;
 use eui48::{MacAddress, MacAddressFormat};
@@ -16,90 +15,6 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::{AstConversionError, Dialect, DialectDisplay, ast::*};
-
-#[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
-pub struct Float {
-    pub value: f32,
-    #[strategy(1u8..=30u8)]
-    pub precision: u8,
-}
-
-impl PartialEq for Float {
-    fn eq(&self, other: &Self) -> bool {
-        self.value.to_bits() == other.value.to_bits() && self.precision == other.precision
-    }
-}
-
-impl PartialOrd for Float {
-    #[allow(clippy::non_canonical_partial_ord_impl)]
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match self.value.to_bits().partial_cmp(&other.value.to_bits()) {
-            Some(Ordering::Equal) => {}
-            ord => return ord,
-        }
-        self.precision.partial_cmp(&other.precision)
-    }
-}
-
-impl Ord for Float {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.value
-            .to_bits()
-            .cmp(&other.value.to_bits())
-            .then_with(|| self.precision.cmp(&other.precision))
-    }
-}
-
-impl Eq for Float {}
-
-impl Hash for Float {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u32(self.value.to_bits());
-        state.write_u8(self.precision);
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
-pub struct Double {
-    pub value: f64,
-    #[strategy(1u8..=30u8)]
-    pub precision: u8,
-}
-
-impl PartialEq for Double {
-    fn eq(&self, other: &Self) -> bool {
-        self.value.to_bits() == other.value.to_bits() && self.precision == other.precision
-    }
-}
-
-impl Eq for Double {}
-
-impl Hash for Double {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u64(self.value.to_bits());
-        state.write_u8(self.precision);
-    }
-}
-
-impl PartialOrd for Double {
-    #[allow(clippy::non_canonical_partial_ord_impl)]
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match self.value.to_bits().partial_cmp(&other.value.to_bits()) {
-            Some(Ordering::Equal) => {}
-            ord => return ord,
-        }
-        self.precision.partial_cmp(&other.precision)
-    }
-}
-
-impl Ord for Double {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.value
-            .to_bits()
-            .cmp(&other.value.to_bits())
-            .then_with(|| self.precision.cmp(&other.precision))
-    }
-}
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub enum ItemPlaceholder {
@@ -169,15 +84,7 @@ pub enum Literal {
     /// When parsing, we default to signed integer if the integer value has no sign, because mysql
     /// does that and postgres doesn't have unsigned integers
     UnsignedInteger(u64),
-    /// Represents an `f32` floating-point number.
-    /// This distinction was introduced to avoid numeric error when transforming
-    /// a `[Literal]` into another type (`[DfValue]` or `[mysql::Value]`), an back.
-    /// As an example, if we read an `f32` from a binlog, we would be transforming that
-    /// `f32` into an `f64` (thus, potentially introducing numeric error) if this type
-    /// didn't exist.
-    Float(Float),
-    Double(Double),
-    Numeric(#[strategy(arbitrary_decimal_string_with_digits(u16::MAX, u8::MAX))] String),
+    Number(#[strategy(arbitrary_decimal_string_with_digits(u16::MAX, u8::MAX))] String),
     String(String),
     #[weight(0)]
     Blob(Vec<u8>),
@@ -262,17 +169,8 @@ impl TryFrom<sqlparser::ast::Value> for Literal {
                     Ok(Self::Integer(i))
                 } else if let Ok(i) = s.parse::<u64>() {
                     Ok(Self::UnsignedInteger(i))
-                } else if let Ok(f) = s.parse::<f64>() {
-                    if f.is_infinite() || f.is_nan() {
-                        Ok(Self::Numeric(s))
-                    } else {
-                        Ok(Self::Double(crate::ast::Double {
-                            value: f,
-                            precision: s.find('.').map(|i| (s.len() - i - 1) as u8).unwrap_or(0),
-                        }))
-                    }
                 } else {
-                    Ok(Self::Numeric(s))
+                    Ok(Self::Number(s))
                 }
             }
             Value::EscapedStringLiteral(s) => Ok(Self::String(s)),
@@ -330,65 +228,47 @@ impl TryFrom<sqlparser::ast::Offset> for Literal {
 
 impl DialectDisplay for Literal {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
-        fmt_with(move |f| {
-            macro_rules! write_real {
-                ($real:expr, $prec:expr) => {{
-                    let precision = if $prec < 30 { $prec } else { 30 };
-                    let fstr = format!("{:.*}", precision as usize, $real);
-                    // Trim all trailing zeros, but leave one after the dot if this is a whole
-                    // number
-                    let res = fstr.trim_end_matches('0');
-                    if res.ends_with('.') {
-                        write!(f, "{}0", res)
+        fmt_with(move |f| match self {
+            Literal::Null => write!(f, "NULL"),
+            Literal::Boolean(true) => write!(f, "TRUE"),
+            Literal::Boolean(false) => write!(f, "FALSE"),
+            Literal::Integer(i) => write!(f, "{i}"),
+            Literal::UnsignedInteger(i) => write!(f, "{i}"),
+            Literal::Number(s) => write!(f, "{s}"),
+            Literal::String(s) => match dialect {
+                Dialect::MySQL => display_string_literal(f, s),
+                Dialect::PostgreSQL => {
+                    let escaped = escape_string_literal(s);
+                    if s.len() != escaped.len() {
+                        write!(f, "E'{escaped}'")
                     } else {
-                        write!(f, "{}", res)
+                        write!(f, "'{escaped}'")
                     }
-                }};
-            }
-            match self {
-                Literal::Null => write!(f, "NULL"),
-                Literal::Boolean(true) => write!(f, "TRUE"),
-                Literal::Boolean(false) => write!(f, "FALSE"),
-                Literal::Integer(i) => write!(f, "{i}"),
-                Literal::UnsignedInteger(i) => write!(f, "{i}"),
-                Literal::Float(float) => write_real!(float.value, float.precision),
-                Literal::Double(double) => write_real!(double.value, double.precision),
-                Literal::Numeric(s) => write!(f, "{s}"),
-                Literal::String(s) => match dialect {
-                    Dialect::MySQL => display_string_literal(f, s),
-                    Dialect::PostgreSQL => {
-                        let escaped = escape_string_literal(s);
-                        if s.len() != escaped.len() {
-                            write!(f, "E'{escaped}'")
-                        } else {
-                            write!(f, "'{escaped}'")
-                        }
-                    }
-                },
-                Literal::Blob(bv) => write!(
-                    f,
-                    "{}",
-                    bv.iter()
-                        .map(|v| format!("{v:x}"))
-                        .collect::<Vec<String>>()
-                        .join(" ")
-                ),
-                Literal::ByteArray(b) => match dialect {
-                    Dialect::PostgreSQL => {
-                        write!(f, "E'\\x{}'", b.iter().map(|v| format!("{v:x}")).join(""))
-                    }
-                    Dialect::MySQL => {
-                        write!(f, "X'{}'", b.iter().map(|v| format!("{v:02X}")).join(""))
-                    }
-                },
-                Literal::Placeholder(item) => write!(f, "{item}"),
-                Literal::BitVector(b) => {
-                    write!(
-                        f,
-                        "B'{}'",
-                        b.iter().map(|bit| if bit { "1" } else { "0" }).join("")
-                    )
                 }
+            },
+            Literal::Blob(bv) => write!(
+                f,
+                "{}",
+                bv.iter()
+                    .map(|v| format!("{v:x}"))
+                    .collect::<Vec<String>>()
+                    .join(" ")
+            ),
+            Literal::ByteArray(b) => match dialect {
+                Dialect::PostgreSQL => {
+                    write!(f, "E'\\x{}'", b.iter().map(|v| format!("{v:x}")).join(""))
+                }
+                Dialect::MySQL => {
+                    write!(f, "X'{}'", b.iter().map(|v| format!("{v:02X}")).join(""))
+                }
+            },
+            Literal::Placeholder(item) => write!(f, "{item}"),
+            Literal::BitVector(b) => {
+                write!(
+                    f,
+                    "B'{}'",
+                    b.iter().map(|bit| if bit { "1" } else { "0" }).join("")
+                )
             }
         })
     }
@@ -453,11 +333,14 @@ impl Literal {
             | SqlType::TinyBlob
             | SqlType::Binary(_)
             | SqlType::VarBinary(_) => any::<Vec<u8>>().prop_map(Self::Blob).boxed(),
-            SqlType::Float => any::<Float>().prop_map(Self::Float).boxed(),
-            SqlType::Double | SqlType::Real => any::<Double>().prop_map(Self::Double).boxed(),
+            SqlType::Real | SqlType::Float | SqlType::Double => {
+                arbitrary_decimal_string_with_digits(65, 30)
+                    .prop_map(Self::Number)
+                    .boxed()
+            }
             SqlType::Decimal(prec, scale) => {
                 arbitrary_decimal_string_with_digits(*prec as u16, *scale)
-                    .prop_map(Self::Numeric)
+                    .prop_map(Self::Number)
                     .boxed()
             }
             SqlType::Numeric(prec_scale) => {
@@ -465,7 +348,7 @@ impl Literal {
                     .map(|(p, s)| (p, s.unwrap_or(p.min(30) as u8)))
                     .unwrap_or((65, 30));
                 arbitrary_decimal_string_with_digits(prec, scale)
-                    .prop_map(Self::Numeric)
+                    .prop_map(Self::Number)
                     .boxed()
             }
             SqlType::Date => arbitrary_positive_naive_date()

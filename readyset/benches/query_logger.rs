@@ -72,7 +72,7 @@ fn create_event(
 }
 
 fn event_logging_bench(c: &mut Criterion, mode: QueryLogMode) {
-    let adapter_rewrite_params = AdapterRewriteParams::default();
+    let adapter_rewrite_params = AdapterRewriteParams::new(DIALECT);
 
     let mut logger = QueryLogger::new(mode, DIALECT, adapter_rewrite_params);
 

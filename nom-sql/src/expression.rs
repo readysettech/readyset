@@ -476,21 +476,15 @@ where
                         .ok()
                         .and_then(|i| i.checked_neg())
                         .map(Literal::Integer)
-                        .unwrap_or_else(|| Literal::Numeric(format!("-{i}")));
+                        .unwrap_or_else(|| Literal::Number(format!("-{i}")));
                     Ok(Expr::Literal(literal))
                 }
                 Expr::Literal(Literal::Integer(i)) => Ok(Expr::Literal(Literal::Integer(-i))),
-                Expr::Literal(Literal::Float(Float { value, precision })) => {
-                    Ok(Expr::Literal(Literal::Float(Float {
-                        value: -value,
-                        precision,
-                    })))
+                Expr::Literal(Literal::Number(s)) if !s.starts_with('-') => {
+                    Ok(Expr::Literal(Literal::Number(format!("-{s}"))))
                 }
-                Expr::Literal(Literal::Double(Double { value, precision })) => {
-                    Ok(Expr::Literal(Literal::Double(Double {
-                        value: -value,
-                        precision,
-                    })))
+                Expr::Literal(Literal::Number(s)) if s.starts_with('-') => {
+                    Ok(Expr::Literal(Literal::Number(s[1..].to_string())))
                 }
                 rhs => Ok(Expr::UnaryOp {
                     op,

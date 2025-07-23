@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
 use std::sync::{atomic, Arc};
 use std::time::Instant;
 
@@ -27,7 +26,7 @@ use readyset_sql::ast::{
     SelectStatement, SetStatement, SqlIdentifier, SqlQuery, TruncateStatement, UnaryOperator,
     UpdateStatement,
 };
-use readyset_sql::DialectDisplay;
+use readyset_sql::{DialectDisplay, TryFromDialect as _, TryIntoDialect as _};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams, ProcessedQueryParams};
 use readyset_util::redacted::Sensitive;
 use readyset_util::shared_cache::{self, LocalCache};
@@ -574,7 +573,7 @@ impl NoriaConnector {
             .inner
             .as_ref()
             .map(|v| v.rewrite_params)
-            .unwrap_or_default()
+            .unwrap_or_else(|| AdapterRewriteParams::new(self.dialect.into()))
     }
 
     // TODO(andrew): Allow client to map table names to NodeIndexes without having to query ReadySet
@@ -610,7 +609,9 @@ impl NoriaConnector {
             .map(|row| {
                 row.iter()
                     .map(|expr| match expr {
-                        Expr::Literal(lit) => DfValue::try_from(lit),
+                        Expr::Literal(lit) => {
+                            Ok(DfValue::try_from_dialect(lit, self.dialect.into())?)
+                        }
                         // Ad-hoc handle unary negation (for logictests, to allow them to insert
                         // negative values)
                         Expr::UnaryOp {
@@ -621,7 +622,7 @@ impl NoriaConnector {
                                 Expr::Literal(lit) => lit,
                                 _ => unreachable!(),
                             };
-                            let val = DfValue::try_from(lit)?;
+                            let val = DfValue::try_from_dialect(lit, self.dialect.into())?;
                             &val * &(-1).into()
                         }
                         _ => unsupported!("Only literal values are supported in expressions"),
@@ -729,7 +730,7 @@ impl NoriaConnector {
         };
 
         trace!("delete::flatten conditionals");
-        match utils::flatten_conditional(cond, &pkey)? {
+        match utils::flatten_conditional(cond, &pkey, self.dialect)? {
             None => Ok(QueryResult::Delete {
                 num_rows_deleted: 0_u64,
             }),
@@ -1349,7 +1350,7 @@ impl NoriaConnector {
                     })?;
                 // only use default value if query doesn't specify one
                 if !columns_specified.contains(&c) {
-                    buf[ri][idx] = v.try_into()?;
+                    buf[ri][idx] = v.try_into_dialect(self.dialect.into())?;
                 }
             }
 
@@ -1476,7 +1477,12 @@ impl NoriaConnector {
             };
             let coerced_params =
                 utils::coerce_params(params, &SqlQuery::Delete(q.clone()), schema, self.dialect)?;
-            utils::extract_delete(q, coerced_params.map(|p| p.into_iter()), schema)?
+            utils::extract_delete(
+                q,
+                coerced_params.map(|p| p.into_iter()),
+                schema,
+                self.dialect,
+            )?
         };
 
         trace!("delete::delete");

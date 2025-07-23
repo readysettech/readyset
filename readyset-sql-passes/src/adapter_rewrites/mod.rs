@@ -1,7 +1,7 @@
 mod autoparameterize;
 
 use std::borrow::Cow;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::{iter, mem};
 
@@ -16,7 +16,7 @@ use readyset_sql::ast::{
     BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, OrderClause,
     SelectMetadata, SelectStatement,
 };
-use readyset_sql::DialectDisplay;
+use readyset_sql::{Dialect, DialectDisplay, TryFromDialect, TryIntoDialect as _};
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
@@ -29,6 +29,7 @@ use tracing::trace;
 /// pass to noria.
 #[derive(Debug, Clone)]
 pub struct ProcessedQueryParams {
+    dialect: Dialect,
     reordered_placeholders: Option<Vec<usize>>,
     rewritten_in_conditions: Vec<RewrittenIn>,
     auto_parameters: Vec<(usize, Literal)>,
@@ -70,8 +71,10 @@ fn use_fallback_pagination(
 }
 
 /// Parameters to be passed to [`process_query`].
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct AdapterRewriteParams {
+    /// The dialect of the SQL query.
+    pub dialect: Dialect,
     /// The server can create TopK nodes, efficient lookup for non-parameterized
     /// limit and order by. Parameterized limits are done by the reader and therefore
     /// doesn't require TopK
@@ -83,6 +86,17 @@ pub struct AdapterRewriteParams {
     /// flag is true, both equals and range parameters in supported positions will be
     /// autoparameterized during the adapter rewrite passes.
     pub server_supports_mixed_comparisons: bool,
+}
+
+impl AdapterRewriteParams {
+    pub fn new(dialect: Dialect) -> Self {
+        Self {
+            dialect,
+            server_supports_topk: false,
+            server_supports_pagination: false,
+            server_supports_mixed_comparisons: false,
+        }
+    }
 }
 
 /// This rewrite pass accomplishes the following:
@@ -117,6 +131,7 @@ pub fn process_query(
     let rewritten_in_conditions = collapse_where_in(query)?;
     number_placeholders(query)?;
     Ok(ProcessedQueryParams {
+        dialect: params.dialect,
         reordered_placeholders,
         rewritten_in_conditions,
         auto_parameters,
@@ -155,12 +170,9 @@ impl ProcessedQueryParams {
                     .map_err(|_| invalid_query_err!("Non negative integer expected")),
                 Literal::UnsignedInteger(v) => Ok(*v as usize),
                 Literal::Null => Ok(0), // Invalid in MySQL but 0 for Postgres
-                Literal::Float(_)
-                | Literal::Double(_)
-                | Literal::String(_)
-                | Literal::Numeric(_) => {
+                Literal::String(_) | Literal::Number(_) => {
                     // All of those are invalid in MySQL, but Postgres coerces to integer
-                    match DfValue::try_from(lit)?
+                    match DfValue::try_from_dialect(lit, self.dialect)?
                         .coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown)?
                     {
                         DfValue::UnsignedInt(v) => Ok(v as usize),
@@ -199,7 +211,7 @@ impl ProcessedQueryParams {
 
     pub fn make_keys<'param, T>(&self, params: &'param [T]) -> ReadySetResult<Vec<Cow<'param, [T]>>>
     where
-        T: Clone + TryFrom<Literal, Error = ReadySetError> + Debug + Default + PartialEq,
+        T: Clone + TryFromDialect<Literal> + Debug + Default + PartialEq,
     {
         let params = if let Some(order_map) = &self.reordered_placeholders {
             Cow::Owned(reorder_params(params, order_map)?)
@@ -235,7 +247,7 @@ impl ProcessedQueryParams {
             .auto_parameters
             .clone()
             .into_iter()
-            .map(|(i, lit)| -> ReadySetResult<_> { Ok((i, lit.try_into()?)) })
+            .map(|(i, lit)| -> ReadySetResult<_> { Ok((i, lit.try_into_dialect(self.dialect)?)) })
             .collect::<Result<Vec<_>, _>>()?;
 
         let params = splice_auto_parameters(params, &auto_parameters);
@@ -300,7 +312,7 @@ fn where_in_to_placeholders(
                     .collect(),
                 _ => unsupported!(
                     "IN only supported on placeholders, got: {}",
-                    e.display(readyset_sql::Dialect::MySQL)
+                    e.display(Dialect::MySQL)
                 ),
             }
         })
@@ -692,7 +704,7 @@ mod tests {
         }
     }
 
-    use readyset_sql::Dialect;
+    use Dialect;
 
     use super::*;
 
@@ -1201,20 +1213,22 @@ mod tests {
 
         use super::*;
 
-        // impls Default, but default is not const fn and therefore can't be used here
-        const PARAMS: AdapterRewriteParams = AdapterRewriteParams {
-            server_supports_topk: false,
-            server_supports_pagination: false,
-            server_supports_mixed_comparisons: false,
-        };
+        fn rewrite_params(dialect: Dialect) -> AdapterRewriteParams {
+            AdapterRewriteParams {
+                dialect,
+                server_supports_topk: false,
+                server_supports_pagination: false,
+                server_supports_mixed_comparisons: false,
+            }
+        }
 
         fn process_and_make_keys(
             query: &str,
             params: Vec<DfValue>,
-            dialect: readyset_sql::Dialect,
+            dialect: Dialect,
         ) -> (Vec<Vec<DfValue>>, SelectStatement) {
             let mut query = parse_select_statement(query, dialect);
-            let processed = process_query(&mut query, PARAMS).unwrap();
+            let processed = process_query(&mut query, rewrite_params(dialect)).unwrap();
             (
                 processed
                     .make_keys(&params)
@@ -1230,31 +1244,35 @@ mod tests {
             query: &str,
             params: Vec<DfValue>,
         ) -> (Vec<Vec<DfValue>>, SelectStatement) {
-            process_and_make_keys(query, params, readyset_sql::Dialect::PostgreSQL)
+            process_and_make_keys(query, params, Dialect::PostgreSQL)
         }
 
         fn process_and_make_keys_mysql(
             query: &str,
             params: Vec<DfValue>,
         ) -> (Vec<Vec<DfValue>>, SelectStatement) {
-            process_and_make_keys(query, params, readyset_sql::Dialect::MySQL)
+            process_and_make_keys(query, params, Dialect::MySQL)
         }
 
         fn get_lim_off(
             query: &str,
             params: &[DfValue],
-            dialect: readyset_sql::Dialect,
+            dialect: Dialect,
         ) -> (Option<usize>, Option<usize>) {
-            let proc = process_query(&mut parse_select_statement(query, dialect), PARAMS).unwrap();
+            let proc = process_query(
+                &mut parse_select_statement(query, dialect),
+                rewrite_params(dialect),
+            )
+            .unwrap();
             proc.limit_offset_params(params).unwrap()
         }
 
         fn get_lim_off_postgres(query: &str, params: &[DfValue]) -> (Option<usize>, Option<usize>) {
-            get_lim_off(query, params, readyset_sql::Dialect::PostgreSQL)
+            get_lim_off(query, params, Dialect::PostgreSQL)
         }
 
         fn get_lim_off_mysql(query: &str, params: &[DfValue]) -> (Option<usize>, Option<usize>) {
-            get_lim_off(query, params, readyset_sql::Dialect::MySQL)
+            get_lim_off(query, params, Dialect::MySQL)
         }
 
         #[test]
@@ -1266,12 +1284,11 @@ mod tests {
                 "SELECT id FROM users WHERE credit_card_number = $1 AND id = $2",
             );
 
-            process_query(&mut query, PARAMS).expect("Should be able to rewrite query");
+            process_query(&mut query, rewrite_params(Dialect::PostgreSQL))
+                .expect("Should be able to rewrite query");
             assert_eq!(
-                query.display(readyset_sql::Dialect::PostgreSQL).to_string(),
-                expected
-                    .display(readyset_sql::Dialect::PostgreSQL)
-                    .to_string()
+                query.display(Dialect::PostgreSQL).to_string(),
+                expected.display(Dialect::PostgreSQL).to_string()
             );
         }
 
@@ -1284,12 +1301,11 @@ mod tests {
                 "SELECT id FROM users WHERE credit_card_number = $1 AND id = $2",
             );
 
-            process_query(&mut query, PARAMS).expect("Should be able to rewrite query");
+            process_query(&mut query, rewrite_params(Dialect::PostgreSQL))
+                .expect("Should be able to rewrite query");
             assert_eq!(
-                query.display(readyset_sql::Dialect::PostgreSQL).to_string(),
-                expected
-                    .display(readyset_sql::Dialect::PostgreSQL)
-                    .to_string()
+                query.display(Dialect::PostgreSQL).to_string(),
+                expected.display(Dialect::PostgreSQL).to_string()
             );
         }
 
@@ -1301,7 +1317,8 @@ mod tests {
             let expected = parse_select_statement_postgres(
                 "SELECT id + 3 FROM users WHERE credit_card_number = $1",
             );
-            process_query(&mut query, PARAMS).expect("Should be able to rewrite query");
+            process_query(&mut query, rewrite_params(Dialect::PostgreSQL))
+                .expect("Should be able to rewrite query");
             assert_eq!(query, expected);
         }
 
@@ -1500,7 +1517,7 @@ mod tests {
                     "SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"
                 ),
                 "{}",
-                query.display(readyset_sql::Dialect::PostgreSQL)
+                query.display(Dialect::PostgreSQL)
             );
 
             assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
@@ -1519,7 +1536,7 @@ mod tests {
                     "SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"
                 ),
                 "{}",
-                query.display(readyset_sql::Dialect::PostgreSQL)
+                query.display(Dialect::PostgreSQL)
             );
 
             assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
@@ -1538,7 +1555,7 @@ mod tests {
                     "SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"
                 ),
                 "{}",
-                query.display(readyset_sql::Dialect::PostgreSQL)
+                query.display(Dialect::PostgreSQL)
             );
 
             assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
@@ -1555,7 +1572,7 @@ mod tests {
                 query,
                 parse_select_statement_postgres("SELECT * FROM t WHERE x = $1"),
                 "{}",
-                query.display(readyset_sql::Dialect::PostgreSQL)
+                query.display(Dialect::PostgreSQL)
             );
             assert_eq!(keys, vec![vec![1.into()]]);
         }
@@ -1571,7 +1588,7 @@ mod tests {
                 query,
                 parse_select_statement_postgres("SELECT * FROM t WHERE x = $1"),
                 "{}",
-                query.display(readyset_sql::Dialect::PostgreSQL)
+                query.display(Dialect::PostgreSQL)
             );
             assert_eq!(keys, vec![vec![1.into()]]);
         }
@@ -1631,13 +1648,13 @@ mod tests {
 
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = ? LIMIT 1 OFFSET ALL",
-                readyset_sql::Dialect::MySQL,
+                Dialect::MySQL,
             )
             .unwrap_err();
 
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = ? LIMIT 1.5 OFFSET 3",
-                readyset_sql::Dialect::MySQL,
+                Dialect::MySQL,
             )
             .unwrap_err();
         }
@@ -1665,11 +1682,8 @@ mod tests {
                 (Some(2), None)
             );
 
-            try_parse_select_statement(
-                "SELECT * FROM t WHERE x = ? LIMIT 1.5",
-                readyset_sql::Dialect::MySQL,
-            )
-            .unwrap_err();
+            try_parse_select_statement("SELECT * FROM t WHERE x = ? LIMIT 1.5", Dialect::MySQL)
+                .unwrap_err();
         }
 
         #[test]
@@ -1715,7 +1729,7 @@ mod tests {
                 get_lim_off(
                     "SELECT * FROM t WHERE x = ? LIMIT ?, ?",
                     &[1.into(), 2.into(), 3.into()],
-                    readyset_sql::Dialect::MySQL,
+                    Dialect::MySQL,
                 ),
                 (Some(3), Some(2))
             );
@@ -1724,7 +1738,7 @@ mod tests {
                 get_lim_off(
                     "SELECT * FROM t WHERE x = ? LIMIT 4, ?",
                     &[1.into(), 2.into()],
-                    readyset_sql::Dialect::MySQL,
+                    Dialect::MySQL,
                 ),
                 (Some(2), Some(4))
             );
@@ -1733,7 +1747,7 @@ mod tests {
                 get_lim_off(
                     "SELECT * FROM t WHERE x = ? LIMIT ?, 4",
                     &[1.into(), 2.into()],
-                    readyset_sql::Dialect::MySQL,
+                    Dialect::MySQL,
                 ),
                 (Some(4), Some(2))
             );
@@ -1741,22 +1755,22 @@ mod tests {
             // PostgreSQL doesn't accept this form at all
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = $3 LIMIT $2, $1",
-                readyset_sql::Dialect::PostgreSQL,
+                Dialect::PostgreSQL,
             )
             .unwrap_err();
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = $3 LIMIT 1, $1",
-                readyset_sql::Dialect::PostgreSQL,
+                Dialect::PostgreSQL,
             )
             .unwrap_err();
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = $3 LIMIT $1, 2",
-                readyset_sql::Dialect::PostgreSQL,
+                Dialect::PostgreSQL,
             )
             .unwrap_err();
             try_parse_select_statement(
                 "SELECT * FROM t WHERE x = $3 LIMIT 1, 2",
-                readyset_sql::Dialect::PostgreSQL,
+                Dialect::PostgreSQL,
             )
             .unwrap_err();
         }
@@ -1772,7 +1786,7 @@ mod tests {
                 query,
                 parse_select_statement_postgres("SELECT * FROM t WHERE x = $1 AND y = $2"),
                 "{}",
-                query.display(readyset_sql::Dialect::PostgreSQL)
+                query.display(Dialect::PostgreSQL)
             );
             assert_eq!(keys, vec![vec![0.into(), 0.into()]]);
         }
@@ -1790,7 +1804,7 @@ mod tests {
                     "SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"
                 ),
                 "{}",
-                query.display(readyset_sql::Dialect::PostgreSQL)
+                query.display(Dialect::PostgreSQL)
             );
             assert_eq!(keys, vec![vec![1.into(), 0.into(), 1.into()]]);
         }
@@ -1807,7 +1821,7 @@ mod tests {
                 query,
                 parse_select_statement_postgres("SELECT * FROM t WHERE x = $1 AND y = $2"),
                 "{}",
-                query.display(readyset_sql::Dialect::PostgreSQL)
+                query.display(Dialect::PostgreSQL)
             );
             assert_eq!(
                 keys,

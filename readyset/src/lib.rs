@@ -815,6 +815,7 @@ where
             Arc::new(authority_type.to_authority(&authority_address, &deployment));
 
         let adapter_rewrite_params = AdapterRewriteParams {
+            dialect: self.database_type.into(),
             server_supports_topk: options.server_worker_options.feature_topk,
             server_supports_pagination: options.server_worker_options.feature_topk
                 && options.server_worker_options.feature_pagination,
