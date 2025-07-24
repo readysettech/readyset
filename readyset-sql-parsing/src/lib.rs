@@ -12,6 +12,7 @@ use readyset_sql::ast::{
     SelectStatement, SqlQuery, SqlType, TableKey,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
+use serde::{Deserialize, Serialize};
 use sqlparser::{
     keywords::Keyword,
     parser::Parser,
@@ -104,7 +105,7 @@ impl ParsingConfig {
 /// Subsystems can then turn this into a [`ParsingConfig`] and modify certain settings. For example,
 /// DDL should always log on mismatch, but parsing ad-hoc queries should not, and this way both code
 /// paths can use the same preset as a starting point.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 pub enum ParsingPreset {
     /// Parse only with nom-sql
     OnlyNom,

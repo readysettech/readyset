@@ -12,6 +12,7 @@ paste = { workspace = true }
 pretty_assertions = { workspace = true }
 readyset-errors = { path = "../readyset-errors" }
 readyset-sql = { path = "../readyset-sql" }
+serde = { workspace = true, features = ["rc", "derive"] }
 sqlparser = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

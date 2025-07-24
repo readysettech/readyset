@@ -5159,6 +5159,7 @@ dependencies = [
  "pretty_assertions",
  "readyset-errors",
  "readyset-sql",
+ "serde",
  "sqlparser",
  "thiserror 1.0.69",
  "tracing",
