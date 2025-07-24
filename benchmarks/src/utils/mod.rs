@@ -44,7 +44,7 @@ pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
 
         if let Ok(data) = res {
             let rows = Vec::<Vec<DfValue>>::try_from(data).unwrap();
-            let snapshot_status = rows.into_iter().find(|r| r[0] == b"Status".to_vec().into());
+            let snapshot_status = rows.into_iter().find(|r| r[0] == "Status".into());
             let snapshot_status: String = if let Some(s) = snapshot_status {
                 s[1].coerce_to(
                     &readyset_data::DfType::Text(Collation::default_for(Dialect::DEFAULT_MYSQL)),
