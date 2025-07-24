@@ -106,7 +106,7 @@ use rand::Rng;
 use rand_distr::{weighted::WeightedAliasIndex, Zipf};
 use readyset_data::DfValue;
 use readyset_sql::{ast::*, Dialect, DialectDisplay};
-use readyset_sql_parsing::parse_query;
+use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tracing::info;
 
@@ -262,6 +262,17 @@ impl WorkloadSpec {
         distributions: &Distributions,
         conn: &mut DatabaseConnection,
     ) -> anyhow::Result<QuerySet> {
+        let parsing_config = ParsingPreset::for_tests().into_config();
+        self.load_queries_with_config(distributions, conn, parsing_config)
+            .await
+    }
+
+    pub async fn load_queries_with_config(
+        &self,
+        distributions: &Distributions,
+        conn: &mut DatabaseConnection,
+        parsing_config: ParsingConfig,
+    ) -> anyhow::Result<QuerySet> {
         let weights =
             WeightedAliasIndex::new(self.queries.iter().map(|q| q.weight).collect()).unwrap();
         let mut queries = Vec::with_capacity(self.queries.len());
@@ -277,7 +288,7 @@ impl WorkloadSpec {
         ) in self.queries.iter().enumerate()
         {
             if *migrate {
-                let stmt = match parse_query(conn.dialect(), spec) {
+                let stmt = match parse_query_with_config(parsing_config, conn.dialect(), spec) {
                     Ok(SqlQuery::Select(stmt)) => stmt,
                     _ => panic!("Can only migrate SELECT statements"),
                 };

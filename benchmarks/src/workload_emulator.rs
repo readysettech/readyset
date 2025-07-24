@@ -20,6 +20,7 @@ use rand_distr::weighted::WeightedAliasIndex;
 use rand_distr::{Distribution, Zipf};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_sql::ast::SqlType;
+use readyset_sql_parsing::ParsingPreset;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
@@ -66,7 +67,7 @@ pub enum QueryExecutionMode {
     SimpleText,
 }
 
-#[derive(Parser, Clone, Default, Serialize, Deserialize)]
+#[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct WorkloadEmulator {
     /// Path to the workload yaml schema
     #[arg(long, short)]
@@ -97,8 +98,14 @@ pub struct WorkloadEmulator {
     #[arg(long, value_enum, default_value_t = QueryExecutionMode::PreparedReuse)]
     query_execution_mode: QueryExecutionMode,
 
-    #[arg(skip)]
+    /// Parsing mode.
     #[serde(skip)]
+    #[serde(default = "ParsingPreset::for_prod")]
+    #[arg(long, value_enum)]
+    parsing_preset: ParsingPreset,
+
+    #[serde(skip)]
+    #[arg(skip)]
     query_set: Arc<Mutex<Option<Arc<QuerySet>>>>,
 }
 
@@ -206,7 +213,10 @@ impl BenchmarkControl for WorkloadEmulator {
             conn.query_drop("DROP ALL CACHES").await?;
         }
 
-        let queries = spec.load_queries(&distributions, &mut conn).await?;
+        let parsing_config = self.parsing_preset.into_config();
+        let queries = spec
+            .load_queries_with_config(&distributions, &mut conn, parsing_config)
+            .await?;
         *self.query_set.lock().unwrap() = Some(Arc::new(queries));
 
         let thread_data = WorkloadThreadParams {
