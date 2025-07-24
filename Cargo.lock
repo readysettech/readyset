@@ -4390,7 +4390,7 @@ dependencies = [
 
 [[package]]
 name = "readyset"
-version = "1.17.0"
+version = "1.18.0"
 dependencies = [
  "antithesis_sdk",
  "anyhow",
