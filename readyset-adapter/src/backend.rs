@@ -1192,6 +1192,10 @@ where
             return PrepareMeta::Proxy;
         }
 
+        if self.state.proxy_state == ProxyState::InTransaction {
+            event.in_tx = true;
+        }
+
         let parse_result = match self.state.parsed_query_cache.get(query) {
             Some(cached_query) => Ok(cached_query.clone()),
             None => {
