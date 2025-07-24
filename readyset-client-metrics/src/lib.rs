@@ -86,6 +86,9 @@ pub struct QueryExecutionEvent {
 
     /// Where the query ended up executing
     pub destination: Option<QueryDestination>,
+
+    /// If the query is being executed inside a transaction
+    pub in_tx: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -225,6 +228,8 @@ impl QueryExecutionEvent {
             readyset_event: None,
             noria_error: None,
             destination: None,
+            in_tx: false,
+
         }
     }
 
