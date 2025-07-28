@@ -380,16 +380,23 @@ fn make_base_node(
                 let df: DfValue = dv
                     .try_into_dialect(mig.dialect.into())
                     .map_err(|e| internal_err!("Failed to convert default value: {}", e))?;
-                let dftype_to =
-                    DfType::from_sql_type(&cs.sql_type, mig.dialect, |_| None, collation).map_err(
-                        |e| internal_err!("Failed to convert SQL type to DfType: {}", e),
-                    )?;
+                let dftype_to = DfType::from_sql_type(
+                    &cs.sql_type,
+                    mig.dialect,
+                    |ty| custom_types.get(&ty).cloned(),
+                    collation,
+                )
+                .map_err(|e| internal_err!("Failed to convert SQL type to DfType: {}", e))?;
                 return df.coerce_to(&dftype_to, &df.infer_dataflow_type());
-            } else if cs.is_not_null() {
-                let dftype_to =
-                    DfType::from_sql_type(&cs.sql_type, mig.dialect, |_| None, collation).map_err(
-                        |e| internal_err!("Failed to convert SQL type to DfType: {}", e),
-                    )?;
+            } else if cs.is_not_null() && mig.dialect == readyset_sql::Dialect::MySQL.into() {
+                // this branch is really only to support mysql minimal row-based replication.
+                let dftype_to = DfType::from_sql_type(
+                    &cs.sql_type,
+                    mig.dialect,
+                    |ty| custom_types.get(&ty).cloned(),
+                    collation,
+                )
+                .map_err(|e| internal_err!("Failed to convert SQL type to DfType: {}", e))?;
 
                 return Ok(DfValue::implicit_default(
                     collation.unwrap_or(Collation::Utf8),
