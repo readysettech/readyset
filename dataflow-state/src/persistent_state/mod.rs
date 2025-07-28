@@ -2686,11 +2686,11 @@ mod tests {
 
         let abc = vec![
             vec![
-                DfValue::from_str_and_collation("abc", Collation::Citext),
+                DfValue::from_str_and_collation("abc", Collation::Utf8Ci),
                 1.into(),
             ],
             vec![
-                DfValue::from_str_and_collation("AbC", Collation::Citext),
+                DfValue::from_str_and_collation("AbC", Collation::Utf8Ci),
                 2.into(),
             ],
         ];
@@ -2702,7 +2702,7 @@ mod tests {
         let res = state
             .lookup(
                 &[0],
-                &PointKey::Single(DfValue::from_str_and_collation("abc", Collation::Citext)),
+                &PointKey::Single(DfValue::from_str_and_collation("abc", Collation::Utf8Ci)),
             )
             .unwrap();
 
@@ -3937,10 +3937,10 @@ mod tests {
             state
                 .process_records(
                     &mut vec![
-                        vec![DfValue::from_str_and_collation("a", Collation::Citext)],
-                        vec![DfValue::from_str_and_collation("B", Collation::Citext)],
-                        vec![DfValue::from_str_and_collation("c", Collation::Citext)],
-                        vec![DfValue::from_str_and_collation("D", Collation::Citext)],
+                        vec![DfValue::from_str_and_collation("a", Collation::Utf8Ci)],
+                        vec![DfValue::from_str_and_collation("B", Collation::Utf8Ci)],
+                        vec![DfValue::from_str_and_collation("c", Collation::Utf8Ci)],
+                        vec![DfValue::from_str_and_collation("D", Collation::Utf8Ci)],
                     ]
                     .into(),
                     None,
@@ -3954,11 +3954,11 @@ mod tests {
                     &RangeKey::from(&(
                         Included(vec1![DfValue::from_str_and_collation(
                             "b",
-                            Collation::Citext
+                            Collation::Utf8Ci
                         )]),
                         Included(vec1![DfValue::from_str_and_collation(
                             "c",
-                            Collation::Citext
+                            Collation::Utf8Ci
                         )]),
                     )),
                 )
@@ -3967,8 +3967,8 @@ mod tests {
             assert_eq!(
                 result,
                 vec![
-                    vec![DfValue::from_str_and_collation("B", Collation::Citext)],
-                    vec![DfValue::from_str_and_collation("c", Collation::Citext)],
+                    vec![DfValue::from_str_and_collation("B", Collation::Utf8Ci)],
+                    vec![DfValue::from_str_and_collation("c", Collation::Utf8Ci)],
                 ]
                 .into()
             )

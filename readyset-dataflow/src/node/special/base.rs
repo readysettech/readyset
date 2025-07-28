@@ -1206,7 +1206,7 @@ mod tests {
                     ni,
                     &[Column::new(
                         "c".into(),
-                        DfType::Text(Collation::Citext),
+                        DfType::Text(Collation::Utf8Ci),
                         None,
                     )],
                     // We insert a `TinyText` with a `Utf8` collation
@@ -1217,9 +1217,9 @@ mod tests {
                 )
                 .unwrap();
 
-            // Since the column associated with the record has a collation of `Citext`, the record
+            // Since the column associated with the record has a collation of `Utf8Ci`, the record
             // should have been coerced into the same collation
-            assert_eq!(records[0].row()[0].collation().unwrap(), Collation::Citext);
+            assert_eq!(records[0].row()[0].collation().unwrap(), Collation::Utf8Ci);
         }
     }
 }

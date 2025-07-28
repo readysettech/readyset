@@ -385,7 +385,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
             ref t if t.name() == "citext" => Ok(PsqlValue::Text(
                 readyset_data::Text::from_str_with_collation(
                     <&str>::from_sql(t, buf)?,
-                    Collation::Citext,
+                    Collation::Utf8Ci,
                 ),
             )),
             _ => Ok(PsqlValue::PassThrough(readyset_data::PassThrough {

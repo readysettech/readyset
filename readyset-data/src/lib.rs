@@ -2046,7 +2046,7 @@ impl<'a> FromSql<'a> for DfValue {
                 Type::TS_VECTOR => Ok(DfValue::None),
                 ref ty if ty.name() == "citext" => Ok(DfValue::from_str_and_collation(
                     <&str>::from_sql(ty, raw)?,
-                    Collation::Citext,
+                    Collation::Utf8Ci,
                 )),
                 // catch the postgis geometry types, and just pass through
                 ref ty if ty.name() == "geometry" => mk_from_sql!(Vec<u8>),

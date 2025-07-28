@@ -1783,7 +1783,7 @@ pub(crate) mod tests {
             Dialect::DEFAULT_MYSQL,
             &resolve_columns(|c| {
                 if c == "col".into() {
-                    Ok((0, DfType::Text(Collation::Citext)))
+                    Ok((0, DfType::Text(Collation::Utf8Ci)))
                 } else {
                     internal!()
                 }
@@ -1796,7 +1796,7 @@ pub(crate) mod tests {
                 func: Box::new(BuiltinFunction::Substring(
                     Expr::Column {
                         index: 0,
-                        ty: DfType::Text(Collation::Citext)
+                        ty: DfType::Text(Collation::Utf8Ci)
                     },
                     Some(Expr::Literal {
                         val: 1.into(),
@@ -1807,7 +1807,7 @@ pub(crate) mod tests {
                         ty: DfType::BigInt
                     })
                 )),
-                ty: DfType::Text(Collation::Citext)
+                ty: DfType::Text(Collation::Utf8Ci)
             }
         )
     }

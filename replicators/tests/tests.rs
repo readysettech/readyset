@@ -2406,8 +2406,8 @@ async fn postgresql_replicate_citext() {
         "citext_v",
         "Snapshot",
         &[
-            &[DfValue::from_str_and_collation("AbC", Collation::Citext)],
-            &[DfValue::from_str_and_collation("abc", Collation::Citext)],
+            &[DfValue::from_str_and_collation("AbC", Collation::Utf8Ci)],
+            &[DfValue::from_str_and_collation("abc", Collation::Utf8Ci)],
         ],
     );
 
@@ -2450,12 +2450,12 @@ async fn postgresql_replicate_citext_array() {
         "Snapshot",
         &[
             &[DfValue::from(vec![
-                DfValue::from_str_and_collation("abc", Collation::Citext),
-                DfValue::from_str_and_collation("DeF", Collation::Citext),
+                DfValue::from_str_and_collation("abc", Collation::Utf8Ci),
+                DfValue::from_str_and_collation("DeF", Collation::Utf8Ci),
             ])],
             &[DfValue::from(vec![
-                DfValue::from_str_and_collation("AbC", Collation::Citext),
-                DfValue::from_str_and_collation("def", Collation::Citext),
+                DfValue::from_str_and_collation("AbC", Collation::Utf8Ci),
+                DfValue::from_str_and_collation("def", Collation::Utf8Ci),
             ])],
         ],
     );
@@ -3709,7 +3709,7 @@ async fn mysql_minimal_row_based_replication() {
     // Check that the data is replicated
     let row = [
         DfValue::Int(1),
-        DfValue::from_str_and_collation("a", Collation::Citext),
+        DfValue::from_str_and_collation("a", Collation::Utf8Ci),
         DfValue::None,
         DfValue::Int(1),
     ];
@@ -3734,7 +3734,7 @@ async fn mysql_minimal_row_based_replication() {
     // Check that the data is replicated
     let row = [
         DfValue::Int(1),
-        DfValue::from_str_and_collation("b", Collation::Citext),
+        DfValue::from_str_and_collation("b", Collation::Utf8Ci),
         DfValue::None,
         DfValue::Int(1),
     ];
@@ -3848,7 +3848,7 @@ async fn mysql_minimal_row_based_collation_and_signedness() {
         &[&[
             DfValue::Int(0),
             DfValue::None,
-            DfValue::from_str_and_collation("a ", Collation::Citext)
+            DfValue::from_str_and_collation("a ", Collation::Utf8Ci)
         ]]
     );
 
@@ -3906,7 +3906,7 @@ async fn mysql_minimal_row_based_char_padding() {
         "mrbr_char_padding_insert",
         &[&[
             DfValue::Int(0),
-            DfValue::from_str_and_collation("a         ", Collation::Citext),
+            DfValue::from_str_and_collation("a         ", Collation::Utf8Ci),
         ]]
     );
 
@@ -4052,7 +4052,7 @@ async fn alter_table_add_key_mysql() {
         &[&[
             DfValue::Int(1),
             DfValue::Int(2),
-            DfValue::from_str_and_collation("a", Collation::Citext)
+            DfValue::from_str_and_collation("a", Collation::Utf8Ci)
         ]]
     );
 
@@ -4159,7 +4159,7 @@ async fn alter_table_add_key_postgres() {
         &[&[
             DfValue::Int(1),
             DfValue::Int(2),
-            DfValue::from_str_and_collation("a", Collation::Citext)
+            DfValue::from_str_and_collation("a", Collation::Utf8Ci)
         ]]
     );
 

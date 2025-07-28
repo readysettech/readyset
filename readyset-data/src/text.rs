@@ -900,11 +900,11 @@ mod tests {
     #[tags(no_retry)]
     #[proptest]
     fn coerce_value_to_citext(input: DfValue) {
-        let result = input.coerce_to(&DfType::Text(Collation::Citext), &DfType::Unknown);
+        let result = input.coerce_to(&DfType::Text(Collation::Utf8Ci), &DfType::Unknown);
         prop_assume!(result.is_ok());
         prop_assume!(result.as_ref().unwrap().collation().is_some());
 
-        assert_eq!(result.unwrap().collation(), Some(Collation::Citext));
+        assert_eq!(result.unwrap().collation(), Some(Collation::Utf8Ci));
     }
 
     #[test]

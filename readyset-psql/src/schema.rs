@@ -64,7 +64,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         DfType::Bool => Ok(Type::BOOL),
         DfType::Char(..) => Ok(Type::BPCHAR),
         DfType::VarChar(_, Collation::Utf8) => Ok(Type::VARCHAR),
-        DfType::VarChar(_, Collation::Citext) => {
+        DfType::VarChar(_, Collation::Utf8Ci) => {
             // TODO: use the right CITEXT type
             Ok(Type::VARCHAR)
         }
@@ -81,7 +81,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         DfType::Float => Ok(Type::FLOAT4),
         DfType::Double => Ok(Type::FLOAT8),
         DfType::Text(Collation::Utf8) => Ok(Type::TEXT),
-        DfType::Text(Collation::Citext) => Ok(Type::TEXT), // TODO: use the right CITEXT type
+        DfType::Text(Collation::Utf8Ci) => Ok(Type::TEXT), // TODO: use the right CITEXT type
         DfType::Text(
             Collation::Utf8AiCi
             | Collation::Binary
@@ -139,7 +139,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                 DfType::Bool => Ok(Type::BOOL_ARRAY),
                 DfType::Char(..) => Ok(Type::BPCHAR_ARRAY),
                 DfType::VarChar(_, Collation::Utf8) => Ok(Type::VARCHAR_ARRAY),
-                DfType::VarChar(_, Collation::Citext) => {
+                DfType::VarChar(_, Collation::Utf8Ci) => {
                     // TODO: use the right CITEXT type
                     Ok(Type::VARCHAR_ARRAY)
                 }
@@ -156,7 +156,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                 DfType::Float => Ok(Type::FLOAT4_ARRAY),
                 DfType::Double => Ok(Type::FLOAT8_ARRAY),
                 DfType::Text(Collation::Utf8) => Ok(Type::TEXT_ARRAY),
-                DfType::Text(Collation::Citext) => {
+                DfType::Text(Collation::Utf8Ci) => {
                     // TODO: use the right CITEXT_ARRAY type
                     Ok(Type::TEXT_ARRAY)
                 }

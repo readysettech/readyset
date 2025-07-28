@@ -332,7 +332,7 @@ impl DfType {
             Uuid => Self::Uuid,
             MacAddr => unsupported!("Unsupported type: MacAddr"),
             Inet => unsupported!("Unsupported type: Inet"),
-            Citext => Self::Text(Collation::Citext),
+            Citext => Self::Text(Collation::Utf8Ci),
             Point => Self::Point,
             PostgisPoint => Self::PostgisPoint,
             Tsvector => Self::Tsvector,

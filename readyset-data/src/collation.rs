@@ -56,7 +56,7 @@ pub enum Collation {
     /// This collation corresponds to the behavior of the
     /// [PostgreSQL `CITEXT` type](https://www.postgresql.org/docs/current/citext.html) with the
     /// locale set to `en_US.utf8`.
-    Citext,
+    Utf8Ci,
 
     /// UTF-8, accent-insensitive, case-insensitive.
     Utf8AiCi,
@@ -75,7 +75,7 @@ impl Display for Collation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Utf8 => write!(f, "utf8"),
-            Self::Citext => write!(f, "citext"),
+            Self::Utf8Ci => write!(f, "utf8_ci"),
             Self::Utf8AiCi => write!(f, "utf8_ai_ci"),
             Self::Binary => write!(f, "binary"),
             Self::Latin1SwedishCi => write!(f, "latin1_swedish_ci"),
@@ -95,7 +95,7 @@ impl Collation {
         let cmp = |c: &CollatorBorrowed| c.compare(a, b);
         match self {
             Self::Utf8 => UTF8.with(cmp),
-            Self::Citext => UTF8_CI.with(cmp),
+            Self::Utf8Ci => UTF8_CI.with(cmp),
             Self::Utf8AiCi => UTF8_AI_CI.with(cmp),
             Self::Binary => a.cmp(b),
             Self::Latin1SwedishCi => mysql_latin1_swedish_ci::compare(a, b),
@@ -112,7 +112,7 @@ impl Collation {
         let s = s.as_ref();
         let len = match self {
             Self::Utf8 | Self::Utf8Binary => s.len() * 4,
-            Self::Citext => s.len() * 2,
+            Self::Utf8Ci => s.len() * 2,
             Self::Utf8AiCi | Self::Binary | Self::Latin1SwedishCi => s.len(),
         };
 
@@ -120,7 +120,7 @@ impl Collation {
         let make = |c: &CollatorBorrowed| c.write_sort_key_to(s.as_ref(), &mut out);
         let Ok(()) = match self {
             Self::Utf8 => UTF8.with(make),
-            Self::Citext => UTF8_CI.with(make),
+            Self::Utf8Ci => UTF8_CI.with(make),
             Self::Utf8AiCi => UTF8_AI_CI.with(make),
             Self::Binary => {
                 out.extend_from_slice(s.as_bytes());
@@ -204,12 +204,12 @@ mod tests {
     fn citext_equal() {
         #[track_caller]
         fn citext_strings_equal(s1: &str, s2: &str) {
-            assert_eq!(Collation::Citext.compare(s1, s2), Ordering::Equal)
+            assert_eq!(Collation::Utf8Ci.compare(s1, s2), Ordering::Equal)
         }
 
         #[track_caller]
         fn citext_strings_inequal(s1: &str, s2: &str) {
-            assert_ne!(Collation::Citext.compare(s1, s2), Ordering::Equal)
+            assert_ne!(Collation::Utf8Ci.compare(s1, s2), Ordering::Equal)
         }
 
         citext_strings_equal("abcdef", "abcdef");
@@ -226,7 +226,7 @@ mod tests {
     fn citext_ordering() {
         #[track_caller]
         fn citext_strings_less(s1: &str, s2: &str) {
-            assert_eq!(Collation::Citext.compare(s1, s2), Ordering::Less)
+            assert_eq!(Collation::Utf8Ci.compare(s1, s2), Ordering::Less)
         }
 
         citext_strings_less("a", "b");
