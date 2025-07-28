@@ -155,9 +155,12 @@ impl Collation {
         match (dialect.engine(), collation) {
             (SqlEngine::MySQL, "utf8mb4_0900_ai_ci") => Some(Self::Utf8AiCi),
             (SqlEngine::MySQL, "utf8mb4_0900_as_cs") => Some(Self::Utf8),
+            (SqlEngine::MySQL, "utf8mb4_0900_bin") => Some(Self::Utf8Binary),
+            (SqlEngine::MySQL, "utf8mb4_bin") => Some(Self::Utf8Binary),
+            (SqlEngine::MySQL, "utf8mb3_bin") => Some(Self::Utf8Binary),
+            (SqlEngine::MySQL, "utf8_bin") => Some(Self::Utf8Binary),
             (SqlEngine::MySQL, "binary") => Some(Self::Binary),
             (SqlEngine::MySQL, "latin1_swedish_ci") => Some(Self::Latin1SwedishCi),
-            (SqlEngine::MySQL, "utf8mb4_bin") => Some(Self::Utf8Binary),
             (_, _) => None,
         }
     }
