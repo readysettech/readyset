@@ -33,10 +33,6 @@ pub trait RewriteLateralJoin: Sized {
 impl RewriteLateralJoin for SelectStatement {
     fn rewrite_lateral_joins(mut self) -> ReadySetResult<Self> {
         if resolve_lateral_subqueries(&mut self)? {
-            println!(
-                "LATERAL sub-queries resolved: {}",
-                self.display(Dialect::PostgreSQL)
-            );
             trace!(
                 name = "LATERAL sub-queries resolved",
                 "{}",
