@@ -46,9 +46,6 @@ thread_local! {
 #[repr(u8)]
 pub enum Collation {
     /// The UTF-8 collation.
-    ///
-    /// This collation, which is the default for PostgreSQL (and the [`Default`] for this type),
-    /// corresponds to the *default* behavior of rust's [`String`] type.
     Utf8,
 
     /// The case-insensitive text collation.
@@ -154,6 +151,7 @@ impl Collation {
     fn try_get(dialect: Dialect, collation: &str) -> Option<Self> {
         match (dialect.engine(), collation) {
             (SqlEngine::MySQL, "utf8mb4_0900_ai_ci") => Some(Self::Utf8AiCi),
+            (SqlEngine::MySQL, "utf8mb4_0900_as_ci") => Some(Self::Utf8Ci),
             (SqlEngine::MySQL, "utf8mb4_0900_as_cs") => Some(Self::Utf8),
             (SqlEngine::MySQL, "utf8mb4_0900_bin") => Some(Self::Utf8Binary),
             (SqlEngine::MySQL, "utf8mb4_bin") => Some(Self::Utf8Binary),

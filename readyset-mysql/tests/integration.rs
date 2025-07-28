@@ -3086,9 +3086,7 @@ async fn create_duplicate_query_id_and_name_caches() {
     shutdown_tx.shutdown().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql8_upstream)]
-async fn test_utf8_ai_ci() {
+async fn test_utf8(coll: &str) {
     readyset_tracing::init_test_logging();
     let (rs_opts, _rs_handle, tx) = setup_with_mysql().await;
     sleep().await;
@@ -3096,30 +3094,49 @@ async fn test_utf8_ai_ci() {
     let mut rs = Conn::new(rs_opts).await.unwrap();
 
     mysql
-        .query_drop("create table utf8_ai_ci (a int primary key, b varchar(10))")
+        .query_drop(format!(
+            "create table {coll} (
+                 a int primary key,
+                 b varchar(10) collate {coll}
+             )"
+        ))
         .await
         .unwrap();
 
     mysql
-        .query_drop(
-            "insert into utf8_ai_ci values (1, 'e'), (2, 'é'), (3, 'E'), (4, 'e'), (5, 'f')",
-        )
+        .query_drop(format!(
+            "insert into {coll} values (1, 'e'), (2, 'é'), (3, 'E'), (4, 'e'), (5, 'f')"
+        ))
         .await
         .unwrap();
-    rs.query_drop("create cache from select * from utf8_ai_ci order by b, a")
-        .await
-        .unwrap();
+    rs.query_drop(format!(
+        "create cache from select * from {coll} order by b, a"
+    ))
+    .await
+    .unwrap();
     sleep().await;
 
     let (m, r) = query_both(
         &mut mysql,
         &mut rs,
-        "select * from utf8_ai_ci order by b, a",
+        &format!("select * from {coll} order by b, a"),
     )
     .await;
     assert_eq!(m, r);
 
     tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, mysql8_upstream)]
+async fn test_utf8_ai_ci() {
+    test_utf8("utf8mb4_0900_ai_ci").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, mysql8_upstream)]
+async fn test_utf8_as_ci() {
+    test_utf8("utf8mb4_0900_as_ci").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
