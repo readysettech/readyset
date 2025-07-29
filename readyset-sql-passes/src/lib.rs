@@ -8,6 +8,7 @@ pub mod detect_unsupported_placeholders;
 mod disallow_row;
 pub mod expr;
 mod implied_tables;
+mod infer_nullability;
 mod inline_literals;
 mod key_def_coalescing;
 mod lateral_join;
@@ -19,6 +20,9 @@ mod rewrite_between;
 mod rewrite_utils;
 mod star_expansion;
 mod strip_literals;
+mod tests;
+mod unnest_subqueries;
+mod unnest_subqueries_3vl;
 mod util;
 mod validate_window_functions;
 
@@ -43,7 +47,6 @@ pub use crate::expr::ScalarOptimizeExpressions;
 pub use crate::implied_tables::ImpliedTableExpansion;
 pub use crate::inline_literals::InlineLiterals;
 pub use crate::key_def_coalescing::KeyDefinitionCoalescing;
-use crate::lateral_join::RewriteLateralJoin;
 pub use crate::normalize_topk_with_aggregate::NormalizeTopKWithAggregate;
 pub use crate::order_limit_removal::OrderLimitRemoval;
 pub use crate::remove_numeric_field_references::RemoveNumericFieldReferences;
@@ -51,6 +54,7 @@ pub use crate::resolve_schemas::ResolveSchemas;
 pub use crate::rewrite_between::RewriteBetween;
 pub use crate::star_expansion::StarExpansion;
 pub use crate::strip_literals::{SelectStatementSkeleton, StripLiterals};
+use crate::unnest_subqueries::UnnestSubqueries;
 pub use crate::util::{
     LogicalOp, is_correlated, is_logical_op, is_predicate, map_aggregates, outermost_table_exprs,
 };
@@ -186,7 +190,7 @@ impl Rewrite for SelectStatement {
                 context.dialect.into(),
             )?
             .expand_implied_tables(context.view_schemas, context.dialect.into())?
-            .rewrite_lateral_joins()?
+            .unnest_subqueries(context)?
             .normalize_topk_with_aggregate(context.dialect.into())?
             .detect_problematic_self_joins()?
             .remove_numeric_field_references()?

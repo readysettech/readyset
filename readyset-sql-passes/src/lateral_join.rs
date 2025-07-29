@@ -1,47 +1,28 @@
+use crate::get_local_from_items_iter_mut;
 use crate::rewrite_utils::{
-    add_expression_to_join_constraint, and_predicates, and_predicates_skip_true,
-    as_sub_query_with_alias, as_sub_query_with_alias_mut, collect_outermost_columns_mut,
-    columns_iter, columns_iter_mut, default_alias_for_select_item_expression, expect_field_as_expr,
-    expect_field_as_expr_mut, expect_sub_query_with_alias_mut, for_each_function_call,
-    get_from_item_reference_name, is_aggregated_select, is_filter_pushable_from_item,
-    is_simple_parametrizable_filter, matches_eq_constraint, project_columns, split_expr,
+    RewriteStatus, add_expression_to_join_constraint, align_group_by_and_windows_with_correlation,
+    analyse_lone_aggregates_subquery_fields, and_predicates_skip_true, as_sub_query_with_alias,
+    as_sub_query_with_alias_mut, collect_local_from_items, collect_outermost_columns_mut,
+    columns_iter, columns_iter_mut, contain_subqueries_with_limit_clause,
+    default_alias_for_select_item_expression, expect_field_as_expr_mut,
+    expect_sub_query_with_alias_mut, get_from_item_reference_name, is_filter_pushable_from_item,
+    move_correlated_constraints_from_join_to_where, project_columns_if,
+    split_correlated_constraint, split_correlated_expression, split_expr,
 };
-use crate::{get_local_from_items_iter, get_local_from_items_iter_mut};
+use crate::unnest_subqueries::{
+    AggNoGbyCardinality, UnnestContext, agg_only_no_gby_cardinality, force_empty_select,
+    has_limit_zero_deep, is_supported_join_condition, rewrite_top_k_for_lateral,
+    split_on_for_rhs_against_preceding_lhs, unnest_all_subqueries,
+};
 use itertools::Either;
-use readyset_errors::{ReadySetError, ReadySetResult, unsupported, unsupported_err};
-use readyset_sql::analysis::is_aggregate;
-use readyset_sql::analysis::visit::{Visitor, walk_select_statement};
+use readyset_errors::{ReadySetResult, unsupported};
 use readyset_sql::ast::{
-    Column, Expr, FunctionExpr, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
-    Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+    Column, Expr, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal, Relation,
+    SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use std::collections::{HashMap, HashSet};
 use std::{iter, mem};
-use tracing::trace;
-
-/// Trait for statements that can rewrite LATERAL joins as regular joins.
-/// Intended to be implemented on SELECT statements after schema resolution and star expansion.
-/// **IMPORTANT**: This rewrite pass must be called after the schema resolution, star expansion
-/// and JoinConstraint::USING expansion passes.
-pub trait RewriteLateralJoin: Sized {
-    fn rewrite_lateral_joins(&mut self) -> ReadySetResult<&mut Self>;
-}
-
-/// Top-level method to convert all LATERAL joins in a SELECT statement into equivalent standard joins.
-/// Modifies the statement in-place, flattening correlated subqueries and updating joins as needed.
-impl RewriteLateralJoin for SelectStatement {
-    fn rewrite_lateral_joins(&mut self) -> ReadySetResult<&mut Self> {
-        if resolve_lateral_subqueries(self)? {
-            trace!(
-                name = "LATERAL sub-queries resolved",
-                "{}",
-                self.display(Dialect::PostgreSQL)
-            );
-        }
-        Ok(self)
-    }
-}
 
 /// Checks if a table relation should be considered an "outer" table for correlation analysis,
 /// as opposed to a local table within a subquery or join.
@@ -53,63 +34,16 @@ fn is_outer_from_item(
     !local_tables.contains(from_item) && outer_tables.contains(from_item)
 }
 
-fn is_correlated_lhs_rhs(
-    lhs: &Relation,
-    rhs: &Relation,
-    local_tables: &HashSet<Relation>,
-    outer_tables: &HashSet<Relation>,
-) -> bool {
-    is_outer_from_item(lhs, local_tables, outer_tables)
-        || is_outer_from_item(rhs, local_tables, outer_tables)
-}
-
-/// Determines if an equality constraint between two columns references an outer table,
-/// making it a correlated predicate that must be hoisted during LATERAL join rewriting.
-fn is_correlated_eq_constraint(
-    expr: &Expr,
-    local_tables: &HashSet<Relation>,
-    outer_tables: &HashSet<Relation>,
-) -> bool {
-    matches_eq_constraint(expr, |left_table, right_table| {
-        is_correlated_lhs_rhs(left_table, right_table, local_tables, outer_tables)
-    })
-}
-
-/// Checks if a simple (e.g., column compares literal, column in (literals), col between literal and literal)
-/// filter on an outer table, identifying correlated filter predicates for extraction.
-fn is_correlated_simple_filter(
-    expr: &Expr,
-    local_tables: &HashSet<Relation>,
-    outer_tables: &HashSet<Relation>,
-) -> bool {
-    is_simple_parametrizable_filter(expr, |table, _| {
-        is_outer_from_item(table, local_tables, outer_tables)
-    })
-}
-
 /// Splits a predicate expression into a correlated part (references outer tables)
 /// and a non-correlated part, for extracting join predicates during rewriting.
-fn split_correlated_expression(
+fn split_correlated_expr(
     expr: &Expr,
     local_tables: &HashSet<Relation>,
     outer_tables: &HashSet<Relation>,
 ) -> (Option<Expr>, Option<Expr>) {
-    let mut correlated_constraints: Vec<Expr> = Vec::new();
-    let remaining_expr = split_expr(
-        expr,
-        &|e| {
-            is_correlated_eq_constraint(e, local_tables, outer_tables)
-                || is_correlated_simple_filter(e, local_tables, outer_tables)
-        },
-        &mut correlated_constraints,
-    );
-
-    let mut correlated_expr = None;
-    for e in correlated_constraints.into_iter() {
-        correlated_expr = and_predicates(correlated_expr, e);
-    }
-
-    (correlated_expr, remaining_expr)
+    split_correlated_expression(expr, &|rel| {
+        is_outer_from_item(rel, local_tables, outer_tables)
+    })
 }
 
 /// Checks if a column does not belong to any of the specified FROM items.
@@ -144,34 +78,9 @@ fn project_local_columns(
     expr: &mut Expr,
     outer_from_items: &HashSet<Relation>,
 ) -> ReadySetResult<()> {
-    let local_columns_refs = columns_iter_mut(expr)
-        .filter_map(|col| {
-            if column_does_not_belong_from_items(col, outer_from_items) {
-                Some(col)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let (tab_expr_stmt, tab_expr_alias) = expect_sub_query_with_alias_mut(tab_expr);
-    let projected_columns_alias = project_columns(
-        tab_expr_stmt,
-        &local_columns_refs
-            .iter()
-            .map(|col| Expr::Column((*col).clone()))
-            .collect::<Vec<_>>(),
-    )?;
-
-    local_columns_refs
-        .into_iter()
-        .zip(projected_columns_alias)
-        .for_each(|(col_ref, proj)| {
-            col_ref.table = Some(tab_expr_alias.clone().into());
-            col_ref.name = proj;
-        });
-
-    Ok(())
+    project_columns_if(tab_expr, expr, |col| {
+        column_does_not_belong_from_items(col, outer_from_items)
+    })
 }
 
 /// Moves predicates from INNER JOIN ON clauses to the WHERE clause if they reference outer tables.
@@ -183,39 +92,9 @@ fn move_correlated_join_on_to_where(
     local_from_items: &HashSet<Relation>,
     outer_from_items: &HashSet<Relation>,
 ) -> ReadySetResult<()> {
-    let mut add_to_where_clause = None;
-    let mut correlated_join_clauses = Vec::new();
-    for (join_clause_idx, join_clause) in stmt.join.iter().enumerate() {
-        match &join_clause.constraint {
-            JoinConstraint::On(on_expr)
-                if is_filter_pushable_from_item(stmt, stmt.tables.len() + join_clause_idx)? =>
-            {
-                if let (Some(correlated_expr), remaining_expr) =
-                    split_correlated_expression(on_expr, local_from_items, outer_from_items)
-                {
-                    add_to_where_clause =
-                        and_predicates_skip_true(add_to_where_clause, correlated_expr);
-                    correlated_join_clauses.push((join_clause_idx, remaining_expr));
-                }
-            }
-            _ => {}
-        }
-    }
-
-    for (join_clause_idx, remaining_expr) in correlated_join_clauses {
-        stmt.join[join_clause_idx].constraint = if let Some(remaining_expr) = remaining_expr {
-            JoinConstraint::On(remaining_expr)
-        } else {
-            JoinConstraint::Empty
-        };
-    }
-
-    if let Some(add_to_where_clause) = add_to_where_clause {
-        stmt.where_clause =
-            and_predicates_skip_true(stmt.where_clause.clone(), add_to_where_clause);
-    }
-
-    Ok(())
+    move_correlated_constraints_from_join_to_where(stmt, &|rel| {
+        is_outer_from_item(rel, local_from_items, outer_from_items)
+    })
 }
 
 /// Scans a SELECT statement for correlated predicates in it's WHERE clause that reference outer tables.
@@ -229,10 +108,7 @@ fn extract_correlated_subquery(
 ) -> ReadySetResult<Option<(TableExpr, Expr)>> {
     let mut stmt = stmt.clone();
 
-    // Collect the local FROM items
-    let local_from_items = get_local_from_items_iter!(stmt)
-        .map(get_from_item_reference_name)
-        .collect::<ReadySetResult<HashSet<Relation>>>()?;
+    let local_from_items = collect_local_from_items(&stmt)?;
 
     // Try to move correlated constraints from the join ONs over to WHERE clause
     if !stmt.join.is_empty() {
@@ -248,13 +124,16 @@ fn extract_correlated_subquery(
     let _ = mem::replace(&mut stmt.where_clause, where_clause);
 
     if has_unsupported_correlation {
-        unsupported!("Unsupported correlation outside of WHERE clause");
+        unsupported!(
+            "Unsupported correlation outside of WHERE clause: {}",
+            stmt.display(Dialect::PostgreSQL)
+        );
     }
 
     if let Some(where_clause) = &stmt.where_clause {
         // Extract that piece of the WHERE clause, which correlates with the legit outer scope.
         let (correlated_expr, remaining_expr) =
-            split_correlated_expression(where_clause, &local_from_items, outer_from_items);
+            split_correlated_expr(where_clause, &local_from_items, outer_from_items);
 
         // Verify the remaining expression has no correlation.
         // **NOTE**: We are visiting the outermost columns only, w/o walking into sub-queries.
@@ -263,7 +142,8 @@ fn extract_correlated_subquery(
                 .any(|col| column_does_not_belong_from_items(col, &local_from_items))
         {
             unsupported!(
-                "Unsupported correlation in subquery: {}",
+                "Statement: {}. Unsupported correlation in subquery: {}",
+                stmt.display(Dialect::PostgreSQL),
                 remaining_expr.display(Dialect::PostgreSQL)
             );
         }
@@ -272,6 +152,11 @@ fn extract_correlated_subquery(
         // involving columns from `outer_from_items`
         if let Some(mut correlated_expr) = correlated_expr {
             stmt.where_clause = remaining_expr;
+
+            align_group_by_and_windows_with_correlation(
+                &mut stmt,
+                &split_correlated_constraint(&correlated_expr, &local_from_items)?,
+            )?;
 
             let mut tab_expr = TableExpr {
                 inner: TableExprInner::Subquery(Box::new(stmt)),
@@ -311,6 +196,8 @@ fn try_extract_correlated_subquery(
         )));
     }
 
+    let local_from_items = collect_local_from_items(stmt)?;
+
     for (idx, local_tab_expr) in get_local_from_items_iter_mut!(stmt).enumerate() {
         if let Some((subquery_ref_name, mut outer_join_on)) =
             try_extract_correlated_subquery(local_tab_expr, outer_tables)?
@@ -318,6 +205,12 @@ fn try_extract_correlated_subquery(
             if !is_filter_pushable_from_item(stmt, idx)? {
                 unsupported!("LATERAL sub-query contains LEFT OUTER JOIN")
             }
+
+            align_group_by_and_windows_with_correlation(
+                stmt,
+                &split_correlated_constraint(&outer_join_on, &local_from_items)?,
+            )?;
+
             project_local_columns(tab_expr, &mut outer_join_on, outer_tables)?;
             return Ok(Some((subquery_ref_name, outer_join_on)));
         }
@@ -341,58 +234,49 @@ fn resolve_lateral_subquery(
     Ok(outer_join_on)
 }
 
-/// Returns true if any subquery within the SELECT statement contains a LIMIT clause.
-/// Used to detect cases where LATERAL join rewriting may be unsupported.
-fn contain_subqueries_with_limit_clause(stmt: &SelectStatement) -> ReadySetResult<bool> {
-    struct LookupVisitor {
-        contains_limit_clause: bool,
-    }
-
-    impl<'ast> Visitor<'ast> for LookupVisitor {
-        type Error = ReadySetError;
-
-        fn visit_select_statement(
-            &mut self,
-            select_statement: &'ast SelectStatement,
-        ) -> Result<(), Self::Error> {
-            if !select_statement.limit_clause.is_empty() {
-                self.contains_limit_clause = true;
-            }
-            walk_select_statement(self, select_statement)
-        }
-    }
-
-    let mut visitor = LookupVisitor {
-        contains_limit_clause: false,
-    };
-    visitor.visit_select_statement(stmt)?;
-
-    Ok(visitor.contains_limit_clause)
-}
-
-/// Tries to resolve a TableExpr as a LATERAL subquery suitable for conversion to a regular join.
-/// It recursively resolves all LATERAL subqueries inside the input TableExpr first,
-/// and then will try to resolve the input one only if it's attributed as LATERAL.
-/// If successful, return the rewritten TableExpr and the extracted join predicate, and a flag
-/// if the input itself, or any of its inner sub-queries have actually been transformed.
+/// LATERAL RHS sanitation (before limit/offset guard):
+///  • LIMIT 0 ⇒ force RHS empty (recursively clear LIMIT/OFFSET/ORDER and set FALSE at the right level).
+///  • Move RHS-internal correlated atoms from JOIN .. ON to WHERE so TOP‑K partitioning sees correlation.
+///  • Rewrite TOP‑K (ORDER/LIMIT) to ROW_NUMBER filters (RN ≤ N), clearing raw ORDER/LIMIT for the legacy guard.
+/// This ensures the legacy `contain_subqueries_with_limit_clause` check will pass for sanitized LATERAL bodies.
 fn try_resolve_as_lateral_subquery(
     from_item: &mut TableExpr,
     preceding_from_items: &HashSet<Relation>,
+    ctx: &mut UnnestContext,
 ) -> ReadySetResult<(bool, Option<(TableExpr, Expr)>)> {
-    let inner_laterals_has_transformed;
-    if let Some((stmt, _)) = as_sub_query_with_alias_mut(from_item) {
-        inner_laterals_has_transformed = resolve_lateral_subqueries(stmt)?;
-        if stmt.lateral {
-            stmt.lateral = false;
-        } else {
-            return Ok((inner_laterals_has_transformed, None));
-        }
-    } else {
+    let mut has_transformed;
+
+    // Descend and resolve inner subqueries first; bail if not actually LATERAL
+    let Some((stmt, _)) = as_sub_query_with_alias_mut(from_item) else {
         return Ok((false, None));
+    };
+
+    has_transformed = unnest_all_subqueries(stmt, ctx)?.has_rewrites();
+    if stmt.lateral {
+        stmt.lateral = false;
+    } else {
+        return Ok((has_transformed, None));
+    }
+
+    // --- Sanitize RHS prior to legacy LIMIT/ORDER guard ---
+    // LIMIT 0 anywhere reachable (respecting aggregate-only cutoff) ⇒ force empty RHS deterministically.
+    if has_limit_zero_deep(stmt) {
+        force_empty_select(stmt);
+        has_transformed = true;
+    } else {
+        // Move RHS-internal correlated atoms from JOIN ON to WHERE so TOP‑K can infer partitions.
+        let locals = collect_local_from_items(stmt)?;
+        move_correlated_join_on_to_where(stmt, &locals, preceding_from_items)?;
+
+        // Materialize TOP‑K (ORDER/LIMIT) into RN (partitioned if correlation present in WHERE)
+        if rewrite_top_k_for_lateral(stmt, &locals)? {
+            has_transformed = true;
+        }
     }
 
     if let Some(mut lateral_join_on) = resolve_lateral_subquery(from_item, preceding_from_items)? {
         let (stmt, stmt_alias) = expect_sub_query_with_alias_mut(from_item);
+        // With RHS sanitized, we should not see raw LIMIT/OFFSET/ORDER here anymore.
         if contain_subqueries_with_limit_clause(stmt)? {
             unsupported!("LATERAL sub-queries with LIMIT clause")
         }
@@ -403,25 +287,38 @@ fn try_resolve_as_lateral_subquery(
         );
         Ok((true, Some((from_item.clone(), lateral_join_on))))
     } else {
-        Ok((inner_laterals_has_transformed, None))
+        Ok((has_transformed, None))
     }
 }
 
-/// Determines the correct join operator when rewriting a LATERAL subquery into a regular join.
+/// Selects the join operator for a rewritten LATERAL subquery.
 ///
-/// - For aggregate-only LATERAL subqueries (no GROUP BY) with no ON constraint, emits LEFT OUTER JOIN
-///   and populates `fields_map` with `COALESCE` expressions for COUNT/literal fields to preserve null semantics.
-/// - If the original operator is a LEFT or RIGHT OUTER join (and not a lone-aggregate special case), preserves it.
-/// - Otherwise defaults to INNER JOIN.
+/// **Policy summary**
+/// - If the RHS is **aggregate-only without GROUP BY** and classified as **`ExactlyOne`**:
+///   - With `JoinConstraint::Empty` or `ON TRUE` (i.e., CROSS/comma or ON TRUE):
+///     * populate `fields_map` with COALESCE mappings for the COUNT family, and
+///     * return `LeftOuterJoin`.
+///     * This preserves “one scalar per outer row” after correlation hoist; absent keys yield
+///     * NULL on the RHS which the SELECT‑list later turns into `0` for COUNT via `coalesce_fields_references`.
+///   - With a **non‑trivial ON**: return the caller’s operator (INNER/LEFT/etc.) and **do not**
+///     * populate `fields_map`.
+/// - Otherwise (not agg‑only/ExactlyOne):
+///   - Preserve explicit `LeftJoin` / `LeftOuterJoin` / `RightJoin` / `RightOuterJoin` as given;
+///   - Default to `InnerJoin` in all other cases.
+///
+/// **Notes**
+/// - The ON normalizer may push ON atoms to WHERE **only** for INNER joins; for LEFT this is
+///   * forbidden and will error if required, so the choice here has semantic implications.
+/// - RIGHT joins are passed through here; downstream may reject them if unsupported by the engine.
 ///
 /// # Arguments
-/// * `tab_expr` - the table expression for the LATERAL subquery.
-/// * `join_operator` - the join operator from the original query context.
-/// * `join_constraint` - the ON-condition or empty constraint associated with the join.
-/// * `fields_map` - mapping of columns to coalesce expressions for lone aggregates.
+/// * `tab_expr`       – table expression for the LATERAL subquery.
+/// * `join_operator`  – operator from the original query context.
+/// * `join_constraint`– ON condition or empty constraint associated with the join.
+/// * `fields_map`     – populated only for the COUNT mapping in the `ExactlyOne` + (Empty|ON TRUE) case.
 ///
 /// # Returns
-/// A `ReadySetResult<JoinOperator>` indicating the operator to use in the rewritten join.
+/// Operator to use for the rewritten join, per the policy above.
 fn get_join_operator_for_lateral(
     tab_expr: &TableExpr,
     join_operator: JoinOperator,
@@ -429,16 +326,49 @@ fn get_join_operator_for_lateral(
     fields_map: &mut HashMap<Column, ReadySetResult<Expr>>,
 ) -> ReadySetResult<JoinOperator> {
     if let Some((stmt, stmt_alis)) = as_sub_query_with_alias(tab_expr) {
-        if is_aggregated_select(stmt)? && stmt.group_by.is_none() {
-            if matches!(
-                join_constraint,
-                JoinConstraint::Empty | JoinConstraint::On(Expr::Literal(Literal::Boolean(true)))
-            ) {
-                analyse_lone_aggregates_subquery_fields(stmt, stmt_alis.clone(), fields_map)?;
-                return Ok(JoinOperator::LeftOuterJoin);
-            } else {
-                unsupported!("Lone aggregates without GROUP BY subquery joining with ON condition")
-            }
+        let agg_card_shape = agg_only_no_gby_cardinality(stmt)?;
+        if matches!(agg_card_shape, Some(AggNoGbyCardinality::ExactlyOne)) {
+            // Collect subquery fields requiring COALESCE injection
+            let mut local_fields_map = HashMap::new();
+            analyse_lone_aggregates_subquery_fields(
+                stmt,
+                stmt_alis.clone(),
+                &mut local_fields_map,
+            )?;
+            let emit_join_op = match join_constraint {
+                JoinConstraint::Empty
+                | JoinConstraint::On(Expr::Literal(Literal::Boolean(true))) => {
+                    // ** cross-join/empty ON/ON TRUE ** - always emit LEFT JOIN to preserve
+                    JoinOperator::LeftOuterJoin
+                }
+                JoinConstraint::On(join_expr) => {
+                    // We reject any ON conjunct referencing COUNT that would be coalesced;
+                    // this mirrors `coalesce_fields_references` which forbids mapping outside the SELECT list.
+                    let mut move_to_where = Vec::new();
+                    let _join_expr_remainder = split_expr(
+                        join_expr,
+                        &|conjunct| {
+                            columns_iter(conjunct)
+                                .into_iter()
+                                .any(|col| local_fields_map.contains_key(col))
+                        },
+                        &mut move_to_where,
+                    );
+                    if !move_to_where.is_empty() {
+                        // TODO: if join_operator.is_inner_join() - Handle moving affected join conjuncts to WHERE,
+                        //       once de-correlation pass is done before the auto-parametrization.
+                        unsupported!(
+                            "LATERAL join condition references a column requiring mapping to COALESCE"
+                        )
+                    }
+                    join_operator
+                }
+                JoinConstraint::Using(_) => {
+                    unreachable!("USING should have been desugared earlier")
+                }
+            };
+            fields_map.extend(local_fields_map);
+            return Ok(emit_join_op);
         } else if matches!(
             join_operator,
             JoinOperator::LeftJoin
@@ -450,86 +380,6 @@ fn get_join_operator_for_lateral(
         }
     }
     Ok(JoinOperator::InnerJoin)
-}
-
-/// For aggregate-only LATERAL subqueries without GROUP BY, analyzes each SELECT field and
-/// populates `fields_map` so that COUNT and literal fields are coalesced to default values.
-///
-/// # Arguments
-/// * `stmt` - The aggregate-only subquery SELECT statement.
-/// * `stmt_alias` - The alias used for the subquery, used to qualify projected columns.
-/// * `fields_map` - A map to be populated with columns and their coalesced expressions or errors.
-///
-/// For pure COUNT aggregates, insert COALESCE (col, 0).
-/// For literal fields, insert COALESCE (col, literal).
-/// For expressions over only COUNT aggregates, inserts an unsupported error.
-fn analyse_lone_aggregates_subquery_fields(
-    stmt: &SelectStatement,
-    stmt_alias: SqlIdentifier,
-    fields_map: &mut HashMap<Column, ReadySetResult<Expr>>,
-) -> ReadySetResult<()> {
-    // Constructs a COALESCE function call for a column and a literal fallback.
-    macro_rules! make_coalesce {
-        ($col:expr_2021, $lit:expr_2021) => {
-            Expr::Call(FunctionExpr::Call {
-                name: "coalesce".into(),
-                arguments: Some(vec![Expr::Column($col), Expr::Literal($lit)]),
-            })
-        };
-    }
-
-    // Identifies COUNT aggregate functions.
-    let is_count_aggregate =
-        |f: &FunctionExpr| matches!(f, FunctionExpr::Count { .. } | FunctionExpr::CountStar);
-
-    for fe in &stmt.fields {
-        let (f_expr, f_alias) = expect_field_as_expr(fe);
-        if let Some(f_alias) = f_alias {
-            let f_col = Column {
-                name: f_alias.clone(),
-                table: Some(stmt_alias.clone().into()),
-            };
-            match f_expr {
-                // For pure COUNT fields, coalesce to zero.
-                Expr::Call(f) if is_count_aggregate(f) => {
-                    fields_map.insert(
-                        f_col.clone(),
-                        Ok(make_coalesce!(f_col.clone(), Literal::Integer(0))),
-                    );
-                }
-                // For literal fields, coalesce to the literal value.
-                Expr::Literal(lit) => {
-                    fields_map.insert(
-                        f_col.clone(),
-                        Ok(make_coalesce!(f_col.clone(), lit.clone())),
-                    );
-                }
-                // For expressions over only COUNT aggregates, insert unsupported error.
-                expr => {
-                    // Detects if the expression is over only COUNT aggregates.
-                    let mut has_count_aggregate = false;
-                    let mut has_other_aggregates = false;
-                    for_each_function_call(expr, &mut |f| {
-                        if is_count_aggregate(f) {
-                            has_count_aggregate = true;
-                        } else if is_aggregate(f) {
-                            has_other_aggregates = true;
-                        }
-                    })?;
-                    if has_count_aggregate && !has_other_aggregates {
-                        // The field `fe` is an expression over only aggregate(s) `COUNT()`, which we could calculate
-                        // assuming `COUNT()` is 0. But, for now, let's just error out if this field is referenced.
-                        fields_map.insert(
-                            f_col,
-                            Err(unsupported_err!("Expression over aggregate COUNT")),
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(())
 }
 
 /// Replace select-list columns with coalesced expressions from `fields_map`.
@@ -628,24 +478,46 @@ fn get_rhs_referenced_in_join_expression(jc: &JoinClause) -> ReadySetResult<Opti
 /// Converts all LATERAL subqueries in the FROM and JOIN clauses to regular joins,
 /// updating join constraints and projections as needed to maintain semantic equivalence.
 /// Return `true` if any transformation happened to the statement itself or any of its inner subqueries.
-fn resolve_lateral_subqueries(stmt: &mut SelectStatement) -> ReadySetResult<bool> {
-    let mut has_transformed = false;
+fn resolve_lateral_subqueries(
+    stmt: &mut SelectStatement,
+    ctx: &mut UnnestContext,
+) -> ReadySetResult<RewriteStatus> {
+    let mut rewrite_status = RewriteStatus::default();
 
     // The LATERAL subqueries can be correlated with the preceding FROM items only,
     // As we are moving along the FROM items, the number of preceding FROM items might increase.
     // This HashSet maintains the current set of items, the remaining LATERAL subqueries can be correlated with.
     let mut preceding_from_items = HashSet::new();
 
+    // Ordered FROM items, preceding current RHS. Maintained as we advance over the `stmt` FROM items.
+    let mut preceding_to_rhs = Vec::new();
+
     // Build new comma separated tables/sub-queries and joins
     let mut new_tables = Vec::new();
     let mut new_joins = Vec::new();
 
-    // This map is used to handle a particular use case, when a `lateral` subquery
-    // is a lone aggregates statement, contains `COUNT()` and is cross-joined.
-    // In such a case, the original cross-join will be replaced with left-outer-join,
-    // and all outer occurrences of the column `COUNT()` should be replaced with `COALESCE(col, 0)`.
-    // This is safe to do only in the outer statement select list, b/c other places can be sensitive to
-    // replacing column reference with function call.
+    // The pieces of transformed `LATERAL` join ON expressions which have to be moved to the base statement WHERE.
+    let mut add_to_where = None;
+
+    // ── SELECT‑list COALESCE mapping policy for LATERAL lone‑aggregate (COUNT) ─────────────
+    // We only use a SELECT‑list replacement map when **all** of the following hold:
+    //   • RHS is aggregate‑only without GROUP BY and classified as **ExactlyOne** (no HAVING / HAVING TRUE);
+    //   • The join constraint was `Empty` or `ON TRUE` (i.e., CROSS/comma semantics), so
+    //     `get_join_operator_for_lateral` promoted the join to **LeftOuterJoin** and populated this map;
+    //   • The first projected field on RHS is from the **COUNT** family; SUM/MIN/MAX are **not** mapped.
+    //
+    // Rationale:
+    //   After correlation hoist + grouping by local keys, an **absent key** yields **no RHS row**.
+    //   For COUNT, the original scalar over empty input is **0** (not NULL); using
+    //   `coalesce_fields_references(..)` replaces outer SELECT‑list occurrences of that COUNT column
+    //   with `COALESCE(col, 0)` so projections match original semantics. We **never** apply these
+    //   mappings in WHERE/ORDER/GROUP BY—only in the outer SELECT list—to avoid changing filtering/ordering.
+    //
+    // Non‑goals / exclusions:
+    //   • **AtMostOne** (HAVING present): we do **not** populate this map—projections should remain NULL when
+    //     HAVING filters the group out.
+    //   • Non‑trivial `ON` joins: we preserve the caller’s operator and **do not** populate this map so LEFT+ON
+    //     semantics (including NULL RHS) remain visible.
     let mut coalesce_fields_map: HashMap<Column, ReadySetResult<Expr>> = HashMap::new();
 
     // Used to preserve the original joining order for comma separated tables/sub-queries in the loop below.
@@ -653,29 +525,78 @@ fn resolve_lateral_subqueries(stmt: &mut SelectStatement) -> ReadySetResult<bool
     // regardless of being `lateral` or not.
     let mut had_lateral = false;
 
+    // Normalizes the ON for a rewritten LATERAL:
+    // - Keep only atoms over {RHS, chosen LHS} in ON; push the remainder to outer WHERE.
+    // - Safe to push only when the **current** join is INNER. With only LEFT supported later,
+    //   filters over already-joined relations are equivalent before/after later LEFT joins.
+    // - For current LEFT joins, do not push (would null-reject).
+    macro_rules! normalize_lateral_join_constraint {
+        ($stmt:expr, $from_item_rel:expr, $join_op:expr, $candidate_on:expr) => {{
+            let split = split_on_for_rhs_against_preceding_lhs(
+                &$candidate_on,
+                &$from_item_rel.into(),
+                &preceding_to_rhs,
+            );
+
+            // Safe: push to WHERE only for INNER joins.
+            if $join_op.is_inner_join() {
+                if let Some(to_where) = split.to_where {
+                    add_to_where = and_predicates_skip_true(add_to_where, to_where);
+                }
+            } else {
+                // Current join is LEFT OUTER: moving ON → WHERE would null-reject.
+                if split.to_where.is_some() {
+                    unsupported!(
+                        "LATERAL normalization would move ON filters out of a LEFT OUTER join"
+                    )
+                }
+            }
+
+            if let Some(join_on) = split.on_expr {
+                debug_assert!(
+                    is_supported_join_condition(&join_on),
+                    "Expected RHS↔LHS equality in ON"
+                );
+                JoinConstraint::On(join_on)
+            } else {
+                JoinConstraint::Empty
+            }
+        }};
+    }
+
     // Handle the left-hand side comma separated tables/sub-queries.
     for stmt_from_item in stmt.tables.iter() {
         //
+        let mut fields_map = HashMap::new();
         let join_operator_for_lateral = get_join_operator_for_lateral(
             stmt_from_item,
             JoinOperator::CrossJoin,
             &JoinConstraint::Empty,
-            &mut coalesce_fields_map,
+            &mut fields_map,
         );
 
         let mut from_item = stmt_from_item.clone();
+        let from_item_rel = get_from_item_reference_name(&from_item)?;
 
         let (transformed, resolved_option) =
-            try_resolve_as_lateral_subquery(&mut from_item, &preceding_from_items)?;
+            try_resolve_as_lateral_subquery(&mut from_item, &preceding_from_items, ctx)?;
 
-        preceding_from_items.insert(get_from_item_reference_name(&from_item)?);
+        preceding_from_items.insert(from_item_rel.clone());
 
         if let Some((resolved_from_item, lateral_join_on)) = resolved_option {
+            let join_operator = join_operator_for_lateral?;
+            let join_constraint = normalize_lateral_join_constraint!(
+                stmt,
+                from_item_rel.clone(),
+                join_operator,
+                lateral_join_on
+            );
             new_joins.push(JoinClause {
-                operator: join_operator_for_lateral?,
+                operator: join_operator,
                 right: JoinRightSide::Table(resolved_from_item),
-                constraint: JoinConstraint::On(lateral_join_on),
+                constraint: join_constraint,
             });
+            coalesce_fields_map.extend(fields_map);
             had_lateral = true;
         } else if had_lateral {
             new_joins.push(JoinClause {
@@ -687,8 +608,10 @@ fn resolve_lateral_subqueries(stmt: &mut SelectStatement) -> ReadySetResult<bool
             new_tables.push(from_item);
         }
 
+        preceding_to_rhs.push(from_item_rel);
+
         if transformed {
-            has_transformed = true;
+            rewrite_status.rewrite();
         }
     }
 
@@ -721,6 +644,7 @@ fn resolve_lateral_subqueries(stmt: &mut SelectStatement) -> ReadySetResult<bool
 
             // Figure out what join operator should be used if `rhs_from_item` turns out to be LATERAL.
             // **NOTE**: it should be determined before transformation, as it might update its format.
+            let mut fields_map = HashMap::new();
             let join_operator_for_lateral = get_join_operator_for_lateral(
                 rhs_from_item,
                 stmt_jc.operator,
@@ -729,32 +653,50 @@ fn resolve_lateral_subqueries(stmt: &mut SelectStatement) -> ReadySetResult<bool
                 } else {
                     &JoinConstraint::Empty
                 },
-                &mut coalesce_fields_map,
+                &mut fields_map,
             );
 
             let mut from_item = rhs_from_item.clone();
+            let from_item_rel = get_from_item_reference_name(&from_item)?;
 
             let (transformed, resolved_option) =
-                try_resolve_as_lateral_subquery(&mut from_item, &preceding_from_items)?;
+                try_resolve_as_lateral_subquery(&mut from_item, &preceding_from_items, ctx)?;
 
-            preceding_from_items.insert(get_from_item_reference_name(&from_item)?);
+            preceding_from_items.insert(from_item_rel.clone());
 
             if let Some((resolved_from_item, lateral_join_on)) = resolved_option {
                 // The current RHS item was LATERAL, generate a join clause for it.
                 // In case it was referenced in the current join condition,
                 // combine `lateral_join_on` with the current join condition, and use it.
-                were_lateral.push(JoinClause {
-                    operator: join_operator_for_lateral?,
-                    right: JoinRightSide::Table(resolved_from_item),
-                    constraint: if is_rhs_from_item {
-                        add_expression_to_join_constraint(
-                            stmt_jc.constraint.clone(),
-                            lateral_join_on,
+                let join_operator = join_operator_for_lateral?;
+                let join_constraint = if is_rhs_from_item {
+                    if let JoinConstraint::On(join_expr) = add_expression_to_join_constraint(
+                        stmt_jc.constraint.clone(),
+                        lateral_join_on,
+                    ) {
+                        normalize_lateral_join_constraint!(
+                            stmt,
+                            from_item_rel.clone(),
+                            join_operator,
+                            join_expr
                         )
                     } else {
-                        JoinConstraint::On(lateral_join_on)
-                    },
+                        JoinConstraint::Empty
+                    }
+                } else {
+                    normalize_lateral_join_constraint!(
+                        stmt,
+                        from_item_rel.clone(),
+                        join_operator,
+                        lateral_join_on
+                    )
+                };
+                were_lateral.push(JoinClause {
+                    operator: join_operator,
+                    right: JoinRightSide::Table(resolved_from_item),
+                    constraint: join_constraint,
                 });
+                coalesce_fields_map.extend(fields_map);
             } else {
                 // Add the regular one to the preceding items, as the later LATERAL subqueries
                 // could be correlated with them.
@@ -764,8 +706,10 @@ fn resolve_lateral_subqueries(stmt: &mut SelectStatement) -> ReadySetResult<bool
                 were_regular.push(from_item);
             }
 
+            preceding_to_rhs.push(from_item_rel);
+
             if transformed {
-                has_transformed = true;
+                rewrite_status.rewrite();
             }
         }
 
@@ -796,20 +740,41 @@ fn resolve_lateral_subqueries(stmt: &mut SelectStatement) -> ReadySetResult<bool
     stmt.tables = new_tables;
     stmt.join = new_joins;
 
+    if let Some(to_where) = add_to_where {
+        stmt.where_clause = and_predicates_skip_true(stmt.where_clause.take(), to_where);
+    }
+
+    // Apply COUNT‑only COALESCE mappings to the **outer SELECT list** (if any were populated by
+    // `get_join_operator_for_lateral` for the CROSS/ON TRUE + ExactlyOne case). This step is
+    // projection‑only; WHERE/ORDER are intentionally unaffected.
     if !coalesce_fields_map.is_empty() {
         coalesce_fields_references(stmt, &coalesce_fields_map)?;
     }
 
-    Ok(has_transformed)
+    Ok(rewrite_status)
+}
+
+/// Top-level method to convert all LATERAL joins in a SELECT statement into equivalent standard joins.
+/// Modifies the statement in-place, flattening correlated subqueries and updating joins as needed.
+/// **IMPORTANT**: This rewrite pass must be called after the schema resolution, star expansion
+/// and JoinConstraint::USING expansion passes.
+#[inline]
+pub(crate) fn unnest_lateral_subqueries(
+    stmt: &mut SelectStatement,
+    ctx: &mut UnnestContext,
+) -> ReadySetResult<RewriteStatus> {
+    resolve_lateral_subqueries(stmt, ctx)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::lateral_join::RewriteLateralJoin;
-    use readyset_sql::Dialect;
-    use readyset_sql::ast::SqlQuery;
+    use crate::lateral_join::unnest_lateral_subqueries;
+    use crate::unnest_subqueries::{NonNullSchema, UnnestContext};
+    use crate::unnest_subqueries_3vl::ProbeRegistry;
+    use readyset_sql::ast::{Column, Relation, SqlQuery};
+    use readyset_sql::{Dialect, DialectDisplay};
     use readyset_sql_parsing::{parse_query, parse_select};
-
+    use std::collections::HashSet;
     /* How to create and populate the tables used in the test module:
     *
        create table test (auth_id uuid, i int, b int, t text, dt date);
@@ -824,16 +789,32 @@ mod tests {
     *
     */
 
+    struct NonNullSchemaMoke {}
+
+    impl NonNullSchema for NonNullSchemaMoke {
+        fn not_null_columns_of(&self, _: &Relation) -> HashSet<Column> {
+            HashSet::new()
+        }
+    }
+
     fn test_it(test_name: &str, original_text: &str, expect_text: &str) {
-        let mut rewritten_stmt = match parse_query(Dialect::PostgreSQL, original_text) {
+        let mut stmt = match parse_query(Dialect::PostgreSQL, original_text) {
             Ok(SqlQuery::Select(stmt)) => stmt,
             Err(e) => panic!("> {test_name}: ORIGINAL STATEMENT PARSE ERROR: {e}"),
             _ => unreachable!(),
         };
-        match rewritten_stmt.rewrite_lateral_joins() {
-            Ok(expect_stmt) => {
+
+        match unnest_lateral_subqueries(
+            &mut stmt,
+            &mut UnnestContext {
+                schema: &NonNullSchemaMoke {},
+                probes: ProbeRegistry::new(),
+            },
+        ) {
+            Ok(_) => {
+                println!(">>> Resolved: {}", stmt.display(Dialect::PostgreSQL));
                 assert_eq!(
-                    *expect_stmt,
+                    stmt,
                     match parse_select(Dialect::PostgreSQL, expect_text) {
                         Ok(stmt) => stmt,
                         Err(e) => panic!("> {test_name}: REWRITTEN STATEMENT PARSE ERROR: {e}"),
@@ -841,6 +822,7 @@ mod tests {
                 );
             }
             Err(e) => {
+                println!("> {test_name}: REWRITE ERROR: {e}");
                 assert!(expect_text.is_empty(), "> {test_name}: REWRITE ERROR: {e}")
             }
         }
@@ -868,17 +850,17 @@ mod tests {
 
     #[test]
     fn test3() {
-        let original_stmt = "SELECT T1.auth_id FROM test1 T1, LATERAL (SELECT T11.auth_id, T11.i FROM \
-                              test2 T11 \
-                                join \
-                              (select T22.i a from test3 T22 where T22.b = T1.b and T22.auth_id = T1.auth_id) T12 \
-                                on T11.i = T12.a) T13 \
+        let original_stmt = "SELECT T1.auth_id FROM test1 T1, LATERAL (SELECT T11.auth_id, T11.i FROM
+                              test2 T11
+                                join
+                              (select T22.i a from test3 T22 where T22.b = T1.b and T22.auth_id = T1.auth_id) T12
+                                on T11.i = T12.a) T13
                               WHERE T1.t = 'aa'";
         let expect_stmt = r#"SELECT "t1"."auth_id" FROM "test1" AS "t1" INNER JOIN
-            (SELECT "t11"."auth_id", "t11"."i", "t12"."auth_id" AS "auth_id_0", "t12"."b" AS "b" FROM "test2" AS "t11" JOIN
-            (SELECT "t22"."i" AS "a", "t22"."auth_id" AS "auth_id", "t22"."b" AS "b" FROM "test3" AS "t22") AS "t12"
-            ON ("t11"."i" = "t12"."a")) AS "t13" ON (("t13"."b" = "t1"."b") AND ("t13"."auth_id_0" = "t1"."auth_id"))
-            WHERE ("t1"."t" = 'aa')"#;
+        (SELECT "t11"."auth_id", "t11"."i", "t12"."auth_id" AS "auth_id0", "t12"."b" AS "b" FROM "test2" AS "t11" JOIN
+        (SELECT "t22"."i" AS "a", "t22"."auth_id" AS "auth_id", "t22"."b" AS "b" FROM "test3" AS "t22") AS "t12" ON
+        ("t11"."i" = "t12"."a")) AS "t13" ON (("t13"."b" = "t1"."b") AND ("t13"."auth_id0" = "t1"."auth_id"))
+        WHERE ("t1"."t" = 'aa')"#;
         test_it("test3", original_stmt, expect_stmt);
     }
 
@@ -896,90 +878,85 @@ mod tests {
 
     #[test]
     fn test5() {
-        let original_stmt = "SELECT * FROM \
-                        test1, test, (SELECT test3.i, test3.b FROM test3 where test3.t = 'aa') t33, \
-                            LATERAL(SELECT t3.t, t2.b, t2.i, t3.i FROM \
-                                    (select test2.b, test2.t, test2.i FROM test2 \
-                                       WHERE test.i = test2.i \
-                                             and test1.i = test2.i \
-                                             and test2.i = t33.i \
-                                             and test2.b = 11 and \
-                                             test.b = 11\
-                                    ) t2 \
-                                    JOIN \
-                                    (SELECT test3.t, test3.i FROM test3 \
-                                       WHERE test1.i = test3.i and test3.t = 'aa'\
-                                    ) AS t3 \
-                                    ON t2.t = t3.t \
+        let original_stmt = "SELECT * FROM
+                        test1, test, (SELECT test3.i, test3.b FROM test3 where test3.t = 'aa') t33,
+                            LATERAL(SELECT t3.t, t2.b, t2.i, t3.i FROM
+                                    (select test2.b, test2.t, test2.i FROM test2
+                                       WHERE test.i = test2.i
+                                             and test1.i = test2.i
+                                             and test2.i = t33.i
+                                             and test2.b = 11 and
+                                             test.b = 11
+                                    ) t2
+                                    JOIN
+                                    (SELECT test3.t, test3.i FROM test3
+                                       WHERE test1.i = test3.i and test3.t = 'aa'
+                                    ) AS t3
+                                    ON t2.t = t3.t
                                   ) AS tl";
         let expect_stmt = r#"SELECT * FROM "test1", "test", (SELECT "test3"."i", "test3"."b" FROM "test3"
-            WHERE ("test3"."t" = 'aa')) AS "t33" INNER JOIN (SELECT "t3"."t", "t2"."b", "t2"."i", "t3"."i" AS "i_0"
-            FROM (SELECT "test2"."b", "test2"."t", "test2"."i" FROM "test2" WHERE ("test2"."b" = 11)) AS "t2" JOIN
-            (SELECT "test3"."t", "test3"."i" FROM "test3" WHERE ("test3"."t" = 'aa')) AS "t3"
-            ON ("t2"."t" = "t3"."t")) AS "tl" ON ((((("test"."i" = "tl"."i") AND
-            ("test1"."i" = "tl"."i")) AND ("tl"."i" = "t33"."i")) AND ("test"."b" = 11)) AND
-            ("test1"."i" = "tl"."i_0"))"#;
+        WHERE ("test3"."t" = 'aa')) AS "t33" INNER JOIN (SELECT "t3"."t", "t2"."b", "t2"."i", "t3"."i" AS "i0"
+        FROM (SELECT "test2"."b", "test2"."t", "test2"."i" FROM "test2" WHERE ("test2"."b" = 11)) AS "t2"
+        JOIN (SELECT "test3"."t", "test3"."i" FROM "test3" WHERE ("test3"."t" = 'aa')) AS "t3"
+        ON ("t2"."t" = "t3"."t")) AS "tl" ON ("tl"."i" = "t33"."i")
+        WHERE (((("test"."i" = "tl"."i") AND ("test1"."i" = "tl"."i")) AND ("test"."b" = 11)) AND ("test1"."i" = "tl"."i0"))"#;
         test_it("test5", original_stmt, expect_stmt);
     }
 
+    // Negative test: LATERAL normalization would move ON filters out of a LEFT OUTER join.
+    // Allowing the rewrite will cause: `join on more than 2 table` error
     #[test]
     fn test6() {
-        let original_stmt = "SELECT * FROM \
-                         (test1 join test on test1.t = test.t) join \
-                         (SELECT test3.i, test3.b FROM test3 where test3.t = 'aa') t33 on test1.b = t33.b left join \
-                          LATERAL(SELECT t3.t, t2.b, t2.i as t2_i, t3.i as t3_i FROM \
-                              (select test2.b, test2.t, test2.i FROM test2 \
-                                   WHERE test.i = test2.i \
-                                         and test1.i = test2.i \
-                                         and test2.b = 11 \
-                                         and test.b = 11\
-                              ) t2 \
-                              JOIN \
-                              (SELECT test3.t, test3.i FROM test3 WHERE test1.i = test3.i and test3.t = 'aa') AS t3 \
-                              ON t2.t = t3.t\
+        let original_stmt = "SELECT * FROM
+                         (test1 join test on test1.t = test.t) join
+                         (SELECT test3.i, test3.b FROM test3 where test3.t = 'aa') t33 on test1.b = t33.b left join
+                          LATERAL(SELECT t3.t, t2.b, t2.i as t2_i, t3.i as t3_i FROM
+                              (select test2.b, test2.t, test2.i FROM test2
+                                   WHERE test.i = test2.i
+                                         and test1.i = test2.i
+                                         and test2.b = 11
+                                         and test.b = 11
+                              ) t2
+                              JOIN
+                              (SELECT test3.t, test3.i FROM test3 WHERE test1.i = test3.i and test3.t = 'aa') AS t3
+                              ON t2.t = t3.t
                          ) AS tl on t33.i = tl.t3_i";
-        let expect_stmt = r#"SELECT * FROM "test1" JOIN "test" ON ("test1"."t" = "test"."t") JOIN
-            (SELECT "test3"."i", "test3"."b" FROM "test3" WHERE ("test3"."t" = 'aa')) AS "t33" ON ("test1"."b" = "t33"."b") LEFT JOIN
-            (SELECT "t3"."t", "t2"."b", "t2"."i" AS "t2_i", "t3"."i" AS "t3_i" FROM (SELECT "test2"."b", "test2"."t", "test2"."i" FROM "test2"
-            WHERE ("test2"."b" = 11)) AS "t2" JOIN (SELECT "test3"."t", "test3"."i" FROM "test3"
-            WHERE ("test3"."t" = 'aa')) AS "t3" ON ("t2"."t" = "t3"."t")) AS "tl"
-            ON (("t33"."i" = "tl"."t3_i") AND (((("test"."i" = "tl"."t2_i") AND ("test1"."i" = "tl"."t2_i"))
-            AND ("test"."b" = 11)) AND ("test1"."i" = "tl"."t3_i")))"#;
+        let expect_stmt = r#""#;
         test_it("test6", original_stmt, expect_stmt);
     }
 
     #[test]
     fn test7() {
-        let original_stmt = "SELECT * FROM \
-                (test1 join test on test1.t = test.t) join \
-                 LATERAL (SELECT t3.t, t2.b, t2.i as t2_i, t3.i as t3_i FROM \
-                                 (select test2.b, test2.t, test2.i \
-                                     FROM test2 \
-                                     WHERE test.i = test2.i \
-                                           and test1.i = test2.i \
-                                           and test2.b = 11 \
-                                           and test.b = 11\
-                                 ) t2 \
-                                 JOIN \
-                                 (SELECT test3.t, min(test3.i) i \
-                                     FROM test3 \
-                                     WHERE test1.i = test3.i \
-                                           and test3.b = 11 \
-                                     GROUP BY test3.t\
-                                 ) AS t3 \
-                                 ON t2.t = t3.t\
-                             ) AS tl \
-                             ON test1.b = tl.b \
-                left join \
+        let original_stmt = "SELECT * FROM
+                (test1 join test on test1.t = test.t) join
+                 LATERAL (SELECT t3.t, t2.b, t2.i as t2_i, t3.i as t3_i FROM
+                                 (select test2.b, test2.t, test2.i
+                                     FROM test2
+                                     WHERE test.i = test2.i
+                                           and test1.i = test2.i
+                                           and test2.b = 11
+                                           and test.b = 11
+                                 ) t2
+                                 JOIN
+                                 (SELECT test3.t, min(test3.i) i
+                                     FROM test3
+                                     WHERE test1.i = test3.i
+                                           and test3.b = 11
+                                     GROUP BY test3.t
+                                 ) AS t3
+                                 ON t2.t = t3.t
+                             ) AS tl
+                             ON test1.b = tl.b
+                left join
                 (SELECT test3.i, test3.b FROM test3 where test3.t = 'aa') t33 on tl.b = t33.b";
         let expect_stmt = r#"SELECT * FROM "test1" JOIN "test" ON ("test1"."t" = "test"."t") INNER JOIN
-            (SELECT "t3"."t", "t2"."b", "t2"."i" AS "t2_i", "t3"."i" AS "t3_i", "t3"."i_0" AS "i_0" FROM
-            (SELECT "test2"."b", "test2"."t", "test2"."i" FROM "test2" WHERE ("test2"."b" = 11)) AS "t2" JOIN
-            (SELECT "test3"."t", min("test3"."i") AS "i", "test3"."i" AS "i_0" FROM "test3"
-            WHERE ("test3"."b" = 11) GROUP BY "test3"."t", "test3"."i") AS "t3" ON ("t2"."t" = "t3"."t")) AS "tl"
-            ON (("test1"."b" = "tl"."b") AND (((("test"."i" = "tl"."t2_i") AND ("test1"."i" = "tl"."t2_i")) AND
-            ("test"."b" = 11)) AND ("test1"."i" = "tl"."i_0"))) LEFT JOIN (SELECT "test3"."i", "test3"."b"
-            FROM "test3" WHERE ("test3"."t" = 'aa')) AS "t33" ON ("tl"."b" = "t33"."b")"#;
+        (SELECT "t3"."t", "t2"."b", "t2"."i" AS "t2_i", "t3"."i" AS "t3_i", "t3"."i0" AS "i0" FROM
+        (SELECT "test2"."b", "test2"."t", "test2"."i" FROM "test2" WHERE ("test2"."b" = 11)) AS "t2" JOIN
+        (SELECT "test3"."t", min("test3"."i") AS "i", "test3"."i" AS "i0" FROM "test3"
+        WHERE ("test3"."b" = 11) GROUP BY "test3"."t", "test3"."i") AS "t3" ON ("t2"."t" = "t3"."t")) AS "tl"
+        ON (("test"."i" = "tl"."t2_i") AND ("test"."b" = 11)) LEFT JOIN (SELECT "test3"."i", "test3"."b" FROM "test3"
+        WHERE ("test3"."t" = 'aa')) AS "t33" ON ("tl"."b" = "t33"."b")
+        WHERE (("test1"."b" = "tl"."b") AND (("test1"."i" = "tl"."t2_i") AND ("test1"."i" = "tl"."i0")))"#;
         test_it("test7", original_stmt, expect_stmt);
     }
 
@@ -1011,60 +988,64 @@ mod tests {
                 LATERAL(select max(T3.i) i from test3 T3 WHERE test1.t = T3.t) T2 \
                 on test1.i = T2.i left join test T1 on T1.i = T2.i \
              WHERE T1.t = 'aa'";
-        let expect_stmt = r#""#;
+        let expect_stmt = r#"SELECT "test1"."b", "t1"."i" FROM "test1" JOIN
+        (SELECT max("t3"."i") AS "i", "t3"."t" AS "t" FROM "test3" AS "t3" GROUP BY "t3"."t") AS "t2"
+        ON (("test1"."i" = "t2"."i") AND ("test1"."t" = "t2"."t")) LEFT JOIN "test" AS "t1" ON ("t1"."i" = "t2"."i")
+        WHERE ("t1"."t" = 'aa');"#;
         test_it("test10", original_stmt, expect_stmt);
     }
 
     #[test]
     fn test11() {
-        let original_stmt = "SELECT * FROM (test1 join test on test1.t = test.t) \
-                 join (SELECT test3.i, test3.b FROM test3 where test3.t = 'aa') t33 on test1.b = t33.b \
-                 left join LATERAL(\
-                    SELECT t3.t, t2.b, t2.i as t2_i, t3.i as t3_i \
-                        FROM (select test2.b, test2.t, test2.i \
-                               FROM test2 \
-                               WHERE test.i = test2.i and test1.i = test2.i and test2.b = 11 and test.b = 11 \
-                                     and exists(select 1 from test3 where test3.i = test2.i) \
-                             ) t2 \
-                        JOIN (SELECT test3.t, test3.i \
-                                FROM test3 \
-                                WHERE test1.i = test3.i and test3.t = 'aa' \
-                                      and test3.b = (select max(test2.b) from test2 where test3.t = test2.t) \
-                             ) AS t3 \
-                        ON t2.t = t3.t \
-                    ) AS tl \
+        let original_stmt = "SELECT * FROM (test1 join test on test1.t = test.t)
+                 join (SELECT test3.i, test3.b FROM test3 where test3.t = 'aa') t33 on test1.b = t33.b
+                 join LATERAL(
+                    SELECT t3.t, t2.b, t2.i as t2_i, t3.i as t3_i
+                        FROM (select test2.b, test2.t, test2.i
+                               FROM test2
+                               WHERE test.i = test2.i and test1.i = test2.i and test2.b = 11 and test.b = 11
+                                     and exists(select 1 from test3 where test3.i = test2.i)
+                             ) t2
+                        JOIN (SELECT test3.t, test3.i
+                                FROM test3
+                                WHERE test1.i = test3.i and test3.t = 'aa'
+                                      and test3.b = (select max(test2.b) from test2 where test3.t = test2.t)
+                             ) AS t3
+                        ON t2.t = t3.t
+                    ) AS tl
                  on t33.i = tl.t3_i";
         let expected_stmt = r#"SELECT * FROM "test1" JOIN "test" ON ("test1"."t" = "test"."t") JOIN
-            (SELECT "test3"."i", "test3"."b" FROM "test3" WHERE ("test3"."t" = 'aa')) AS "t33" ON
-            ("test1"."b" = "t33"."b") LEFT JOIN (SELECT "t3"."t", "t2"."b", "t2"."i" AS "t2_i", "t3"."i" AS "t3_i"
-            FROM (SELECT "test2"."b", "test2"."t", "test2"."i" FROM "test2" WHERE (("test2"."b" = 11)
-            AND EXISTS (SELECT 1 FROM "test3" WHERE ("test3"."i" = "test2"."i")))) AS "t2" JOIN
-             (SELECT "test3"."t", "test3"."i" FROM "test3" WHERE (("test3"."t" = 'aa') AND
-             ("test3"."b" = (SELECT max("test2"."b") FROM "test2" WHERE ("test3"."t" = "test2"."t"))))) AS "t3"
-             ON ("t2"."t" = "t3"."t")) AS "tl" ON (("t33"."i" = "tl"."t3_i") AND (((("test"."i" = "tl"."t2_i")
-             AND ("test1"."i" = "tl"."t2_i")) AND ("test"."b" = 11)) AND ("test1"."i" = "tl"."t3_i")))"#;
+        (SELECT "test3"."i", "test3"."b" FROM "test3" WHERE ("test3"."t" = 'aa')) AS "t33" ON ("test1"."b" = "t33"."b") INNER JOIN
+        (SELECT "t3"."t", "t2"."b", "t2"."i" AS "t2_i", "t3"."i" AS "t3_i" FROM
+        (SELECT "test2"."b", "test2"."t", "test2"."i" FROM "test2" INNER JOIN
+        (SELECT DISTINCT 1 AS "present_", "test3"."i" AS "i" FROM "test3") AS "GNL" ON ("GNL"."i" = "test2"."i")
+        WHERE ("test2"."b" = 11)) AS "t2" JOIN (SELECT "test3"."t", "test3"."i" FROM "test3" INNER JOIN
+        (SELECT max("test2"."b") AS "max(b)", "test2"."t" AS "t" FROM "test2" GROUP BY "test2"."t") AS "GNL"
+         ON (("test3"."t" = "GNL"."t") AND ("test3"."b" = "GNL"."max(b)")) WHERE ("test3"."t" = 'aa')) AS "t3"
+         ON ("t2"."t" = "t3"."t")) AS "tl" ON ("t33"."i" = "tl"."t3_i")
+         WHERE (((("test"."i" = "tl"."t2_i") AND ("test1"."i" = "tl"."t2_i")) AND ("test"."b" = 11)) AND ("test1"."i" = "tl"."t3_i"))"#;
         test_it("test11", original_stmt, expected_stmt);
     }
 
     #[test]
     fn test12() {
-        let original_stmt = "SELECT * FROM (test1 join test on test1.t = test.t) join \
-            (SELECT test3.i, test3.b FROM test3 where test3.t = 'aa') t33 on test1.b = t33.b \
-            left join LATERAL(SELECT t3.t, t2.b, t2.i as t2_i, t3.i as t3_i FROM \
-            (select test2.b, test2.t, test2.i FROM test2 WHERE test2.b = 11 and \
-            exists(select 1 from test3 where test3.i = test2.i)) t2 JOIN \
-            LATERAL(SELECT test3.t, test3.i FROM test3 WHERE t2.i = test3.i and test3.t = 'aa' \
-            and test3.b = (select max(test2.b) from test2 where test3.t = test2.t)) AS t3 \
+        let original_stmt = "SELECT * FROM (test1 join test on test1.t = test.t) join
+            (SELECT test3.i, test3.b FROM test3 where test3.t = 'aa') t33 on test1.b = t33.b
+            left join LATERAL(SELECT t3.t, t2.b, t2.i as t2_i, t3.i as t3_i FROM
+            (select test2.b, test2.t, test2.i FROM test2 WHERE test2.b = 11 and
+            exists(select 1 from test3 where test3.i = test2.i)) t2 JOIN
+            LATERAL(SELECT test3.t, test3.i FROM test3 WHERE t2.i = test3.i and test3.t = 'aa'
+            and test3.b = (select max(test2.b) from test2 where test3.t = test2.t)) AS t3
             ON t2.t = t3.t) AS tl on t33.i = tl.t3_i;";
         let expect_stmt = r#"SELECT * FROM "test1" JOIN "test" ON ("test1"."t" = "test"."t") JOIN
-            (SELECT "test3"."i", "test3"."b" FROM "test3" WHERE ("test3"."t" = 'aa')) AS "t33" ON
-            ("test1"."b" = "t33"."b") LEFT JOIN
-            (SELECT "t3"."t", "t2"."b", "t2"."i" AS "t2_i", "t3"."i" AS "t3_i" FROM
-            (SELECT "test2"."b", "test2"."t", "test2"."i" FROM "test2" WHERE (("test2"."b" = 11)
-            AND EXISTS (SELECT 1 FROM "test3" WHERE ("test3"."i" = "test2"."i")))) AS "t2" INNER JOIN
-            (SELECT "test3"."t", "test3"."i" FROM "test3" WHERE (("test3"."t" = 'aa') AND
-            ("test3"."b" = (SELECT max("test2"."b") FROM "test2" WHERE ("test3"."t" = "test2"."t"))))) AS "t3"
-            ON (("t2"."t" = "t3"."t") AND ("t2"."i" = "t3"."i"))) AS "tl" ON ("t33"."i" = "tl"."t3_i")"#;
+        (SELECT "test3"."i", "test3"."b" FROM "test3" WHERE ("test3"."t" = 'aa')) AS "t33" ON ("test1"."b" = "t33"."b")
+        LEFT JOIN (SELECT "t3"."t", "t2"."b", "t2"."i" AS "t2_i", "t3"."i" AS "t3_i" FROM
+        (SELECT "test2"."b", "test2"."t", "test2"."i" FROM "test2" INNER JOIN
+        (SELECT DISTINCT 1 AS "present_", "test3"."i" AS "i" FROM "test3") AS "GNL" ON ("GNL"."i" = "test2"."i")
+        WHERE ("test2"."b" = 11)) AS "t2" INNER JOIN (SELECT "test3"."t", "test3"."i" FROM "test3" INNER JOIN
+        (SELECT max("test2"."b") AS "max(b)", "test2"."t" AS "t" FROM "test2" GROUP BY "test2"."t") AS "GNL"
+        ON (("test3"."t" = "GNL"."t") AND ("test3"."b" = "GNL"."max(b)")) WHERE ("test3"."t" = 'aa')) AS "t3"
+        ON (("t2"."t" = "t3"."t") AND ("t2"."i" = "t3"."i"))) AS "tl" ON ("t33"."i" = "tl"."t3_i")"#;
         test_it("test12", original_stmt, expect_stmt);
     }
 
@@ -1145,7 +1126,7 @@ SELECT
 FROM
     spj,
     DataTypes
-    LEFT JOIN LATERAL (
+    JOIN LATERAL (
         SELECT
             DataTypes3.Test_INTEGER2,
             COUNT(*) C1
@@ -1159,13 +1140,12 @@ FROM
 ORDER BY
     1,
     2;"#;
-        let expect_stmt = r#"SELECT "dt"."c1", "datatypes"."test_integer", "dt"."test_integer2"
-        FROM "spj", "datatypes" LEFT JOIN
-        (SELECT "datatypes3"."test_integer2", count(*) AS "c1", "datatypes3"."test_smallint2" AS "test_smallint2"
+        let expect_stmt = r#"SELECT "dt"."c1", "datatypes"."test_integer", "dt"."test_integer2" FROM "spj", "datatypes"
+        INNER JOIN (SELECT "datatypes3"."test_integer2", count(*) AS "c1", "datatypes3"."test_smallint2" AS "test_smallint2"
         FROM "datatypes3" GROUP BY "datatypes3"."test_integer2", "datatypes3"."test_smallint2") AS "dt"
-        ON (("datatypes"."test_integer" = "dt"."test_integer2") AND (("dt"."test_smallint2" = "spj"."qty")
-        AND ("datatypes"."test_boolean" = TRUE)))
-        ORDER BY 1, 2"#;
+        ON (("datatypes"."test_integer" = "dt"."test_integer2") AND ("datatypes"."test_boolean" = TRUE))
+        WHERE ("dt"."test_smallint2" = "spj"."qty")
+        ORDER BY 1 NULLS LAST, 2 NULLS LAST"#;
         test_it("test17", original_stmt, expect_stmt);
     }
 
@@ -1227,5 +1207,53 @@ FROM
         (SELECT count(*) AS "post_count", "p"."jn", "p"."pn" AS "pn" FROM "qa"."p" AS "p" GROUP BY "p"."jn", "p"."pn")
         AS "pstats" ON ("pstats"."pn" = "u"."pn") JOIN "qa"."spj" ON (0 = "pstats"."post_count")"#;
         test_it("test19", original_stmt, expect_stmt);
+    }
+
+    #[test]
+    fn test20() {
+        let original_stmt = r#"
+        SELECT a.k, l.cnt
+        FROM qa.a AS a
+        CROSS JOIN LATERAL (
+            SELECT COUNT(*) AS cnt
+            FROM qa.b AS b
+            WHERE b.k = a.k
+        ) AS l;
+        "#;
+        let expect_stmt = r#"SELECT "a"."k", coalesce("l"."cnt", 0) FROM "qa"."a" AS "a" LEFT OUTER JOIN
+        (SELECT count(*) AS "cnt", "b"."k" AS "k" FROM "qa"."b" AS "b" GROUP BY "b"."k") AS "l" ON ("l"."k" = "a"."k")"#;
+        test_it("test20", original_stmt, expect_stmt);
+    }
+
+    #[test]
+    fn test21() {
+        let original_stmt = r#"
+        SELECT DataTypes.Test_INT, spj.MR
+        FROM DataTypes
+        JOIN LATERAL (
+            SELECT count(*) MR FROM DataTypes1 WHERE DataTypes1.Test_INT = DataTypes.Test_INT HAVING MAX(DataTypes1.RowNum) > 10
+        ) spj ON spj.MR = DataTypes.RowNum
+        ORDER BY DataTypes.RowNum;
+        "#;
+        let expect_stmt = r#"SELECT "datatypes"."test_int", "spj"."mr" FROM "datatypes" INNER JOIN
+        (SELECT count(*) AS "mr", "datatypes1"."test_int" AS "test_int" FROM "datatypes1" GROUP BY "datatypes1"."test_int"
+        HAVING (max("datatypes1"."rownum") > 10)) AS "spj"
+        ON (("spj"."mr" = "datatypes"."rownum") AND ("spj"."test_int" = "datatypes"."test_int"))
+        ORDER BY "datatypes"."rownum" NULLS LAST"#;
+        test_it("test21", original_stmt, expect_stmt);
+    }
+
+    // Negative test: LATERAL join condition references a column that should be mapped to COALESCE
+    #[test]
+    fn test22() {
+        let original_stmt = r#"
+        SELECT DataTypes.Test_INT, spj.MR
+        FROM DataTypes
+        JOIN LATERAL (
+            SELECT count(*) MR FROM DataTypes1 WHERE DataTypes1.Test_INT = DataTypes.Test_INT
+        ) spj ON spj.MR = DataTypes.RowNum
+        ORDER BY DataTypes.RowNum;"#;
+        let expect_stmt = r#""#;
+        test_it("test22", original_stmt, expect_stmt);
     }
 }

@@ -5,7 +5,7 @@ use readyset_sql::ast::{Expr, SelectStatement};
 use self::constant_fold::constant_fold_expr;
 use self::normalize_negation::normalize_negation;
 
-mod constant_fold;
+pub(crate) mod constant_fold;
 mod normalize_negation;
 
 pub fn scalar_optimize_expr(expr: &mut Expr, dialect: Dialect) {

@@ -247,6 +247,10 @@ impl DetectProblematicSelfJoins for SelectStatement {
     }
 }
 
+pub fn contains_problematic_self_joins(stmt: &SelectStatement) -> bool {
+    check_select_statement(stmt, &HashMap::new()).is_err()
+}
+
 impl DetectProblematicSelfJoins for SqlQuery {
     fn detect_problematic_self_joins(&mut self) -> ReadySetResult<&mut Self> {
         match &self {

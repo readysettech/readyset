@@ -16,6 +16,7 @@ readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
 readyset-sql = { path = "../readyset-sql" }
 dataflow-expression = { path = "../dataflow-expression" }
+strum = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

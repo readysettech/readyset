@@ -5456,6 +5456,7 @@ dependencies = [
  "readyset-sql",
  "readyset-sql-parsing",
  "serde",
+ "strum",
  "tracing",
  "vec1",
 ]

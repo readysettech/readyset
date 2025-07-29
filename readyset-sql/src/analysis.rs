@@ -91,10 +91,9 @@ impl<'a> ReferredColumnsIter<'a> {
                 order_by,
                 ..
             } => {
-                self.visit_function_expression(function)?;
                 self.exprs_to_visit.extend(partition_by.iter());
                 self.exprs_to_visit.extend(order_by.iter().map(|e| &e.0));
-                None
+                self.visit_function_expression(function)
             }
         }
     }
@@ -232,11 +231,10 @@ impl<'a> ReferredColumnsMut<'a> {
                 order_by,
                 ..
             } => {
-                self.visit_function_expression(function)?;
                 self.exprs_to_visit.extend(partition_by.iter_mut());
                 self.exprs_to_visit
                     .extend(order_by.iter_mut().map(|e| &mut e.0));
-                None
+                self.visit_function_expression(function)
             }
         }
     }

@@ -238,7 +238,10 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
     }
 
     fn visit_offset(&mut self, offset: &'ast mut Literal) -> Result<(), Self::Error> {
-        if !matches!(offset, Literal::Placeholder(_)) && self.autoparameterize_equals {
+        if !matches!(offset, Literal::Placeholder(_))
+            && self.autoparameterize_equals
+            && self.query_depth <= 1
+        {
             self.replace_literal(offset);
         }
 
