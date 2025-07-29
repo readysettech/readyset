@@ -398,6 +398,32 @@ impl BuiltinFunction {
                     ty,
                 )
             }
+            "concat_ws" => {
+                let arg1 = next_arg()?;
+                let arg2 = next_arg()?;
+                let rest_args = args.by_ref().collect::<Vec<_>>();
+                let collation = Collation::unwrap_or_default(
+                    iter::once(&arg1)
+                        .chain(&rest_args)
+                        .find_map(|expr| match expr.ty() {
+                            DfType::Text(c) => Some(*c),
+                            _ => None,
+                        }),
+                    dialect,
+                );
+                let ty = DfType::Text(collation);
+                (
+                    Self::ConcatWs(
+                        cast(arg1, ty.clone()),
+                        cast(arg2, ty.clone()),
+                        rest_args
+                            .into_iter()
+                            .map(|arg| cast(arg, ty.clone()))
+                            .collect(),
+                    ),
+                    ty,
+                )
+            }
             "substring" | "substr" => {
                 let string = next_arg()?;
                 let ty = if string.ty().is_any_text() {

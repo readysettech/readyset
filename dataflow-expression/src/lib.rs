@@ -87,6 +87,8 @@ pub enum BuiltinFunction {
     Coalesce(Expr, Vec<Expr>),
     /// [`concat`](https://dev.mysql.com/doc/refman/8.0/en/string-functions.html#function_concat)
     Concat(Expr, Vec<Expr>),
+    /// [`concat_ws`](https://dev.mysql.com/doc/refman/8.0/en/string-functions.html#function_concat_ws)
+    ConcatWs(Expr, Expr, Vec<Expr>),
 
     /// `substring`:
     ///
@@ -208,6 +210,7 @@ impl BuiltinFunction {
             JsonbPretty { .. } => "jsonb_pretty",
             Coalesce { .. } => "coalesce",
             Concat { .. } => "concat",
+            ConcatWs { .. } => "concat_ws",
             Substring { .. } => "substring",
             SplitPart { .. } => "split_part",
             Greatest { .. } => "greatest",
@@ -297,6 +300,9 @@ impl Display for BuiltinFunction {
             }
             Concat(arg1, args) => {
                 write!(f, "({}, {})", arg1, args.iter().join(", "))
+            }
+            ConcatWs(arg1, arg2, args) => {
+                write!(f, "({arg1}, {arg2}, {})", args.iter().join(", "))
             }
             Substring(string, from, len) => {
                 write!(f, "({string}")?;

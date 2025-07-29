@@ -1178,6 +1178,34 @@ impl BuiltinFunction {
 
                 Ok(s.into())
             }
+            BuiltinFunction::ConcatWs(separator, first_arg, rest_args) => {
+                let separator = <&str>::try_from(&non_null!(separator.eval(record)?))?.to_owned();
+                let mut result = String::new();
+                let mut first = true;
+
+                // Add the first argument if it's not NULL
+                if let Ok(val) = first_arg.eval(record) {
+                    if !val.is_none() {
+                        result.push_str((&val).try_into()?);
+                        first = false;
+                    }
+                }
+
+                // Add the rest of the arguments, separated by the separator
+                for arg in rest_args {
+                    if let Ok(val) = arg.eval(record) {
+                        if !val.is_none() {
+                            if !first {
+                                result.push_str(&separator);
+                            }
+                            result.push_str((&val).try_into()?);
+                            first = false;
+                        }
+                    }
+                }
+
+                Ok(result.into())
+            }
             BuiltinFunction::Substring(string, from, len) => {
                 let string = non_null!(string.eval(record)?);
                 let s = <&str>::try_from(&string)?;
@@ -2131,6 +2159,31 @@ mod tests {
 
         let res = expr.eval::<DfValue>(&[]).unwrap();
         assert_eq!(res, DfValue::None);
+    }
+
+    #[test]
+    fn concat_ws() {
+        let expr = parse_and_lower(
+            "concat_ws(',', 'First name', 'Second name', 'Last Name')",
+            MySQL,
+        );
+        let res = expr.eval::<DfValue>(&[]).unwrap();
+        assert_eq!(res, "First name,Second name,Last Name".into());
+
+        let expr = parse_and_lower("concat_ws(',', '', 'b', 'c')", MySQL);
+        let res = expr.eval::<DfValue>(&[]).unwrap();
+        assert_eq!(res, ",b,c".into());
+    }
+
+    #[test]
+    fn concat_ws_with_nulls() {
+        let expr = parse_and_lower("concat_ws(',', 'First name', null, 'Last Name')", MySQL);
+        let res = expr.eval::<DfValue>(&[]).unwrap();
+        assert_eq!(res, "First name,Last Name".into());
+
+        let expr = parse_and_lower("concat_ws(',', null, 'First name', 'Last Name')", MySQL);
+        let res = expr.eval::<DfValue>(&[]).unwrap();
+        assert_eq!(res, "First name,Last Name".into());
     }
 
     #[test]

@@ -36,6 +36,7 @@ mod call {
             Dialect::PostgreSQL => prop_oneof![
                 coalesce(es.string.clone()),
                 concat(es.clone()),
+                concat_ws(es.clone()),
                 split_part(es.clone()),
                 substring(es)
             ]
@@ -44,6 +45,7 @@ mod call {
                 if_null(es.string.clone()),
                 coalesce(es.string.clone()),
                 concat(es.clone()),
+                concat_ws(es.clone()),
                 substring(es)
             ]
             .boxed(),
@@ -64,6 +66,25 @@ mod call {
             exprs.insert(0, s);
             Expr::Call(FunctionExpr::Call {
                 name: "concat".into(),
+                arguments: Some(exprs),
+            })
+        })
+    }
+
+    /// Produces a [`Strategy`] that generates a string [`Expr::Call`] with
+    /// [`BuiltinFunction::ConcatWs`].
+    fn concat_ws(es: ExprStrategy) -> impl Strategy<Value = Expr> {
+        let random_expr = prop_oneof![
+            es.string.clone(),
+            es.integer.clone(),
+            es.bool.clone(),
+            es.timestamp.clone()
+        ];
+        let concat_wss = proptest::collection::vec(random_expr, 0..3);
+        (es.string, concat_wss).prop_map(|(s, mut exprs): (_, Vec<Expr>)| {
+            exprs.insert(0, s);
+            Expr::Call(FunctionExpr::Call {
+                name: "concat_ws".into(),
                 arguments: Some(exprs),
             })
         })
