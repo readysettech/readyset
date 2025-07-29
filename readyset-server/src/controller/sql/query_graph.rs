@@ -1177,7 +1177,10 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                         params,
                     }
                 }
-                JoinOperator::Join | JoinOperator::InnerJoin | JoinOperator::StraightJoin => {
+                JoinOperator::Join
+                | JoinOperator::InnerJoin
+                | JoinOperator::StraightJoin
+                | JoinOperator::CrossJoin => {
                     for pred in &extra_preds {
                         classify_conditionals(
                             pred,

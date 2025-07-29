@@ -83,6 +83,19 @@ fn lateral_join_parsing() {
 }
 
 #[test]
+fn cross_join() {
+    check_parse_both!("CREATE CACHE FROM SELECT qa.j.jn FROM qa.j CROSS JOIN qa.spj ORDER BY 1;");
+    check_parse_both!(
+        "CREATE CACHE FROM
+        SELECT Test_INTEGER, Test_INTEGER2
+        FROM qa.DataTypes TDT
+        CROSS JOIN LATERAL (
+            SELECT * FROM qa.DataTypes3 DT WHERE TDT.Test_INTEGER = DT.Test_INTEGER2
+        ) T1 ORDER BY 1, 2;"
+    );
+}
+
+#[test]
 fn cast_with_mysql_integer_types() {
     check_parse_mysql!("SELECT CAST(123 AS SIGNED);");
     check_parse_mysql!("SELECT CAST(123 AS SIGNED INTEGER);");

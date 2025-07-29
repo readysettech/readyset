@@ -44,16 +44,13 @@ impl DialectDisplay for JoinRightSide {
 pub enum JoinOperator {
     Join,
     LeftJoin,
-    #[weight(0)]
     LeftOuterJoin,
     #[weight(0)]
     RightJoin,
     #[weight(0)]
     RightOuterJoin,
     InnerJoin,
-    #[weight(0)]
     CrossJoin,
-    #[weight(0)]
     StraightJoin,
 }
 
