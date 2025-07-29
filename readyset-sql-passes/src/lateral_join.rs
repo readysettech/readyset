@@ -662,7 +662,7 @@ fn resolve_lateral_subqueries(stmt: &mut SelectStatement) -> ReadySetResult<bool
             JoinOperator::CrossJoin,
             &JoinConstraint::Empty,
             &mut coalesce_fields_map,
-        )?;
+        );
 
         let mut from_item = stmt_from_item.clone();
 
@@ -673,7 +673,7 @@ fn resolve_lateral_subqueries(stmt: &mut SelectStatement) -> ReadySetResult<bool
 
         if let Some((resolved_from_item, lateral_join_on)) = resolved_option {
             new_joins.push(JoinClause {
-                operator: join_operator_for_lateral,
+                operator: join_operator_for_lateral?,
                 right: JoinRightSide::Table(resolved_from_item),
                 constraint: JoinConstraint::On(lateral_join_on),
             });
@@ -731,7 +731,7 @@ fn resolve_lateral_subqueries(stmt: &mut SelectStatement) -> ReadySetResult<bool
                     &JoinConstraint::Empty
                 },
                 &mut coalesce_fields_map,
-            )?;
+            );
 
             let mut from_item = rhs_from_item.clone();
 
@@ -745,7 +745,7 @@ fn resolve_lateral_subqueries(stmt: &mut SelectStatement) -> ReadySetResult<bool
                 // In case it was referenced in the current join condition,
                 // combine `lateral_join_on` with the current join condition, and use it.
                 were_lateral.push(JoinClause {
-                    operator: join_operator_for_lateral,
+                    operator: join_operator_for_lateral?,
                     right: JoinRightSide::Table(resolved_from_item),
                     constraint: if is_rhs_from_item {
                         add_expression_to_join_constraint(
