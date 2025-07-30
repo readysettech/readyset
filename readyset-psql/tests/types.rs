@@ -164,8 +164,8 @@ mod types {
         // TODO(fran): Add numeric with precision and scale when we start correctly handling them.
         // XXX(mvzink): We could generate much larger decimals, but they quickly take too long to
         // de/serialize (e.g. reaching 1s for a 50k digit value). See comment in `Decimal::from_sql`
-        numeric_decimal("numeric", Decimal, arbitrary_decimal(<u16>::MAX, 255));
-        decimal("decimal", Decimal, arbitrary_decimal(<u16>::MAX, 255));
+        numeric_decimal("numeric", Decimal, arbitrary_decimal(1000, 255));
+        decimal("decimal", Decimal, arbitrary_decimal(1000, 255));
         timestamp_systemtime("timestamp", std::time::SystemTime, arbitrary_systemtime());
         inet_ipaddr("inet", IpInet, arbitrary_ipinet());
         macaddr_string("macaddr", MacAddress, arbitrary_mac_address());
