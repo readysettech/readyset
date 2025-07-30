@@ -81,6 +81,7 @@ use itertools::{Either, Itertools};
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
+use proptest::prelude::Just;
 use proptest::sample::Select;
 use proptest::strategy::{BoxedStrategy, Strategy};
 use readyset_data::{Collation, DfType, DfValue, Dialect};
@@ -1034,6 +1035,97 @@ fn min_max_arg_type(dialect: ParseDialect) -> impl Strategy<Value = SqlType> {
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 #[arbitrary(args = QueryDialect)]
+pub enum WindowFunctionType {
+    RowNumber,
+    Rank,
+    DenseRank,
+    CountStar,
+    Count {
+        #[any(generate_arrays = false, dialect = Some(args_shared.0))]
+        column_type: SqlType,
+    },
+    Sum {
+        #[strategy(arbitrary_numeric_type(Some(args.0)))]
+        column_type: SqlType,
+    },
+    Avg {
+        #[strategy(arbitrary_numeric_type(Some(args.0)))]
+        column_type: SqlType,
+    },
+    // Currently, min and max only support numeric types in WFs
+    Max {
+        #[strategy(arbitrary_numeric_type(Some(args.0)))]
+        column_type: SqlType,
+    },
+    Min {
+        #[strategy(arbitrary_numeric_type(Some(args.0)))]
+        column_type: SqlType,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Arbitrary, Copy)]
+pub enum OverClauseKind {
+    Empty,
+    OrderOnly(#[strategy(1..=5_usize)] usize),
+    PartitionOnly(#[strategy(1..=5_usize)] usize),
+    PartitionAndOrder(
+        #[strategy(1..=5_usize)] usize,
+        #[strategy(1..=5_usize)] usize,
+    ),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowFunctionConfig {
+    pub function: WindowFunctionType,
+    pub over_clause: OverClauseKind,
+    pub order_type: Option<OrderType>,
+    pub null_order: Option<NullOrder>,
+}
+
+impl Arbitrary for WindowFunctionConfig {
+    type Parameters = QueryDialect;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        any_with::<WindowFunctionType>(args)
+            .prop_flat_map(move |function| {
+                any::<OverClauseKind>().prop_flat_map(move |over_clause| {
+                    let needs_order = matches!(
+                        over_clause,
+                        OverClauseKind::OrderOnly(_) | OverClauseKind::PartitionAndOrder(_, _)
+                    );
+
+                    let order_strat = if needs_order {
+                        (any::<OrderType>(), any::<NullOrder>())
+                            .prop_map(Some)
+                            .boxed()
+                    } else {
+                        Just(None).boxed()
+                    };
+
+                    order_strat.prop_map({
+                        let func = function.clone();
+                        move |order_opt| {
+                            let (order_type, null_order) = order_opt
+                                .map(|(o, n)| (Some(o), Some(n)))
+                                .unwrap_or((None, None));
+
+                            WindowFunctionConfig {
+                                function: func.clone(),
+                                over_clause,
+                                order_type,
+                                null_order,
+                            }
+                        }
+                    })
+                })
+            })
+            .boxed()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
+#[arbitrary(args = QueryDialect)]
 pub enum AggregateType {
     Count {
         #[any(generate_arrays = false, dialect = Some(args_shared.0))]
@@ -1328,6 +1420,7 @@ pub enum QueryOperation {
         #[strategy(0..=100u64)]
         page_number: u64,
     },
+    WindowFunction(#[any(args_shared.dialect)] WindowFunctionConfig),
     #[weight(0)]
     Subquery(SubqueryPosition),
 }
@@ -2035,6 +2128,106 @@ impl QueryOperation {
             // Subqueries are turned into QuerySeed::subqueries as part of
             // GeneratorOps::into_query_seeds
             QueryOperation::Subquery(_) => {}
+            QueryOperation::WindowFunction(config) => {
+                if query.fields.iter().any(|f| {
+                    matches!(
+                        f,
+                        FieldDefinitionExpr::Expr {
+                            expr: Expr::WindowFunction { .. },
+                            ..
+                        }
+                    )
+                }) {
+                    return;
+                }
+
+                let table = state.some_table_in_query_mut(query);
+                let table_name = table.name.clone();
+
+                let column_name = table.some_column_name();
+
+                let column = Column {
+                    table: Some(table.name.clone().into()),
+                    ..column_name.into()
+                };
+
+                query.fields.push(FieldDefinitionExpr::Expr {
+                    expr: Expr::Column(column),
+                    alias: None,
+                });
+
+                let mut make_col_with_type = |sql_type: &SqlType| {
+                    Box::new(Expr::Column(Column {
+                        name: table.some_column_with_type(sql_type.clone()).into(),
+                        table: Some(table_name.clone().into()),
+                    }))
+                };
+
+                let function = match &config.function {
+                    WindowFunctionType::Rank => FunctionExpr::Rank,
+                    WindowFunctionType::DenseRank => FunctionExpr::DenseRank,
+                    WindowFunctionType::RowNumber => FunctionExpr::RowNumber,
+                    WindowFunctionType::CountStar => FunctionExpr::CountStar,
+                    WindowFunctionType::Count { column_type } => FunctionExpr::Count {
+                        distinct: false,
+                        expr: make_col_with_type(column_type),
+                    },
+                    WindowFunctionType::Sum { column_type } => FunctionExpr::Sum {
+                        distinct: false,
+                        expr: make_col_with_type(column_type),
+                    },
+                    WindowFunctionType::Avg { column_type } => FunctionExpr::Avg {
+                        distinct: false,
+                        expr: make_col_with_type(column_type),
+                    },
+                    WindowFunctionType::Max { column_type } => {
+                        FunctionExpr::Max(make_col_with_type(column_type))
+                    }
+                    WindowFunctionType::Min { column_type } => {
+                        FunctionExpr::Min(make_col_with_type(column_type))
+                    }
+                };
+
+                let mut make_column = || {
+                    Expr::Column(Column {
+                        table: Some(table_name.clone().into()),
+                        name: table.some_column_name().into(),
+                    })
+                };
+
+                let partition_by = match config.over_clause {
+                    OverClauseKind::PartitionOnly(count)
+                    | OverClauseKind::PartitionAndOrder(count, _) => {
+                        iter::repeat_with(&mut make_column).take(count).collect()
+                    }
+                    _ => vec![],
+                };
+
+                let make_ordering = || {
+                    (
+                        make_column(),
+                        config.order_type.expect("order_type missing"),
+                        config.null_order.expect("null_order missing"),
+                    )
+                };
+
+                let order_by = match config.over_clause {
+                    OverClauseKind::OrderOnly(count)
+                    | OverClauseKind::PartitionAndOrder(_, count) => {
+                        iter::repeat_with(make_ordering).take(count).collect()
+                    }
+                    _ => vec![],
+                };
+
+                query.fields.push(FieldDefinitionExpr::Expr {
+                    alias: Some(state.fresh_alias()),
+                    expr: Expr::WindowFunction {
+                        function,
+                        partition_by,
+                        order_by,
+                    },
+                });
+            }
         }
     }
 
@@ -2271,12 +2464,19 @@ impl Arbitrary for Operations {
                 let mut parameter_found = false;
                 let mut or_filter_found = false;
 
+                // Only allow one window function per query
+                // Window functions can't be used with: ranges, aggregates, or group by
+                let mut window_function_found = false;
+                let mut range_parameter_found = false;
+                let mut aggregate_found = false;
+
                 ops.retain(|op| match op {
                     QueryOperation::ColumnAggregate(agg) if agg.is_distinct() => {
-                        if in_parameter_found {
+                        if in_parameter_found || window_function_found {
                             false
                         } else {
                             distinct_found = true;
+                            aggregate_found = true;
                             true
                         }
                     }
@@ -2289,7 +2489,7 @@ impl Arbitrary for Operations {
                         }
                     }
                     QueryOperation::InParameter { .. } => {
-                        if distinct_found | or_filter_found {
+                        if distinct_found || or_filter_found || window_function_found {
                             false
                         } else {
                             in_parameter_found = true;
@@ -2297,13 +2497,19 @@ impl Arbitrary for Operations {
                             true
                         }
                     }
-                    QueryOperation::SingleParameter
-                    | QueryOperation::MultipleParameters
-                    | QueryOperation::RangeParameter
-                    | QueryOperation::MultipleRangeParameters => {
+                    QueryOperation::SingleParameter | QueryOperation::MultipleParameters => {
                         if or_filter_found {
                             false
                         } else {
+                            parameter_found = true;
+                            true
+                        }
+                    }
+                    QueryOperation::RangeParameter | QueryOperation::MultipleRangeParameters => {
+                        if window_function_found || or_filter_found {
+                            false
+                        } else {
+                            range_parameter_found = true;
                             parameter_found = true;
                             true
                         }
@@ -2319,8 +2525,29 @@ impl Arbitrary for Operations {
                             true
                         }
                     }
+                    QueryOperation::ColumnAggregate(_) => {
+                        if window_function_found {
+                            false
+                        } else {
+                            aggregate_found = true;
+                            true
+                        }
+                    }
+                    QueryOperation::WindowFunction(_) => {
+                        if window_function_found
+                            || range_parameter_found
+                            || aggregate_found
+                            || in_parameter_found
+                        {
+                            false
+                        } else {
+                            window_function_found = true;
+                            true
+                        }
+                    }
                     _ => true,
                 });
+
                 Operations(ops)
             })
             .boxed()

@@ -1916,7 +1916,12 @@ impl DialectDisplay for Expr {
                         if i != 0 {
                             write!(f, ", ")?;
                         }
-                        write!(f, "{} {o}({no})", e.display(dialect))?;
+                        write!(f, "{} {o}", e.display(dialect))?;
+
+                        // MySQL doesn't support explicit NULLS FIRST|LAST
+                        if !matches!(dialect, Dialect::MySQL) {
+                            write!(f, " {no}")?;
+                        }
                     }
                 }
 

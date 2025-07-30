@@ -144,7 +144,10 @@ impl OrderBy {
                 write!(f, " {ot}")?;
             }
 
-            write!(f, " {}", self.null_order)?;
+            // MySQL doesn't support explicit NULLS FIRST|LAST
+            if !matches!(dialect, Dialect::MySQL) {
+                write!(f, " {}", self.null_order)?;
+            }
 
             Ok(())
         })

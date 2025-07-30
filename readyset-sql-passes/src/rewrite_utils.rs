@@ -788,11 +788,17 @@ pub(crate) fn for_each_function_call<'a>(
 
 pub(crate) fn is_aggregated_expr(expr: &Expr) -> ReadySetResult<bool> {
     let mut has_aggregates = false;
+
+    if matches!(expr, Expr::WindowFunction { .. }) {
+        return Ok(false);
+    }
+
     for_each_function_call(expr, &mut |f| {
         if is_aggregate(f) {
             has_aggregates = true;
         }
     })?;
+
     Ok(has_aggregates)
 }
 

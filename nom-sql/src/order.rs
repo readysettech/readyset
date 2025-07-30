@@ -147,9 +147,10 @@ mod tests {
                     null_order: NullOrder::NullsFirst,
                 }],
             };
+            // mysql doesn't support explicit NULLS FIRST|LAST
             assert_eq!(
                 clause.display(Dialect::MySQL).to_string(),
-                "ORDER BY `t`.`n` DESC NULLS FIRST"
+                "ORDER BY `t`.`n` DESC"
             );
         }
     }
