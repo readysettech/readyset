@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::str::FromStr as _;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use atoi::atoi;
@@ -25,6 +26,7 @@ use readyset_data::encoding::{mysql_character_set_name_to_collation_id, Encoding
 use readyset_decimal::Decimal;
 use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
 use serde_json::Map;
+use tokio::time::timeout;
 use tracing::{error, info, warn};
 
 use readyset_client::metrics::recorded;
@@ -119,7 +121,8 @@ type TableMetadata = (Vec<Option<u16>>, Vec<Option<bool>>);
 ///
 /// The connector must also be assigned a unique `server_id` value
 pub(crate) struct MySqlBinlogConnector {
-    /// A handle to the Readyset instance; used for retrieving schemas in MySQL 5.7. See [`MySqlBinlogConnector::table_schemas`].
+    /// A handle to the Readyset instance; used for retrieving schemas in MySQL 5.7.
+    /// See [`MySqlBinlogConnector::table_schemas`].
     noria: ReadySetHandle,
     /// This is the underlying (regular) MySQL connection
     connection: mysql::Conn,
@@ -137,7 +140,7 @@ pub(crate) struct MySqlBinlogConnector {
     enable_statement_logging: bool,
     /// Timestamp of the last reported position. This is use to ensure we keep the distance
     /// between min/max position as short as possible.
-    last_reported_pos_ts: std::time::Instant,
+    last_reported_pos_ts: Instant,
     /// Table filter
     table_filter: TableFilter,
     /// A cache of `CREATE TABLE` statements retrieved from the controller. This is only populated
@@ -153,6 +156,19 @@ impl MySqlBinlogConnector {
     /// if one is not assigned we will use (u32::MAX - 55)
     fn server_id(&self) -> u32 {
         self.server_id.unwrap_or(DEFAULT_SERVER_ID)
+    }
+
+    async fn set_parameters(&mut self) -> mysql::Result<()> {
+        // Enabling source to replica heartbeat packets requires manipulation of a knob that is
+        // totally undocumented.  Yes, this really is a user variable, not a session variable.
+        // The two different ones are for different MySQL versions, but we can set both because
+        // setting a non-existent user variable isn't an error.  The timeout is in nanoseconds.
+        self.connection
+            .query_drop(
+                "set @master_heartbeat_period = 1000000000, @source_heartbeat_period = 1000000000",
+            )
+            .await?;
+        Ok(())
     }
 
     /// In order to request a binlog, we must first register as a replica, and let the primary
@@ -240,13 +256,13 @@ impl MySqlBinlogConnector {
             next_position,
             current_gtid: None,
             enable_statement_logging,
-            last_reported_pos_ts: std::time::Instant::now()
-                - std::time::Duration::from_secs(MAX_POSITION_TIME),
+            last_reported_pos_ts: Instant::now() - Duration::from_secs(MAX_POSITION_TIME),
             table_filter,
             table_schemas: Default::default(),
             parsing_config: parsing_preset.into_config().rate_limit_logging(false),
         };
 
+        connector.set_parameters().await?;
         connector.register_as_replica().await?;
         let binlog_request = connector.request_binlog().await;
         match binlog_request {
@@ -1067,7 +1083,7 @@ impl MySqlBinlogConnector {
     /// This function returns a boolean indicating if we need to report the current position
     fn report_position_elapsed(&mut self) -> bool {
         if self.last_reported_pos_ts.elapsed().as_secs() > MAX_POSITION_TIME {
-            self.last_reported_pos_ts = std::time::Instant::now();
+            self.last_reported_pos_ts = Instant::now();
             return true;
         }
         false
@@ -1086,7 +1102,11 @@ impl MySqlBinlogConnector {
         use mysql_common::binlog::events;
 
         loop {
-            let binlog_event = handle_err!(self, self.next_event().await);
+            let fut = self.next_event();
+            let res = timeout(Duration::from_secs(5), fut).await;
+            let res = handle_err!(self, res);
+
+            let binlog_event = handle_err!(self, res);
 
             if u64::from(binlog_event.header().log_pos()) < self.next_position.position
                 && self.next_position.position + u64::from(binlog_event.header().event_size())
@@ -1201,6 +1221,8 @@ impl MySqlBinlogConnector {
                     self.current_gtid = Some(ev.gno());
                 }
 
+                EventType::HEARTBEAT_EVENT => {}
+
                 /*
 
                 EventType::ANONYMOUS_GTID_EVENT => {}
@@ -1216,7 +1238,6 @@ impl MySqlBinlogConnector {
                 | EventType::FORMAT_DESCRIPTION_EVENT // A descriptor event that is written to the beginning of each binary log file. This event is used as of MySQL 5.0; it supersedes START_EVENT_V3.
                 | EventType::STOP_EVENT // Written when mysqld stops
                 | EventType::INCIDENT_EVENT // The event is used to inform the slave that something out of the ordinary happened on the master that might cause the database to be in an inconsistent state.
-                | EventType::HEARTBEAT_EVENT => {} // The event is originated by master's dump thread and sent straight to slave without being logged. Slave itself does not store it in relay log but rather uses a data for immediate checks and throws away the event.
 
                 EventType::UNKNOWN_EVENT | EventType::SLAVE_EVENT => {} // Ignored events
 
