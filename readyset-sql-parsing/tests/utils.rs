@@ -1,8 +1,14 @@
 #[macro_export]
 macro_rules! check_parse_mysql {
     ($sql:expr) => {
-        parse_query_with_config(ParsingPreset::BothPanicOnMismatch, Dialect::MySQL, $sql)
-            .expect(&format!("Failed to parse MySQL query: {}", $sql))
+        parse_query_with_config(
+            ParsingPreset::BothPanicOnMismatch
+                .into_config()
+                .log_on_mismatch(true),
+            Dialect::MySQL,
+            $sql,
+        )
+        .expect(&format!("Failed to parse MySQL query: {}", $sql))
     };
 }
 
