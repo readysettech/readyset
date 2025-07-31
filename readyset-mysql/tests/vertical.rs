@@ -950,7 +950,8 @@ vertical_tests! {
     mixed_range(
         "SELECT id, name, score FROM posts WHERE name = ? AND score > ?";
         "posts" => (
-            "CREATE TABLE posts (id INT, name TEXT, score INT, PRIMARY KEY (id))",
+            "CREATE TABLE posts
+             (id INT, name TEXT collate utf8mb4_0900_ai_ci, score INT, PRIMARY KEY (id))",
             schema: [id: i32, name: string(), score: i32],
             primary_key: 0,
             key_columns: [1, 2],
@@ -984,7 +985,8 @@ vertical_tests! {
          name = ?";
         "posts" => (
             "CREATE TABLE posts
-             (id INT, name TEXT, score1 SMALLINT, score2 SMALLINT, PRIMARY KEY (id))",
+             (id INT, name TEXT collate utf8mb4_0900_ai_ci, score1 SMALLINT, score2 SMALLINT,
+              PRIMARY KEY (id))",
             schema: [id: i32, name: string(), score1: i16, score2: i16],
             primary_key: 0,
             key_columns: [1],
