@@ -10,7 +10,9 @@ macro_rules! check_parse_mysql {
 macro_rules! check_parse_postgres {
     ($sql:expr) => {
         parse_query_with_config(
-            ParsingPreset::BothPanicOnMismatch,
+            ParsingPreset::BothPanicOnMismatch
+                .into_config()
+                .log_on_mismatch(true),
             Dialect::PostgreSQL,
             $sql,
         )

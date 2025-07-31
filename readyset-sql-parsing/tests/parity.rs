@@ -872,6 +872,18 @@ fn create_with_unique_key_using_suffix() {
 }
 
 #[test]
+fn key_with_using_prefix() {
+    check_parse_mysql!("CREATE TABLE t (x INT, INDEX idx_on_x USING BTREE (x))");
+    check_parse_mysql!("CREATE TABLE t (x INT, KEY idx_on_x USING BTREE (x))");
+    check_parse_mysql!("CREATE TABLE t (x INT, INDEX idx_on_x USING HASH (x))");
+    check_parse_mysql!("CREATE TABLE t (x INT, KEY idx_on_x USING HASH (x))");
+    check_parse_mysql!("CREATE TABLE t (x INT, UNIQUE INDEX idx_on_x USING BTREE (x))");
+    check_parse_mysql!("CREATE TABLE t (x INT, UNIQUE KEY idx_on_x USING BTREE (x))");
+    check_parse_mysql!("CREATE TABLE t (x INT, UNIQUE INDEX idx_on_x USING HASH (x))");
+    check_parse_mysql!("CREATE TABLE t (x INT, UNIQUE KEY idx_on_x USING HASH (x))");
+}
+
+#[test]
 #[ignore = "REA-5843"]
 fn create_table_options_comma_separated() {
     check_parse_mysql!("CREATE TABLE t (x int) AUTO_INCREMENT=1 COLLATE=utf8mb4_general_ci");

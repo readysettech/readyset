@@ -373,7 +373,7 @@ fn index_type(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], IndexType> {
 }
 
 fn using_index(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], IndexType> {
-    let (i, _) = whitespace1(i)?;
+    let (i, _) = whitespace0(i)?;
     let (i, _) = tag_no_case("using")(i)?;
     let (i, _) = whitespace1(i)?;
     index_type(i)
@@ -398,8 +398,17 @@ fn unique(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
         } else {
             (i, None)
         };
+        debug_print("before opt nulls_distinct", &i);
         let (i, nulls_distinct) = opt(preceded(whitespace1, nulls_distinct(dialect)))(i)?;
         let nulls_distinct = nulls_distinct.unwrap_or(None);
+        debug_print("after opt nulls_distinct", &i);
+        // Per [docs](https://dev.mysql.com/doc/refman/8.4/en/create-table.html): The preferred
+        // position for USING is after the index column list. It can be given before the column
+        // list, but support for use of the option in that position is deprecated and you should
+        // expect it to be removed in a future MySQL release.
+        let (i, index_type_pre) = opt(using_index)(i)?;
+        debug_print("after using_index", &i);
+        let (i, _) = whitespace0(i)?;
         let (i, columns) = preceded(
             whitespace0,
             delimited(
@@ -410,7 +419,7 @@ fn unique(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
         )(i)?;
         let (i, constraint_timing) = opt(deferrable(dialect, false))(i)?;
         let constraint_timing = constraint_timing.unwrap_or(None);
-        let (i, index_type) = opt(using_index)(i)?;
+        let (i, index_type_post) = opt(using_index)(i)?;
         debug_print("after unique", &i);
 
         Ok((
@@ -420,7 +429,7 @@ fn unique(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
                 constraint_timing,
                 index_name,
                 columns,
-                index_type,
+                index_type: index_type_post.or(index_type_pre),
                 nulls_distinct,
             },
         ))
@@ -433,14 +442,22 @@ fn key_or_index(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult
 
         let (i, _) = whitespace0(i)?;
         let (i, _) = alt((tag_no_case("key"), tag_no_case("index")))(i)?;
+        debug_print("after key or index", &i);
         let (i, index_name) = opt(preceded(whitespace1, dialect.identifier()))(i)?;
+        debug_print("after opt identifier", &i);
+        // Per [docs](https://dev.mysql.com/doc/refman/8.4/en/create-table.html): The preferred
+        // position for USING is after the index column list. It can be given before the column
+        // list, but support for use of the option in that position is deprecated and you should
+        // expect it to be removed in a future MySQL release.
+        let (i, index_type_pre) = opt(using_index)(i)?;
+        debug_print("after using_index", &i);
         let (i, _) = whitespace0(i)?;
         let (i, columns) = delimited(
             tag("("),
             delimited(whitespace0, index_col_list(dialect), whitespace0),
             tag(")"),
         )(i)?;
-        let (i, index_type) = opt(using_index)(i)?;
+        let (i, index_type_post) = opt(using_index)(i)?;
 
         debug_print("after key_or_index", &i);
         Ok((
@@ -448,7 +465,7 @@ fn key_or_index(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult
             TableKey::Key {
                 index_name,
                 columns,
-                index_type,
+                index_type: index_type_post.or(index_type_pre),
             },
         ))
     }
