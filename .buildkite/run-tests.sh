@@ -95,7 +95,6 @@ elif [[ "$TEST_CATEGORY" == "doctest" ]]; then
     echo "+++ :rust: Run tests (doctest)"
     cargo --locked test --doc \
         --workspace --features failure_injection \
-        --exclude readyset-clustertest --exclude benchmarks \
         || upload_artifacts
 else
     echo "No test defined for TEST_CATEGORY=${TEST_CATEGORY}."
