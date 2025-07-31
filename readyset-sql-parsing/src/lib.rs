@@ -346,7 +346,7 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
                 ReadysetKeyword::Standard(Keyword::TABLE),
             ],
         ) {
-            let table_name = parser.parse_object_name(false)?.into_dialect(dialect);
+            let table_name = parser.parse_object_name(false)?.try_into_dialect(dialect)?;
             Ok(SqlQuery::AlterReadySet(
                 AlterReadysetStatement::ResnapshotTable(ResnapshotTableStatement {
                     table: table_name,
@@ -356,8 +356,8 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
             let tables = parser
                 .parse_comma_separated(|p| p.parse_object_name(false))?
                 .into_iter()
-                .map(|table| table.into_dialect(dialect))
-                .collect();
+                .map(|table| table.try_into_dialect(dialect))
+                .collect::<Result<Vec<_>, _>>()?;
             Ok(SqlQuery::AlterReadySet(AlterReadysetStatement::AddTables(
                 AddTablesStatement { tables },
             )))
@@ -432,7 +432,10 @@ fn parse_create_cache(
     }
     let from = parser.parse_keyword(Keyword::FROM);
     let name = if !from {
-        let name = parser.parse_object_name(false).ok().into_dialect(dialect);
+        let name = parser
+            .parse_object_name(false)
+            .ok()
+            .try_into_dialect(dialect)?;
         parser.expect_keyword(Keyword::FROM)?;
         name
     } else {
@@ -506,7 +509,7 @@ fn parse_explain(
     let simplified = parse_readyset_keyword(parser, ReadysetKeyword::SIMPLIFIED);
     if parser.parse_keyword(Keyword::GRAPHVIZ) {
         let for_cache = if parser.parse_keywords(&[Keyword::FOR, Keyword::CACHE]) {
-            Some(parser.parse_object_name(false)?.into_dialect(dialect))
+            Some(parser.parse_object_name(false)?.try_into_dialect(dialect)?)
         } else {
             None
         };
@@ -690,7 +693,7 @@ fn parse_drop(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
             readyset_sql::ast::DropAllCachesStatement {},
         ))
     } else if parser.parse_keyword(Keyword::CACHE) {
-        let name = parser.parse_object_name(false)?.into_dialect(dialect);
+        let name = parser.parse_object_name(false)?.try_into_dialect(dialect)?;
         Ok(SqlQuery::DropCache(DropCacheStatement { name }))
     } else {
         Ok(parser.parse_drop()?.try_into_dialect(dialect)?)

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::{
-    AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect, ast::*,
+    AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect as _, ast::*,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
@@ -32,12 +32,15 @@ pub struct TruncateStatement {
     pub cascade: bool,
 }
 
-impl FromDialect<sqlparser::ast::TruncateTableTarget> for TruncateTable {
-    fn from_dialect(value: sqlparser::ast::TruncateTableTarget, dialect: Dialect) -> Self {
-        Self {
-            relation: value.name.into_dialect(dialect),
+impl TryFromDialect<sqlparser::ast::TruncateTableTarget> for TruncateTable {
+    fn try_from_dialect(
+        value: sqlparser::ast::TruncateTableTarget,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        Ok(Self {
+            relation: value.name.try_into_dialect(dialect)?,
             only: value.only,
-        }
+        })
     }
 }
 
@@ -57,8 +60,8 @@ impl TryFromDialect<sqlparser::ast::Statement> for TruncateStatement {
         {
             let tables = table_names
                 .into_iter()
-                .map(|tn| tn.into_dialect(dialect))
-                .collect();
+                .map(|tn| tn.try_into_dialect(dialect))
+                .try_collect()?;
             Ok(Self {
                 tables,
                 restart_identity: identity == Some(sqlparser::ast::TruncateIdentityOption::Restart),

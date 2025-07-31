@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use sqlparser::ast::RenameTable;
 use test_strategy::Arbitrary;
 
-use crate::{AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, ast::*};
+use crate::{
+    AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect as _, ast::*,
+};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct RenameTableStatement {
@@ -40,8 +42,8 @@ impl TryFromDialect<sqlparser::ast::RenameTable> for RenameTableOperation {
     ) -> Result<Self, AstConversionError> {
         let RenameTable { old_name, new_name } = value;
         Ok(Self {
-            from: old_name.into_dialect(dialect),
-            to: new_name.into_dialect(dialect),
+            from: old_name.try_into_dialect(dialect)?,
+            to: new_name.try_into_dialect(dialect)?,
         })
     }
 }

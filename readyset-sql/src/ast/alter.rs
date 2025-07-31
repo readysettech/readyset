@@ -216,12 +216,16 @@ impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinitio
                 drop_behavior: drop_behavior.map(Into::into),
             }),
             DropColumn {
-                column_name,
+                column_names,
                 if_exists: _,
                 drop_behavior,
                 has_column_keyword: _,
             } => Ok(Self::DropColumn {
-                name: column_name.into_dialect(dialect),
+                name: column_names
+                    .into_iter()
+                    .exactly_one()
+                    .map_err(|_| failed_err!("Exactly one column name expected in DROP COLUMN"))?
+                    .into_dialect(dialect),
                 behavior: drop_behavior.map(Into::into),
             }),
             RenameColumn {
@@ -361,10 +365,11 @@ impl TryFromDialect<sqlparser::ast::Statement> for AlterTableStatement {
             location: _,
             on_cluster: _,
             iceberg: _,
+            end_token: _,
         } = value
         {
             Ok(Self {
-                table: name.into_dialect(dialect),
+                table: name.try_into_dialect(dialect)?,
                 only,
                 definitions: Ok(operations.try_into_dialect(dialect)?),
             })

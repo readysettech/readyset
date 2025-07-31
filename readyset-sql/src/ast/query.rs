@@ -5,10 +5,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{
-    AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, TryIntoDialect,
-    ast::*,
-};
+use crate::{AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect, ast::*};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 #[arbitrary(args = Option<Dialect>)]
@@ -166,11 +163,11 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
                 ..
             } => match object_type {
                 sqlparser::ast::ObjectType::Table => Ok(Self::DropTable(DropTableStatement {
-                    tables: names.into_dialect(dialect),
+                    tables: names.try_into_dialect(dialect)?,
                     if_exists,
                 })),
                 sqlparser::ast::ObjectType::View => Ok(Self::DropView(DropViewStatement {
-                    views: names.into_dialect(dialect),
+                    views: names.try_into_dialect(dialect)?,
                     if_exists,
                 })),
                 _ => not_yet_implemented!("drop statement type: {object_type:?}"),
@@ -208,7 +205,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
                     .map_err(|_| {
                         failed_err!("Expected unqualified table name in COMMENT ON TABLE")
                     })?
-                    .into_dialect(dialect),
+                    .try_into_dialect(dialect)?,
                 comment: comment.unwrap_or("".to_owned()),
             })),
             Comment {
@@ -217,7 +214,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
                 comment,
                 if_exists: _,
             } => {
-                let Relation { schema, name } = object_name.into_dialect(dialect);
+                let Relation { schema, name } = object_name.try_into_dialect(dialect)?;
                 Ok(Self::Comment(CommentStatement::Column {
                     column_name: name,
                     table_name: schema.ok_or_else(|| {

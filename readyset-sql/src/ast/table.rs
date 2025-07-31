@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::{
-    AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
-    TryIntoDialect, ast::*,
+    AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, TryIntoDialect,
+    ast::*,
 };
 
 /// A (potentially schema-qualified) name for a relation
@@ -65,23 +65,29 @@ impl<'a> From<&'a String> for Relation {
     }
 }
 
-impl FromDialect<sqlparser::ast::ObjectName> for Relation {
-    fn from_dialect(value: sqlparser::ast::ObjectName, dialect: Dialect) -> Self {
+impl TryFromDialect<sqlparser::ast::ObjectName> for Relation {
+    fn try_from_dialect(
+        value: sqlparser::ast::ObjectName,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::ObjectNamePart;
-        let mut identifiers = value
-            .0
-            .into_iter()
-            .map(|ObjectNamePart::Identifier(ident)| ident.into_dialect(dialect));
-        let first = identifiers.next().unwrap_or_default();
+        let mut identifiers = value.0.into_iter().map(|part| match part {
+            ObjectNamePart::Identifier(ident) => Ok(ident.into_dialect(dialect)),
+            ObjectNamePart::Function(_) => unsupported!("identifier constructor in relation name"),
+        });
+        let first = identifiers
+            .next()
+            .ok_or_else(|| failed_err!("Expected at least one identifier in relation name"))??;
         match identifiers.next() {
-            Some(second) => Self {
+            Some(Ok(second)) => Ok(Self {
                 name: second,
                 schema: Some(first),
-            },
-            _ => Self {
+            }),
+            Some(Err(err)) => Err(err),
+            None => Ok(Self {
                 name: first,
                 schema: None,
-            },
+            }),
         }
     }
 }
@@ -108,7 +114,7 @@ impl TryFromDialect<sqlparser::ast::TableWithJoins> for Relation {
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
         match value.relation {
-            sqlparser::ast::TableFactor::Table { name, .. } => Ok(name.into_dialect(dialect)),
+            sqlparser::ast::TableFactor::Table { name, .. } => name.try_into_dialect(dialect),
             _ => unsupported!("Joined Tables in this context"),
         }
     }
@@ -209,7 +215,7 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
     ) -> Result<Self, AstConversionError> {
         match value {
             sqlparser::ast::TableFactor::Table { name, alias, .. } => Ok(Self {
-                inner: TableExprInner::Table(name.into_dialect(dialect)),
+                inner: TableExprInner::Table(name.try_into_dialect(dialect)?),
                 alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)), // XXX we don't support [`TableAlias::columns`]
             }),
             sqlparser::ast::TableFactor::Derived {

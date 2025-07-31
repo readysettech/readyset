@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::ast::SqlIdentifier;
-use crate::{AstConversionError, Dialect, IntoDialect, TryFromDialect};
+use crate::{AstConversionError, Dialect, TryFromDialect, TryIntoDialect as _};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
@@ -23,7 +23,7 @@ impl TryFromDialect<sqlparser::ast::Use> for UseStatement {
     ) -> Result<Self, AstConversionError> {
         match value {
             sqlparser::ast::Use::Object(mut object) if object.0.len() == 1 => Ok(Self {
-                database: object.0.pop().unwrap().into_dialect(dialect),
+                database: object.0.pop().unwrap().try_into_dialect(dialect)?,
             }),
             // can also be skipped!, but not much of a difference between them
             _ => unsupported!("unsupported use statement {value:?}"),

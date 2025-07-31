@@ -648,6 +648,12 @@ fn create_table_with_collate_option() {
 }
 
 #[test]
+fn column_default_and_collate() {
+    check_parse_mysql!("create table t (x varchar(255) default 'foo' collate utf8mb4_bin);");
+    check_parse_postgres!(r#"create table t (x text default 'foo' collate "en-US");"#);
+}
+
+#[test]
 fn row() {
     check_parse_both!(r#"SELECT ROW(1, 2, 3);"#);
 }
@@ -863,12 +869,7 @@ fn where_not_in_not_between() {
 fn rename_table() {
     check_parse_both!("RENAME TABLE tb1 TO tb2");
     check_parse_both!("ALTER TABLE tb1 RENAME TO tb2");
-    // disabled as sqlparser does not currently support this syntax
-    check_parse_fails!(
-        Dialect::MySQL,
-        "ALTER TABLE tb1 RENAME AS tb2",
-        "sql parser error: Expected: TO, found: tb2"
-    );
+    check_parse_both!("ALTER TABLE tb1 RENAME AS tb2");
 }
 
 #[test]
@@ -905,11 +906,14 @@ fn key_with_using_prefix() {
 }
 
 #[test]
-#[ignore = "REA-5843"]
 fn create_table_options_comma_separated() {
     check_parse_mysql!("CREATE TABLE t (x int) AUTO_INCREMENT=1 COLLATE=utf8mb4_general_ci");
     check_parse_mysql!("CREATE TABLE t (x int) AUTO_INCREMENT=1, COLLATE=utf8mb4_general_ci");
-    check_parse_mysql!("CREATE TABLE t (x int) AUTO_INCREMENT 1, COLLATE utf8mb4_general_ci");
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE TABLE t (x int) AUTO_INCREMENT 1, COLLATE utf8mb4_general_ci",
+        "nom-sql error"
+    );
 }
 
 #[test]
@@ -994,14 +998,9 @@ fn postgres_hex_bytes_odd_digits() {
 
 #[test]
 fn interval_type() {
-    check_parse_type_postgres!("interval");
-    // REA-5857
-    check_parse_type_fails!(Dialect::PostgreSQL, "interval day", "sqlparser error");
-    check_parse_type_fails!(
-        Dialect::PostgreSQL,
-        "INTERVAL HOUR TO MINUTE (4)",
-        "sqlparser error"
-    );
+    check_parse_type_both!("interval");
+    check_parse_type_postgres!("interval day");
+    check_parse_type_postgres!("INTERVAL HOUR TO MINUTE (4)");
 }
 
 #[test]

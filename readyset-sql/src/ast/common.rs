@@ -243,7 +243,7 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 constraint_name: name.into_dialect(dialect),
                 index_name: index_name.into_dialect(dialect),
                 columns: columns.into_dialect(dialect),
-                target_table: foreign_table.into_dialect(dialect),
+                target_table: foreign_table.try_into_dialect(dialect)?,
                 target_columns: referred_columns.into_dialect(dialect),
                 on_delete: on_delete.map(Into::into),
                 on_update: on_update.map(Into::into),
@@ -264,12 +264,28 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 name,
                 index_type,
                 columns,
-                display_as_key: _display_as_key,
-            } => Ok(Self::Key {
-                index_name: name.into_dialect(dialect),
-                columns: columns.try_into_dialect(dialect)?,
-                index_type: index_type.into_dialect(dialect),
-            }),
+                display_as_key: _,
+                index_options,
+            } => {
+                // sqlparser parses more (MySQL) options than we support, so just pull out `USING`
+                // if it's there. `index_type` will be filled if `USING` was *before* the column
+                // list (deprecated syntax for MySQL, standard for Postgres), otherwise it will be
+                // in the list of options (which are always after the column list). MySQL ignores
+                // the prefix version in favor of the suffix if both are present.
+                let index_type = index_options
+                    .into_iter()
+                    .find_map(|opt| match opt {
+                        sqlparser::ast::IndexOption::Using(using) => Some(using),
+                        _ => None,
+                    })
+                    .or(index_type)
+                    .map(|using| using.into_dialect(dialect));
+                Ok(Self::Key {
+                    index_name: name.into_dialect(dialect),
+                    columns: columns.try_into_dialect(dialect)?,
+                    index_type,
+                })
+            }
             PrimaryKey {
                 name,
                 index_name,
@@ -291,23 +307,35 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 columns,
                 nulls_distinct,
                 characteristics,
-                // XXX Not sure why, but we don't support any of these
-                index_type_display: _index_type_display,
-                index_options: _index_options,
-            } => Ok(Self::UniqueKey {
-                constraint_name: name.into_dialect(dialect),
-                index_name: index_name.into_dialect(dialect),
-                columns: columns.try_into_dialect(dialect)?,
-                index_type: index_type.into_dialect(dialect),
-                constraint_timing: characteristics.map(Into::into),
-                nulls_distinct: match nulls_distinct {
-                    sqlparser::ast::NullsDistinctOption::Distinct => Some(NullsDistinct::Distinct),
-                    sqlparser::ast::NullsDistinctOption::NotDistinct => {
-                        Some(NullsDistinct::NotDistinct)
-                    }
-                    sqlparser::ast::NullsDistinctOption::None => None,
-                },
-            }),
+                index_options,
+                index_type_display: _,
+            } => {
+                // See above comment on `Index`
+                let index_type = index_options
+                    .into_iter()
+                    .find_map(|opt| match opt {
+                        sqlparser::ast::IndexOption::Using(using) => Some(using),
+                        _ => None,
+                    })
+                    .or(index_type)
+                    .map(|using| using.into_dialect(dialect));
+                Ok(Self::UniqueKey {
+                    constraint_name: name.into_dialect(dialect),
+                    index_name: index_name.into_dialect(dialect),
+                    columns: columns.try_into_dialect(dialect)?,
+                    index_type,
+                    constraint_timing: characteristics.map(Into::into),
+                    nulls_distinct: match nulls_distinct {
+                        sqlparser::ast::NullsDistinctOption::Distinct => {
+                            Some(NullsDistinct::Distinct)
+                        }
+                        sqlparser::ast::NullsDistinctOption::NotDistinct => {
+                            Some(NullsDistinct::NotDistinct)
+                        }
+                        sqlparser::ast::NullsDistinctOption::None => None,
+                    },
+                })
+            }
         }
     }
 }
@@ -674,7 +702,7 @@ impl TryFromDialect<sqlparser::ast::SelectItem> for FieldDefinitionExpr {
                 sqlparser::ast::SelectItemQualifiedWildcardKind::ObjectName(relation),
                 _options,
             ) => Ok(FieldDefinitionExpr::AllInTable(
-                relation.into_dialect(dialect),
+                relation.try_into_dialect(dialect)?,
             )),
             QualifiedWildcard(
                 sqlparser::ast::SelectItemQualifiedWildcardKind::Expr(_expr),

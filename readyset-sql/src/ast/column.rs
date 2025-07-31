@@ -68,14 +68,23 @@ impl FromDialect<Vec<sqlparser::ast::Ident>> for Column {
     }
 }
 
-impl FromDialect<sqlparser::ast::ObjectName> for Column {
-    fn from_dialect(value: sqlparser::ast::ObjectName, dialect: Dialect) -> Self {
-        value
+impl TryFromDialect<sqlparser::ast::ObjectName> for Column {
+    fn try_from_dialect(
+        value: sqlparser::ast::ObjectName,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        use sqlparser::ast::ObjectNamePart;
+        let idents: Vec<_> = value
             .0
             .into_iter()
-            .map(|sqlparser::ast::ObjectNamePart::Identifier(ident)| ident)
-            .collect::<Vec<_>>()
-            .into_dialect(dialect)
+            .map(|part| match part {
+                ObjectNamePart::Identifier(ident) => Ok(ident),
+                ObjectNamePart::Function(_) => {
+                    failed!("Unexpected identifier constructor in column")
+                }
+            })
+            .try_collect()?;
+        Ok(idents.into_dialect(dialect))
     }
 }
 
@@ -127,7 +136,7 @@ impl TryFromDialect<sqlparser::ast::IndexColumn> for Column {
                         )
                     )
                 {
-                    Ok(name.into_dialect(dialect))
+                    name.try_into_dialect(dialect)
                 } else {
                     unsupported!(
                         "function expression used as index column wasn't column prefix: {name}({arglist})"
@@ -149,7 +158,7 @@ impl TryFromDialect<Vec<sqlparser::ast::Assignment>> for Vec<(Column, Expr)> {
         for assignment in assignments {
             match assignment.target {
                 sqlparser::ast::AssignmentTarget::ColumnName(object_name) => {
-                    let column = object_name.into_dialect(dialect);
+                    let column = object_name.try_into_dialect(dialect)?;
                     let value = assignment.value.try_into_dialect(dialect)?;
                     result.push((column, value));
                 }
@@ -164,7 +173,7 @@ impl TryFromDialect<Vec<sqlparser::ast::Assignment>> for Vec<(Column, Expr)> {
                         }
 
                         for (target, value) in v1.into_iter().zip(v2) {
-                            let column = target.into_dialect(dialect);
+                            let column = target.try_into_dialect(dialect)?;
                             let expr = value.try_into_dialect(dialect)?;
                             result.push((column, expr));
                         }

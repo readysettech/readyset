@@ -5,7 +5,7 @@ use std::fmt;
 
 use proptest::arbitrary::Arbitrary;
 
-use crate::{Dialect, FromDialect, IntoDialect};
+use crate::{AstConversionError, Dialect, FromDialect, IntoDialect, TryFromDialect};
 
 const TINYTEXT_WIDTH: usize = 14;
 
@@ -302,11 +302,16 @@ impl FromDialect<sqlparser::ast::Ident> for SqlIdentifier {
     }
 }
 
-impl FromDialect<sqlparser::ast::ObjectNamePart> for SqlIdentifier {
-    #[inline]
-    fn from_dialect(value: sqlparser::ast::ObjectNamePart, dialect: Dialect) -> Self {
+impl TryFromDialect<sqlparser::ast::ObjectNamePart> for SqlIdentifier {
+    fn try_from_dialect(
+        value: sqlparser::ast::ObjectNamePart,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
         match value {
-            sqlparser::ast::ObjectNamePart::Identifier(ident) => ident.into_dialect(dialect),
+            sqlparser::ast::ObjectNamePart::Identifier(ident) => Ok(ident.into_dialect(dialect)),
+            sqlparser::ast::ObjectNamePart::Function(_) => {
+                unsupported!("identifier constructor")
+            }
         }
     }
 }

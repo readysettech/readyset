@@ -33,7 +33,7 @@ impl TryFromDialect<sqlparser::ast::Insert> for InsertStatement {
         } = value
         {
             Ok(Self {
-                table: name.into_dialect(dialect),
+                table: name.try_into_dialect(dialect)?,
                 fields: columns.into_dialect(dialect),
                 data: if let Some(query) = source {
                     match *query.body {
@@ -69,7 +69,7 @@ fn assignment_into_expr(
     Ok((
         match assignment.target {
             sqlparser::ast::AssignmentTarget::ColumnName(object_name) => {
-                object_name.into_dialect(dialect)
+                object_name.try_into_dialect(dialect)?
             }
             sqlparser::ast::AssignmentTarget::Tuple(_vec) => {
                 return unsupported!("Currently don't support tuple assignment: (a,b) = (1,2)");

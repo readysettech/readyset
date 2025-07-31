@@ -42,7 +42,7 @@ impl TryFromDialect<sqlparser::ast::Set> for SetStatement {
                         .map_err(|_| {
                             not_yet_implemented_err!("SET with namespaced Postgres parameter names")
                         })?
-                        .into_dialect(dialect);
+                        .try_into_dialect(dialect)?;
                     let value = values.try_into_dialect(dialect)?;
                     Ok(Self::PostgresParameter(SetPostgresParameter {
                         scope,
@@ -309,6 +309,9 @@ impl TryFrom<sqlparser::ast::ObjectNamePart> for VariableScope {
             sqlparser::ast::ObjectNamePart::Identifier(ident) => {
                 VariableScope::try_from(ident.value.as_str())
             }
+            sqlparser::ast::ObjectNamePart::Function(_) => {
+                unsupported!("identifier constructor in variable scope")
+            }
         }
     }
 }
@@ -416,14 +419,17 @@ impl TryFromDialect<sqlparser::ast::ObjectName> for Variable {
         value: sqlparser::ast::ObjectName,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        value
+        let idents: Vec<_> = value
             .0
             .into_iter()
             .map(|part| match part {
-                sqlparser::ast::ObjectNamePart::Identifier(ident) => ident,
+                sqlparser::ast::ObjectNamePart::Identifier(ident) => Ok(ident),
+                sqlparser::ast::ObjectNamePart::Function(_) => {
+                    unsupported!("identifier constructor in variable name")
+                }
             })
-            .collect::<Vec<_>>()
-            .try_into_dialect(dialect)
+            .try_collect()?;
+        idents.try_into_dialect(dialect)
     }
 }
 

@@ -10,10 +10,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use triomphe::ThinArc;
 
-use crate::{
-    AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, TryIntoDialect,
-    ast::*,
-};
+use crate::{AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect, ast::*};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum IntervalFields {
@@ -48,6 +45,26 @@ impl fmt::Display for IntervalFields {
             IntervalFields::HourToMinute => write!(f, "HOUR TO MINUTE"),
             IntervalFields::HourToSecond => write!(f, "HOUR TO SECOND"),
             IntervalFields::MinuteToSecond => write!(f, "MINUTE TO SECOND"),
+        }
+    }
+}
+
+impl From<sqlparser::ast::IntervalFields> for IntervalFields {
+    fn from(value: sqlparser::ast::IntervalFields) -> Self {
+        match value {
+            sqlparser::ast::IntervalFields::Year => Self::Year,
+            sqlparser::ast::IntervalFields::Month => Self::Month,
+            sqlparser::ast::IntervalFields::Day => Self::Day,
+            sqlparser::ast::IntervalFields::Hour => Self::Hour,
+            sqlparser::ast::IntervalFields::Minute => Self::Minute,
+            sqlparser::ast::IntervalFields::Second => Self::Second,
+            sqlparser::ast::IntervalFields::YearToMonth => Self::YearToMonth,
+            sqlparser::ast::IntervalFields::DayToHour => Self::DayToHour,
+            sqlparser::ast::IntervalFields::DayToMinute => Self::DayToMinute,
+            sqlparser::ast::IntervalFields::DayToSecond => Self::DayToSecond,
+            sqlparser::ast::IntervalFields::HourToMinute => Self::HourToMinute,
+            sqlparser::ast::IntervalFields::HourToSecond => Self::HourToSecond,
+            sqlparser::ast::IntervalFields::MinuteToSecond => Self::MinuteToSecond,
         }
     }
 }
@@ -97,7 +114,7 @@ pub enum SqlType {
     TimestampTz,
     Interval {
         fields: Option<IntervalFields>,
-        precision: Option<u16>,
+        precision: Option<u64>,
     },
     Binary(Option<u16>),
     VarBinary(u16),
@@ -220,9 +237,9 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
                 sqlparser::ast::TimezoneInfo::WithoutTimeZone => Ok(Self::Timestamp),
                 sqlparser::ast::TimezoneInfo::Tz => Ok(Self::TimestampTz),
             },
-            Interval => Ok(Self::Interval {
-                fields: None,
-                precision: None,
+            Interval { fields, precision } => Ok(Self::Interval {
+                fields: fields.map(Into::into),
+                precision,
             }),
             JSON => Ok(Self::Json),
             JSONB => Ok(Self::Jsonb),
@@ -263,7 +280,7 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
                     }
                     None => failed!("invalid custom type name {}", name),
                 },
-                Err(_) => Ok(Self::Other(name.into_dialect(dialect))),
+                Err(_) => Ok(Self::Other(name.try_into_dialect(dialect)?)),
             },
             Array(def) => Ok(Self::Array(Box::new(def.try_into_dialect(dialect)?))),
             Map(_data_type, _data_type1) => unsupported!("MAP type"),

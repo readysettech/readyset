@@ -43,7 +43,9 @@ impl TryFrom<sqlparser::ast::ObjectName> for CollationName {
         use sqlparser::ast::ObjectNamePart::Identifier;
         match value.0.into_iter().exactly_one() {
             Ok(Identifier(ident)) => Ok(ident.into()),
-            Err(_) => failed!("Unexpected multi-part charset name"),
+            _ => failed!(
+                "Unexpected multi-part identifier or identifier constructor in charset name"
+            ),
         }
     }
 }
@@ -408,7 +410,7 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
 
         let mut create_table = Self {
             if_not_exists: value.if_not_exists,
-            table: value.name.into_dialect(dialect),
+            table: value.name.try_into_dialect(dialect)?,
             body: Ok(CreateTableBody {
                 fields: value.columns.try_into_dialect(dialect)?,
                 keys: if value.constraints.is_empty() {
@@ -642,7 +644,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for CreateViewStatement {
         } = value
         {
             Ok(Self {
-                name: name.into_dialect(dialect),
+                name: name.try_into_dialect(dialect)?,
                 or_replace,
                 fields: columns.into_dialect(dialect),
                 // TODO: handle compound selects, not sure how sqlparser represents them

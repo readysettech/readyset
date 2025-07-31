@@ -6,10 +6,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{
-    AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, TryIntoDialect,
-    ast::*,
-};
+use crate::{AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect, ast::*};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub enum JoinRightSide {
@@ -145,7 +142,7 @@ impl TryFromDialect<sqlparser::ast::JoinConstraint> for JoinConstraint {
         use sqlparser::ast::JoinConstraint::*;
         match value {
             On(expr) => Ok(Self::On(expr.try_into_dialect(dialect)?)),
-            Using(idents) => Ok(Self::Using(idents.into_dialect(dialect))),
+            Using(idents) => Ok(Self::Using(idents.try_into_dialect(dialect)?)),
             None => Ok(Self::Empty),
             Natural => unsupported!("NATURAL join"),
         }

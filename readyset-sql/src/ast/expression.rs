@@ -1379,12 +1379,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 exprs: vec.try_into_dialect(dialect)?,
                 explicit: false, // TODO: Fix upstrem in sqlparser
             }),
-            TypedString {
-                data_type: _,
-                value: _,
-            } => unsupported!("TYPED STRING"),
-            // TODO(mvzink): Remove these negation special cases once we disable nom-sql; they're
-            // just here for checking parity
+            TypedString(_) => unsupported!("TYPED STRING"),
             UnaryOp {
                 op: sqlparser::ast::UnaryOperator::Minus,
                 expr,
@@ -1420,17 +1415,13 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             } => {
                 unsupported!("Compound field access a la `foo['bar'].baz[1]`: `{cfa}` = {cfa:?}")
             }
-            // not sure what these are for, parity tests seem to be
-            // passing normally though
             Wildcard(_token) => unsupported!("wildcard expression in this context"),
             QualifiedWildcard(_object_name, _token) => {
                 unsupported!("qualified wildcard expression in this context")
             }
             IsNormalized { .. } => unsupported!("IS NORMALIZED"),
-            // Prefixed expression like introducer string
-            // https://dev.mysql.com/doc/refman/8.0/en/charset-introducer.html
-            // prefix is ignored for now
             Prefixed { value, .. } => value.try_into_dialect(dialect),
+            MemberOf(_) => unsupported!("MEMBER OF"),
         }
     }
 }
@@ -1538,11 +1529,19 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             args, name, over, ..
         } = value;
 
-        let sqlparser::ast::ObjectNamePart::Identifier(mut ident) = name
+        let mut ident = name
             .0
             .into_iter()
+            .filter_map(|part| match part {
+                sqlparser::ast::ObjectNamePart::Identifier(ident) => Some(ident),
+                _ => None,
+            })
             .exactly_one()
-            .map_err(|_| unsupported_err!("non-builtin function (UDF)"))?;
+            .map_err(|_| {
+                unsupported_err!(
+                    "non-builtin function (UDF) or identifier constructor in function name"
+                )
+            })?;
 
         // Special case for `COUNT(*)`
         if ident.value.eq_ignore_ascii_case("COUNT")
@@ -1801,7 +1800,9 @@ impl TryFromDialect<sqlparser::ast::FunctionArgExpr> for Expr {
         use sqlparser::ast::FunctionArgExpr::*;
         match value {
             Expr(expr) => expr.try_into_dialect(dialect),
-            QualifiedWildcard(object_name) => Ok(Self::Column(object_name.into_dialect(dialect))),
+            QualifiedWildcard(object_name) => {
+                Ok(Self::Column(object_name.try_into_dialect(dialect)?))
+            }
             Wildcard => not_yet_implemented!("wildcard expression in function argument"),
         }
     }

@@ -762,6 +762,13 @@ fn create_mysql() {
             INDEX `index_comments_on_user_id`  (`user_id`))
             ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
     );
+    check_parse_mysql!(
+        "CREATE TABLE `auth_group` (
+            `id` INT AUTO_INCREMENT NOT NULL PRIMARY KEY,
+            `name` VARCHAR(80) NOT NULL UNIQUE COLLATE utf8mb4_unicode_ci)
+            ENGINE=InnoDB, AUTO_INCREMENT=495209, DEFAULT CHARSET=utf8mb4, COLLATE=utf8mb4_unicode_ci"
+    );
+    check_parse_mysql!("CREATE TABLE foo (x TEXT) AUTO_INCREMENT=1,ENGINE=InnoDB,KEY_BLOCK_SIZE=8");
 }
 
 #[test]
@@ -832,7 +839,7 @@ fn create_postgres() {
 #[test]
 #[ignore = "various issues, see comments"]
 fn create_mysql_unsupported() {
-    // REA-5841, REA-5842
+    // REA-5841
     check_parse_mysql!(
         "CREATE TABLE customers (
                 id INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -849,13 +856,6 @@ fn create_mysql_unsupported() {
             age INTEGER,
             KEY age_key (age) USING BTREE
         )"
-    );
-    // REA-5843
-    check_parse_mysql!(
-        "CREATE TABLE `auth_group` (
-            `id` INT AUTO_INCREMENT NOT NULL PRIMARY KEY,
-            `name` VARCHAR(80) NOT NULL UNIQUE COLLATE utf8mb4_unicode_ci)
-            ENGINE=InnoDB, AUTO_INCREMENT=495209, DEFAULT CHARSET=utf8mb4, COLLATE=utf8mb4_unicode_ci"
     );
     // REA-5844
     check_parse_mysql!(
@@ -965,13 +965,6 @@ fn create_table_options_mysql() {
 
 #[test]
 fn create_table_options_unsupported() {
-    // REA-5843
-    check_parse_fails!(
-        Dialect::MySQL,
-        "CREATE TABLE foo (x TEXT) AUTO_INCREMENT=1,ENGINE=,KEY_BLOCK_SIZE=8",
-        "sqlparser error"
-    );
-
     // REA-5847
     check_parse_fails!(
         Dialect::MySQL,
@@ -1679,20 +1672,24 @@ fn binary_modifier() {
 }
 
 #[test]
-#[ignore = "REA-5856"]
 fn signed_modifier() {
     check_parse_type_mysql!("bigint(20) unsigned");
     check_parse_type_mysql!("bigint(20) signed");
+}
+
+// Not supported by sqlparser-rs, and may never be; not totally supported by nom-sql either.
+#[test]
+#[ignore = "REA-5856: deprecated"]
+fn signed_modifier_on_non_integer_types() {
     check_parse_type_mysql!("decimal(6,2) unsigned");
     check_parse_type_mysql!("numeric(2) unsigned");
     check_parse_type_mysql!("float unsigned");
 }
 
 #[test]
-#[ignore = "REA-5857"]
 fn interval_type() {
-    check_parse_type_both!("interval dAY");
-    check_parse_type_both!("INTERVAL hour to mINuTe (4)");
+    check_parse_type_postgres!("interval dAY");
+    check_parse_type_postgres!("INTERVAL hour to mINuTe (4)");
 }
 
 #[test]

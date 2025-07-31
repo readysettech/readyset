@@ -257,7 +257,7 @@ fn interval_fields(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], IntervalFields>
 fn interval_type(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     let (i, _) = tag_no_case("interval")(i)?;
     let (i, fields) = opt(preceded(whitespace1, interval_fields))(i)?;
-    let (i, precision) = opt(preceded(whitespace0, delim_u16))(i)?;
+    let (i, precision) = opt(map(preceded(whitespace0, delim_u16), |x| x as u64))(i)?;
 
     Ok((i, SqlType::Interval { fields, precision }))
 }
