@@ -942,12 +942,15 @@ where
                 if config.log_on_mismatch
                     && (!config.log_only_selects || is_not_query_or_should_log(&sqlparser_ast))
                 {
-                    tracing::debug!(
-                        ?dialect,
-                        input = %input.as_ref(),
-                        %nom_error,
-                        ?sqlparser_ast,
-                        "nom-sql failed but sqlparser-rs succeeded"
+                    rate_limit!(
+                        config.rate_limit_logging,
+                        tracing::debug!(
+                            ?dialect,
+                            input = %input.as_ref(),
+                            %nom_error,
+                            ?sqlparser_ast,
+                            "nom-sql failed but sqlparser-rs succeeded"
+                        )
                     );
                 }
                 if config.prefer_sqlparser {
