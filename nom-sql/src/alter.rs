@@ -259,48 +259,40 @@ fn alter_table_definition(
             drop_constraint(dialect),
             drop_foreign_key(dialect),
             replica_identity(dialect),
+            algorithm,
+            lock,
         ))(i)
     }
 }
 
-pub fn parse_algorithm(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], String> {
-    let (i, _) = tag_no_case(",")(i)?;
-    let (i, _) = whitespace0(i)?;
+fn algorithm(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
     let (i, _) = tag_no_case("algorithm")(i)?;
-    let (i, _) = alt((
-        map(
-            delimited(whitespace0, tag_no_case("="), whitespace0),
-            |_| (),
-        ),
-        value((), whitespace1),
+    let (i, equals) = alt((
+        value(true, delimited(whitespace0, tag_no_case("="), whitespace0)),
+        value(false, whitespace1),
     ))(i)?;
     let (i, algorithm) = alt((
-        value(String::from("DEFAULT"), tag_no_case("default")),
-        value(String::from("INPLACE"), tag_no_case("inplace")),
-        value(String::from("COPY"), tag_no_case("copy")),
-        value(String::from("INSTANT"), tag_no_case("instant")),
+        value(AlterTableAlgorithm::Default, tag_no_case("default")),
+        value(AlterTableAlgorithm::Inplace, tag_no_case("inplace")),
+        value(AlterTableAlgorithm::Copy, tag_no_case("copy")),
+        value(AlterTableAlgorithm::Instant, tag_no_case("instant")),
     ))(i)?;
-    Ok((i, algorithm))
+    Ok((i, AlterTableDefinition::Algorithm { equals, algorithm }))
 }
 
-pub fn parse_lock(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], String> {
-    let (i, _) = tag_no_case(",")(i)?;
-    let (i, _) = whitespace0(i)?;
+fn lock(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
     let (i, _) = tag_no_case("lock")(i)?;
-    let (i, _) = alt((
-        map(
-            delimited(whitespace0, tag_no_case("="), whitespace0),
-            |_| (),
-        ),
-        value((), whitespace1),
+    let (i, equals) = alt((
+        value(true, delimited(whitespace0, tag_no_case("="), whitespace0)),
+        value(false, whitespace1),
     ))(i)?;
     let (i, lock) = alt((
-        value(String::from("DEFAULT"), tag_no_case("default")),
-        value(String::from("NONE"), tag_no_case("none")),
-        value(String::from("SHARED"), tag_no_case("shared")),
-        value(String::from("EXCLUSIVE"), tag_no_case("exclusive")),
+        value(AlterTableLock::Default, tag_no_case("default")),
+        value(AlterTableLock::None, tag_no_case("none")),
+        value(AlterTableLock::Shared, tag_no_case("shared")),
+        value(AlterTableLock::Exclusive, tag_no_case("exclusive")),
     ))(i)?;
-    Ok((i, lock))
+    Ok((i, AlterTableDefinition::Lock { equals, lock }))
 }
 
 pub fn alter_table_statement(
@@ -327,27 +319,14 @@ pub fn alter_table_statement(
             separated_list1(ws_sep_comma, alter_table_definition(dialect)),
             until_statement_terminator,
         )(i)?;
-        let (i, algorithm) = if matches!(dialect, Dialect::MySQL) {
-            opt(parse_algorithm)(i)?
-        } else {
-            (i, None)
-        };
-        let (i, lock) = if matches!(dialect, Dialect::MySQL) {
-            opt(parse_lock)(i)?
-        } else {
-            (i, None)
-        };
-
         let (i, _) = statement_terminator(i)?;
 
         Ok((
             i,
             AlterTableStatement {
                 table,
-                definitions,
                 only,
-                algorithm,
-                lock,
+                definitions,
             },
         ))
     }
@@ -475,8 +454,6 @@ mod tests {
                 }),
             ]),
             only: false,
-            algorithm: None,
-            lock: None,
         };
         let result = alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring));
         assert_eq!(result.unwrap().1, expected);
@@ -500,8 +477,6 @@ mod tests {
                     constraints: vec![],
                 })]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
 
             let result = stmt.display(Dialect::MySQL).to_string();
@@ -514,8 +489,6 @@ mod tests {
                 table: "t".into(),
                 definitions: Err("unsupported rest of the query".to_string()),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
 
             let result = stmt.display(Dialect::MySQL).to_string();
@@ -533,8 +506,6 @@ mod tests {
                 },
                 definitions: Err("unsupported rest of the query".to_string()),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -549,8 +520,6 @@ mod tests {
                 },
                 definitions: Err("unsupported rest of the query".to_string()),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -576,8 +545,6 @@ mod tests {
                     comment: None,
                 })]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -615,8 +582,6 @@ mod tests {
                     }),
                 ]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -636,8 +601,6 @@ mod tests {
                     behavior: None,
                 }]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -657,8 +620,6 @@ mod tests {
                     behavior: Some(DropBehavior::Cascade),
                 }]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -680,8 +641,6 @@ mod tests {
                     )),
                 }]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -701,8 +660,6 @@ mod tests {
                     operation: AlterColumnOperation::DropColumnDefault,
                 }]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -728,8 +685,6 @@ mod tests {
                         }
                     }]),
                     only: false,
-                    algorithm: None,
-                    lock: None,
                 }
             );
         }
@@ -756,8 +711,6 @@ mod tests {
                         }
                     }]),
                     only: false,
-                    algorithm: None,
-                    lock: None,
                 }
             );
         }
@@ -781,8 +734,6 @@ mod tests {
                         }
                     }]),
                     only: false,
-                    algorithm: None,
-                    lock: None,
                 }
             );
             assert_eq!(
@@ -807,8 +758,6 @@ mod tests {
                         columns: vec![Column::from("post_id"), Column::from("user_id"),],
                     })]),
                     only: false,
-                    algorithm: None,
-                    lock: None,
                 }
             );
         }
@@ -827,8 +776,6 @@ mod tests {
                         index_type: None,
                     })]),
                     only: false,
-                    algorithm: None,
-                    lock: None,
                 }
             );
         }
@@ -851,8 +798,6 @@ mod tests {
                         on_update: None
                     })]),
                     only: false,
-                    algorithm: None,
-                    lock: None,
                 }
             );
         }
@@ -874,8 +819,6 @@ mod tests {
                         comment: None,
                     })]),
                     only: false,
-                    algorithm: None,
-                    lock: None,
                 }
             );
             assert_eq!(
@@ -898,46 +841,60 @@ mod tests {
         #[test]
         fn parse_algorithm_lock() {
             let algorithm_lock_combinations = [
-                ", ALGORITHM = INPLACE, LOCK = DEFAULT",
-                ",ALGORITHM=INPLACE,LOCK=DEFAULT",
-                ", ALGORITHM INPLACE, LOCK DEFAULT",
-                ",ALGORITHM INPLACE,LOCK DEFAULT",
+                (", ALGORITHM = INPLACE, LOCK = DEFAULT", true),
+                (",ALGORITHM=INPLACE,LOCK=DEFAULT", true),
+                (", ALGORITHM INPLACE, LOCK DEFAULT", false),
+                (",ALGORITHM INPLACE,LOCK DEFAULT", false),
             ];
-            algorithm_lock_combinations.iter().for_each(|qstring| {
-                let expected = AlterTableStatement {
-                    table: Relation {
-                        name: "t".into(),
-                        schema: None,
-                    },
-                    definitions: Ok(vec![AlterTableDefinition::DropColumn {
-                        name: "c".into(),
-                        behavior: None,
-                    }]),
-                    only: false,
-                    algorithm: Some("INPLACE".into()),
-                    lock: Some("DEFAULT".into()),
-                };
-                let qstring = format!("ALTER TABLE `t` DROP COLUMN c{qstring}");
-                let result =
-                    alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-                assert_eq!(result.unwrap().1, expected);
-            });
+            algorithm_lock_combinations
+                .into_iter()
+                .for_each(|(qstring, equals)| {
+                    let expected = AlterTableStatement {
+                        table: Relation {
+                            name: "t".into(),
+                            schema: None,
+                        },
+                        only: false,
+                        definitions: Ok(vec![
+                            AlterTableDefinition::DropColumn {
+                                name: "c".into(),
+                                behavior: None,
+                            },
+                            AlterTableDefinition::Algorithm {
+                                equals,
+                                algorithm: AlterTableAlgorithm::Inplace,
+                            },
+                            AlterTableDefinition::Lock {
+                                equals,
+                                lock: AlterTableLock::Default,
+                            },
+                        ]),
+                    };
+                    let qstring = format!("ALTER TABLE `t` DROP COLUMN c{qstring}");
+                    let result =
+                        alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+                    assert_eq!(result.unwrap().1, expected);
+                });
             let qstring = b"ALTER TABLE `t` ADD COLUMN c INT, ALGORITHM = INSTANT";
             let res = test_parse!(alter_table_statement(Dialect::MySQL), qstring);
             assert_eq!(
                 res,
                 AlterTableStatement {
                     table: Relation::from("t"),
-                    definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
-                        column: Column::from("c"),
-                        sql_type: SqlType::Int(None),
-                        generated: None,
-                        constraints: vec![],
-                        comment: None,
-                    })]),
+                    definitions: Ok(vec![
+                        AlterTableDefinition::AddColumn(ColumnSpecification {
+                            column: Column::from("c"),
+                            sql_type: SqlType::Int(None),
+                            generated: None,
+                            constraints: vec![],
+                            comment: None,
+                        }),
+                        AlterTableDefinition::Algorithm {
+                            equals: true,
+                            algorithm: AlterTableAlgorithm::Instant
+                        }
+                    ]),
                     only: false,
-                    algorithm: Some("INSTANT".into()),
-                    lock: None,
                 }
             );
         }
@@ -963,8 +920,6 @@ mod tests {
                     constraints: vec![],
                 })]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
 
             let result = stmt.display(Dialect::PostgreSQL).to_string();
@@ -977,8 +932,6 @@ mod tests {
                 table: "t".into(),
                 definitions: Err("unsupported rest of the query".to_string()),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
 
             let result = stmt.display(Dialect::PostgreSQL).to_string();
@@ -996,8 +949,6 @@ mod tests {
                 },
                 definitions: Err("unsupported rest of the query".to_string()),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -1012,8 +963,6 @@ mod tests {
                 },
                 definitions: Err("unsupported rest of the query".to_string()),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -1039,8 +988,6 @@ mod tests {
                     comment: None,
                 })]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -1078,8 +1025,6 @@ mod tests {
                     }),
                 ]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -1099,8 +1044,6 @@ mod tests {
                     behavior: None,
                 }]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -1120,8 +1063,6 @@ mod tests {
                     behavior: Some(DropBehavior::Cascade),
                 }]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -1143,8 +1084,6 @@ mod tests {
                     )),
                 }]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -1164,8 +1103,6 @@ mod tests {
                     operation: AlterColumnOperation::DropColumnDefault,
                 }]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let result =
                 alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -1185,8 +1122,6 @@ mod tests {
                     behavior: None,
                 }]),
                 only: true,
-                algorithm: None,
-                lock: None,
             };
             let res =
                 alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
@@ -1208,8 +1143,6 @@ mod tests {
                     drop_behavior: Some(DropBehavior::Cascade),
                 }]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let res1 =
                 alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring1.as_bytes()));
@@ -1245,8 +1178,6 @@ mod tests {
                 },
                 definitions: Ok(vec![AlterTableDefinition::AddKey(table_key)]),
                 only: false,
-                algorithm: None,
-                lock: None,
             };
             let res1 =
                 alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));

@@ -1051,6 +1051,9 @@ impl SqlIncorporator {
                                 }
                                 Ok(())
                             }
+                            // These operations are no-ops
+                            AlterTableDefinition::Algorithm { .. }
+                            | AlterTableDefinition::Lock { .. } => Ok(()),
                             // These operations will change the underlying table, and should have been caught earlier
                             AlterTableDefinition::AddColumn(_)
                             | AlterTableDefinition::AddKey(TableKey::PrimaryKey { .. })

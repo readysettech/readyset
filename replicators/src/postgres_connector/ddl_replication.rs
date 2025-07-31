@@ -248,8 +248,6 @@ impl DdlEvent {
                             },
                             definitions: Err(err.to_string()),
                             only: false,
-                            algorithm: None,
-                            lock: None,
                         }
                     }
                 };

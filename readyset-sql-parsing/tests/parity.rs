@@ -234,8 +234,6 @@ fn alter_drop_foreign_key() {
             definitions: Ok(vec![AlterTableDefinition::DropForeignKey {
                 name: SqlIdentifier::from("orderitem_ibfk_1"),
             }]),
-            algorithm: None,
-            lock: None,
             only: false,
         }),
         check_parse_mysql!("ALTER TABLE `orderitem` DROP FOREIGN KEY `orderitem_ibfk_1`")
@@ -988,4 +986,12 @@ fn interval_type() {
 fn truncate_restart() {
     check_parse_postgres!("truncate t1 *");
     check_parse_postgres!("truncate t1 *, t2*, t3");
+}
+
+#[test]
+fn alter_table_lock_algorithm() {
+    check_parse_mysql!("ALTER TABLE t1 LOCK=NONE");
+    check_parse_mysql!("ALTER TABLE t1 LOCK= SHARED, ALGORITHM INPLACE");
+    check_parse_mysql!("ALTER TABLE t1 ALGORITHM DEFAULT, LOCK=EXCLUSIVE");
+    check_parse_mysql!("ALTER TABLE t1 ALGORITHM DEFAULT, DROP COLUMN foo, LOCK EXCLUSIVE");
 }

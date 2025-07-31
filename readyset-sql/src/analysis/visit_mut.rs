@@ -1099,7 +1099,9 @@ pub fn walk_alter_table_definition<'a, V: VisitorMut<'a>>(
             visitor.visit_sql_identifier(name)?;
             visitor.visit_sql_identifier(new_name)
         }
-        AlterTableDefinition::ReplicaIdentity(_) => Ok(()),
+        AlterTableDefinition::ReplicaIdentity(_)
+        | AlterTableDefinition::Algorithm { .. }
+        | AlterTableDefinition::Lock { .. } => Ok(()),
     }
 }
 

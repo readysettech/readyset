@@ -93,6 +93,66 @@ impl fmt::Display for ReplicaIdentity {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum AlterTableLock {
+    Default,
+    None,
+    Shared,
+    Exclusive,
+}
+
+impl fmt::Display for AlterTableLock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterTableLock::Default => write!(f, "DEFAULT"),
+            AlterTableLock::None => write!(f, "NONE"),
+            AlterTableLock::Shared => write!(f, "SHARED"),
+            AlterTableLock::Exclusive => write!(f, "EXCLUSIVE"),
+        }
+    }
+}
+
+impl From<sqlparser::ast::AlterTableLock> for AlterTableLock {
+    fn from(lock: sqlparser::ast::AlterTableLock) -> Self {
+        match lock {
+            sqlparser::ast::AlterTableLock::Default => AlterTableLock::Default,
+            sqlparser::ast::AlterTableLock::None => AlterTableLock::None,
+            sqlparser::ast::AlterTableLock::Shared => AlterTableLock::Shared,
+            sqlparser::ast::AlterTableLock::Exclusive => AlterTableLock::Exclusive,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum AlterTableAlgorithm {
+    Default,
+    Instant,
+    Inplace,
+    Copy,
+}
+
+impl fmt::Display for AlterTableAlgorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterTableAlgorithm::Default => write!(f, "DEFAULT"),
+            AlterTableAlgorithm::Instant => write!(f, "INSTANT"),
+            AlterTableAlgorithm::Inplace => write!(f, "INPLACE"),
+            AlterTableAlgorithm::Copy => write!(f, "COPY"),
+        }
+    }
+}
+
+impl From<sqlparser::ast::AlterTableAlgorithm> for AlterTableAlgorithm {
+    fn from(algorithm: sqlparser::ast::AlterTableAlgorithm) -> Self {
+        match algorithm {
+            sqlparser::ast::AlterTableAlgorithm::Default => AlterTableAlgorithm::Default,
+            sqlparser::ast::AlterTableAlgorithm::Instant => AlterTableAlgorithm::Instant,
+            sqlparser::ast::AlterTableAlgorithm::Inplace => AlterTableAlgorithm::Inplace,
+            sqlparser::ast::AlterTableAlgorithm::Copy => AlterTableAlgorithm::Copy,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterTableDefinition {
     AddColumn(ColumnSpecification),
     AddKey(TableKey),
@@ -120,10 +180,18 @@ pub enum AlterTableDefinition {
     DropForeignKey {
         name: SqlIdentifier,
     },
-    /* TODO(aspen): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#add%20table%20constraint%20definition
-     * AddTableConstraint(..),
-     * TODO(aspen): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#drop%20table%20constraint%20definition
-     * DropTableConstraint(..), */
+    // Though the following aren't really definitions/operations, from a parsing perspective it makes it
+    // easier to treat them the same way.
+    /// [DEFAULT | INPLACE | COPY | INSTANT]
+    Lock {
+        equals: bool,
+        lock: AlterTableLock,
+    },
+    /// [DEFAULT | NONE | SHARED | EXCLUSIVE]
+    Algorithm {
+        equals: bool,
+        algorithm: AlterTableAlgorithm,
+    },
 }
 
 impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinition {
@@ -185,6 +253,14 @@ impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinitio
                 name: column_name.into_dialect(dialect),
                 operation: op.try_into()?,
             }),
+            Lock { equals, lock } => Ok(Self::Lock {
+                equals,
+                lock: lock.into(),
+            }),
+            Algorithm { equals, algorithm } => Ok(Self::Algorithm {
+                equals,
+                algorithm: algorithm.into(),
+            }),
             _ => unsupported!("ALTER TABLE definition {value}"),
         }
     }
@@ -241,6 +317,20 @@ impl DialectDisplay for AlterTableDefinition {
                 write!(f, "REPLICA IDENTITY {replica_identity}")
             }
             Self::DropForeignKey { name } => write!(f, "DROP FOREIGN KEY {name}"),
+            Self::Lock { equals, lock } => {
+                write!(f, "LOCK")?;
+                if *equals {
+                    write!(f, " =")?;
+                }
+                write!(f, " {lock}")
+            }
+            Self::Algorithm { equals, algorithm } => {
+                write!(f, "ALGORITHM")?;
+                if *equals {
+                    write!(f, " =")?;
+                }
+                write!(f, " {algorithm}")
+            }
         })
     }
 }
@@ -248,6 +338,7 @@ impl DialectDisplay for AlterTableDefinition {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct AlterTableStatement {
     pub table: Relation,
+    pub only: bool,
     /// The result of parsing the alter table definitions.
     ///
     /// If the parsing succeeded, then this will be an `Ok` result with the list of
@@ -255,11 +346,6 @@ pub struct AlterTableStatement {
     /// [`String`] that could not be parsed.
     #[strategy(any_with::<Vec<AlterTableDefinition>>(size_range(1..16).lift()).prop_map(Ok))]
     pub definitions: Result<Vec<AlterTableDefinition>, String>,
-    pub only: bool,
-    /// [DEFAULT | INPLACE | COPY | INSTANT]
-    pub algorithm: Option<String>,
-    /// [DEFAULT | NONE | SHARED | EXCLUSIVE]
-    pub lock: Option<String>,
 }
 
 impl TryFromDialect<sqlparser::ast::Statement> for AlterTableStatement {
@@ -280,18 +366,6 @@ impl TryFromDialect<sqlparser::ast::Statement> for AlterTableStatement {
             Ok(Self {
                 table: name.into_dialect(dialect),
                 only,
-                algorithm: operations.iter().find_map(|op| match op {
-                    sqlparser::ast::AlterTableOperation::Algorithm { algorithm, .. } => {
-                        Some(algorithm.to_string())
-                    }
-                    _ => None,
-                }),
-                lock: operations.iter().find_map(|op| match op {
-                    sqlparser::ast::AlterTableOperation::Lock { lock, .. } => {
-                        Some(lock.to_string())
-                    }
-                    _ => None,
-                }),
                 definitions: Ok(operations.try_into_dialect(dialect)?),
             })
         } else {

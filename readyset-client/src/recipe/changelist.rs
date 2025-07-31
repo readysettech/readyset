@@ -405,7 +405,9 @@ impl Change {
                         | AlterTableDefinition::AddKey(TableKey::FulltextKey { .. })
                         | AlterTableDefinition::AddKey(TableKey::Key { .. })
                         | AlterTableDefinition::AddKey(TableKey::CheckConstraint { .. })
-                        | AlterTableDefinition::AddKey(TableKey::ForeignKey { .. }) => false,
+                        | AlterTableDefinition::AddKey(TableKey::ForeignKey { .. })
+                        | AlterTableDefinition::Algorithm { .. }
+                        | AlterTableDefinition::Lock { .. } => false,
                     })
                 } else {
                     // We know it's an alter table, but we couldn't fully parse it.
