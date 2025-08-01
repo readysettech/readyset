@@ -349,6 +349,14 @@ fn collation_name() {
 }
 
 #[test]
+fn charset_name() {
+    check_parse_mysql!("CREATE TABLE t (x TEXT) CHARSET latin1");
+    check_parse_mysql!("CREATE TABLE t (x TEXT) CHARSET `latin1`");
+    check_parse_both!(r#"CREATE TABLE t (x TEXT) CHARSET "UTF8""#);
+    check_parse_both!("CREATE TABLE t (x TEXT) CHARSET 'UTF8'");
+}
+
+#[test]
 fn convert_mysql_style() {
     check_parse_mysql!("SELECT CONVERT('foo', CHAR)");
 }

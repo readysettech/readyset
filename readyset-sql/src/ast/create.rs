@@ -12,7 +12,7 @@ use proptest::{
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
-    CommentDef, CreateTableOptions, Ident, NamedParenthesizedList, SqlOption, Value, ValueWithSpan,
+    CommentDef, CreateTableOptions, NamedParenthesizedList, SqlOption, Value, ValueWithSpan,
 };
 use test_strategy::Arbitrary;
 
@@ -359,20 +359,9 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                         "DEFAULT CHARSET"
                         | "CHARSET"
                         | "DEFAULT CHARACTER SET"
-                        | "CHARACTER SET" => match value {
-                            sqlparser::ast::Expr::Value(ValueWithSpan {
-                                value: Value::SingleQuotedString(v),
-                                ..
-                            }) => options
-                                .push(CreateTableOption::Charset(CollationName::Quoted(v.into()))),
-                            sqlparser::ast::Expr::Identifier(Ident { value: v, .. }) => options
-                                .push(CreateTableOption::Charset(CollationName::Unquoted(
-                                    v.into(),
-                                ))),
-                            v => {
-                                return failed!("Unsupported charset option {v}");
-                            }
-                        },
+                        | "CHARACTER SET" => {
+                            options.push(CreateTableOption::Charset(value.try_into()?))
+                        }
                         "COLLATE" | "DEFAULT COLLATE" => {
                             options.push(CreateTableOption::Collate(value.try_into()?))
                         }
