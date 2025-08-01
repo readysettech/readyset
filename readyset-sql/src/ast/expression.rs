@@ -755,7 +755,7 @@ impl DialectDisplay for CaseWhenBranch {
 }
 
 /// SQL Expression AST
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize, From)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize)]
 pub enum Expr {
     /// Function call expressions
     ///
@@ -775,7 +775,6 @@ pub enum Expr {
     /// `<expr> <op> ANY (<expr>)` ([PostgreSQL docs][pg-docs])
     ///
     /// [pg-docs]: https://www.postgresql.org/docs/current/functions-comparisons.html#id-1.5.8.30.16
-    #[from(ignore)]
     OpAny {
         lhs: Box<Expr>,
         op: BinaryOperator,
@@ -785,7 +784,6 @@ pub enum Expr {
     /// `<expr> <op> SOME (<expr>)` ([PostgreSQL docs][pg-docs])
     ///
     /// [pg-docs]: https://www.postgresql.org/docs/current/functions-comparisons.html#id-1.5.8.30.16
-    #[from(ignore)]
     OpSome {
         lhs: Box<Expr>,
         op: BinaryOperator,
@@ -795,7 +793,6 @@ pub enum Expr {
     /// `<expr> <op> ALL (<expr>)` ([PostgreSQL docs][pg-docs])
     ///
     /// [pg-docs]: https://www.postgresql.org/docs/current/functions-comparisons.html#id-1.5.8.30.16
-    #[from(ignore)]
     OpAll {
         lhs: Box<Expr>,
         op: BinaryOperator,
@@ -815,7 +812,6 @@ pub enum Expr {
     Column(Column),
 
     /// EXISTS (select)
-    #[from(ignore)]
     Exists(Box<SelectStatement>),
 
     /// operand BETWEEN min AND max

@@ -432,7 +432,7 @@ impl TryFromDialect<sqlparser::ast::ObjectName> for Variable {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct SetVariables {
     /// A list of variables and their assigned values
-    #[strategy(vec(any::<(Variable, Literal)>().prop_map(|(var, lit)| (var, lit.into())), 1..=10))]
+    #[strategy(vec(any::<(Variable, Literal)>().prop_map(|(var, lit)| (var, Expr::Literal(lit))), 1..=10))]
     pub variables: Vec<(Variable, Expr)>,
 }
 
