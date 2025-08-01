@@ -78,6 +78,15 @@ impl TryFrom<sqlparser::ast::Expr> for CollationName {
     }
 }
 
+impl From<&str> for CollationName {
+    fn from(value: &str) -> Self {
+        Self {
+            name: SqlIdentifier::from(value.to_string()),
+            quote_style: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum CreateDatabaseOption {
     CharsetName { default: bool, name: CollationName },
@@ -514,14 +523,14 @@ impl CreateTableStatement {
                         if let Some(charset) = &default_charset {
                             field
                                 .constraints
-                                .push(ColumnConstraint::CharacterSet(charset.to_string()));
+                                .push(ColumnConstraint::CharacterSet(charset.clone()));
                         }
                     }
                     if field.get_collation().is_none() {
                         if let Some(collation) = &default_collation {
                             field
                                 .constraints
-                                .push(ColumnConstraint::Collation(collation.to_string()));
+                                .push(ColumnConstraint::Collation(collation.clone()));
                         }
                     }
                 }
@@ -548,7 +557,7 @@ impl CreateTableStatement {
                     .extract_if(.., |constraint| {
                         matches!(
                             constraint,
-                            ColumnConstraint::Collation(collation) if collation.eq_ignore_ascii_case("binary")
+                            ColumnConstraint::Collation(collation) if collation.name.eq_ignore_ascii_case("binary")
                         )
                     })
                     .next()

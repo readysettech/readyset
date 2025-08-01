@@ -3,7 +3,6 @@ use std::{cmp::Ordering, fmt};
 use itertools::Itertools;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
-use sqlparser::ast::ObjectName;
 use test_strategy::Arbitrary;
 
 use crate::{
@@ -224,8 +223,8 @@ impl Column {
 pub enum ColumnConstraint {
     Null,
     NotNull,
-    CharacterSet(#[any(r"[a-zA-Z_][a-zA-Z0-9_]{0,10}".into())] String),
-    Collation(#[any(r"[a-zA-Z_][a-zA-Z0-9_]{0,10}".into())] String),
+    CharacterSet(CollationName),
+    Collation(CollationName),
     DefaultValue(Expr),
     AutoIncrement,
     PrimaryKey,
@@ -316,21 +315,11 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
                         constraints.push(ColumnConstraint::AutoIncrement)
                     }
                 }
-                sqlparser::ast::ColumnOption::CharacterSet(ObjectName(object_name)) => {
-                    // strip the quoting style from the charset
-                    let value = object_name
-                        .iter()
-                        .map(|s| s.as_ident().unwrap().value.clone())
-                        .join(".");
-                    constraints.push(ColumnConstraint::CharacterSet(value))
+                sqlparser::ast::ColumnOption::CharacterSet(name) => {
+                    constraints.push(ColumnConstraint::CharacterSet(name.try_into()?))
                 }
-                sqlparser::ast::ColumnOption::Collation(ObjectName(object_name)) => {
-                    // strip the quoting style from the collation
-                    let value = object_name
-                        .iter()
-                        .map(|s| s.as_ident().unwrap().value.clone())
-                        .join(".");
-                    constraints.push(ColumnConstraint::Collation(value))
+                sqlparser::ast::ColumnOption::Collation(name) => {
+                    constraints.push(ColumnConstraint::Collation(name.try_into()?))
                 }
                 sqlparser::ast::ColumnOption::Comment(s) => {
                     comment = Some(s);
@@ -463,7 +452,7 @@ impl ColumnSpecification {
             return None;
         }
         self.constraints.iter().find_map(|c| match c {
-            ColumnConstraint::CharacterSet(charset) => Some(charset.as_str()),
+            ColumnConstraint::CharacterSet(charset) => Some(charset.name.as_str()),
             _ => None,
         })
     }
@@ -475,7 +464,7 @@ impl ColumnSpecification {
             return None;
         }
         self.constraints.iter().find_map(|c| match c {
-            ColumnConstraint::Collation(collation) => Some(collation.as_str()),
+            ColumnConstraint::Collation(collation) => Some(collation.name.as_str()),
             _ => None,
         })
     }

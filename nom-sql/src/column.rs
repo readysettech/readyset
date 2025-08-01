@@ -83,14 +83,14 @@ pub fn column_constraint(
                 delimited(whitespace0, tag_no_case("character set"), whitespace1),
                 collation_name(dialect),
             ),
-            |cs| ColumnConstraint::CharacterSet(cs.name.to_string()),
+            ColumnConstraint::CharacterSet,
         );
         let collate = map(
             preceded(
                 delimited(whitespace0, tag_no_case("collate"), whitespace1),
                 collation_name(dialect),
             ),
-            |c| ColumnConstraint::Collation(c.name.to_string()),
+            ColumnConstraint::Collation,
         );
 
         alt((
@@ -393,8 +393,14 @@ mod tests {
                     generated: None,
                     comment: None,
                     constraints: vec![
-                        ColumnConstraint::CharacterSet("utf8mb4".into()),
-                        ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
+                        ColumnConstraint::CharacterSet(CollationName {
+                            name: "utf8mb4".into(),
+                            quote_style: Some('\'')
+                        }),
+                        ColumnConstraint::Collation(CollationName {
+                            name: "utf8mb4_unicode_ci".into(),
+                            quote_style: Some('\'')
+                        }),
                     ],
                 }
             );
