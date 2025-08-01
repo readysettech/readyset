@@ -1058,7 +1058,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             Ceil { expr: _, field: _ } => not_yet_implemented!("CEIL"),
             Collate { expr, collation } => Ok(Self::Collate {
                 expr: expr.try_into_dialect(dialect)?,
-                collation: collation.try_into_dialect(dialect)?,
+                collation: collation.try_into()?,
             }),
             CompoundIdentifier(idents) => {
                 let is_variable = if let Some(first) = idents.first() {
@@ -1382,21 +1382,6 @@ impl TryFromDialect<Box<sqlparser::ast::Expr>> for Expr {
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
         (*value).try_into_dialect(dialect)
-    }
-}
-
-impl TryFromDialect<sqlparser::ast::ObjectName> for CollationName {
-    fn try_from_dialect(
-        value: sqlparser::ast::ObjectName,
-        _dialect: Dialect,
-    ) -> Result<Self, AstConversionError> {
-        // strip the quoting style from the ObjectName
-        let ident = value
-            .0
-            .iter()
-            .map(|s| s.as_ident().unwrap().value.clone())
-            .join(".");
-        Ok(CollationName::Unquoted(ident.into()))
     }
 }
 

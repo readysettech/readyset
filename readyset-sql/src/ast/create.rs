@@ -49,6 +49,48 @@ impl fmt::Display for CollationName {
     }
 }
 
+impl TryFrom<sqlparser::ast::ObjectName> for CollationName {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::ObjectName) -> Result<Self, Self::Error> {
+        use sqlparser::ast::ObjectNamePart::Identifier;
+        match value.0.into_iter().exactly_one() {
+            Ok(Identifier(ident)) => Ok(ident.into()),
+            Err(_) => failed!("Unexpected multi-part charset name"),
+        }
+    }
+}
+
+impl From<sqlparser::ast::Ident> for CollationName {
+    fn from(value: sqlparser::ast::Ident) -> Self {
+        if value.quote_style.is_some() {
+            CollationName::Quoted(SqlIdentifier::from(value.value))
+        } else {
+            CollationName::Unquoted(SqlIdentifier::from(value.value))
+        }
+    }
+}
+
+impl TryFrom<sqlparser::ast::Expr> for CollationName {
+    type Error = AstConversionError;
+
+    fn try_from(value: sqlparser::ast::Expr) -> Result<Self, Self::Error> {
+        use sqlparser::ast::Expr;
+        match value {
+            Expr::Value(ValueWithSpan {
+                value: Value::SingleQuotedString(s),
+                ..
+            }) => Ok(CollationName::Quoted(SqlIdentifier::from(s))),
+            Expr::Value(ValueWithSpan {
+                value: Value::DoubleQuotedString(s),
+                ..
+            }) => Ok(CollationName::Quoted(SqlIdentifier::from(s))),
+            Expr::Identifier(ident) => Ok(ident.into()),
+            _ => failed!("Unexpected expression type"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum CreateDatabaseOption {
     CharsetName { default: bool, name: CharsetName },
@@ -343,20 +385,9 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                                 return failed!("Unsupported charset option {v}");
                             }
                         },
-                        "COLLATE" | "DEFAULT COLLATE" => match value {
-                            sqlparser::ast::Expr::Value(ValueWithSpan {
-                                value: Value::SingleQuotedString(v),
-                                ..
-                            }) => options
-                                .push(CreateTableOption::Collate(CollationName::Quoted(v.into()))),
-                            sqlparser::ast::Expr::Identifier(Ident { value: v, .. }) => options
-                                .push(CreateTableOption::Collate(CollationName::Unquoted(
-                                    v.into(),
-                                ))),
-                            v => {
-                                return failed!("Unsupported collate value {v}");
-                            }
-                        },
+                        "COLLATE" | "DEFAULT COLLATE" => {
+                            options.push(CreateTableOption::Collate(value.try_into()?))
+                        }
                         "DATA DIRECTORY" => match value {
                             sqlparser::ast::Expr::Value(ValueWithSpan {
                                 value: Value::SingleQuotedString(v),

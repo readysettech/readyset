@@ -331,6 +331,24 @@ fn comment_on_column() {
 }
 
 #[test]
+fn collation_name() {
+    // nom-sql doesn't parse `COLLATE` expressions
+    check_parse_fails!(
+        Dialect::MySQL,
+        "SELECT * FROM t WHERE x COLLATE latin1_swedish_ci = 'foo'",
+        "NomSqlError"
+    );
+    check_parse_mysql!(
+        "CREATE TABLE t (x TEXT COLLATE latin1_swedish_ci) COLLATE latin1_swedish_ci"
+    );
+    check_parse_mysql!(
+        "CREATE TABLE t (x TEXT COLLATE `latin1_swedish_ci`) COLLATE `latin1_swedish_ci`"
+    );
+    check_parse_both!(r#"CREATE TABLE t (x TEXT COLLATE "en-US-x-icu") COLLATE "en-US-x-icu""#);
+    check_parse_both!("CREATE TABLE t (x TEXT COLLATE 'en-US-x-icu') COLLATE 'en-US-x-icu'");
+}
+
+#[test]
 fn convert_mysql_style() {
     check_parse_mysql!("SELECT CONVERT('foo', CHAR)");
 }

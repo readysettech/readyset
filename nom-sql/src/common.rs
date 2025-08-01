@@ -723,8 +723,15 @@ pub(crate) fn collation_name(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CollationName> {
     move |i| {
+        let quoted = !i.is_empty() && i[0] as u32 == dialect.quote_identifier_char() as u32;
         alt((
-            map(dialect.identifier(), CollationName::Unquoted),
+            map(dialect.identifier(), move |ident| {
+                if quoted {
+                    CollationName::Quoted(ident)
+                } else {
+                    CollationName::Unquoted(ident)
+                }
+            }),
             map(map_res(dialect.string_literal(), String::from_utf8), |s| {
                 CollationName::Quoted(SqlIdentifier::from(s))
             }),

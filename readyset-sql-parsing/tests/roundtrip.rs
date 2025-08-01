@@ -45,3 +45,13 @@ fn bare_functions() {
         check_rt_postgres!(format!(r#"SELECT * FROM myfuncs WHERE "{func}" = {func}"#));
     }
 }
+
+#[test]
+fn collation_name() {
+    check_rt_mysql!("CREATE TABLE t (x TEXT COLLATE latin1_swedish_ci)");
+    check_rt_mysql!("CREATE TABLE t (x TEXT COLLATE `latin1_swedish_ci`)");
+    check_rt_mysql!("CREATE TABLE t (x TEXT COLLATE 'latin1_swedish_ci')");
+    check_rt_mysql!(r#"CREATE TABLE t (x TEXT COLLATE "latin1_swedish_ci")"#);
+    check_rt_postgres!(r#"CREATE TABLE t (x TEXT COLLATE "latin1_swedish_ci")"#);
+    check_rt_postgres!("CREATE TABLE t (x TEXT COLLATE latin1_swedish_ci)");
+}
