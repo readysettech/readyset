@@ -844,11 +844,10 @@ impl MySqlBinlogConnector {
                                         Ok(opts) => opts,
                                         Err(_) => &mut Vec::new(),
                                     };
-                                    options.push(CreateTableOption::Collate(
-                                        CollationName::Quoted(SqlIdentifier::from(
-                                            collation.collation(),
-                                        )),
-                                    ));
+                                    options.push(CreateTableOption::Collate(CollationName {
+                                        name: SqlIdentifier::from(collation.collation()),
+                                        quote_style: None,
+                                    }));
                                 }
                                 statement.propagate_default_charset(readyset_sql::Dialect::MySQL);
                                 statement.rewrite_binary_collation_columns();

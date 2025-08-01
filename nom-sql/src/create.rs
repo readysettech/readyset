@@ -1811,7 +1811,10 @@ mod tests {
                     }),
                     options: Ok(vec![
                         CreateTableOption::Engine(Some("InnoDB".to_string())),
-                        CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
+                        CreateTableOption::Charset(CollationName {
+                            name: "utf8mb4".into(),
+                            quote_style: None
+                        }),
                     ])
                 }
             );
@@ -2319,7 +2322,10 @@ mod tests {
                     }),
                     options: Ok(vec![
                         CreateTableOption::Engine(Some("InnoDB".to_string())),
-                        CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into()))
+                        CreateTableOption::Charset(CollationName {
+                            name: "utf8mb4".into(),
+                            quote_style: None
+                        }),
                     ]),
                 }
             );
@@ -2555,10 +2561,14 @@ mod tests {
                 }),
                 options: Ok(vec![
                     CreateTableOption::Engine(Some("InnoDB".to_string())),
-                    CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
-                    CreateTableOption::Collate(CollationName::Unquoted(
-                        "utf8mb4_unicode_ci".into()
-                    ))
+                    CreateTableOption::Charset(CollationName {
+                        name: "utf8mb4".into(),
+                        quote_style: None
+                    }),
+                    CreateTableOption::Collate(CollationName {
+                        name: "utf8mb4_unicode_ci".into(),
+                        quote_style: None
+                    })
                 ]),
             }
         )
@@ -2590,8 +2600,14 @@ mod tests {
                     keys: None,
                 }),
                 options: Ok(vec![
-                    CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
-                    CreateTableOption::Collate(CollationName::Quoted("utf8mb4_unicode_ci".into()))
+                    CreateTableOption::Charset(CollationName {
+                        name: "utf8mb4".into(),
+                        quote_style: None
+                    }),
+                    CreateTableOption::Collate(CollationName {
+                        name: "utf8mb4_unicode_ci".into(),
+                        quote_style: Some('\'')
+                    })
                 ]),
             }
         )
@@ -2776,10 +2792,14 @@ PRIMARY KEY (`id`));";
                 }),
                 options: Ok(vec![
                     CreateTableOption::Engine(Some("InnoDB".to_string())),
-                    CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
-                    CreateTableOption::Collate(CollationName::Unquoted(
-                        "utf8mb4_0900_ai_ci".into()
-                    ))
+                    CreateTableOption::Charset(CollationName {
+                        name: "utf8mb4".into(),
+                        quote_style: None
+                    }),
+                    CreateTableOption::Collate(CollationName {
+                        name: "utf8mb4_0900_ai_ci".into(),
+                        quote_style: None
+                    }),
                 ]),
             }
         );

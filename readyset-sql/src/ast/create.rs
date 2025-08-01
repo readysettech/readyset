@@ -22,15 +22,16 @@ use crate::{
 };
 
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
-pub enum CollationName {
-    Quoted(SqlIdentifier),
-    Unquoted(SqlIdentifier),
+pub struct CollationName {
+    pub name: SqlIdentifier,
+    pub quote_style: Option<char>,
 }
 
 impl fmt::Display for CollationName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            CollationName::Quoted(i) | CollationName::Unquoted(i) => write!(f, "{i}"),
+        match self.quote_style {
+            Some(quote_style) => write!(f, "{quote_style}{name}{quote_style}", name = self.name),
+            None => write!(f, "{name}", name = self.name),
         }
     }
 }
@@ -49,10 +50,9 @@ impl TryFrom<sqlparser::ast::ObjectName> for CollationName {
 
 impl From<sqlparser::ast::Ident> for CollationName {
     fn from(value: sqlparser::ast::Ident) -> Self {
-        if value.quote_style.is_some() {
-            CollationName::Quoted(SqlIdentifier::from(value.value))
-        } else {
-            CollationName::Unquoted(SqlIdentifier::from(value.value))
+        Self {
+            name: SqlIdentifier::from(value.value),
+            quote_style: value.quote_style,
         }
     }
 }
@@ -62,18 +62,19 @@ impl TryFrom<sqlparser::ast::Expr> for CollationName {
 
     fn try_from(value: sqlparser::ast::Expr) -> Result<Self, Self::Error> {
         use sqlparser::ast::Expr;
-        match value {
+        let (name, quote_style) = match value {
             Expr::Value(ValueWithSpan {
                 value: Value::SingleQuotedString(s),
                 ..
-            }) => Ok(CollationName::Quoted(SqlIdentifier::from(s))),
+            }) => (SqlIdentifier::from(s), Some('\'')),
             Expr::Value(ValueWithSpan {
                 value: Value::DoubleQuotedString(s),
                 ..
-            }) => Ok(CollationName::Quoted(SqlIdentifier::from(s))),
-            Expr::Identifier(ident) => Ok(ident.into()),
-            _ => failed!("Unexpected expression type"),
-        }
+            }) => (SqlIdentifier::from(s), Some('"')),
+            Expr::Identifier(ident) => return Ok(ident.into()),
+            _ => return failed!("Unexpected expression type"),
+        };
+        Ok(Self { name, quote_style })
     }
 }
 

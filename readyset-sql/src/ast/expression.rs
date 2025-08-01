@@ -135,7 +135,7 @@ impl FunctionExpr {
                 "lower({}{})",
                 expr.alias(dialect)?,
                 if let Some(c) = collation {
-                    format!(" COLLATE \"{c}\"")
+                    format!(" COLLATE {c}")
                 } else {
                     "".to_string()
                 }
@@ -144,7 +144,7 @@ impl FunctionExpr {
                 "upper({}{})",
                 expr.alias(dialect)?,
                 if let Some(c) = collation {
-                    format!(" COLLATE \"{c}\"")
+                    format!(" COLLATE {c}")
                 } else {
                     "".to_string()
                 }
@@ -332,14 +332,14 @@ impl DialectDisplay for FunctionExpr {
             FunctionExpr::Lower { expr, collation } => {
                 write!(f, "lower({}", expr.display(dialect))?;
                 if let Some(c) = collation {
-                    write!(f, " COLLATE \"{c}\"")?;
+                    write!(f, " COLLATE {c}")?;
                 }
                 write!(f, ")")
             }
             FunctionExpr::Upper { expr, collation } => {
                 write!(f, "upper({}", expr.display(dialect))?;
                 if let Some(c) = collation {
-                    write!(f, " COLLATE \"{c}\"")?;
+                    write!(f, " COLLATE {c}")?;
                 }
                 write!(f, ")")
             }

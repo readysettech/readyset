@@ -83,20 +83,14 @@ pub fn column_constraint(
                 delimited(whitespace0, tag_no_case("character set"), whitespace1),
                 collation_name(dialect),
             ),
-            |cs| {
-                let char_set = cs.to_string();
-                ColumnConstraint::CharacterSet(char_set)
-            },
+            |cs| ColumnConstraint::CharacterSet(cs.name.to_string()),
         );
         let collate = map(
             preceded(
                 delimited(whitespace0, tag_no_case("collate"), whitespace1),
                 collation_name(dialect),
             ),
-            |c| {
-                let collation = c.to_string();
-                ColumnConstraint::Collation(collation)
-            },
+            |c| ColumnConstraint::Collation(c.name.to_string()),
         );
 
         alt((

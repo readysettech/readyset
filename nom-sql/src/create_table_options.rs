@@ -330,8 +330,14 @@ mod tests {
         should_parse_all(
             "DEFAULT CHARSET 'utf8mb4' COLLATE 'utf8mb4_unicode_520_ci'",
             vec![
-                CreateTableOption::Charset(CollationName::Quoted("utf8mb4".into())),
-                CreateTableOption::Collate(CollationName::Quoted("utf8mb4_unicode_520_ci".into())),
+                CreateTableOption::Charset(CollationName {
+                    name: "utf8mb4".into(),
+                    quote_style: Some('\''),
+                }),
+                CreateTableOption::Collate(CollationName {
+                    name: "utf8mb4_unicode_520_ci".into(),
+                    quote_style: Some('\''),
+                }),
             ],
         );
     }
@@ -341,10 +347,14 @@ mod tests {
         should_parse_all(
             "DEFAULT CHARSET 'utf8mb4' COLLATE utf8mb4_unicode_520_ci",
             vec![
-                CreateTableOption::Charset(CollationName::Quoted("utf8mb4".into())),
-                CreateTableOption::Collate(CollationName::Unquoted(
-                    "utf8mb4_unicode_520_ci".into(),
-                )),
+                CreateTableOption::Charset(CollationName {
+                    name: "utf8mb4".into(),
+                    quote_style: Some('\''),
+                }),
+                CreateTableOption::Collate(CollationName {
+                    name: "utf8mb4_unicode_520_ci".into(),
+                    quote_style: None,
+                }),
             ],
         );
     }
@@ -354,8 +364,14 @@ mod tests {
         should_parse_all(
             "DEFAULT CHARSET utf8mb4 COLLATE 'utf8mb4_unicode_520_ci'",
             vec![
-                CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
-                CreateTableOption::Collate(CollationName::Quoted("utf8mb4_unicode_520_ci".into())),
+                CreateTableOption::Charset(CollationName {
+                    name: "utf8mb4".into(),
+                    quote_style: None,
+                }),
+                CreateTableOption::Collate(CollationName {
+                    name: "utf8mb4_unicode_520_ci".into(),
+                    quote_style: Some('\''),
+                }),
             ],
         );
     }
@@ -365,10 +381,14 @@ mod tests {
         should_parse_all(
             "DEFAULT  CHARSET  utf8mb4  COLLATE  utf8mb4_unicode_520_ci",
             vec![
-                CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
-                CreateTableOption::Collate(CollationName::Unquoted(
-                    "utf8mb4_unicode_520_ci".into(),
-                )),
+                CreateTableOption::Charset(CollationName {
+                    name: "utf8mb4".into(),
+                    quote_style: None,
+                }),
+                CreateTableOption::Collate(CollationName {
+                    name: "utf8mb4_unicode_520_ci".into(),
+                    quote_style: None,
+                }),
             ],
         );
     }
@@ -381,7 +401,10 @@ mod tests {
             vec![
                 CreateTableOption::Engine(Some("InnoDB".to_string())),
                 CreateTableOption::AutoIncrement(44782967),
-                CreateTableOption::Charset(CollationName::Unquoted("binary".into())),
+                CreateTableOption::Charset(CollationName {
+                    name: "binary".into(),
+                    quote_style: None,
+                }),
                 CreateTableOption::Other {
                     key: "ROW_FORMAT".into(),
                     value: "COMPRESSED".into(),
@@ -398,9 +421,10 @@ mod tests {
     fn create_table_charset_extra_spacing() {
         should_parse_all(
             "DEFAULT CHARSET  utf8mb4",
-            vec![CreateTableOption::Charset(CollationName::Unquoted(
-                "utf8mb4".into(),
-            ))],
+            vec![CreateTableOption::Charset(CollationName {
+                name: "utf8mb4".into(),
+                quote_style: None,
+            })],
         );
     }
 
@@ -408,9 +432,10 @@ mod tests {
     fn create_table_character_set_extra_spacing() {
         should_parse_all(
             "DEFAULT CHARACTER   SET  utf8mb4",
-            vec![CreateTableOption::Charset(CollationName::Unquoted(
-                "utf8mb4".into(),
-            ))],
+            vec![CreateTableOption::Charset(CollationName {
+                name: "utf8mb4".into(),
+                quote_style: None,
+            })],
         );
     }
 
@@ -485,44 +510,56 @@ mod tests {
     fn create_table_default_charset_and_collate() {
         should_parse_all(
             "DEFAULT CHARSET=utf8mb4",
-            vec![CreateTableOption::Charset(CollationName::Unquoted(
-                "utf8mb4".into(),
-            ))],
+            vec![CreateTableOption::Charset(CollationName {
+                name: "utf8mb4".into(),
+                quote_style: None,
+            })],
         );
         should_parse_all(
             "DEFAULT CHARSET utf8mb4",
-            vec![CreateTableOption::Charset(CollationName::Unquoted(
-                "utf8mb4".into(),
-            ))],
+            vec![CreateTableOption::Charset(CollationName {
+                name: "utf8mb4".into(),
+                quote_style: None,
+            })],
         );
         should_parse_all(
             " CHARSET=utf8mb4",
-            vec![CreateTableOption::Charset(CollationName::Unquoted(
-                "utf8mb4".into(),
-            ))],
+            vec![CreateTableOption::Charset(CollationName {
+                name: "utf8mb4".into(),
+                quote_style: None,
+            })],
         );
         should_parse_all(
             "CHARSET utf8mb4",
-            vec![CreateTableOption::Charset(CollationName::Unquoted(
-                "utf8mb4".into(),
-            ))],
+            vec![CreateTableOption::Charset(CollationName {
+                name: "utf8mb4".into(),
+                quote_style: None,
+            })],
         );
         should_parse_all(
             "CHARSET=utf8mb4 DEFAULT COLLATE=utf8mb4_unicode_520_ci",
             vec![
-                CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
-                CreateTableOption::Collate(CollationName::Unquoted(
-                    "utf8mb4_unicode_520_ci".into(),
-                )),
+                CreateTableOption::Charset(CollationName {
+                    name: "utf8mb4".into(),
+                    quote_style: None,
+                }),
+                CreateTableOption::Collate(CollationName {
+                    name: "utf8mb4_unicode_520_ci".into(),
+                    quote_style: None,
+                }),
             ],
         );
         should_parse_all(
             "CHARSET=utf8mb4 COLLATE utf8mb4_unicode_520_ci",
             vec![
-                CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
-                CreateTableOption::Collate(CollationName::Unquoted(
-                    "utf8mb4_unicode_520_ci".into(),
-                )),
+                CreateTableOption::Charset(CollationName {
+                    name: "utf8mb4".into(),
+                    quote_style: None,
+                }),
+                CreateTableOption::Collate(CollationName {
+                    name: "utf8mb4_unicode_520_ci".into(),
+                    quote_style: None,
+                }),
             ],
         );
     }
