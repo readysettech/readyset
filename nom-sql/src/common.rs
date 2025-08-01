@@ -706,19 +706,6 @@ pub fn field_reference_list(
     move |i| separated_list0(ws_sep_comma, field_reference(dialect))(i)
 }
 
-pub(crate) fn charset_name(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CharsetName> {
-    move |i| {
-        alt((
-            map(dialect.identifier(), CharsetName::Unquoted),
-            map(map_res(dialect.string_literal(), String::from_utf8), |s| {
-                CharsetName::Quoted(SqlIdentifier::from(s))
-            }),
-        ))(i)
-    }
-}
-
 pub(crate) fn collation_name(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CollationName> {

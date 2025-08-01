@@ -10,7 +10,7 @@ use nom::sequence::{delimited, separated_pair, tuple};
 use nom_locate::LocatedSpan;
 use readyset_sql::{ast::*, Dialect, DialectDisplay};
 
-use crate::common::{charset_name, collation_name, ws_sep_comma, ws_sep_equals};
+use crate::common::{collation_name, ws_sep_comma, ws_sep_equals};
 use crate::dialect::DialectParser;
 use crate::literal::integer_literal;
 use crate::whitespace::{whitespace0, whitespace1};
@@ -199,8 +199,8 @@ fn create_option_default_charset(
     move |i| {
         map(
             alt((
-                create_option_equals_pair(charset_prefix, charset_name(dialect)),
-                create_option_spaced_pair(charset_prefix, charset_name(dialect)),
+                create_option_equals_pair(charset_prefix, collation_name(dialect)),
+                create_option_spaced_pair(charset_prefix, collation_name(dialect)),
             )),
             CreateTableOption::Charset,
         )(i)
@@ -330,7 +330,7 @@ mod tests {
         should_parse_all(
             "DEFAULT CHARSET 'utf8mb4' COLLATE 'utf8mb4_unicode_520_ci'",
             vec![
-                CreateTableOption::Charset(CharsetName::Quoted("utf8mb4".into())),
+                CreateTableOption::Charset(CollationName::Quoted("utf8mb4".into())),
                 CreateTableOption::Collate(CollationName::Quoted("utf8mb4_unicode_520_ci".into())),
             ],
         );
@@ -341,7 +341,7 @@ mod tests {
         should_parse_all(
             "DEFAULT CHARSET 'utf8mb4' COLLATE utf8mb4_unicode_520_ci",
             vec![
-                CreateTableOption::Charset(CharsetName::Quoted("utf8mb4".into())),
+                CreateTableOption::Charset(CollationName::Quoted("utf8mb4".into())),
                 CreateTableOption::Collate(CollationName::Unquoted(
                     "utf8mb4_unicode_520_ci".into(),
                 )),
@@ -354,7 +354,7 @@ mod tests {
         should_parse_all(
             "DEFAULT CHARSET utf8mb4 COLLATE 'utf8mb4_unicode_520_ci'",
             vec![
-                CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
                 CreateTableOption::Collate(CollationName::Quoted("utf8mb4_unicode_520_ci".into())),
             ],
         );
@@ -365,7 +365,7 @@ mod tests {
         should_parse_all(
             "DEFAULT  CHARSET  utf8mb4  COLLATE  utf8mb4_unicode_520_ci",
             vec![
-                CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
                 CreateTableOption::Collate(CollationName::Unquoted(
                     "utf8mb4_unicode_520_ci".into(),
                 )),
@@ -381,7 +381,7 @@ mod tests {
             vec![
                 CreateTableOption::Engine(Some("InnoDB".to_string())),
                 CreateTableOption::AutoIncrement(44782967),
-                CreateTableOption::Charset(CharsetName::Unquoted("binary".into())),
+                CreateTableOption::Charset(CollationName::Unquoted("binary".into())),
                 CreateTableOption::Other {
                     key: "ROW_FORMAT".into(),
                     value: "COMPRESSED".into(),
@@ -398,7 +398,7 @@ mod tests {
     fn create_table_charset_extra_spacing() {
         should_parse_all(
             "DEFAULT CHARSET  utf8mb4",
-            vec![CreateTableOption::Charset(CharsetName::Unquoted(
+            vec![CreateTableOption::Charset(CollationName::Unquoted(
                 "utf8mb4".into(),
             ))],
         );
@@ -408,7 +408,7 @@ mod tests {
     fn create_table_character_set_extra_spacing() {
         should_parse_all(
             "DEFAULT CHARACTER   SET  utf8mb4",
-            vec![CreateTableOption::Charset(CharsetName::Unquoted(
+            vec![CreateTableOption::Charset(CollationName::Unquoted(
                 "utf8mb4".into(),
             ))],
         );
@@ -485,32 +485,32 @@ mod tests {
     fn create_table_default_charset_and_collate() {
         should_parse_all(
             "DEFAULT CHARSET=utf8mb4",
-            vec![CreateTableOption::Charset(CharsetName::Unquoted(
+            vec![CreateTableOption::Charset(CollationName::Unquoted(
                 "utf8mb4".into(),
             ))],
         );
         should_parse_all(
             "DEFAULT CHARSET utf8mb4",
-            vec![CreateTableOption::Charset(CharsetName::Unquoted(
+            vec![CreateTableOption::Charset(CollationName::Unquoted(
                 "utf8mb4".into(),
             ))],
         );
         should_parse_all(
             " CHARSET=utf8mb4",
-            vec![CreateTableOption::Charset(CharsetName::Unquoted(
+            vec![CreateTableOption::Charset(CollationName::Unquoted(
                 "utf8mb4".into(),
             ))],
         );
         should_parse_all(
             "CHARSET utf8mb4",
-            vec![CreateTableOption::Charset(CharsetName::Unquoted(
+            vec![CreateTableOption::Charset(CollationName::Unquoted(
                 "utf8mb4".into(),
             ))],
         );
         should_parse_all(
             "CHARSET=utf8mb4 DEFAULT COLLATE=utf8mb4_unicode_520_ci",
             vec![
-                CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
                 CreateTableOption::Collate(CollationName::Unquoted(
                     "utf8mb4_unicode_520_ci".into(),
                 )),
@@ -519,7 +519,7 @@ mod tests {
         should_parse_all(
             "CHARSET=utf8mb4 COLLATE utf8mb4_unicode_520_ci",
             vec![
-                CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
                 CreateTableOption::Collate(CollationName::Unquoted(
                     "utf8mb4_unicode_520_ci".into(),
                 )),

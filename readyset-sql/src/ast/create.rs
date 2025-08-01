@@ -21,20 +21,6 @@ use crate::{
     ast::*,
 };
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
-pub enum CharsetName {
-    Quoted(SqlIdentifier),
-    Unquoted(SqlIdentifier),
-}
-
-impl fmt::Display for CharsetName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            CharsetName::Quoted(i) | CharsetName::Unquoted(i) => write!(f, "{i}"),
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Hash, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum CollationName {
     Quoted(SqlIdentifier),
@@ -93,7 +79,7 @@ impl TryFrom<sqlparser::ast::Expr> for CollationName {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum CreateDatabaseOption {
-    CharsetName { default: bool, name: CharsetName },
+    CharsetName { default: bool, name: CollationName },
     CollationName { default: bool, name: CollationName },
     Encryption { default: bool, encrypted: bool },
 }
@@ -378,9 +364,11 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                                 value: Value::SingleQuotedString(v),
                                 ..
                             }) => options
-                                .push(CreateTableOption::Charset(CharsetName::Quoted(v.into()))),
+                                .push(CreateTableOption::Charset(CollationName::Quoted(v.into()))),
                             sqlparser::ast::Expr::Identifier(Ident { value: v, .. }) => options
-                                .push(CreateTableOption::Charset(CharsetName::Unquoted(v.into()))),
+                                .push(CreateTableOption::Charset(CollationName::Unquoted(
+                                    v.into(),
+                                ))),
                             v => {
                                 return failed!("Unsupported charset option {v}");
                             }
@@ -499,7 +487,7 @@ impl CreateTableStatement {
     }
 
     /// If the create statement contained a charset, return it
-    pub fn get_charset(&self) -> Option<&CharsetName> {
+    pub fn get_charset(&self) -> Option<&CollationName> {
         self.options
             .as_ref()
             .ok()?

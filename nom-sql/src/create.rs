@@ -14,8 +14,8 @@ use readyset_sql::{ast::*, Dialect};
 
 use crate::column::column_specification;
 use crate::common::{
-    charset_name, collation_name, column_identifier_no_alias, debug_print, if_not_exists,
-    parse_fallible, statement_terminator, until_statement_terminator, ws_sep_comma,
+    collation_name, column_identifier_no_alias, debug_print, if_not_exists, parse_fallible,
+    statement_terminator, until_statement_terminator, ws_sep_comma,
 };
 use crate::compound_select::nested_compound_selection;
 use crate::create_table_options::{
@@ -595,8 +595,8 @@ fn charset_option(
     move |i| {
         map(
             alt((
-                create_option_spaced_pair(charset_attribute_name, charset_name(dialect)),
-                create_option_equals_pair(charset_attribute_name, charset_name(dialect)),
+                create_option_spaced_pair(charset_attribute_name, collation_name(dialect)),
+                create_option_equals_pair(charset_attribute_name, collation_name(dialect)),
             )),
             |name| CreateDatabaseOption::CharsetName {
                 default: false,
@@ -1811,7 +1811,7 @@ mod tests {
                     }),
                     options: Ok(vec![
                         CreateTableOption::Engine(Some("InnoDB".to_string())),
-                        CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                        CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
                     ])
                 }
             );
@@ -2319,7 +2319,7 @@ mod tests {
                     }),
                     options: Ok(vec![
                         CreateTableOption::Engine(Some("InnoDB".to_string())),
-                        CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into()))
+                        CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into()))
                     ]),
                 }
             );
@@ -2555,7 +2555,7 @@ mod tests {
                 }),
                 options: Ok(vec![
                     CreateTableOption::Engine(Some("InnoDB".to_string())),
-                    CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                    CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
                     CreateTableOption::Collate(CollationName::Unquoted(
                         "utf8mb4_unicode_ci".into()
                     ))
@@ -2590,7 +2590,7 @@ mod tests {
                     keys: None,
                 }),
                 options: Ok(vec![
-                    CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                    CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
                     CreateTableOption::Collate(CollationName::Quoted("utf8mb4_unicode_ci".into()))
                 ]),
             }
@@ -2776,7 +2776,7 @@ PRIMARY KEY (`id`));";
                 }),
                 options: Ok(vec![
                     CreateTableOption::Engine(Some("InnoDB".to_string())),
-                    CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                    CreateTableOption::Charset(CollationName::Unquoted("utf8mb4".into())),
                     CreateTableOption::Collate(CollationName::Unquoted(
                         "utf8mb4_0900_ai_ci".into()
                     ))

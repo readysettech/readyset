@@ -12,7 +12,7 @@ pub enum CreateTableOption {
     Engine(
         #[strategy(option::of(any_with::<String>(r#"[a-zA-Z0-9_]{1,16}"#.into())))] Option<String>,
     ),
-    Charset(CharsetName),
+    Charset(CollationName),
     Collate(CollationName),
     Comment(String),
     DataDirectory(String),

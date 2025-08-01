@@ -6,7 +6,7 @@ use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use readyset_sql::{ast::*, Dialect};
 
-use crate::common::{charset_name, collation_name, column_identifier_no_alias, parse_comment};
+use crate::common::{collation_name, column_identifier_no_alias, parse_comment};
 use crate::expression::expression;
 use crate::sql_type::type_identifier;
 use crate::whitespace::{whitespace0, whitespace1};
@@ -81,7 +81,7 @@ pub fn column_constraint(
         let character_set = map(
             preceded(
                 delimited(whitespace0, tag_no_case("character set"), whitespace1),
-                charset_name(dialect),
+                collation_name(dialect),
             ),
             |cs| {
                 let char_set = cs.to_string();
