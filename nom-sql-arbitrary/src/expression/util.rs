@@ -22,7 +22,11 @@ where
     expr.prop_map(move |e| Expr::Cast {
         expr: Box::new(e),
         ty: ty.clone(),
-        postgres_style,
+        style: if postgres_style {
+            CastStyle::DoubleColon
+        } else {
+            CastStyle::As
+        },
     })
 }
 

@@ -51,7 +51,9 @@ impl<'a> ReferredColumnsIter<'a> {
                 self.exprs_to_visit.push(lhs);
                 self.visit_expr(rhs)
             }
-            Expr::UnaryOp { rhs: expr, .. } | Expr::Cast { expr, .. } => self.visit_expr(expr),
+            Expr::UnaryOp { rhs: expr, .. }
+            | Expr::Cast { expr, .. }
+            | Expr::ConvertUsing { expr, .. } => self.visit_expr(expr),
             Expr::Exists { .. } => None,
             Expr::Between {
                 operand, min, max, ..
@@ -191,7 +193,9 @@ impl<'a> ReferredColumnsMut<'a> {
                 self.exprs_to_visit.push(lhs);
                 self.visit_expr(rhs)
             }
-            Expr::UnaryOp { rhs: expr, .. } | Expr::Cast { expr, .. } => self.visit_expr(expr),
+            Expr::UnaryOp { rhs: expr, .. }
+            | Expr::Cast { expr, .. }
+            | Expr::ConvertUsing { expr, .. } => self.visit_expr(expr),
             Expr::Exists { .. } => None,
             Expr::Between {
                 operand, min, max, ..
@@ -430,7 +434,9 @@ pub fn contains_aggregate(expr: &Expr) -> bool {
         | Expr::OpAny { lhs, rhs, .. }
         | Expr::OpSome { lhs, rhs, .. }
         | Expr::OpAll { lhs, rhs, .. } => contains_aggregate(lhs) || contains_aggregate(rhs),
-        Expr::UnaryOp { rhs: expr, .. } | Expr::Cast { expr, .. } => contains_aggregate(expr),
+        Expr::UnaryOp { rhs: expr, .. }
+        | Expr::Cast { expr, .. }
+        | Expr::ConvertUsing { expr, .. } => contains_aggregate(expr),
         Expr::Exists(_) => false,
         Expr::Between {
             operand, min, max, ..
@@ -505,9 +511,9 @@ impl Expr {
             | Expr::OpAll { lhs, rhs, .. } => {
                 Box::new(vec![lhs, rhs].into_iter().map(AsRef::as_ref)) as _
             }
-            Expr::UnaryOp { rhs: expr, .. } | Expr::Cast { expr, .. } => {
-                Box::new(iter::once(expr.as_ref())) as _
-            }
+            Expr::UnaryOp { rhs: expr, .. }
+            | Expr::Cast { expr, .. }
+            | Expr::ConvertUsing { expr, .. } => Box::new(iter::once(expr.as_ref())) as _,
             Expr::CaseWhen {
                 branches,
                 else_expr,

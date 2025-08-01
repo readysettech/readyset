@@ -754,6 +754,38 @@ impl DialectDisplay for CaseWhenBranch {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize)]
+pub enum CastStyle {
+    /// `CAST(expression AS type)`
+    As,
+    /// `CONVERT(expression USING charset)`
+    Convert,
+    /// `expr::type`
+    DoubleColon,
+}
+
+impl Arbitrary for CastStyle {
+    type Parameters = Option<Dialect>;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        match args {
+            Some(Dialect::PostgreSQL) => {
+                prop_oneof![Just(CastStyle::As), Just(CastStyle::DoubleColon)].boxed()
+            }
+            Some(Dialect::MySQL) => {
+                prop_oneof![Just(CastStyle::As), Just(CastStyle::Convert),].boxed()
+            }
+            None => prop_oneof![
+                Just(CastStyle::As),
+                Just(CastStyle::Convert),
+                Just(CastStyle::DoubleColon)
+            ]
+            .boxed(),
+        }
+    }
+}
+
 /// SQL Expression AST
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize)]
 pub enum Expr {
@@ -834,12 +866,27 @@ pub enum Expr {
         negated: bool,
     },
 
-    /// `CAST(expression AS type)`.
+    /// All three basic kinds of type casting:
+    /// - `CAST(expression AS type)`
+    /// - `expr::type`
+    /// - `CONVERT(expression, type)`
+    ///
+    /// Note that non-type casting is handled elsewhere:
+    /// - Charset conversions with `CONVERT(expression USING charset)` are in [`Expr::Convert`]
+    /// - `expr COLLATE collation` is in [`Expr::Collate`]
     Cast {
         expr: Box<Expr>,
         ty: SqlType,
-        /// If true indicates that the expression used the Postgres syntax (expr::type)
-        postgres_style: bool,
+        style: CastStyle,
+    },
+
+    /// `CONVERT(expression USING charset)`
+    ///
+    /// `CONVERT(expression, type)` is equivalent to `CAST(expression AS type)`, so we represent it
+    /// with [`Expr::Cast`] and [`CastStyle::Convert`].
+    ConvertUsing {
+        expr: Box<Expr>,
+        charset: CollationName,
     },
 
     /// fn OVER([PARTITION BY [column, ...]] [ORDER BY [column [ASC|DESC], ...]])
@@ -1053,7 +1100,11 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             } => Ok(Self::Cast {
                 expr: expr.try_into_dialect(dialect)?,
                 ty: data_type.try_into_dialect(dialect)?,
-                postgres_style: kind == sqlparser::ast::CastKind::DoubleColon,
+                style: if kind == sqlparser::ast::CastKind::DoubleColon {
+                    CastStyle::DoubleColon
+                } else {
+                    CastStyle::As
+                },
             }),
             Ceil { expr: _, field: _ } => not_yet_implemented!("CEIL"),
             Collate { expr, collation } => Ok(Self::Collate {
@@ -1074,13 +1125,30 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 }
             }
             Convert {
-                expr: _,
-                data_type: _,
-                charset: _,
+                expr,
+                data_type,
+                charset,
                 target_before_value: _,
                 styles: _,
                 is_try: _,
-            } => unsupported!("CONVERT"), // XXX: this could be supported in some cases by rewriting to `CAST`
+            } => {
+                let expr = expr.try_into_dialect(dialect)?;
+                if let Some(data_type) = data_type {
+                    debug_assert!(charset.is_none());
+                    Ok(Self::Cast {
+                        expr,
+                        ty: data_type.try_into_dialect(dialect)?,
+                        style: CastStyle::Convert,
+                    })
+                } else if let Some(charset) = charset {
+                    Ok(Self::ConvertUsing {
+                        expr,
+                        charset: charset.try_into()?,
+                    })
+                } else {
+                    failed!("Neither type nor charset present in CONVERT")
+                }
+            }
             Cube(_vec) => not_yet_implemented!("CUBE"),
             Dictionary(_vec) => not_yet_implemented!("DICTIONARY"),
             Exists { subquery, negated } => {
@@ -1548,7 +1616,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             Self::Cast {
                 expr: next_expr()?,
                 ty: crate::ast::SqlType::Date,
-                postgres_style: false,
+                style: CastStyle::As,
             }
         } else if ident.value.eq_ignore_ascii_case("EXTRACT") {
             return failed!("{ident} should have been converted earlier");
@@ -1812,20 +1880,19 @@ impl DialectDisplay for Expr {
                 write!(f, " IN ({})", rhs.display(dialect))
             }
             Expr::NestedSelect(q) => write!(f, "({})", q.display(dialect)),
-            Expr::Cast {
-                expr,
-                ty,
-                postgres_style,
-            } if *postgres_style => {
-                write!(f, "({}::{})", expr.display(dialect), ty.display(dialect))
+            Expr::Cast { expr, ty, style } => {
+                let expr = expr.display(dialect);
+                let ty = ty.display(dialect);
+                match style {
+                    CastStyle::As => write!(f, "CAST({expr} as {ty})"),
+                    CastStyle::Convert => write!(f, "CONVERT({expr}, {ty})"),
+                    CastStyle::DoubleColon => write!(f, "({expr}::{ty})"),
+                }
             }
-            Expr::Cast { expr, ty, .. } => write!(
-                f,
-                "CAST({} as {})",
-                expr.display(dialect),
-                ty.display(dialect)
-            ),
-
+            Expr::ConvertUsing { expr, charset } => {
+                let expr = expr.display(dialect);
+                write!(f, "CONVERT({expr} USING {charset})")
+            }
             Expr::Array(exprs) => {
                 fn write_value(
                     expr: &Expr,
@@ -2048,13 +2115,9 @@ impl Arbitrary for Expr {
                         dialect: params,
                         ..Default::default()
                     }),
-                    any::<bool>(),
+                    any_with::<CastStyle>(params),
                 )
-                    .prop_map(|(expr, ty, postgres_style)| Expr::Cast {
-                        expr,
-                        ty,
-                        postgres_style,
-                    })
+                    .prop_map(|(expr, ty, style)| Expr::Cast { expr, ty, style })
                     .boxed())
                 .or(proptest::collection::vec(element, 0..24)
                     .prop_map(Expr::Array)

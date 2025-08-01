@@ -1458,6 +1458,9 @@ impl Expr {
             }),
             AstExpr::Exists(_) => unsupported!("EXISTS not currently supported"),
             AstExpr::Variable(_) => unsupported!("Variables not currently supported"),
+            AstExpr::ConvertUsing { .. } => {
+                unsupported!("CONVERT(x USING charset) not currently supported")
+            }
             AstExpr::Between { .. }
             | AstExpr::NestedSelect(_)
             | AstExpr::In { .. }

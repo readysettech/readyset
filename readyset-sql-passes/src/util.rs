@@ -159,7 +159,9 @@ pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
             ret.append(&mut map_aggregates(lhs));
             ret.append(&mut map_aggregates(rhs));
         }
-        Expr::UnaryOp { rhs: expr, .. } | Expr::Cast { expr, .. } => {
+        Expr::UnaryOp { rhs: expr, .. }
+        | Expr::Cast { expr, .. }
+        | Expr::ConvertUsing { expr, .. } => {
             ret.append(&mut map_aggregates(expr));
         }
         Expr::Exists(_) => {}

@@ -357,17 +357,14 @@ fn charset_name() {
 }
 
 #[test]
-fn convert_mysql_style() {
+fn convert_type() {
     check_parse_mysql!("SELECT CONVERT('foo', CHAR)");
 }
 
 #[test]
-fn convert_with_using() {
-    check_parse_fails!(
-        Dialect::MySQL,
-        "SELECT CONVERT('foo' USING latin1)",
-        "NomSqlError"
-    );
+fn convert_charset() {
+    check_parse_mysql!("SELECT CONVERT('foo' USING latin1)");
+    check_parse_mysql!("SELECT CONVERT('foo' USING 'latin1')");
 }
 
 #[test]

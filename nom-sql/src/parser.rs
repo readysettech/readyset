@@ -693,7 +693,7 @@ mod tests {
                                 fields: None,
                                 precision: None
                             },
-                            postgres_style: true
+                            style: CastStyle::DoubleColon,
                         },
                         alias: Some("foo".into())
                     }],

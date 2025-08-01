@@ -11,7 +11,7 @@ use nom_locate::LocatedSpan;
 use pratt::{Affix, Associativity, PrattParser, Precedence};
 use readyset_sql::{ast::*, Dialect};
 
-use crate::common::{column_identifier_no_alias, function_expr, ws_sep_comma};
+use crate::common::{collation_name, column_identifier_no_alias, function_expr, ws_sep_comma};
 use crate::dialect::DialectParser;
 use crate::literal::literal;
 use crate::select::nested_selection;
@@ -401,7 +401,7 @@ where
                 Expr::Cast {
                     expr: tt.into(),
                     ty,
-                    postgres_style: true,
+                    style: CastStyle::DoubleColon,
                 }
             }
             OpSuffix(lhs, op, suffix, rhs) => {
@@ -669,9 +669,72 @@ fn cast(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], 
             Expr::Cast {
                 expr: Box::new(arg),
                 ty,
-                postgres_style: false,
+                style: CastStyle::As,
             },
         ))
+    }
+}
+
+fn convert_inner_type(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
+    move |i| {
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag_no_case(",")(i)?;
+        let (i, _) = whitespace0(i)?;
+
+        let (i, ty) = if dialect == Dialect::MySQL {
+            // See comment on allowed types in `cast`
+            alt((type_identifier(dialect), mysql_int_cast_targets()))(i)?
+        } else {
+            type_identifier(dialect)(i)?
+        };
+
+        Ok((i, ty))
+    }
+}
+
+fn convert_inner_using(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CollationName> {
+    move |i| {
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("using")(i)?;
+        let (i, _) = whitespace1(i)?;
+        collation_name(dialect)(i)
+    }
+}
+
+fn convert(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
+    move |i| {
+        let (i, _) = tag_no_case("convert")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = char('(')(i)?;
+
+        let (i, arg) = expression(dialect)(i)?;
+
+        let (i, expr) = if let Ok((i, ty)) = convert_inner_type(dialect)(i) {
+            (
+                i,
+                Expr::Cast {
+                    expr: Box::new(arg),
+                    ty,
+                    style: CastStyle::Convert,
+                },
+            )
+        } else {
+            let (i, charset) = convert_inner_using(dialect)(i)?;
+            (
+                i,
+                Expr::ConvertUsing {
+                    expr: Box::new(arg),
+                    charset,
+                },
+            )
+        };
+
+        let (i, _) = char(')')(i)?;
+        Ok((i, expr))
     }
 }
 
@@ -691,7 +754,7 @@ fn date_cast_function(
             Expr::Cast {
                 expr: Box::new(arg),
                 ty: SqlType::Date,
-                postgres_style: false,
+                style: CastStyle::As,
             },
         ))
     }
@@ -831,6 +894,7 @@ pub(crate) fn simple_expr(
             row_expr_explicit(dialect),
             row_expr_implicit(dialect),
             cast(dialect),
+            convert(dialect),
             date_cast_function(dialect),
             map(function_expr(dialect), Expr::Call),
             map(literal(dialect), Expr::Literal),
@@ -884,7 +948,7 @@ mod tests {
                         schema: None,
                         name: "abc".into(),
                     }),
-                    postgres_style: true,
+                    style: CastStyle::DoubleColon,
                 }),
                 op: BinaryOperator::Less,
                 rhs: Box::new(Expr::Literal(Literal::String("{b,c}".to_string()))),
@@ -968,7 +1032,7 @@ mod tests {
                     rhs: Box::new(Expr::Cast {
                         expr: Box::new(Expr::Literal(Literal::Integer(128))),
                         ty: SqlType::Int(None),
-                        postgres_style: true
+                        style: CastStyle::DoubleColon
                     }),
                 }
             );
@@ -982,7 +1046,7 @@ mod tests {
                     rhs: Box::new(Expr::Cast {
                         expr: Box::new(Expr::Literal(Literal::Integer(128))),
                         ty: SqlType::Text,
-                        postgres_style: true
+                        style: CastStyle::DoubleColon
                     }),
                 }
             );
@@ -997,7 +1061,7 @@ mod tests {
                         rhs: Box::new(Expr::Literal(Literal::Integer(128)))
                     }),
                     ty: SqlType::Text,
-                    postgres_style: true,
+                    style: CastStyle::DoubleColon,
                 },
             );
 
@@ -1012,7 +1076,7 @@ mod tests {
                     rhs: Box::new(Expr::Cast {
                         expr: Box::new(Expr::Column(Column::from("postgres.column"))),
                         ty: SqlType::Double,
-                        postgres_style: true,
+                        style: CastStyle::DoubleColon,
                     }),
                 }
             );
@@ -1026,7 +1090,7 @@ mod tests {
                 Expr::Cast {
                     expr: Box::new(Expr::Literal(Literal::Integer(-128))),
                     ty: SqlType::Unsigned,
-                    postgres_style: false
+                    style: CastStyle::As
                 }
             );
         }
@@ -1038,7 +1102,7 @@ mod tests {
             Expr::Cast {
                 expr: Box::new(Expr::Literal(Literal::String(arg.to_string()))),
                 ty: SqlType::Date,
-                postgres_style: false,
+                style: CastStyle::As,
             }
         }
         fn from_date_func(dialect: Dialect, arg: &str) -> Expr {
@@ -2282,7 +2346,7 @@ mod tests {
                     lhs: Box::new(Expr::Cast {
                         expr: Box::new(Expr::Literal(r#"["a", "b"]"#.into())),
                         ty: SqlType::Jsonb,
-                        postgres_style: true,
+                        style: CastStyle::DoubleColon,
                     }),
                     op: BinaryOperator::DoublePipe,
                     rhs: Box::new(Expr::Literal(r#"["c", "d"]"#.into())),
@@ -2536,7 +2600,7 @@ mod tests {
                         Expr::Cast {
                             expr: Box::new(Expr::Literal("2".into())),
                             ty: SqlType::Int(None),
-                            postgres_style: true,
+                            style: CastStyle::DoubleColon,
                         },
                     ]),
                     Expr::Array(vec![Expr::Literal(3.into())])
@@ -2551,7 +2615,7 @@ mod tests {
                 Expr::Cast {
                     expr: Box::new(Expr::Literal("2".into())),
                     ty: SqlType::Int(None),
-                    postgres_style: true,
+                    style: CastStyle::DoubleColon,
                 },
             ])]);
             let res = expr.display(Dialect::PostgreSQL).to_string();

@@ -1565,7 +1565,7 @@ mod tests {
                         expr: Expr::Cast {
                             expr: Box::new(Expr::Column(Column::from("created_at"))),
                             ty: SqlType::Date,
-                            postgres_style: false,
+                            style: CastStyle::As,
                         },
                     },
                 ],
@@ -2147,7 +2147,7 @@ mod tests {
                     expr: Expr::Cast {
                         expr: Box::new(Expr::Column(Column::from("a"))),
                         ty: SqlType::Numeric(None),
-                        postgres_style: true,
+                        style: CastStyle::DoubleColon,
                     },
                     alias: Some("n".into()),
                 }],
@@ -2168,7 +2168,7 @@ mod tests {
                     expr: Expr::Cast {
                         expr: Box::new(Expr::Column(Column::from("a"))),
                         ty: SqlType::Numeric(Some((1, Some(2)))),
-                        postgres_style: true,
+                        style: CastStyle::DoubleColon,
                     },
                     alias: Some("n".into()),
                 }],

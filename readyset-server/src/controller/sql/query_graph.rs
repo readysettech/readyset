@@ -746,6 +746,7 @@ fn classify_conditionals(
         | Expr::Column(_)
         | Expr::NestedSelect(_)
         | Expr::Cast { .. }
+        | Expr::ConvertUsing { .. }
         | Expr::Array(_)
         | Expr::Row { .. }
         | Expr::Collate { .. }

@@ -845,7 +845,7 @@ mod tests {
             FunctionExpr::Max(Box::new(Expr::Cast {
                 expr: Box::new(Expr::Column("foo".into())),
                 ty: SqlType::Int(None),
-                postgres_style: false,
+                style: CastStyle::As,
             }))
         )
     }
@@ -1017,7 +1017,7 @@ mod tests {
                     name: "start_ddtm".into(),
                 })),
                 ty: SqlType::Date,
-                postgres_style: false,
+                style: CastStyle::As,
             };
             let res = expression(Dialect::MySQL)(LocatedSpan::new(qs));
             assert_eq!(res.unwrap().1, expected);
@@ -1105,7 +1105,7 @@ mod tests {
                     name: "start_ddtm".into(),
                 })),
                 ty: SqlType::Date,
-                postgres_style: false,
+                style: CastStyle::As,
             };
             let res = expression(Dialect::PostgreSQL)(LocatedSpan::new(qs));
             assert_eq!(res.unwrap().1, expected);
