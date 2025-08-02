@@ -23,6 +23,7 @@ RUN set -eux; \
         liblz4-dev \
         curl \
         protobuf-compiler \
+        jq \
         rsync && \
     rm -rf /var/lib/apt/lists/*
 
