@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d86d0444adfbbed5f9bf8cf8fe33f7b676d93043a4e6fa9270e3d47d88409306 # shrinks to [CreateTable("___3_gj_7vljlcl___aw866_w13", [ColumnSpec { name: "u4t9_z89_3k__2", sql_type: Text }, ColumnSpec { name: "to", sql_type: Blob }]), AddKey { table: "___3_gj_7vljlcl___aw866_w13", column: "to" }]

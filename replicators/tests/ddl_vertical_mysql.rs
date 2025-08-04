@@ -754,7 +754,7 @@ impl ModelState for DDLModelState {
                     SqlType::Blob | SqlType::Text => "(10)",
                     _ => "",
                 };
-                let query = format!("ALTER TABLE `{table}` ADD KEY ({column}{key_len})");
+                let query = format!("ALTER TABLE `{table}` ADD KEY (`{column}`{key_len})");
                 println!("Adding key: {query}");
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
