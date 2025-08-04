@@ -2905,7 +2905,8 @@ where
                     | SqlQuery::DropView(_)
                     | SqlQuery::AlterTable(_)
                     | SqlQuery::Truncate(_)
-                    | SqlQuery::Use(_) => {
+                    | SqlQuery::Use(_)
+                    | SqlQuery::CreateIndex(_) => {
                         event.sql_type = SqlQueryType::Other;
                         upstream.query(raw_query).await.map(QueryResult::Upstream)
                     }

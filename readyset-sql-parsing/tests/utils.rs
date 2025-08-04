@@ -59,11 +59,40 @@ macro_rules! check_rt_mysql {
 }
 
 #[macro_export]
+macro_rules! check_rt_mysql_sqlparser {
+    ($sql:expr) => {
+        let ast =
+            parse_query_with_config(ParsingPreset::OnlySqlparser, Dialect::MySQL, $sql).unwrap();
+        let displayed = ast.display(Dialect::MySQL).to_string();
+        let displayed_ast =
+            parse_query_with_config(ParsingPreset::OnlySqlparser, Dialect::MySQL, &displayed)
+                .unwrap();
+        pretty_assertions::assert_eq!(ast, displayed_ast);
+    };
+}
+
+#[macro_export]
 macro_rules! check_rt_postgres {
     ($sql:expr) => {
-        let ast = dbg!($crate::check_parse_postgres!($sql));
-        let displayed = dbg!(ast.display(Dialect::PostgreSQL).to_string());
-        let displayed_ast = dbg!($crate::check_parse_postgres!(&displayed));
+        let ast = $crate::check_parse_postgres!($sql);
+        let displayed = ast.display(Dialect::PostgreSQL).to_string();
+        let displayed_ast = $crate::check_parse_postgres!(&displayed);
+        pretty_assertions::assert_eq!(ast, displayed_ast);
+    };
+}
+
+#[macro_export]
+macro_rules! check_rt_postgres_sqlparser {
+    ($sql:expr) => {
+        let ast = parse_query_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, $sql)
+            .unwrap();
+        let displayed = ast.display(Dialect::PostgreSQL).to_string();
+        let displayed_ast = parse_query_with_config(
+            ParsingPreset::OnlySqlparser,
+            Dialect::PostgreSQL,
+            &displayed,
+        )
+        .unwrap();
         pretty_assertions::assert_eq!(ast, displayed_ast);
     };
 }

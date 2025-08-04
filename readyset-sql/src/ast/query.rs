@@ -15,6 +15,7 @@ pub enum SqlQuery {
     CreateDatabase(CreateDatabaseStatement),
     CreateTable(CreateTableStatement),
     CreateView(CreateViewStatement),
+    CreateIndex(CreateIndexStatement),
     CreateCache(CreateCacheStatement),
     DropCache(DropCacheStatement),
     DropAllCaches(DropAllCachesStatement),
@@ -62,6 +63,7 @@ impl DialectDisplay for SqlQuery {
             Self::Insert(insert) => write!(f, "{}", insert.display(dialect)),
             Self::CreateTable(create) => write!(f, "{}", create.display(dialect)),
             Self::CreateView(create) => write!(f, "{}", create.display(dialect)),
+            Self::CreateIndex(create) => write!(f, "{}", create.display(dialect)),
             Self::CreateCache(create) => write!(f, "{}", create.display(dialect)),
             Self::DropCache(drop) => write!(f, "{}", drop.display(dialect)),
             Self::DropAllCaches(drop) => write!(f, "{drop}"),
@@ -150,6 +152,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
             ))),
             ShowDatabases { .. } => Ok(Self::Show(crate::ast::ShowStatement::Databases)),
             CreateTable(create) => Ok(Self::CreateTable(create.try_into_dialect(dialect)?)),
+            CreateIndex(create) => Ok(Self::CreateIndex(create.try_into_dialect(dialect)?)),
             Insert(insert) => Ok(Self::Insert(insert.try_into_dialect(dialect)?)),
             Delete(delete) => Ok(Self::Delete(delete.try_into_dialect(dialect)?)),
             create @ CreateView { .. } => Ok(Self::CreateView(create.try_into_dialect(dialect)?)),
@@ -270,6 +273,7 @@ impl SqlQuery {
             }
             Self::CreateTable(_) => "CREATE TABLE",
             Self::CreateView(_) => "CREATE VIEW",
+            Self::CreateIndex(_) => "CREATE INDEX",
             Self::CreateCache(_) => "CREATE CACHE",
             Self::DropCache(_) => "DROP CACHE",
             Self::DropAllCaches(_) => "DROP ALL CACHES",
@@ -337,6 +341,7 @@ impl SqlQuery {
             SqlQuery::CreateDatabase(_)
             | SqlQuery::CreateTable(_)
             | SqlQuery::CreateView(_)
+            | SqlQuery::CreateIndex(_)
             | SqlQuery::AlterTable(_)
             | SqlQuery::Insert(_)
             | SqlQuery::CompoundSelect(_)

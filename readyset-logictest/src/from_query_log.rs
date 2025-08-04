@@ -120,7 +120,8 @@ fn is_ddl(query: &SqlQuery) -> bool {
         | SqlQuery::DropAllProxiedQueries(_)
         | SqlQuery::DropAllCaches(_)
         | SqlQuery::CreateRls(_)
-        | SqlQuery::DropRls(_) => true,
+        | SqlQuery::DropRls(_)
+        | SqlQuery::CreateIndex(_) => true,
     }
 }
 

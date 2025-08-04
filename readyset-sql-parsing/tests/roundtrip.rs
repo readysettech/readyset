@@ -55,3 +55,64 @@ fn collation_name() {
     check_rt_postgres!(r#"CREATE TABLE t (x TEXT COLLATE "latin1_swedish_ci")"#);
     check_rt_postgres!("CREATE TABLE t (x TEXT COLLATE latin1_swedish_ci)");
 }
+
+#[test]
+fn create_index() {
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_name ON t (c1);");
+    check_rt_mysql_sqlparser!("CREATE INDEX `idx_name` ON `t` (`c1`);");
+
+    check_rt_mysql_sqlparser!("CREATE UNIQUE INDEX idx_name ON t (c1);");
+    check_rt_mysql_sqlparser!("CREATE UNIQUE INDEX `idx_name` ON `t` (`c1`, `c2`);");
+    check_rt_mysql_sqlparser!("CREATE UNIQUE INDEX `idx_name` ON `t` (`c1`, `c2`)  LOCK=NONE;");
+
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_multi ON t (c1, c2, c3);");
+
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_prefix ON t (c1(10));");
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_prefix_multi ON t (c1(10), c2(20));");
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_mixed ON t (c1, c2(15), c3);");
+
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_asc ON t (c1 ASC);");
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_desc ON t (c1 DESC);");
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_mixed_order ON t (c1 ASC, c2 DESC);");
+
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_btree ON t (c1) USING BTREE;");
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_hash ON t (c1) USING HASH;");
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_combo ON t (c1) USING BTREE COMMENT 'Test index';");
+
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_comment ON t (c1) COMMENT 'Index comment';");
+
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_lock_default ON t (c1) LOCK=DEFAULT;");
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_lock_none ON t (c1) LOCK=NONE;");
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_lock_shared ON t (c1) LOCK=SHARED;");
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_lock_exclusive ON t (c1) LOCK=EXCLUSIVE;");
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_lock_space ON t (c1) LOCK = NONE;");
+
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_algo_default ON t (c1) ALGORITHM=DEFAULT;");
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_algo_inplace ON t (c1) ALGORITHM=INPLACE;");
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_algo_copy ON t (c1) ALGORITHM=COPY;");
+    check_rt_mysql_sqlparser!("CREATE INDEX idx_algo_space ON t (c1) ALGORITHM = INPLACE;");
+
+    check_rt_mysql_sqlparser!(
+        "CREATE UNIQUE INDEX idx_complex ON t (c1(10), c2 DESC) COMMENT 'Complex index' ALGORITHM=INPLACE LOCK=NONE;"
+    );
+
+    check_rt_postgres_sqlparser!("CREATE INDEX \"idx_double_quotes\" ON \"table\" (\"column\");");
+
+    // FULLTEXT/SPATIAL indexes: not supported by sqlparser-rs yet
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE FULLTEXT INDEX idx_name ON t (c1);",
+        "found: FULLTEXT"
+    );
+
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE FULLTEXT INDEX idx_fulltext ON articles (title, content);",
+        "found: FULLTEXT"
+    );
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE SPATIAL INDEX idx_spatial ON locations (coordinates);",
+        "found: SPATIAL"
+    );
+}

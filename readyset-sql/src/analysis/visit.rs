@@ -200,6 +200,13 @@ pub trait Visitor<'ast>: Sized {
         walk_create_database_statement(self, create_database_statement)
     }
 
+    fn visit_create_index_statement(
+        &mut self,
+        create_index_statement: &'ast CreateIndexStatement,
+    ) -> Result<(), Self::Error> {
+        walk_create_index_statement(self, create_index_statement)
+    }
+
     fn visit_drop_rls_statement(
         &mut self,
         drop_rls_statement: &'ast DropRlsStatement,
@@ -1279,6 +1286,7 @@ pub fn walk_sql_query<'a, V: Visitor<'a>>(
     match sql_query {
         SqlQuery::CreateTable(statement) => visitor.visit_create_table_statement(statement),
         SqlQuery::CreateView(statement) => visitor.visit_create_view_statement(statement),
+        SqlQuery::CreateIndex(statement) => visitor.visit_create_index_statement(statement),
         SqlQuery::AlterTable(statement) => visitor.visit_alter_table_statement(statement),
         SqlQuery::AlterReadySet(statement) => visitor.visit_alter_readyset_statement(statement),
         SqlQuery::Insert(statement) => visitor.visit_insert_statement(statement),
@@ -1311,6 +1319,23 @@ pub fn walk_sql_query<'a, V: Visitor<'a>>(
         SqlQuery::CreateRls(statement) => visitor.visit_create_rls_statement(statement),
         SqlQuery::DropRls(statement) => visitor.visit_drop_rls_statement(statement),
     }
+}
+
+pub fn walk_create_index_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    create_index_statement: &'a CreateIndexStatement,
+) -> Result<(), V::Error> {
+    visitor.visit_table(&create_index_statement.table_name)?;
+
+    for column in &create_index_statement.columns {
+        visitor.visit_column(column)?;
+    }
+
+    if let Some(predicate) = &create_index_statement.predicate {
+        visitor.visit_expr(predicate)?;
+    }
+
+    Ok(())
 }
 
 pub fn walk_comment_statement<'a, V: Visitor<'a>>(

@@ -691,7 +691,8 @@ fn key_part_prefix() {
     );
     check_parse_mysql!(
         r#"ALTER TABLE comments ADD FULLTEXT INDEX index_comments_on_comment_prefix (comment(50));"#
-    ); // nom-sql doesn't parse `CREATE INDEX`
+    );
+    // functional key parts (expressions) not supported
     check_parse_fails!(
         Dialect::PostgreSQL,
         r#"CREATE INDEX idx_jsonblob_id ON blobs (CAST(jsonblob->>'id' AS INTEGER));"#,
