@@ -664,15 +664,21 @@ impl SqlIncorporator {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
         let query_id = QueryId::from_select(&stmt, schema_search_path);
 
+        // Make a copy of our current state, and first perform modifications on it.  If the cache
+        // is successfully created, we update our own state with this working copy.  If instead we
+        // find the cache already exists, drop the modified copy on the floor, as it may have been
+        // modified to contain references to nodes we won't actually add to the dataflow graph.
+        let mut next = self.clone();
+
         let mut invalidating_tables = vec![];
         let detect_placeholders_config =
             readyset_sql_passes::detect_unsupported_placeholders::Config {
-                allow_mixed_comparisons: self.mir_converter.config.allow_mixed_comparisons,
+                allow_mixed_comparisons: next.mir_converter.config.allow_mixed_comparisons,
             };
         let mir_query = match stmt
             .detect_unsupported_placeholders(detect_placeholders_config)
             .and_then(|_| {
-                self.select_query_to_mir(
+                next.select_query_to_mir(
                     name.clone(),
                     &mut stmt,
                     schema_search_path,
@@ -688,7 +694,7 @@ impl SqlIncorporator {
             Err(err @ ReadySetError::UnsupportedPlaceholders { .. }) => {
                 // We must rewrite before looking for a query we can reuse.
                 invalidating_tables.clear();
-                let rewritten_stmt = self.rewrite(
+                let rewritten_stmt = next.rewrite(
                     stmt.clone(),
                     Some(&name.name),
                     schema_search_path,
@@ -696,14 +702,14 @@ impl SqlIncorporator {
                     Some(&mut invalidating_tables),
                     None,
                 )?;
-                let caches = self.registry.caches_for_query(rewritten_stmt)?;
+                let caches = next.registry.caches_for_query(rewritten_stmt)?;
                 if caches.is_empty() {
                     // Can't reuse anything. Return the error.
                     return Err(err);
                 } else {
                     #[allow(clippy::unwrap_used)]
                     // we checked that caches is not empty
-                    self.registry
+                    next.registry
                         .add_reused_caches(name.clone(), Vec1::try_from(caches).unwrap());
                     warn!(%err, "Migration failed");
                     info!(
@@ -721,16 +727,24 @@ impl SqlIncorporator {
             Err(err) => Err(err),
         }?;
 
-        let aliased = !self.registry.add_query(RecipeExpr::Cache {
+        let expression = RecipeExpr::Cache {
             name: name.clone(),
             statement: stmt,
             always,
             query_id,
-        })?;
+        };
+
+        let exists = next.registry.contains_expression(&expression);
+        if !exists {
+            // We are creating the cache for the first time; incorporate it into our state.
+            *self = next;
+        }
+
+        self.registry.add_query(expression)?;
         self.registry
             .insert_invalidating_tables(name.clone(), invalidating_tables)?;
 
-        if aliased {
+        if exists {
             return Ok(name);
         }
 

@@ -369,6 +369,11 @@ pub(super) struct ExprRegistry {
 }
 
 impl ExprRegistry {
+    pub(super) fn contains_expression(&self, expression: &RecipeExpr) -> bool {
+        let id = expression.into();
+        self.expressions.contains_key(&id)
+    }
+
     /// Adds a [`RecipeExpr`] to the registry.
     /// If the [`RecipeExpr`] was already present, returns `Ok(false)`; otherwise it returns
     /// `Ok(true)`.
