@@ -3140,6 +3140,18 @@ async fn test_utf8_as_ci() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[tags(serial, mysql8_upstream)]
+async fn test_utf8mb4_general_ci() {
+    test_utf8("utf8mb4_general_ci").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, mysql8_upstream)]
+async fn test_utf8mb4_unicode_ci() {
+    test_utf8("utf8mb4_unicode_ci").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 #[tags(serial, mysql_upstream)]
 async fn test_latin1_swedish_ci() {
     readyset_tracing::init_test_logging();

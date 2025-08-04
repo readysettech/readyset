@@ -48,7 +48,7 @@ pub enum Collation {
     /// The UTF-8 collation.
     Utf8,
 
-    /// The case-insensitive text collation.
+    /// UTF-8 case-insensitive.
     ///
     /// This collation corresponds to the behavior of the
     /// [PostgreSQL `CITEXT` type](https://www.postgresql.org/docs/current/citext.html) with the
@@ -66,6 +66,9 @@ pub enum Collation {
 
     /// A binary collation that compares codepoints.
     Utf8Binary,
+
+    /// Like Utf8Ci, but trailing spaces are ignored (for a few legacy MySQL collations).
+    Utf8AiCiPad,
 }
 
 impl Display for Collation {
@@ -77,6 +80,7 @@ impl Display for Collation {
             Self::Binary => write!(f, "binary"),
             Self::Latin1SwedishCi => write!(f, "latin1_swedish_ci"),
             Self::Utf8Binary => write!(f, "utf8_binary"),
+            Self::Utf8AiCiPad => write!(f, "utf8_ai_ci(pad)"),
         }
     }
 }
@@ -97,6 +101,30 @@ impl Collation {
             Self::Binary => a.cmp(b),
             Self::Latin1SwedishCi => mysql_latin1_swedish_ci::compare(a, b),
             Self::Utf8Binary => a.chars().cmp(b.chars()),
+            Self::Utf8AiCiPad => Self::compare_ai_ci_pad(a, b),
+        }
+    }
+
+    fn compare_ai_ci_pad(a: &str, b: &str) -> Ordering {
+        let (ac, bc) = (a.chars().count(), b.chars().count());
+        let (a, b, ac, bc, flip) = if ac > bc {
+            (a, b, ac, bc, false)
+        } else {
+            (b, a, bc, ac, true)
+        };
+
+        let pad = ac - bc;
+        let mut b = String::from(b);
+        for _ in 0..pad {
+            b.push(' ');
+        }
+
+        let b = b.as_str();
+        let ord = UTF8_AI_CI.with(|c| c.compare(a, b));
+        if flip {
+            ord.reverse()
+        } else {
+            ord
         }
     }
 
@@ -106,18 +134,22 @@ impl Collation {
     where
         S: AsRef<str>,
     {
-        let s = s.as_ref();
+        let mut s = s.as_ref();
         let len = match self {
             Self::Utf8 | Self::Utf8Binary => s.len() * 4,
-            Self::Utf8Ci => s.len() * 2,
+            Self::Utf8Ci | Self::Utf8AiCiPad => s.len() * 2,
             Self::Utf8AiCi | Self::Binary | Self::Latin1SwedishCi => s.len(),
         };
+
+        if *self == Self::Utf8AiCiPad {
+            s = s.trim_end_matches(' ');
+        }
 
         let mut out = Vec::with_capacity(len); // just a close guess
         let make = |c: &CollatorBorrowed| c.write_sort_key_to(s.as_ref(), &mut out);
         let Ok(()) = match self {
             Self::Utf8 => UTF8.with(make),
-            Self::Utf8Ci => UTF8_CI.with(make),
+            Self::Utf8Ci | Self::Utf8AiCiPad => UTF8_CI.with(make),
             Self::Utf8AiCi => UTF8_AI_CI.with(make),
             Self::Binary => {
                 out.extend_from_slice(s.as_bytes());
@@ -159,6 +191,8 @@ impl Collation {
             (SqlEngine::MySQL, "utf8_bin") => Some(Self::Utf8Binary),
             (SqlEngine::MySQL, "binary") => Some(Self::Binary),
             (SqlEngine::MySQL, "latin1_swedish_ci") => Some(Self::Latin1SwedishCi),
+            (SqlEngine::MySQL, "utf8mb4_general_ci") => Some(Self::Utf8AiCiPad),
+            (SqlEngine::MySQL, "utf8mb4_unicode_ci") => Some(Self::Utf8AiCiPad),
             (_, _) => None,
         }
     }
@@ -250,5 +284,16 @@ mod tests {
         assert_eq!(col.key("a "), col.key("a"));
         assert_eq!(col.compare("a", "b"), Ordering::Less);
         assert!(col.key("a").lt(&col.key("b")));
+    }
+
+    #[test]
+    fn utf8_pad_space() {
+        let col = Collation::Utf8AiCiPad;
+        assert_eq!(col.compare("A", "a "), Ordering::Equal);
+        assert_eq!(col.key("A"), col.key("a "));
+        assert_eq!(col.compare("A ", "a"), Ordering::Equal);
+        assert_eq!(col.key("A "), col.key("a"));
+        assert_eq!(col.compare("a", "b "), Ordering::Less);
+        assert_eq!(col.compare("b", "a "), Ordering::Greater);
     }
 }

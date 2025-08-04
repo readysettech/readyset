@@ -73,7 +73,8 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
             Collation::Utf8AiCi
             | Collation::Binary
             | Collation::Latin1SwedishCi
-            | Collation::Utf8Binary,
+            | Collation::Utf8Binary
+            | Collation::Utf8AiCiPad,
         ) => unreachable!("not used by Postgres"),
         DfType::Int => Ok(Type::INT4),
         DfType::BigInt => Ok(Type::INT8),
@@ -86,7 +87,8 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
             Collation::Utf8AiCi
             | Collation::Binary
             | Collation::Latin1SwedishCi
-            | Collation::Utf8Binary,
+            | Collation::Utf8Binary
+            | Collation::Utf8AiCiPad,
         ) => {
             unreachable!("not used by Postgres")
         }
@@ -148,7 +150,8 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                     Collation::Utf8AiCi
                     | Collation::Binary
                     | Collation::Latin1SwedishCi
-                    | Collation::Utf8Binary,
+                    | Collation::Utf8Binary
+                    | Collation::Utf8AiCiPad,
                 ) => unreachable!("not used by Postgres"),
                 DfType::Int => Ok(Type::INT4_ARRAY),
                 DfType::BigInt => Ok(Type::INT8_ARRAY),
@@ -164,7 +167,8 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                     Collation::Utf8AiCi
                     | Collation::Binary
                     | Collation::Latin1SwedishCi
-                    | Collation::Utf8Binary,
+                    | Collation::Utf8Binary
+                    | Collation::Utf8AiCiPad,
                 ) => unreachable!("not used by Postgres"),
                 DfType::Timestamp { .. } => Ok(Type::TIMESTAMP_ARRAY),
                 DfType::TimestampTz { .. } => Ok(Type::TIMESTAMPTZ_ARRAY),
