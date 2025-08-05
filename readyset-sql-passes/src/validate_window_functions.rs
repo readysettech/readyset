@@ -37,8 +37,9 @@ fn contains_window_function(expr: &Expr) -> bool {
                 || contains_window_function(min)
                 || contains_window_function(max)
         }
-        Expr::Cast { expr, .. } => contains_window_function(expr),
-        Expr::Collate { expr, .. } => contains_window_function(expr),
+        Expr::Cast { expr, .. } | Expr::Collate { expr, .. } | Expr::ConvertUsing { expr, .. } => {
+            contains_window_function(expr)
+        }
         Expr::Array(exprs) | Expr::Row { exprs, .. } => exprs.iter().any(contains_window_function),
         Expr::Call(f) => f.arguments().any(contains_window_function),
         Expr::Literal(_)
