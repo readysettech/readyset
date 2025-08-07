@@ -4183,6 +4183,7 @@ impl Domain {
         reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
         nodes: &DomainNodes,
         remapped_keys: &mut RemappedKeys,
+        auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<usize> {
         let mut bytes_freed = 0;
 
@@ -4198,6 +4199,7 @@ impl Domain {
                 nodes,
                 reader_write_handles,
                 ex,
+                auxiliary_node_states,
             )?;
             match path.trigger {
                 TriggerEndpoint::Local(_) => {
@@ -4244,6 +4246,7 @@ impl Domain {
                             reader_write_handles,
                             nodes,
                             remapped_keys,
+                            auxiliary_node_states,
                         )?;
                     }
                 }
@@ -4268,6 +4271,7 @@ impl Domain {
         nodes: &DomainNodes,
         reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
         executor: &mut dyn Executor,
+        auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<()> {
         let mut from = path[0].node;
         for segment in path {
@@ -4282,6 +4286,7 @@ impl Domain {
                 replica,
                 reader_write_handles,
                 executor,
+                auxiliary_node_states,
             )?;
             from = segment.node;
         }
@@ -4423,6 +4428,7 @@ impl Domain {
                         &mut self.reader_write_handles,
                         &self.nodes,
                         &mut self.remapped_keys,
+                        &mut self.auxiliary_node_states,
                     )?;
                 }
             } else {
@@ -4466,6 +4472,7 @@ impl Domain {
             &self.nodes,
             &mut self.reader_write_handles,
             ex,
+            &mut self.auxiliary_node_states,
         )?;
 
         match trigger {
@@ -4502,6 +4509,7 @@ impl Domain {
                         &mut self.reader_write_handles,
                         &self.nodes,
                         &mut self.remapped_keys,
+                        &mut self.auxiliary_node_states,
                     )?;
                     self.state_size.fetch_sub(freed, Ordering::AcqRel);
                 }
@@ -4612,6 +4620,7 @@ impl Domain {
                         &mut self.reader_write_handles,
                         &self.nodes,
                         &mut self.remapped_keys,
+                        &mut self.auxiliary_node_states,
                     )?;
                     (bytes_freed + freed, Some(key_evicted))
                 };

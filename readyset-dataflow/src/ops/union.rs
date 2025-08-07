@@ -1002,7 +1002,13 @@ impl Ingredient for Union {
         }
     }
 
-    fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[KeyComparison]) {
+    fn on_eviction(
+        &mut self,
+        from: LocalNodeIndex,
+        tag: Tag,
+        keys: &[KeyComparison],
+        _auxiliary_node_states: &mut AuxiliaryNodeStateMap,
+    ) {
         for key in keys {
             // TODO: the key.clone()s here are really sad
             for (_, e) in self.replay_pieces.range_mut(

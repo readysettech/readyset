@@ -817,7 +817,14 @@ where
 
     /// Triggered whenever an eviction occurs, to allow the operator to react by evicting from any
     /// auxiliary state other than what is stored in its materialization.
-    fn on_eviction(&mut self, _from: LocalNodeIndex, _tag: Tag, _keys: &[KeyComparison]) {}
+    fn on_eviction(
+        &mut self,
+        _from: LocalNodeIndex,
+        _tag: Tag,
+        _keys: &[KeyComparison],
+        _auxiliary_node_states: &mut AuxiliaryNodeStateMap,
+    ) {
+    }
 
     fn can_query_through(&self) -> bool {
         false

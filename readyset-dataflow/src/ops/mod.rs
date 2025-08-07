@@ -223,8 +223,14 @@ impl Ingredient for NodeOperator {
         result
     }
 
-    fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[KeyComparison]) {
-        impl_ingredient_fn_mut!(self, on_eviction, from, tag, keys)
+    fn on_eviction(
+        &mut self,
+        from: LocalNodeIndex,
+        tag: Tag,
+        keys: &[KeyComparison],
+        auxiliary_node_states: &mut AuxiliaryNodeStateMap,
+    ) {
+        impl_ingredient_fn_mut!(self, on_eviction, from, tag, keys, auxiliary_node_states)
     }
 
     fn can_query_through(&self) -> bool {

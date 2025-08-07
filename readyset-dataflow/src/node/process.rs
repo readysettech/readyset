@@ -463,6 +463,7 @@ impl Node {
         on_replica: usize,
         reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
         ex: &mut dyn Executor,
+        auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<()> {
         let addr = self.local_addr();
         match self.inner {
@@ -500,7 +501,7 @@ impl Node {
                 )?;
             }
             NodeType::Internal(ref mut i) => {
-                i.on_eviction(from, tag, keys);
+                i.on_eviction(from, tag, keys, auxiliary_node_states);
             }
             NodeType::Reader(_) => {
                 if let Some(state) = reader_write_handles.get_mut(addr) {
