@@ -393,7 +393,7 @@ impl Literal {
                     .boxed()
             }
             SqlType::VarBit(n) => {
-                arbitrary_bitvec(0..n.map(|max_size| max_size as usize).unwrap_or(20_usize))
+                arbitrary_bitvec(0..=n.map(|max_size| max_size as usize).unwrap_or(20_usize))
                     .prop_map(Self::BitVector)
                     .boxed()
             }
