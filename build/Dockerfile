@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/rust:1.88.0
+FROM public.ecr.aws/docker/library/rust:1.89.0
 
 ARG TARGETARCH
 
