@@ -16,7 +16,7 @@
 //! send them to a collector.
 
 use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::{Args, ValueEnum};
@@ -25,7 +25,7 @@ use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::trace::{Sampler, Tracer};
 use opentelemetry_sdk::Resource;
 use tracing::Subscriber;
-use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::layer::SubscriberExt;
@@ -42,25 +42,17 @@ use percent::Percent;
 pub mod presampled;
 pub mod propagation;
 
-fn warn_if_debug_build() {
-    #[cfg(debug_assertions)]
-    tracing::warn!("Running a debug build")
-}
-
 #[derive(Debug, Args)]
 #[group(id = "logging")]
 pub struct Options {
-    /// Optional path to write logs to. If set, logs will rollover based on the chosen
-    /// `log_rotation` policy, which defaults to daily. Readyset must have write permissions to
-    /// the provided path.
-    /// Logs will be written to `readyset.log` within this path.
+    /// Optional path to a directory where log files will be placed. Logs will be written to
+    /// `readyset.log` within this directory. If set, logs will rollover based on the chosen
+    /// `log_rotation` policy, which defaults to daily. Readyset must have write permissions.
     #[arg(long, env = "LOG_PATH")]
     pub log_path: Option<PathBuf>,
 
-    /// Log [`Rotation`](https://docs.rs/tracing-appender/latest/tracing_appender/rolling/struct.Rotation.html)
-    /// to use if a log file is set. Defaults to daily.
-    /// Does nothing if no log file is set.
-    /// Possible Values: [daily, hourly, minutely, never]
+    /// Log [`RotationCadence`] to use if a log file is set. Defaults to daily. Does nothing if no
+    /// log file is set. Possible Values: [daily, hourly, minutely, never]
     #[arg(long, env = "LOG_ROTATION", default_value = "daily", value_enum)]
     pub log_rotation: RotationCadence,
 
@@ -174,98 +166,6 @@ fn is_statement_log(target: &str) -> bool {
     target == "client_statement" || target == "replicator_statement"
 }
 
-/// Initializes a SubscriberBuilder based on self.log_format.
-// This is a macro rather than a fn because SubscriberBuilder embeds its layering types into the
-// type itself, and to make it variadic
-macro_rules! log_format_init {
-    ($self:expr, $subscriber_builder:expr, $fmt_layer:expr, $tracing_layer:expr) => {
-        match $self.log_format {
-            LogFormat::Compact => $subscriber_builder
-                .with($tracing_layer)
-                .with(
-                    $fmt_layer
-                        .compact()
-                        .with_filter(filter::filter_fn(|metadata| {
-                            !is_statement_log(metadata.target())
-                        })),
-                )
-                .init(),
-            LogFormat::Full => $subscriber_builder
-                .with($tracing_layer)
-                .with($fmt_layer.with_filter(filter::filter_fn(|metadata| {
-                    !is_statement_log(metadata.target())
-                })))
-                .init(),
-            LogFormat::Pretty => $subscriber_builder
-                .with($tracing_layer)
-                .with(
-                    $fmt_layer
-                        .pretty()
-                        .with_filter(filter::filter_fn(|metadata| {
-                            !is_statement_log(metadata.target())
-                        })),
-                )
-                .init(),
-            LogFormat::Json => $subscriber_builder
-                .with($tracing_layer)
-                .with(
-                    $fmt_layer
-                        .json()
-                        .with_current_span(true)
-                        .with_filter(filter::filter_fn(|metadata| {
-                            !is_statement_log(metadata.target())
-                        })),
-                )
-                .init(),
-        };
-    };
-    ($self:expr, $subscriber_builder:expr, $fmt_layer:expr) => {
-        match $self.log_format {
-            LogFormat::Compact => $subscriber_builder
-                .with(
-                    $fmt_layer
-                        .compact()
-                        .with_filter(filter::filter_fn(|metadata| {
-                            !is_statement_log(metadata.target())
-                        })),
-                )
-                .init(),
-            LogFormat::Full => $subscriber_builder
-                .with($fmt_layer.with_filter(filter::filter_fn(|metadata| {
-                    !is_statement_log(metadata.target())
-                })))
-                .init(),
-            LogFormat::Pretty => $subscriber_builder
-                .with(
-                    $fmt_layer
-                        .pretty()
-                        .with_filter(filter::filter_fn(|metadata| {
-                            !is_statement_log(metadata.target())
-                        })),
-                )
-                .init(),
-            LogFormat::Json => $subscriber_builder
-                .with(
-                    $fmt_layer
-                        .json()
-                        .with_current_span(true)
-                        .with_filter(filter::filter_fn(|metadata| {
-                            !is_statement_log(metadata.target())
-                        })),
-                )
-                .init(),
-        };
-    };
-    ($self:expr, $subscriber_builder:expr) => {
-        match &$self.log_format {
-            LogFormat::Compact => $subscriber_builder.compact().init(),
-            LogFormat::Full => $subscriber_builder.init(),
-            LogFormat::Pretty => $subscriber_builder.pretty().init(),
-            LogFormat::Json => $subscriber_builder.json().with_current_span(true).init(),
-        }
-    };
-}
-
 impl Options {
     fn tracing_layer<S>(
         &self,
@@ -322,17 +222,6 @@ impl Options {
         }
     }
 
-    /// Sets up a non-blocking filing appender with the configured log rotation policy.
-    /// Note that the returned WorkerGuard should be kept in scope for the duration of the
-    /// process--it's Drop is what flushes the logs before a shutdown or crash.
-    fn setup_file_appender(&self, log_path: &Path) -> (NonBlocking, WorkerGuard) {
-        tracing_appender::non_blocking(RollingFileAppender::new(
-            self.log_rotation.into(),
-            log_path,
-            "readyset.log",
-        ))
-    }
-
     /// This is the primary entrypoint to the combined logging/tracing subsystem.  If
     /// tracing, statement logging, and the log path are all not configured, it will initialize
     /// logging with static dispatch for the format, saving some performance cost.
@@ -372,47 +261,56 @@ impl Options {
     ///     // Perform work!
     /// }
     /// ```
-    pub fn init(&self, service_name: &str, deployment: &str) -> Result<Option<WorkerGuard>, Error> {
-        // Note: There isn't a great way to make partial builders here and avoid this match, because
-        // the subscriber builder type embeds the layering types.
-        let res = Ok(
-            match (
-                self.tracing_host.is_some(),
-                self.statement_logging,
-                self.log_path.is_some(),
-            ) {
-                (true, true, true) => {
-                    let log_path = self.log_path.as_ref().expect("is some").as_path();
-                    self.setup_tracing_statement_logging_and_log_file(
-                        log_path,
-                        service_name,
-                        deployment,
-                    )
-                }
-                (true, true, false) => {
-                    self.setup_tracing_and_statement_logging(service_name, deployment)
-                }
-                (true, false, true) => {
-                    let log_path = self.log_path.as_ref().expect("is some").as_path();
-                    self.setup_tracing_and_log_file(log_path, service_name, deployment)
-                }
-                (true, false, false) => self.setup_tracing(service_name, deployment),
-                (false, true, true) => {
-                    let log_path = self.log_path.as_ref().expect("is some").as_path();
-                    self.setup_statement_logging_and_log_file(log_path, deployment)
-                }
-                (false, true, false) => self.setup_statement_logging(deployment),
-                (false, false, true) => {
-                    let log_path = self.log_path.as_ref().expect("is some").as_path();
-                    self.setup_log_file(log_path)
-                }
-                (false, false, false) => self.setup_basic(),
-            },
-        );
+    pub fn init(&self, service_name: &str, deployment: &str) -> Result<WorkerGuard, Error> {
+        let (non_blocking, worker_guard) = if let Some(log_path) = &self.log_path {
+            tracing_appender::non_blocking(RollingFileAppender::new(
+                self.log_rotation.into(),
+                log_path,
+                "readyset.log",
+            ))
+        } else {
+            tracing_appender::non_blocking(std::io::stdout())
+        };
+        let fmt_layer = fmt::layer()
+            .with_ansi(!self.no_color)
+            .with_writer(non_blocking);
+        let tracing_layer = if self.tracing_host.is_some() {
+            Some(self.tracing_layer(service_name, deployment))
+        } else {
+            None
+        };
+        let statement_layer = if self.statement_logging {
+            Some(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
+        } else {
+            None
+        };
 
-        warn_if_debug_build();
+        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
+        let fmt_filter = filter::filter_fn(|metadata| !is_statement_log(metadata.target()));
 
-        res
+        let s = tracing_subscriber::registry()
+            .with(statement_layer)
+            .with(env_filter)
+            .with(tracing_layer);
+
+        match self.log_format {
+            LogFormat::Compact => s.with(fmt_layer.compact().with_filter(fmt_filter)).init(),
+            LogFormat::Full => s.with(fmt_layer.with_filter(fmt_filter)).init(),
+            LogFormat::Pretty => s.with(fmt_layer.pretty().with_filter(fmt_filter)).init(),
+            LogFormat::Json => s
+                .with(
+                    fmt_layer
+                        .json()
+                        .with_current_span(true)
+                        .with_filter(fmt_filter),
+                )
+                .init(),
+        }
+
+        #[cfg(debug_assertions)]
+        tracing::warn!("Running a debug build");
+
+        Ok(worker_guard)
     }
 
     // Returns the provided `statement_log_path` or a default filename.
@@ -421,138 +319,6 @@ impl Options {
             Some(ref p) => p.clone(),
             None => format!("{deployment}_statements.log"),
         }
-    }
-
-    fn setup_tracing_statement_logging_and_log_file(
-        &self,
-        log_path: &Path,
-        service_name: &str,
-        deployment: &str,
-    ) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
-        let s = tracing_subscriber::registry()
-            .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
-            .with(env_filter);
-
-        let (non_blocking, worker_guard) = self.setup_file_appender(log_path);
-        let fmt_layer = fmt::layer()
-            .with_ansi(!self.no_color)
-            .with_writer(non_blocking);
-        let tracing_layer = self.tracing_layer(service_name, deployment);
-
-        log_format_init!(self, s, fmt_layer, tracing_layer);
-
-        Some(worker_guard)
-    }
-
-    fn setup_tracing_and_statement_logging(
-        &self,
-        service_name: &str,
-        deployment: &str,
-    ) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
-        let s = tracing_subscriber::registry()
-            .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
-            .with(env_filter);
-        let fmt_layer = fmt::layer().with_ansi(!self.no_color);
-        let tracing_layer = self.tracing_layer(service_name, deployment);
-
-        log_format_init!(self, s, fmt_layer, tracing_layer);
-
-        None
-    }
-
-    fn setup_tracing_and_log_file(
-        &self,
-        log_path: &Path,
-        service_name: &str,
-        deployment: &str,
-    ) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
-        let s = tracing_subscriber::registry().with(env_filter);
-
-        let (non_blocking, worker_guard) = self.setup_file_appender(log_path);
-        let fmt_layer = fmt::layer()
-            .with_ansi(!self.no_color)
-            .with_writer(non_blocking);
-        let tracing_layer = self.tracing_layer(service_name, deployment);
-
-        log_format_init!(self, s, fmt_layer, tracing_layer);
-
-        Some(worker_guard)
-    }
-
-    fn setup_tracing(&self, service_name: &str, deployment: &str) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
-        let s = tracing_subscriber::registry().with(env_filter);
-        let fmt_layer = fmt::layer().with_ansi(!self.no_color);
-        let tracing_layer = self.tracing_layer(service_name, deployment);
-
-        log_format_init!(self, s, fmt_layer, tracing_layer);
-
-        None
-    }
-
-    /// Sets up a subscriber with no tracing, but statement logging and a log file configured
-    fn setup_statement_logging_and_log_file(
-        &self,
-        log_path: &Path,
-        deployment: &str,
-    ) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
-        let s = tracing_subscriber::registry()
-            .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
-            .with(env_filter);
-
-        let (non_blocking, worker_guard) = self.setup_file_appender(log_path);
-        let fmt_layer = fmt::layer()
-            .with_ansi(!self.no_color)
-            .with_writer(non_blocking);
-
-        log_format_init!(self, s, fmt_layer);
-
-        Some(worker_guard)
-    }
-
-    /// Sets up a subscriber with no tracing, statement logging and no log file configured
-    fn setup_statement_logging(&self, deployment: &str) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
-        let s = tracing_subscriber::registry()
-            .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
-            .with(env_filter);
-
-        let fmt_layer = fmt::layer().with_ansi(!self.no_color);
-
-        log_format_init!(self, s, fmt_layer);
-
-        None
-    }
-
-    /// Sets up a subscriber with no tracing, no statement logging, but a log file configured
-    fn setup_log_file(&self, log_path: &Path) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
-        let (non_blocking, worker_guard) = self.setup_file_appender(log_path);
-        let s = tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .with_ansi(!self.no_color)
-            .with_writer(non_blocking);
-
-        log_format_init!(self, s);
-
-        Some(worker_guard)
-    }
-
-    /// Sets up a subscriber with no tracing, no statement logging, and no log file configured
-    // In this case we can avoid dynamic dispatch/using the registry
-    fn setup_basic(&self) -> Option<WorkerGuard> {
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
-        let s = tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .with_ansi(!self.no_color);
-
-        log_format_init!(self, s);
-
-        None
     }
 }
 
