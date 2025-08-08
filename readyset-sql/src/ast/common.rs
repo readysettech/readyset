@@ -729,10 +729,9 @@ impl TryFromDialect<sqlparser::ast::Expr> for FieldReference {
             value: sqlparser::ast::Value::Number(ref n, _),
             ..
         }) = value
+            && let Ok(i) = n.parse()
         {
-            if let Ok(i) = n.parse() {
-                return Ok(FieldReference::Numeric(i));
-            }
+            return Ok(FieldReference::Numeric(i));
         }
         Ok(FieldReference::Expr(value.try_into_dialect(dialect)?))
     }

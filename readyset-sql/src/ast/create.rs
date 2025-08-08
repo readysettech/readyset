@@ -519,19 +519,19 @@ impl CreateTableStatement {
                     if !field.sql_type.is_any_text() {
                         continue;
                     }
-                    if field.get_charset().is_none() {
-                        if let Some(charset) = &default_charset {
-                            field
-                                .constraints
-                                .push(ColumnConstraint::CharacterSet(charset.clone()));
-                        }
+                    if field.get_charset().is_none()
+                        && let Some(charset) = &default_charset
+                    {
+                        field
+                            .constraints
+                            .push(ColumnConstraint::CharacterSet(charset.clone()));
                     }
-                    if field.get_collation().is_none() {
-                        if let Some(collation) = &default_collation {
-                            field
-                                .constraints
-                                .push(ColumnConstraint::Collation(collation.clone()));
-                        }
+                    if field.get_collation().is_none()
+                        && let Some(collation) = &default_collation
+                    {
+                        field
+                            .constraints
+                            .push(ColumnConstraint::Collation(collation.clone()));
                     }
                 }
             }

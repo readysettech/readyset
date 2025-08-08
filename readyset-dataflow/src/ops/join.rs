@@ -1154,7 +1154,7 @@ impl Ingredient for Join {
             if self.is_rhs_full_mat() {
                 let mut join_right_cols = self.on.iter().map(|(_l, r)| *r).collect::<Vec<_>>();
                 join_right_cols.extend(right_cols.iter().copied());
-                return ColumnSource::GeneratedFromColumns(vec1![
+                ColumnSource::GeneratedFromColumns(vec1![
                     ColumnRef {
                         node: self.left.as_global(),
                         columns: left_cols
@@ -1163,9 +1163,9 @@ impl Ingredient for Join {
                         node: self.right.as_global(),
                         columns: join_right_cols
                     }
-                ]);
+                ])
             } else {
-                return ColumnSource::GeneratedFromColumns(vec1![
+                ColumnSource::GeneratedFromColumns(vec1![
                     ColumnRef {
                         node: self.left.as_global(),
                         columns: left_cols
@@ -1174,7 +1174,7 @@ impl Ingredient for Join {
                         node: self.right.as_global(),
                         columns: right_cols
                     },
-                ]);
+                ])
             }
         }
     }

@@ -157,13 +157,11 @@ impl TryFromDialect<Vec<sqlparser::ast::Expr>> for SetPostgresParameterValue {
         value: Vec<sqlparser::ast::Expr>,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        if value.len() == 1 {
-            if let sqlparser::ast::Expr::Identifier(sqlparser::ast::Ident { value, .. }) = &value[0]
-            {
-                if value.eq_ignore_ascii_case("DEFAULT") {
-                    return Ok(Self::Default);
-                }
-            }
+        if value.len() == 1
+            && let sqlparser::ast::Expr::Identifier(sqlparser::ast::Ident { value, .. }) = &value[0]
+            && value.eq_ignore_ascii_case("DEFAULT")
+        {
+            return Ok(Self::Default);
         }
         let values = value.into_iter().map(|expr| expr.try_into_dialect(dialect));
         if values.len() == 1 {
