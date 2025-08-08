@@ -1,30 +1,48 @@
+/// Please note that the ordering for TopK and Pagination is reversed during MIR lowering.
+/// This is why every single use of `cmp` is reversed here.
+/// Why this MIR reversal was done is still unknown to me and this moment.
+///
+/// Ideally, that MIR reversal should be removed and all reversals here should be removed
+/// as well.
 use std::borrow::Cow;
-use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::cmp::{min, Ordering};
+use std::collections::HashMap;
 use std::convert::TryInto;
 
 use dataflow_state::PointKey;
 use itertools::Itertools;
-use readyset_client::internal;
-use readyset_errors::{internal, internal_err, invariant, ReadySetResult};
+use readyset_client::{internal, KeyComparison};
+use readyset_data::{Bound, DfValue};
+use readyset_errors::{internal, internal_err, ReadySetResult};
 use readyset_sql::ast::{NullOrder, OrderType};
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use tracing::trace;
+use vec1::Vec1;
 
+use crate::node::AuxiliaryNodeState;
 use crate::ops::utils::Order;
 use crate::prelude::*;
 use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, LookupMode};
 
-/// Data structure used internally to topk to track rows currently within a group. Contains a
-/// reference to the `order` of the topk itself to allow for a custom Ord implementation, which
-/// compares records in reverse order for efficient determination of the minimum record via
-/// insertion into a [`BinaryHeap`]
+/// Data structure used internally by the Auxiliary State to
+/// track the state of the TopK operator per key/group.
+/// The Auxiliary State is used instead of the main State, because
+/// we want to keep a buffer zone of rows past the top k rows.
+pub type TopKState = HashMap<Vec<DfValue>, Vec<Vec<DfValue>>>;
+
+/// Data structure used internally by TopK to track rows within a group.
+/// Holds a reference to the `order` of the TopK operator to allow for a
+/// custom `Ord` implementation, which compares records in reverse order
+/// to support maintaining a sorted `Vec` for efficient binary search and
+/// insertion/removal.
 #[derive(Debug)]
 struct CurrentRecord<'topk, 'state> {
     row: Cow<'state, [DfValue]>,
     order: &'topk Order,
-    is_new: bool,
+    // If the key wasn't in Top K (or buffer) then it's a new entry
+    // and `original_index` will be `None`.
+    original_index: Option<usize>,
 }
 
 impl Ord for CurrentRecord<'_, '_> {
@@ -42,15 +60,15 @@ impl PartialOrd for CurrentRecord<'_, '_> {
     }
 }
 
-impl PartialOrd<[DfValue]> for CurrentRecord<'_, '_> {
-    fn partial_cmp(&self, other: &[DfValue]) -> Option<Ordering> {
-        Some(self.order.cmp(self.row.as_ref(), other))
-    }
-}
-
 impl PartialEq for CurrentRecord<'_, '_> {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl PartialOrd<[DfValue]> for CurrentRecord<'_, '_> {
+    fn partial_cmp(&self, other: &[DfValue]) -> Option<Ordering> {
+        Some(self.order.cmp(self.row.as_ref(), other))
     }
 }
 
@@ -73,7 +91,7 @@ impl Eq for CurrentRecord<'_, '_> {}
 pub struct TopK {
     src: IndexPair,
 
-    /// The index of this node
+    /// The index of this node.
     our_index: Option<IndexPair>,
 
     /// The list of column indices that we're grouping by.
@@ -81,6 +99,11 @@ pub struct TopK {
 
     order: Order,
     k: usize,
+
+    /// The number of rows to keep (buffer) past k.
+    /// This is used to reduce the number of lookups that need to be
+    /// made in case of deletions from top k rows.
+    buffered: usize,
 }
 
 impl TopK {
@@ -104,6 +127,7 @@ impl TopK {
             group_by,
             order: order.into(),
             k,
+            buffered: k,
         }
     }
 
@@ -116,11 +140,20 @@ impl TopK {
             .map_err(|_| ReadySetError::InvalidRecordLength)
     }
 
+    /// Compare two records by the query's `ORDER BY`
+    /// (reversed, check the comment at the top of this file),
+    /// breaking ties with full-row comparison to ensure a deterministic
+    /// order, which is required by the binary search used in `post_group` and `on_input`.
+    fn total_cmp(&self, a: &[DfValue], b: &[DfValue]) -> Ordering {
+        self.order.cmp(a, b).reverse().then(a.cmp(b))
+    }
+
     /// Called inside of on_input after processing an individual group of input records, to turn
     /// that group into a set of records in `out`.
     ///
-    /// `current` is the final contents of the current group, where the elements are tuples of
-    /// `(row, whether the row has been newly added to the group)`.
+    /// `current` is the final contents of the current group, where the elements are structs of
+    /// `(row, original_index)`. Check the comment on [`CurrentRecord::original_index`]
+    /// for more details.
     ///
     /// `current_group_key` contains the projected key of the group.
     ///
@@ -130,87 +163,143 @@ impl TopK {
     fn post_group<'topk, 'state>(
         &'topk self,
         out: &mut Vec<Record>,
-        current: &mut BinaryHeap<CurrentRecord<'topk, 'state>>,
+        current: &mut Vec<CurrentRecord<'topk, 'state>>,
         current_group_key: &[DfValue],
         original_group_len: usize,
         state: &'state StateMap,
         nodes: &DomainNodes,
+        buffered_state: &mut TopKState,
     ) -> ReadySetResult<Option<Lookup>> {
+        if current_group_key.is_empty() {
+            return Ok(None);
+        }
+
         let mut lookup = None;
-        let group_start_index = current.len().saturating_sub(self.k);
 
         if original_group_len >= self.k && current.len() < self.k {
-            // there used to be k things in the group, now there are fewer than k.
-            match self.lookup(
+            // Previously this group contained >= k records, but now it has fewer.
+            //
+            // To recover, we pull all rows from the parent, sort them, and take
+            // top k (+ buffered).
+            //
+            // Optimization: we avoid generating redundant updates (e.g., pushing a Negative
+            // then a Positive for the same row). We track whether a row was already pushed
+            // using its `original_index`:
+            //   - `Some(_)` → row was already pushed, so we can skip re-emitting
+            //   - `None` → row has never been pushed, so it must be emitted now
+            //
+            // The push/no-push decision is simplified here, please refer to the loops
+            // below and their comments.
+            let IngredientLookupResult::Records(parent_records) = self.lookup(
                 *self.src,
                 &self.group_by,
                 &PointKey::from(current_group_key.iter().cloned()),
                 nodes,
                 state,
                 LookupMode::Strict,
-            )? {
-                IngredientLookupResult::Miss => {
-                    internal!(
-                        "We shouldn't have been able to get this record if the parent would miss"
-                    )
-                }
-                IngredientLookupResult::Records(rs) => {
-                    let old_current = current.drain().map(|r| r.row).collect::<HashSet<_>>();
+            )?
+            else {
+                internal!("We shouldn't have been able to get this record if the parent would miss")
+            };
 
-                    let mut rs = rs.collect::<Result<Vec<_>, _>>()?;
-                    rs.sort_unstable_by(|a, b| self.order.cmp(a.as_ref(), b.as_ref()).reverse());
+            let mut old_current = current
+                .drain(..)
+                .map(|r| (r.row, r.original_index))
+                .collect::<HashMap<_, _>>();
 
-                    current.extend(rs.into_iter().take(self.k).map(|row| CurrentRecord {
-                        is_new: !old_current.contains(&row),
+            let mut rs = parent_records.collect::<Result<Vec<_>, _>>()?;
+            rs.sort_unstable_by(|a, b| self.total_cmp(a, b));
+
+            current.extend(
+                rs.into_iter()
+                    .take(self.k + self.buffered)
+                    .map(|row| CurrentRecord {
+                        original_index: old_current.remove(&row).unwrap_or_default(),
                         row,
                         order: &self.order,
-                    }));
+                    }),
+            );
 
-                    lookup = Some(Lookup {
-                        on: *self.src,
-                        cols: self.group_by.clone(),
-                        key: current_group_key.to_vec().try_into().expect("Empty group"),
-                    })
-                }
+            lookup = Some(Lookup {
+                on: *self.src,
+                cols: self.group_by.clone(),
+                key: current_group_key.to_vec().try_into().expect("Empty group"),
+            })
+        }
+
+        let k = min(current.len(), self.k);
+        let end = min(current.len(), self.k + self.buffered);
+
+        // check top k records first
+        for r in current[..k].iter() {
+            match r.original_index {
+                // new entry in top k rows; push positive
+                None => out.push(Record::Positive(r.row.to_vec())),
+                // was in the buffer zone, now in top k; push positive
+                Some(i) if i >= self.k => out.push(Record::Positive(r.row.to_vec())),
+                // was in top k, still in top k; do nothing
+                _ => (),
             }
         }
 
-        let mut current = current.drain().collect::<Vec<_>>();
-        current.sort_by(|a, b| a.cmp(b).reverse());
-
-        // optimization: if we don't *have to* remove something, we don't
-        for i in group_start_index..current.len() {
-            if current[i].is_new {
-                // we found an `is_new` in current
-                // can we replace it with a !is_new with the same order value?
-                let replace = current[0..group_start_index].iter().position(
-                    |CurrentRecord {
-                         row: ref r, is_new, ..
-                     }| {
-                        !is_new && self.order.cmp(r, &current[i].row) == Ordering::Equal
-                    },
-                );
-                if let Some(ri) = replace {
-                    current.swap(i, ri);
-                }
+        // now check the buffer zone
+        for r in current[k..end].iter() {
+            // was in top k, now is in buffer; push negative
+            if matches!(r.original_index, Some(i) if i < k) {
+                out.push(Record::Negative(r.row.to_vec()));
             }
         }
 
-        for CurrentRecord { row, is_new, .. } in current.drain(group_start_index..) {
-            if is_new {
-                out.push(Record::Positive(row.into_owned()));
-            }
-        }
+        // update the buffered (auxiliary) state of this group.
+        let _ = buffered_state.insert(
+            current_group_key.to_vec(),
+            // Since we're done processing this group, we must clear the current
+            // group to prepare for the next group, so we use drain instead of iter
+            current
+                .drain(..)
+                .take(self.k + self.buffered)
+                .map(|r| r.row.to_vec())
+                .collect(),
+        );
 
-        if !current.is_empty() {
-            for CurrentRecord { row, is_new, .. } in current.drain(..) {
-                if !is_new {
-                    // Was in k, now isn't
-                    out.push(Record::Negative(row.clone().into()));
-                }
-            }
-        }
         Ok(lookup)
+    }
+
+    /// Helper method to check if a group key falls within a given range
+    /// Mainly used for ranged evictions
+    fn key_in_range(
+        &self,
+        group_key: &[DfValue],
+        start: &Bound<Vec1<DfValue>>,
+        end: &Bound<Vec1<DfValue>>,
+    ) -> bool {
+        let compare_with_bound = |key: &[DfValue], bound_vec: &Vec1<DfValue>| -> Ordering {
+            for (key_val, bound_val) in key.iter().zip(bound_vec.iter()) {
+                match key_val.cmp(bound_val) {
+                    Ordering::Equal => continue,
+                    other => return other,
+                }
+            }
+            Ordering::Equal
+        };
+
+        let start_ok = match start {
+            Bound::Included(start_key) => {
+                compare_with_bound(group_key, start_key) >= Ordering::Equal
+            }
+            Bound::Excluded(start_key) => {
+                compare_with_bound(group_key, start_key) > Ordering::Equal
+            }
+        };
+
+        if !start_ok {
+            return false;
+        }
+
+        match end {
+            Bound::Included(end_key) => compare_with_bound(group_key, end_key) <= Ordering::Equal,
+            Bound::Excluded(end_key) => compare_with_bound(group_key, end_key) < Ordering::Equal,
+        }
     }
 }
 
@@ -229,6 +318,41 @@ impl Ingredient for TopK {
         self.our_index = Some(remap[&us]);
     }
 
+    fn on_eviction(
+        &mut self,
+        _from: LocalNodeIndex,
+        _tag: Tag,
+        keys: &[KeyComparison],
+        auxiliary_node_states: &mut AuxiliaryNodeStateMap,
+    ) {
+        let aux_state = match auxiliary_node_states.get_mut(*self.our_index.unwrap()) {
+            Some(AuxiliaryNodeState::TopK(state)) => state,
+            _ => panic!("topk operators got the wrong auxiliary node state"),
+        };
+
+        for key in keys {
+            match key {
+                KeyComparison::Equal(exact) => {
+                    aux_state.remove(&exact.clone().into_vec());
+                }
+                KeyComparison::Range((start, end)) => {
+                    // For range evictions, we need to find all keys that fall within the range
+                    // and remove them. Since we're dealing with group keys, we need to check
+                    // which group keys fall within the specified range.
+                    let keys_to_remove: Vec<_> = aux_state
+                        .keys()
+                        .filter(|group_key| self.key_in_range(group_key, start, end))
+                        .cloned()
+                        .collect();
+
+                    for key in keys_to_remove {
+                        aux_state.remove(&key);
+                    }
+                }
+            }
+        }
+    }
+
     #[allow(clippy::cognitive_complexity)]
     fn on_input(
         &mut self,
@@ -237,7 +361,7 @@ impl Ingredient for TopK {
         replay: &ReplayContext,
         nodes: &DomainNodes,
         state: &StateMap,
-        _auxiliary_node_states: &mut AuxiliaryNodeStateMap,
+        auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 
@@ -262,7 +386,15 @@ impl Ingredient for TopK {
             internal_err!("topk operators must have their own state materialized")
         })?;
 
-        let mut out = Vec::new();
+        let buffered_state = match auxiliary_node_states
+            .get_mut(*us)
+            .ok_or_else(|| internal_err!("topk operators must have their own state materialized"))?
+        {
+            AuxiliaryNodeState::TopK(state) => state,
+            _ => internal!("topk operator got the wrong auxiliary node state"),
+        };
+
+        let mut out = Vec::with_capacity(rs.len());
         // the lookup key of the group currently being processed
         let mut current_group_key = Vec::new();
         // the original length of the group currently being processed before we started doing
@@ -271,64 +403,95 @@ impl Ingredient for TopK {
         // records (if we weren't originally at `k` records we don't need to do anything special).
         let mut original_group_len = 0;
         let mut missed = false;
-        // The current group being processed
-        let mut current = BinaryHeap::new();
+
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
+        // +1 so insertions after reaching capacity don't cause a reallocation
+        let current_capacity = self.k + self.buffered + 1;
+        let mut current: Vec<CurrentRecord> = Vec::with_capacity(current_capacity);
 
         // records are now chunked by group
         for r in &rs {
+            // Does this record belong to the same group or did we start processing a new group?
             if current_group_key.iter().cmp(self.project_group(r.rec())?) != Ordering::Equal {
                 // new group!
 
                 // first, tidy up the old one
-                if !current_group_key.is_empty() {
-                    if let Some(lookup) = self.post_group(
-                        &mut out,
-                        &mut current,
-                        &current_group_key,
-                        original_group_len,
-                        state,
-                        nodes,
-                    )? {
-                        if replay.is_partial() {
-                            lookups.push(lookup)
-                        }
+                if let Some(lookup) = self.post_group(
+                    &mut out,
+                    &mut current,
+                    &current_group_key,
+                    original_group_len,
+                    state,
+                    nodes,
+                    buffered_state,
+                )? {
+                    if replay.is_partial() {
+                        lookups.push(lookup)
                     }
                 }
-                invariant!(current.is_empty());
 
                 // make ready for the new one
-                // NOTE(aspen): Is this the most optimal way of doing this?
-                current_group_key.clear();
-                current_group_key.extend(self.project_group(r.rec())?.into_iter().cloned());
+                current_group_key = self.project_group(r.rec())?.into_iter().cloned().collect();
 
-                // check out current state
-                match db.lookup(
-                    &self.group_by[..],
-                    &PointKey::from(current_group_key.iter().cloned()),
-                ) {
-                    LookupResult::Some(local_records) => {
-                        if replay.is_partial() {
-                            lookups.push(Lookup {
-                                on: *us,
-                                cols: self.group_by.clone(),
-                                key: current_group_key.clone().try_into().expect("Empty group"),
-                            });
-                        }
+                // We can’t check for misses against `buffered_state` (the aux state), even though
+                // evictions affect both main and aux.
+                //
+                // Only the main state marks missing keys as "filled" when an upquery resolves a hole.
+                // If we relied on the aux state instead, we’d never see those fills and could loop
+                // forever reporting misses.
+                missed = if let LookupResult::Some(r) =
+                    db.lookup(&self.group_by, &PointKey::from(current_group_key.clone()))
+                {
+                    if replay.is_partial() {
+                        lookups.push(Lookup {
+                            on: *us,
+                            cols: self.group_by.clone(),
+                            key: current_group_key.clone().try_into().expect("Empty group"),
+                        });
+                    }
 
-                        missed = false;
-                        original_group_len = local_records.len();
-                        current.extend(local_records.into_iter().map(|row| CurrentRecord {
-                            row: row.clone(),
-                            is_new: false,
-                            order: &self.order,
-                        }))
+                    // verify that the states match and that the eviction affected both states
+                    debug_assert_eq!(
+                        r.into_iter()
+                            .map(|r| r.to_vec())
+                            .sorted_by(|a, b| self.order.cmp(a, b).reverse().then(a.cmp(b)))
+                            .collect::<Vec<_>>(),
+                        buffered_state
+                            .get(&current_group_key)
+                            .unwrap_or(&Vec::new())
+                            .iter()
+                            .take(self.k)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    );
+
+                    false
+                } else {
+                    true
+                };
+
+                current = match buffered_state.get(&current_group_key) {
+                    Some(records) => {
+                        original_group_len = records.len();
+
+                        records
+                            .iter()
+                            .cloned()
+                            .enumerate()
+                            .map(|(i, r)| CurrentRecord {
+                                row: Cow::Owned(r),
+                                order: &self.order,
+                                original_index: Some(i),
+                            })
+                            .collect()
                     }
-                    LookupResult::Missing => {
-                        missed = true;
+                    None => {
+                        // New group or was previously evicted. Either way, we need to start fresh
+                        original_group_len = 0;
+                        Vec::with_capacity(current_capacity)
                     }
-                }
+                };
             }
 
             if missed {
@@ -341,72 +504,73 @@ impl Ingredient for TopK {
                         .record(r.row().clone())
                         .build(),
                 );
-            } else {
-                match r {
-                    Record::Positive(r) => {
-                        // If we're at k records we can't consider positive records below our
-                        // minimum element, because it's possible that there are *other* records
-                        // *between* our minimum element and that positive record which we wouldn't
-                        // know about. If we drop below k records during processing and it turns out
-                        // that this positive record would have been in the topk, we'll figure that
-                        // out in post_group when we query our parent.
-                        if original_group_len >= self.k {
-                            if let Some(min) = current.peek() {
-                                if min > r.as_slice() {
-                                    trace!(row = ?r, "topk skipping positive below minimum");
-                                    continue;
-                                }
+                continue;
+            }
+
+            match r {
+                Record::Positive(r) => {
+                    // If we're at capacity we can't consider positive records worse than our
+                    // worst element, because it's possible that there are *other* records
+                    // *between* our worst element and that positive record which we wouldn't
+                    // know about. If we drop below k records during processing and it turns out
+                    // that this positive record would have been in the topk, we'll figure that
+                    // out in post_group when we query our parent.
+                    if current.len() >= (self.k + self.buffered) {
+                        if let Some(worst) = current.last() {
+                            if worst <= r.as_slice() {
+                                trace!(row = ?r, "topk skipping positive worse than worst");
+                                continue;
                             }
                         }
-
-                        current.push(CurrentRecord {
-                            row: Cow::Owned(r.clone()),
-                            is_new: true,
-                            order: &self.order,
-                        })
                     }
-                    Record::Negative(r) => {
-                        let mut found = false;
-                        current.retain(|CurrentRecord { row, is_new, .. }| {
-                            if found {
-                                // we've already removed one copy of this row, don't need to do any
-                                // more
-                                return true;
-                            }
-                            if **row == *r {
-                                found = true;
-                                // is_new = we received a positive and a negative for the same value
-                                // in one batch
-                                // [note: topk-record-ordering]
-                                // Note that since we sort records, and positive records compare
-                                // less than negative records, we'll
-                                // always get the positive first and the
-                                // negative second
-                                if !is_new {
-                                    out.push(Record::Negative(r.clone()))
-                                }
-                                return false;
-                            }
 
-                            true
+                    let record = CurrentRecord {
+                        row: Cow::Borrowed(r),
+                        order: &self.order,
+                        // New entry to the topk
+                        original_index: None,
+                    };
+
+                    match current.binary_search_by(|cr| self.total_cmp(&cr.row, r)) {
+                        Ok(idx) | Err(idx) => {
+                            // we already know that this record is within bounds and
+                            // at least better than our worst element
+                            current.insert(idx, record);
+                            // Immediately enforce size bound to prevent unbounded growth
+                            // and vec reallocation
+                            if current.len() > self.k + self.buffered {
+                                current.truncate(self.k + self.buffered);
+                            }
+                        }
+                    };
+                }
+                Record::Negative(r) => {
+                    let _ = current
+                        .binary_search_by(|cr| self.total_cmp(&cr.row, r))
+                        .map(|idx| {
+                            // This record was already in the topk
+                            if matches!(current[idx].original_index, Some(i) if i < self.k) {
+                                out.push(Record::Negative(r.clone()));
+                            }
+                            // Shifting sucks, we can use a deletion marker, but that
+                            // will make the group-posting logic more complex
+                            current.remove(idx);
                         });
-                    }
                 }
             }
         }
 
-        if !current_group_key.is_empty() {
-            if let Some(lookup) = self.post_group(
-                &mut out,
-                &mut current,
-                &current_group_key,
-                original_group_len,
-                state,
-                nodes,
-            )? {
-                if replay.is_partial() {
-                    lookups.push(lookup)
-                }
+        if let Some(lookup) = self.post_group(
+            &mut out,
+            &mut current,
+            &current_group_key,
+            original_group_len,
+            state,
+            nodes,
+            buffered_state,
+        )? {
+            if replay.is_partial() {
+                lookups.push(lookup)
             }
         }
 

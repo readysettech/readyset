@@ -548,7 +548,7 @@ impl TestScript {
             builder.set_mixed_comparisons(true);
             builder.set_straddled_joins(true);
             builder.set_post_lookup(true);
-            builder.set_topk(false); // TODO: fails on generated tests
+            builder.set_topk(true);
             builder.set_parsing_preset(run_opts.parsing_preset);
             builder.set_dialect(run_opts.database_type.into());
 

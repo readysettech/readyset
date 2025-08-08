@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ops::grouped::aggregate::AggregatorState;
 use crate::ops::grouped::concat::GroupConcatState;
+use crate::ops::topk::TopKState;
 use crate::ops::{self};
 use crate::prelude::*;
 use crate::processing::LookupIndex;
@@ -185,6 +186,7 @@ impl DanglingDomainNode {
 pub enum AuxiliaryNodeState {
     Aggregation(AggregatorState),
     Concat(GroupConcatState),
+    TopK(TopKState),
 }
 
 // external parts of Ingredient
@@ -343,6 +345,7 @@ impl Node {
                     Some(AuxiliaryNodeState::Aggregation(Default::default()))
                 }
                 NodeOperator::Concat(_) => Some(AuxiliaryNodeState::Concat(Default::default())),
+                NodeOperator::TopK(_) => Some(AuxiliaryNodeState::TopK(Default::default())),
                 NodeOperator::Extremum(_)
                 | NodeOperator::Join(_)
                 | NodeOperator::Paginate(_)
@@ -352,8 +355,7 @@ impl Node {
                 | NodeOperator::Filter(_)
                 // NOTE: probably will need to give window function
                 // an auxiliary state in the future to improve performance
-                | NodeOperator::Window(_)
-                | NodeOperator::TopK(_) => None,
+                | NodeOperator::Window(_) => None,
             },
             NodeType::Ingress
             | NodeType::Base(_)
