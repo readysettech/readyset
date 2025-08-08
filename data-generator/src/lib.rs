@@ -263,7 +263,7 @@ impl UniqueGenerator {
     pub fn gen(&mut self) -> DfValue {
         let val = unique_value_of_type(&self.sql_type, self.index);
         self.generated += 1;
-        if self.generated % self.batch_size == 0 {
+        if self.generated.is_multiple_of(self.batch_size) {
             self.index += 1;
         }
         val

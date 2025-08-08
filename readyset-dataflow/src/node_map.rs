@@ -202,7 +202,7 @@ impl<T> NodeMap<T> {
 
     /// Construct an iterator over all keys in the map
     pub fn keys(&self) -> impl Iterator<Item = LocalNodeIndex> + '_ {
-        (0..self.len).map(|i| (LocalNodeIndex::make(i as u32)))
+        (0..self.len).map(|i| LocalNodeIndex::make(i as u32))
     }
 
     /// Construct an iterator over all values in the map

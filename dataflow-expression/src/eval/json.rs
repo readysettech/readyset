@@ -251,7 +251,7 @@ pub(crate) fn json_object_from_pairs(
 
     match kv_pairs.num_dimensions() {
         1 => {
-            if kv_pairs.total_len() % 2 != 0 {
+            if !kv_pairs.total_len().is_multiple_of(2) {
                 return Err(invalid_query_err!(
                     "array must have even number of elements"
                 ));

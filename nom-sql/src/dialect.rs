@@ -49,7 +49,9 @@ fn raw_hex_bytes_mysql(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>
 fn hex_bytes(chunk: usize) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
     move |i| {
         map_res(
-            verify(hex_digit0, |i: &LocatedSpan<&[u8]>| i.len() % chunk == 0),
+            verify(hex_digit0, |i: &LocatedSpan<&[u8]>| {
+                i.len().is_multiple_of(chunk)
+            }),
             |i: LocatedSpan<&[u8]>| hex::decode(*i),
         )(i)
     }

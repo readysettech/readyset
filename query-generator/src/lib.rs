@@ -560,11 +560,13 @@ impl TableSpec {
                         // Allow using the `index` for key columns which are specified
                         // as Unique.
                         ColumnGenerator::Unique(u) => u.gen(),
-                        _ if index % 2 == 0 && !expected_values.is_empty() => expected_values
-                            .iter()
-                            .nth(index / 2 % expected_values.len())
-                            .unwrap()
-                            .clone(),
+                        _ if index.is_multiple_of(2) && !expected_values.is_empty() => {
+                            expected_values
+                                .iter()
+                                .nth(index / 2 % expected_values.len())
+                                .unwrap()
+                                .clone()
+                        }
                         _ if random => random_value_of_type(col_type, rand::rng()),
                         ColumnGenerator::Constant(c) => c.gen(),
                         ColumnGenerator::Uniform(u) => u.gen(),

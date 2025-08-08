@@ -60,7 +60,7 @@ struct PermutationGenerator {
 
 fn num_permutations_upto(num_ops: usize, depth: usize) -> usize {
     (1..=depth)
-        .map(|l| (0..l).map(|n| (num_ops - n)).product::<usize>())
+        .map(|l| (0..l).map(|n| num_ops - n).product::<usize>())
         .sum::<usize>()
 }
 

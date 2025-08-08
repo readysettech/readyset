@@ -1410,7 +1410,7 @@ fn make_reader_processing(
     let returned_cols = if let Some(col) = returned_cols.as_ref() {
         let returned_cols = col
             .iter()
-            .map(|col| (graph.column_id_for_column(*parent, col)))
+            .map(|col| graph.column_id_for_column(*parent, col))
             .collect::<ReadySetResult<Vec<_>>>()?;
 
         // In the future we will avoid reordering column, and must make sure that the returned

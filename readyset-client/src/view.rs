@@ -1773,7 +1773,7 @@ impl<'a> KeyComparisonBuilder<'a> {
                     let offset: u64 = self
                         .remap_key(raw_key.as_ref(), offset_placeholder, &DfType::BigInt)?
                         .try_into()?;
-                    if offset % *limit != 0 {
+                    if !offset.is_multiple_of(*limit) {
                         unsupported!("OFFSET must currently be an integer multiple of LIMIT");
                     }
                     let page_number = offset / *limit;
