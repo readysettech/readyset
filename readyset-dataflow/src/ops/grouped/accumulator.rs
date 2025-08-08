@@ -1,8 +1,9 @@
-//! Kinda (s)crappy group_concat() implementation
+//! Accumulation-based aggregation operations that collect values into composite results.
+//!
+//! This module implements SQL aggregation functions that accumulate multiple input values
+//! into a single output value. Currently only supports mysql's `GROUP_CONCAT`.
 
 use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::fmt::Write;
 
 use common::DfValue;
 use readyset_data::{Collation, DfType};
@@ -15,21 +16,12 @@ use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
 
 /// The last stored state for a given group.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 struct LastState {
-    /// The string representation we last emitted for this group.
-    string_repr: String,
+    /// The last output value we emitted for this group.
+    last_output: Option<DfValue>,
     /// A vector containing the actual data
     data: Vec<DfValue>,
-}
-
-impl Default for LastState {
-    fn default() -> Self {
-        Self {
-            string_repr: "".to_owned(),
-            data: vec![],
-        }
-    }
 }
 
 /// `GroupConcat` partially implements the `GROUP_CONCAT` SQL aggregate function, which
@@ -43,17 +35,6 @@ pub struct GroupConcat {
     group_by: Vec<usize>,
     /// The user-defined separator.
     separator: String,
-}
-
-fn concat_fmt<F: Write>(f: &mut F, dt: &DfValue) -> ReadySetResult<()> {
-    match dt {
-        DfValue::Text(..) | DfValue::TinyText(..) => {
-            let text: &str = <&str>::try_from(dt)?;
-            write!(f, "{text}").unwrap();
-        }
-        x => write!(f, "{x}").unwrap(),
-    }
-    Ok(())
 }
 
 impl GroupConcat {
@@ -115,10 +96,6 @@ impl GroupedOperation for GroupConcat {
         diffs: &mut dyn Iterator<Item = Self::Diff>,
         auxiliary_node_state: Option<&mut AuxiliaryNodeState>,
     ) -> ReadySetResult<Option<DfValue>> {
-        let current: Option<&str> = current
-            .filter(|dt| matches!(dt, &DfValue::Text(..) | &DfValue::TinyText(..)))
-            .and_then(|dt| <&str>::try_from(dt).ok());
-
         let mut diffs = diffs.peekable();
 
         let first_diff = diffs
@@ -133,9 +110,14 @@ impl GroupedOperation for GroupConcat {
         };
 
         let mut ls = last_state.remove(&group);
+        // check that the `current` value, as known by node owning operator,
+        // is the same value that was last emitted from this function.
+        // if they don't match, something's gone wrong and we need to rebuild.
         let mut prev_state = match current {
             #[allow(clippy::unwrap_used)] // check for is_some() before unwrapping
-            Some(text) if ls.is_some() && text == ls.as_ref().unwrap().string_repr => {
+            Some(curr_val)
+                if ls.is_some() && ls.as_ref().unwrap().last_output.as_ref() == Some(curr_val) =>
+            {
                 // if state matches, use it
                 ls.take().unwrap()
             }
@@ -175,18 +157,16 @@ impl GroupedOperation for GroupConcat {
                 prev_state.data.remove(item_pos);
             }
         }
-        // what I *really* want here is Haskell's "intercalate" ~eta
-        let mut out_str = String::new();
-        for (i, piece) in prev_state.data.iter().enumerate() {
-            // TODO(eta): not unwrap, maybe
-            concat_fmt(&mut out_str, piece)?;
-            if i < prev_state.data.len() - 1 {
-                write!(&mut out_str, "{}", self.separator).unwrap();
-            }
-        }
-        prev_state.string_repr.clone_from(&out_str);
+        let out_str = prev_state
+            .data
+            .iter()
+            .map(|piece| piece.to_string())
+            .collect::<Vec<_>>()
+            .join(&self.separator);
+        let output_value: DfValue = out_str.into();
+        prev_state.last_output = Some(output_value.clone());
         last_state.insert(group, prev_state);
-        Ok(Some(out_str.into()))
+        Ok(Some(output_value))
     }
 
     fn description(&self) -> String {

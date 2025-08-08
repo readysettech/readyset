@@ -4,8 +4,8 @@ use readyset_data::{Collation, DfType, Dialect};
 use readyset_sql::ast::{ColumnSpecification, Relation, SqlIdentifier};
 use serde::{Deserialize, Serialize};
 
+use crate::ops::grouped::accumulator::GroupConcatState;
 use crate::ops::grouped::aggregate::AggregatorState;
-use crate::ops::grouped::concat::GroupConcatState;
 use crate::ops::topk::TopKState;
 use crate::ops::{self};
 use crate::prelude::*;

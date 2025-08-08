@@ -11,7 +11,7 @@ use std::mem;
 
 use common::DfValue;
 use dataflow::node::Column as DfColumn;
-use dataflow::ops::grouped::concat::GroupConcat;
+use dataflow::ops::grouped::accumulator::GroupConcat;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::window::{Window, WindowOperation, WindowOperationKind};

@@ -23,7 +23,7 @@ pub mod union;
 pub(crate) mod utils;
 pub mod window;
 
-use crate::ops::grouped::concat::GroupConcat;
+use crate::ops::grouped::accumulator::GroupConcat;
 use crate::processing::{
     ColumnMiss, ColumnSource, IngredientLookupResult, LookupIndex, LookupMode,
 };

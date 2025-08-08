@@ -12,9 +12,8 @@ use crate::node::AuxiliaryNodeState;
 use crate::prelude::*;
 use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, LookupMode};
 
-// pub mod latest;
+pub mod accumulator;
 pub mod aggregate;
-pub mod concat;
 pub mod extremum;
 
 /// Trait for implementing operations that collapse a group of records into a single record.
