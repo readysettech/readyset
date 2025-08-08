@@ -87,6 +87,8 @@ steps:
     key: rust-tests
     command: |
       [ -d public ] && cd public
+      ../.buildkite/retrieve_last_artifact.sh '**/proptest-regressions/*.txt'
+      ../.buildkite/retrieve_last_artifact.sh '**/*.proptest-regressions'
       .buildkite/run-tests.sh
       echo "~~~ Show sccache stats"
       sccache --show-stats
@@ -97,6 +99,12 @@ steps:
           tty: true           # nextest makes colored output if we use tty
           env:
             - BUILDKITE_PARALLEL_JOB
+            - BUILDKITE_API_TOKEN             # buildkite vars needed to fetch regression artifacts
+            - BUILDKITE_GRAPHQL_API_TOKEN
+            - BUILDKITE_ORGANIZATION_SLUG
+            - BUILDKITE_PIPELINE_SLUG
+            - BUILDKITE_BRANCH
+            - BUILDKITE_STEP_KEY
             - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
             - SCCACHE_REGION=us-east-2
             - CARGO_INCREMENTAL=0
@@ -141,6 +149,8 @@ steps:
     key: rust-tests-mrbr
     command: |
       [ -d public ] && cd public
+      ../.buildkite/retrieve_last_artifact.sh '**/proptest-regressions/*.txt'
+      ../.buildkite/retrieve_last_artifact.sh '**/*.proptest-regressions'
       TEST_CATEGORY=nextest UPSTREAM_CONFIG=mysql80 MYSQL_MRBR=on .buildkite/run-tests.sh
       echo "~~~ Show sccache stats"
       sccache --show-stats
@@ -151,6 +161,12 @@ steps:
           tty: true           # nextest makes colored output if we use tty
           env:
             - BUILDKITE_PARALLEL_JOB
+            - BUILDKITE_API_TOKEN             # buildkite vars needed to fetch regression artifacts
+            - BUILDKITE_GRAPHQL_API_TOKEN
+            - BUILDKITE_ORGANIZATION_SLUG
+            - BUILDKITE_PIPELINE_SLUG
+            - BUILDKITE_BRANCH
+            - BUILDKITE_STEP_KEY
             - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
             - SCCACHE_REGION=us-east-2
             - CARGO_INCREMENTAL=0
@@ -178,6 +194,8 @@ steps:
     key: rust-dectests
     command: |
       [ -d public ] && cd public
+      ../.buildkite/retrieve_last_artifact.sh '**/proptest-regressions/*.txt'
+      ../.buildkite/retrieve_last_artifact.sh '**/*.proptest-regressions'
       TEST_CATEGORY=doctest .buildkite/run-tests.sh
       echo "~~~ Show sccache stats"
       sccache --show-stats
@@ -188,6 +206,12 @@ steps:
           tty: true           # nextest makes colored output if we use tty
           env:
             - BUILDKITE_PARALLEL_JOB
+            - BUILDKITE_API_TOKEN             # buildkite vars needed to fetch regression artifacts
+            - BUILDKITE_GRAPHQL_API_TOKEN
+            - BUILDKITE_ORGANIZATION_SLUG
+            - BUILDKITE_PIPELINE_SLUG
+            - BUILDKITE_BRANCH
+            - BUILDKITE_STEP_KEY
             - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
             - SCCACHE_REGION=us-east-2
             - CARGO_INCREMENTAL=0
