@@ -9,4 +9,6 @@ pub enum Error {
     Parse(#[from] ParseError),
     #[error("invalid rotation cadence: {0}")]
     InvalidRotationCadence(String),
+    #[error("could not open file for appending: {0}")]
+    CouldNotOpenFile(#[from] std::io::Error),
 }

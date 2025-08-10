@@ -15,7 +15,7 @@
 //! [presampling](presampled) - sampling spans at creation time rather than when a subscriber would
 //! send them to a collector.
 
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -48,12 +48,22 @@ pub struct Options {
     /// Optional path to a directory where log files will be placed. Logs will be written to
     /// `readyset.log` within this directory. If set, logs will rollover based on the chosen
     /// `log_rotation` policy, which defaults to daily. Readyset must have write permissions.
-    #[arg(long, env = "LOG_DIR")]
+    #[arg(long, env = "LOG_DIR", conflicts_with = "log_file")]
     pub log_dir: Option<PathBuf>,
+
+    /// Optional full log filename where logs will be appended. Incompatible with log rotation.
+    #[arg(long, env = "LOG_FILE", conflicts_with_all = ["log_dir", "log_rotation"])]
+    pub log_file: Option<PathBuf>,
 
     /// Log [`RotationCadence`] to use if a log file is set. Defaults to daily. Does nothing if no
     /// log file is set. Possible Values: [daily, hourly, minutely, never]
-    #[arg(long, env = "LOG_ROTATION", default_value = "daily", value_enum)]
+    #[arg(
+        long,
+        env = "LOG_ROTATION",
+        default_value = "daily",
+        value_enum,
+        conflicts_with = "log_file"
+    )]
     pub log_rotation: RotationCadence,
 
     /// Format to use when emitting log events.
@@ -110,6 +120,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             log_dir: None,
+            log_file: None,
             log_rotation: "daily".try_into().expect("daily is a valid log rotation"),
             log_format: LogFormat::Full,
             no_color: false,
@@ -268,6 +279,11 @@ impl Options {
                 log_dir,
                 "readyset.log",
             ))
+        } else if let Some(log_file) = &self.log_file {
+            let mut open_options = OpenOptions::new();
+            open_options.append(true).create(true);
+            let file = open_options.open(log_file)?;
+            tracing_appender::non_blocking(file)
         } else {
             tracing_appender::non_blocking(std::io::stdout())
         };
