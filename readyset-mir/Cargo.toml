@@ -20,6 +20,7 @@ derive_more = { workspace = true }
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }
 dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow" }
+dataflow-expression = { path = "../dataflow-expression" }
 readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-sql = { path = "../readyset-sql" }

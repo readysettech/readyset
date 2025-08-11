@@ -1,5 +1,6 @@
 mod binary_operator;
 pub mod eval;
+pub mod grouped;
 pub mod like;
 mod lower;
 mod promotion;

@@ -12,7 +12,8 @@ use crate::{Column, NodeIndex};
 
 fn commutes_with(conditions: &Expr, inner: &MirNodeInner) -> bool {
     match inner {
-        MirNodeInner::Aggregation { group_by, .. }
+        MirNodeInner::Accumulator { group_by, .. }
+        | MirNodeInner::Aggregation { group_by, .. }
         | MirNodeInner::Paginate { group_by, .. }
         | MirNodeInner::TopK { group_by, .. }
         | MirNodeInner::Distinct { group_by, .. }

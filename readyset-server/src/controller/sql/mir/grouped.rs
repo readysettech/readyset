@@ -286,6 +286,7 @@ fn joinable_aggregate_nodes(
     agg_nodes
         .iter()
         .filter_map(|&node| match mir_converter.get_node(node).unwrap().inner {
+            MirNodeInner::Accumulator { .. } => Some(node),
             MirNodeInner::Aggregation { .. } => Some(node),
             MirNodeInner::Extremum { .. } => Some(node),
             _ => None,

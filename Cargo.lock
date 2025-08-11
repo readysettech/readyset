@@ -5114,6 +5114,7 @@ dependencies = [
 name = "readyset-mir"
 version = "0.7.0"
 dependencies = [
+ "dataflow-expression",
  "derive_more",
  "fixedbitset",
  "itertools 0.14.0",
@@ -5262,6 +5263,7 @@ dependencies = [
  "clap",
  "criterion",
  "database-utils",
+ "dataflow-expression",
  "dataflow-state",
  "diff",
  "enum-kinds",

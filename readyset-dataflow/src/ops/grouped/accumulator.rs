@@ -1,13 +1,11 @@
 //! Accumulation-based aggregation operations that collect values into composite results.
-//!
-//! This module implements SQL aggregation functions that accumulate multiple input values
-//! into a single output value. Currently only supports mysql's `GROUP_CONCAT`.
 
 use std::collections::HashMap;
 
 use common::DfValue;
-use readyset_data::{Collation, DfType};
-use readyset_errors::invariant_eq;
+use dataflow_expression::grouped::accumulator::AccumulationOp;
+use readyset_data::{Collation, DfType, Dialect};
+use readyset_errors::{internal_err, invariant_eq, ReadySetResult};
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 
@@ -24,66 +22,77 @@ struct LastState {
     data: Vec<DfValue>,
 }
 
-/// `GroupConcat` partially implements the `GROUP_CONCAT` SQL aggregate function, which
-/// aggregates a set of arbitrary `DfValue`s into a string representation separated by
-/// a user-defined separator.
+/// `Accumulator` implements accumulation-based aggregation operations that collect
+/// multiple input values into a single composite output value.
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct GroupConcat {
-    /// Which column to aggregate.
-    source_col: usize,
-    /// The columns to group by.
-    group_by: Vec<usize>,
-    /// The user-defined separator.
-    separator: String,
+pub struct Accumulator {
+    op: AccumulationOp,
+    over: usize,
+    group: Vec<usize>,
+    out_ty: DfType,
 }
 
-impl GroupConcat {
-    /// Construct a new `GroupConcat`, aggregating the provided `source_col` and separating
-    /// aggregated data with the provided `separator`.
-    pub fn new(
+impl Accumulator {
+    /// Construct a new `Accumulator` that performs this operation.
+    pub fn over(
+        op: AccumulationOp,
         src: NodeIndex,
-        source_col: usize,
-        group_by: Vec<usize>,
-        separator: String,
-    ) -> ReadySetResult<GroupedOperator<GroupConcat>> {
+        over: usize,
+        group_by: &[usize],
+        _over_col_ty: &DfType,
+        _dialect: &Dialect,
+    ) -> ReadySetResult<GroupedOperator<Accumulator>> {
+        let out_ty = match &op {
+            AccumulationOp::GroupConcat { .. } => {
+                antithesis_sdk::assert_reachable!("Accumulation::GroupConcat");
+                DfType::Text(/* TODO */ Collation::Utf8)
+            }
+            AccumulationOp::JsonObjectAgg { .. } => {
+                antithesis_sdk::assert_reachable!("Accumulation::JsonObjectAgg");
+                DfType::Text(Collation::Utf8)
+            }
+        };
+
         Ok(GroupedOperator::new(
             src,
-            GroupConcat {
-                source_col,
-                group_by,
-                separator,
+            Accumulator {
+                op,
+                over,
+                group: group_by.into(),
+                out_ty,
             },
         ))
     }
 }
 
-pub struct ConcatDiff {
+#[derive(Debug)]
+pub struct AccumulationDiff {
     value: DfValue,
     is_positive: bool,
     group_by: Vec<DfValue>,
 }
 
-impl GroupedOperation for GroupConcat {
-    type Diff = ConcatDiff;
+impl GroupedOperation for Accumulator {
+    type Diff = AccumulationDiff;
 
     fn setup(&mut self, _: &Node) -> ReadySetResult<()> {
         Ok(())
     }
 
     fn group_by(&self) -> &[usize] {
-        &self.group_by
+        &self.group
     }
 
     fn to_diff(&self, record: &[DfValue], is_positive: bool) -> ReadySetResult<Self::Diff> {
         let value = record
-            .get(self.source_col)
+            .get(self.over)
             .ok_or(ReadySetError::InvalidRecordLength)?
             .clone();
         // We need this to figure out which state to use.
         let group_by = record
-            .cloned_indices(self.group_by.iter().cloned())
+            .cloned_indices(self.group.iter().cloned())
             .map_err(|_| ReadySetError::InvalidRecordLength)?;
-        Ok(ConcatDiff {
+        Ok(AccumulationDiff {
             value,
             is_positive,
             group_by,
@@ -104,9 +113,9 @@ impl GroupedOperation for GroupConcat {
         let group = first_diff.group_by.clone();
 
         let last_state = match auxiliary_node_state {
-            Some(AuxiliaryNodeState::Concat(ref mut gcs)) => &mut gcs.last_state,
-            Some(_) => internal!("Incorrect auxiliary state for Concat node"),
-            None => internal!("Missing auxiliary state for Concat node"),
+            Some(AuxiliaryNodeState::Accumulator(ref mut acc_state)) => &mut acc_state.last_state,
+            Some(_) => internal!("Incorrect auxiliary state for Accumulator node"),
+            None => internal!("Missing auxiliary state for Accumulator node"),
         };
 
         let mut ls = last_state.remove(&group);
@@ -128,7 +137,7 @@ impl GroupedOperation for GroupConcat {
             // if we're recreating or this is the first record for the group, make a new state
             None => LastState::default(),
         };
-        for ConcatDiff {
+        for AccumulationDiff {
             value,
             is_positive,
             group_by,
@@ -157,31 +166,36 @@ impl GroupedOperation for GroupConcat {
                 prev_state.data.remove(item_pos);
             }
         }
-        let out_str = prev_state
-            .data
-            .iter()
-            .map(|piece| piece.to_string())
-            .collect::<Vec<_>>()
-            .join(&self.separator);
-        let output_value: DfValue = out_str.into();
+        let output_value = self.op.apply(&prev_state.data)?;
         prev_state.last_output = Some(output_value.clone());
         last_state.insert(group, prev_state);
         Ok(Some(output_value))
     }
 
     fn description(&self) -> String {
-        format!(
-            "||({}, {:?}) γ{:?}",
-            self.source_col, self.separator, self.group_by
-        )
+        let op_string = match &self.op {
+            AccumulationOp::GroupConcat { separator } => {
+                format!("GroupConcat({}, {:?})", self.over, separator)
+            }
+            AccumulationOp::JsonObjectAgg {
+                allow_duplicate_keys,
+            } => {
+                if *allow_duplicate_keys {
+                    format!("JsonObjectAgg({})", self.over)
+                } else {
+                    format!("JsonbObjectAgg({})", self.over)
+                }
+            }
+        };
+        format!("{} γ{:?}", op_string, self.group)
     }
 
     fn over_column(&self) -> usize {
-        self.source_col
+        self.over
     }
 
     fn output_col_type(&self) -> DfType {
-        DfType::Text(/* TODO */ Collation::Utf8)
+        self.out_ty.clone()
     }
 
     fn empty_value(&self) -> Option<DfValue> {
@@ -194,8 +208,8 @@ impl GroupedOperation for GroupConcat {
 }
 
 #[derive(Debug, Default)]
-/// Auxiliary State for a single GroupConcat Node, which is owned by a Domain.
-pub struct GroupConcatState {
+/// Auxiliary State for accumulation operations, which is owned by a Domain.
+pub struct AccumulatorState {
     last_state: HashMap<Vec<DfValue>, LastState>,
 }
 
@@ -208,7 +222,18 @@ mod tests {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
 
-        let c = GroupConcat::new(s.as_global(), 1, vec![0], String::from("#")).unwrap();
+        let op = AccumulationOp::GroupConcat {
+            separator: "#".to_string(),
+        };
+        let c = Accumulator::over(
+            op,
+            s.as_global(),
+            1,
+            &[0],
+            &DfType::Unknown,
+            &Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap();
 
         g.set_op("concat", &["x", "ys"], c, mat);
         g
@@ -217,7 +242,7 @@ mod tests {
     #[test]
     fn it_describes() {
         let c = setup(true);
-        assert_eq!(c.node().description(), "||(1, \"#\") γ[0]",);
+        assert_eq!(c.node().description(), "GroupConcat(1, \"#\") γ[0]",);
     }
 
     #[test]

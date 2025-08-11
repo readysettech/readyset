@@ -4,7 +4,7 @@ use readyset_data::{Collation, DfType, Dialect};
 use readyset_sql::ast::{ColumnSpecification, Relation, SqlIdentifier};
 use serde::{Deserialize, Serialize};
 
-use crate::ops::grouped::accumulator::GroupConcatState;
+use crate::ops::grouped::accumulator::AccumulatorState;
 use crate::ops::grouped::aggregate::AggregatorState;
 use crate::ops::topk::TopKState;
 use crate::ops::{self};
@@ -184,8 +184,8 @@ impl DanglingDomainNode {
 /// The state of an internal node in the graph
 // Naming convention is NodeOperator(name of type internal to NodeOperator)
 pub enum AuxiliaryNodeState {
+    Accumulator(AccumulatorState),
     Aggregation(AggregatorState),
-    Concat(GroupConcatState),
     TopK(TopKState),
 }
 
@@ -341,10 +341,10 @@ impl Node {
     pub fn initial_auxiliary_state(&self) -> Option<AuxiliaryNodeState> {
         match &self.inner {
             NodeType::Internal(no) => match no {
+                NodeOperator::Accumulation(_) => Some(AuxiliaryNodeState::Accumulator(Default::default())),
                 NodeOperator::Aggregation(_) => {
                     Some(AuxiliaryNodeState::Aggregation(Default::default()))
                 }
-                NodeOperator::Concat(_) => Some(AuxiliaryNodeState::Concat(Default::default())),
                 NodeOperator::TopK(_) => Some(AuxiliaryNodeState::TopK(Default::default())),
                 NodeOperator::Extremum(_)
                 | NodeOperator::Join(_)

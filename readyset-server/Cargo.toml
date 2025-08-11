@@ -73,6 +73,7 @@ vec1 = { workspace = true }
 
 # local deps
 dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow" }
+dataflow-expression = { path = "../dataflow-expression" }
 dataflow-state = { path = "../dataflow-state" }
 mir = { path = "../readyset-mir", package = "readyset-mir" }
 common = { path = "../readyset-common", package = "readyset-common" }

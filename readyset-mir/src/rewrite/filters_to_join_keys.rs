@@ -206,7 +206,8 @@ pub(crate) fn convert_filters_to_join_keys(
         //    removed from a query and turned into a join key later
         for ancestor_idx in query.topo_ancestors(filter_idx)? {
             match &query.get_node(ancestor_idx).unwrap().inner {
-                MirNodeInner::Aggregation { group_by, .. }
+                MirNodeInner::Accumulator { group_by, .. }
+                | MirNodeInner::Aggregation { group_by, .. }
                 | MirNodeInner::Extremum { group_by, .. }
                 | MirNodeInner::Distinct { group_by, .. }
                 | MirNodeInner::Paginate { group_by, .. }

@@ -176,7 +176,8 @@ impl MirGraph {
     /// from its parent.
     pub fn referenced_columns(&self, node: NodeIndex) -> Vec<MirColumn> {
         match &self.graph[node].inner {
-            MirNodeInner::Aggregation { on, group_by, .. }
+            MirNodeInner::Accumulator { on, group_by, .. }
+            | MirNodeInner::Aggregation { on, group_by, .. }
             | MirNodeInner::Extremum { on, group_by, .. } => {
                 // Aggregates need the group_by columns and the "over" column
                 let mut columns = group_by.clone();
@@ -287,7 +288,12 @@ impl MirGraph {
                     aliases: vec![],
                 })
                 .collect(),
-            MirNodeInner::Aggregation {
+            MirNodeInner::Accumulator {
+                group_by,
+                output_column,
+                ..
+            }
+            | MirNodeInner::Aggregation {
                 group_by,
                 output_column,
                 ..

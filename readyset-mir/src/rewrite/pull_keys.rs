@@ -35,7 +35,8 @@ fn push_view_key(query: &mut MirQuery<'_>, node_idx: NodeIndex) -> ReadySetResul
     };
 
     match &mut query.get_node_mut(child_idx).unwrap().inner {
-        MirNodeInner::Aggregation { group_by, .. }
+        MirNodeInner::Accumulator { group_by, .. }
+        | MirNodeInner::Aggregation { group_by, .. }
         | MirNodeInner::Extremum { group_by, .. }
         | MirNodeInner::Distinct { group_by }
         | MirNodeInner::Paginate { group_by, .. }

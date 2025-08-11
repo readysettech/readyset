@@ -11,7 +11,7 @@ use std::mem;
 
 use common::DfValue;
 use dataflow::node::Column as DfColumn;
-use dataflow::ops::grouped::accumulator::GroupConcat;
+use dataflow::ops::grouped::accumulator::Accumulator;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::window::{Window, WindowOperation, WindowOperationKind};
@@ -87,6 +87,25 @@ pub(super) fn mir_node_to_flow_parts(
     match graph[mir_node].df_node_index() {
         None => {
             let flow_node = match graph[mir_node].inner {
+                MirNodeInner::Accumulator {
+                    ref on,
+                    ref group_by,
+                    ref kind,
+                    ..
+                } => {
+                    invariant_eq!(ancestors.len(), 1);
+                    let parent = ancestors[0];
+                    Some(make_grouped_node(
+                        graph,
+                        name,
+                        parent,
+                        &graph.columns(mir_node),
+                        on,
+                        group_by,
+                        GroupedNodeType::Accumulation(kind.clone()),
+                        mig,
+                    )?)
+                }
                 MirNodeInner::Aggregation {
                     ref on,
                     ref group_by,
@@ -802,16 +821,19 @@ fn make_grouped_node(
         |ty: DfType| -> DfColumn { DfColumn::new(over_col_name.clone(), ty, Some(name.clone())) };
 
     let na = match kind {
-        // This is the product of an incomplete refactor. It simplifies MIR to consider Group_Concat
-        // to be an aggregation, however once we are in dataflow land the logic has not been
-        // merged yet. For this reason, we need to pattern match for a groupconcat
-        // aggregation before we pattern match for a generic aggregation.
-        GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator: sep }) => {
-            let gc = GroupConcat::new(parent_na.address(), over_col_indx, group_col_indx, sep)?;
-            let agg_col = make_agg_col(DfType::Text(/* TODO */ Collation::Utf8));
+        GroupedNodeType::Accumulation(acc) => {
+            let grouped = Accumulator::over(
+                acc,
+                parent_na.address(),
+                over_col_indx,
+                group_col_indx.as_slice(),
+                over_col_ty,
+                &mig.dialect,
+            )?;
+            let agg_col = make_agg_col(grouped.output_col_type().or_ref(over_col_ty).clone());
             cols.push(agg_col);
             set_names(&column_names(columns), &mut cols)?;
-            mig.add_ingredient(name, cols, gc)
+            mig.add_ingredient(name, cols, grouped)
         }
         GroupedNodeType::Aggregation(agg) => {
             let grouped = agg.over(

@@ -13,6 +13,7 @@ pub mod node_inner;
 
 /// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
 pub enum GroupedNodeType {
+    Accumulation(dataflow_expression::grouped::accumulator::AccumulationOp),
     Aggregation(ops::grouped::aggregate::Aggregation),
     Extremum(ops::grouped::extremum::Extremum),
 }
@@ -122,6 +123,7 @@ mod tests {
         use dataflow::ops::grouped::aggregate::Aggregation;
         use dataflow::ops::grouped::extremum::Extremum;
         use dataflow::ops::union::DuplicateMode;
+        use dataflow_expression::grouped::accumulator;
         use readyset_client::ViewPlaceholder;
         use readyset_sql::ast::{
             BinaryOperator, ColumnSpecification, Expr, NullOrder, OrderType, SqlType,
@@ -208,6 +210,21 @@ mod tests {
                 MirNodeInner::AliasTable { table: "at".into() },
                 vec![Column::new(Some("at"), "a"), Column::new(Some("at"), "b")],
             )
+        }
+
+        #[test]
+        fn accumulator() {
+            has_columns_single_parent(
+                MirNodeInner::Accumulator {
+                    on: Column::new(Some("base"), "a"),
+                    group_by: vec![Column::new(Some("base"), "b")],
+                    output_column: Column::named("agg"),
+                    kind: accumulator::AccumulationOp::GroupConcat {
+                        separator: ",".to_string(),
+                    },
+                },
+                vec![Column::new(Some("base"), "b"), Column::named("agg")],
+            );
         }
 
         #[test]

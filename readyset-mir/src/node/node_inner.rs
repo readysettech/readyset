@@ -6,6 +6,7 @@ use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
 use dataflow::ops::window::WindowOperationKind;
 use dataflow::PostLookupAggregates;
+use dataflow_expression::grouped::accumulator::AccumulationOp;
 use derive_more::From;
 use itertools::Itertools;
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
@@ -71,6 +72,23 @@ impl Display for ViewKeyColumn {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum MirNodeInner {
+    /// Node that computes an accumulation function on a column grouped by another set of columns,
+    /// outputting its result as an additional column.
+    ///
+    /// Converted to [`Accumulator`] when lowering to dataflow.
+    ///
+    /// [`Accumulator`]: dataflow::ops::grouped::accumulator::Accumulator
+    Accumulator {
+        /// Column to compute the accumulation function over
+        on: Column,
+        /// List of columns to group by
+        group_by: Vec<Column>,
+        /// The column name to use for the result of the accumulation, which will always be the last
+        /// column
+        output_column: Column,
+        /// Which accumulation function we are computing
+        kind: AccumulationOp,
+    },
     /// Node that computes an aggregate function on a column grouped by another set of columns,
     /// outputting its result as an additional column.
     ///
@@ -163,7 +181,7 @@ pub enum MirNodeInner {
     /// different from other operators in that it doesn't map 1:1 to a SQL operator and there are
     /// several invariants we follow. It is used to support multiple aggregates in queries by
     /// joining pairs of aggregates together using custom join logic. We only join nodes with inner
-    /// types of Aggregation or Extremum. For any group of aggregates, we will make N-1
+    /// types of Aggregation, Accumulator, or Extremum. For any group of aggregates, we will make N-1
     /// JoinAggregates to join them all back together. The first JoinAggregates will join the first
     /// two aggregates together. The next JoinAggregates will join that JoinAggregates node to the
     /// next aggregate in the list, so on and so forth. Each aggregate will share identical
@@ -349,6 +367,10 @@ impl MirNodeInner {
     /// node), returns `Ok(false)`
     pub(crate) fn add_column(&mut self, c: Column) -> ReadySetResult<bool> {
         match self {
+            MirNodeInner::Accumulator { group_by, .. } => {
+                group_by.push(c);
+                Ok(true)
+            }
             MirNodeInner::Aggregation { group_by, .. } => {
                 group_by.push(c);
                 Ok(true)
@@ -418,6 +440,37 @@ impl MirNodeInner {
 
     pub(crate) fn description(&self) -> String {
         match self {
+            MirNodeInner::Accumulator {
+                ref on,
+                ref group_by,
+                ref kind,
+                ..
+            } => {
+                let op_string = match kind {
+                    AccumulationOp::GroupConcat { separator } => {
+                        format!(
+                            "GroupConcat([{}], \"{}\")",
+                            on.name.as_str(),
+                            separator.as_str()
+                        )
+                    }
+                    AccumulationOp::JsonObjectAgg {
+                        allow_duplicate_keys,
+                    } => {
+                        if *allow_duplicate_keys {
+                            format!("JsonObjectAgg({})", on.name.as_str())
+                        } else {
+                            format!("JsonbObjectAgg({})", on.name.as_str())
+                        }
+                    }
+                };
+                let group_cols = group_by
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{op_string} γ[{group_cols}]")
+            }
             MirNodeInner::Aggregation {
                 ref on,
                 ref group_by,
@@ -428,18 +481,6 @@ impl MirNodeInner {
                     Aggregation::Count => format!("|*|({})", on.name.as_str()),
                     Aggregation::Sum => format!("𝛴({})", on.name.as_str()),
                     Aggregation::Avg => format!("AVG({})", on.name.as_str()),
-                    Aggregation::GroupConcat { separator: ref s } => {
-                        format!("||([{}], \"{}\")", on.name.as_str(), s.as_str())
-                    }
-                    Aggregation::JsonObjectAgg {
-                        allow_duplicate_keys,
-                    } => {
-                        if allow_duplicate_keys {
-                            format!("JsonObjectAgg({})", on.name.as_str())
-                        } else {
-                            format!("JsonbObjectAgg({})", on.name.as_str())
-                        }
-                    }
                 };
                 let group_cols = group_by
                     .iter()

@@ -10,6 +10,7 @@ use common::IndexType;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::union;
 use dataflow::ops::window::WindowOperationKind;
+use dataflow_expression::grouped::accumulator::AccumulationOp;
 use lazy_static::lazy_static;
 use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
@@ -962,7 +963,7 @@ impl SqlToMirConverter {
                 separator,
             } if is_column(expr) => mknode(
                 Column::from(get_column(expr)),
-                GroupedNodeType::Aggregation(Aggregation::GroupConcat {
+                GroupedNodeType::Accumulation(AccumulationOp::GroupConcat {
                     separator: separator.unwrap_or_else(|| ",".to_owned()),
                 }),
                 false,
@@ -972,7 +973,7 @@ impl SqlToMirConverter {
                 ..
             } => mknode(
                 Column::named("__json_objects__"),
-                GroupedNodeType::Aggregation(Aggregation::JsonObjectAgg {
+                GroupedNodeType::Accumulation(AccumulationOp::JsonObjectAgg {
                     allow_duplicate_keys,
                 }),
                 false,
@@ -995,6 +996,15 @@ impl SqlToMirConverter {
         self.add_query_node(
             query_name.clone(),
             match node_type {
+                GroupedNodeType::Accumulation(kind) => MirNode::new(
+                    name,
+                    MirNodeInner::Accumulator {
+                        on,
+                        group_by,
+                        output_column,
+                        kind,
+                    },
+                ),
                 GroupedNodeType::Aggregation(kind) => MirNode::new(
                     name,
                     MirNodeInner::Aggregation {

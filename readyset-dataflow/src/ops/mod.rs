@@ -23,7 +23,6 @@ pub mod union;
 pub(crate) mod utils;
 pub mod window;
 
-use crate::ops::grouped::accumulator::GroupConcat;
 use crate::processing::{
     ColumnMiss, ColumnSource, IngredientLookupResult, LookupIndex, LookupMode,
 };
@@ -47,11 +46,9 @@ impl Side {
 #[derive(Clone, Serialize, Deserialize, From)]
 #[allow(clippy::large_enum_variant)]
 pub enum NodeOperator {
-    // Aggregation was previously named "Sum", but now supports Sum, Count, Avg
-    // Aggregation supports both filtered and normal Aggregations
+    Accumulation(grouped::GroupedOperator<grouped::accumulator::Accumulator>),
     Aggregation(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
     Extremum(grouped::GroupedOperator<grouped::extremum::ExtremumOperator>),
-    Concat(grouped::GroupedOperator<GroupConcat>),
     Join(join::Join),
     Paginate(paginate::Paginate),
     Project(project::Project),
@@ -65,9 +62,9 @@ pub enum NodeOperator {
 impl Display for NodeOperator {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            NodeOperator::Accumulation(_) => write!(f, "Accumulation"),
             NodeOperator::Aggregation(_) => write!(f, "Aggregation"),
             NodeOperator::Extremum(_) => write!(f, "Extremum"),
-            NodeOperator::Concat(_) => write!(f, "Concat"),
             NodeOperator::Join(_) => write!(f, "Join"),
             NodeOperator::Paginate(_) => write!(f, "Paginate"),
             NodeOperator::Project(_) => write!(f, "Project"),
@@ -83,9 +80,9 @@ impl Display for NodeOperator {
 macro_rules! impl_ingredient_fn_mut {
     ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
         match $self {
+            NodeOperator::Accumulation(i) => i.$fn($($arg),*),
             NodeOperator::Aggregation(i) => i.$fn($($arg),*),
             NodeOperator::Extremum(i) => i.$fn($($arg),*),
-            NodeOperator::Concat(i) => i.$fn($($arg),*),
             NodeOperator::Join(i) => i.$fn($($arg),*),
             NodeOperator::Paginate(i) => i.$fn($($arg),*),
             NodeOperator::Project(i) => i.$fn($($arg),*),
@@ -101,9 +98,9 @@ macro_rules! impl_ingredient_fn_mut {
 macro_rules! impl_ingredient_fn_ref {
     ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
         match $self {
+            NodeOperator::Accumulation(i) => i.$fn($($arg),*),
             NodeOperator::Aggregation(i) => i.$fn($($arg),*),
             NodeOperator::Extremum(i) => i.$fn($($arg),*),
-            NodeOperator::Concat(i) => i.$fn($($arg),*),
             NodeOperator::Join(i) => i.$fn($($arg),*),
             NodeOperator::Paginate(i) => i.$fn($($arg),*),
             NodeOperator::Project(i) => i.$fn($($arg),*),

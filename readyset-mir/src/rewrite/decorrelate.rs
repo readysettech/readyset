@@ -103,7 +103,8 @@ fn push_dependent_filter(
         | MirNodeInner::LeftJoin { .. }
         | MirNodeInner::DependentJoin { .. }
         | MirNodeInner::AliasTable { .. } => true,
-        MirNodeInner::Aggregation { .. }
+        MirNodeInner::Accumulator { .. }
+        | MirNodeInner::Aggregation { .. }
         | MirNodeInner::Extremum { .. }
         | MirNodeInner::Distinct { .. } => {
             for col in dependency.non_dependent_columns() {

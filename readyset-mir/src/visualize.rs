@@ -4,6 +4,7 @@ use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use dataflow::ops::union;
 use dataflow::PostLookupAggregateFunction;
+use dataflow_expression::grouped::accumulator::AccumulationOp as AccumulationKind;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use petgraph::visit::EdgeRef;
@@ -151,6 +152,29 @@ impl GraphViz for MirNodeRef<'_> {
 impl GraphViz for MirNodeInner {
     fn graphviz_fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            MirNodeInner::Accumulator {
+                ref on,
+                ref group_by,
+                ref kind,
+                ..
+            } => {
+                let op_string = match kind {
+                    AccumulationKind::GroupConcat { separator: s } => {
+                        format!("GroupConcat({on}, \\\"{s}\\\")")
+                    }
+                    AccumulationKind::JsonObjectAgg {
+                        allow_duplicate_keys,
+                    } => {
+                        if *allow_duplicate_keys {
+                            format!("JsonObjectAgg({on})")
+                        } else {
+                            format!("JsonbObjectAgg({on})")
+                        }
+                    }
+                };
+                let group_cols = group_by.iter().join(", ");
+                write!(f, "{op_string} | γ: {group_cols}")
+            }
             MirNodeInner::Aggregation {
                 ref on,
                 ref group_by,
@@ -161,18 +185,6 @@ impl GraphViz for MirNodeInner {
                     AggregationKind::Count => format!("\\|*\\|({on})"),
                     AggregationKind::Sum => format!("𝛴({on})"),
                     AggregationKind::Avg => format!("AVG({on})"),
-                    AggregationKind::GroupConcat { separator: s } => {
-                        format!("\\|\\|({on}, \\\"{s}\\\")")
-                    }
-                    AggregationKind::JsonObjectAgg {
-                        allow_duplicate_keys,
-                    } => {
-                        if *allow_duplicate_keys {
-                            format!("JsonObjectAgg({on})")
-                        } else {
-                            format!("JsonbObjectAgg({on})")
-                        }
-                    }
                 };
                 let group_cols = group_by.iter().join(", ");
                 write!(f, "{op_string} | γ: {group_cols}")
