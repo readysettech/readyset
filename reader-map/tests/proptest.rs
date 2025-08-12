@@ -170,11 +170,12 @@ where
     for key in b.keys() {
         assert!(a.get(key).unwrap().is_some(), "a does not contain {key:?}");
     }
-    let guard = if let Ok(guard) = a.enter() {
-        guard
-    } else {
-        // Reference was empty, ReadHandle was destroyed, so all is well. Maybe.
-        return true;
+    let guard = match a.enter() {
+        Ok(guard) => guard,
+        _ => {
+            // Reference was empty, ReadHandle was destroyed, so all is well. Maybe.
+            return true;
+        }
     };
     for key in guard.keys() {
         let mut ev_map_values: Vec<V> = guard.get(key).unwrap().iter().copied().collect();

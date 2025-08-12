@@ -183,10 +183,11 @@ where
         V: Ord,
         Q: Ord + Clone + Hash,
     {
-        let vs = if let Some(vs) = self.get_raw(key.borrow())? {
-            vs
-        } else {
-            return Ok(None);
+        let vs = match self.get_raw(key.borrow())? {
+            Some(vs) => vs,
+            _ => {
+                return Ok(None);
+            }
         };
         Ok(ReadGuard::try_map(vs, |x| x.first()))
     }

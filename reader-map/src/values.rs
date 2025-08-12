@@ -368,15 +368,12 @@ where
         let Self { values, order, .. } = self;
 
         match values {
-            ValuesInner::InitSmallVec {
-                ref mut v,
-                ref mut read,
-            } if read.get().is_some() => {
+            ValuesInner::InitSmallVec { v, read } if read.get().is_some() => {
                 // On first post-read write, switch to final state.
                 *values = ValuesInner::new_vec(Arc::clone(v));
                 self.insert(value, index, timestamp);
             }
-            ValuesInner::InitSmallVec { ref mut v, read: _ } if v.len() < Self::VEC_MAX => {
+            ValuesInner::InitSmallVec { v, read: _ } if v.len() < Self::VEC_MAX => {
                 Self::find(v, order, &value, index, true);
                 Arc::make_mut(v).insert(index.unwrap(), value);
             }
@@ -392,16 +389,14 @@ where
 
                 self.insert(value, index, timestamp);
             }
-            ValuesInner::BTreeMap {
-                ref mut converted, ..
-            } if converted.get().is_some() => {
+            ValuesInner::BTreeMap { converted, .. } if converted.get().is_some() => {
                 // On first post-read write, switch to final state.
                 *values = ValuesInner::new_vec(converted.take().unwrap());
                 self.insert(value, index, timestamp);
             }
             ValuesInner::BTreeMap {
-                ref mut map,
-                ref mut len,
+                map,
+                len,
                 converted: _,
             } => {
                 let new = BTreeValue::new(value, order.clone());
@@ -413,7 +408,7 @@ where
                 }
                 *len += 1;
             }
-            ValuesInner::SmallVec(ref mut v) => {
+            ValuesInner::SmallVec(v) => {
                 Self::find(v, order, &value, index, true);
                 Arc::make_mut(v).insert(index.unwrap(), value);
             }
@@ -430,30 +425,25 @@ where
         let Self { values, order, .. } = self;
 
         match values {
-            ValuesInner::InitSmallVec {
-                ref mut v,
-                ref mut read,
-            } if read.get().is_some() => {
+            ValuesInner::InitSmallVec { v, read } if read.get().is_some() => {
                 // On first post-read write, switch to final state.
                 *values = ValuesInner::new_vec(Arc::clone(v));
                 self.remove(value, index, timestamp);
             }
-            ValuesInner::InitSmallVec { ref mut v, read: _ } => {
+            ValuesInner::InitSmallVec { v, read: _ } => {
                 Self::find(v, order, value, index, false);
                 if let Some(index) = *index {
                     Arc::make_mut(v).remove(index);
                 }
             }
-            ValuesInner::BTreeMap {
-                ref mut converted, ..
-            } if converted.get().is_some() => {
+            ValuesInner::BTreeMap { converted, .. } if converted.get().is_some() => {
                 // On first post-read write, switch to final state.
                 *values = ValuesInner::new_vec(converted.take().unwrap());
                 self.remove(value, index, timestamp);
             }
             ValuesInner::BTreeMap {
-                ref mut map,
-                ref mut len,
+                map,
+                len,
                 converted: _,
             } => {
                 let new = BTreeValue::new(value.clone(), order.clone());
@@ -469,7 +459,7 @@ where
                     }
                 }
             }
-            ValuesInner::SmallVec(ref mut v) => {
+            ValuesInner::SmallVec(v) => {
                 Self::find(v, order, value, index, false);
                 if let Some(index) = *index {
                     Arc::make_mut(v).remove(index);
@@ -531,7 +521,7 @@ mod tests {
     type TestValues = Values<i32, DefaultInsertionOrder>;
 
     macro_rules! assert_empty {
-        ($x:expr) => {
+        ($x:expr_2021) => {
             assert_eq!($x.len(), 0);
             assert!($x.is_empty());
             assert_eq!($x.iter().count(), 0);
@@ -540,7 +530,7 @@ mod tests {
     }
 
     macro_rules! assert_len {
-        ($x:expr, $n:expr) => {
+        ($x:expr_2021, $n:expr_2021) => {
             assert_eq!($x.len(), $n);
             assert!(!$x.is_empty());
             assert_eq!($x.iter().count(), $n);

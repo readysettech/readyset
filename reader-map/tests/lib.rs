@@ -11,7 +11,7 @@ use reader_map::{DefaultInsertionOrder, EvictionQuantity, Options};
 use readyset_util::ranges::Bound;
 
 macro_rules! assert_match {
-    ($x:expr, $p:pat) => {
+    ($x:expr_2021, $p:pat) => {
         if let $p = $x {
         } else {
             panic!(concat!(stringify!($x), " did not match ", stringify!($p)));

@@ -155,7 +155,7 @@ impl EvictionStrategy {
         &self,
         data: &'a Data<K, V, I, S>,
         nkeys: usize,
-    ) -> impl Iterator<Item = (&'a K, &'a Values<V, I>)>
+    ) -> impl Iterator<Item = (&'a K, &'a Values<V, I>)> + use<'a, K, V, I, S>
     where
         K: Ord + Clone,
         I: InsertionOrder<V>,
@@ -175,8 +175,8 @@ impl EvictionStrategy {
         nkeys: usize,
     ) -> EvictRangeIter<
         (&'a K, &'a Values<V, I>),
-        impl Iterator<Item = (u64, (&'a K, &'a Values<V, I>))>,
-        impl FnMut(u64) -> bool,
+        impl Iterator<Item = (u64, (&'a K, &'a Values<V, I>))> + use<'a, K, V, I, S>,
+        impl FnMut(u64) -> bool + use<K, V, I, S>,
     >
     where
         K: Ord + Clone,
@@ -234,7 +234,7 @@ impl LRUEviction {
         &self,
         data: &'a Data<K, V, I, S>,
         nkeys: usize,
-    ) -> impl Iterator<Item = (&'a K, &'a Values<V, I>)>
+    ) -> impl Iterator<Item = (&'a K, &'a Values<V, I>)> + use<'a, K, V, I, S>
     where
         K: Ord + Clone,
         I: InsertionOrder<V>,
@@ -264,8 +264,8 @@ impl LRUEviction {
         data: &'a Data<K, V, I, S>,
         nkeys: usize,
     ) -> (
-        impl Iterator<Item = (u64, (&'a K, &'a Values<V, I>))>,
-        impl FnMut(u64) -> bool,
+        impl Iterator<Item = (u64, (&'a K, &'a Values<V, I>))> + use<'a, K, V, I, S>,
+        impl FnMut(u64) -> bool + use<K, V, I, S>,
     )
     where
         K: Ord + Clone,
