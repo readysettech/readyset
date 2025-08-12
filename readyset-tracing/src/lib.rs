@@ -31,7 +31,7 @@ use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{filter, fmt, EnvFilter, Layer};
+use tracing_subscriber::{filter, fmt, reload, EnvFilter, Layer};
 
 mod error;
 pub use error::Error;
@@ -39,8 +39,11 @@ mod logformat;
 use logformat::LogFormat;
 mod percent;
 use percent::Percent;
+mod dynamic;
 pub mod presampled;
 pub mod propagation;
+
+pub use dynamic::set_log_level;
 
 #[derive(Debug, Args)]
 #[group(id = "logging")]
@@ -248,12 +251,20 @@ impl Options {
     /// If a log file is configured, it will be rolled over based on the configured rotation, and
     /// when the WorkerGuard is dropped, the logs will be flushed.
     ///
+    /// Returns a drop guard for the file appender.
+    ///
+    /// This also populates a global update callback (in the form of a [`reload::ReloadHandle`])
+    /// exposed via [`set_log_level`]. This allows changing the set of filter directives
+    /// and reloading the filter layer; as if you could change `LOG_LEVEL` at runtime. See
+    /// [`EnvFilter`] for syntax.
+    ///
     /// # Panics
     /// This will panic if called with tracing enabled outside the context of a tokio runtime.
     ///
     /// Example:
     /// ```
     /// use clap::Parser;
+    /// use tracing::debug;
     ///
     /// #[derive(Debug, Parser)]
     /// struct Options {
@@ -270,6 +281,12 @@ impl Options {
     ///         .unwrap();
     ///
     ///     // Perform work!
+    ///
+    ///     debug!("This is a debug message; it won't show up");
+    ///
+    ///     readyset_tracing::set_log_level("info,foo=debug").unwrap();
+    ///
+    ///     debug!(target: "foo", "This is a debug message; it will show up");
     /// }
     /// ```
     pub fn init(&self, service_name: &str, deployment: &str) -> Result<WorkerGuard, Error> {
@@ -301,8 +318,9 @@ impl Options {
             None
         };
 
-        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
         let fmt_filter = filter::filter_fn(|metadata| !is_statement_log(metadata.target()));
+
+        let (env_filter, reload_handle) = reload::Layer::new(EnvFilter::new(&self.log_level));
 
         let s = tracing_subscriber::registry()
             .with(statement_layer)
@@ -325,6 +343,10 @@ impl Options {
 
         #[cfg(debug_assertions)]
         tracing::warn!("Running a debug build");
+
+        if let Err(e) = dynamic::init(reload_handle) {
+            tracing::warn!("Could not initialize dynamic LOG_LEVEL update callback: {e}")
+        }
 
         Ok(worker_guard)
     }

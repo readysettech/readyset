@@ -1,5 +1,5 @@
 use opentelemetry::trace::TraceError;
-use tracing_subscriber::filter::ParseError;
+use tracing_subscriber::{filter::ParseError, reload};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -11,4 +11,8 @@ pub enum Error {
     InvalidRotationCadence(String),
     #[error("could not open file for appending: {0}")]
     CouldNotOpenFile(#[from] std::io::Error),
+    #[error("log level reload handle not initialized")]
+    ReloadHandleNotInitialized,
+    #[error("could not set log level: {0}")]
+    CouldNotSetLogLevel(#[from] reload::Error),
 }
