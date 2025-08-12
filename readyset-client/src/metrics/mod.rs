@@ -279,6 +279,21 @@ pub mod recorded {
     /// | ntype | The operator node type. |
     pub const NODE_ON_INPUT_INVOCATIONS: &str = "readyset_domain.node_on_input_invocations";
 
+    /// Histogram: The amount of time in microseconds spent processing data during
+    /// `Ingredient::on_input_raw`.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | ntype | The operator node type. |
+    pub const NODE_ON_INPUT_RAW_DURATION: &str = "readyset_domain.node_on_input_raw_duration_us";
+
+    /// Counter: The number of times `Ingredient::on_input_raw` has been invoked for a node.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | ntype | The operator node type. |
+    pub const NODE_ON_INPUT_RAW_INVOCATIONS: &str = "readyset_domain.node_on_input_raw_invocations";
+
     /// Histogram: The amount of time in microseconds a snapshot takes to be performed.
     pub const REPLICATOR_SNAPSHOT_DURATION: &str = "readyset_replicator.snapshot_duration_us";
 

@@ -201,7 +201,8 @@ impl Ingredient for NodeOperator {
         states: &StateMap,
         auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<RawProcessingResult> {
-        impl_ingredient_fn_mut!(
+        let start = Instant::now();
+        let result = impl_ingredient_fn_mut!(
             self,
             on_input_raw,
             from,
@@ -210,7 +211,16 @@ impl Ingredient for NodeOperator {
             domain,
             states,
             auxiliary_node_states
+        );
+
+        let elapsed = start.elapsed().as_micros();
+        histogram!(recorded::NODE_ON_INPUT_RAW_DURATION,
+            "ntype" => self.to_string()
         )
+        .record(elapsed as f64);
+        counter!(recorded::NODE_ON_INPUT_RAW_INVOCATIONS, "ntype" => self.to_string()).increment(1);
+
+        result
     }
 
     fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[KeyComparison]) {
