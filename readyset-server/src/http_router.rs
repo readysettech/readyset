@@ -334,6 +334,28 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                 };
                 Ok(res.unwrap())
             }),
+            // Sets the log level of the tracing system, similar to changing the `LOG_LEVEL`
+            // environment variable.
+            (&Method::POST, "/log_level") => Box::pin(async move {
+                let bytes = hyper::body::to_bytes(req.into_body()).await.unwrap();
+                let res = match str::from_utf8(&bytes) {
+                    Err(e) => res
+                        .status(StatusCode::BAD_REQUEST)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from(format!("Invalid UTF-8: {e}"))),
+                    Ok(directives) => match readyset_tracing::set_log_level(directives) {
+                        Ok(_) => res
+                            .status(StatusCode::OK)
+                            .header(CONTENT_TYPE, "text/plain")
+                            .body(hyper::Body::from("Log level set successfully")),
+                        Err(e) => res
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .header(CONTENT_TYPE, "text/plain")
+                            .body(hyper::Body::from(format!("Error setting log level: {e}"))),
+                    },
+                };
+                Ok(res.unwrap())
+            }),
             _ => {
                 metrics::counter!(recorded::SERVER_CONTROLLER_REQUESTS).increment(1);
 
