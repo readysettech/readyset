@@ -1,12 +1,14 @@
 use std::borrow::Borrow;
+use std::sync::Arc;
 
+use cached::proc_macro::cached;
 use readyset_data::{Array, ArrayD, DfValue, IxDyn, TimestampTz};
 use readyset_errors::{
     internal_err, invalid_query_err, unsupported, ReadySetError, ReadySetResult,
 };
 use serde_json::Value as JsonValue;
 
-use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
+use crate::like::{CaseInsensitive, CaseSensitive, CaseSensitivityMode, LikePattern};
 use crate::{utils, BinaryOperator, CaseWhenBranch, Expr};
 
 macro_rules! non_null {
@@ -22,6 +24,11 @@ pub(crate) mod builtins;
 pub mod json;
 pub(crate) mod spatial;
 
+#[cached(size = 1000)]
+fn like_pattern(pattern: String, case_sensitivity: CaseSensitivityMode) -> Arc<LikePattern> {
+    Arc::new(LikePattern::new(&pattern, case_sensitivity))
+}
+
 fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadySetResult<DfValue> {
     use BinaryOperator::*;
 
@@ -31,10 +38,7 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
             return Ok(false.into());
         };
 
-        // NOTE(aspen): At some point, we may want to optimize this to pre-cache
-        // the LikePattern if the value is constant, since constructing a new
-        // LikePattern can be kinda slow.
-        let pat = LikePattern::new(right, case_sensitivity);
+        let pat = like_pattern(right.to_string(), case_sensitivity);
 
         Ok(pat.matches(left).into())
     };

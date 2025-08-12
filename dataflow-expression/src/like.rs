@@ -11,7 +11,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 /// Case-sensitivity mode for a [`LikePattern`]
-#[derive(Debug, Eq, PartialEq, Default)]
+#[derive(Debug, Eq, PartialEq, Default, Clone, Copy, Hash)]
 pub enum CaseSensitivityMode {
     /// Match case-sentitively
     #[default]
