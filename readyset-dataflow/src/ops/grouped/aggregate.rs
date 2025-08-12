@@ -1,6 +1,4 @@
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, Dialect};
@@ -11,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::node::AuxiliaryNodeState;
 use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
+
+use super::{hash_grouped_records, GroupHash};
 
 /// Supported aggregation operators.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,8 +124,6 @@ pub struct NumericalDiff {
     group_hash: GroupHash,
 }
 
-pub type GroupHash = u64;
-
 /// For storing (Count, Sum) in additional state for Average.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AverageDataPair {
@@ -158,17 +156,6 @@ pub struct AggregatorState {
 }
 
 impl Aggregator {
-    fn group_hash(&self, rec: &[DfValue]) -> GroupHash {
-        let mut hasher = DefaultHasher::new();
-        for &col in self.group.iter() {
-            // When the Aggregator is constructed, it is constructed with a group by that is
-            // derived from existing columns. If we lack a column in the record, then something has
-            // gone horrible wrong and we should panic.
-            rec[col].hash(&mut hasher)
-        }
-        hasher.finish()
-    }
-
     fn new_data(&self) -> ReadySetResult<DfValue> {
         match &self.out_ty {
             DfType::BigInt => Ok(DfValue::Int(Default::default())),
@@ -198,7 +185,7 @@ impl GroupedOperation for Aggregator {
     }
 
     fn to_diff(&self, r: &[DfValue], pos: bool) -> ReadySetResult<Self::Diff> {
-        let group_hash = self.group_hash(r);
+        let group_hash = hash_grouped_records(r, self.group_by());
         Ok(NumericalDiff {
             value: r[self.over].clone(),
             positive: pos,

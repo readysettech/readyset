@@ -1,7 +1,9 @@
 use std::cmp::Ordering;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 use dataflow_state::PointKey;
 use readyset_data::DfType;
@@ -15,6 +17,19 @@ use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, Looku
 pub mod accumulator;
 pub mod aggregate;
 pub mod extremum;
+
+pub(crate) type GroupHash = u64;
+
+pub(crate) fn hash_grouped_records(rec: &[DfValue], group_by: &[usize]) -> GroupHash {
+    let mut hasher = DefaultHasher::new();
+    for &col in group_by.iter() {
+        // When the Aggregator is constructed, it is constructed with a group by that is
+        // derived from existing columns. If we lack a column in the record, then something has
+        // gone horrible wrong and we should panic.
+        rec[col].hash(&mut hasher)
+    }
+    hasher.finish()
+}
 
 /// Trait for implementing operations that collapse a group of records into a single record.
 ///

@@ -6,12 +6,13 @@ use common::DfValue;
 use dataflow_expression::grouped::accumulator::AccumulationOp;
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{internal_err, invariant_eq, ReadySetResult};
-use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 
 use crate::node::{AuxiliaryNodeState, Node};
 use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
+
+use super::{hash_grouped_records, GroupHash};
 
 /// The last stored state for a given group.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -75,7 +76,7 @@ impl Accumulator {
 pub struct AccumulationDiff {
     value: DfValue,
     is_positive: bool,
-    group_by: Vec<DfValue>,
+    group_hash: GroupHash,
 }
 
 impl GroupedOperation for Accumulator {
@@ -90,18 +91,15 @@ impl GroupedOperation for Accumulator {
     }
 
     fn to_diff(&self, record: &[DfValue], is_positive: bool) -> ReadySetResult<Self::Diff> {
+        let group_hash = hash_grouped_records(record, self.group_by());
         let value = record
             .get(self.over)
             .ok_or(ReadySetError::InvalidRecordLength)?
             .clone();
-        // We need this to figure out which state to use.
-        let group_by = record
-            .cloned_indices(self.group.iter().cloned())
-            .map_err(|_| ReadySetError::InvalidRecordLength)?;
         Ok(AccumulationDiff {
             value,
             is_positive,
-            group_by,
+            group_hash,
         })
     }
 
@@ -115,8 +113,8 @@ impl GroupedOperation for Accumulator {
 
         let first_diff = diffs
             .peek()
-            .ok_or_else(|| internal_err!("group_concat got no diffs"))?;
-        let group = first_diff.group_by.clone();
+            .ok_or_else(|| internal_err!("accumulator received no diffs"))?;
+        let group = first_diff.group_hash;
 
         let last_state = match auxiliary_node_state {
             Some(AuxiliaryNodeState::Accumulator(ref mut acc_state)) => &mut acc_state.last_state,
@@ -146,14 +144,14 @@ impl GroupedOperation for Accumulator {
         for AccumulationDiff {
             value,
             is_positive,
-            group_by,
+            group_hash,
         } in diffs
         {
             if value.is_none() {
                 continue;
             }
 
-            invariant_eq!(group_by, group);
+            invariant_eq!(group_hash, group);
             if is_positive {
                 prev_state.data.push(value);
             } else {
@@ -224,7 +222,7 @@ impl GroupedOperation for Accumulator {
 #[derive(Debug, Default)]
 /// Auxiliary State for accumulation operations, which is owned by a Domain.
 pub struct AccumulatorState {
-    last_state: HashMap<Vec<DfValue>, LastState>,
+    last_state: HashMap<GroupHash, LastState>,
 }
 
 #[cfg(test)]
