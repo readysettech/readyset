@@ -48,8 +48,8 @@ pub struct Options {
     /// Optional path to a directory where log files will be placed. Logs will be written to
     /// `readyset.log` within this directory. If set, logs will rollover based on the chosen
     /// `log_rotation` policy, which defaults to daily. Readyset must have write permissions.
-    #[arg(long, env = "LOG_PATH")]
-    pub log_path: Option<PathBuf>,
+    #[arg(long, env = "LOG_DIR")]
+    pub log_dir: Option<PathBuf>,
 
     /// Log [`RotationCadence`] to use if a log file is set. Defaults to daily. Does nothing if no
     /// log file is set. Possible Values: [daily, hourly, minutely, never]
@@ -109,7 +109,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            log_path: None,
+            log_dir: None,
             log_rotation: "daily".try_into().expect("daily is a valid log rotation"),
             log_format: LogFormat::Full,
             no_color: false,
@@ -262,10 +262,10 @@ impl Options {
     /// }
     /// ```
     pub fn init(&self, service_name: &str, deployment: &str) -> Result<WorkerGuard, Error> {
-        let (non_blocking, worker_guard) = if let Some(log_path) = &self.log_path {
+        let (non_blocking, worker_guard) = if let Some(log_dir) = &self.log_dir {
             tracing_appender::non_blocking(RollingFileAppender::new(
                 self.log_rotation.into(),
-                log_path,
+                log_dir,
                 "readyset.log",
             ))
         } else {
