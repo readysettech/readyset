@@ -415,6 +415,7 @@ pub enum AlterReadysetStatement {
     AddTables(AddTablesStatement),
     EnterMaintenanceMode,
     ExitMaintenanceMode,
+    SetLogLevel(String),
 }
 
 impl DialectDisplay for AlterReadysetStatement {
@@ -435,6 +436,9 @@ impl DialectDisplay for AlterReadysetStatement {
             }
             Self::ExitMaintenanceMode => {
                 write!(f, "EXIT MAINTENANCE MODE")
+            }
+            Self::SetLogLevel(level) => {
+                write!(f, "SET LOG LEVEL '{}'", level)
             }
         })
     }

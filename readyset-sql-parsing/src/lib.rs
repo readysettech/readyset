@@ -383,6 +383,11 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
             Ok(SqlQuery::AlterReadySet(
                 AlterReadysetStatement::ExitMaintenanceMode,
             ))
+        } else if parser.parse_keywords(&[Keyword::SET, Keyword::LOG, Keyword::LEVEL]) {
+            let directives = parser.parse_literal_string()?;
+            Ok(SqlQuery::AlterReadySet(
+                AlterReadysetStatement::SetLogLevel(directives),
+            ))
         } else {
             Err(ReadysetParsingError::ReadysetParsingError(
                 "expected RESNAPSHOT TABLE, or ADD TABLES after READYSET".into(),

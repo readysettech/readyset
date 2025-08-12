@@ -2596,6 +2596,12 @@ where
             SqlQuery::AlterReadySet(AlterReadysetStatement::ExitMaintenanceMode) => {
                 self.noria.exit_maintenance_mode().await
             }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::SetLogLevel(directives)) => {
+                match readyset_tracing::set_log_level(directives) {
+                    Ok(()) => Ok(noria_connector::QueryResult::Empty),
+                    Err(e) => Err(internal_err!("Failed to set log level: {e}")),
+                }
+            }
             SqlQuery::CreateRls(_create_rls) => {
                 unsupported!("CREATE RLS statement is not yet supported")
             }

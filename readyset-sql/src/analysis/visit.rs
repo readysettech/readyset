@@ -1098,8 +1098,9 @@ pub fn walk_alter_readyset_statement<'a, V: Visitor<'a>>(
             .tables
             .iter()
             .try_for_each(|table| visitor.visit_table(table)),
-        AlterReadysetStatement::EnterMaintenanceMode => Ok(()),
-        AlterReadysetStatement::ExitMaintenanceMode => Ok(()),
+        AlterReadysetStatement::EnterMaintenanceMode
+        | AlterReadysetStatement::ExitMaintenanceMode
+        | AlterReadysetStatement::SetLogLevel(_) => Ok(()),
     }
 }
 
