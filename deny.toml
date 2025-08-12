@@ -153,7 +153,7 @@ skip-tree = [
     { name = "regex-automata", version = "0.1.10" },
     { name = "rusty-fork", version = "0.3.0" },
     { name = "unicode-width", version = "0.1.14" },
-    { name = "web-time", version = "0.2.4" },
+    { name = "tower", version = "0.4.13" },
     { name = "winnow", version = "0.6.26" },
 ]
 

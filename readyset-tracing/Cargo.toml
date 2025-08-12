@@ -13,8 +13,8 @@ tokio = { workspace = true }
 
 tracing = { workspace = true }
 opentelemetry = { workspace = true }
-opentelemetry-otlp = { workspace = true }
-opentelemetry-semantic-conventions = { workspace = true }
+opentelemetry-otlp = { workspace = true, features = ["grpc-tonic"] }
+opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
 tracing-appender = { workspace = true }

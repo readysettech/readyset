@@ -1,4 +1,4 @@
-use opentelemetry::trace::TraceError;
+use opentelemetry_sdk::trace::TraceError;
 use tracing_subscriber::{filter::ParseError, reload};
 
 #[derive(Debug, thiserror::Error)]

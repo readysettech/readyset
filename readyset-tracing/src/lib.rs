@@ -20,9 +20,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::{Args, ValueEnum};
+use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::trace::{Sampler, Tracer};
+use opentelemetry_otlp::{SpanExporter, WithExportConfig};
+use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider, Tracer};
 use opentelemetry_sdk::Resource;
 use tracing::Subscriber;
 use tracing_appender::non_blocking::WorkerGuard;
@@ -185,39 +186,38 @@ impl Options {
         &self,
         service_name: &str,
         deployment: &str,
-    ) -> OpenTelemetryLayer<S, Tracer>
+    ) -> (OpenTelemetryLayer<S, Tracer>, SdkTracerProvider)
     where
         S: Subscriber + for<'span> LookupSpan<'span>,
     {
-        let resources = vec![
-            KeyValue::new(
-                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                service_name.to_owned(),
-            ),
-            KeyValue::new(
-                opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE,
-                deployment.to_owned(),
-            ),
-        ];
+        let resource = Resource::builder()
+            .with_attributes([
+                KeyValue::new(
+                    opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                    service_name.to_owned(),
+                ),
+                KeyValue::new(
+                    opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE,
+                    deployment.to_owned(),
+                ),
+            ])
+            .build();
 
-        let tracer = opentelemetry_otlp::new_pipeline()
-            .tracing()
-            .with_exporter(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_endpoint(self.tracing_host.as_ref().unwrap()),
-            )
-            .with_trace_config(
-                opentelemetry_sdk::trace::config()
-                    .with_sampler(Sampler::TraceIdRatioBased(self.tracing_sample_percent.0))
-                    .with_max_events_per_span(64)
-                    .with_max_attributes_per_span(16)
-                    .with_resource(Resource::new(resources)),
-            )
-            .install_batch(opentelemetry_sdk::runtime::Tokio)
+        let exporter = SpanExporter::builder()
+            .with_tonic()
+            .with_endpoint(self.tracing_host.as_ref().unwrap())
+            .build()
             .unwrap();
 
-        tracing_opentelemetry::layer().with_tracer(tracer)
+        let provider = SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
+            .with_sampler(Sampler::TraceIdRatioBased(self.tracing_sample_percent.0))
+            .with_resource(resource)
+            .build();
+
+        let tracer = provider.tracer("readyset-tracing");
+
+        (tracing_opentelemetry::layer().with_tracer(tracer), provider)
     }
 
     #[allow(clippy::type_complexity)]
@@ -251,7 +251,7 @@ impl Options {
     /// If a log file is configured, it will be rolled over based on the configured rotation, and
     /// when the WorkerGuard is dropped, the logs will be flushed.
     ///
-    /// Returns a drop guard for the file appender.
+    /// Returns a `TracingGuard` that handles both file appender cleanup and OpenTelemetry shutdown.
     ///
     /// This also populates a global update callback (in the form of a [`reload::ReloadHandle`])
     /// exposed via [`set_log_level`]. This allows changing the set of filter directives
@@ -289,7 +289,7 @@ impl Options {
     ///     debug!(target: "foo", "This is a debug message; it will show up");
     /// }
     /// ```
-    pub fn init(&self, service_name: &str, deployment: &str) -> Result<WorkerGuard, Error> {
+    pub fn init(&self, service_name: &str, deployment: &str) -> Result<TracingGuard, Error> {
         let (non_blocking, worker_guard) = if let Some(log_dir) = &self.log_dir {
             tracing_appender::non_blocking(RollingFileAppender::new(
                 self.log_rotation.into(),
@@ -307,10 +307,11 @@ impl Options {
         let fmt_layer = fmt::layer()
             .with_ansi(!self.no_color)
             .with_writer(non_blocking);
-        let tracing_layer = if self.tracing_host.is_some() {
-            Some(self.tracing_layer(service_name, deployment))
+        let (tracing_layer, tracer_provider) = if self.tracing_host.is_some() {
+            let (layer, provider) = self.tracing_layer(service_name, deployment);
+            (Some(layer), Some(provider))
         } else {
-            None
+            (None, None)
         };
         let statement_layer = if self.statement_logging {
             Some(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
@@ -348,7 +349,10 @@ impl Options {
             tracing::warn!("Could not initialize dynamic LOG_LEVEL update callback: {e}")
         }
 
-        Ok(worker_guard)
+        Ok(TracingGuard {
+            _worker_guard: Some(worker_guard),
+            tracer_provider,
+        })
     }
 
     // Returns the provided `statement_log_path` or a default filename.
@@ -360,10 +364,19 @@ impl Options {
     }
 }
 
-impl Drop for Options {
+/// Guard that handles cleanup of OpenTelemetry resources on drop
+pub struct TracingGuard {
+    /// Optional WorkerGuard for file appender cleanup
+    _worker_guard: Option<WorkerGuard>,
+    /// Optional SdkTracerProvider for proper shutdown
+    tracer_provider: Option<SdkTracerProvider>,
+}
+
+impl Drop for TracingGuard {
     fn drop(&mut self) {
-        if self.tracing_host.is_some() {
-            opentelemetry::global::shutdown_tracer_provider()
+        if let Some(provider) = self.tracer_provider.take() {
+            // Shutdown the tracer provider to flush any remaining spans
+            let _ = provider.shutdown();
         }
     }
 }
