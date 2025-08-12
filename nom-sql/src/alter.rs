@@ -399,6 +399,23 @@ pub fn exit_maintenance_mode_statement(
     }
 }
 
+pub fn set_log_level_statement(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("set")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("log")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("level")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, directives) = dialect.utf8_string_literal()(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((i, AlterReadysetStatement::SetLogLevel(directives)))
+    }
+}
+
 pub fn alter_readyset_statement(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
@@ -412,6 +429,7 @@ pub fn alter_readyset_statement(
             add_tables_statement(dialect),
             enter_maintenance_mode_statement(),
             exit_maintenance_mode_statement(),
+            set_log_level_statement(dialect),
         ))(i)?;
 
         Ok((i, statement))
