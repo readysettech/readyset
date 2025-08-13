@@ -726,16 +726,11 @@ impl Ingredient for Window {
             .our_index
             .expect("our index not set, should have been set in on_commit");
 
-        let columns: Vec<_> = cols
+        let columns = cols
             .iter()
-            .filter_map(|&col| {
-                if col == self.output_col_index {
-                    None
-                } else {
-                    Some(col)
-                }
-            })
-            .collect();
+            .copied()
+            .filter(|c| *c != self.output_col_index)
+            .collect::<Vec<_>>();
 
         // the cols we're asking for all belong to the parent
         if columns.len() == cols.len() {
@@ -744,17 +739,11 @@ impl Ingredient for Window {
                 columns: cols.to_vec(),
             })
         } else {
-            // asked about the output col
-            ColumnSource::GeneratedFromColumns(vec1![
-                ColumnRef {
-                    node: our_index.as_global(),
-                    columns: vec![self.output_col_index],
-                },
-                ColumnRef {
-                    node: self.src.as_global(),
-                    columns,
-                }
-            ])
+            // asked about the output col - reference this node with the other columns
+            ColumnSource::GeneratedFromColumns(vec1![ColumnRef {
+                node: our_index.as_global(),
+                columns,
+            }])
         }
     }
 
