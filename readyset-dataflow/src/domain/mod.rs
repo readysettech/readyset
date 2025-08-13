@@ -4383,7 +4383,7 @@ impl Domain {
 
         for (node, num_bytes) in nodes {
             let mut freed = 0;
-            let n = self.nodes[node].borrow_mut();
+            let mut n = self.nodes[node].borrow_mut();
 
             if n.is_dropped() {
                 continue; // Node was dropped. Skip.
@@ -4414,6 +4414,26 @@ impl Domain {
 
                 freed += bytes_freed;
                 if !keys.is_empty() {
+                    // Call on_eviction hook for the target node for all associated tags
+                    for (tag, _, _) in self.replay_paths.downstream_dependent_paths(
+                        node,
+                        index,
+                        &keys,
+                        &mut self.remapped_keys,
+                    ) {
+                        n.process_eviction(
+                            node,
+                            &index.columns,
+                            &keys,
+                            tag,
+                            self.shard,
+                            self.replica,
+                            &mut self.reader_write_handles,
+                            ex,
+                            &mut self.auxiliary_node_states,
+                        )?;
+                    }
+
                     let index = index.clone();
                     freed += Self::trigger_downstream_evictions(
                         &index,
@@ -4537,7 +4557,7 @@ impl Domain {
                 // This path terminates inside the domain. Find the destination node, evict
                 // from it, and then propagate the eviction further downstream.
                 let destination = path.last().node;
-                let n = self.nodes[destination].borrow_mut();
+                let mut n = self.nodes[destination].borrow_mut();
 
                 let (freed, eviction) = if n.is_dropped() {
                     // Node was dropped. Skip.
@@ -4605,6 +4625,19 @@ impl Domain {
                     };
                     let key = KeyComparison::try_from(key_evicted.clone())
                         .map_err(|_| internal_err!("Empty key evicted"))?;
+
+                    // Call on_eviction hook for the target node
+                    n.process_eviction(
+                        destination,
+                        &index.columns,
+                        std::slice::from_ref(&key),
+                        tag,
+                        self.shard,
+                        self.replica,
+                        &mut self.reader_write_handles,
+                        ex,
+                        &mut self.auxiliary_node_states,
+                    )?;
 
                     let index = index.clone();
                     let freed = Self::trigger_downstream_evictions(
