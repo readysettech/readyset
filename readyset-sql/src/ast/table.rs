@@ -274,23 +274,27 @@ pub enum NotReplicatedReason {
 impl NotReplicatedReason {
     pub fn description(&self) -> String {
         match self {
-                NotReplicatedReason::Configuration => "The table was either excluded from replicated-tables or included in replication-tables-ignore option.".to_string(),
-                NotReplicatedReason::TableDropped => "Table has been dropped.".to_string(),
-                NotReplicatedReason::Partitioned => "Partitioned tables are not supported.".to_string(),
-                NotReplicatedReason::UnsupportedType(reason) => {
-                    let prefix = "Unsupported type:";
-                    if let Some(start) = reason.find(prefix) {
-                        let start_offset = start + prefix.len();
-                        let type_name_raw = &reason[start_offset..];
-                        let type_name = type_name_raw.trim();  // Trim whitespace
-                        format!("Column type {type_name} is not supported.")
-                    } else {
-                        "Column type unknown is not supported.".to_string()
-                    }
-                },
-                NotReplicatedReason::OtherError(error) => format!("An unexpected replication error occurred: {error}"),
-                NotReplicatedReason::Default => "No specific reason provided.".to_string(),
+            NotReplicatedReason::Configuration => "The table was either excluded from \
+                --replication-tables or included in --replication-tables-ignore."
+                .to_string(),
+            NotReplicatedReason::TableDropped => "Table has been dropped.".to_string(),
+            NotReplicatedReason::Partitioned => "Partitioned tables are not supported.".to_string(),
+            NotReplicatedReason::UnsupportedType(reason) => {
+                let prefix = "Unsupported type:";
+                if let Some(start) = reason.find(prefix) {
+                    let start_offset = start + prefix.len();
+                    let type_name_raw = &reason[start_offset..];
+                    let type_name = type_name_raw.trim(); // Trim whitespace
+                    format!("Column type {type_name} is not supported.")
+                } else {
+                    "Column type unknown is not supported.".to_string()
+                }
             }
+            NotReplicatedReason::OtherError(error) => {
+                format!("An unexpected replication error occurred: {error}")
+            }
+            NotReplicatedReason::Default => "No specific reason provided.".to_string(),
+        }
     }
 
     pub fn from_string(reason: &String) -> Self {
