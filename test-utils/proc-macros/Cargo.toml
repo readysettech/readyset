@@ -3,7 +3,7 @@ name = "test-utils-proc-macros"
 version = "0.0.0"
 publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
-edition = "2021"
+edition = "2024"
 
 [lib]
 proc-macro = true

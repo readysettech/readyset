@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 pub use std::collections::btree_map::{Iter, Keys, Range, Values, ValuesMut};
-use std::collections::{btree_map, BTreeMap};
+use std::collections::{BTreeMap, btree_map};
 use std::fmt;
 
 use merging_interval_tree::IntervalTreeSet;

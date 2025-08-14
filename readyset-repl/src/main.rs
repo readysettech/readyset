@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use console::style;
 use database_utils::{
@@ -9,9 +9,9 @@ use database_utils::{
 use postgres_types::Type;
 use prettytable::Table;
 use readyset_data::DfValue;
+use rustyline::Editor;
 use rustyline::error::ReadlineError;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
-use rustyline::Editor;
 use rustyline_derive::{Completer, Helper, Highlighter, Hinter};
 
 #[derive(Parser)]
@@ -37,6 +37,7 @@ enum Command<'a> {
 }
 
 mod parse {
+    use nom::IResult;
     use nom::branch::alt;
     use nom::bytes::complete::{tag, take_while1};
     use nom::character::complete::{multispace0, multispace1};
@@ -45,7 +46,6 @@ mod parse {
     use nom::combinator::{all_consuming, map_res, opt, value};
     use nom::multi::separated_list0;
     use nom::sequence::terminated;
-    use nom::IResult;
 
     use super::Command;
 

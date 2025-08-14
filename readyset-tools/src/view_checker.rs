@@ -1,9 +1,9 @@
 #![warn(clippy::panic)]
 
-use clap::builder::NonEmptyStringValueParser;
 use clap::Parser;
-use readyset_client::consensus::AuthorityType;
+use clap::builder::NonEmptyStringValueParser;
 use readyset_client::ReadySetHandle;
+use readyset_client::consensus::AuthorityType;
 
 #[derive(Parser)]
 #[command(name = "view_checker")]

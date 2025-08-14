@@ -4,8 +4,8 @@ use std::mem;
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenTree};
-use quote::{quote, ToTokens};
-use syn::{parse_macro_input, parse_quote, Error, Ident, ItemFn};
+use quote::{ToTokens, quote};
+use syn::{Error, Ident, ItemFn, parse_macro_input, parse_quote};
 
 /// Mark the given test as a "slow" test, meaning it won't be run if slow tests should not be run.
 ///

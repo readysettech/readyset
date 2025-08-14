@@ -2,11 +2,11 @@
 //! Tool to retrieve a metrics dump for the current leader in a
 //! deployment.
 
-use clap::builder::NonEmptyStringValueParser;
 use clap::Parser;
+use clap::builder::NonEmptyStringValueParser;
+use readyset_client::ReadySetHandle;
 use readyset_client::consensus::AuthorityType;
 use readyset_client::metrics::client::MetricsClient;
-use readyset_client::ReadySetHandle;
 
 #[derive(Parser)]
 #[command(name = "metrics_dump")]

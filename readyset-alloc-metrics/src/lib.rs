@@ -1,12 +1,12 @@
 pub(crate) mod recorded;
 
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Entry},
     time::Duration,
 };
 
 use metrics::{Counter, Gauge};
-use readyset_alloc::{fetch_all_memory_stats, AllocThreadStats};
+use readyset_alloc::{AllocThreadStats, fetch_all_memory_stats};
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tracing::info;

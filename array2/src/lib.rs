@@ -34,9 +34,7 @@ pub enum Error {
     Empty,
 
     /// Rows of different size were passed to [`Array2::try_from_rows`]
-    #[error(
-        "Inconsistent row size at row {row_index}; expected {row_size}, but got {actual_size}"
-    )]
+    #[error("Inconsistent row size at row {row_index}; expected {row_size}, but got {actual_size}")]
     InconsistentRowSize {
         row_index: usize,
         row_size: usize,

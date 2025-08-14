@@ -3,7 +3,7 @@ name = "replication-offset"
 version = "0.1.0"
 publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 readyset-sql = { path = "../readyset-sql" }

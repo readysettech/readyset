@@ -5,16 +5,16 @@
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;
-use quote::{quote_spanned, ToTokens};
+use quote::{ToTokens, quote_spanned};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::token::Comma;
 use syn::visit::{self, Visit};
 use syn::visit_mut::{self, VisitMut};
 use syn::{
-    parse_macro_input, parse_quote, parse_quote_spanned, Arm, Expr, GenericArgument, GenericParam,
-    Ident, ItemEnum, ItemFn, ItemImpl, Lifetime, LifetimeParam, Path, PathArguments, ReturnType,
-    Type, TypeParam, TypeParamBound, Variant,
+    Arm, Expr, GenericArgument, GenericParam, Ident, ItemEnum, ItemFn, ItemImpl, Lifetime,
+    LifetimeParam, Path, PathArguments, ReturnType, Type, TypeParam, TypeParamBound, Variant,
+    parse_macro_input, parse_quote, parse_quote_spanned,
 };
 
 /// Try to sniff out the `T` in `impl Iterator<Item = T> + ...`.

@@ -11,7 +11,7 @@ use std::hash::Hash;
 
 use mysql::MySqlPosition;
 use postgres::PostgresPosition;
-use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use readyset_errors::{ReadySetError, ReadySetResult, internal_err};
 use readyset_sql::ast::Relation;
 use serde::{Deserialize, Serialize};
 
@@ -269,10 +269,10 @@ impl ReplicationOffsets {
             }
         }
 
-        if let Some(ref mut schema_offset) = self.schema {
-            if offset.try_partial_cmp(schema_offset)?.is_gt() {
-                *schema_offset = offset;
-            }
+        if let Some(ref mut schema_offset) = self.schema
+            && offset.try_partial_cmp(schema_offset)?.is_gt()
+        {
+            *schema_offset = offset;
         }
 
         Ok(())

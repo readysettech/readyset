@@ -23,8 +23,8 @@
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
-use std::collections::btree_set::Range;
 use std::collections::BTreeSet;
+use std::collections::btree_set::Range;
 use std::fmt::Debug;
 use std::hint::unreachable_unchecked;
 use std::ops::{Bound, Deref, RangeBounds};
@@ -1452,10 +1452,11 @@ mod tests {
             intervals.collect::<Vec<_>>(),
             vec![(Included(&20), Included(&20))],
         );
-        assert!(tree
-            .get_interval_overlaps(&(Included(20), Included(20)))
-            .next()
-            .is_none());
+        assert!(
+            tree.get_interval_overlaps(&(Included(20), Included(20)))
+                .next()
+                .is_none()
+        );
     }
 
     #[tags(no_retry)]
