@@ -137,7 +137,6 @@ impl WindowOperation {
     /// 2. be sorted on the `ORDER BY` columns
     ///
     /// For non-cumulative window functions, see [`WindowOperation::apply`]
-    #[allow(clippy::too_many_arguments)]
     pub fn apply_cumulative(
         &self,
         partition: &mut [Cow<[DfValue]>],
@@ -672,11 +671,16 @@ impl Display for WindowOperation {
 pub struct Window {
     src: IndexPair,
     our_index: Option<IndexPair>,
-    // this is NOT the query's `GROUP BY` clause.
-    // This is the predicates (view keys) that define
-    // (or "group") the window
-    group_by: Vec<usize>,
+    // mainly used by display
     partition_by: Vec<usize>,
+    // This is the group by + partition by.
+    //
+    // When we say group by, we don't mean the GROUP BY clause in sql,
+    // we mean the predicates (view key) that define this group/window.
+    //
+    // This is an optimization since we don't need to fetch the entire window
+    // just to modify a single partition inside of it.
+    lookup_key: Vec<usize>,
     order_by: Order,
     function: WindowOperation,
     output_col_index: usize,
@@ -697,7 +701,11 @@ impl Window {
         Ok(Window {
             src: src.into(),
             our_index: None,
-            group_by,
+            lookup_key: group_by
+                .iter()
+                .chain(partition_by.iter())
+                .copied()
+                .collect(),
             partition_by,
             order_by: Order::from(order_by),
             function,
@@ -713,11 +721,9 @@ impl Ingredient for Window {
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
-        // TODO: REA-5866 - Changing this index to be group_by + partition_key
-        // may be a good idea.
         HashMap::from([(
             this,
-            LookupIndex::Strict(internal::Index::hash_map(self.group_by.clone())),
+            LookupIndex::Strict(internal::Index::hash_map(self.lookup_key.clone())),
         )])
     }
 
@@ -794,54 +800,59 @@ impl Ingredient for Window {
             internal_err!("window operators must have their own state materialized")
         })?;
 
-        // Sort the records by group for efficient processing
+        // Sort the records by window + partition key for efficient processing
         //
-        // Chunk by group and assign group key to each group
-        // then sort positives first
+        // Chunk by window + partition key and assign key to each group.
         let grouped_rs: Vec<(_, _)> = rs
             .into_iter()
-            .sorted_by(|a, b| self.project_group(&***a).cmp(&self.project_group(&***b)))
+            .sorted_by(|a, b| {
+                self.project_window_partition_key(&***a)
+                    .cmp(&self.project_window_partition_key(&***b))
+            })
             .chunk_by(|r| {
-                self.project_group(&***r)
+                self.project_window_partition_key(&***r)
                     .into_iter()
                     .cloned()
                     .collect::<Vec<_>>()
             })
             .into_iter()
-            .map(|(key, group)| (key, group.into_iter().sorted_by(|a, b| a.cmp(b)).collect()))
+            .map(|(k, v)| (k, v.into_iter().collect::<Vec<_>>()))
             .collect();
 
-        for (group_key, diffs) in grouped_rs {
-            let mut current_window = vec![];
-
-            let missed = match db.lookup(&self.group_by[..], &PointKey::from(group_key.clone())) {
+        for (window_partition_key, diffs) in grouped_rs {
+            match db.lookup(
+                &self.lookup_key[..],
+                &PointKey::from(window_partition_key.clone()),
+            ) {
                 LookupResult::Some(records) => {
                     if replay.is_partial() {
                         lookups.push(Lookup {
                             on: *us,
-                            cols: self.group_by.clone(),
-                            key: group_key
+                            cols: self.lookup_key.clone(),
+                            key: window_partition_key
+                                .clone()
                                 .try_into()
-                                .expect("Expected at least 1 element, found empty group"),
+                                .expect("Expected at least 1 element, found empty key"),
                         });
                     }
 
-                    current_window.extend(records);
-
-                    false
+                    self.process_partition(diffs, &mut records.into_iter().collect(), &mut out)?;
                 }
-                LookupResult::Missing => true,
-            };
+                LookupResult::Missing => {
+                    // If we missed, no need to process further
+                    misses.extend(diffs.into_iter().map(|r| {
+                        Miss::builder()
+                            .on(*us)
+                            .lookup_idx(self.lookup_key.clone())
+                            .lookup_key(self.lookup_key.clone())
+                            .replay(replay)
+                            .record(r.into_row())
+                            .build()
+                    }));
 
-            self.process_window(
-                diffs,
-                &mut current_window,
-                missed,
-                &mut out,
-                &mut misses,
-                us,
-                replay,
-            )?;
+                    continue;
+                }
+            };
         }
 
         Ok(ProcessingResult {
@@ -858,155 +869,78 @@ impl Window {
         !self.order_by.is_empty()
     }
 
-    /// Project the columns we are grouping by out of the given record
-    fn project_group<'rec, R>(&self, rec: &'rec R) -> Vec<&'rec DfValue>
+    /// Project the combined window key (predicate) + partition key out of the given record
+    fn project_window_partition_key<'rec, R>(&self, rec: &'rec R) -> Vec<&'rec DfValue>
     where
         R: Indices<'static, usize, Output = DfValue> + ?Sized,
     {
-        rec.indices(self.group_by.clone())
+        rec.indices(self.lookup_key.clone())
             .expect("Invalid record length")
     }
 
-    /// Project the columns we are partitioning by out of the given record
-    fn project_partition<'rec, R>(&self, rec: &'rec R) -> Vec<&'rec DfValue>
-    where
-        R: Indices<'static, usize, Output = DfValue> + ?Sized,
-    {
-        rec.indices(self.partition_by.clone())
-            .expect("Invalid record length")
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn process_window(
+    fn process_partition(
         &self,
         diffs: Vec<Record>,
-        window: &mut Vec<Cow<[DfValue]>>,
-        missed: bool,
+        partition: &mut Vec<Cow<[DfValue]>>,
         out: &mut Vec<Record>,
-        misses: &mut Vec<Miss>,
-        us: IndexPair,
-        replay: &ReplayContext,
     ) -> ReadySetResult<()> {
-        // Try to be smart about the number of +/- rows emitted
-        // keep track of the modified partitions and only emit those
-        // instead of emitting the entire window
-        let mut modified_partitions = HashSet::new();
-        // map partition keys to their records for faster lookups
-        // and smarter emissions
-        let mut partition_to_records: HashMap<Vec<DfValue>, Vec<Cow<[DfValue]>>> = HashMap::new();
-        // map partition keys to changes (+/-) to be applied
-        let mut changes: HashMap<Vec<_>, Vec<(_, bool)>> = HashMap::new();
+        let partition_changes = diffs
+            .into_iter()
+            .map(|r| {
+                let is_positive = r.is_positive();
+                let mut row = r.into_row();
 
-        {
-            // keys of the partitions affected by the diffs
-            // scoped so it's immediately dropped after the loop
-            let required_keys: HashSet<Vec<DfValue>> = diffs
-                .iter()
-                .map(|r| self.project_partition(&***r).into_iter().cloned().collect())
-                .collect();
+                // Add the output column initialized to None
+                row.push(DfValue::None);
 
-            for row in &*window {
-                let key = self
-                    .project_partition(&**row)
-                    .into_iter()
-                    .cloned()
-                    .collect::<Vec<_>>();
+                (Cow::from(row), is_positive)
+            })
+            .collect();
 
-                // Skip partitions that will not be affected by the diffs
-                if !required_keys.contains(&key) {
-                    continue;
-                }
+        // Apply window function to the partition
+        if self.is_cumulative() {
+            partition.sort_by(|a, b| self.order_by.cmp(a, b));
 
-                partition_to_records
-                    .entry(key)
-                    .or_default()
-                    .push(row.clone());
-            }
-        }
+            // apply diffs to the ordered partition, send the
+            // negatives out, and record the index of the
+            // earliest change so we can save time on recomputation.
+            let Some(changes_offset) = apply_diffs_to_ordered_partition(
+                partition,
+                partition_changes,
+                self.output_col_index,
+                &self.order_by,
+                out,
+            )?
+            else {
+                return Ok(());
+            };
 
-        for record in diffs {
-            if missed {
-                misses.push(
-                    Miss::builder()
-                        .on(*us)
-                        .lookup_idx(self.group_by.clone())
-                        .lookup_key(self.group_by.clone())
-                        .replay(replay)
-                        .record(record.row().clone())
-                        .build(),
-                );
-                continue;
-            }
+            self.function.apply_cumulative(
+                partition,
+                self.output_col_index,
+                &self.output_col_type,
+                &self.order_by.columns(),
+                changes_offset,
+            )?;
 
-            let is_positive = record.is_positive();
-            let mut r = record.into_row();
+            out.extend(
+                partition[changes_offset..]
+                    .iter()
+                    .map(|r| Record::Positive((**r).to_vec())),
+            );
+        } else {
+            // send negatives of the current partition as applying
+            // diffs will probably change the values of the entire partition
+            out.extend(partition.iter().map(|r| Record::Negative((**r).to_vec())));
 
-            r.push(DfValue::None);
+            self.function.apply(
+                partition,
+                partition_changes,
+                self.output_col_index,
+                &self.output_col_type,
+            )?;
 
-            let partition_key = self
-                .project_partition(&*r)
-                .into_iter()
-                .cloned()
-                .collect::<Vec<_>>();
-
-            modified_partitions.insert(partition_key.clone());
-
-            changes
-                .entry(partition_key)
-                .or_default()
-                .push((Cow::from(r), is_positive));
-        }
-
-        for partition_key in modified_partitions {
-            // can be empty if this is the first +ve row
-            // in this partition
-            let mut partition = partition_to_records
-                .remove(&partition_key)
-                .unwrap_or_default();
-
-            let partition_changes = changes.remove(&partition_key).unwrap();
-
-            if self.is_cumulative() {
-                partition.sort_by(|a, b| self.order_by.cmp(a, b));
-
-                // apply diffs to the ordered partition, send the
-                // negatives out, and record the index of the
-                // earliest change so we can save time on recomputation
-                let changes_offset = apply_diffs_to_ordered_partition(
-                    &mut partition,
-                    partition_changes,
-                    self.output_col_index,
-                    &self.order_by,
-                    out,
-                )?;
-
-                self.function.apply_cumulative(
-                    &mut partition,
-                    self.output_col_index,
-                    &self.output_col_type,
-                    &self.order_by.columns(),
-                    changes_offset,
-                )?;
-
-                out.extend(
-                    partition[changes_offset..]
-                        .iter()
-                        .map(|r| Record::Positive((**r).to_vec())),
-                );
-            } else {
-                // send negatives of the current partition as applying
-                // diffs will probably change the values of the entire partition
-                out.extend(partition.iter().map(|r| Record::Negative((**r).to_vec())));
-
-                self.function.apply(
-                    &mut partition,
-                    partition_changes,
-                    self.output_col_index,
-                    &self.output_col_type,
-                )?;
-
-                out.extend(partition.iter().map(|r| Record::Positive((**r).to_vec())));
-            }
+            out.extend(partition.iter().map(|r| Record::Positive((**r).to_vec())));
         }
 
         Ok(())
@@ -1032,9 +966,9 @@ fn apply_diffs_to_partition<'a>(
         });
 
     positives.retain(|r| !negatives.remove(&r[..col_index]));
+    partition.retain(|r| !negatives.remove(&r[..col_index]));
 
     partition.extend(positives);
-    partition.retain(|r| !negatives.remove(&r[..col_index]));
 
     if !negatives.is_empty() {
         return Err(ReadySetError::Internal(
@@ -1045,17 +979,29 @@ fn apply_diffs_to_partition<'a>(
     Ok(())
 }
 
-/// Given the sorted partition and the diffs, sorts the
-/// positives by their `ORDER BY` value and merges the
-/// diffs with the partition. Also applies the negative diffs.
-/// Returns the index of the first change (+ or -)
+/// Applies a set of diffs (insertions and deletions) to a sorted partition,
+/// maintaining order and tracking the first change.
+///
+/// Given a sorted `partition` and a list of `diffs`, this function:
+/// 1. Separates positive diffs (insertions) and negative diffs (deletions).
+/// 2. Cancels out insertions that are directly negated by deletions.
+/// 3. Sorts the remaining insertions according to the provided `ORDER BY` clause.
+/// 4. Merges the sorted insertions with the original partition while:
+///     - Removing rows that match negative diffs,
+///     - Emitting `Record::Negative` outputs for affected rows if needed,
+///     - Tracking the earliest index at which any change occurs (insert or delete).
+///
+/// The final partition is written back into the provided `partition` vector.
+///
+/// If no changes were made to the original partition
+/// (either diffs cancel out or were empty), return `Ok(None)`
 fn apply_diffs_to_ordered_partition<'a>(
     partition: &mut Vec<Cow<'a, [DfValue]>>,
     diffs: Vec<(Cow<'a, [DfValue]>, bool)>,
     col_index: usize,
     order: &Order,
     out: &mut Vec<Record>,
-) -> ReadySetResult<usize> {
+) -> ReadySetResult<Option<usize>> {
     let mut earliest = usize::MAX;
 
     let (mut positives, mut negatives): (Vec<_>, HashSet<_>) =
@@ -1141,5 +1087,348 @@ fn apply_diffs_to_ordered_partition<'a>(
 
     *partition = sorted;
 
-    Ok(if earliest == usize::MAX { 0 } else { earliest })
+    Ok(if earliest == usize::MAX {
+        None
+    } else {
+        Some(earliest)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ops;
+    use readyset_data::DfValue;
+
+    fn setup_row_number(
+        group_by: Vec<usize>,
+        partition_by: Vec<usize>,
+    ) -> (ops::test::MockGraph, IndexPair) {
+        let order_by = vec![(2, OrderType::OrderAscending, NullOrder::NullsFirst)];
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["group", "partition", "order", "value"]);
+        g.set_op(
+            "window",
+            &["group", "partition", "order", "value", "row_num"],
+            Window::new(
+                s.as_global(),
+                group_by,
+                partition_by,
+                order_by,
+                WindowOperation::RowNumber,
+                4,
+                DfType::Int,
+            )
+            .unwrap(),
+            true,
+        );
+        (g, s)
+    }
+
+    fn setup_count_star(
+        group_by: Vec<usize>,
+        partition_by: Vec<usize>,
+    ) -> (ops::test::MockGraph, IndexPair) {
+        let order_by = vec![]; // No ORDER BY for non-ordered windows
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["group", "partition", "value"]);
+        g.set_op(
+            "window",
+            &["group", "partition", "value", "count"],
+            Window::new(
+                s.as_global(),
+                group_by,
+                partition_by,
+                order_by,
+                WindowOperation::CountStar,
+                3,
+                DfType::Int,
+            )
+            .unwrap(),
+            true,
+        );
+        (g, s)
+    }
+
+    #[test]
+    fn ordered_window_change_at_top_emits_entire_window() {
+        let (mut g, _s) = setup_row_number(vec![0], vec![1]);
+        let ni = g.node().local_addr();
+
+        let r1: Vec<DfValue> = vec![1.into(), "A".into(), 1.into(), 10.into()];
+        let r2: Vec<DfValue> = vec![1.into(), "A".into(), 2.into(), 20.into()];
+        let r3: Vec<DfValue> = vec![1.into(), "A".into(), 3.into(), 30.into()];
+
+        g.narrow_one_row(r1.clone(), true);
+        g.narrow_one_row(r2.clone(), true);
+        g.narrow_one_row(r3.clone(), true);
+        assert_eq!(g.states[ni].row_count(), 3);
+
+        // Insert at top - should emit entire window twice
+        let r0: Vec<DfValue> = vec![1.into(), "A".into(), 0.into(), 5.into()];
+        let emit = g.narrow_one_row(r0.clone(), true);
+
+        let negatives: Vec<_> = emit.iter().filter(|r| !r.is_positive()).collect();
+        let positives: Vec<_> = emit.iter().filter(|r| r.is_positive()).collect();
+
+        assert_eq!(negatives.len(), 3);
+        assert_eq!(positives.len(), 4);
+    }
+
+    #[test]
+    fn ordered_window_change_at_bottom_emits_one_positive() {
+        let (mut g, _s) = setup_row_number(vec![0], vec![1]);
+        let ni = g.node().local_addr();
+
+        let r1: Vec<DfValue> = vec![1.into(), "A".into(), 1.into(), 10.into()];
+        let r2: Vec<DfValue> = vec![1.into(), "A".into(), 2.into(), 20.into()];
+        let r3: Vec<DfValue> = vec![1.into(), "A".into(), 3.into(), 30.into()];
+
+        g.narrow_one_row(r1, true);
+        g.narrow_one_row(r2, true);
+        g.narrow_one_row(r3, true);
+        assert_eq!(g.states[ni].row_count(), 3);
+
+        // Insert at bottom - should emit only 1 positive
+        let r4: Vec<DfValue> = vec![1.into(), "A".into(), 4.into(), 40.into()];
+        let emit = g.narrow_one_row(r4.clone(), true);
+
+        assert_eq!(emit.len(), 1);
+        assert!(emit[0].is_positive());
+        assert_eq!(emit[0][4], DfValue::Int(4));
+    }
+
+    #[test]
+    fn ordered_self_canceling_diffs_emit_nothing() {
+        let (mut g, _s) = setup_row_number(vec![0], vec![1]);
+        let ni = g.node().local_addr();
+
+        let r1: Vec<DfValue> = vec![1.into(), "A".into(), 1.into(), 10.into()];
+        let r2: Vec<DfValue> = vec![1.into(), "A".into(), 2.into(), 20.into()];
+
+        g.narrow_one_row(r1, true);
+        g.narrow_one_row(r2, true);
+
+        assert_eq!(g.states[ni].row_count(), 2);
+
+        let r3: Vec<DfValue> = vec![1.into(), "A".into(), 3.into(), 30.into()];
+        let emit = g.narrow_one(
+            vec![Record::Positive(r3.clone()), Record::Negative(r3)],
+            true,
+        );
+
+        assert_eq!(emit.len(), 0);
+        assert_eq!(g.states[ni].row_count(), 2);
+    }
+
+    #[test]
+    fn multiple_partitions_independent_processing() {
+        let (mut g, _s) = setup_row_number(vec![0], vec![1]);
+        let ni = g.node().local_addr();
+
+        let r1a: Vec<DfValue> = vec![1.into(), "A".into(), 1.into(), 10.into()];
+        let r2a: Vec<DfValue> = vec![1.into(), "A".into(), 2.into(), 20.into()];
+        let r1b: Vec<DfValue> = vec![1.into(), "B".into(), 1.into(), 100.into()];
+        let r2b: Vec<DfValue> = vec![1.into(), "B".into(), 2.into(), 200.into()];
+
+        g.narrow_one_row(r1a, true);
+        g.narrow_one_row(r2a, true);
+        g.narrow_one_row(r1b, true);
+        g.narrow_one_row(r2b, true);
+        assert_eq!(g.states[ni].row_count(), 4);
+
+        // Insert at top of partition A - should not affect partition B
+        let r0a: Vec<DfValue> = vec![1.into(), "A".into(), 0.into(), 5.into()];
+        let emit = g.narrow_one_row(r0a.clone(), true);
+
+        assert_eq!(emit.len(), 5);
+        for record in &emit {
+            assert_eq!(record[1], "A".into());
+        }
+    }
+
+    #[test]
+    fn index_construction_empty_group_by() {
+        let order_by = vec![(1, OrderType::OrderAscending, NullOrder::NullsFirst)];
+        let window = Window::new(
+            1.into(),
+            vec![],  // empty group_by
+            vec![0], // partition_by on column 0
+            order_by,
+            WindowOperation::RowNumber,
+            2,
+            DfType::Int,
+        )
+        .unwrap();
+
+        assert_eq!(window.lookup_key, vec![0]);
+    }
+
+    #[test]
+    fn index_construction_empty_partition_by() {
+        let order_by = vec![(1, OrderType::OrderAscending, NullOrder::NullsFirst)];
+        let window = Window::new(
+            1.into(),
+            vec![0], // group_by on column 0
+            vec![],  // empty partition_by
+            order_by,
+            WindowOperation::RowNumber,
+            2,
+            DfType::Int,
+        )
+        .unwrap();
+
+        assert_eq!(window.lookup_key, vec![0]);
+    }
+
+    #[test]
+    fn index_construction_both_empty() {
+        let order_by = vec![(1, OrderType::OrderAscending, NullOrder::NullsFirst)];
+        let window = Window::new(
+            1.into(),
+            vec![], // empty group_by
+            vec![], // empty partition_by
+            order_by,
+            WindowOperation::RowNumber,
+            2,
+            DfType::Int,
+        )
+        .unwrap();
+
+        assert_eq!(window.lookup_key, Vec::<usize>::new());
+    }
+
+    #[test]
+    fn index_construction_non_sequential_columns() {
+        let order_by = vec![(1, OrderType::OrderAscending, NullOrder::NullsFirst)];
+        let window = Window::new(
+            1.into(),
+            vec![3, 0], // group_by on columns 3, 0
+            vec![2, 1], // partition_by on columns 2, 1
+            order_by,
+            WindowOperation::RowNumber,
+            5,
+            DfType::Int,
+        )
+        .unwrap();
+
+        assert_eq!(window.lookup_key, vec![3, 0, 2, 1]);
+    }
+
+    #[test]
+    fn different_windows_same_partition_keys() {
+        let (mut g, _s) = setup_row_number(vec![0], vec![1]);
+        let ni = g.node().local_addr();
+
+        let r1_win1: Vec<DfValue> = vec![1.into(), "A".into(), 1.into(), 10.into()];
+        let r2_win1: Vec<DfValue> = vec![1.into(), "A".into(), 2.into(), 20.into()];
+        let r1_win2: Vec<DfValue> = vec![2.into(), "A".into(), 1.into(), 100.into()];
+        let r2_win2: Vec<DfValue> = vec![2.into(), "A".into(), 2.into(), 200.into()];
+
+        g.narrow_one_row(r1_win1.clone(), true);
+        g.narrow_one_row(r2_win1.clone(), true);
+        g.narrow_one_row(r1_win2.clone(), true);
+        g.narrow_one_row(r2_win2.clone(), true);
+        assert_eq!(g.states[ni].row_count(), 4);
+
+        // Insert at top of window 1 - should not affect window 2
+        let r0_win1: Vec<DfValue> = vec![1.into(), "A".into(), 0.into(), 5.into()];
+        let emit = g.narrow_one_row(r0_win1.clone(), true);
+
+        assert_eq!(emit.len(), 5);
+        for record in &emit {
+            assert_eq!(record[0], 1.into());
+        }
+    }
+
+    #[test]
+    fn non_ordered_over_entire_table() {
+        let (mut g, _s) = setup_count_star(vec![], vec![]);
+        let ni = g.node().local_addr();
+
+        let r1: Vec<DfValue> = vec![1.into(), "A".into(), 10.into()];
+        let r2: Vec<DfValue> = vec![2.into(), "B".into(), 20.into()];
+        let r3: Vec<DfValue> = vec![3.into(), "C".into(), 30.into()];
+
+        g.narrow_one_row(r1.clone(), true);
+        g.narrow_one_row(r2.clone(), true);
+        g.narrow_one_row(r3.clone(), true);
+        assert_eq!(g.states[ni].row_count(), 3);
+
+        // Add new record - should emit entire table with updated count
+        let r4: Vec<DfValue> = vec![4.into(), "D".into(), 40.into()];
+        let emit = g.narrow_one_row(r4.clone(), true);
+
+        let (positives, negatives): (Vec<_>, Vec<_>) =
+            emit.into_iter().partition(|r| r.is_positive());
+
+        assert_eq!(negatives.len(), 3);
+        assert_eq!(positives.len(), 4);
+
+        // All records should have count = 4
+        for record in &positives {
+            assert_eq!(record[3], DfValue::Int(4));
+        }
+    }
+
+    #[test]
+    fn non_ordered_over_partition_by() {
+        let (mut g, _s) = setup_count_star(vec![0], vec![1]);
+        let ni = g.node().local_addr();
+
+        let r1a: Vec<DfValue> = vec![1.into(), "A".into(), 10.into()];
+        let r2a: Vec<DfValue> = vec![1.into(), "A".into(), 20.into()];
+        let r1b: Vec<DfValue> = vec![1.into(), "B".into(), 100.into()];
+        let r2b: Vec<DfValue> = vec![1.into(), "B".into(), 200.into()];
+
+        g.narrow_one_row(r1a.clone(), true);
+        g.narrow_one_row(r2a.clone(), true);
+        g.narrow_one_row(r1b.clone(), true);
+        g.narrow_one_row(r2b.clone(), true);
+        assert_eq!(g.states[ni].row_count(), 4);
+
+        // Add to partition A - should only emit partition A records
+        let r3a: Vec<DfValue> = vec![1.into(), "A".into(), 30.into()];
+        let emit = g.narrow_one_row(r3a.clone(), true);
+
+        assert_eq!(emit.len(), 5); // 2 negatives + 3 positives (partition A only)
+
+        // All emitted records should be for partition A
+        for record in &emit {
+            assert_eq!(record[1], "A".into());
+        }
+
+        // Partition A records should have count = 3
+        let positives: Vec<_> = emit.iter().filter(|r| r.is_positive()).collect();
+        for record in &positives {
+            assert_eq!(record[3], DfValue::Int(3));
+        }
+    }
+
+    #[test]
+    /// TODO:
+    /// Non-ordered windows always re-emit entire partition even for self-canceling diffs
+    /// because the implementation conservatively assumes function values may change.
+    /// I'm not comfortable doing this change this close to the release. Especially
+    /// after it was tested by Joe.
+    fn non_ordered_self_canceling_still_emits() {
+        let (mut g, _s) = setup_count_star(vec![0], vec![1]);
+        let ni = g.node().local_addr();
+
+        let r1: Vec<DfValue> = vec![1.into(), "A".into(), 10.into()];
+        let r2: Vec<DfValue> = vec![1.into(), "A".into(), 20.into()];
+
+        g.narrow_one_row(r1, true);
+        g.narrow_one_row(r2, true);
+        assert_eq!(g.states[ni].row_count(), 2);
+
+        let r3: Vec<DfValue> = vec![1.into(), "A".into(), 30.into()];
+        let emit = g.narrow_one(
+            vec![Record::Positive(r3.clone()), Record::Negative(r3)],
+            true,
+        );
+
+        assert_eq!(emit.len(), 4); // 2 negatives + 2 positives
+        assert_eq!(g.states[ni].row_count(), 2);
+    }
 }
