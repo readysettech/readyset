@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = ["property", "testing", "proptest", "stateful", "quickcheck"]
 categories = ["development-tools::testing"]
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 # NOTE: DO NOT REPLACE THESE WITH WORKSPACE DEPENDENCIES. This crate is

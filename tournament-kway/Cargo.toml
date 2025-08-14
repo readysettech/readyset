@@ -3,7 +3,7 @@ name = "tournament-kway"
 version = "0.1.0"
 publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
-edition = "2021"
+edition = "2024"
 
 keywords = ["sort", "tournament", "tree", "kway", "merge"]
 description = "Implementation of a k-way merge using a tournament tree"
