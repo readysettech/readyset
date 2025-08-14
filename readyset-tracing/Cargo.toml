@@ -7,18 +7,21 @@ edition = "2024"
 
 [dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true, features = ["grpc-tonic"] }
+opentelemetry-semantic-conventions = { workspace = true, features = [
+    "semconv_experimental",
+] }
+opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
+pyroscope = { workspace = true }
+pyroscope_pprofrs = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-
 tracing = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry-otlp = { workspace = true, features = ["grpc-tonic"] }
-opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
+tracing-appender = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
-tracing-appender = { workspace = true }
-opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
 
 [dev-dependencies]
 tracing-attributes = { workspace = true }

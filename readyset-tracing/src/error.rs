@@ -1,4 +1,5 @@
 use opentelemetry_sdk::trace::TraceError;
+use pyroscope::PyroscopeError;
 use tracing_subscriber::{filter::ParseError, reload};
 
 #[derive(Debug, thiserror::Error)]
@@ -15,4 +16,6 @@ pub enum Error {
     ReloadHandleNotInitialized,
     #[error("could not set log level: {0}")]
     CouldNotSetLogLevel(#[from] reload::Error),
+    #[error("could not initialize pyroscope agent: {0}")]
+    PyroscopeError(#[from] PyroscopeError),
 }

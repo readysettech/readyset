@@ -25,6 +25,9 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider, Tracer};
+use pyroscope::PyroscopeAgent;
+use pyroscope::pyroscope::PyroscopeAgentRunning;
+use pyroscope_pprofrs::{PprofConfig, pprof_backend};
 use tracing::Subscriber;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
@@ -118,6 +121,14 @@ pub struct Options {
         hide = true
     )]
     pub statement_log_path: Option<String>,
+
+    /// Pyroscope endpoint to send profiling data to
+    #[arg(long, env = "PYROSCOPE_ENDPOINT", hide = true)]
+    pub pyroscope_endpoint: Option<String>,
+
+    /// Sample rate for pprof profiling if Pyroscope is in use
+    #[arg(long, env = "PPROF_SAMPLE_RATE", default_value_t = 100, hide = true)]
+    pub pprof_sample_rate: u32,
 }
 
 impl Default for Options {
@@ -133,6 +144,8 @@ impl Default for Options {
             tracing_sample_percent: Percent(0.01),
             statement_logging: false,
             statement_log_path: None,
+            pyroscope_endpoint: None,
+            pprof_sample_rate: 100,
         }
     }
 }
@@ -349,9 +362,28 @@ impl Options {
             tracing::warn!("Could not initialize dynamic LOG_LEVEL update callback: {e}")
         }
 
+        let pyroscope_agent = if let Some(pyroscope_endpoint) = &self.pyroscope_endpoint {
+            let pprof_config = PprofConfig::new().sample_rate(self.pprof_sample_rate);
+            let backend_impl = pprof_backend(pprof_config);
+            let agent = PyroscopeAgent::builder(
+                pyroscope_endpoint,
+                &format!("{deployment}-{service_name}"),
+            )
+            .backend(backend_impl)
+            .build()?;
+            tracing::info!(
+                "Initialized pprof profiling with Pyroscope endpoint: {}",
+                pyroscope_endpoint
+            );
+            Some(agent.start()?)
+        } else {
+            None
+        };
+
         Ok(TracingGuard {
             _worker_guard: Some(worker_guard),
             tracer_provider,
+            pyroscope_agent,
         })
     }
 
@@ -370,6 +402,8 @@ pub struct TracingGuard {
     _worker_guard: Option<WorkerGuard>,
     /// Optional SdkTracerProvider for proper shutdown
     tracer_provider: Option<SdkTracerProvider>,
+    /// Optional Pyroscope agent for proper shutdown (so we don't miss a last batch report)
+    pyroscope_agent: Option<PyroscopeAgent<PyroscopeAgentRunning>>,
 }
 
 impl Drop for TracingGuard {
@@ -377,6 +411,10 @@ impl Drop for TracingGuard {
         if let Some(provider) = self.tracer_provider.take() {
             // Shutdown the tracer provider to flush any remaining spans
             let _ = provider.shutdown();
+        }
+        if let Some(agent) = self.pyroscope_agent.take() {
+            let agent = agent.stop().expect("Failed to stop Pyroscope agent");
+            agent.shutdown();
         }
     }
 }

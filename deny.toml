@@ -134,7 +134,6 @@ deny = [
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
     { name = "bit-vec", version = "0.6.3" },
-    { name = "uuid", version = "0.8.2" },
     # tokio-postgres uses 0.11, chrono-tz uses 0.12
     { name = "phf", version = "0.11.3" },
     { name = "phf_shared", version = "0.11.3" },
@@ -149,9 +148,11 @@ skip-tree = [
     { name = "hashbrown", version = "0.12.3" },
     { name = "itertools", version = "0.10.5" },
     { name = "itertools", version = "0.12.1" },
+    { name = "pyroscope", version = "0.5.8" },
+    { name = "pyroscope_pprofrs", version = "0.2.10" },
     { name = "rusty-fork", version = "0.3.0" },
-    { name = "unicode-width", version = "0.1.14" },
     { name = "tower", version = "0.4.13" },
+    { name = "unicode-width", version = "0.1.14" },
     { name = "winnow", version = "0.6.26" },
 ]
 
