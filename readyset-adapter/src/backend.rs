@@ -734,18 +734,6 @@ pub enum PrepareResultInner<DB: UpstreamDatabase> {
     Both(noria_connector::PrepareResult, UpstreamPrepare<DB>),
 }
 
-// Sadly rustc is very confused when trying to derive Clone for UpstreamPrepare, so have to do it
-// manually
-impl<DB: UpstreamDatabase> Clone for PrepareResultInner<DB> {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Noria(n) => Self::Noria(n.clone()),
-            Self::Upstream(u) => Self::Upstream(u.clone()),
-            Self::Both(n, u) => Self::Both(n.clone(), u.clone()),
-        }
-    }
-}
-
 impl<DB: UpstreamDatabase> Debug for PrepareResultInner<DB> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -809,9 +797,9 @@ impl<DB: UpstreamDatabase> PrepareResult<DB> {
 /// The type returned when a query is carried out by `Backend`, through either the `query` or
 /// `execute` functions.
 #[allow(clippy::large_enum_variant)]
-pub enum QueryResult<'a, DB: UpstreamDatabase>
+pub enum QueryResult<'a, DB>
 where
-    DB: 'a,
+    DB: UpstreamDatabase + 'a,
 {
     /// Results from noria
     Noria(noria_connector::QueryResult<'a>),
@@ -821,7 +809,7 @@ where
     /// Protocol)
     UpstreamBufferedInMemory(DB::QueryResult<'a>),
     /// Results from parsing a SQL statement and determining that it's a command that should
-    /// be handed at an outer layer.
+    /// be handled at an outer layer.
     Parser(ParsedCommand),
 }
 
@@ -2001,7 +1989,6 @@ where
             // inlined query in the query status cache.
             Err(e) => {
                 if let Some(placeholders) = e.unsupported_placeholders_cause() {
-                    #[allow(clippy::unwrap_used)] // converting from Vec1 back to Vec1
                     let placeholders = Vec1::try_from(
                         placeholders
                             .into_iter()
@@ -2263,7 +2250,7 @@ where
         query_id: Option<&str>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let query_id = match query_id {
-            // Bail if query_id is specificed and invalid.
+            // Bail if query_id is specified and invalid.
             Some(query_id) => Some(query_id.parse()?),
             None => None,
         };
@@ -2670,7 +2657,6 @@ where
             && (upstream_exists && (proxy_out_of_band || unsupported || exceeded_network_failure))
         {
             if did_work {
-                #[allow(clippy::unwrap_used)] // Validated by did_work.
                 state.query_status_cache.update_transition_time(
                     view_request,
                     &status.execution_info.unwrap().last_transition_time,
@@ -2679,23 +2665,21 @@ where
             return Self::query_fallback(upstream, original_query, event).await;
         }
 
-        let noria_res = {
-            event.destination = Some(QueryDestination::Readyset);
-            let ctx = ExecuteSelectContext::AdHoc {
-                statement: &view_request.statement,
-                create_if_missing: settings.migration_mode == MigrationMode::InRequestPath,
-                processed_query_params,
-            };
-            noria.execute_select(ctx, event).await
+        event.destination = Some(QueryDestination::Readyset);
+        let ctx = ExecuteSelectContext::AdHoc {
+            statement: &view_request.statement,
+            create_if_missing: settings.migration_mode == MigrationMode::InRequestPath,
+            processed_query_params,
         };
-
+        let res = noria.execute_select(ctx, event).await;
         if status.execution_info.is_none() {
             status.execution_info = Some(ExecutionInfo {
                 state: ExecutionState::Failed,
                 last_transition_time: Instant::now(),
             });
         }
-        match noria_res {
+
+        match res {
             Ok(noria_ok) => {
                 // We managed to select on ReadySet, good for us
                 status.migration_state = MigrationState::Successful;

@@ -59,7 +59,7 @@ where
     /// use streaming_iterator::StreamingIterator;
     /// use tournament_kway::{Comparator, StreamingTournament};
     ///
-    /// struct CompareIgnoringCase {}
+    /// struct CompareIgnoringCase;
     ///
     /// impl Comparator<&str> for CompareIgnoringCase {
     ///     fn cmp(&self, a: &&str, b: &&str) -> core::cmp::Ordering {

@@ -372,11 +372,10 @@ pub async fn handle_resp(resp: Response) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::*;
 
-    struct TestPeriodicReporter {}
+    struct TestPeriodicReporter;
 
     #[async_trait]
     impl PeriodicReport for TestPeriodicReporter {

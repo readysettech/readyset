@@ -259,8 +259,6 @@ pub mod handles {
 
 /// Helper types that give access to values inside the read half of an `reader_map`.
 pub mod refs {
-    // Same here, ::{..} won't work.
-    // Expose `ReadGuard` since it has useful methods the user will likely care about.
     #[doc(inline)]
     pub use left_right::ReadGuard;
 
@@ -415,7 +413,7 @@ impl<M, S, I> Options<M, S, I> {
 /// The default order of rows in the reader is the default order as defined by
 /// [`slice::binary_search`]
 #[derive(Clone, Debug, Default)]
-pub struct DefaultInsertionOrder {}
+pub struct DefaultInsertionOrder;
 
 impl<V> InsertionOrder<V> for DefaultInsertionOrder
 where

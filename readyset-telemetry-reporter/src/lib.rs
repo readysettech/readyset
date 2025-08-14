@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 
 pub const TELMETRY_CHANNEL_LEN: usize = 1024;
 
-pub struct TelemetryInitializer {}
+pub struct TelemetryInitializer;
 
 impl TelemetryInitializer {
     /// Initializes a background task and returns a TelemetrySender handle

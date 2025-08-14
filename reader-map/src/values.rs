@@ -625,7 +625,7 @@ mod tests {
     }
 
     #[derive(Debug, Default, Clone)]
-    struct Backwards {}
+    struct Backwards;
 
     impl<T> InsertionOrder<T> for Backwards
     where

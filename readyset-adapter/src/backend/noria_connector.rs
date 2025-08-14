@@ -1742,7 +1742,6 @@ struct ReadResult<'a> {
 
 /// Run the supplied [`SelectStatement`] on the supplied [`View`]
 /// Assumption: the [`View`] was created for that specific [`SelectStatement`]
-#[allow(clippy::needless_lifetimes)] // clippy erroneously thinks the timelife can be elided
 #[allow(clippy::too_many_arguments)]
 async fn do_read<'a>(
     getter: &'a mut View,

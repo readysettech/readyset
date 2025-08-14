@@ -700,7 +700,7 @@ macro_rules! vertical_tests {
     (@test $(#[$meta:meta])* $name:ident($query: expr; $extra_key_strategies: expr; $($tables: tt)*)) => {
         paste! {
             #[derive(Clone, Debug, Default)]
-            struct [<$name:camel TestDef>] {}
+            struct [<$name:camel TestDef>];
             impl TestDef for [<$name:camel TestDef>] {
                 fn test_query() -> &'static str {
                     $query

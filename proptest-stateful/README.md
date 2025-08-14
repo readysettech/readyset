@@ -61,7 +61,7 @@ enum CounterOp {
 The API requires us to define a state type, though for now it'll just be empty:
 ```rust
 #[derive(Clone, Debug, Default)]
-struct TestState {}
+struct TestState;
 ```
 And we need a context type to hold runtime state when we're executing a test
 case:

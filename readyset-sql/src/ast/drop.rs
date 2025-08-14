@@ -77,7 +77,7 @@ impl DialectDisplay for DropViewStatement {
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct DropAllCachesStatement {}
+pub struct DropAllCachesStatement;
 
 impl fmt::Display for DropAllCachesStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
