@@ -29,15 +29,15 @@ pub use failpoint_proc_macros::failpoint;
 /// ```
 #[macro_export]
 macro_rules! set_failpoint {
-    ($name:expr) => {{
+    ($name:expr_2021) => {{
         #[cfg(feature = "failure_injection")]
         fail::fail_point!($name);
     }};
-    ($name:expr, $e:expr) => {{
+    ($name:expr_2021, $e:expr_2021) => {{
         #[cfg(feature = "failure_injection")]
         fail::fail_point!($name, $e);
     }};
-    ($name:expr, $cond:expr, $e:expr) => {{
+    ($name:expr_2021, $cond:expr_2021, $e:expr_2021) => {{
         #[cfg(feature = "failure_injection")]
         fail::fail_point!($name, $cond, $e);
     }};

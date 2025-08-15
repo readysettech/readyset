@@ -1,4 +1,4 @@
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use rlimit::increase_nofile_limit;
 use tracing::info;
 

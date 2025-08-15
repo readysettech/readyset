@@ -7,8 +7,8 @@ use std::ops::{Add, Sub};
 use std::str::FromStr;
 
 use chrono::{Duration, NaiveDateTime, NaiveTime, Timelike};
-use mysql_common::value::convert::{FromValue, FromValueError};
 use mysql_common::value::Value;
+use mysql_common::value::convert::{FromValue, FromValueError};
 use proptest::arbitrary::Arbitrary;
 use proptest::strategy::Strategy;
 use readyset_util::arbitrary::arbitrary_duration;
@@ -370,6 +370,7 @@ impl From<MySqlTime> for Duration {
 }
 
 mod parse {
+    use nom::IResult;
     use nom::branch::alt;
     use nom::bytes::complete::take_while_m_n;
     use nom::character::complete::{char, digit1};
@@ -377,7 +378,6 @@ mod parse {
     use nom::combinator::{complete, eof, map, map_parser, opt};
     use nom::multi::{fold_many0, many0};
     use nom::sequence::{preceded, terminated, tuple};
-    use nom::IResult;
 
     use super::*;
 
@@ -680,7 +680,7 @@ mod tests {
     use super::*;
 
     macro_rules! assert_valid {
-        ($mysql_time:expr,$duration:expr) => {
+        ($mysql_time:expr_2021,$duration:expr_2021) => {
             if $duration > MAX_MYSQL_TIME_SECONDS {
                 assert_eq!($mysql_time.duration().num_seconds(), MAX_MYSQL_TIME_SECONDS);
             } else if $duration < -MAX_MYSQL_TIME_SECONDS {
@@ -695,7 +695,7 @@ mod tests {
     }
 
     macro_rules! assert_time {
-        ($mysql_time:expr, $positive:literal , $h:literal, $m:literal, $s:literal, $us: literal) => {
+        ($mysql_time:expr_2021, $positive:literal , $h:literal, $m:literal, $s:literal, $us: literal) => {
             assert_eq!($mysql_time.is_positive(), $positive);
             assert_eq!($mysql_time.hour(), $h);
             assert_eq!($mysql_time.minutes(), $m);

@@ -6,14 +6,17 @@
 
 use proptest::prop_oneof;
 use proptest::strategy::{Just, Strategy};
-use readyset_sql::{ast::*, Dialect};
+use readyset_sql::{Dialect, ast::*};
 
-use crate::expression::util::{case_when, cast, coalesce, if_null};
 use crate::expression::ExprStrategy;
+use crate::expression::util::{case_when, cast, coalesce, if_null};
 
 /// Produces a [`Strategy`] that generates a non-base (neither literal nor column) integer [`Expr`],
 /// using other kinds of [`Expr`] provided by the given [`ExprStrategy`]
-pub(super) fn generate_integer(es: ExprStrategy, dialect: &Dialect) -> impl Strategy<Value = Expr> {
+pub(super) fn generate_integer(
+    es: ExprStrategy,
+    dialect: &Dialect,
+) -> impl Strategy<Value = Expr> + use<> {
     let case_when = case_when(es.integer.clone(), es.bool.clone());
     prop_oneof![
         case_when,
@@ -65,7 +68,7 @@ mod call {
     use super::*;
 
     /// Produces a [`Strategy`] that generates an integer [`Expr::Call`].
-    pub(super) fn call(es: ExprStrategy, dialect: &Dialect) -> impl Strategy<Value = Expr> {
+    pub(super) fn call(es: ExprStrategy, dialect: &Dialect) -> impl Strategy<Value = Expr> + use<> {
         match dialect {
             Dialect::PostgreSQL => prop_oneof![coalesce(es.integer.clone()), round(es),].boxed(),
             Dialect::MySQL => prop_oneof![

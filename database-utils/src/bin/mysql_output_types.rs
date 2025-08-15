@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::iter::zip;
 
-use mysql_async::prelude::Queryable;
 use mysql_async::Value;
+use mysql_async::prelude::Queryable;
 
 const MYSQL_TYPES: &[&str] = &["tinyint", "smallint", "mediumint", "int", "bigint"];
 const MYSQL_SIGNED: &[&str] = &["", "unsigned"];

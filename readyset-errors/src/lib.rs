@@ -8,8 +8,8 @@ use std::{error::Error, str::Utf8Error};
 use derive_more::Display;
 use petgraph::graph::NodeIndex;
 use readyset_sql::{
-    ast::{Relation, SelectStatement},
     DialectDisplay,
+    ast::{Relation, SelectStatement},
 };
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
@@ -427,7 +427,9 @@ pub enum ReadySetError {
     NoSuchColumn(String),
 
     /// Conversion to or from a [`DfValue`](crate::DfValue) failed.
-    #[error("DfValue conversion error: Failed to convert value of type {src_type} to the type {target_type}: {details}")]
+    #[error(
+        "DfValue conversion error: Failed to convert value of type {src_type} to the type {target_type}: {details}"
+    )]
     DfValueConversionError {
         /// Source type.
         src_type: String,
@@ -687,7 +689,9 @@ pub enum ReadySetError {
     MirNodeMustHaveDfNodeAssigned { mir_node_index: usize },
 
     /// Error that the upstream database is using an unsupported server version.
-    #[error("Upstream server version {major}-{minor} is too low. Minimum supported version is {min_major}.{min_minor}")]
+    #[error(
+        "Upstream server version {major}-{minor} is too low. Minimum supported version is {min_major}.{min_minor}"
+    )]
     UnsupportedServerVersion {
         major: u16,
         minor: String,
@@ -1107,12 +1111,12 @@ macro_rules! unsupported {
 /// This is intended to be used wherever [`assert!`] would otherwise be used.
 #[macro_export]
 macro_rules! invariant {
-    ($expr:expr, $($tt:tt)*) => {
+    ($expr:expr_2021, $($tt:tt)*) => {
         if !$expr {
             $crate::internal!($($tt)*);
         }
     };
-    ($expr:expr) => {
+    ($expr:expr_2021) => {
         if !$expr {
             $crate::internal!("invariant failed: {}", std::stringify!($expr));
         }
@@ -1125,7 +1129,7 @@ macro_rules! invariant {
 /// This is intended to be used wherever [`assert_eq!`] was used previously.
 #[macro_export]
 macro_rules! invariant_eq {
-    ($expr:expr, $expr2:expr, $($tt:tt)*) => {
+    ($expr:expr_2021, $expr2:expr_2021, $($tt:tt)*) => {
         if $expr != $expr2 {
             $crate::internal!(
                 "invariant failed: {} == {} ({});\nleft = {:?};\nright = {:?}",
@@ -1137,7 +1141,7 @@ macro_rules! invariant_eq {
             )
         }
     };
-    ($expr:expr, $expr2:expr) => {
+    ($expr:expr_2021, $expr2:expr_2021) => {
         if $expr != $expr2 {
             $crate::internal!(
                 "invariant failed: {} == {};\nleft = {:?};\nright = {:?}",
@@ -1156,7 +1160,7 @@ macro_rules! invariant_eq {
 /// This is intended to be used wherever [`assert_ne!`] was used previously.
 #[macro_export]
 macro_rules! invariant_ne {
-    ($expr:expr, $expr2:expr, $($tt:tt)*) => {
+    ($expr:expr_2021, $expr2:expr_2021, $($tt:tt)*) => {
         if $expr == $expr2 {
             $crate::internal!(
                 "invariant failed: {} != {} ({});\nleft = {:?};\nright = {:?}",
@@ -1168,7 +1172,7 @@ macro_rules! invariant_ne {
             )
         }
     };
-    ($expr:expr, $expr2:expr) => {
+    ($expr:expr_2021, $expr2:expr_2021) => {
         if $expr == $expr2 {
             $crate::internal!(
                 "invariant failed: {} != {};\nleft = {:?};\nright = {:?}",
@@ -1261,7 +1265,7 @@ impl From<Utf8Error> for ReadySetError {
 /// The failpoint can also be used as a non-return ("pause", "panic", etc.) as well
 #[macro_export]
 macro_rules! set_failpoint_return_err {
-    ($name:expr) => {{
+    ($name:expr_2021) => {{
         #[cfg(feature = "failure_injection")]
         set_failpoint!($name, |r| r.map_or(
             Err(ReadySetError::Internal(
@@ -1279,7 +1283,7 @@ macro_rules! set_failpoint_return_err {
 
 #[cfg(test)]
 mod test {
-    use crate::{internal, ReadySetError, ReadySetResult};
+    use crate::{ReadySetError, ReadySetResult, internal};
 
     #[test]
     #[should_panic(expected = "errors/src/lib.rs")]

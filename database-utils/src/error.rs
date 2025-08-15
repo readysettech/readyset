@@ -66,16 +66,24 @@ impl Display for ConnectionType {
 /// Error type for the [`FromStr`] implementation for [`DatabaseURL`]
 #[derive(Debug, Error)]
 pub enum DatabaseURLParseError {
-    #[error("Invalid database URL format; database URLs must start with either mysql:// or postgresql://")]
+    #[error(
+        "Invalid database URL format; database URLs must start with either mysql:// or postgresql://"
+    )]
     InvalidFormat,
 
-    #[error("Invalid database URL format; ReadySet requires that Postgres database URLs contain a database name")]
+    #[error(
+        "Invalid database URL format; ReadySet requires that Postgres database URLs contain a database name"
+    )]
     MissingPostgresDbName,
 
-    #[error("Invalid database URL format: {0}; Make sure any special characters are percent-encoded. See https://docs.readyset.io/reference/cli/readyset#--upstream-db-url for more details.")]
+    #[error(
+        "Invalid database URL format: {0}; Make sure any special characters are percent-encoded. See https://docs.readyset.io/reference/cli/readyset#--upstream-db-url for more details."
+    )]
     PostgreSQL(#[from] pgsql::Error),
 
-    #[error("Invalid database URL format: {0}; Make sure any special characters are percent-encoded. See https://docs.readyset.io/reference/cli/readyset#--upstream-db-url for more details.")]
+    #[error(
+        "Invalid database URL format: {0}; Make sure any special characters are percent-encoded. See https://docs.readyset.io/reference/cli/readyset#--upstream-db-url for more details."
+    )]
     MySQL(#[from] mysql::UrlError),
 }
 

@@ -3,7 +3,7 @@ name = "nom-sql-arbitrary"
 version = "0.1.0"
 publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
-edition = "2021"
+edition = "2024"
 
 homepage = "https://github.com/readysettech/readyset/tree/master/nom-sql-arbitrary"
 repository = "https://github.com/readysettech/readyset/tree/master/nom-sql-arbitrary"

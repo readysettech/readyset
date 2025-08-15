@@ -3,7 +3,7 @@ name = "readyset-common"
 version = "0.7.0"
 publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
-edition = "2021"
+edition = "2024"
 
 description = "Artifacts commonly shared among other ReadySet crates"
 

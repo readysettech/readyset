@@ -17,7 +17,7 @@ pub async fn instrument_if_enabled<T>(future: impl Future<Output = T>, span: Spa
 /// will not work; we need to detect the existence of a parent
 #[macro_export]
 macro_rules! child_span {
-    (target: $target:expr, $lvl:ident, $name:expr, $($fields:tt)*) => {{
+    (target: $target:expr_2021, $lvl:ident, $name:expr_2021, $($fields:tt)*) => {{
         let span = ::tracing::Span::current();
         if span.is_disabled() {
             span
@@ -25,13 +25,13 @@ macro_rules! child_span {
             ::tracing::span!(target: $target, parent: span, ::tracing::Level::$lvl, $name, $($fields)*)
         }
     }};
-    (target: $target:expr, $lvl:ident, $name:expr) => {
+    (target: $target:expr_2021, $lvl:ident, $name:expr_2021) => {
         $crate::child_span!(target: $target, $lvl, $name,)
     };
-    ($lvl:ident, $name:expr, $($fields:tt)*) => {
+    ($lvl:ident, $name:expr_2021, $($fields:tt)*) => {
         $crate::child_span!(target: module_path!(), $lvl, $name, $($fields)*)
     };
-    ($lvl:ident, $name:expr) => {
+    ($lvl:ident, $name:expr_2021) => {
         $crate::child_span!(target: module_path!(), $lvl, $name,)
     };
 }

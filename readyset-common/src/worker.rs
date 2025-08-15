@@ -2,8 +2,8 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use readyset_errors::{ReadySetError, ReadySetResult};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use url::Url;
 
 pub async fn rpc<T, R>(

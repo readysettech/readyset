@@ -4,7 +4,7 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
-use metrics::{gauge, Gauge};
+use metrics::{Gauge, gauge};
 
 use crate::Len;
 

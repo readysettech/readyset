@@ -3,7 +3,7 @@ use std::task::{Context, Poll};
 
 use futures::{Sink, Stream, TryStream};
 
-use crate::{internal_err, ReadySetError};
+use crate::{ReadySetError, internal_err};
 
 /// A type that implements [`Sink`] and [`TryStream`] for use as a placeholder associated type for
 /// [`tokio_tower::Error`]'s type parameters when we aren't trying to downcast to a
@@ -101,10 +101,10 @@ where
 /// ```
 #[macro_export]
 macro_rules! rpc_err {
-    ($during:expr) => {
+    ($during:expr_2021) => {
         rpc_err!($during, $crate::rpc::NullSink, ())
     };
-    ($during:expr, $s: ty, $i: ty $(,)?) => {
+    ($during:expr_2021, $s: ty, $i: ty $(,)?) => {
         |e| {
             $crate::rpc::rpc_err::<_, $s, $i>(
                 format!("{}{}", $during, $crate::__location_info!()),

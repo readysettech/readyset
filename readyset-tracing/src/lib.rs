@@ -20,11 +20,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::{Args, ValueEnum};
-use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
+use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
-use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider, Tracer};
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider, Tracer};
 use tracing::Subscriber;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
@@ -32,7 +32,7 @@ use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{filter, fmt, reload, EnvFilter, Layer};
+use tracing_subscriber::{EnvFilter, Layer, filter, fmt, reload};
 
 mod error;
 pub use error::Error;

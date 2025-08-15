@@ -1,8 +1,8 @@
 use std::panic::AssertUnwindSafe;
 
 use chrono::DateTime;
-use mysql_async::prelude::Queryable;
 use mysql_async::Params;
+use mysql_async::prelude::Queryable;
 use mysql_common::{Row, Value};
 use pretty_assertions::assert_eq;
 use proptest::arbitrary::any;
@@ -13,7 +13,7 @@ use proptest::strategy::{Just, Strategy};
 use proptest::string::string_regex;
 use proptest::test_runner::Config as ProptestConfig;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
-use readyset_client_test_helpers::{mysql_helpers, TestBuilder};
+use readyset_client_test_helpers::{TestBuilder, mysql_helpers};
 use readyset_sql::ast::{EnumVariants, SqlType, SqlTypeArbitraryOptions};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_util::arbitrary::{

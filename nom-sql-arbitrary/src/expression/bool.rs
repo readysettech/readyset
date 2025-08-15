@@ -3,14 +3,17 @@
 
 use proptest::prop_oneof;
 use proptest::strategy::{Just, Strategy};
-use readyset_sql::{ast::*, Dialect};
+use readyset_sql::{Dialect, ast::*};
 
-use crate::expression::util::{case_when, cast, coalesce, if_null};
 use crate::expression::ExprStrategy;
+use crate::expression::util::{case_when, cast, coalesce, if_null};
 
 /// Produces a [`Strategy`] that generates a non-base (neither literal nor column) boolean [`Expr`],
 /// using other kinds of [`Expr`] provided by the given [`ExprStrategy`]
-pub(super) fn generate_bool(es: ExprStrategy, dialect: &Dialect) -> impl Strategy<Value = Expr> {
+pub(super) fn generate_bool(
+    es: ExprStrategy,
+    dialect: &Dialect,
+) -> impl Strategy<Value = Expr> + use<> {
     let case_when = case_when(es.bool.clone(), es.bool.clone());
     prop_oneof![
         op::op(es.clone()),
@@ -139,7 +142,7 @@ mod call {
     use super::*;
 
     /// Produces a [`Strategy`] that generates a boolean [`Expr::Call`].
-    pub(super) fn call(es: ExprStrategy, dialect: &Dialect) -> impl Strategy<Value = Expr> {
+    pub(super) fn call(es: ExprStrategy, dialect: &Dialect) -> impl Strategy<Value = Expr> + use<> {
         match dialect {
             Dialect::PostgreSQL => coalesce(es.bool).boxed(),
             Dialect::MySQL => prop_oneof![if_null(es.bool.clone()), coalesce(es.bool)].boxed(),

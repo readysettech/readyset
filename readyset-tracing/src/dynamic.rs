@@ -1,6 +1,6 @@
 use std::sync::{Arc, OnceLock};
 
-use tracing_subscriber::{reload, EnvFilter};
+use tracing_subscriber::{EnvFilter, reload};
 
 use crate::Error;
 

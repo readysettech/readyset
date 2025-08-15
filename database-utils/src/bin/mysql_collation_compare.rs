@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 
-use icu::collator::{options::*, Collator, CollatorBorrowed};
+use icu::collator::{Collator, CollatorBorrowed, options::*};
 use icu::locale::locale;
-use icu::properties::props::GeneralCategory;
 use icu::properties::CodePointMapData;
+use icu::properties::props::GeneralCategory;
 use mysql_async::prelude::Queryable;
 
 fn expr(b: u16, name: &str) -> String {

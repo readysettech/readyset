@@ -2,15 +2,15 @@ use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use pretty_assertions::assert_eq;
 use readyset_client_test_helpers::{
-    mysql_helpers::{self, MySQLAdapter},
     TestBuilder,
+    mysql_helpers::{self, MySQLAdapter},
 };
 use readyset_util::eventually;
 use std::time::Duration;
 use test_utils::tags;
 
 macro_rules! check_rows {
-    ($my_rows:expr, $rs_rows:expr, $($format_args:tt)*) => {
+    ($my_rows:expr_2021, $rs_rows:expr_2021, $($format_args:tt)*) => {
         for row in $my_rows.iter().zip($rs_rows.iter()) {
             assert_eq!(row.0, row.1, $($format_args)*);
         }
@@ -312,7 +312,7 @@ where
 }
 
 macro_rules! test_encoding_replication {
-    ($name:ident, $coltype:expr, $charset:expr, $range:expr) => {
+    ($name:ident, $coltype:expr_2021, $charset:expr_2021, $range:expr_2021) => {
         paste::paste! {
             #[tokio::test]
             #[tags(serial, slow, mysql_upstream)]

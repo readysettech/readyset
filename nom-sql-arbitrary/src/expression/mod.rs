@@ -7,10 +7,10 @@
 
 use proptest::arbitrary::{any, any_with};
 use proptest::strategy::{BoxedStrategy, Just, Strategy};
-use readyset_sql::{ast::*, Dialect};
+use readyset_sql::{Dialect, ast::*};
 
 use crate::expression::bool::generate_bool;
-use crate::expression::expr::{generate_base_expr, ExprSpec};
+use crate::expression::expr::{ExprSpec, generate_base_expr};
 use crate::expression::float::generate_float;
 use crate::expression::integer::generate_integer;
 use crate::expression::string::generate_string;

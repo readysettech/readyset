@@ -4,7 +4,7 @@ use std::mem;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::Parser;
-use syn::{parse_macro_input, ItemFn, Stmt};
+use syn::{ItemFn, Stmt, parse_macro_input};
 
 /// Introduces a failpoint at the beginning of the function this attribute macro
 /// is applied to. This failpoint can use all failpoint actions except `return`.

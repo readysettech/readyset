@@ -132,8 +132,8 @@ impl Records {
         Q: Eq + ?Sized,
     {
         self.iter().any(|r| match r {
-            Record::Positive(ref r) if positive => r.borrow() == q,
-            Record::Negative(ref r) if !positive => r.borrow() == q,
+            Record::Positive(r) if positive => r.borrow() == q,
+            Record::Negative(r) if !positive => r.borrow() == q,
             _ => false,
         })
     }
@@ -162,13 +162,13 @@ impl Records {
         while i < self.0.len() {
             if let Record::Negative(val) = &self.0[i] {
                 for j in (0..i).rev() {
-                    if let Record::Positive(pos_val) = &self.0[j] {
-                        if pos_val == val {
-                            self.0.remove(j);
-                            i -= 1;
-                            self.0.remove(i); // index decreased due to previous removal
-                            break;
-                        }
+                    if let Record::Positive(pos_val) = &self.0[j]
+                        && pos_val == val
+                    {
+                        self.0.remove(j);
+                        i -= 1;
+                        self.0.remove(i); // index decreased due to previous removal
+                        break;
                     }
                 }
             }

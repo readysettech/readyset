@@ -12,7 +12,7 @@ use error::DatabaseTypeParseError;
 use mysql_async::OptsBuilder;
 use native_tls::TlsConnectorBuilder;
 use readyset_errors::{ReadySetError, ReadySetResult};
-use readyset_sql::{ast::SqlIdentifier, Dialect};
+use readyset_sql::{Dialect, ast::SqlIdentifier};
 use readyset_util::redacted::RedactedString;
 use serde::{Deserialize, Serialize};
 use {mysql_async as mysql, tokio_postgres as pgsql};
@@ -222,28 +222,26 @@ impl UpstreamConfig {
     }
 
     pub fn default_schema_search_path(&self) -> Vec<SqlIdentifier> {
-        if self.upstream_db_url.is_some() {
-            if let Ok(ref db_url) = self
+        if self.upstream_db_url.is_some()
+            && let Ok(ref db_url) = self
                 .upstream_db_url
                 .as_ref()
                 .unwrap()
                 .parse::<DatabaseURL>()
-            {
-                return db_url.default_schema_search_path();
-            }
+        {
+            return db_url.default_schema_search_path();
         }
         vec![]
     }
 
     pub fn default_timezone_name(&self) -> SqlIdentifier {
-        if let Some(Ok(db_url)) = self
+        match self
             .upstream_db_url
             .as_ref()
             .map(|url| url.parse::<DatabaseURL>())
         {
-            db_url.default_timezone_name()
-        } else {
-            DEFAULT_TIMEZONE_NAME.into()
+            Some(Ok(db_url)) => db_url.default_timezone_name(),
+            _ => DEFAULT_TIMEZONE_NAME.into(),
         }
     }
 }

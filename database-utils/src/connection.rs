@@ -5,13 +5,13 @@ use std::str;
 
 use derive_more::From;
 use futures::TryStreamExt;
-use mysql::prelude::AsQuery;
 use mysql::PoolConstraints;
+use mysql::prelude::AsQuery;
 use mysql_async::consts::ColumnFlags;
 use mysql_async::prelude::Queryable;
 use readyset_errors::ReadySetError;
-use readyset_sql::{ast::SqlType, Dialect};
-use tokio_postgres::{GenericResult, DEFAULT_RESULT_FORMATS};
+use readyset_sql::{Dialect, ast::SqlType};
+use tokio_postgres::{DEFAULT_RESULT_FORMATS, GenericResult};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::error::{ConnectionType, DatabaseError};
@@ -141,7 +141,7 @@ pub enum DatabaseConnection {
 
 /// Macro to handle collecting PostgreSQL query results into a Vec<Row>, filtering out Command messages
 macro_rules! collect_postgres_rows {
-    ($query_result:expr) => {
+    ($query_result:expr_2021) => {
         ($query_result.await?)
             .try_filter_map(|result| async move {
                 match result {
@@ -223,22 +223,12 @@ impl QueryableConnection for DatabaseConnection {
     {
         match self {
             Self::MySQL(_) => Err(DatabaseError::WrongConnection(ConnectionType::PostgreSQL)),
-            Self::PostgreSQL(conn, _) => {
-                Ok(QueryResults::Postgres(collect_postgres_rows!(conn
-                    .query_typed_raw(
-                        query.as_ref(),
-                        params,
-                        DEFAULT_RESULT_FORMATS
-                    ))))
-            }
-            Self::PostgreSQLPool(conn) => {
-                Ok(QueryResults::Postgres(collect_postgres_rows!(conn
-                    .query_typed_raw(
-                        query.as_ref(),
-                        params,
-                        DEFAULT_RESULT_FORMATS
-                    ))))
-            }
+            Self::PostgreSQL(conn, _) => Ok(QueryResults::Postgres(collect_postgres_rows!(
+                conn.query_typed_raw(query.as_ref(), params, DEFAULT_RESULT_FORMATS)
+            ))),
+            Self::PostgreSQLPool(conn) => Ok(QueryResults::Postgres(collect_postgres_rows!(
+                conn.query_typed_raw(query.as_ref(), params, DEFAULT_RESULT_FORMATS)
+            ))),
         }
     }
 

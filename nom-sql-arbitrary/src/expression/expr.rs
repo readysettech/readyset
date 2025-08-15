@@ -45,12 +45,12 @@ pub(super) enum ExprSpec {
 
 // Helper macro to generate the different types of numeric `Expr`s.
 macro_rules! numeric_expr {
-    ($range:expr, i64) => {{
+    ($range:expr_2021, i64) => {{
         $range
             .prop_map(|i| Expr::Literal(Literal::Integer(i as i64)))
             .boxed()
     }};
-    ($range:expr, u64) => {{
+    ($range:expr_2021, u64) => {{
         $range
             .prop_map(|i| Expr::Literal(Literal::UnsignedInteger(i as u64)))
             .boxed()

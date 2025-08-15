@@ -1,8 +1,8 @@
 use mysql_async::consts::MAX_PAYLOAD_LEN;
 use mysql_async::prelude::Queryable;
 use mysql_common::Value;
-use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use test_utils::tags;
 
 #[tags(serial, slow, mysql8_upstream)]

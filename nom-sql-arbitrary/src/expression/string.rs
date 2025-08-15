@@ -4,14 +4,17 @@
 
 use proptest::prop_oneof;
 use proptest::strategy::Strategy;
-use readyset_sql::{ast::*, Dialect};
+use readyset_sql::{Dialect, ast::*};
 
-use crate::expression::util::{case_when, cast, coalesce, if_null};
 use crate::expression::ExprStrategy;
+use crate::expression::util::{case_when, cast, coalesce, if_null};
 
 /// Produces a [`Strategy`] that generates a non-base (neither literal nor column) string
 /// [`Expr`], using other kinds of [`Expr`] provided by the given [`ExprStrategy`]
-pub(super) fn generate_string(es: ExprStrategy, dialect: &Dialect) -> impl Strategy<Value = Expr> {
+pub(super) fn generate_string(
+    es: ExprStrategy,
+    dialect: &Dialect,
+) -> impl Strategy<Value = Expr> + use<> {
     let case_when = case_when(es.string.clone(), es.bool.clone());
     prop_oneof![case_when, string_cast(es.clone()), call::call(es, dialect)]
 }
@@ -31,7 +34,7 @@ mod call {
     use super::*;
 
     /// Produces a [`Strategy`] that generates a string [`Expr::Call`].
-    pub(super) fn call(es: ExprStrategy, dialect: &Dialect) -> impl Strategy<Value = Expr> {
+    pub(super) fn call(es: ExprStrategy, dialect: &Dialect) -> impl Strategy<Value = Expr> + use<> {
         match dialect {
             Dialect::PostgreSQL => prop_oneof![
                 coalesce(es.string.clone()),
