@@ -2714,7 +2714,9 @@ impl Domain {
                 };
                 let keys = if is_generated {
                     // No need to store remapping; if it's not there, we don't have the key.
-                    self.nodes[src].borrow_mut().handle_upquery(m)?
+                    let mut missed_keys = self.nodes[src].borrow_mut().handle_upquery(m)?;
+                    missed_keys.retain(|m| !self.nodes[m.node].borrow().is_base());
+                    missed_keys
                 } else {
                     vec![m]
                 };

@@ -562,6 +562,10 @@ impl KeyedState {
     ///
     /// * Panics if `self` is [`KeyedState::AllRows`], which cannot be partial
     pub(super) fn evict(&mut self, key: &[DfValue]) -> Option<Rows> {
+        // If the provided key length doesn't match the index's key length, do nothing.
+        if key.len() != self.key_len() {
+            return None;
+        }
         macro_rules! evict_hash {
             ($m: expr, $ty:ty, $k: expr) => {{
                 let rows = $m.swap_remove::<$ty>(&MakeKey::from_key($k));
@@ -611,6 +615,19 @@ impl KeyedState {
     where
         R: RangeBounds<Vec1<DfValue>>,
     {
+        // Validate bound lengths match the index key length when present; if not, nothing to evict.
+        let expected_len = self.key_len();
+        let start_ok = matches!(
+            range.start_bound(),
+            Bound::Included(k) | Bound::Excluded(k) if k.len() == expected_len
+        );
+        let end_ok = matches!(
+            range.end_bound(),
+            Bound::Included(k) | Bound::Excluded(k) if k.len() == expected_len
+        );
+        if !(start_ok && end_ok) {
+            return Default::default();
+        }
         macro_rules! do_evict_range {
             ($m: expr, $range: expr, $hint: ty) => {
                 $m.remove_range(<$hint as MakeKey<DfValue>>::from_range($range))
