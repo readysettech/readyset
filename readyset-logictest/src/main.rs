@@ -663,10 +663,6 @@ impl Fuzz {
             TestRunner::new(self.into())
         };
 
-        lifecycle::setup_complete(&json!({
-            "logictest-type": "fuzz",
-        }));
-
         let readyset_url = self
             .readyset_url
             .as_ref()
