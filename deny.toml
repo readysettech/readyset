@@ -150,6 +150,7 @@ skip-tree = [
     { name = "hermit-abi", version = "0.3.9" },
     { name = "itertools", version = "0.10.5" },
     { name = "itertools", version = "0.12.1" },
+    { name = "itertools", version = "0.13.0" },
     { name = "regex-automata", version = "0.1.10" },
     { name = "rusty-fork", version = "0.3.0" },
     { name = "unicode-width", version = "0.1.14" },
