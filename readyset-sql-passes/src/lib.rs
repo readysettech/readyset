@@ -18,7 +18,6 @@ mod rewrite_between;
 mod rewrite_utils;
 mod star_expansion;
 mod strip_literals;
-mod strip_post_filters;
 mod util;
 mod validate_window_functions;
 
@@ -49,7 +48,6 @@ pub use crate::resolve_schemas::ResolveSchemas;
 pub use crate::rewrite_between::RewriteBetween;
 pub use crate::star_expansion::StarExpansion;
 pub use crate::strip_literals::{SelectStatementSkeleton, StripLiterals};
-pub use crate::strip_post_filters::StripPostFilters;
 pub use crate::util::{
     is_correlated, is_logical_op, is_predicate, map_aggregates, outermost_table_exprs, LogicalOp,
 };
@@ -173,7 +171,6 @@ impl Rewrite for SelectStatement {
             .disallow_row()?
             .validate_window_functions()?
             .scalar_optimize_expressions(context.dialect)
-            .strip_post_filters()
             .resolve_schemas(
                 context.tables(),
                 context.custom_types,
