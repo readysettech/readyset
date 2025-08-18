@@ -134,8 +134,7 @@ impl MigrationHandler {
                     Err(e) if e.caused_by_unsupported() => {
                         debug!(
                             error = %e,
-                            // FIXME(REA-2169): Use correct dialect.
-                            query = %Sensitive(&query.query().statement.display(readyset_sql::Dialect::MySQL)),
+                            query = %Sensitive(&query.query().statement.display(self.dialect.into())),
                             "Select query is unsupported in ReadySet"
                         );
                         self.query_status_cache
@@ -147,8 +146,7 @@ impl MigrationHandler {
                     Err(e) => {
                         debug!(
                             error = %e,
-                            // FIXME(REA-2169): Use correct dialect.
-                            query = %Sensitive(&query.query().statement.display(readyset_sql::Dialect::MySQL)),
+                            query = %Sensitive(&query.query().statement.display(self.dialect.into())),
                             "Select query may have transiently failed"
                         );
                         if Instant::now() - *self.start_time.get(query.query()).unwrap()
@@ -242,8 +240,7 @@ impl MigrationHandler {
             Err(e) if e.caused_by_unsupported() => {
                 debug!(
                     error = %e,
-                    // FIXME(REA-2168 + REA-2169): Use correct dialect.
-                    query = %Sensitive(&view_request.statement.display(readyset_sql::Dialect::MySQL)),
+                    query = %Sensitive(&view_request.statement.display(self.dialect.into())),
                     "Select query is unsupported in ReadySet"
                 );
 
@@ -258,8 +255,7 @@ impl MigrationHandler {
             Err(e) => {
                 debug!(
                     error = %e,
-                    // FIXME(REA-2168 + REA-2169): Use correct dialect.
-                    query = %Sensitive(&view_request.statement.display(readyset_sql::Dialect::MySQL)),
+                    query = %Sensitive(&view_request.statement.display(self.dialect.into())),
                     "Select query may have transiently failed"
                 );
                 if Instant::now() - *self.start_time.get(view_request).unwrap() > self.max_retry {

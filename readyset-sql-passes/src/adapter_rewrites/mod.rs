@@ -128,7 +128,7 @@ pub fn process_query(
 
     let auto_parameters =
         autoparameterize::auto_parameterize_query(query, params.server_supports_mixed_comparisons);
-    let rewritten_in_conditions = collapse_where_in(query)?;
+    let rewritten_in_conditions = collapse_where_in(query, params.dialect)?;
     number_placeholders(query)?;
     Ok(ProcessedQueryParams {
         dialect: params.dialect,
@@ -285,6 +285,7 @@ struct RewrittenIn {
 fn where_in_to_placeholders(
     leftmost_param_index: &mut usize,
     expr: &mut Expr,
+    dialect: Dialect,
 ) -> ReadySetResult<RewrittenIn> {
     let (lhs, list, negated) = match *expr {
         Expr::In {
@@ -312,7 +313,7 @@ fn where_in_to_placeholders(
                     .collect(),
                 _ => unsupported!(
                     "IN only supported on placeholders, got: {}",
-                    e.display(Dialect::MySQL)
+                    e.display(dialect)
                 ),
             }
         })
@@ -362,11 +363,11 @@ fn where_in_to_placeholders(
     })
 }
 
-#[derive(Default)]
 /// Please refer to the documentation of [`collapse_where_in`]
 struct CollapseWhereInVisitor {
     leftmost_param_index: usize,
     out: Vec<RewrittenIn>,
+    dialect: Dialect,
 }
 
 impl<'ast> VisitorMut<'ast> for CollapseWhereInVisitor {
@@ -427,6 +428,7 @@ impl<'ast> VisitorMut<'ast> for CollapseWhereInVisitor {
                 self.out.push(where_in_to_placeholders(
                     &mut self.leftmost_param_index,
                     expression,
+                    self.dialect,
                 )?);
                 return Ok(());
             }
@@ -445,11 +447,18 @@ impl<'ast> VisitorMut<'ast> for CollapseWhereInVisitor {
 ///
 /// Note that IN conditions without any placeholders will be left untouched, as these can be handled
 /// by regular filter nodes in dataflow
-fn collapse_where_in(query: &mut SelectStatement) -> ReadySetResult<Vec<RewrittenIn>> {
+fn collapse_where_in(
+    query: &mut SelectStatement,
+    dialect: Dialect,
+) -> ReadySetResult<Vec<RewrittenIn>> {
     let mut res = vec![];
 
     if let Some(ref mut w) = query.where_clause {
-        let mut visitor = CollapseWhereInVisitor::default();
+        let mut visitor = CollapseWhereInVisitor {
+            leftmost_param_index: 0,
+            out: Vec::new(),
+            dialect,
+        };
         visitor.visit_expr(w)?;
         res = visitor.out;
 
@@ -732,7 +741,7 @@ mod tests {
         #[test]
         fn collapsed_where_placeholders() {
             let mut q = parse_select_statement_mysql("SELECT * FROM x WHERE x.y IN (?, ?, ?)");
-            let rewritten = collapse_where_in(&mut q).unwrap();
+            let rewritten = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
             assert_eq!(
                 rewritten,
                 vec![RewrittenIn {
@@ -750,7 +759,7 @@ mod tests {
             );
 
             let mut q = parse_select_statement_mysql("SELECT * FROM x WHERE y IN (?, ?, ?)");
-            let rewritten = collapse_where_in(&mut q).unwrap();
+            let rewritten = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
             assert_eq!(
                 rewritten,
                 vec![RewrittenIn {
@@ -768,7 +777,7 @@ mod tests {
             );
 
             let mut q = parse_select_statement_mysql("SELECT * FROM x WHERE AVG(y) IN (?, ?, ?)");
-            let rewritten = collapse_where_in(&mut q).unwrap();
+            let rewritten = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
             assert_eq!(
                 rewritten,
                 vec![RewrittenIn {
@@ -788,7 +797,7 @@ mod tests {
             let mut q = parse_select_statement_mysql(
                 "SELECT * FROM t WHERE x = ? AND y IN (?, ?, ?) OR z = ?",
             );
-            let rewritten = collapse_where_in(&mut q).unwrap();
+            let rewritten = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
             assert_eq!(
                 rewritten,
                 vec![RewrittenIn {
@@ -808,7 +817,7 @@ mod tests {
             let mut q = parse_select_statement_mysql(
                 "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = ?) AND y IN (?, ?) OR z = ?",
             );
-            let rewritten = collapse_where_in(&mut q).unwrap();
+            let rewritten = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
             assert_eq!(
                 rewritten,
                 vec![RewrittenIn {
@@ -830,7 +839,7 @@ mod tests {
             let mut q = parse_select_statement_mysql(
                 "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = ? AND a IN (?, ?)) OR z = ?",
             );
-            let rewritten = collapse_where_in(&mut q).unwrap();
+            let rewritten = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
             assert_eq!(
                 rewritten,
                 vec![RewrittenIn {
@@ -853,7 +862,7 @@ mod tests {
         #[test]
         fn collapsed_where_literals() {
             let mut q = parse_select_statement_mysql("SELECT * FROM x WHERE x.y IN (1, 2, 3)");
-            assert_eq!(collapse_where_in(&mut q).unwrap(), vec![]);
+            assert_eq!(collapse_where_in(&mut q, Dialect::MySQL).unwrap(), vec![]);
             assert_eq!(
                 q,
                 parse_select_statement_mysql("SELECT * FROM x WHERE x.y IN (1, 2, 3)")
@@ -863,7 +872,7 @@ mod tests {
         #[test]
         fn collapsed_where_dollarsign_placeholders() {
             let mut q = parse_select_statement_mysql("SELECT * FROM x WHERE x.y IN ($1, $2, $3)");
-            let rewritten = collapse_where_in(&mut q).unwrap();
+            let rewritten = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
             assert_eq!(
                 rewritten,
                 vec![RewrittenIn {
@@ -884,7 +893,7 @@ mod tests {
             );
 
             let mut q = parse_select_statement_postgres("SELECT * FROM x WHERE y IN ($1, $2, $3)");
-            let rewritten = collapse_where_in(&mut q).unwrap();
+            let rewritten = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
             assert_eq!(
                 rewritten,
                 vec![RewrittenIn {
@@ -906,7 +915,7 @@ mod tests {
 
             let mut q =
                 parse_select_statement_postgres("SELECT * FROM x WHERE AVG(y) IN ($1, $2, $3)");
-            let rewritten = collapse_where_in(&mut q).unwrap();
+            let rewritten = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
             assert_eq!(
                 rewritten,
                 vec![RewrittenIn {
@@ -929,7 +938,7 @@ mod tests {
             let mut q = parse_select_statement_postgres(
                 "SELECT * FROM t WHERE x = $1 AND y IN ($2, $3, $4) OR z = $5",
             );
-            let rewritten = collapse_where_in(&mut q).unwrap();
+            let rewritten = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
             assert_eq!(
                 rewritten,
                 vec![RewrittenIn {
@@ -952,7 +961,7 @@ mod tests {
             let mut q = parse_select_statement_postgres(
                 "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y IN ($2, $3) OR z = $4",
             );
-            let rewritten = collapse_where_in(&mut q).unwrap();
+            let rewritten = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
             assert_eq!(
                 rewritten,
                 vec![RewrittenIn {
@@ -976,7 +985,7 @@ mod tests {
             let mut q = parse_select_statement_postgres(
                 "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = $1 AND a IN ($2, $3)) OR z = $4",
             );
-            let rewritten = collapse_where_in(&mut q).unwrap();
+            let rewritten = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
             assert_eq!(
                 rewritten,
                 vec![RewrittenIn {
@@ -1001,7 +1010,7 @@ mod tests {
         fn collapse_multiple_where_in() {
             let mut q =
                 parse_select_statement_mysql("SELECT * FROM t WHERE x IN (?,?) AND y IN (?,?)");
-            let rewritten = collapse_where_in(&mut q).unwrap();
+            let rewritten = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
 
             assert_eq!(
                 rewritten,
@@ -1032,7 +1041,7 @@ mod tests {
             let mut q =
                 parse_select_statement_mysql("SELECT * FROM t WHERE (x, y) IN ((?, ?), (?,?))");
 
-            let _ = collapse_where_in(&mut q).unwrap();
+            let _ = collapse_where_in(&mut q, Dialect::MySQL).unwrap();
 
             q.clear_metadata();
 

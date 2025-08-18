@@ -13,11 +13,11 @@ mod pull_keys;
 impl MirQuery<'_> {
     /// Run a set of rewrite and optimization passes on this [`MirQuery`], and returns the modified
     /// query.
-    pub fn rewrite(mut self) -> ReadySetResult<Self> {
+    pub fn rewrite(mut self, dialect: readyset_sql::Dialect) -> ReadySetResult<Self> {
         pull_keys::pull_view_keys_to_leaf(&mut self)?;
         decorrelate::eliminate_dependent_joins(&mut self)?;
         predicate_pushup::push_filters_up(&mut self)?;
-        filters_to_join_keys::convert_filters_to_join_keys(&mut self)?;
+        filters_to_join_keys::convert_filters_to_join_keys(&mut self, dialect)?;
         add_bogokey::add_bogokey_if_necessary(&mut self)?;
         pull_columns::pull_all_required_columns(&mut self)?;
         fuse::fuse_project_nodes(&mut self)?;

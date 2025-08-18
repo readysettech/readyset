@@ -45,7 +45,10 @@ pub fn is_correlated(statement: &SelectStatement) -> bool {
         .any(|col| col.table.iter().any(|tbl| !tables.contains(tbl)))
 }
 
-fn field_names(statement: &mut SelectStatement) -> ReadySetResult<Vec<&mut SqlIdentifier>> {
+fn field_names(
+    statement: &mut SelectStatement,
+    dialect: readyset_sql::Dialect,
+) -> ReadySetResult<Vec<&mut SqlIdentifier>> {
     statement
         .fields
         .iter_mut()
@@ -57,7 +60,6 @@ fn field_names(statement: &mut SelectStatement) -> ReadySetResult<Vec<&mut SqlId
                 expr: Expr::Column(Column { name, .. }),
                 ..
             } => Ok(name),
-            // FIXME: use correct dialect
             FieldDefinitionExpr::Expr {
                 ref mut alias,
                 expr,
@@ -65,12 +67,9 @@ fn field_names(statement: &mut SelectStatement) -> ReadySetResult<Vec<&mut SqlId
                 if let Some(a) = alias {
                     Ok(a)
                 } else {
-                    *alias = expr.alias(readyset_sql::Dialect::MySQL);
+                    *alias = expr.alias(dialect);
                     alias.as_mut().ok_or({
-                        unsupported_err!(
-                            "Expression {} not supported",
-                            expr.display(readyset_sql::Dialect::MySQL)
-                        )
+                        unsupported_err!("Expression {} not supported", expr.display(dialect))
                     })
                 }
             }
@@ -78,7 +77,7 @@ fn field_names(statement: &mut SelectStatement) -> ReadySetResult<Vec<&mut SqlId
             // doesn't have one
             e => Err(unsupported_err!(
                 "Expression {} not supported",
-                e.display(readyset_sql::Dialect::MySQL)
+                e.display(dialect)
             )),
         })
         .collect()
@@ -91,6 +90,7 @@ pub(crate) fn subquery_schemas<'a>(
     tables: &'a mut [TableExpr],
     ctes: &'a mut [CommonTableExpr],
     join: &'a mut [JoinClause],
+    dialect: readyset_sql::Dialect,
 ) -> ReadySetResult<HashMap<&'a SqlIdentifier, Vec<&'a SqlIdentifier>>> {
     ctes.iter_mut()
         .map(|cte| (&cte.name, &mut cte.statement))
@@ -111,7 +111,7 @@ pub(crate) fn subquery_schemas<'a>(
         .map(|(name, stmt)| {
             Ok((
                 name,
-                field_names(stmt)?
+                field_names(stmt, dialect)?
                     .into_iter()
                     .map(|x| &*x)
                     .collect::<Vec<&SqlIdentifier>>(),
@@ -121,11 +121,14 @@ pub(crate) fn subquery_schemas<'a>(
 }
 
 #[must_use]
-pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
+pub fn map_aggregates(
+    expr: &mut Expr,
+    dialect: readyset_sql::Dialect,
+) -> Vec<(FunctionExpr, SqlIdentifier)> {
     let mut ret = Vec::new();
     match expr {
         Expr::Call(f) if is_aggregate(f) => {
-            let name: SqlIdentifier = f.display(readyset_sql::Dialect::MySQL).to_string().into();
+            let name: SqlIdentifier = f.display(dialect).to_string().into();
             ret.push((f.clone(), name.clone()));
             *expr = Expr::Column(Column { name, table: None });
         }
@@ -134,12 +137,12 @@ pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
             else_expr,
         } => {
             ret.extend(branches.iter_mut().flat_map(|b| {
-                map_aggregates(&mut b.condition)
+                map_aggregates(&mut b.condition, dialect)
                     .into_iter()
-                    .chain(map_aggregates(&mut b.body))
+                    .chain(map_aggregates(&mut b.body, dialect))
             }));
             if let Some(else_expr) = else_expr {
-                ret.append(&mut map_aggregates(else_expr));
+                ret.append(&mut map_aggregates(else_expr, dialect));
             }
         }
         Expr::Call(FunctionExpr::Call {
@@ -149,45 +152,45 @@ pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
             let expr = exprs
                 .first_mut()
                 .expect("round should have at least one argument");
-            ret.append(&mut map_aggregates(expr));
+            ret.append(&mut map_aggregates(expr, dialect));
         }
         Expr::Call(_) | Expr::Literal(_) | Expr::Column(_) | Expr::Variable(_) => {}
         Expr::BinaryOp { lhs, rhs, .. }
         | Expr::OpAny { lhs, rhs, .. }
         | Expr::OpSome { lhs, rhs, .. }
         | Expr::OpAll { lhs, rhs, .. } => {
-            ret.append(&mut map_aggregates(lhs));
-            ret.append(&mut map_aggregates(rhs));
+            ret.append(&mut map_aggregates(lhs, dialect));
+            ret.append(&mut map_aggregates(rhs, dialect));
         }
         Expr::UnaryOp { rhs: expr, .. }
         | Expr::Cast { expr, .. }
         | Expr::ConvertUsing { expr, .. } => {
-            ret.append(&mut map_aggregates(expr));
+            ret.append(&mut map_aggregates(expr, dialect));
         }
         Expr::Exists(_) => {}
         Expr::NestedSelect(_) => {}
         Expr::Between {
             operand, min, max, ..
         } => {
-            ret.append(&mut map_aggregates(operand));
-            ret.append(&mut map_aggregates(min));
-            ret.append(&mut map_aggregates(max));
+            ret.append(&mut map_aggregates(operand, dialect));
+            ret.append(&mut map_aggregates(min, dialect));
+            ret.append(&mut map_aggregates(max, dialect));
         }
         Expr::In { lhs, rhs, .. } => {
-            ret.append(&mut map_aggregates(lhs));
+            ret.append(&mut map_aggregates(lhs, dialect));
             match rhs {
                 InValue::Subquery(_) => {}
                 InValue::List(exprs) => {
                     for expr in exprs {
-                        ret.append(&mut map_aggregates(expr));
+                        ret.append(&mut map_aggregates(expr, dialect));
                     }
                 }
             }
         }
         Expr::Array(exprs) | Expr::Row { exprs, .. } => {
-            ret.extend(exprs.iter_mut().flat_map(map_aggregates))
+            ret.extend(exprs.iter_mut().flat_map(|e| map_aggregates(e, dialect)))
         }
-        Expr::Collate { expr, .. } => ret.append(&mut map_aggregates(expr)),
+        Expr::Collate { expr, .. } => ret.append(&mut map_aggregates(expr, dialect)),
         // Window functions are handled separately
         // `PARTITION BY` and `ORDER BY` can *NOT* contain aggregates
         Expr::WindowFunction { .. } => {}

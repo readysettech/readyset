@@ -936,7 +936,6 @@ impl Expr {
             Expr::Literal(Literal::Placeholder(_)) => return None,
             Expr::Variable(_) => return None,
 
-            // FIXME: follow dialect's naming convention
             e => e.display(dialect).to_string(),
         };
 

@@ -126,10 +126,7 @@ impl CreateSchema {
             ) {
                 Ok(mut parsed_table) => {
                     parsed_table.anonymize(anonymizer);
-                    // FIXME(ENG-1860): Use correct dialect.
-                    parsed_table
-                        .display(readyset_sql::Dialect::MySQL)
-                        .to_string()
+                    parsed_table.display(self.dialect).to_string()
                 }
                 // If we fail to parse, fully anonymize the statement.
                 Err(_) => "<anonymized: create table failed to parse>".to_string(),

@@ -137,9 +137,10 @@ impl FunctionProcessor<'_> {
 /// ```
 ///
 /// Also works with functions over join columns.
-pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
-    let dialect = Dialect::MySQL;
-
+pub(crate) fn convert_filters_to_join_keys(
+    query: &mut MirQuery<'_>,
+    dialect: Dialect,
+) -> ReadySetResult<()> {
     // We'll be constructing a map from join_idx -> Vec<(filter_idx, (left_join_col,
     // right_join_col))>
     let mut filters_to_add = BTreeMap::<_, Vec<_>>::new();
@@ -524,7 +525,7 @@ mod tests {
 
         let mut query = MirQuery::new(query_name, leaf, &mut mir_graph);
 
-        convert_filters_to_join_keys(&mut query).unwrap();
+        convert_filters_to_join_keys(&mut query, readyset_sql::Dialect::MySQL).unwrap();
         assert!(!mir_graph.contains_node(filter));
         match &mir_graph[join].inner {
             MirNodeInner::Join { on, .. } => assert_eq!(
@@ -573,7 +574,7 @@ mod tests {
 
         let mut query = MirQuery::new(query_name, leaf, &mut mir_graph);
 
-        convert_filters_to_join_keys(&mut query).unwrap();
+        convert_filters_to_join_keys(&mut query, readyset_sql::Dialect::MySQL).unwrap();
         assert!(!mir_graph.contains_node(filter));
         match &mir_graph[join].inner {
             MirNodeInner::Join { on, .. } => assert_eq!(
@@ -615,7 +616,7 @@ mod tests {
 
         let mut query = MirQuery::new(query_name, leaf, &mut mir_graph);
 
-        convert_filters_to_join_keys(&mut query).unwrap();
+        convert_filters_to_join_keys(&mut query, readyset_sql::Dialect::MySQL).unwrap();
 
         assert!(mir_graph.contains_node(filter), "Filter is not a join key!");
     }
@@ -658,7 +659,7 @@ mod tests {
 
         let mut query = MirQuery::new(query_name, leaf, &mut mir_graph);
 
-        convert_filters_to_join_keys(&mut query).unwrap();
+        convert_filters_to_join_keys(&mut query, readyset_sql::Dialect::MySQL).unwrap();
 
         assert!(mir_graph.contains_node(filter), "Filter is not a join key!");
     }
@@ -688,7 +689,7 @@ mod tests {
 
         let mut query = MirQuery::new(query_name, leaf, &mut mir_graph);
 
-        convert_filters_to_join_keys(&mut query).unwrap();
+        convert_filters_to_join_keys(&mut query, readyset_sql::Dialect::MySQL).unwrap();
 
         assert!(!mir_graph.contains_node(filter));
         match &mir_graph[join].inner {
@@ -725,7 +726,7 @@ mod tests {
 
         let mut query = MirQuery::new(query_name, leaf, &mut mir_graph);
 
-        convert_filters_to_join_keys(&mut query).unwrap();
+        convert_filters_to_join_keys(&mut query, readyset_sql::Dialect::MySQL).unwrap();
 
         assert!(!mir_graph.contains_node(filter));
         match &mir_graph[join].inner {
@@ -762,7 +763,7 @@ mod tests {
 
         let mut query = MirQuery::new(query_name, leaf, &mut mir_graph);
 
-        convert_filters_to_join_keys(&mut query).unwrap();
+        convert_filters_to_join_keys(&mut query, readyset_sql::Dialect::MySQL).unwrap();
 
         assert!(!mir_graph.contains_node(filter));
         match &mir_graph[join].inner {
@@ -801,7 +802,7 @@ mod tests {
 
         let mut query = MirQuery::new(query_name, leaf, &mut mir_graph);
 
-        convert_filters_to_join_keys(&mut query).unwrap();
+        convert_filters_to_join_keys(&mut query, readyset_sql::Dialect::MySQL).unwrap();
 
         assert!(!mir_graph.contains_node(filter));
         match &mir_graph[join].inner {

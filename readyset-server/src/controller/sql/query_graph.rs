@@ -8,6 +8,7 @@ use std::{iter, mem};
 
 use common::{DfValue, IndexType};
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
+use readyset_data::Dialect;
 use readyset_errors::{
     internal, invalid_query, invalid_query_err, invariant, invariant_eq, no_table_for_col,
     unsupported, unsupported_err, ReadySetResult,
@@ -798,12 +799,13 @@ fn collect_join_predicates(
 fn extract_having_aggregates(
     having_expr: &Expr,
     aggregates: &mut HashMap<FunctionExpr, SqlIdentifier>,
+    dialect: Dialect,
 ) -> Vec<Expr> {
     let mut having_predicates = split_conjunctions(iter::once(having_expr));
 
-    #[derive(Default)]
     struct AggregateFinder {
         result: Vec<(FunctionExpr, SqlIdentifier)>,
+        dialect: Dialect,
     }
 
     impl<'ast> VisitorMut<'ast> for AggregateFinder {
@@ -811,11 +813,7 @@ fn extract_having_aggregates(
 
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
             if matches!(expr, Expr::Call(fun) if is_aggregate(fun)) {
-                // FIXME(REA-2168): Use correct dialect.
-                let name: SqlIdentifier = expr
-                    .display(readyset_sql::Dialect::MySQL)
-                    .to_string()
-                    .into();
+                let name: SqlIdentifier = expr.display(self.dialect.into()).to_string().into();
                 let col_expr = Expr::Column(ast::Column {
                     name: name.clone(),
                     table: None,
@@ -840,7 +838,10 @@ fn extract_having_aggregates(
         }
     }
 
-    let mut af = AggregateFinder::default();
+    let mut af = AggregateFinder {
+        result: Vec::new(),
+        dialect,
+    };
     for pred in having_predicates.iter_mut() {
         let _ = af.visit_expr(pred);
     }
@@ -935,7 +936,7 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DfValue>> {
 }
 
 #[allow(clippy::cognitive_complexity)]
-pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
+pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult<QueryGraph> {
     // a handy closure for making new relation nodes
     let new_node = |rel: Relation,
                     preds: Vec<Expr>,
@@ -1020,7 +1021,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                 );
                 if let Entry::Vacant(e) = relations.entry(rel.clone()) {
                     let mut node = new_node(rel.clone(), vec![], &stmt.fields)?;
-                    node.subgraph = Some(Box::new(to_query_graph((**sq).clone())?));
+                    node.subgraph = Some(Box::new(to_query_graph((**sq).clone(), dialect)?));
                     e.insert(node);
                 } else {
                     invalid_query!(
@@ -1283,7 +1284,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
     // necessarily return these in the query results.
     let mut aggregates = HashMap::new();
     let having_predicates = if let Some(having_expr) = stmt.having.as_ref() {
-        extract_having_aggregates(having_expr, &mut aggregates)
+        extract_having_aggregates(having_expr, &mut aggregates, dialect)
     } else {
         vec![]
     };
@@ -1299,12 +1300,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
             FieldDefinitionExpr::Expr { expr, alias } => {
                 let name: SqlIdentifier = alias
                     .clone()
-                    // FIXME(REA-2168): Use correct dialect.
-                    .unwrap_or_else(|| {
-                        expr.display(readyset_sql::Dialect::MySQL)
-                            .to_string()
-                            .into()
-                    });
+                    .unwrap_or_else(|| expr.display(dialect.into()).to_string().into());
                 match expr {
                     Expr::Literal(l) => columns.push(OutputColumn::Literal(LiteralColumn {
                         name,
@@ -1322,10 +1318,8 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                         partition_by,
                         order_by,
                     } => {
-                        let fn_name: SqlIdentifier = expr
-                            .display(readyset_sql::Dialect::MySQL)
-                            .to_string()
-                            .into();
+                        let fn_name: SqlIdentifier =
+                            expr.display(dialect.into()).to_string().into();
 
                         columns.push(OutputColumn::Data {
                             alias: alias.clone().unwrap_or(fn_name.clone()),
@@ -1364,7 +1358,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     }
                     _ => {
                         let mut expr = expr.clone();
-                        let aggs = map_aggregates(&mut expr);
+                        let aggs = map_aggregates(&mut expr, dialect.into());
                         aggregates.extend(aggs);
 
                         columns.push(OutputColumn::Expr(ExprColumn {
@@ -1424,21 +1418,14 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     // we don't necessarily need it projected in the result set of the query, and
                     // the pull_columns pass will make sure the topk/paginate node gets the
                     // aggregate result column
-                    aggregates.entry(func.clone()).or_insert_with(|| {
-                        // FIXME(REA-2168): Use correct dialect.
-                        func.display(readyset_sql::Dialect::MySQL)
-                            .to_string()
-                            .into()
-                    });
+                    aggregates
+                        .entry(func.clone())
+                        .or_insert_with(|| func.display(dialect.into()).to_string().into());
                 }
                 FieldReference::Expr(expr) => {
                     // This is an expression that we need to add to the list of projected columns
                     columns.push(OutputColumn::Expr(ExprColumn {
-                        // FIXME(REA-2168): Use correct dialect.
-                        name: expr
-                            .display(readyset_sql::Dialect::MySQL)
-                            .to_string()
-                            .into(),
+                        name: expr.display(dialect.into()).to_string().into(),
                         table: None,
                         expression: expr.clone(),
                     }));
@@ -1468,11 +1455,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                             match field {
                                 FieldReference::Expr(Expr::Column(col)) => col,
                                 FieldReference::Expr(expr) => Column {
-                                    // FIXME(REA-2168): Use correct dialect.
-                                    name: expr
-                                        .display(readyset_sql::Dialect::MySQL)
-                                        .to_string()
-                                        .into(),
+                                    name: expr.display(dialect.into()).to_string().into(),
                                     table: None,
                                 },
                                 FieldReference::Numeric(_) => {
@@ -1587,7 +1570,7 @@ mod tests {
             q => panic!("Unexpected query type; expected SelectStatement but got {q:?}"),
         };
 
-        to_query_graph(query).unwrap()
+        to_query_graph(query, readyset_data::Dialect::DEFAULT_MYSQL).unwrap()
     }
 
     #[test]
@@ -1735,7 +1718,7 @@ mod tests {
             "select * from (select * from t) q1, (select * from t) q1;",
         )
         .unwrap();
-        to_query_graph(query).unwrap_err();
+        to_query_graph(query, readyset_data::Dialect::DEFAULT_MYSQL).unwrap_err();
     }
 
     #[test]

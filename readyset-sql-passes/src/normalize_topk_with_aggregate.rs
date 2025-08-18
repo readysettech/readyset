@@ -5,7 +5,7 @@ use readyset_sql::analysis::contains_aggregate;
 use readyset_sql::ast::{
     Expr, FieldDefinitionExpr, FieldReference, LimitClause, OrderBy, SelectStatement, SqlQuery,
 };
-use readyset_sql::DialectDisplay;
+use readyset_sql::{Dialect, DialectDisplay};
 
 pub trait NormalizeTopKWithAggregate: Sized {
     /// Remove any topk clause (order by, limit, offset) from a query with an aggregate without a
@@ -15,11 +15,11 @@ pub trait NormalizeTopKWithAggregate: Sized {
     /// If the query *has* a GROUP BY clause, this query checks that all the columns in the ORDER BY
     /// clause either appear in the GROUP BY clause, or reference the results of aggregates, and
     /// returns an error otherwise.
-    fn normalize_topk_with_aggregate(&mut self) -> ReadySetResult<&mut Self>;
+    fn normalize_topk_with_aggregate(&mut self, dialect: Dialect) -> ReadySetResult<&mut Self>;
 }
 
 impl NormalizeTopKWithAggregate for SelectStatement {
-    fn normalize_topk_with_aggregate(&mut self) -> ReadySetResult<&mut Self> {
+    fn normalize_topk_with_aggregate(&mut self, dialect: Dialect) -> ReadySetResult<&mut Self> {
         if let Some(order) = self.order.take() {
             let aggs = self
                 .fields
@@ -66,10 +66,7 @@ impl NormalizeTopKWithAggregate for SelectStatement {
 
                             if !in_group_by_clause && !references_aggregate {
                                 return Err(ReadySetError::ExprNotInGroupBy {
-                                    // FIXME(REA-2168): Use correct dialect.
-                                    expression: order_field
-                                        .display(readyset_sql::Dialect::MySQL)
-                                        .to_string(),
+                                    expression: order_field.display(dialect).to_string(),
                                     position: "ORDER BY".to_owned(),
                                 });
                             }
@@ -105,9 +102,9 @@ impl NormalizeTopKWithAggregate for SelectStatement {
 }
 
 impl NormalizeTopKWithAggregate for SqlQuery {
-    fn normalize_topk_with_aggregate(&mut self) -> ReadySetResult<&mut Self> {
+    fn normalize_topk_with_aggregate(&mut self, dialect: Dialect) -> ReadySetResult<&mut Self> {
         if let SqlQuery::Select(stmt) = self {
-            stmt.normalize_topk_with_aggregate()?;
+            stmt.normalize_topk_with_aggregate(dialect)?;
         }
         Ok(self)
     }
@@ -123,7 +120,7 @@ mod tests {
 
     fn removes_all_topk(input: &str) {
         let mut q = parse_query(Dialect::MySQL, input).unwrap();
-        q.normalize_topk_with_aggregate().unwrap();
+        q.normalize_topk_with_aggregate(Dialect::MySQL).unwrap();
         match q {
             SqlQuery::Select(stmt) => {
                 assert!(stmt.order.is_none());
@@ -187,7 +184,7 @@ mod tests {
             "SELECT table_1.column_1 FROM table_1 order by column_3 asc limit 4;",
         )
         .unwrap();
-        query.normalize_topk_with_aggregate().unwrap();
+        query.normalize_topk_with_aggregate(Dialect::MySQL).unwrap();
 
         match query {
             SqlQuery::Select(stmt) => {
@@ -224,7 +221,9 @@ mod tests {
         )
         .unwrap();
         let mut result = query.clone();
-        result.normalize_topk_with_aggregate().unwrap();
+        result
+            .normalize_topk_with_aggregate(Dialect::MySQL)
+            .unwrap();
 
         assert_eq!(result, query);
     }
@@ -239,7 +238,7 @@ mod tests {
              ORDER BY column_3 DESC",
         )
         .unwrap();
-        let result = query.normalize_topk_with_aggregate();
+        let result = query.normalize_topk_with_aggregate(Dialect::MySQL);
         assert!(result.is_err());
         assert!(matches!(
             result.err(),
@@ -258,7 +257,9 @@ mod tests {
         )
         .unwrap();
         let mut result = query.clone();
-        result.normalize_topk_with_aggregate().unwrap();
+        result
+            .normalize_topk_with_aggregate(Dialect::MySQL)
+            .unwrap();
         assert_eq!(result, query);
     }
 
@@ -273,7 +274,9 @@ mod tests {
         )
         .unwrap();
         let mut result = query.clone();
-        result.normalize_topk_with_aggregate().unwrap();
+        result
+            .normalize_topk_with_aggregate(Dialect::MySQL)
+            .unwrap();
         assert_eq!(result, query);
     }
 
@@ -289,7 +292,9 @@ mod tests {
         )
         .unwrap();
         let mut result = query.clone();
-        result.normalize_topk_with_aggregate().unwrap();
+        result
+            .normalize_topk_with_aggregate(Dialect::MySQL)
+            .unwrap();
         assert_eq!(result, query);
     }
 }

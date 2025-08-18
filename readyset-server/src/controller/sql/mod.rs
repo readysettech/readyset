@@ -141,7 +141,7 @@ impl SqlIncorporator {
     /// Creates a new `SqlIncorporator` for an empty flow graph.
     pub fn new(dialect: Dialect) -> Self {
         Self {
-            mir_converter: Default::default(),
+            mir_converter: SqlToMirConverter::new(dialect),
             leaf_addresses: Default::default(),
             named_queries: Default::default(),
             num_queries: Default::default(),
@@ -1258,8 +1258,7 @@ impl SqlIncorporator {
         leaf_behavior: LeafBehavior,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirNodeIndex> {
-        // FIXME(REA-2168): Use correct dialect.
-        trace!(stmt = %stmt.display(readyset_sql::Dialect::MySQL), "Adding select query");
+        trace!(stmt = %stmt.display(mig.dialect.into()), "Adding select query");
         let mut table_alias_rewrites = vec![];
         *stmt = self.rewrite(
             stmt.clone(),
@@ -1316,11 +1315,10 @@ impl SqlIncorporator {
             }
         }
 
-        // FIXME(REA-2168): Use correct dialect.
-        trace!(rewritten_query = %stmt.display(readyset_sql::Dialect::MySQL));
+        trace!(rewritten_query = %stmt.display(mig.dialect.into()));
         trace!("SelectStatement: {:?}", &stmt);
 
-        let query_graph = to_query_graph(stmt.clone())?;
+        let query_graph = to_query_graph(stmt.clone(), mig.dialect)?;
         trace!("QueryGraph: {:?}", &query_graph);
 
         self.mir_converter.named_query_to_mir(
@@ -1386,12 +1384,13 @@ impl SqlIncorporator {
             qname: query_name.display_unquoted().to_string(),
             source: Box::new(e),
         };
+        let dialect = self.mir_converter.dialect.into();
         let mir_query = self
             .mir_converter
             .make_mir_query(query_name.clone(), mir_leaf);
 
         trace!(pre_opt_mir = %mir_query.to_graphviz());
-        let mut opt_mir = mir_query.rewrite().map_err(on_err)?;
+        let mut opt_mir = mir_query.rewrite(dialect).map_err(on_err)?;
         trace!(post_opt_mir = %opt_mir.to_graphviz());
 
         let df_leaf =

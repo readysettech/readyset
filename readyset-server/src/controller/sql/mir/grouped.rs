@@ -75,10 +75,9 @@ pub(super) fn make_expressions_above_grouped(
         .cloned()
         .map(|expr| {
             let x = (
-                // FIXME(ENG-2502): Use correct dialect.
                 SqlIdentifier::from(
                     expr.clone()
-                        .display(readyset_sql::Dialect::MySQL)
+                        .display(mir_converter.dialect.into())
                         .to_string(),
                 ),
                 expr,
@@ -101,10 +100,9 @@ pub(super) fn make_expressions_above_grouped(
                     None
                 }
                 expr => Some((
-                    // FIXME(ENG-2502): Use correct dialect.
                     SqlIdentifier::from(
                         expr.clone()
-                            .display(readyset_sql::Dialect::MySQL)
+                            .display(mir_converter.dialect.into())
                             .to_string(),
                     ),
                     expr.clone(),
@@ -184,7 +182,7 @@ pub(super) fn make_grouped(
                 Expr::Column(c) => c.clone(),
                 expr => ast::Column {
                     name: expr
-                        .display(readyset_sql::Dialect::MySQL)
+                        .display(mir_converter.dialect.into())
                         .to_string()
                         .into(),
                     table: None,
@@ -304,6 +302,7 @@ fn joinable_aggregate_nodes(
 pub(super) fn post_lookup_aggregates(
     query_graph: &QueryGraph,
     query_name: &Relation,
+    dialect: readyset_data::Dialect,
 ) -> ReadySetResult<Option<PostLookupAggregates<Column>>> {
     if query_graph.distinct {
         // DISTINCT is the equivalent of grouping by all projected columns but not actually doing
@@ -321,8 +320,7 @@ pub(super) fn post_lookup_aggregates(
                         ..
                     } => Some(Column::from(col).aliased_as_table(query_name.clone())),
                     FieldDefinitionExpr::Expr { expr, .. } => Some(
-                        // FIXME(ENG-2502): Use correct dialect.
-                        Column::named(expr.display(readyset_sql::Dialect::MySQL).to_string())
+                        Column::named(expr.display(dialect.into()).to_string())
                             .aliased_as_table(query_name.clone()),
                     ),
                     _ => None,
@@ -384,7 +382,7 @@ pub(super) fn post_lookup_aggregates(
             .map(|c| {
                 match c {
                     Expr::Column(c) => c.clone().into(),
-                    expr => Column::named(expr.display(readyset_sql::Dialect::MySQL).to_string()),
+                    expr => Column::named(expr.display(dialect.into()).to_string()),
                 }
                 .aliased_as_table(query_name.clone())
             })

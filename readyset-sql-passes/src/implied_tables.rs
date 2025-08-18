@@ -18,6 +18,7 @@ pub trait ImpliedTableExpansion: Sized {
     fn expand_implied_tables(
         &mut self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
+        dialect: readyset_sql::Dialect,
     ) -> ReadySetResult<&mut Self>;
 }
 
@@ -36,6 +37,8 @@ struct ExpandImpliedTablesVisitor<'schema> {
     // Are we currently in a position in the query that can reference aliases in the projected
     // field list?
     can_reference_aliases: bool,
+    /// SQL dialect to use for expression display
+    dialect: readyset_sql::Dialect,
 }
 
 impl ExpandImpliedTablesVisitor<'_> {
@@ -110,6 +113,7 @@ impl<'ast> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'_> {
                 &mut select_statement.tables,
                 &mut select_statement.ctes,
                 &mut select_statement.join,
+                self.dialect,
             )?
             .into_iter()
             .map(|(k, v)| (k.into(), v.into_iter().cloned().collect()))
@@ -192,6 +196,7 @@ impl<'ast> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'_> {
 fn rewrite_select<'stmt>(
     select_statement: &'stmt mut SelectStatement,
     schema: &HashMap<Relation, Vec<SqlIdentifier>>,
+    dialect: readyset_sql::Dialect,
 ) -> ReadySetResult<&'stmt mut SelectStatement> {
     let mut visitor = ExpandImpliedTablesVisitor {
         schema,
@@ -199,6 +204,7 @@ fn rewrite_select<'stmt>(
         tables: Default::default(),
         aliases: Default::default(),
         can_reference_aliases: false,
+        dialect,
     };
 
     visitor.visit_select_statement(select_statement)?;
@@ -209,8 +215,9 @@ impl ImpliedTableExpansion for SelectStatement {
     fn expand_implied_tables(
         &mut self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
+        dialect: readyset_sql::Dialect,
     ) -> ReadySetResult<&mut Self> {
-        rewrite_select(self, table_columns)
+        rewrite_select(self, table_columns, dialect)
     }
 }
 
@@ -218,16 +225,17 @@ impl ImpliedTableExpansion for SqlQuery {
     fn expand_implied_tables(
         &mut self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
+        dialect: readyset_sql::Dialect,
     ) -> ReadySetResult<&mut SqlQuery> {
         match self {
             SqlQuery::CreateTable(..) => {}
             SqlQuery::CompoundSelect(csq) => {
                 for (_op, select) in &mut csq.selects {
-                    rewrite_select(select, table_columns)?;
+                    rewrite_select(select, table_columns, dialect)?;
                 }
             }
             SqlQuery::Select(sq) => {
-                sq.expand_implied_tables(table_columns)?;
+                sq.expand_implied_tables(table_columns, dialect)?;
             }
             SqlQuery::Insert(iq) => {
                 let table = iq.table.clone();
@@ -287,7 +295,9 @@ mod tests {
         );
 
         let mut rewritten = SqlQuery::Select(q);
-        rewritten.expand_implied_tables(&schema).unwrap();
+        rewritten
+            .expand_implied_tables(&schema, readyset_sql::Dialect::MySQL)
+            .unwrap();
         match rewritten {
             SqlQuery::Select(tq) => {
                 assert_eq!(
@@ -327,7 +337,8 @@ mod tests {
 
         let schema = HashMap::from([("t1".into(), vec!["id".into(), "value".into()])]);
 
-        q.expand_implied_tables(&schema).unwrap();
+        q.expand_implied_tables(&schema, readyset_sql::Dialect::MySQL)
+            .unwrap();
         assert_eq!(q, expected);
     }
 
@@ -341,7 +352,8 @@ mod tests {
         .unwrap();
         let schema = HashMap::from([("users".into(), vec!["id".into(), "name".into()])]);
 
-        q.expand_implied_tables(&schema).unwrap();
+        q.expand_implied_tables(&schema, readyset_sql::Dialect::MySQL)
+            .unwrap();
         assert_eq!(q, expected);
     }
 
@@ -361,7 +373,8 @@ mod tests {
         .unwrap();
         let schema = HashMap::from([("votes".into(), vec!["aid".into(), "userid".into()])]);
 
-        q.expand_implied_tables(&schema).unwrap();
+        q.expand_implied_tables(&schema, readyset_sql::Dialect::MySQL)
+            .unwrap();
         assert_eq!(q, expected);
     }
 
@@ -385,7 +398,8 @@ Dialect::MySQL,
             ("stories".into(), vec!["id".into(), "title".into()]),
         ]);
 
-        q.expand_implied_tables(&schema).unwrap();
+        q.expand_implied_tables(&schema, readyset_sql::Dialect::MySQL)
+            .unwrap();
         assert_eq!(q, expected);
     }
 
@@ -408,7 +422,8 @@ Dialect::MySQL,
             ("stories".into(), vec!["id".into(), "title".into()]),
         ]);
 
-        q.expand_implied_tables(&schema).unwrap();
+        q.expand_implied_tables(&schema, readyset_sql::Dialect::MySQL)
+            .unwrap();
         assert_eq!(
             q,
             expected,
@@ -430,7 +445,8 @@ Dialect::MySQL,
             vec!["id".into()],
         )]
         .into();
-        q.expand_implied_tables(&schema).unwrap();
+        q.expand_implied_tables(&schema, readyset_sql::Dialect::MySQL)
+            .unwrap();
         assert_eq!(
             q,
             expected,
@@ -460,7 +476,8 @@ Dialect::MySQL,
             ),
         ]
         .into();
-        q.expand_implied_tables(&schema).unwrap_err();
+        q.expand_implied_tables(&schema, readyset_sql::Dialect::MySQL)
+            .unwrap_err();
     }
 
     #[test]
@@ -502,7 +519,8 @@ Dialect::MySQL,
             ),
         ]
         .into();
-        q.expand_implied_tables(&schema).unwrap();
+        q.expand_implied_tables(&schema, readyset_sql::Dialect::MySQL)
+            .unwrap();
         assert_eq!(
             q,
             expected,
@@ -552,7 +570,8 @@ Dialect::MySQL,
         ]
         .into();
 
-        q.expand_implied_tables(&schema).unwrap();
+        q.expand_implied_tables(&schema, readyset_sql::Dialect::MySQL)
+            .unwrap();
         assert_eq!(
             q,
             expected,
@@ -569,7 +588,8 @@ Dialect::MySQL,
             parse_query(Dialect::MySQL, "SELECT sq.x FROM (SELECT t1.x FROM t1) sq").unwrap();
         let schema = [(Relation::from("t1"), vec!["x".into()])].into();
 
-        q.expand_implied_tables(&schema).unwrap();
+        q.expand_implied_tables(&schema, readyset_sql::Dialect::MySQL)
+            .unwrap();
         assert_eq!(
             q,
             expected,

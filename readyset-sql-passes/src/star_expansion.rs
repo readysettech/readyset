@@ -17,12 +17,14 @@ pub trait StarExpansion: Sized {
         &mut self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
         non_replicated_relations: &HashSet<NonReplicatedRelation>,
+        dialect: readyset_sql::Dialect,
     ) -> ReadySetResult<&mut Self>;
 }
 
 struct ExpandStarsVisitor<'schema> {
     table_columns: &'schema HashMap<Relation, Vec<SqlIdentifier>>,
     non_replicated_relations: &'schema HashSet<NonReplicatedRelation>,
+    dialect: readyset_sql::Dialect,
 }
 
 impl<'ast> VisitorMut<'ast> for ExpandStarsVisitor<'_> {
@@ -40,6 +42,7 @@ impl<'ast> VisitorMut<'ast> for ExpandStarsVisitor<'_> {
             &mut select_statement.tables,
             &mut select_statement.ctes,
             &mut select_statement.join,
+            self.dialect,
         )?
         .into_iter()
         .map(|(k, v)| (k.clone(), v.into_iter().cloned().collect()))
@@ -148,10 +151,12 @@ impl StarExpansion for SelectStatement {
         &mut self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
         non_replicated_relations: &HashSet<NonReplicatedRelation>,
+        dialect: readyset_sql::Dialect,
     ) -> ReadySetResult<&mut Self> {
         let mut visitor = ExpandStarsVisitor {
             table_columns,
             non_replicated_relations,
+            dialect,
         };
         visitor.visit_select_statement(self)?;
         Ok(self)
@@ -163,9 +168,10 @@ impl StarExpansion for SqlQuery {
         &mut self,
         write_schemas: &HashMap<Relation, Vec<SqlIdentifier>>,
         non_replicated_relations: &HashSet<NonReplicatedRelation>,
+        dialect: readyset_sql::Dialect,
     ) -> ReadySetResult<&mut Self> {
         if let SqlQuery::Select(sq) = self {
-            sq.expand_stars(write_schemas, non_replicated_relations)?;
+            sq.expand_stars(write_schemas, non_replicated_relations, dialect)?;
         }
         Ok(self)
     }
@@ -182,7 +188,8 @@ mod tests {
     fn expands_stars(source: &str, expected: &str, schema: HashMap<Relation, Vec<SqlIdentifier>>) {
         let mut q = parse_query(Dialect::MySQL, source).unwrap();
         let expected = parse_query(Dialect::MySQL, expected).unwrap();
-        q.expand_stars(&schema, &Default::default()).unwrap();
+        q.expand_stars(&schema, &Default::default(), readyset_sql::Dialect::MySQL)
+            .unwrap();
         assert_eq!(
             q,
             expected,

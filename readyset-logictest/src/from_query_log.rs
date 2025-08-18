@@ -184,8 +184,7 @@ impl FromQueryLog {
             .map(Value::try_from)
             .collect::<Result<Vec<_>, _>>()?;
 
-        // FIXME(REA-2168): Use correct dialect.
-        let stmt_string = stmt.display(readyset_sql::Dialect::MySQL).to_string();
+        let stmt_string = stmt.display(self.database.dialect()).to_string();
 
         let rows = conn.execute(&stmt_string, &params).await?;
 

@@ -177,10 +177,14 @@ impl Rewrite for SelectStatement {
                 context.search_path,
                 context.invalidating_tables.as_deref_mut(),
             )?
-            .expand_stars(context.view_schemas, context.non_replicated_relations)?
-            .expand_implied_tables(context.view_schemas)?
+            .expand_stars(
+                context.view_schemas,
+                context.non_replicated_relations,
+                context.dialect.into(),
+            )?
+            .expand_implied_tables(context.view_schemas, context.dialect.into())?
             .rewrite_lateral_joins()?
-            .normalize_topk_with_aggregate()?
+            .normalize_topk_with_aggregate(context.dialect.into())?
             .detect_problematic_self_joins()?
             .remove_numeric_field_references()?
             .order_limit_removal(&context.base_schemas)?

@@ -20,6 +20,7 @@ pub use mir::{Column, NodeIndex};
 use petgraph::visit::Reversed;
 use petgraph::Direction;
 use readyset_client::ViewPlaceholder;
+use readyset_data::Dialect;
 use readyset_errors::{
     internal, internal_err, invalid_query, invalid_query_err, invariant, invariant_eq, unsupported,
     unsupported_err, ReadySetError, ReadySetResult,
@@ -172,7 +173,7 @@ pub(crate) struct Config {
     pub(crate) allow_post_lookup: bool,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct SqlToMirConverter {
     pub(in crate::controller::sql) config: Config,
     pub(in crate::controller::sql) base_schemas:
@@ -188,6 +189,9 @@ pub(super) struct SqlToMirConverter {
     /// replicated (either due to lack of support, or because the user explicitly opted out from
     /// them being replicated)
     pub(in crate::controller::sql) non_replicated_relations: HashSet<NonReplicatedRelation>,
+
+    /// SQL dialect for expression display
+    pub(in crate::controller::sql) dialect: Dialect,
 }
 
 enum SubqueryContext {
@@ -197,6 +201,18 @@ enum SubqueryContext {
 }
 
 impl SqlToMirConverter {
+    /// Creates a new `SqlToMirConverter` with the specified dialect
+    pub(crate) fn new(dialect: Dialect) -> Self {
+        Self {
+            config: Default::default(),
+            base_schemas: Default::default(),
+            mir_graph: Default::default(),
+            relations: Default::default(),
+            non_replicated_relations: Default::default(),
+            dialect,
+        }
+    }
+
     pub(crate) fn config(&self) -> &Config {
         &self.config
     }
@@ -745,8 +761,7 @@ impl SqlToMirConverter {
     ) -> NodeIndex {
         trace!(
             name = %name.display_unquoted(),
-            // FIXME(REA-2168+2502): Use correct dialect.
-            conditions = %conditions.display(readyset_sql::Dialect::MySQL),
+            conditions = %conditions.display(self.dialect.into()),
             "Added filter node"
         );
         self.add_query_node(
@@ -1158,7 +1173,7 @@ impl SqlToMirConverter {
             Expr::Column(col) => (col.clone(), parent),
             expr => {
                 // The lhs is a non-column expr, so we need to project it first
-                let label = lhs.display(readyset_sql::Dialect::MySQL).to_string();
+                let label = lhs.display(self.dialect.into()).to_string();
                 let prj = self.make_project_node(
                     query_name,
                     self.generate_label(&"in_lhs_project".into()),
@@ -1179,7 +1194,7 @@ impl SqlToMirConverter {
         };
 
         let is_correlated = is_correlated(&subquery);
-        let query_graph = to_query_graph(subquery)?;
+        let query_graph = to_query_graph(subquery, self.dialect)?;
         let subquery_leaf = self.named_query_to_mir(
             query_name,
             &query_graph,
@@ -1365,10 +1380,7 @@ impl SqlToMirConverter {
                         }
                     }
                     expr => {
-                        let col = Column::named(
-                            // FIXME(REA-2168+2502): Use correct dialect.
-                            expr.display(readyset_sql::Dialect::MySQL).to_string(),
-                        );
+                        let col = Column::named(expr.display(self.dialect.into()).to_string());
                         if self
                             .mir_graph
                             .column_id_for_column(parent, &col)
@@ -1400,11 +1412,8 @@ impl SqlToMirConverter {
                     .into_iter()
                     .map(ProjectExpr::Column)
                     .chain(exprs_to_project.into_iter().map(|(expr, name)| {
-                        // FIXME(ENG-2502): Use correct dialect.
                         let alias = name.unwrap_or_else(|| {
-                            expr.display(readyset_sql::Dialect::MySQL)
-                                .to_string()
-                                .into()
+                            expr.display(self.dialect.into()).to_string().into()
                         });
                         ProjectExpr::Expr { alias, expr }
                     }))
@@ -1459,7 +1468,7 @@ impl SqlToMirConverter {
             }
         );
 
-        let query_graph = to_query_graph((*subquery).clone())?;
+        let query_graph = to_query_graph((*subquery).clone(), self.dialect)?;
         let subquery_leaf = self.named_query_to_mir(
             query_name,
             &query_graph,
@@ -1567,7 +1576,7 @@ impl SqlToMirConverter {
             Expr::Column(col) => (col.clone(), parent),
             expr => {
                 // The lhs is a non-column expr, so we need to project it first
-                let label = lhs.display(readyset_sql::Dialect::MySQL).to_string();
+                let label = lhs.display(self.dialect.into()).to_string();
                 let prj = self.make_project_node(
                     query_name,
                     self.generate_label(&format!("{text_context}_lhs_project").into()),
@@ -1836,7 +1845,7 @@ impl SqlToMirConverter {
             );
         }
 
-        let query_graph = to_query_graph(subquery.clone())?;
+        let query_graph = to_query_graph(subquery.clone(), self.dialect)?;
         let subquery_leaf = self.named_query_to_mir(
             query_name,
             &query_graph,
@@ -2087,7 +2096,7 @@ impl SqlToMirConverter {
             unsupported!("Using multiple window functions is not yet supported");
         }
 
-        let dialect = readyset_sql::Dialect::MySQL;
+        let dialect: readyset_sql::Dialect = self.dialect.into();
         let WindowFunction {
             function,
             partition_by,
@@ -2720,9 +2729,9 @@ impl SqlToMirConverter {
                                 expr: Expr::Column(c),
                                 ..
                             } => Ok(Column::from(c)),
-                            FieldDefinitionExpr::Expr { expr, .. } => Ok(Column::named(
-                                expr.display(readyset_sql::Dialect::MySQL).to_string(),
-                            )),
+                            FieldDefinitionExpr::Expr { expr, .. } => {
+                                Ok(Column::named(expr.display(self.dialect.into()).to_string()))
+                            }
                         }
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -2788,7 +2797,7 @@ impl SqlToMirConverter {
                     //
                     // Note: Post-lookup operations have performance overhead, so they're gated behind
                     // the allow_post_lookup config flag.
-                    match post_lookup_aggregates(query_graph, query_name)? {
+                    match post_lookup_aggregates(query_graph, query_name, self.dialect)? {
                         Some(agg) if self.config.allow_post_lookup => Some(agg),
                         Some(_) => {
                             unsupported!(
@@ -2908,6 +2917,7 @@ mod tests {
     };
 
     use crate::controller::sql::query_graph::to_query_graph;
+    use readyset_data::Dialect;
     use readyset_sql_parsing::parse_select;
 
     fn sql_to_mir_test(
@@ -2917,7 +2927,7 @@ mod tests {
         columns: &[ColumnSpecification],
         keys: Option<&Vec<TableKey>>,
     ) -> ReadySetResult<(SqlToMirConverter, NodeIndex)> {
-        let mut converter = SqlToMirConverter::default();
+        let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_MYSQL);
         converter.set_config(Config {
             allow_topk: true,
             allow_post_lookup: true,
@@ -2984,7 +2994,7 @@ mod tests {
                     },
                 ];
 
-                let qg = to_query_graph(query).unwrap();
+                let qg = to_query_graph(query, Dialect::DEFAULT_MYSQL).unwrap();
                 let (mut converter, node) =
                     sql_to_mir_test($query_name, qg, table_name, columns, None)?;
                 let query = converter.make_mir_query($query_name.into(), node);
@@ -3147,7 +3157,7 @@ mod tests {
                     query.metadata.push(SelectMetadata::CollapsedWhereIn);
                 }
 
-                let qg = to_query_graph(query).unwrap();
+                let qg = to_query_graph(query, Dialect::DEFAULT_MYSQL).unwrap();
 
                 let table_name = "test_table";
                 let columns = &[
@@ -3174,7 +3184,7 @@ mod tests {
                     },
                 ];
 
-                let mut converter = SqlToMirConverter::default();
+                let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_MYSQL);
                 converter.set_config($config);
                 let result = converter
                     .make_base_node(&table_name.into(), columns, None)

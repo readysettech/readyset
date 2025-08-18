@@ -173,8 +173,7 @@ impl ViewsSynchronizer {
                     let chunk_hashes = hashes.iter().take(chunk.len());
                     for ((query, name), hash) in chunk.iter().zip(statuses).zip(chunk_hashes) {
                         trace!(
-                            // FIXME(REA-2168): Use correct dialect.
-                            query = %query.statement.display(readyset_sql::Dialect::MySQL),
+                            query = %query.statement.display(self.dialect.into()),
                             name = ?name,
                             "Loaded query status from controller"
                         );
