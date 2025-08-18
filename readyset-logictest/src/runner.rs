@@ -550,6 +550,7 @@ impl TestScript {
             builder.set_post_lookup(true);
             builder.set_topk(false); // TODO: fails on generated tests
             builder.set_parsing_preset(run_opts.parsing_preset);
+            builder.set_dialect(run_opts.database_type.into());
 
             if run_opts.enable_reuse {
                 builder.set_reuse(Some(ReuseConfigType::Finkelstein))

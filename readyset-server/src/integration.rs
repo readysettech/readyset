@@ -35,6 +35,7 @@ use readyset_decimal::Decimal;
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_sql::ast;
 use readyset_sql::ast::{NullOrder, OrderType, Relation, SqlQuery};
+use readyset_sql::Dialect as SqlDialect;
 use readyset_sql_parsing::{parse_create_table, parse_create_view, parse_query, parse_select};
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
@@ -49,11 +50,17 @@ use crate::controller::sql::SqlIncorporator;
 use crate::integration_utils::*;
 use crate::{get_col, get_settle_time, sleep, Builder};
 
+fn builder_for_tests() -> Builder {
+    let mut builder = Builder::for_tests();
+    builder.set_dialect(SqlDialect::MySQL);
+    builder
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn it_completes() {
     readyset_tracing::init_test_logging();
 
-    let mut builder = Builder::for_tests();
+    let mut builder = builder_for_tests();
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("it_completes"));
     let (mut g, shutdown_tx) = builder.start_local().await.unwrap();
@@ -1199,7 +1206,7 @@ async fn it_recovers_persisted_bases() {
     );
 
     {
-        let mut g = Builder::for_tests();
+        let mut g = builder_for_tests();
         g.set_persistence(persistence_params.clone());
         let (mut g, shutdown_tx) = g.start(authority.clone()).await.unwrap();
         g.backend_ready().await;
@@ -1235,7 +1242,7 @@ async fn it_recovers_persisted_bases() {
         authority_store.clone(),
     )));
 
-    let mut g = Builder::for_tests();
+    let mut g = builder_for_tests();
     g.set_persistence(persistence_params);
     let (mut g, shutdown_tx) = g.start(authority.clone()).await.unwrap();
     g.backend_ready().await;
@@ -1280,7 +1287,7 @@ async fn it_recovers_persisted_bases_with_volume_id() {
     );
 
     {
-        let mut g = Builder::for_tests();
+        let mut g = builder_for_tests();
         g.set_persistence(persistence_params.clone());
         g.set_volume_id("ef731j2".into());
         let (mut g, shutdown_tx) = g.start(authority.clone()).await.unwrap();
@@ -1315,7 +1322,7 @@ async fn it_recovers_persisted_bases_with_volume_id() {
     let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
         authority_store.clone(),
     )));
-    let mut g = Builder::for_tests();
+    let mut g = builder_for_tests();
     g.set_persistence(persistence_params);
     g.set_volume_id("ef731j2".into());
     let (mut g, shutdown_tx) = g.start(authority.clone()).await.unwrap();
@@ -1355,7 +1362,7 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
     );
 
     {
-        let mut g = Builder::for_tests();
+        let mut g = builder_for_tests();
         g.set_persistence(persistence_params.clone());
         g.set_volume_id("ef731j2".into());
         let (mut g, shutdown_tx) = g.start(authority.clone()).await.unwrap();
@@ -1388,7 +1395,7 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
 
     sleep().await;
 
-    let mut g = Builder::for_tests();
+    let mut g = builder_for_tests();
     let authority = Arc::new(Authority::from(LocalAuthority::new()));
     g.set_persistence(persistence_params);
     g.set_volume_id("j3131t8".into());
@@ -1471,7 +1478,7 @@ async fn view_connection_churn() {
         authority_store,
     )));
 
-    let mut builder = Builder::for_tests();
+    let mut builder = builder_for_tests();
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("view_connection_churn"));
     let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
@@ -1498,7 +1505,7 @@ async fn view_connection_churn() {
             let authority = authority.clone();
             let tx = tx.clone();
             tokio::spawn(async move {
-                let mut builder = Builder::for_tests();
+                let mut builder = builder_for_tests();
                 builder.set_sharding(Some(DEFAULT_SHARDING));
                 builder.set_persistence(get_persistence_params("view_connection_churn"));
                 let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
@@ -1532,7 +1539,7 @@ async fn table_connection_churn() {
         authority_store,
     )));
 
-    let mut builder = Builder::for_tests();
+    let mut builder = builder_for_tests();
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("table_connection_churn"));
     let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
@@ -1556,7 +1563,7 @@ async fn table_connection_churn() {
             let authority = authority.clone();
             let tx = tx.clone();
             tokio::spawn(async move {
-                let mut builder = Builder::for_tests();
+                let mut builder = builder_for_tests();
                 builder.set_sharding(Some(DEFAULT_SHARDING));
                 builder.set_persistence(get_persistence_params("table_connection_churn"));
                 let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
@@ -1602,7 +1609,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     );
 
     {
-        let mut g = Builder::for_tests();
+        let mut g = builder_for_tests();
         g.set_persistence(persistence_parameters.clone());
         let (mut g, shutdown_tx) = g.start(authority.clone()).await.unwrap();
         g.backend_ready().await;
@@ -1638,7 +1645,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
         authority_store,
     )));
-    let mut g = Builder::for_tests();
+    let mut g = builder_for_tests();
     g.set_persistence(persistence_parameters);
     let (mut g, shutdown_tx) = g.start(authority.clone()).await.unwrap();
     g.backend_ready().await;
@@ -1676,7 +1683,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
     );
 
     {
-        let mut g = Builder::for_tests();
+        let mut g = builder_for_tests();
         g.set_persistence(persistence_parameters.clone());
         g.set_volume_id("ef731j2".into());
         let (mut g, shutdown_tx) = g.start(authority.clone()).await.unwrap();
@@ -1712,7 +1719,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
     let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
         authority_store,
     )));
-    let mut g = Builder::for_tests();
+    let mut g = builder_for_tests();
     g.set_persistence(persistence_parameters);
     g.set_volume_id("ef731j2".into());
     let (mut g, shutdown_tx) = g.start(authority.clone()).await.unwrap();
@@ -2474,7 +2481,7 @@ async fn replay_during_replay() {
     // the join key that does not exist in the view the record was sent from. since joins only do
     // lookups into the origin view during forward processing when it receives things from the
     // right in a left join, that's what we have to construct.
-    let mut g = Builder::for_tests();
+    let mut g = builder_for_tests();
     g.disable_partial();
     g.set_persistence(get_persistence_params("replay_during_replay"));
     let (mut g, shutdown_tx) = g.start_local().await.unwrap();
@@ -4324,7 +4331,7 @@ async fn correct_nested_view_schema() {
                 WHERE stories.id = ? GROUP BY votes.story;",
     ];
 
-    let mut b = Builder::for_tests();
+    let mut b = builder_for_tests();
     // need to disable partial due to lack of support for key subsumption (#99)
     b.disable_partial();
     b.set_sharding(None);
@@ -4840,7 +4847,7 @@ async fn self_join_param() {
 #[tokio::test(flavor = "multi_thread")]
 async fn non_sql_materialized_range_query() {
     let (mut g, shutdown_tx) = {
-        let mut builder = Builder::for_tests();
+        let mut builder = builder_for_tests();
         builder.disable_partial();
         builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("non_sql_materialized_range_query"));
@@ -4889,7 +4896,7 @@ async fn non_sql_materialized_range_query() {
 #[tokio::test(flavor = "multi_thread")]
 async fn non_sql_range_upquery() {
     let (mut g, shutdown_tx) = {
-        let mut builder = Builder::for_tests();
+        let mut builder = builder_for_tests();
         builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("non_sql_range_upquery"));
         builder.start_local()
@@ -4937,7 +4944,7 @@ async fn non_sql_range_upquery() {
 #[tokio::test(flavor = "multi_thread")]
 async fn range_upquery_after_point_queries() {
     let (mut g, shutdown_tx) = {
-        let mut builder = Builder::for_tests();
+        let mut builder = builder_for_tests();
         builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("non_sql_range_upquery"));
         builder.start_local()
@@ -5190,7 +5197,7 @@ async fn post_read_ilike() {
     readyset_tracing::init_test_logging();
 
     let (mut g, shutdown_tx) = {
-        let mut builder = Builder::for_tests();
+        let mut builder = builder_for_tests();
         builder.disable_partial();
         builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("post_read_ilike"));
@@ -7383,7 +7390,7 @@ async fn mixed_inclusive_range_and_equality() {
     readyset_tracing::init_test_logging();
 
     let (mut g, shutdown_tx) = {
-        let mut builder = Builder::for_tests();
+        let mut builder = builder_for_tests();
         builder.set_sharding(Some(DEFAULT_SHARDING));
         builder.set_persistence(get_persistence_params("mixed_inclusive_range_and_equality"));
         builder.set_mixed_comparisons(true);
@@ -8388,7 +8395,7 @@ async fn reroutes_count() {
 #[tokio::test(flavor = "multi_thread")]
 async fn forbid_full_materialization() {
     let (mut g, shutdown_tx) = {
-        let mut builder = Builder::for_tests();
+        let mut builder = builder_for_tests();
         builder.set_full_materialization(false);
         builder.set_sharding(Some(DEFAULT_SHARDING));
         builder.set_persistence(get_persistence_params("forbid_full_materialization"));
@@ -8430,7 +8437,7 @@ async fn forbid_full_materialization() {
 #[ignore]
 async fn overwrite_with_changed_recipe() {
     let (mut g, shutdown_tx) = {
-        let mut builder = Builder::for_tests();
+        let mut builder = builder_for_tests();
         builder.set_sharding(Some(DEFAULT_SHARDING));
         builder
             .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
@@ -8488,7 +8495,7 @@ async fn it_recovers_fully_materialized() {
             authority_store.clone(),
         )));
 
-        let mut g = Builder::for_tests();
+        let mut g = builder_for_tests();
         g.set_persistence(persistence_params.clone());
         g.set_sharding(None);
         g.start(authority)
@@ -8697,7 +8704,7 @@ async fn simple_drop_tables_with_data() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_drop_tables_with_persisted_data() {
-    let mut builder = Builder::for_tests();
+    let mut builder = builder_for_tests();
     let dir = TempDir::new().unwrap();
     let path = dir.path().to_path_buf();
     builder.set_sharding(None);

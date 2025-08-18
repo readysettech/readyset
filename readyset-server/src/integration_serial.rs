@@ -17,10 +17,17 @@ use readyset_client::get_metric;
 use readyset_client::metrics::{recorded, DumpedMetricValue, MetricsDump};
 use readyset_client::recipe::changelist::ChangeList;
 use readyset_data::{DfValue, Dialect};
+use readyset_sql::Dialect as SqlDialect;
 use rusty_fork::rusty_fork_test;
 
 use crate::integration_utils::*;
 use crate::{get_col, sleep, Builder};
+
+fn builder_for_tests() -> Builder {
+    let mut builder = Builder::for_tests();
+    builder.set_dialect(SqlDialect::MySQL);
+    builder
+}
 
 rusty_fork_test! {
     #[test]
@@ -54,7 +61,7 @@ rusty_fork_test! {
 async fn it_works_basic_impl() {
     register_metric_recorder();
     let (mut g, shutdown_tx) = {
-        let mut builder = Builder::for_tests();
+        let mut builder = builder_for_tests();
         builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("it_works_basic"));
         builder.set_topk(true);
@@ -223,7 +230,7 @@ async fn it_works_basic_standalone_impl() {
     let dir_path = dir.path().to_str().unwrap();
 
     let start_standalone = || {
-        let mut builder = Builder::for_tests();
+        let mut builder = builder_for_tests();
         builder.set_sharding(None);
         builder.set_persistence(get_persistence_params_in_tmp_dir(
             "it_works_basic_standalone",
@@ -338,7 +345,7 @@ async fn test_metrics_client_impl() {
     // We assign it a different port than the rest of the tests to prevent
     // other tests impacting the metrics collected.
     register_metric_recorder();
-    let builder = Builder::for_tests();
+    let builder = builder_for_tests();
     let (mut g, shutdown_tx) = builder.start_local().await.unwrap();
     let mut client = initialize_metrics(&mut g).await;
 

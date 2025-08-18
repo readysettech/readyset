@@ -289,6 +289,7 @@ impl TestBuilder {
         builder.set_topk(true);
         builder.set_pagination(true);
         builder.set_mixed_comparisons(self.mixed_comparisons);
+        builder.set_dialect(A::DIALECT);
 
         if !self.partial {
             builder.disable_partial();

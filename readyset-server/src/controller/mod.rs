@@ -115,7 +115,11 @@ impl Debug for ControllerState {
 impl ControllerState {
     /// Initialize a new, empty [`ControllerState`] with the given configuration, and with the given
     /// value for the `permissive_writes` setting
-    fn new(config: Config, permissive_writes: bool) -> Self {
+    fn new(
+        config: Config,
+        permissive_writes: bool,
+        dialect: Option<readyset_sql::Dialect>,
+    ) -> Self {
         let mut g = petgraph::Graph::new();
         // Create the root node in the graph.
         let source = g.add_node(node::Node::new::<_, _, Vec<Column>, _>(
@@ -130,13 +134,15 @@ impl ControllerState {
         let cc = Arc::new(ChannelCoordinator::new());
         assert_ne!(config.min_workers, 0);
 
-        // TODO(mvzink): There may be a more principled way to determine this, without defaulting to
-        // MySQL if no upstream is configured.
-        let dialect = config
-            .replicator_config
-            .get_cdc_db_url()
-            .map(|url| url.database_type().into())
-            .unwrap_or(readyset_sql::Dialect::MySQL)
+        let dialect = dialect
+            .unwrap_or_else(|| {
+                config
+                    .replicator_config
+                    .get_cdc_db_url()
+                    .expect("Failed to get CDC database URL")
+                    .database_type()
+                    .into()
+            })
             .into();
 
         let recipe = Recipe::with_config(
@@ -410,6 +416,9 @@ pub struct Controller {
     /// Whether or not to consider failed writes to base tables as no-ops
     permissive_writes: bool,
 
+    /// Explicit dialect to use when creating ControllerState
+    dialect: Option<readyset_sql::Dialect>,
+
     /// Handle used to receive a shutdown signal
     shutdown_rx: ShutdownReceiver,
 }
@@ -425,6 +434,7 @@ impl Controller {
         telemetry_sender: TelemetrySender,
         config: Config,
         parsing_preset: ParsingPreset,
+        dialect: Option<readyset_sql::Dialect>,
         shutdown_rx: ShutdownReceiver,
     ) -> Self {
         // If we don't have an upstream, we allow permissive writes to base tables.
@@ -448,6 +458,7 @@ impl Controller {
             replicator_channel: ReplicatorChannel::new(),
             telemetry_sender,
             permissive_writes,
+            dialect,
             shutdown_rx,
             cache_ddl: None,
         }
@@ -614,6 +625,7 @@ impl Controller {
                 self.worker_descriptor.clone(),
                 self.config.clone(),
                 self.permissive_writes,
+                self.dialect,
                 self.shutdown_rx.clone(),
             )
             .instrument(info_span!("authority")),
@@ -984,6 +996,8 @@ struct AuthorityLeaderElectionState {
     is_leader: bool,
     /// Whether or not to treat failed writes to base nodes as no-ops
     permissive_writes: bool,
+    /// Explicit dialect to use when creating ControllerState
+    dialect: Option<readyset_sql::Dialect>,
 }
 
 impl AuthorityLeaderElectionState {
@@ -994,6 +1008,7 @@ impl AuthorityLeaderElectionState {
         permissive_writes: bool,
         config: Config,
         leader_eligible: bool,
+        dialect: Option<readyset_sql::Dialect>,
     ) -> Self {
         Self {
             event_tx,
@@ -1003,6 +1018,7 @@ impl AuthorityLeaderElectionState {
             leader_eligible,
             is_leader: false,
             permissive_writes,
+            dialect,
         }
     }
 
@@ -1047,7 +1063,7 @@ impl AuthorityLeaderElectionState {
                     |state: Option<ControllerState>| -> Result<ControllerState, ()> {
                         match state {
                             None => {
-                                Ok(ControllerState::new(self.config.clone(), self.permissive_writes))
+                                Ok(ControllerState::new(self.config.clone(), self.permissive_writes, self.dialect))
                             },
                             Some(mut state) => {
                                 // check that running config is compatible with the new
@@ -1092,8 +1108,11 @@ impl AuthorityLeaderElectionState {
                         .schema_replication_offset()
                         .await
                         .unwrap_or_default();
-                    let mut state =
-                        ControllerState::new(self.config.clone(), self.permissive_writes);
+                    let mut state = ControllerState::new(
+                        self.config.clone(),
+                        self.permissive_writes,
+                        self.dialect,
+                    );
                     state
                         .dataflow_state
                         .set_schema_replication_offset(schema_replication_offset);
@@ -1232,6 +1251,7 @@ async fn authority_inner(
     worker_descriptor: WorkerDescriptor,
     config: Config,
     permissive_writes: bool,
+    dialect: Option<readyset_sql::Dialect>,
 ) -> anyhow::Result<()> {
     authority.init().await?;
 
@@ -1242,6 +1262,7 @@ async fn authority_inner(
         permissive_writes,
         config,
         worker_descriptor.leader_eligible,
+        dialect,
     );
 
     let mut worker_state =
@@ -1296,6 +1317,7 @@ pub(crate) async fn authority_runner(
     worker_descriptor: WorkerDescriptor,
     config: Config,
     permissive_writes: bool,
+    dialect: Option<readyset_sql::Dialect>,
     mut shutdown_rx: ShutdownReceiver,
 ) -> anyhow::Result<()> {
     tokio::select! {
@@ -1306,6 +1328,7 @@ pub(crate) async fn authority_runner(
             worker_descriptor,
             config,
             permissive_writes,
+            dialect,
         ) => if let Err(e) = result
         {
             if shutdown_rx.signal_received() {

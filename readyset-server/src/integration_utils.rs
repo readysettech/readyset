@@ -8,6 +8,7 @@ use readyset_client::metrics::client::MetricsClient;
 use readyset_client::metrics::{DumpedMetric, DumpedMetricValue, MetricsDump};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::Relation;
+use readyset_sql::Dialect;
 use readyset_util::shutdown::ShutdownSender;
 
 use crate::metrics::{
@@ -57,6 +58,7 @@ pub async fn start_simple_reuse_unsharded(prefix: &str) -> (Handle, ShutdownSend
         authority_store,
     )));
     let mut builder = Builder::for_tests();
+    builder.set_dialect(Dialect::MySQL);
     builder.set_reuse(Some(ReuseConfigType::Finkelstein));
     builder.set_persistence(get_persistence_params(prefix));
     builder.set_topk(true);
@@ -98,9 +100,9 @@ pub async fn build_custom(
 ) -> (Handle, ShutdownSender) {
     readyset_tracing::init_test_logging();
     let mut builder = Builder::for_tests();
+    builder.set_dialect(Dialect::MySQL);
     builder.set_sharding(sharding);
     builder.set_persistence(get_persistence_params(prefix));
-    // don't return unsupported errors for topk in queries
     builder.set_topk(true);
     builder.set_pagination(true);
     builder.set_mixed_comparisons(true);

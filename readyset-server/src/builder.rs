@@ -35,6 +35,7 @@ pub struct Builder {
     pub telemetry: TelemetrySender,
     wait_for_failpoint: bool,
     unquery: bool,
+    dialect: Option<readyset_sql::Dialect>,
 }
 
 impl Default for Builder {
@@ -52,6 +53,7 @@ impl Default for Builder {
             telemetry: TelemetrySender::new_no_op(),
             wait_for_failpoint: false,
             unquery: true,
+            dialect: None,
         }
     }
 }
@@ -385,6 +387,10 @@ impl Builder {
         self.parsing_preset = value;
     }
 
+    pub fn set_dialect(&mut self, dialect: readyset_sql::Dialect) {
+        self.dialect = Some(dialect);
+    }
+
     /// Start a server instance and return a handle to it. This method also returns a
     /// [`ShutdownSender`] that should be used to shut down the server when it is no longer needed.
     pub fn start(
@@ -403,6 +409,7 @@ impl Builder {
             telemetry,
             wait_for_failpoint,
             unquery,
+            dialect,
         } = self;
 
         let config = config.clone();
@@ -420,6 +427,7 @@ impl Builder {
             telemetry,
             wait_for_failpoint,
             unquery,
+            dialect,
         )
     }
 
@@ -444,6 +452,7 @@ impl Builder {
             telemetry,
             wait_for_failpoint,
             unquery,
+            dialect,
         } = self;
 
         let config = config.clone();
@@ -465,6 +474,7 @@ impl Builder {
             wait_for_failpoint,
             shutdown_rx,
             unquery,
+            dialect,
         )
         .await?;
 

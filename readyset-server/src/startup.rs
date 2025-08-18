@@ -59,6 +59,7 @@ use health_reporter::{HealthReporter, State as ServerState};
 use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::{Authority, WorkerSchedulingConfig};
 use readyset_client::{ControllerDescriptor, WorkerDescriptor};
+use readyset_sql::Dialect;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 #[cfg(feature = "failure_injection")]
@@ -154,6 +155,7 @@ fn start_controller(
     parsing_preset: ParsingPreset,
     leader_eligible: bool,
     telemetry_sender: TelemetrySender,
+    dialect: Option<Dialect>,
     shutdown_rx: ShutdownReceiver,
 ) -> Result<ControllerDescriptor, anyhow::Error> {
     set_failpoint!(failpoints::START_CONTROLLER);
@@ -179,6 +181,7 @@ fn start_controller(
         telemetry_sender,
         config,
         parsing_preset,
+        dialect,
         shutdown_rx,
     );
 
@@ -272,6 +275,7 @@ pub(crate) async fn start_instance_inner(
     wait_for_failpoint: bool,
     shutdown_rx: ShutdownReceiver,
     unquery: bool,
+    dialect: Option<Dialect>,
 ) -> Result<Handle, anyhow::Error> {
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
     let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
@@ -330,6 +334,7 @@ pub(crate) async fn start_instance_inner(
         parsing_preset,
         leader_eligible,
         telemetry_sender.clone(),
+        dialect,
         shutdown_rx,
     )?;
 
@@ -360,6 +365,7 @@ pub(super) async fn start_instance(
     telemetry_sender: TelemetrySender,
     wait_for_failpoint: bool,
     unquery: bool,
+    dialect: Option<Dialect>,
 ) -> Result<(Handle, ShutdownSender), anyhow::Error> {
     let Config {
         abort_on_task_failure,
@@ -396,6 +402,7 @@ pub(super) async fn start_instance(
         wait_for_failpoint,
         shutdown_rx,
         unquery,
+        dialect,
     )
     .await?;
 

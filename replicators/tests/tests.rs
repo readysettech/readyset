@@ -289,12 +289,25 @@ impl DbConnection {
     }
 }
 
+fn sql_dialect_from_url(url: &str) -> readyset_sql::Dialect {
+    DatabaseURL::from_str(url).unwrap().database_type().into()
+}
+
+fn data_dialect_from_url(url: &str) -> Dialect {
+    match sql_dialect_from_url(url) {
+        readyset_sql::Dialect::PostgreSQL => Dialect::DEFAULT_POSTGRESQL,
+        readyset_sql::Dialect::MySQL => Dialect::DEFAULT_MYSQL,
+    }
+}
+
 impl TestHandle {
     async fn start_noria(
         url: String,
         config: Option<Config>,
     ) -> ReadySetResult<(TestHandle, ShutdownSender)> {
-        Self::start_noria_with_builder(url, config, Builder::for_tests()).await
+        let mut builder = Builder::for_tests();
+        builder.set_dialect(sql_dialect_from_url(&url));
+        Self::start_noria_with_builder(url, config, builder).await
     }
 
     async fn start_noria_with_builder(
@@ -325,11 +338,7 @@ impl TestHandle {
         let telemetry_sender = builder.telemetry.clone();
         let (noria, shutdown_tx) = builder.start(Arc::clone(&authority)).await.unwrap();
 
-        let dialect = if url.starts_with("postgresql") {
-            Dialect::DEFAULT_POSTGRESQL
-        } else {
-            Dialect::DEFAULT_MYSQL
-        };
+        let dialect = data_dialect_from_url(&url);
 
         let mut handle = TestHandle {
             url,
