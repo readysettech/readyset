@@ -24,7 +24,9 @@ enable_mrbr() {
     attempt=1
     interval=3
     while [ $attempt -le $max_attempts ]; do
-        if (mysql -h mysql --password=noria -e "SET GLOBAL binlog_row_image=MINIMAL;"); then
+        if (mysql -h mysql --password=noria \
+              --disable-ssl-verify-server-cert \
+              -e "SET GLOBAL binlog_row_image=MINIMAL;"); then
             echo "mysql 'SET GLOBAL binlog_row_image=MINIMAL' succeeded."
             break
         else
