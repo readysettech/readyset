@@ -21,7 +21,7 @@ use crate::ast::{
     Conditional, Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult,
     Value,
 };
-use crate::runner::{recreate_test_database, TestScript};
+use crate::runner::{recreate_test_database, RunOptions, TestScript};
 
 /// Default value for [`Seed::hash_threshold`]
 const DEFAULT_HASH_THRESHOLD: usize = 20;
@@ -277,7 +277,12 @@ impl Seed {
 
         info!("Running original test script");
         self.script
-            .run_on_database(&Default::default(), &mut conn, None, false)
+            .run_on_database(
+                &RunOptions::default_for_database(dialect.into()),
+                &mut conn,
+                None,
+                false,
+            )
             .await?;
 
         info!(count = insert_statements.len(), "Running insert statements");

@@ -101,15 +101,15 @@ pub struct RunOptions {
     pub verbose: bool,
 }
 
-impl Default for RunOptions {
-    fn default() -> Self {
+impl RunOptions {
+    pub fn default_for_database(database_type: DatabaseType) -> Self {
         Self {
             upstream_database_url: None,
             upstream_database_is_readyset: false,
             enable_reuse: false,
             time: false,
             replication_url: None,
-            database_type: DatabaseType::MySQL,
+            database_type,
             parsing_preset: ParsingPreset::for_tests(),
             verbose: false,
         }

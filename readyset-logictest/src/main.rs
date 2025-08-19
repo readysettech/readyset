@@ -677,7 +677,7 @@ impl Fuzz {
                     upstream_database_is_readyset: readyset_url.is_some(),
                     replication_url: Some(self.compare_to.clone()),
                     parsing_preset: self.parsing_preset,
-                    ..Default::default()
+                    ..RunOptions::default_for_database(self.dialect().into())
                 },
                 Default::default(),
             ))
