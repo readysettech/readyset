@@ -446,7 +446,7 @@ impl Drop for CompactionThreadHandle {
 pub struct PersistentState {
     name: SqlIdentifier,
     /// The relation when PersistenceType::BaseTable.
-    _table: Option<Relation>,
+    table: Option<Relation>,
     default_options: rocksdb::Options,
     db: PersistentStateHandle,
     // The list of all the indices that are defined as unique in the schema for this table
@@ -466,7 +466,7 @@ pub struct PersistentState {
     metrics_stop: Option<MetricsReporterStop>,
     /// Any TableStatus updates sent here will be sent to the current controller (only relevant for
     /// PersistenceType::BaseTable).
-    _table_status_tx: Option<UnboundedSender<(Relation, TableStatus)>>,
+    table_status_tx: Option<UnboundedSender<(Relation, TableStatus)>>,
 }
 
 /// Things that are shared between read handles and the state itself, that can be locked under a
@@ -1280,6 +1280,40 @@ impl IndexParams {
     }
 }
 
+/// Represents the state of an ongoing compaction.
+///
+/// When the last reference is dropped, we report that compaction has completed.
+struct RunningCompactionGuard {
+    name: SqlIdentifier,
+    table: Option<Relation>,
+    table_status_tx: Option<UnboundedSender<(Relation, TableStatus)>>,
+}
+
+impl RunningCompactionGuard {
+    fn new(state: &PersistentState) -> Arc<Self> {
+        Arc::new(Self {
+            name: state.name.clone(),
+            table: state.table.clone(),
+            table_status_tx: state.table_status_tx.clone(),
+        })
+    }
+}
+
+impl Drop for RunningCompactionGuard {
+    fn drop(&mut self) {
+        info!(table = %self.name, "All compactions finished");
+        if let (Some(table_status_tx), Some(table)) = (&self.table_status_tx, &self.table) {
+            if let Err(err) = table_status_tx.send((table.clone(), TableStatus::Online)) {
+                error!(
+                    error = %err,
+                    table = %table.display_unquoted(),
+                    "Failed to notify controller of index compaction completion",
+                );
+            }
+        }
+    }
+}
+
 // Getting the current compaction progress is as easy as getting the property value
 // for `rocksdb.num-files-at-level<N>` NOT.
 // Essentially we have to implement a huge hack here, since the only way I could find
@@ -1402,7 +1436,7 @@ fn compaction_progress_watcher(table_name: &str, db: &DB) -> anyhow::Result<impl
     Ok(log_watcher)
 }
 
-fn compact_cf(table: &str, db: &DB, index: &PersistentIndex, opts: &CompactOptions) {
+fn compact_cf(name: &str, db: &DB, index: &PersistentIndex, opts: &CompactOptions) {
     let cf = match db.cf_handle(&index.column_family) {
         Some(cf) => cf,
         None => {
@@ -1411,18 +1445,18 @@ fn compact_cf(table: &str, db: &DB, index: &PersistentIndex, opts: &CompactOptio
         }
     };
 
-    let _log_watcher = compaction_progress_watcher(table, db);
+    let _log_watcher = compaction_progress_watcher(name, db);
     if let Err(error) = &_log_watcher {
-        warn!(%error, %table, "Could not start compaction monitor");
+        warn!(%error, table = %name, "Could not start compaction monitor");
     }
 
-    info!(%table, cf = %index.column_family, "Compaction starting");
+    info!(table = %name, cf = %index.column_family, "Compaction starting");
     db.compact_range_cf_opt(cf, Option::<&[u8]>::None, Option::<&[u8]>::None, opts);
-    info!(%table, cf = %index.column_family, "Compaction finished");
+    info!(table = %name, cf = %index.column_family, "Compaction finished");
 
     // Reenable auto compactions when done
     if let Err(error) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
-        error!(%error, %table, "Error setting cf options");
+        error!(%error, table = %name, "Error setting cf options");
     }
 }
 
@@ -1702,7 +1736,7 @@ impl PersistentState {
 
         let state = Self {
             name,
-            _table: table,
+            table,
             default_options,
             seq: 0,
             unique_keys,
@@ -1715,7 +1749,7 @@ impl PersistentState {
             persistence_type,
             replay_done: persistence_type == PersistenceType::BaseTable,
             metrics_stop: Some(metrics),
-            _table_status_tx: table_status_tx,
+            table_status_tx,
         };
 
         if let Some(pk) = state.unique_keys.first().cloned() {
@@ -1914,6 +1948,17 @@ impl PersistentState {
         indices: &[Index],
         is_unique: &[bool],
     ) -> Vec<CompactionThreadHandle> {
+        if let (Some(table_status_tx), Some(table)) = (&self.table_status_tx, &self.table) {
+            if let Err(err) =
+                table_status_tx.send((table.clone(), TableStatus::CreatingIndex(None)))
+            {
+                error!(
+                    error = %err,
+                    table = %table.display_unquoted(),
+                    "Failed to notify controller of new index",
+                );
+            }
+        }
         let new = self.create_secondary(&mut inner, indices, is_unique);
         let inner = inner.downgrade();
         let (txs, rxs) = Self::make_channels(new.len());
@@ -1957,7 +2002,19 @@ impl PersistentState {
         });
 
         // Compact the newly created column families in the background
-        new.into_iter().map(|p| self.compact_index(p)).collect()
+        if let (Some(table_status_tx), Some(table)) = (&self.table_status_tx, &self.table) {
+            if let Err(err) = table_status_tx.send((table.clone(), TableStatus::Compacting(None))) {
+                error!(
+                    error = %err,
+                    table = %table.display_unquoted(),
+                    "Failed to notify controller of index compaction",
+                );
+            }
+        }
+        let compaction_guard = RunningCompactionGuard::new(self);
+        new.into_iter()
+            .map(|p| self.compact_index(p, compaction_guard.clone()))
+            .collect()
     }
 
     /// Builds a [`PersistentMeta`] from the in-memory metadata information stored in `self`,
@@ -2025,8 +2082,30 @@ impl PersistentState {
         self.snapshot_mode = snapshot;
 
         if snapshot.is_enabled() {
+            if let (Some(table_status_tx), Some(table)) = (&self.table_status_tx, &self.table) {
+                if let Err(err) =
+                    table_status_tx.send((table.clone(), TableStatus::Snapshotting(None)))
+                {
+                    error!(
+                        error = %err,
+                        table = %table.display_unquoted(),
+                        "Failed to notify controller of snapshotting",
+                    );
+                }
+            }
             self.enable_snapshot_mode();
         } else {
+            if let (Some(table_status_tx), Some(table)) = (&self.table_status_tx, &self.table) {
+                if let Err(err) =
+                    table_status_tx.send((table.clone(), TableStatus::Compacting(None)))
+                {
+                    error!(
+                        error = %err,
+                        table = %table.display_unquoted(),
+                        "Failed to notify controller of compaction",
+                    );
+                }
+            }
             self.compact_all_indices();
         }
     }
@@ -2084,32 +2163,37 @@ impl PersistentState {
     }
 
     fn compact_worker(
-        table: SqlIdentifier,
+        name: SqlIdentifier,
         index: PersistentIndex,
         read: PersistentStateHandle,
         opts: Arc<CompactOptions>,
+        _compaction_guard: Arc<RunningCompactionGuard>, /* hold for duration of compaction */
     ) {
-        let span = info_span!("Compacting index", %table, column_family = %index.column_family);
+        let span =
+            info_span!("Compacting index", table = %name, column_family = %index.column_family);
         let _guard = span.enter();
-        compact_cf(&table, &read.inner().db, &index, &opts);
+        compact_cf(&name, &read.inner().db, &index, &opts);
     }
 
     /// Perform a manual compaction for a single column family.
-    fn compact_index(&self, index: PersistentIndex) -> CompactionThreadHandle {
+    fn compact_index(
+        &self,
+        index: PersistentIndex,
+        compaction_guard: Arc<RunningCompactionGuard>,
+    ) -> CompactionThreadHandle {
         let mut opts = CompactOptions::default();
         opts.set_exclusive_manual_compaction(false);
         let opts = Arc::new(opts);
-
-        let table = self.name.clone();
         let read = self.read_handle();
         let opts = Arc::clone(&opts);
-        let name = format!(
+        let thread_name = format!(
             "Compacting index table={}, cf={}",
-            table, index.column_family
+            self.name, index.column_family,
         );
+        let name = self.name.clone();
         let compaction_thread = std::thread::Builder::new()
-            .name(name)
-            .spawn_wrapper(move || Self::compact_worker(table, index, read, opts))
+            .name(thread_name)
+            .spawn_wrapper(move || Self::compact_worker(name, index, read, opts, compaction_guard))
             .expect("spawn_wrapper failed");
 
         CompactionThreadHandle {
@@ -2120,8 +2204,9 @@ impl PersistentState {
     /// Perform a manual compaction for each column family.
     fn compact_all_indices(&mut self) {
         let indices = self.db.inner().shared_state.indices.to_vec();
+        let compaction_guard = RunningCompactionGuard::new(self);
         for index in indices {
-            let thr = self.compact_index(index);
+            let thr = self.compact_index(index, compaction_guard.clone());
             self.push_compaction_thread(thr);
         }
         self.wait_for_compaction();

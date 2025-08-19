@@ -153,7 +153,7 @@ pub struct NoriaAdapter<'a> {
     /// If the connector can partially resnapshot a database
     supports_resnapshot: bool,
     /// Any TableStatus updates sent here will update this controller's state machine.
-    _table_status_tx: UnboundedSender<(Relation, TableStatus)>,
+    table_status_tx: UnboundedSender<(Relation, TableStatus)>,
 }
 
 impl<'a> NoriaAdapter<'a> {
@@ -461,7 +461,7 @@ impl<'a> NoriaAdapter<'a> {
             table_filter,
             supports_resnapshot: true,
             dialect: Dialect::DEFAULT_MYSQL,
-            _table_status_tx: table_status_tx,
+            table_status_tx,
         };
 
         let mut current_pos: ReplicationOffset = pos.into();
@@ -741,7 +741,7 @@ impl<'a> NoriaAdapter<'a> {
             table_filter,
             supports_resnapshot: true,
             dialect: Dialect::DEFAULT_POSTGRESQL,
-            _table_status_tx: table_status_tx,
+            table_status_tx,
         };
 
         if min_pos != max_pos {
@@ -899,6 +899,18 @@ impl<'a> NoriaAdapter<'a> {
                     table = %table.display_unquoted(),
                     "Just-created table missing replication offset"
                 )
+            }
+
+            // Online freshly-created table.
+            if let Err(err) = self
+                .table_status_tx
+                .send((table.clone(), TableStatus::Online))
+            {
+                error!(
+                    error = %err,
+                    table = %table.display_unquoted(),
+                    "Failed to notify controller of freshly-created table",
+                );
             }
         }
 

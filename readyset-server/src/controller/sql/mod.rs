@@ -237,7 +237,7 @@ impl SqlIncorporator {
         &mut self,
         changelist: ChangeList,
         mig: &mut Migration<'_>,
-        mut _table_statuses: Option<&mut HashMap<Relation, TableStatus>>,
+        mut table_statuses: Option<&mut HashMap<Relation, TableStatus>>,
     ) -> ReadySetResult<()> {
         debug!(
             num_queries = self.registry.len(),
@@ -312,7 +312,14 @@ impl SqlIncorporator {
                                     pg_meta,
                                     mig,
                                 )?;
+                                if let Some(table_statuses) = table_statuses.as_mut() {
+                                    table_statuses
+                                        .insert(cts.table.clone(), TableStatus::Initializing);
+                                }
                                 continue;
+                            }
+                            if let Some(table_statuses) = table_statuses.as_mut() {
+                                table_statuses.insert(cts.table.clone(), TableStatus::Online);
                             }
                             trace!(
                                 name = %cts.table.name,
@@ -327,6 +334,9 @@ impl SqlIncorporator {
                         _ => {
                             self.invalidate_queries_for_added_relation(&cts.table, mig)?;
                             self.add_table(cts.table.clone(), body.clone(), pg_meta.clone(), mig)?;
+                            if let Some(table_statuses) = table_statuses.as_mut() {
+                                table_statuses.insert(cts.table.clone(), TableStatus::Initializing);
+                            }
                             self.registry.add_query(RecipeExpr::Table {
                                 name: cts.table,
                                 body,
@@ -335,7 +345,15 @@ impl SqlIncorporator {
                         }
                     }
                 }
-                Change::AddNonReplicatedRelation(table) => self.add_non_replicated_relation(table),
+                Change::AddNonReplicatedRelation(table) => {
+                    if let Some(table_statuses) = table_statuses.as_mut() {
+                        table_statuses.insert(
+                            table.name.clone(),
+                            TableStatus::NotReplicated(table.reason.clone()),
+                        );
+                    }
+                    self.add_non_replicated_relation(table);
+                }
                 Change::CreateView(mut stmt) => {
                     if let Some(first_schema) = schema_search_path.first() {
                         if stmt.name.schema.is_none() {
@@ -416,6 +434,10 @@ impl SqlIncorporator {
                                     body,
                                     pg_meta,
                                 } => {
+                                    if let Some(table_statuses) = table_statuses.as_mut() {
+                                        table_statuses
+                                            .insert(name.clone(), TableStatus::Initializing);
+                                    }
                                     self.drop_and_recreate_table(&name, body, pg_meta, mig)?;
                                 }
                                 RecipeExpr::View { name, .. } | RecipeExpr::Cache { name, .. } => {
@@ -438,6 +460,9 @@ impl SqlIncorporator {
                     let removed = if self
                         .remove_non_replicated_relation(&NonReplicatedRelation::new(name.clone()))
                     {
+                        if let Some(table_statuses) = table_statuses.as_mut() {
+                            table_statuses.insert(name.clone(), TableStatus::Dropped);
+                        }
                         true
                     } else if self.registry.remove_custom_type(&name) {
                         for expr in self
@@ -446,7 +471,7 @@ impl SqlIncorporator {
                             .cloned()
                             .collect::<Vec<_>>()
                         {
-                            match expr {
+                            match &expr {
                                 // Technically postgres doesn't allow removing custom types
                                 // before removing tables and views referencing those custom types -
                                 // but we might as well be more
@@ -454,14 +479,23 @@ impl SqlIncorporator {
                                 RecipeExpr::Table { name, .. }
                                 | RecipeExpr::View { name, .. }
                                 | RecipeExpr::Cache { name, .. } => {
-                                    self.remove_expression(&name, mig)?;
+                                    self.remove_expression(name, mig)?;
+                                }
+                            }
+                            if let RecipeExpr::Table { name, .. } = expr {
+                                if let Some(table_statuses) = table_statuses.as_mut() {
+                                    table_statuses.insert(name, TableStatus::Dropped);
                                 }
                             }
                         }
 
                         self.drop_custom_type(&name).is_some()
                     } else {
-                        self.remove_expression(&name, mig)?.is_some()
+                        let removed = self.remove_expression(&name, mig)?.is_some();
+                        if let Some(table_statuses) = table_statuses.as_mut() {
+                            table_statuses.insert(name.clone(), TableStatus::Dropped);
+                        }
+                        removed
                     };
 
                     if !removed && !if_exists {
