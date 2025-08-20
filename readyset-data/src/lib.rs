@@ -2422,7 +2422,6 @@ mod arbitrary {
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
-    use derive_more::{From, Into};
     use readyset_util::{eq_laws, hash_laws, ord_laws};
     use test_strategy::proptest;
     use test_utils::tags;
