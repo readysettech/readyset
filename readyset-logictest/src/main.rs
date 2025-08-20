@@ -441,8 +441,7 @@ impl Verify {
         let mut tasks = FuturesUnordered::new();
 
         let max_tasks = if self.replication_url.is_some() {
-            // Can not parallelize tests when binlog is enabled, because each test reuses the same
-            // db
+            // Cannot parallelize tests when replicating because each test reuses the same db
             1
         } else {
             self.tasks

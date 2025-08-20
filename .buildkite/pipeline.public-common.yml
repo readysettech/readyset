@@ -241,14 +241,13 @@ steps:
       - 'echo +++ Running readyset-logictest'
       - '[ -d public ] && cd public'
       - 'export RUST_BACKTRACE=full'
-      - 'export AUTHORITY=standalone'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/psql --database-type postgresql'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/mysql --database-type mysql'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/psql --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/postgis --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/mysql --database-type mysql --replication-url mysql://root:noria@mysql/noria'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/sqlparser --parsing-preset=only-sqlparser'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests --authority local'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests/psql --database-type postgresql --authority local'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests/mysql --database-type mysql --authority local'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/psql --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria --authority local'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/postgis --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria --authority local'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/mysql --database-type mysql --replication-url mysql://root:noria@mysql/noria --authority local'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests/sqlparser --parsing-preset=only-sqlparser --authority local'
     timeout_in_minutes: 60
     plugins:
       - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:

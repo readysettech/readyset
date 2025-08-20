@@ -12,7 +12,6 @@ services:
     depends_on:
       - postgres
     environment:
-      - AUTHORITY=standalone
       - ALLOW_UNAUTHENTICATED_CONNECTIONS=true
       - POSTGRESQL_HOST=postgres
       - PGHOST=postgres

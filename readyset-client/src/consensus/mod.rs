@@ -3,7 +3,7 @@
 //! workers which necessitate changes, and storing cluster wide global state.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt::{self, Display};
+use std::fmt::{self, Debug, Display};
 use std::net::SocketAddr;
 use std::str::FromStr;
 
@@ -324,6 +324,16 @@ pub enum Authority {
     ConsulAuthority,
     LocalAuthority,
     StandaloneAuthority,
+}
+
+impl Debug for Authority {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Authority::ConsulAuthority(_) => f.write_str("ConsulAuthority"),
+            Authority::LocalAuthority(_) => f.write_str("LocalAuthority"),
+            Authority::StandaloneAuthority(_) => f.write_str("StandaloneAuthority"),
+        }
+    }
 }
 
 /// Enum that mirrors Authority that parses command line arguments.

@@ -8,6 +8,5 @@ services:
     depends_on:
       - mysql
     environment:
-      - AUTHORITY=standalone
       - ALLOW_UNAUTHENTICATED_CONNECTIONS=true
       - MYSQL_HOST=mysql
