@@ -405,23 +405,30 @@ impl Node {
                     return Ok(Default::default());
                 }
 
-                let m = m.as_mut().unwrap();
-                let tag = match *m {
-                    Packet::ReplayPiece(ReplayPiece {
+                let tag = match m {
+                    Some(Packet::ReplayPiece(ReplayPiece {
                         tag,
                         context: payload::ReplayPieceContext::Partial { .. },
                         ..
-                    }) => {
-                        // NOTE: non-partial replays shouldn't be materialized only for a
-                        // particular index, and so the tag shouldn't be forwarded to the
-                        // materialization code. this allows us to keep some asserts deeper in
-                        // the code to check that we don't do partial replays to non-partial
-                        // indices, or for unknown tags.
-                        Some(tag)
-                    }
+                    })) => Some(*tag),
                     _ => None,
                 };
-                materialize(m.data_mut(), None, tag, env.state.get_mut(addr))?;
+                if let Some(Packet::ReplayPiece(ReplayPiece { ref mut data, .. })) = m.as_mut() {
+                    // Keep a copy of the rows so downstream (domain-level) mirroring can still
+                    // access them after materialization in case the state implementation consumes
+                    // the Records.
+                    let mirror_copy = data.clone();
+                    materialize(data, None, tag, env.state.get_mut(addr))?;
+                    // Restore packet rows for post-process mirroring and forwarding
+                    *data = mirror_copy;
+                }
+                if let Some(Packet::Update(ref mut up)) = m.as_mut() {
+                    // Ensure internal-node state stays up-to-date for normal updates as well.
+                    let data = up.data_mut();
+                    let mirror_copy = data.clone();
+                    materialize(data, None, None, env.state.get_mut(addr))?;
+                    *up.data_mut() = mirror_copy;
+                }
 
                 for miss in misses.iter_mut() {
                     if miss.on != addr {

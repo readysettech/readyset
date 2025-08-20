@@ -3073,6 +3073,14 @@ impl Domain {
 
     fn seed_all(&mut self, ex: &mut dyn Executor, pkt: RequestPartialReplay) -> ReadySetResult<()> {
         let (src, index, dst) = self.lookup_replay(pkt.tag)?;
+        trace!(
+            tag = %pkt.tag,
+            src = %src,
+            dst = %dst,
+            index_cols = ?index.columns,
+            num_keys = %pkt.keys.len(),
+            "seed_all"
+        );
         let Some(node) = Self::get_node(&self.nodes, src)? else {
             return Ok(());
         };
@@ -3439,6 +3447,57 @@ impl Domain {
                     },
                 )?;
 
+                // Determine node kind, then drop mutable borrow before any further borrows
+                let is_internal = n.is_internal();
+                drop(n);
+
+                // Mirror rows into any other partial indices at this node that are filled by
+                // replay paths passing through from this same parent. Do this both for partial
+                // replay pieces and for regular updates, so that subsequent lookups through
+                // alternate indices observe up-to-date rows.
+                type MirrorInputs = (LocalNodeIndex, Option<Tag>, Records);
+                let mirror_inputs: Option<MirrorInputs> =
+                    if let Some(Packet::ReplayPiece(ref rpkt)) = pkt {
+                        if matches!(rpkt.context, payload::ReplayPieceContext::Partial { .. })
+                            && is_internal
+                        {
+                            // Copy the rows now; compute primary_index_cols later to avoid borrowing self here
+                            Some((segment.node, Some(tag), rpkt.data.clone()))
+                        } else {
+                            None
+                        }
+                    } else if let Some(Packet::Update(ref upkt)) = pkt {
+                        if is_internal {
+                            Some((segment.node, None, upkt.data.clone()))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                if let Some((mirror_node, mirror_tag_opt, mirror_rows)) = mirror_inputs {
+                    let primary_for_call = mirror_tag_opt
+                        .and_then(|mirror_tag| self.replay_paths.get(mirror_tag))
+                        .and_then(|path| {
+                            path.path
+                                .iter()
+                                .find(|seg| seg.node == mirror_node)
+                                .and_then(|seg| seg.partial_index.as_ref())
+                                .map(|idx| idx.columns.clone())
+                        });
+                    if let Some(state) = self.state.get_mut(mirror_node) {
+                        Domain::mirror_partial_rows_to_other_indices_for_node(
+                            &self.replay_paths,
+                            state,
+                            mirror_node,
+                            mirror_tag_opt,
+                            &primary_for_call,
+                            &mirror_rows,
+                        )?;
+                    }
+                }
+
                 let misses = process_result.unique_misses();
 
                 let missed_on = if backfill_keys.is_some() {
@@ -3466,7 +3525,7 @@ impl Domain {
                                 wh.mark_hole(miss)?;
                             }
                         }
-                    } else if n.is_reader() {
+                    } else if self.nodes[segment.node].borrow().is_reader() {
                         // we filled a hole! publish the reader.
                         if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
                             wh.publish();
@@ -3491,7 +3550,7 @@ impl Domain {
                         for key in &process_result.captured {
                             state.mark_hole(key, tag);
                         }
-                    } else if n.is_reader() {
+                    } else if self.nodes[segment.node].borrow().is_reader() {
                         if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
                             for key in &process_result.captured {
                                 wh.mark_hole(key)?;
@@ -3499,9 +3558,6 @@ impl Domain {
                         }
                     }
                 }
-
-                // we're done with the node
-                drop(n);
 
                 if pkt.is_none() {
                     // eaten full replay
@@ -4840,6 +4896,52 @@ impl Domain {
             }
         );
         false
+    }
+
+    fn mirror_partial_rows_to_other_indices_for_node(
+        replay_paths: &ReplayPaths,
+        state: &mut MaterializedNodeState,
+        node: LocalNodeIndex,
+        current_tag: Option<Tag>,
+        primary_index_cols: &Option<Vec<usize>>,
+        rows: &Records,
+    ) -> ReadySetResult<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        // Enumerate all replay tags that include this node with a partial index
+        let deps: Vec<Tag> = replay_paths
+            .into_iter()
+            .filter_map(|(&t, rp)| {
+                rp.path
+                    .iter()
+                    .find(|seg| seg.node == node)
+                    .and_then(|seg| seg.partial_index.as_ref())
+                    .map(|_| t)
+            })
+            .filter(|tag| current_tag.is_some() && Some(*tag) != current_tag)
+            .collect();
+
+        for other_tag in deps {
+            // Skip if target columns equal primary index columns to avoid duplication
+            let mirror_index_cols: Option<Vec<usize>> =
+                replay_paths.get(other_tag).and_then(|path| {
+                    path.path
+                        .iter()
+                        .find(|seg| seg.node == node)
+                        .and_then(|seg| seg.partial_index.as_ref())
+                        .map(|idx| idx.columns.clone())
+                });
+
+            if &mirror_index_cols == primary_index_cols {
+                continue;
+            }
+
+            trace!(node = node.id(), from_tag = ?current_tag, to_tag = %other_tag, to_index_cols = ?mirror_index_cols, rows = rows.len(), "mirroring rows");
+            let mut clone_rs = rows.clone();
+            state.process_records(&mut clone_rs, Some(other_tag), None)?;
+        }
+        Ok(())
     }
 }
 
