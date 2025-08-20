@@ -675,7 +675,7 @@ impl Value {
             context.consume(result.to_string());
             context.consume("\n");
         }
-        context.compute()
+        context.finalize()
     }
 
     pub fn compare_type_insensitive(&self, other: &Self) -> bool {

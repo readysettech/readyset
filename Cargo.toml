@@ -165,7 +165,7 @@ libc = "0.2"
 log-once = "0.4.1"
 lru = "0.14.0"
 machine-uid = "0.5"
-md5 = "0.7.0"
+md5 = "0.8.0"
 metrics = "0.24.0"
 metrics-exporter-prometheus = { version = "0.17.2", default-features = false }
 metrics-util = "0.20.0"
