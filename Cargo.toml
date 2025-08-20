@@ -226,7 +226,7 @@ sha2 = "0.10.8"
 slab = "0.4.9"
 slotmap = "1.0.7"
 smallvec = { version = "1.13.2", default-features = false }
-socket2 = "0.5"
+socket2 = "0.6"
 sqlformat = "0.3.1"
 sqlparser = { git = "https://github.com/apache/datafusion-sqlparser-rs", branch = "main" }
 strawpoll = "0.2.3"

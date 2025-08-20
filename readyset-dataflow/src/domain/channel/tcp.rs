@@ -80,7 +80,7 @@ impl TcpSender {
         let s = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
         s.set_reuse_address(true)?;
         s.bind(&SockAddr::from(bind_addr))?;
-        s.set_nodelay(true)?;
+        s.set_tcp_nodelay(true)?;
         s.connect(&SockAddr::from(*addr))?;
         Self::new(std::net::TcpStream::from(s))
     }

@@ -4855,7 +4855,7 @@ dependencies = [
  "serde",
  "serde_with 3.14.0",
  "smallvec",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "strum",
  "test-strategy",
  "test-utils",
