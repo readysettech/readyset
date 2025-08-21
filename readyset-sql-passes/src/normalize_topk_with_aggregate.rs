@@ -1,3 +1,5 @@
+use std::mem;
+
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::analysis::contains_aggregate;
 use readyset_sql::ast::{
@@ -13,11 +15,11 @@ pub trait NormalizeTopKWithAggregate: Sized {
     /// If the query *has* a GROUP BY clause, this query checks that all the columns in the ORDER BY
     /// clause either appear in the GROUP BY clause, or reference the results of aggregates, and
     /// returns an error otherwise.
-    fn normalize_topk_with_aggregate(self) -> ReadySetResult<Self>;
+    fn normalize_topk_with_aggregate(&mut self) -> ReadySetResult<&mut Self>;
 }
 
 impl NormalizeTopKWithAggregate for SelectStatement {
-    fn normalize_topk_with_aggregate(mut self) -> ReadySetResult<Self> {
+    fn normalize_topk_with_aggregate(&mut self) -> ReadySetResult<&mut Self> {
         if let Some(order) = self.order.take() {
             let aggs = self
                 .fields
@@ -75,7 +77,14 @@ impl NormalizeTopKWithAggregate for SelectStatement {
                     }
                     None => {
                         // Save the offset.
-                        let offset = match self.limit_clause {
+                        let limit_clause = mem::replace(
+                            &mut self.limit_clause,
+                            LimitClause::LimitOffset {
+                                limit: None,
+                                offset: None,
+                            },
+                        );
+                        let offset = match limit_clause {
                             LimitClause::LimitOffset { offset, .. } => offset,
                             LimitClause::OffsetCommaLimit { offset, .. } => Some(offset),
                         };
@@ -96,11 +105,11 @@ impl NormalizeTopKWithAggregate for SelectStatement {
 }
 
 impl NormalizeTopKWithAggregate for SqlQuery {
-    fn normalize_topk_with_aggregate(self) -> ReadySetResult<Self> {
-        match self {
-            SqlQuery::Select(stmt) => Ok(SqlQuery::Select(stmt.normalize_topk_with_aggregate()?)),
-            _ => Ok(self),
+    fn normalize_topk_with_aggregate(&mut self) -> ReadySetResult<&mut Self> {
+        if let SqlQuery::Select(stmt) = self {
+            stmt.normalize_topk_with_aggregate()?;
         }
+        Ok(self)
     }
 }
 
@@ -113,9 +122,9 @@ mod tests {
     use super::*;
 
     fn removes_all_topk(input: &str) {
-        let input_query = parse_query(Dialect::MySQL, input).unwrap();
-        let actual = input_query.normalize_topk_with_aggregate().unwrap();
-        match actual {
+        let mut q = parse_query(Dialect::MySQL, input).unwrap();
+        q.normalize_topk_with_aggregate().unwrap();
+        match q {
             SqlQuery::Select(stmt) => {
                 assert!(stmt.order.is_none());
                 assert!(matches!(
@@ -123,7 +132,7 @@ mod tests {
                     LimitClause::LimitOffset { limit: None, .. }
                 ));
             }
-            _ => panic!("Invalid query returned: {actual:?}"),
+            _ => panic!("Invalid query returned: {q:?}"),
         }
     }
 
@@ -173,14 +182,14 @@ mod tests {
 
     #[test]
     fn no_aggregate_leaves_topk() {
-        let query = parse_query(
+        let mut query = parse_query(
             Dialect::MySQL,
             "SELECT table_1.column_1 FROM table_1 order by column_3 asc limit 4;",
         )
         .unwrap();
-        let result = query.normalize_topk_with_aggregate().unwrap();
+        query.normalize_topk_with_aggregate().unwrap();
 
-        match result {
+        match query {
             SqlQuery::Select(stmt) => {
                 assert_eq!(
                     stmt.order,
@@ -201,7 +210,7 @@ mod tests {
                     }
                 );
             }
-            _ => panic!("Invalid query returned: {result:?}"),
+            _ => panic!("Invalid query returned: {query:?}"),
         }
     }
 
@@ -214,14 +223,15 @@ mod tests {
              GROUP BY 1",
         )
         .unwrap();
-        let result = query.clone().normalize_topk_with_aggregate().unwrap();
+        let mut result = query.clone();
+        result.normalize_topk_with_aggregate().unwrap();
 
         assert_eq!(result, query);
     }
 
     #[test]
     fn order_by_not_in_group_by_returns_error() {
-        let query = parse_query(
+        let mut query = parse_query(
             Dialect::MySQL,
             "SELECT sum(table_1.column_1)
              FROM table_1
@@ -247,7 +257,8 @@ mod tests {
              ORDER BY column_2 DESC",
         )
         .unwrap();
-        let result = query.clone().normalize_topk_with_aggregate().unwrap();
+        let mut result = query.clone();
+        result.normalize_topk_with_aggregate().unwrap();
         assert_eq!(result, query);
     }
 
@@ -261,7 +272,8 @@ mod tests {
              ORDER BY sum DESC",
         )
         .unwrap();
-        let result = query.clone().normalize_topk_with_aggregate().unwrap();
+        let mut result = query.clone();
+        result.normalize_topk_with_aggregate().unwrap();
         assert_eq!(result, query);
     }
 
@@ -276,7 +288,8 @@ mod tests {
              ORDER BY sum(table_1.column_1) DESC",
         )
         .unwrap();
-        let result = query.clone().normalize_topk_with_aggregate().unwrap();
+        let mut result = query.clone();
+        result.normalize_topk_with_aggregate().unwrap();
         assert_eq!(result, query);
     }
 }
