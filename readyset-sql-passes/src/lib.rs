@@ -167,11 +167,9 @@ impl Rewrite for SelectStatement {
     fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
         let query_name = context.query_name.unwrap_or("unknown");
 
-        let mut s = self
-            .rewrite_between()
-            .disallow_row()?
-            .validate_window_functions()?;
-        s.scalar_optimize_expressions(context.dialect)
+        let mut s = self.rewrite_between().disallow_row()?;
+        s.validate_window_functions()?
+            .scalar_optimize_expressions(context.dialect)
             .resolve_schemas(
                 context.tables(),
                 context.custom_types,

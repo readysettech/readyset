@@ -148,12 +148,12 @@ fn validate_window_function_usage(stmt: &SelectStatement) -> ReadySetResult<()> 
 
 pub trait ValidateWindowFunctions: Sized {
     /// Validate that WindowFunction expressions are only used in SELECT clauses
-    fn validate_window_functions(self) -> ReadySetResult<Self>;
+    fn validate_window_functions(&mut self) -> ReadySetResult<&mut Self>;
 }
 
 impl ValidateWindowFunctions for SelectStatement {
-    fn validate_window_functions(self) -> ReadySetResult<Self> {
-        validate_window_function_usage(&self)?;
+    fn validate_window_functions(&mut self) -> ReadySetResult<&mut Self> {
+        validate_window_function_usage(self)?;
         Ok(self)
     }
 }
