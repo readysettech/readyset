@@ -4,7 +4,7 @@ pub(crate) mod noria_adapter;
 pub(crate) mod postgres_connector;
 pub mod table_filter;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use metrics::{gauge, Gauge};
 pub use noria_adapter::{cleanup, NoriaAdapter};
@@ -64,11 +64,7 @@ impl Drop for TablesSnapshottingGaugeGuard {
 }
 
 /// Provide a simplistic human-readable estimate for how much time remains to complete an operation
-pub(crate) fn estimate_remaining_time(elapsed: Duration, progress: i64, total: i64) -> String {
-    // Total number of rows can be undefined (0 for PG  or 1 for MySQL) or zero
-    if total <= 1 {
-        return "n/a".to_owned();
-    }
+fn estimate_remaining_time(elapsed: Duration, progress: usize, total: usize) -> String {
     // If we have progress greater than total (inaccurate estimate for total)
     if progress > total {
         return format!("{:02}:{:02}:{:02}", 0, 0, 0);
@@ -81,29 +77,34 @@ pub(crate) fn estimate_remaining_time(elapsed: Duration, progress: i64, total: i
     let hours = (remaining.as_secs() / 60) / 60;
     format!("{hours:02}:{minutes:02}:{seconds:02}")
 }
-/// Logs snapshot progress. Handles cases when 'total' is undefined or inaccurate.
-/// Log message will never show progress greater than 100%, if total number of rows is
-/// unknown (equals to 0 or 1), then estimated time and progress will be set to 'n/a'
-/// To provide feedback to a user, number of replicated rows and estimated total rows are logged
-/// If total number of rows is unknown progress %% is set to 0.0 (in metric).
-pub(crate) fn log_snapshot_progress(elapsed: Duration, cnt: i64, total: i64) {
-    let estimate = estimate_remaining_time(elapsed, cnt, total);
-    let mut progress_percent: f64;
-    progress_percent = if total > 1 {
-        progress_percent = (cnt as f64 / total as f64) * 100.;
-        if progress_percent > 100.0 {
-            99.9
-        } else {
-            progress_percent
-        }
-    } else {
-        0.
-    };
-    let progress = if total > 1 {
-        format!("{progress_percent:.2}%")
-    } else {
-        "n/a".to_owned()
-    };
-    let rows_total_est = if total > cnt { total } else { cnt };
-    info!(rows_replicated = %cnt, rows_total_est = %rows_total_est, %progress, %estimate, "Snapshotting progress");
+
+/// Report snapshot progress if the report interval has elapsed.
+pub(crate) fn report_snapshot_progress(
+    start: Instant,
+    progress: usize,
+    total: usize,
+    log_interval_s: u16,
+    last_log: &mut Instant,
+) {
+    if log_interval_s == 0 || last_log.elapsed().as_secs() < log_interval_s as u64 {
+        return;
+    }
+    if total <= 1 {
+        info!(rows_replicated = %progress, "Snapshotting progress");
+        *last_log = Instant::now();
+        return;
+    }
+
+    let percent = progress as f64 / total as f64 * 100.0;
+    let percent = percent.clamp(0.0, 99.99);
+    let percent = format!("{percent:.2}%");
+    let estimate = estimate_remaining_time(start.elapsed(), progress, total);
+    info!(
+        rows_replicated = %progress,
+        rows_estimated = %total,
+        progress = %percent,
+        %estimate,
+        "Snapshotting progress"
+    );
+    *last_log = Instant::now();
 }

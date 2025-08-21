@@ -168,7 +168,7 @@ impl SnapshotType {
     ///
     /// Arguments:
     /// * `row` - The row to compute the lower bound from
-    pub fn get_lower_bound(&mut self, row: &mysql::Row) -> ReadySetResult<Vec<mysql::Value>> {
+    pub fn get_lower_bound(&self, row: &mysql::Row) -> ReadySetResult<Vec<mysql::Value>> {
         match self {
             SnapshotType::KeyBased {
                 column_indices: cols,

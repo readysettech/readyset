@@ -35,7 +35,7 @@ use super::utils::{get_mysql_version, mysql_pad_binary_column, mysql_pad_char_co
 use crate::db_util::DatabaseSchemas;
 use crate::mysql_connector::snapshot_type::SnapshotType;
 use crate::table_filter::TableFilter;
-use crate::TablesSnapshottingGaugeGuard;
+use crate::{report_snapshot_progress, TablesSnapshottingGaugeGuard};
 use std::collections::HashSet;
 
 const RS_BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to ReadySet
@@ -427,8 +427,7 @@ impl MySqlReplicator<'_> {
         snapshot_report_interval_secs: u16,
         snapshot_query_comment: Option<String>,
     ) -> ReadySetResult<()> {
-        let mut cnt = 0;
-        let mut snapshot_type = SnapshotType::new(&table_mutator)?;
+        let snapshot_type = SnapshotType::new(&table_mutator)?;
         // During snapshot, on each row object, we get the collation of connection,
         // and not the collation of the columns. We have the collation of the columns
         // in the table_mutator.schema().fields, but current version of mysql_common
@@ -457,7 +456,7 @@ impl MySqlReplicator<'_> {
             .collect::<Vec<_>>();
 
         // Query for number of rows first
-        let nrows: usize = trx
+        let total: usize = trx
             .query_first(count_query)
             .await
             .map_err(log_err)?
@@ -469,15 +468,13 @@ impl MySqlReplicator<'_> {
             .map_err(log_err)?;
         let mut rows = Vec::with_capacity(RS_BATCH_SIZE);
 
-        info!(rows = %nrows, "Snapshotting started");
-
+        info!(approximate_rows = %total, "Snapshotting started");
         table_mutator.set_snapshot_mode(true).await?;
         let _tables_snapshotting_metric_handle = TablesSnapshottingGaugeGuard::new();
 
-        let start_time = Instant::now();
-        let mut last_report_time = start_time;
-        let snapshot_report_interval_secs = snapshot_report_interval_secs as u64;
-
+        let start = Instant::now();
+        let mut last_log = start;
+        let mut progress = 0;
         let mut prev_row: Option<Row> = None;
         loop {
             let mut row = row_stream.next().await.map_err(log_err)?;
@@ -513,7 +510,7 @@ impl MySqlReplicator<'_> {
             };
             prev_row = row;
             rows.push(df_row);
-            cnt += 1;
+            progress += 1;
 
             if rows.len() == RS_BATCH_SIZE {
                 // We aggregate rows into batches and then send them all to noria
@@ -524,19 +521,20 @@ impl MySqlReplicator<'_> {
                     .map_err(log_err)?;
             }
 
-            if snapshot_report_interval_secs != 0
-                && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
-            {
-                last_report_time = Instant::now();
-                crate::log_snapshot_progress(start_time.elapsed(), cnt as i64, nrows as i64);
-            }
+            report_snapshot_progress(
+                start,
+                progress,
+                total,
+                snapshot_report_interval_secs,
+                &mut last_log,
+            );
         }
 
         if !rows.is_empty() {
             table_mutator.insert_many(rows).await.map_err(log_err)?;
         }
 
-        info!(rows_replicated = %cnt, "Snapshotting finished");
+        info!(rows_replicated = %progress, "Snapshotting finished");
 
         Ok(())
     }

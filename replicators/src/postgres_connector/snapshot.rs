@@ -31,7 +31,7 @@ use tracing::{debug, info, info_span, trace, warn, Instrument};
 use super::connector::CreatedSlot;
 use crate::db_util::CreateSchema;
 use crate::table_filter::TableFilter;
-use crate::TablesSnapshottingGaugeGuard;
+use crate::{report_snapshot_progress, TablesSnapshottingGaugeGuard};
 
 const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to ReadySet
 
@@ -486,9 +486,7 @@ impl TableDescription {
         snapshot_report_interval_secs: u16,
         wal_position: &ReplicationOffset,
     ) -> ReadySetResult<()> {
-        let mut cnt = 0;
-
-        let approximate_rows = transaction
+        let total = transaction
             .query_one(
                 // Fetch an *approximate estimate* of the number of rows in the table, rather than
                 // an exact count (the latter is *significantly* more expensive, especially for
@@ -504,7 +502,7 @@ impl TableDescription {
                 &[&self.name.name.as_str(), &self.schema()?.as_str()],
             )
             .await?
-            .try_get::<_, i64>("approximate_nrows")?;
+            .try_get::<_, i64>("approximate_nrows")? as usize;
 
         // The most efficient way to copy an entire table is COPY BINARY
         let query = format!(
@@ -521,15 +519,15 @@ impl TableDescription {
 
         pin_mut!(binary_row_batches);
 
-        info!(%approximate_rows, "Snapshotting started");
+        info!(approximate_rows = %total, "Snapshotting started");
         let _tables_snapshotting_metric_handle = TablesSnapshottingGaugeGuard::new();
-        let start_time = Instant::now();
-        let mut last_report_time = start_time;
-        let snapshot_report_interval_secs = snapshot_report_interval_secs as u64;
-        let mut set_replication_offset_and_snapshot_mode = false;
 
+        let start = Instant::now();
+        let mut last_log = start;
+        let mut progress = 0;
+        let mut set_replication_offset_and_snapshot_mode = false;
         while let Some(batch) = binary_row_batches.as_mut().next().await {
-            let cnt_copy = cnt;
+            let progress_copy = progress;
             let batch_size = batch.len();
             let noria_rows_iter = batch
                 .into_iter()
@@ -543,14 +541,14 @@ impl TableDescription {
                                 ReadySetError::ReplicationFailed(format!(
                                     "Failed converting to DfValue, table: {}, row: {}, err: {}",
                                     noria_table.table_name().display(Dialect::PostgreSQL),
-                                    cnt_copy + index_within_batch,
+                                    progress_copy + index_within_batch,
                                     err
                                 ))
                             })
                     })
                 });
 
-            cnt += batch_size;
+            progress += batch_size;
 
             if binary_row_batches.as_mut().peek().await.is_none() {
                 // This is the last batch of rows we're adding to the table, so batch the RPCs to
@@ -581,12 +579,13 @@ impl TableDescription {
                     .await?
             }
 
-            if snapshot_report_interval_secs != 0
-                && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
-            {
-                last_report_time = Instant::now();
-                crate::log_snapshot_progress(start_time.elapsed(), cnt as i64, approximate_rows);
-            }
+            report_snapshot_progress(
+                start,
+                progress,
+                total,
+                snapshot_report_interval_secs,
+                &mut last_log,
+            );
         }
 
         // If the table was empty, we didn't set the replication offset or disable snapshot mode
@@ -600,7 +599,7 @@ impl TableDescription {
                 .await?;
         }
 
-        info!(rows_replicated = %cnt, "Snapshotting finished");
+        info!(rows_replicated = %progress, "Snapshotting finished");
 
         Ok(())
     }
