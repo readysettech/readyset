@@ -14,10 +14,10 @@ pub trait StarExpansion: Sized {
     /// Expand all `*` column references in the query given a map from tables to the lists of
     /// columns in those tables
     fn expand_stars(
-        self,
+        &mut self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
         non_replicated_relations: &HashSet<NonReplicatedRelation>,
-    ) -> ReadySetResult<Self>;
+    ) -> ReadySetResult<&mut Self>;
 }
 
 struct ExpandStarsVisitor<'schema> {
@@ -145,31 +145,29 @@ impl<'ast> VisitorMut<'ast> for ExpandStarsVisitor<'_> {
 
 impl StarExpansion for SelectStatement {
     fn expand_stars(
-        mut self,
+        &mut self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
         non_replicated_relations: &HashSet<NonReplicatedRelation>,
-    ) -> ReadySetResult<Self> {
+    ) -> ReadySetResult<&mut Self> {
         let mut visitor = ExpandStarsVisitor {
             table_columns,
             non_replicated_relations,
         };
-        visitor.visit_select_statement(&mut self)?;
+        visitor.visit_select_statement(self)?;
         Ok(self)
     }
 }
 
 impl StarExpansion for SqlQuery {
     fn expand_stars(
-        self,
+        &mut self,
         write_schemas: &HashMap<Relation, Vec<SqlIdentifier>>,
         non_replicated_relations: &HashSet<NonReplicatedRelation>,
-    ) -> ReadySetResult<Self> {
-        Ok(match self {
-            SqlQuery::Select(sq) => {
-                SqlQuery::Select(sq.expand_stars(write_schemas, non_replicated_relations)?)
-            }
-            _ => self,
-        })
+    ) -> ReadySetResult<&mut Self> {
+        if let SqlQuery::Select(sq) = self {
+            sq.expand_stars(write_schemas, non_replicated_relations)?;
+        }
+        Ok(self)
     }
 }
 
@@ -182,14 +180,14 @@ mod tests {
 
     #[track_caller]
     fn expands_stars(source: &str, expected: &str, schema: HashMap<Relation, Vec<SqlIdentifier>>) {
-        let q = parse_query(Dialect::MySQL, source).unwrap();
+        let mut q = parse_query(Dialect::MySQL, source).unwrap();
         let expected = parse_query(Dialect::MySQL, expected).unwrap();
-        let res = q.expand_stars(&schema, &Default::default()).unwrap();
+        q.expand_stars(&schema, &Default::default()).unwrap();
         assert_eq!(
-            res,
+            q,
             expected,
             "{} != {}",
-            res.display(readyset_sql::Dialect::MySQL),
+            q.display(readyset_sql::Dialect::MySQL),
             expected.display(readyset_sql::Dialect::MySQL)
         );
     }
