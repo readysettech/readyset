@@ -183,9 +183,9 @@ impl Rewrite for SelectStatement {
             .rewrite_lateral_joins()?
             .normalize_topk_with_aggregate()?
             .detect_problematic_self_joins()?
-            .remove_numeric_field_references()?
-            .order_limit_removal(&context.base_schemas)?;
-        s.rewrite_table_aliases(query_name, context.table_alias_rewrites.as_deref_mut())?;
+            .remove_numeric_field_references()?;
+        s.order_limit_removal(&context.base_schemas)?
+            .rewrite_table_aliases(query_name, context.table_alias_rewrites.as_deref_mut())?;
         Ok(s)
     }
 }

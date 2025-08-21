@@ -13,9 +13,9 @@ pub trait OrderLimitRemoval: Sized {
     /// This past must be run after the expand_implied_tables() pass, because it requires that each
     /// column have an associated table name.
     fn order_limit_removal(
-        self,
+        &mut self,
         base_schemas: &HashMap<&Relation, &CreateTableBody>,
-    ) -> ReadySetResult<Self>;
+    ) -> ReadySetResult<&mut Self>;
 }
 
 fn is_unique_or_primary(
@@ -117,9 +117,9 @@ fn compares_unique_key_against_literal(
 
 impl OrderLimitRemoval for SelectStatement {
     fn order_limit_removal(
-        mut self,
+        &mut self,
         base_schemas: &HashMap<&Relation, &CreateTableBody>,
-    ) -> ReadySetResult<Self> {
+    ) -> ReadySetResult<&mut Self> {
         let has_limit = matches!(
             self.limit_clause,
             LimitClause::LimitOffset { limit: Some(_), .. } | LimitClause::OffsetCommaLimit { .. }
@@ -140,13 +140,13 @@ impl OrderLimitRemoval for SelectStatement {
 
 impl OrderLimitRemoval for SqlQuery {
     fn order_limit_removal(
-        self,
+        &mut self,
         base_schemas: &HashMap<&Relation, &CreateTableBody>,
-    ) -> ReadySetResult<Self> {
-        match self {
-            SqlQuery::Select(stmt) => Ok(SqlQuery::Select(stmt.order_limit_removal(base_schemas)?)),
-            _ => Ok(self),
+    ) -> ReadySetResult<&mut Self> {
+        if let SqlQuery::Select(stmt) = self {
+            stmt.order_limit_removal(base_schemas)?;
         }
+        Ok(self)
     }
 }
 
@@ -224,12 +224,11 @@ mod tests {
     }
 
     fn removes_limit_order(input: &str) {
-        let input_query = parse_query(Dialect::MySQL, input).unwrap();
+        let mut q = parse_query(Dialect::MySQL, input).unwrap();
         let base_schemas = generate_base_schemas();
-        let revised_query = input_query
-            .order_limit_removal(&base_schemas.iter().collect())
+        q.order_limit_removal(&base_schemas.iter().collect())
             .unwrap();
-        match revised_query {
+        match q {
             SqlQuery::Select(stmt) => {
                 assert!(stmt.order.is_none());
                 assert!(matches!(
@@ -240,20 +239,18 @@ mod tests {
                     }
                 ));
             }
-            _ => panic!("Invalid query returned: {revised_query:?}"),
+            _ => panic!("Invalid query returned: {q:?}"),
         }
     }
 
     fn does_not_change_limit_order(input: &str) {
         let input_query = parse_query(Dialect::MySQL, input).unwrap();
         let base_schemas = generate_base_schemas();
-        assert_eq!(
-            input_query,
-            input_query
-                .clone()
-                .order_limit_removal(&base_schemas.iter().collect(),)
-                .unwrap()
-        );
+        let mut revised_query = input_query.clone();
+        revised_query
+            .order_limit_removal(&base_schemas.iter().collect())
+            .unwrap();
+        assert_eq!(input_query, revised_query);
     }
 
     #[test]
@@ -341,13 +338,11 @@ mod tests {
             columns: vec![col1.clone(), col2.clone()],
         }]);
         base_schema.get_mut(&Relation::from("t")).unwrap().keys = keys;
-        assert_eq!(
-            input_query,
-            input_query
-                .clone()
-                .order_limit_removal(&base_schema.iter().collect())
-                .unwrap()
-        );
+        let mut revised_query = input_query.clone();
+        revised_query
+            .order_limit_removal(&base_schema.iter().collect())
+            .unwrap();
+        assert_eq!(input_query, revised_query);
         // compound Unique
         let keys = Some(vec![TableKey::UniqueKey {
             constraint_name: None,
@@ -358,15 +353,14 @@ mod tests {
             nulls_distinct: None,
         }]);
         base_schema.get_mut(&Relation::from("t")).unwrap().keys = keys;
-        assert_eq!(
-            input_query,
-            input_query
-                .clone()
-                .order_limit_removal(&base_schema.iter().collect())
-                .unwrap()
-        );
+        let mut revised_query = input_query.clone();
+        revised_query
+            .order_limit_removal(&base_schema.iter().collect())
+            .unwrap();
+        assert_eq!(input_query, revised_query);
         // compound unique but col is separately specified to be unique
-        let revised_query = input_query2
+        let mut revised_query = input_query2.clone();
+        revised_query
             .order_limit_removal(&base_schema.iter().collect())
             .unwrap();
         match revised_query {
