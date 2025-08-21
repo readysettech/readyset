@@ -355,6 +355,7 @@ impl<'a> NoriaAdapter<'a> {
                     table_filter,
                     parsing_preset,
                     snapshot_query_comment: config.snapshot_query_comment.clone(),
+                    table_status_tx: table_status_tx.clone(),
                 };
 
                 let snapshot_start = Instant::now();
@@ -664,6 +665,7 @@ impl<'a> NoriaAdapter<'a> {
                 &mut noria,
                 table_filter,
                 parsing_preset,
+                table_status_tx.clone(),
             )
             .await?;
 

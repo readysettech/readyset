@@ -9,11 +9,13 @@ use std::time::{Duration, Instant};
 use metrics::{gauge, Gauge};
 pub use noria_adapter::{cleanup, NoriaAdapter};
 use readyset_client::metrics::recorded;
+use readyset_client::{TableStatus, TABLE_STATUS_REPORT_INTERVAL};
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::Relation;
 pub use replication_offset::mysql::MySqlPosition;
 pub use replication_offset::postgres::PostgresPosition;
-use tracing::info;
+use tokio::sync::mpsc::UnboundedSender;
+use tracing::{debug, info};
 
 /// Event notification sent to the controller.
 #[derive(Debug)]
@@ -79,13 +81,35 @@ fn estimate_remaining_time(elapsed: Duration, progress: usize, total: usize) -> 
 }
 
 /// Report snapshot progress if the report interval has elapsed.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn report_snapshot_progress(
+    table: &Relation,
     start: Instant,
     progress: usize,
     total: usize,
     log_interval_s: u16,
     last_log: &mut Instant,
+    last_status: &mut Instant,
+    table_status_tx: &UnboundedSender<(Relation, TableStatus)>,
 ) {
+    fn percent(progress: usize, total: usize) -> f64 {
+        let percent = progress as f64 / total as f64 * 100.0;
+        percent.clamp(0.0, 99.99)
+    }
+
+    if last_status.elapsed() >= TABLE_STATUS_REPORT_INTERVAL {
+        let percent = percent(progress, total);
+        if let Err(err) =
+            table_status_tx.send((table.clone(), TableStatus::Snapshotting(Some(percent))))
+        {
+            debug!(
+                error = %err,
+                table = %table.display_unquoted(),
+                "Failed to notify controller of snapshotting progress",
+            );
+        }
+        *last_status = Instant::now();
+    }
     if log_interval_s == 0 || last_log.elapsed().as_secs() < log_interval_s as u64 {
         return;
     }
@@ -95,9 +119,7 @@ pub(crate) fn report_snapshot_progress(
         return;
     }
 
-    let percent = progress as f64 / total as f64 * 100.0;
-    let percent = percent.clamp(0.0, 99.99);
-    let percent = format!("{percent:.2}%");
+    let percent = format!("{:.2}%", percent(progress, total));
     let estimate = estimate_remaining_time(start.elapsed(), progress, total);
     info!(
         rows_replicated = %progress,

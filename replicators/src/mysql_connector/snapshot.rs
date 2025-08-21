@@ -18,6 +18,7 @@ use mysql_common::collations::{Collation, CollationId};
 use mysql_common::constants::ColumnType;
 use mysql_srv::ColumnFlags;
 use readyset_client::recipe::changelist::{Change, ChangeList};
+use readyset_client::TableStatus;
 use readyset_data::{DfValue, Dialect};
 use readyset_decimal::Decimal;
 use readyset_errors::{internal_err, ReadySetResult};
@@ -27,6 +28,7 @@ use readyset_sql_parsing::ParsingPreset;
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use serde_json::Value;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
@@ -65,6 +67,8 @@ pub(crate) struct MySqlReplicator<'a> {
     pub(crate) parsing_preset: ParsingPreset,
     /// Whether to add a comment for snapshot queries
     pub(crate) snapshot_query_comment: Option<String>,
+    /// Any TableStatus updates sent here will update this controller's state machine.
+    pub(crate) table_status_tx: UnboundedSender<(Relation, TableStatus)>,
 }
 
 /// Get the list of tables defined in the database
@@ -426,6 +430,7 @@ impl MySqlReplicator<'_> {
         mut table_mutator: readyset_client::Table,
         snapshot_report_interval_secs: u16,
         snapshot_query_comment: Option<String>,
+        table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     ) -> ReadySetResult<()> {
         let snapshot_type = SnapshotType::new(&table_mutator)?;
         // During snapshot, on each row object, we get the collation of connection,
@@ -474,6 +479,7 @@ impl MySqlReplicator<'_> {
 
         let start = Instant::now();
         let mut last_log = start;
+        let mut last_status = start;
         let mut progress = 0;
         let mut prev_row: Option<Row> = None;
         loop {
@@ -522,11 +528,14 @@ impl MySqlReplicator<'_> {
             }
 
             report_snapshot_progress(
+                table_mutator.table_name(),
                 start,
                 progress,
                 total,
                 snapshot_report_interval_secs,
                 &mut last_log,
+                &mut last_status,
+                &table_status_tx,
             );
         }
 
@@ -664,6 +673,7 @@ impl MySqlReplicator<'_> {
         let table_mutator = noria.table(table.clone()).instrument(span.clone()).await?;
         let snapshot_query_comment = self.snapshot_query_comment.clone();
 
+        let table_status_tx = self.table_status_tx.clone();
         Ok(tokio::spawn(async move {
             (
                 table,
@@ -673,6 +683,7 @@ impl MySqlReplicator<'_> {
                     table_mutator,
                     snapshot_report_interval_secs,
                     snapshot_query_comment,
+                    table_status_tx,
                 )
                 .instrument(span)
                 .await,

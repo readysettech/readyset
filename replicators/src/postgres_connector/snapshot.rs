@@ -10,7 +10,7 @@ use futures::{pin_mut, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use postgres_types::{Kind, Type};
 use readyset_client::recipe::changelist::{Change, ChangeList, PostgresTableMetadata};
-use readyset_client::TableOperation;
+use readyset_client::{TableOperation, TableStatus};
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
@@ -25,6 +25,7 @@ use readyset_sql_parsing::{parse_key_specification_with_config, ParsingPreset};
 use readyset_util::failpoints;
 use replication_offset::postgres::PostgresPosition;
 use replication_offset::ReplicationOffset;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_postgres as pgsql;
 use tracing::{debug, info, info_span, trace, warn, Instrument};
 
@@ -54,6 +55,8 @@ pub struct PostgresReplicator<'a> {
     pub(crate) table_filter: &'a mut TableFilter,
     /// Parsing preset to use for parsing SQL types and key specifications
     pub(crate) parsing_preset: ParsingPreset,
+    /// Any TableStatus updates sent here will update this controller's state machine.
+    table_status_tx: UnboundedSender<(Relation, TableStatus)>,
 }
 
 #[derive(Debug)]
@@ -485,6 +488,7 @@ impl TableDescription {
         mut noria_table: readyset_client::Table,
         snapshot_report_interval_secs: u16,
         wal_position: &ReplicationOffset,
+        table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     ) -> ReadySetResult<()> {
         let total = transaction
             .query_one(
@@ -524,6 +528,7 @@ impl TableDescription {
 
         let start = Instant::now();
         let mut last_log = start;
+        let mut last_status = start;
         let mut progress = 0;
         let mut set_replication_offset_and_snapshot_mode = false;
         while let Some(batch) = binary_row_batches.as_mut().next().await {
@@ -580,11 +585,14 @@ impl TableDescription {
             }
 
             report_snapshot_progress(
+                noria_table.table_name(),
                 start,
                 progress,
                 total,
                 snapshot_report_interval_secs,
                 &mut last_log,
+                &mut last_status,
+                &table_status_tx,
             );
         }
 
@@ -612,6 +620,7 @@ impl<'a> PostgresReplicator<'a> {
         noria: &'a mut readyset_client::ReadySetHandle,
         table_filter: &'a mut TableFilter,
         parsing_preset: ParsingPreset,
+        table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     ) -> ReadySetResult<PostgresReplicator<'a>> {
         let transaction = Some(
             client
@@ -628,9 +637,11 @@ impl<'a> PostgresReplicator<'a> {
             noria,
             table_filter,
             parsing_preset,
+            table_status_tx,
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn snapshot_table(
         pool: deadpool_postgres::Pool,
         span: tracing::Span,
@@ -639,6 +650,7 @@ impl<'a> PostgresReplicator<'a> {
         snapshot_report_interval_secs: u16,
         snapshot_name: String,
         wal_position: &ReplicationOffset,
+        table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     ) -> ReadySetResult<()> {
         let mut client = pool.get().await?;
 
@@ -660,6 +672,7 @@ impl<'a> PostgresReplicator<'a> {
                 noria_table,
                 snapshot_report_interval_secs,
                 wal_position,
+                table_status_tx,
             )
             .instrument(span.clone())
             .await
@@ -985,6 +998,7 @@ impl<'a> PostgresReplicator<'a> {
 
             let snapshot_name = replication_slot.snapshot_name.clone();
             let table = table.clone();
+            let table_status_tx = self.table_status_tx.clone();
             if snapshotting_tables.len() >= max_parallel_snapshot_tables {
                 // If we're already at the max number of parallel snapshots, wait for one to finish
                 // before adding another.
@@ -1000,6 +1014,7 @@ impl<'a> PostgresReplicator<'a> {
                 snapshot_report_interval_secs,
                 snapshot_name,
                 &wal_position,
+                table_status_tx,
             ))
         }
 

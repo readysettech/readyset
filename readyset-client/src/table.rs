@@ -40,6 +40,9 @@ use crate::{Tagged, Tagger, CONNECTION_FROM_BASE};
 // TODO(justin): Make write propagation sample rate configurable.
 const TRACE_SAMPLE_RATE: Duration = Duration::from_secs(1);
 
+/// How frequently to report TableStatus updates.
+pub const TABLE_STATUS_REPORT_INTERVAL: Duration = Duration::from_secs(1);
+
 /// A modification to make to an existing value.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Operation {
