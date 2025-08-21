@@ -179,9 +179,9 @@ impl Rewrite for SelectStatement {
                 context.invalidating_tables.as_deref_mut(),
             )?
             .expand_stars(context.view_schemas, context.non_replicated_relations)?
-            .expand_implied_tables(context.view_schemas)?
-            .rewrite_lateral_joins()?;
-        s.normalize_topk_with_aggregate()?
+            .expand_implied_tables(context.view_schemas)?;
+        s.rewrite_lateral_joins()?
+            .normalize_topk_with_aggregate()?
             .detect_problematic_self_joins()?
             .remove_numeric_field_references()?
             .order_limit_removal(&context.base_schemas)?

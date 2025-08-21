@@ -25,14 +25,14 @@ use tracing::trace;
 /// **IMPORTANT**: This rewrite pass must be called after the schema resolution, star expansion
 /// and JoinConstraint::USING expansion passes.
 pub trait RewriteLateralJoin: Sized {
-    fn rewrite_lateral_joins(self) -> ReadySetResult<Self>;
+    fn rewrite_lateral_joins(&mut self) -> ReadySetResult<&mut Self>;
 }
 
 /// Top-level method to convert all LATERAL joins in a SELECT statement into equivalent standard joins.
 /// Modifies the statement in-place, flattening correlated subqueries and updating joins as needed.
 impl RewriteLateralJoin for SelectStatement {
-    fn rewrite_lateral_joins(mut self) -> ReadySetResult<Self> {
-        if resolve_lateral_subqueries(&mut self)? {
+    fn rewrite_lateral_joins(&mut self) -> ReadySetResult<&mut Self> {
+        if resolve_lateral_subqueries(self)? {
             trace!(
                 name = "LATERAL sub-queries resolved",
                 "{}",
@@ -826,16 +826,15 @@ mod tests {
     */
 
     fn test_it(test_name: &str, original_text: &str, expect_text: &str) {
-        let rewritten_stmt = match parse_query(Dialect::PostgreSQL, original_text) {
+        let mut rewritten_stmt = match parse_query(Dialect::PostgreSQL, original_text) {
             Ok(SqlQuery::Select(stmt)) => stmt,
             Err(e) => panic!("> {test_name}: ORIGINAL STATEMENT PARSE ERROR: {e}"),
             _ => unreachable!(),
-        }
-        .rewrite_lateral_joins();
-        match rewritten_stmt {
+        };
+        match rewritten_stmt.rewrite_lateral_joins() {
             Ok(expect_stmt) => {
                 assert_eq!(
-                    expect_stmt,
+                    *expect_stmt,
                     match parse_select(Dialect::PostgreSQL, expect_text) {
                         Ok(stmt) => stmt,
                         Err(e) => panic!("> {test_name}: REWRITTEN STATEMENT PARSE ERROR: {e}"),
