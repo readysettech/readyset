@@ -9,11 +9,11 @@ pub trait RemoveNumericFieldReferences: Sized {
     ///
     /// [0]: FieldReference::Numeric
     /// [0]: FieldReference::Expr
-    fn remove_numeric_field_references(self) -> ReadySetResult<Self>;
+    fn remove_numeric_field_references(&mut self) -> ReadySetResult<&mut Self>;
 }
 
 impl RemoveNumericFieldReferences for SelectStatement {
-    fn remove_numeric_field_references(mut self) -> ReadySetResult<Self> {
+    fn remove_numeric_field_references(&mut self) -> ReadySetResult<&mut Self> {
         let lookup_field = |n: usize| -> ReadySetResult<Expr> {
             let oob = invalid_query_err!("Out-of-bounds index in numeric field reference");
 
@@ -54,17 +54,19 @@ impl RemoveNumericFieldReferences for SelectStatement {
 }
 
 impl RemoveNumericFieldReferences for SqlQuery {
-    fn remove_numeric_field_references(self) -> ReadySetResult<Self> {
+    fn remove_numeric_field_references(&mut self) -> ReadySetResult<&mut Self> {
         match self {
-            SqlQuery::CompoundSelect(mut cs) => {
+            SqlQuery::CompoundSelect(cs) => {
                 for (_, stmt) in &mut cs.selects {
-                    *stmt = stmt.clone().remove_numeric_field_references()?;
+                    stmt.clone().remove_numeric_field_references()?;
                 }
-                Ok(SqlQuery::CompoundSelect(cs))
             }
-            SqlQuery::Select(stmt) => Ok(SqlQuery::Select(stmt.remove_numeric_field_references()?)),
-            _ => Ok(self),
+            SqlQuery::Select(stmt) => {
+                stmt.remove_numeric_field_references()?;
+            }
+            _ => {}
         }
+        Ok(self)
     }
 }
 
@@ -77,10 +79,10 @@ mod tests {
 
     #[test]
     fn simple_group_by() {
-        let query = parse_select_statement("select id, count(*) from t group by 1");
-        let result = query.remove_numeric_field_references().unwrap();
+        let mut query = parse_select_statement("select id, count(*) from t group by 1");
+        query.remove_numeric_field_references().unwrap();
         assert_eq!(
-            result.group_by,
+            query.group_by,
             Some(GroupByClause {
                 fields: vec![FieldReference::Expr(Expr::Column("id".into()))]
             })
@@ -89,10 +91,10 @@ mod tests {
 
     #[test]
     fn simple_order_by() {
-        let query = parse_select_statement("select id from t order by 1 asc");
-        let result = query.remove_numeric_field_references().unwrap();
+        let mut query = parse_select_statement("select id from t order by 1 asc");
+        query.remove_numeric_field_references().unwrap();
         assert_eq!(
-            result.order,
+            query.order,
             Some(OrderClause {
                 order_by: vec![OrderBy {
                     field: FieldReference::Expr(Expr::Column("id".into())),
