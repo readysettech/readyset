@@ -27,12 +27,12 @@ impl<'ast> VisitorMut<'ast> for ScalarOptimizeExpressionsVisitor {
 }
 
 pub trait ScalarOptimizeExpressions {
-    fn scalar_optimize_expressions(self, dialect: Dialect) -> Self;
+    fn scalar_optimize_expressions(&mut self, dialect: Dialect) -> &mut Self;
 }
 
 impl ScalarOptimizeExpressions for SelectStatement {
-    fn scalar_optimize_expressions(mut self, dialect: Dialect) -> Self {
-        let Ok(()) = ScalarOptimizeExpressionsVisitor { dialect }.visit_select_statement(&mut self);
+    fn scalar_optimize_expressions(&mut self, dialect: Dialect) -> &mut Self {
+        let Ok(()) = ScalarOptimizeExpressionsVisitor { dialect }.visit_select_statement(self);
         self
     }
 }
