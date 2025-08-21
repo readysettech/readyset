@@ -16,9 +16,9 @@ use crate::{outermost_table_exprs, util};
 
 pub trait ImpliedTableExpansion: Sized {
     fn expand_implied_tables(
-        self,
+        &mut self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
-    ) -> ReadySetResult<Self>;
+    ) -> ReadySetResult<&mut Self>;
 }
 
 #[derive(Debug)]
@@ -189,10 +189,10 @@ impl<'ast> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'_> {
     }
 }
 
-fn rewrite_select(
-    mut select_statement: SelectStatement,
+fn rewrite_select<'stmt>(
+    select_statement: &'stmt mut SelectStatement,
     schema: &HashMap<Relation, Vec<SqlIdentifier>>,
-) -> ReadySetResult<SelectStatement> {
+) -> ReadySetResult<&'stmt mut SelectStatement> {
     let mut visitor = ExpandImpliedTablesVisitor {
         schema,
         subquery_schemas: Default::default(),
@@ -201,51 +201,45 @@ fn rewrite_select(
         can_reference_aliases: false,
     };
 
-    visitor.visit_select_statement(&mut select_statement)?;
+    visitor.visit_select_statement(select_statement)?;
     Ok(select_statement)
 }
 
 impl ImpliedTableExpansion for SelectStatement {
     fn expand_implied_tables(
-        self,
+        &mut self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
-    ) -> ReadySetResult<Self> {
+    ) -> ReadySetResult<&mut Self> {
         rewrite_select(self, table_columns)
     }
 }
 
 impl ImpliedTableExpansion for SqlQuery {
     fn expand_implied_tables(
-        self,
+        &mut self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
-    ) -> ReadySetResult<SqlQuery> {
-        Ok(match self {
-            SqlQuery::CreateTable(..) => self,
-            SqlQuery::CompoundSelect(mut csq) => {
-                csq.selects = csq
-                    .selects
-                    .into_iter()
-                    .map(|(op, sq)| Ok((op, rewrite_select(sq, table_columns)?)))
-                    .collect::<ReadySetResult<Vec<_>>>()?;
-                SqlQuery::CompoundSelect(csq)
+    ) -> ReadySetResult<&mut SqlQuery> {
+        match self {
+            SqlQuery::CreateTable(..) => {}
+            SqlQuery::CompoundSelect(csq) => {
+                for (_op, select) in &mut csq.selects {
+                    rewrite_select(select, table_columns)?;
+                }
             }
-            SqlQuery::Select(sq) => SqlQuery::Select(sq.expand_implied_tables(table_columns)?),
-            SqlQuery::Insert(mut iq) => {
+            SqlQuery::Select(sq) => {
+                sq.expand_implied_tables(table_columns)?;
+            }
+            SqlQuery::Insert(iq) => {
                 let table = iq.table.clone();
-                // Expand within field list
-                iq.fields = iq
-                    .fields
-                    .into_iter()
-                    .map(|c| Column {
-                        table: Some(c.table.unwrap_or_else(|| table.clone())),
-                        ..c
-                    })
-                    .collect();
-
-                SqlQuery::Insert(iq)
+                for field in &mut iq.fields {
+                    if field.table.is_none() {
+                        field.table = Some(table.clone());
+                    }
+                }
             }
-            _ => internal!(),
-        })
+            _ => internal!("Unexpected query type expanding implied tables"),
+        }
+        Ok(self)
     }
 }
 
@@ -292,8 +286,9 @@ mod tests {
             vec!["id".into(), "title".into(), "text".into(), "author".into()],
         );
 
-        let res = SqlQuery::Select(q).expand_implied_tables(&schema).unwrap();
-        match res {
+        let mut rewritten = SqlQuery::Select(q);
+        rewritten.expand_implied_tables(&schema).unwrap();
+        match rewritten {
             SqlQuery::Select(tq) => {
                 assert_eq!(
                     tq.fields,
@@ -318,7 +313,7 @@ mod tests {
 
     #[test]
     fn doesnt_expand_order_referencing_projected_field() {
-        let orig = parse_query(
+        let mut q = parse_query(
             Dialect::MySQL,
             "select value in (2, 3) as value from t1 order by value;",
         )
@@ -332,13 +327,13 @@ mod tests {
 
         let schema = HashMap::from([("t1".into(), vec!["id".into(), "value".into()])]);
 
-        let res = orig.expand_implied_tables(&schema).unwrap();
-        assert_eq!(res, expected);
+        q.expand_implied_tables(&schema).unwrap();
+        assert_eq!(q, expected);
     }
 
     #[test]
     fn in_where() {
-        let orig = parse_query(Dialect::MySQL, "SELECT name FROM users WHERE id = ?").unwrap();
+        let mut q = parse_query(Dialect::MySQL, "SELECT name FROM users WHERE id = ?").unwrap();
         let expected = parse_query(
             Dialect::MySQL,
             "SELECT users.name FROM users WHERE users.id = ?",
@@ -346,13 +341,13 @@ mod tests {
         .unwrap();
         let schema = HashMap::from([("users".into(), vec!["id".into(), "name".into()])]);
 
-        let res = orig.expand_implied_tables(&schema).unwrap();
-        assert_eq!(res, expected);
+        q.expand_implied_tables(&schema).unwrap();
+        assert_eq!(q, expected);
     }
 
     #[test]
     fn case_when() {
-        let orig = parse_query(
+        let mut q = parse_query(
             Dialect::MySQL,
             "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS count
              FROM votes GROUP BY votes.userid",
@@ -366,13 +361,13 @@ mod tests {
         .unwrap();
         let schema = HashMap::from([("votes".into(), vec!["aid".into(), "userid".into()])]);
 
-        let res = orig.expand_implied_tables(&schema).unwrap();
-        assert_eq!(res, expected);
+        q.expand_implied_tables(&schema).unwrap();
+        assert_eq!(q, expected);
     }
 
     #[test]
     fn in_cte() {
-        let orig = parse_query(
+        let mut q = parse_query(
             Dialect::MySQL,
             "With votes AS (SELECT COUNT(id) as id_count, story_id FROM votes GROUP BY story_id )
              SELECT title FROM stories JOIN votes ON stories.id = votes.story_id",
@@ -390,13 +385,13 @@ Dialect::MySQL,
             ("stories".into(), vec!["id".into(), "title".into()]),
         ]);
 
-        let res = orig.expand_implied_tables(&schema).unwrap();
-        assert_eq!(res, expected);
+        q.expand_implied_tables(&schema).unwrap();
+        assert_eq!(q, expected);
     }
 
     #[test]
     fn referencing_cte() {
-        let orig = parse_query(
+        let mut q = parse_query(
             Dialect::MySQL,
             "With votes AS (SELECT COUNT(id) as count, story_id FROM votes GROUP BY story_id )
              SELECT count, title FROM stories JOIN votes ON stories.id = votes.story_id",
@@ -413,19 +408,19 @@ Dialect::MySQL,
             ("stories".into(), vec!["id".into(), "title".into()]),
         ]);
 
-        let res = orig.expand_implied_tables(&schema).unwrap();
+        q.expand_implied_tables(&schema).unwrap();
         assert_eq!(
-            res,
+            q,
             expected,
             "{} != {}",
-            res.display(readyset_sql::Dialect::MySQL),
+            q.display(readyset_sql::Dialect::MySQL),
             expected.display(readyset_sql::Dialect::MySQL)
         );
     }
 
     #[test]
     fn non_schema_qualified_column() {
-        let orig = parse_query(Dialect::MySQL, "SELECT votes.id from s1.votes").unwrap();
+        let mut q = parse_query(Dialect::MySQL, "SELECT votes.id from s1.votes").unwrap();
         let expected = parse_query(Dialect::MySQL, "SELECT s1.votes.id FROM s1.votes").unwrap();
         let schema = [(
             Relation {
@@ -435,20 +430,19 @@ Dialect::MySQL,
             vec!["id".into()],
         )]
         .into();
-        let res = orig.expand_implied_tables(&schema).unwrap();
-
+        q.expand_implied_tables(&schema).unwrap();
         assert_eq!(
-            res,
+            q,
             expected,
             "\n{} != {}",
-            res.display(readyset_sql::Dialect::MySQL),
+            q.display(readyset_sql::Dialect::MySQL),
             expected.display(readyset_sql::Dialect::MySQL)
         );
     }
 
     #[test]
     fn ambiguous_non_schema_qualified_table_reference() {
-        let orig = parse_query(Dialect::MySQL, "SELECT t.id from s1.t, s2.t").unwrap();
+        let mut q = parse_query(Dialect::MySQL, "SELECT t.id from s1.t, s2.t").unwrap();
         let schema = [
             (
                 Relation {
@@ -466,12 +460,12 @@ Dialect::MySQL,
             ),
         ]
         .into();
-        orig.expand_implied_tables(&schema).unwrap_err();
+        q.expand_implied_tables(&schema).unwrap_err();
     }
 
     #[test]
     fn votes() {
-        let orig = parse_query(
+        let mut q = parse_query(
             Dialect::MySQL,
             "SELECT id, author, title, url, vcount
             FROM stories
@@ -508,19 +502,19 @@ Dialect::MySQL,
             ),
         ]
         .into();
-        let res = orig.expand_implied_tables(&schema).unwrap();
+        q.expand_implied_tables(&schema).unwrap();
         assert_eq!(
-            res,
+            q,
             expected,
             "\n left: {}\nright: {}",
-            res.display(readyset_sql::Dialect::MySQL),
+            q.display(readyset_sql::Dialect::MySQL),
             expected.display(readyset_sql::Dialect::MySQL)
         );
     }
 
     #[test]
     fn column_referencing_aliased_table() {
-        let orig = parse_query(
+        let mut q = parse_query(
             Dialect::MySQL,
             "SELECT bl.time, bl.name, s.ip, s.port
              FROM sb_banlog AS bl
@@ -558,29 +552,29 @@ Dialect::MySQL,
         ]
         .into();
 
-        let res = orig.expand_implied_tables(&schema).unwrap();
+        q.expand_implied_tables(&schema).unwrap();
         assert_eq!(
-            res,
+            q,
             expected,
             "\n left: {}\nright: {}",
-            res.display(readyset_sql::Dialect::MySQL),
+            q.display(readyset_sql::Dialect::MySQL),
             expected.display(readyset_sql::Dialect::MySQL)
         );
     }
 
     #[test]
     fn select_from_subquery() {
-        let orig = parse_query(Dialect::MySQL, "SELECT x FROM (SELECT x FROM t1) sq").unwrap();
+        let mut q = parse_query(Dialect::MySQL, "SELECT x FROM (SELECT x FROM t1) sq").unwrap();
         let expected =
             parse_query(Dialect::MySQL, "SELECT sq.x FROM (SELECT t1.x FROM t1) sq").unwrap();
         let schema = [(Relation::from("t1"), vec!["x".into()])].into();
 
-        let res = orig.expand_implied_tables(&schema).unwrap();
+        q.expand_implied_tables(&schema).unwrap();
         assert_eq!(
-            res,
+            q,
             expected,
             "\n left: {}\nright: {}",
-            res.display(readyset_sql::Dialect::MySQL),
+            q.display(readyset_sql::Dialect::MySQL),
             expected.display(readyset_sql::Dialect::MySQL)
         );
     }
