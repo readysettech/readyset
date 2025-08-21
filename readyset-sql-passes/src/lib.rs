@@ -167,7 +167,8 @@ impl Rewrite for SelectStatement {
     fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
         let query_name = context.query_name.unwrap_or("unknown");
 
-        self.rewrite_between()
+        let mut s = self
+            .rewrite_between()
             .disallow_row()?
             .validate_window_functions()?
             .scalar_optimize_expressions(context.dialect)
@@ -183,8 +184,9 @@ impl Rewrite for SelectStatement {
             .normalize_topk_with_aggregate()?
             .detect_problematic_self_joins()?
             .remove_numeric_field_references()?
-            .order_limit_removal(&context.base_schemas)?
-            .rewrite_table_aliases(query_name, context.table_alias_rewrites.as_deref_mut())
+            .order_limit_removal(&context.base_schemas)?;
+        s.rewrite_table_aliases(query_name, context.table_alias_rewrites.as_deref_mut())?;
+        Ok(s)
     }
 }
 
