@@ -40,26 +40,24 @@ pub trait DisallowRow {
     /// ```sql
     /// SELECT * FROM t WHERE (id, name) IN ((1, 'foo'), (2, 'bar')); -- This is allowed
     /// ```
-    fn disallow_row(self) -> ReadySetResult<Self>
+    fn disallow_row(&mut self) -> ReadySetResult<&mut Self>
     where
         Self: Sized;
 }
 
 impl DisallowRow for SelectStatement {
-    fn disallow_row(mut self) -> ReadySetResult<Self> {
-        DisallowRowVisitor
-            .visit_select_statement(&mut self)
-            .map(|_| self)
+    fn disallow_row(&mut self) -> ReadySetResult<&mut Self> {
+        let () = DisallowRowVisitor.visit_select_statement(self)?;
+        Ok(self)
     }
 }
 
 impl DisallowRow for SqlQuery {
-    fn disallow_row(self) -> ReadySetResult<Self> {
+    fn disallow_row(&mut self) -> ReadySetResult<&mut Self> {
         if let SqlQuery::Select(select) = self {
-            Ok(SqlQuery::Select(select.disallow_row()?))
-        } else {
-            Ok(self)
+            select.disallow_row()?;
         }
+        Ok(self)
     }
 }
 
@@ -71,20 +69,21 @@ mod tests {
 
     #[test]
     fn test_disallow_row_in_projection() {
-        let query = parse_query(Dialect::PostgreSQL, "SELECT ROW(1, 2, 3) FROM things;").unwrap();
+        let mut query =
+            parse_query(Dialect::PostgreSQL, "SELECT ROW(1, 2, 3) FROM things;").unwrap();
         assert!(query.disallow_row().is_err());
     }
 
     #[test]
     fn test_allow_row_elsewhere() {
-        let query = parse_query(
+        let mut query = parse_query(
             Dialect::MySQL,
             "SELECT * FROM things WHERE (id, name) IN ((1, 'foo'), (2, 'bar'));",
         )
         .unwrap();
         assert!(query.disallow_row().is_ok());
 
-        let query = parse_query(
+        let mut query = parse_query(
             Dialect::PostgreSQL,
             "SELECT * FROM things WHERE (id, name) IN ((1, 'foo'), (2, 'bar'));",
         )
