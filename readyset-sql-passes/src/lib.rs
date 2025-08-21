@@ -150,14 +150,14 @@ pub trait Rewrite: Sized {
 }
 
 impl Rewrite for CreateTableStatement {
-    fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
+    fn rewrite(mut self, context: &mut RewriteContext) -> ReadySetResult<Self> {
+        self.resolve_schemas(
+            context.tables(),
+            context.custom_types,
+            context.search_path,
+            context.invalidating_tables.as_deref_mut(),
+        )?;
         Ok(self
-            .resolve_schemas(
-                context.tables(),
-                context.custom_types,
-                context.search_path,
-                context.invalidating_tables.as_deref_mut(),
-            )?
             .normalize_create_table_columns()
             .coalesce_key_definitions())
     }
@@ -171,21 +171,21 @@ impl Rewrite for SelectStatement {
             .rewrite_between()
             .disallow_row()?
             .validate_window_functions()?
-            .scalar_optimize_expressions(context.dialect)
-            .resolve_schemas(
-                context.tables(),
-                context.custom_types,
-                context.search_path,
-                context.invalidating_tables.as_deref_mut(),
-            )?;
-        s.expand_stars(context.view_schemas, context.non_replicated_relations)?
-            .expand_implied_tables(context.view_schemas)?
-            .rewrite_lateral_joins()?
-            .normalize_topk_with_aggregate()?
-            .detect_problematic_self_joins()?
-            .remove_numeric_field_references()?
-            .order_limit_removal(&context.base_schemas)?
-            .rewrite_table_aliases(query_name, context.table_alias_rewrites.as_deref_mut())?;
+            .scalar_optimize_expressions(context.dialect);
+        s.resolve_schemas(
+            context.tables(),
+            context.custom_types,
+            context.search_path,
+            context.invalidating_tables.as_deref_mut(),
+        )?
+        .expand_stars(context.view_schemas, context.non_replicated_relations)?
+        .expand_implied_tables(context.view_schemas)?
+        .rewrite_lateral_joins()?
+        .normalize_topk_with_aggregate()?
+        .detect_problematic_self_joins()?
+        .remove_numeric_field_references()?
+        .order_limit_removal(&context.base_schemas)?
+        .rewrite_table_aliases(query_name, context.table_alias_rewrites.as_deref_mut())?;
         Ok(s)
     }
 }

@@ -272,22 +272,22 @@ pub trait ResolveSchemas: Sized {
     /// * Any unqualified references to aliases for tables (including CTEs) will not be rewritten,
     ///   as they should take precedence over tables in the database
     fn resolve_schemas<'schema>(
-        self,
+        &mut self,
         tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
         custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
         invalidating_tables: Option<&'schema mut Vec<Relation>>,
-    ) -> ReadySetResult<Self>;
+    ) -> ReadySetResult<&mut Self>;
 }
 
 impl ResolveSchemas for SelectStatement {
     fn resolve_schemas<'schema>(
-        mut self,
+        &mut self,
         tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
         custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
         invalidating_tables: Option<&'schema mut Vec<Relation>>,
-    ) -> ReadySetResult<Self> {
+    ) -> ReadySetResult<&mut Self> {
         ResolveSchemaVisitor {
             tables,
             custom_types,
@@ -295,19 +295,19 @@ impl ResolveSchemas for SelectStatement {
             alias_stack: Default::default(),
             invalidating_tables,
         }
-        .visit_select_statement(&mut self)?;
+        .visit_select_statement(self)?;
         Ok(self)
     }
 }
 
 impl ResolveSchemas for CreateTableStatement {
     fn resolve_schemas<'schema>(
-        mut self,
+        &mut self,
         tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
         custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
         invalidating_tables: Option<&'schema mut Vec<Relation>>,
-    ) -> ReadySetResult<Self> {
+    ) -> ReadySetResult<&mut Self> {
         ResolveSchemaVisitor {
             tables,
             custom_types,
@@ -315,7 +315,7 @@ impl ResolveSchemas for CreateTableStatement {
             alias_stack: Default::default(),
             invalidating_tables,
         }
-        .visit_create_table_statement(&mut self)?;
+        .visit_create_table_statement(self)?;
 
         Ok(self)
     }
@@ -341,41 +341,40 @@ mod tests {
     ) where
         S: Debug + PartialEq + ResolveSchemas,
     {
-        let input = parser(input);
+        let mut q = parser(input);
         let expected = parser(expected);
-        let result = input
-            .resolve_schemas(
-                HashMap::from([
-                    (
-                        &"s1".into(),
-                        HashMap::from([
-                            (&"t1".into(), CanQuery::Yes),
-                            (&"t2".into(), CanQuery::Yes),
-                            (&"t_ignored".into(), CanQuery::No),
-                        ]),
-                    ),
-                    (
-                        &"s2".into(),
-                        HashMap::from([
-                            (&"t1".into(), CanQuery::Yes),
-                            (&"t2".into(), CanQuery::Yes),
-                            (&"t3".into(), CanQuery::Yes),
-                        ]),
-                    ),
-                    (&"s3".into(), HashMap::from([(&"t4".into(), CanQuery::Yes)])),
-                ]),
-                &HashMap::from([(&"s2".into(), HashSet::from([&"abc".into()]))]),
-                &["s1".into(), "s2".into()],
-                None,
-            )
-            .unwrap();
+        q.resolve_schemas(
+            HashMap::from([
+                (
+                    &"s1".into(),
+                    HashMap::from([
+                        (&"t1".into(), CanQuery::Yes),
+                        (&"t2".into(), CanQuery::Yes),
+                        (&"t_ignored".into(), CanQuery::No),
+                    ]),
+                ),
+                (
+                    &"s2".into(),
+                    HashMap::from([
+                        (&"t1".into(), CanQuery::Yes),
+                        (&"t2".into(), CanQuery::Yes),
+                        (&"t3".into(), CanQuery::Yes),
+                    ]),
+                ),
+                (&"s3".into(), HashMap::from([(&"t4".into(), CanQuery::Yes)])),
+            ]),
+            &HashMap::from([(&"s2".into(), HashSet::from([&"abc".into()]))]),
+            &["s1".into(), "s2".into()],
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
-            result,
+            q,
             expected,
             "\nExpected: {expected}\n     Got: {result}",
             expected = result_to_string(&expected),
-            result = result_to_string(&result),
+            result = result_to_string(&q),
         );
     }
 
@@ -511,16 +510,15 @@ mod tests {
 
     #[test]
     fn writes_to_invalidating_tables() {
-        let input = parse_select_statement("select * from t");
+        let mut q = parse_select_statement("select * from t");
         let mut invalidating_tables = vec![];
-        let _result = input
-            .resolve_schemas(
-                HashMap::from([(&"s2".into(), HashMap::from([(&"t".into(), CanQuery::Yes)]))]),
-                &HashMap::new(),
-                &["s1".into(), "s2".into()],
-                Some(&mut invalidating_tables),
-            )
-            .unwrap();
+        q.resolve_schemas(
+            HashMap::from([(&"s2".into(), HashMap::from([(&"t".into(), CanQuery::Yes)]))]),
+            &HashMap::new(),
+            &["s1".into(), "s2".into()],
+            Some(&mut invalidating_tables),
+        )
+        .unwrap();
 
         assert_eq!(
             invalidating_tables,
@@ -533,8 +531,8 @@ mod tests {
 
     #[test]
     fn cant_query_returns_error() {
-        let input = parse_select_statement("select * from t");
-        let result = input.resolve_schemas(
+        let mut q = parse_select_statement("select * from t");
+        let result = q.resolve_schemas(
             HashMap::from([
                 (&"s1".into(), HashMap::from([(&"t".into(), CanQuery::No)])),
                 (&"s2".into(), HashMap::from([(&"t".into(), CanQuery::Yes)])),
@@ -555,19 +553,18 @@ mod tests {
 
     #[test]
     fn unresolved_cant_query_works() {
-        let input = parse_select_statement("select * from t");
-        let result = input
-            .resolve_schemas(
-                HashMap::from([
-                    (&"s1".into(), HashMap::from([(&"t".into(), CanQuery::Yes)])),
-                    (&"s2".into(), HashMap::from([(&"t".into(), CanQuery::No)])),
-                ]),
-                &HashMap::new(),
-                &["s1".into(), "s2".into()],
-                None,
-            )
-            .unwrap();
-        assert_eq!(result, parse_select_statement("select * from s1.t"));
+        let mut q = parse_select_statement("select * from t");
+        q.resolve_schemas(
+            HashMap::from([
+                (&"s1".into(), HashMap::from([(&"t".into(), CanQuery::Yes)])),
+                (&"s2".into(), HashMap::from([(&"t".into(), CanQuery::No)])),
+            ]),
+            &HashMap::new(),
+            &["s1".into(), "s2".into()],
+            None,
+        )
+        .unwrap();
+        assert_eq!(q, parse_select_statement("select * from s1.t"));
     }
 
     #[test]
