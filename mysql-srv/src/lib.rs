@@ -561,9 +561,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             io::Error::other("peer terminated connection before sending bytes")
         })?;
 
-        // Peek at the first 4 bytes (the capabilities flags) without consuming them
-        let capabilities = &packet.data[..4];
-        if commands::is_ssl_request(capabilities)
+        if commands::is_ssl_request(&packet.data)
             .map_err(|_| io::Error::other("invalid client capabilities flags in the handshake"))?
             .1
         {
