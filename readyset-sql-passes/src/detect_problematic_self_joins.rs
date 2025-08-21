@@ -19,7 +19,7 @@ pub trait DetectProblematicSelfJoins: Sized {
     /// This must be run after the following rewrite passes:
     /// - [`expand_implied_tables`](super::ImpliedTableExpansion::expand_implied_tables)
     /// - [`expand_stars`](super::StarExpansion::expand_stars)
-    fn detect_problematic_self_joins(self) -> ReadySetResult<Self>;
+    fn detect_problematic_self_joins(&mut self) -> ReadySetResult<&mut Self>;
 }
 
 fn check_select_statement<'a>(
@@ -239,14 +239,14 @@ fn check_select_statement<'a>(
 }
 
 impl DetectProblematicSelfJoins for SelectStatement {
-    fn detect_problematic_self_joins(self) -> ReadySetResult<Self> {
-        check_select_statement(&self, &HashMap::new())?;
+    fn detect_problematic_self_joins(&mut self) -> ReadySetResult<&mut Self> {
+        check_select_statement(&*self, &HashMap::new())?;
         Ok(self)
     }
 }
 
 impl DetectProblematicSelfJoins for SqlQuery {
-    fn detect_problematic_self_joins(self) -> ReadySetResult<Self> {
+    fn detect_problematic_self_joins(&mut self) -> ReadySetResult<&mut Self> {
         match &self {
             SqlQuery::Select(stmt) => {
                 check_select_statement(stmt, &HashMap::new())?;
@@ -273,7 +273,7 @@ mod tests {
         use super::*;
 
         fn is_unsupported(query_str: &str) {
-            let query = parse_query(Dialect::MySQL, query_str).unwrap();
+            let mut query = parse_query(Dialect::MySQL, query_str).unwrap();
             let res = query.detect_problematic_self_joins();
             assert!(res.is_err());
             let err = res.err().unwrap();
@@ -375,9 +375,9 @@ mod tests {
 
         fn is_supported(query_str: &str) {
             let query = parse_query(Dialect::MySQL, query_str).unwrap();
-            let res = query.clone().detect_problematic_self_joins();
-            assert!(res.is_ok());
-            assert_eq!(res.unwrap(), query);
+            let mut rewritten = query.clone();
+            rewritten.detect_problematic_self_joins().unwrap();
+            assert_eq!(rewritten, query);
         }
 
         #[test]
