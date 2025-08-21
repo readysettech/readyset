@@ -23,8 +23,7 @@ pub trait RewriteBetween {
     ///
     /// Invariant: The return value will have no recursive subexpressions of type
     /// [`Expr::Between`]
-    #[must_use]
-    fn rewrite_between(self) -> Self;
+    fn rewrite_between(&mut self) -> &mut Self;
 }
 
 fn rewrite_between_condition(operand: Expr, min: Expr, max: Expr) -> Expr {
@@ -82,29 +81,29 @@ impl<'ast> VisitorMut<'ast> for RewriteBetweenVisitor {
 }
 
 impl RewriteBetween for SelectStatement {
-    fn rewrite_between(mut self) -> Self {
-        let Ok(()) = RewriteBetweenVisitor.visit_select_statement(&mut self);
+    fn rewrite_between(&mut self) -> &mut Self {
+        let Ok(()) = RewriteBetweenVisitor.visit_select_statement(self);
         self
     }
 }
 
 impl RewriteBetween for DeleteStatement {
-    fn rewrite_between(mut self) -> Self {
-        let Ok(()) = RewriteBetweenVisitor.visit_delete_statement(&mut self);
+    fn rewrite_between(&mut self) -> &mut Self {
+        let Ok(()) = RewriteBetweenVisitor.visit_delete_statement(self);
         self
     }
 }
 
 impl RewriteBetween for UpdateStatement {
-    fn rewrite_between(mut self) -> Self {
-        let Ok(()) = RewriteBetweenVisitor.visit_update_statement(&mut self);
+    fn rewrite_between(&mut self) -> &mut Self {
+        let Ok(()) = RewriteBetweenVisitor.visit_update_statement(self);
         self
     }
 }
 
 impl RewriteBetween for SqlQuery {
-    fn rewrite_between(mut self) -> Self {
-        let Ok(()) = RewriteBetweenVisitor.visit_sql_query(&mut self);
+    fn rewrite_between(&mut self) -> &mut Self {
+        let Ok(()) = RewriteBetweenVisitor.visit_sql_query(self);
         self
     }
 }
@@ -118,7 +117,7 @@ mod tests {
 
     #[test]
     fn test_rewrite_top_level_between_in_select() {
-        let query = parse_query(
+        let mut query = parse_query(
             Dialect::MySQL,
             "SELECT id FROM things WHERE frobulation BETWEEN 10 AND 17;",
         )
@@ -128,12 +127,12 @@ mod tests {
             "SELECT id FROM things WHERE frobulation >= 10 AND frobulation <= 17;",
         )
         .unwrap();
-        let result = query.rewrite_between();
+        query.rewrite_between();
         assert_eq!(
-            result,
+            query,
             expected,
             "result = {}",
-            result.display(readyset_sql::Dialect::MySQL)
+            query.display(readyset_sql::Dialect::MySQL)
         );
     }
 }

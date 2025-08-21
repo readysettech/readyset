@@ -164,11 +164,11 @@ impl Rewrite for CreateTableStatement {
 }
 
 impl Rewrite for SelectStatement {
-    fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
+    fn rewrite(mut self, context: &mut RewriteContext) -> ReadySetResult<Self> {
         let query_name = context.query_name.unwrap_or("unknown");
 
-        let mut s = self.rewrite_between();
-        s.disallow_row()?
+        self.rewrite_between()
+            .disallow_row()?
             .validate_window_functions()?
             .scalar_optimize_expressions(context.dialect)
             .resolve_schemas(
@@ -185,7 +185,8 @@ impl Rewrite for SelectStatement {
             .remove_numeric_field_references()?
             .order_limit_removal(&context.base_schemas)?
             .rewrite_table_aliases(query_name, context.table_alias_rewrites.as_deref_mut())?;
-        Ok(s)
+
+        Ok(self)
     }
 }
 
