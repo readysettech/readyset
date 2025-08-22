@@ -84,7 +84,7 @@ use rand::Rng;
 use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
-use readyset_client::{KeyComparison, TableStatus};
+use readyset_client::{KeyComparison, TableStatus, TABLE_STATUS_REPORT_INTERVAL};
 use readyset_data::{Bound, BoundedRange, DfValue};
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{Relation, SqlIdentifier};
@@ -1768,14 +1768,40 @@ impl PersistentState {
         self.db.clone()
     }
 
-    fn index_progress(&self, started: Instant, last: &mut Instant, rows: usize, estimated: usize) {
+    fn index_progress(
+        &self,
+        started: Instant,
+        last_log: &mut Instant,
+        last_status: &mut Instant,
+        rows: usize,
+        estimated: usize,
+    ) {
+        fn progress(rows: usize, estimated: usize) -> f64 {
+            ((rows as f64) / (estimated.max(1) as f64)).clamp(0.0, 0.9999)
+        }
+
+        if let (Some(table), Some(table_status_tx)) = (&self.table, &self.table_status_tx) {
+            if last_status.elapsed() >= TABLE_STATUS_REPORT_INTERVAL {
+                let progress = progress(rows, estimated) * 100.0;
+                if let Err(err) = table_status_tx
+                    .send((table.clone(), TableStatus::CreatingIndex(Some(progress))))
+                {
+                    debug!(
+                        error = %err,
+                        table = %table.display_unquoted(),
+                        "Failed to notify controller of indexing progress",
+                    );
+                }
+                *last_status = Instant::now();
+            }
+        }
         const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
-        if last.elapsed() < PROGRESS_INTERVAL {
+        if last_log.elapsed() < PROGRESS_INTERVAL {
             return;
         }
-        *last += PROGRESS_INTERVAL;
+        *last_log += PROGRESS_INTERVAL;
 
-        let progress = ((rows as f64) / (estimated.max(1) as f64)).clamp(0.0, 1.0);
+        let progress = progress(rows, estimated);
         let running = started.elapsed().as_secs_f64();
         let total = running / progress;
         let left = (total - running) as u64;
@@ -1783,7 +1809,7 @@ impl PersistentState {
         let mins = left / 60 % 60;
         let secs = left % 60;
 
-        let progress = format!("{:.1}%", progress * 100.0);
+        let progress = format!("{:.2}%", progress * 100.0);
         let left = format!("{hours:02}:{mins:02}:{secs:02}");
 
         info!(
@@ -1977,7 +2003,8 @@ impl PersistentState {
 
             let started = Instant::now();
             let estimated = self.row_count();
-            let mut last_progress = started;
+            let mut last_log = started;
+            let mut last_status = started;
             let mut indexed = 0;
 
             while let (Some(pk), Some(value)) = (iter.key(), iter.value()) {
@@ -1990,7 +2017,7 @@ impl PersistentState {
                 }
 
                 indexed += 1;
-                self.index_progress(started, &mut last_progress, indexed, estimated);
+                self.index_progress(started, &mut last_log, &mut last_status, indexed, estimated);
                 iter.next();
             }
 
