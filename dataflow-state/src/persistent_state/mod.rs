@@ -80,6 +80,7 @@ use clap::ValueEnum;
 use common::{IndexType, Record, Records, SizeOf, Tag};
 pub use handle::PersistentStateHandle;
 use handle::{PersistentStateReadGuard, PersistentStateWriteGuard};
+use notify::Watcher;
 use rand::Rng;
 use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
@@ -1287,14 +1288,28 @@ struct RunningCompactionGuard {
     name: SqlIdentifier,
     table: Option<Relation>,
     table_status_tx: Option<UnboundedSender<(Relation, TableStatus)>>,
+    _watcher_guard: Option<Box<dyn Watcher + Send + Sync>>,
 }
 
 impl RunningCompactionGuard {
-    fn new(state: &PersistentState) -> Arc<Self> {
+    fn new(state: &PersistentState, index_count: usize) -> Arc<Self> {
+        let name = state.name.clone();
+        let watcher = match compaction_progress_watcher(
+            &name,
+            &state.read_handle().inner().db,
+            index_count,
+        ) {
+            Ok(watcher) => Some(Box::new(watcher) as Box<dyn Watcher + Send + Sync>),
+            Err(err) => {
+                warn!(table = %name, "Could not start compaction monitor: {err}");
+                None
+            }
+        };
         Arc::new(Self {
-            name: state.name.clone(),
+            name,
             table: state.table.clone(),
             table_status_tx: state.table_status_tx.clone(),
+            _watcher_guard: watcher,
         })
     }
 }
@@ -1320,11 +1335,15 @@ impl Drop for RunningCompactionGuard {
 // to get accurate progress stats is from reading the DB LOG directly. This is very
 // fragile, as it depends on the LOG format not changing, and if it does the report
 // will be less accurate or not work at all. This is however not critical.
-fn compaction_progress_watcher(table_name: &str, db: &DB) -> anyhow::Result<impl notify::Watcher> {
+fn compaction_progress_watcher(
+    table_name: &str,
+    db: &DB,
+    index_count: usize,
+) -> anyhow::Result<impl Watcher> {
     use std::fs::File;
     use std::io::{Seek, SeekFrom};
 
-    use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+    use notify::{Config, RecommendedWatcher, RecursiveMode};
 
     // We open the LOG file, skip to the end, and begin watching for change events
     // on it in order to get the latest log entries as they come
@@ -1407,11 +1426,11 @@ fn compaction_progress_watcher(table_name: &str, db: &DB) -> anyhow::Result<impl
                 if last_report.elapsed() > REPORT_INTERVAL {
                     let first_stage = format!(
                         "{:.2}%",
-                        (first_stage_keys as f64 / row_count as f64) * 100.0
+                        (first_stage_keys as f64 / index_count as f64 / row_count as f64) * 100.0
                     );
                     let second_stage = format!(
                         "{:.2}%",
-                        (second_stage_keys as f64 / row_count as f64) * 100.0
+                        (second_stage_keys as f64 / index_count as f64 / row_count as f64) * 100.0
                     );
                     info!(%table, %first_stage, %second_stage, "Compaction");
                     last_report = Instant::now();
@@ -1444,11 +1463,6 @@ fn compact_cf(name: &str, db: &DB, index: &PersistentIndex, opts: &CompactOption
             return;
         }
     };
-
-    let _log_watcher = compaction_progress_watcher(name, db);
-    if let Err(error) = &_log_watcher {
-        warn!(%error, table = %name, "Could not start compaction monitor");
-    }
 
     info!(table = %name, cf = %index.column_family, "Compaction starting");
     db.compact_range_cf_opt(cf, Option::<&[u8]>::None, Option::<&[u8]>::None, opts);
@@ -2038,7 +2052,7 @@ impl PersistentState {
                 );
             }
         }
-        let compaction_guard = RunningCompactionGuard::new(self);
+        let compaction_guard = RunningCompactionGuard::new(self, indices.len());
         new.into_iter()
             .map(|p| self.compact_index(p, compaction_guard.clone()))
             .collect()
@@ -2231,7 +2245,7 @@ impl PersistentState {
     /// Perform a manual compaction for each column family.
     fn compact_all_indices(&mut self) {
         let indices = self.db.inner().shared_state.indices.to_vec();
-        let compaction_guard = RunningCompactionGuard::new(self);
+        let compaction_guard = RunningCompactionGuard::new(self, indices.len());
         for index in indices {
             let thr = self.compact_index(index, compaction_guard.clone());
             self.push_compaction_thread(thr);
