@@ -1294,10 +1294,14 @@ struct RunningCompactionGuard {
 impl RunningCompactionGuard {
     fn new(state: &PersistentState, index_count: usize) -> Arc<Self> {
         let name = state.name.clone();
+        let table = state.table.clone();
+        let table_status_tx = state.table_status_tx.clone();
         let watcher = match compaction_progress_watcher(
             &name,
             &state.read_handle().inner().db,
             index_count,
+            table.clone(),
+            table_status_tx.clone(),
         ) {
             Ok(watcher) => Some(Box::new(watcher) as Box<dyn Watcher + Send + Sync>),
             Err(err) => {
@@ -1307,8 +1311,8 @@ impl RunningCompactionGuard {
         };
         Arc::new(Self {
             name,
-            table: state.table.clone(),
-            table_status_tx: state.table_status_tx.clone(),
+            table,
+            table_status_tx,
             _watcher_guard: watcher,
         })
     }
@@ -1339,6 +1343,8 @@ fn compaction_progress_watcher(
     table_name: &str,
     db: &DB,
     index_count: usize,
+    table_for_status: Option<Relation>,
+    table_status_tx: Option<UnboundedSender<(Relation, TableStatus)>>,
 ) -> anyhow::Result<impl Watcher> {
     use std::fs::File;
     use std::io::{Seek, SeekFrom};
@@ -1365,12 +1371,17 @@ fn compaction_progress_watcher(
     log_watcher.watch(log_path.as_ref(), RecursiveMode::NonRecursive)?;
 
     let mut monitor = move || -> anyhow::Result<()> {
+        fn percent(progress: usize, total: usize, index_count: usize) -> f64 {
+            ((progress as f64 / index_count as f64 / total as f64) * 100.0).clamp(0.0, 99.99)
+        }
+
         const REPORT_INTERVAL: Duration = Duration::from_secs(1);
         let mut compaction_started = false;
         let mut buf = String::new();
         let mut first_stage_keys = 0;
         let mut second_stage_keys = 0;
-        let mut last_report = Instant::now();
+        let mut last_log = Instant::now();
+        let mut last_status = Instant::now();
 
         // The thread will stop once the notifier drops
         while rx.recv().is_ok() {
@@ -1423,17 +1434,31 @@ fn compaction_progress_watcher(
                     }
                 }
 
-                if last_report.elapsed() > REPORT_INTERVAL {
-                    let first_stage = format!(
-                        "{:.2}%",
-                        (first_stage_keys as f64 / index_count as f64 / row_count as f64) * 100.0
-                    );
+                if let (Some(table), Some(table_status_tx)) = (&table_for_status, &table_status_tx)
+                {
+                    if last_status.elapsed() > TABLE_STATUS_REPORT_INTERVAL {
+                        let progress = percent(first_stage_keys, row_count, index_count);
+                        if let Err(err) = table_status_tx
+                            .send((table.clone(), TableStatus::Compacting(Some(progress))))
+                        {
+                            debug!(
+                                error = %err,
+                                table = %table.display_unquoted(),
+                                "Failed to notify controller of compaction progress",
+                            );
+                        }
+                        last_status = Instant::now();
+                    }
+                }
+                if last_log.elapsed() > REPORT_INTERVAL {
+                    let first_stage =
+                        format!("{:.2}%", percent(first_stage_keys, row_count, index_count));
                     let second_stage = format!(
                         "{:.2}%",
-                        (second_stage_keys as f64 / index_count as f64 / row_count as f64) * 100.0
+                        percent(second_stage_keys as usize, row_count, index_count)
                     );
                     info!(%table, %first_stage, %second_stage, "Compaction");
-                    last_report = Instant::now();
+                    last_log = Instant::now();
                 }
             }
             buf.clear();
