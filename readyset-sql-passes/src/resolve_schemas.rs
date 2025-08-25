@@ -12,6 +12,7 @@ use readyset_sql::ast::{
 };
 use std::collections::{HashMap, HashSet};
 use std::iter;
+use std::ops::DerefMut;
 
 struct ResolveSchemaVisitor<'schema> {
     /// Map from schema name to the set of table names in that schema
@@ -61,7 +62,7 @@ impl ResolveSchemaVisitor<'_> {
                     });
                 }
                 None => {
-                    if let Some(invalidating) = self.invalidating_tables.as_deref_mut() {
+                    if let Some(invalidating) = &mut self.invalidating_tables {
                         invalidating.push(Relation {
                             schema: Some(schema.clone()),
                             name: table.name.clone(),
@@ -275,7 +276,7 @@ pub trait ResolveSchemas: Sized {
         tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
         custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
-        invalidating_tables: Option<&'schema mut Vec<Relation>>,
+        invalidating_tables: Option<impl DerefMut<Target = Vec<Relation>>>,
     ) -> ReadySetResult<&mut Self>;
 }
 
@@ -285,14 +286,14 @@ impl ResolveSchemas for SelectStatement {
         tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
         custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
-        invalidating_tables: Option<&'schema mut Vec<Relation>>,
+        mut invalidating_tables: Option<impl DerefMut<Target = Vec<Relation>>>,
     ) -> ReadySetResult<&mut Self> {
         ResolveSchemaVisitor {
             tables,
             custom_types,
             search_path,
             alias_stack: Default::default(),
-            invalidating_tables,
+            invalidating_tables: invalidating_tables.as_deref_mut(),
         }
         .visit_select_statement(self)?;
         Ok(self)
@@ -305,14 +306,14 @@ impl ResolveSchemas for CreateTableStatement {
         tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
         custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
-        invalidating_tables: Option<&'schema mut Vec<Relation>>,
+        mut invalidating_tables: Option<impl DerefMut<Target = Vec<Relation>>>,
     ) -> ReadySetResult<&mut Self> {
         ResolveSchemaVisitor {
             tables,
             custom_types,
             search_path,
             alias_stack: Default::default(),
-            invalidating_tables,
+            invalidating_tables: invalidating_tables.as_deref_mut(),
         }
         .visit_create_table_statement(self)?;
 
@@ -323,7 +324,7 @@ impl ResolveSchemas for CreateTableStatement {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use std::fmt::Debug;
+    use std::{cell::RefMut, fmt::Debug};
 
     use readyset_sql::{Dialect, DialectDisplay};
     use readyset_sql_parsing::parse_create_table;
@@ -364,7 +365,7 @@ mod tests {
             ]),
             &HashMap::from([(&"s2".into(), HashSet::from([&"abc".into()]))]),
             &["s1".into(), "s2".into()],
-            None,
+            None::<RefMut<'static, Vec<Relation>>>,
         )
         .unwrap();
 
@@ -538,7 +539,7 @@ mod tests {
             ]),
             &HashMap::new(),
             &["s1".into(), "s2".into()],
-            None,
+            None::<RefMut<'static, Vec<Relation>>>,
         );
         let err = result.unwrap_err();
         assert_eq!(
@@ -560,7 +561,7 @@ mod tests {
             ]),
             &HashMap::new(),
             &["s1".into(), "s2".into()],
-            None,
+            None::<RefMut<'static, Vec<Relation>>>,
         )
         .unwrap();
         assert_eq!(q, parse_select_statement("select * from s1.t"));

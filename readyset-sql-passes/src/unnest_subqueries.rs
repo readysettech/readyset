@@ -111,12 +111,12 @@ pub(crate) struct UnnestContext<'a> {
 }
 
 pub trait UnnestSubqueries: Sized {
-    fn unnest_subqueries(&mut self, ctx: &RewriteContext) -> ReadySetResult<&mut Self>;
+    fn unnest_subqueries<C: RewriteContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self>;
 }
 
 impl UnnestSubqueries for SelectStatement {
-    fn unnest_subqueries(&mut self, ctx: &RewriteContext) -> ReadySetResult<&mut Self> {
-        let schema = <&RewriteContext<'_> as Into<NonNullSchemaImpl>>::into(ctx);
+    fn unnest_subqueries<C: RewriteContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self> {
+        let schema = NonNullSchemaImpl::from(ctx);
         if unnest_subqueries_main(self, &schema)?.has_rewrites() {
             trace!(target: "unnest_subqueries",
                 statement = %self.display(Dialect::PostgreSQL),
@@ -156,13 +156,13 @@ struct NonNullSchemaImpl {
     nonnull_schema: HashMap<Relation, HashSet<Column>>,
 }
 
-impl From<&RewriteContext<'_>> for NonNullSchemaImpl {
-    fn from(ctx: &RewriteContext<'_>) -> Self {
+impl<C: RewriteContext> From<C> for NonNullSchemaImpl {
+    fn from(ctx: C) -> Self {
         let mut schema = NonNullSchemaImpl {
             nonnull_schema: HashMap::new(),
         };
 
-        for (rel, body) in ctx.base_schemas.iter() {
+        for (rel, body) in ctx.base_schemas().iter() {
             let nonnull_cols = body
                 .fields
                 .iter()

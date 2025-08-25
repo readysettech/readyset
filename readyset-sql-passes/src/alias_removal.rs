@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::mem;
+use std::ops::DerefMut;
 
 use itertools::Itertools;
 use readyset_errors::ReadySetResult;
@@ -39,7 +40,7 @@ pub trait AliasRemoval: Sized {
     fn rewrite_table_aliases(
         &mut self,
         query_name: &str,
-        rewrites: Option<&mut Vec<TableAliasRewrite>>,
+        rewrites: Option<impl DerefMut<Target = Vec<TableAliasRewrite>>>,
     ) -> ReadySetResult<&mut Self>;
 }
 
@@ -198,7 +199,7 @@ impl AliasRemoval for SelectStatement {
     fn rewrite_table_aliases(
         &mut self,
         query_name: &str,
-        rewrites: Option<&mut Vec<TableAliasRewrite>>,
+        mut rewrites: Option<impl DerefMut<Target = Vec<TableAliasRewrite>>>,
     ) -> ReadySetResult<&mut Self> {
         let mut visitor = RemoveAliasesVisitor {
             query_name,
@@ -209,7 +210,7 @@ impl AliasRemoval for SelectStatement {
 
         let Ok(_) = visitor.visit_select_statement(self);
 
-        if let Some(rewrites) = rewrites {
+        if let Some(rewrites) = rewrites.as_deref_mut() {
             rewrites.extend(visitor.out);
         }
 
@@ -221,7 +222,7 @@ impl AliasRemoval for SqlQuery {
     fn rewrite_table_aliases(
         &mut self,
         query_name: &str,
-        rewrites: Option<&mut Vec<TableAliasRewrite>>,
+        rewrites: Option<impl DerefMut<Target = Vec<TableAliasRewrite>>>,
     ) -> ReadySetResult<&mut Self> {
         if let SqlQuery::Select(sq) = self {
             sq.rewrite_table_aliases(query_name, rewrites)?;
@@ -239,6 +240,7 @@ mod tests {
     };
     use readyset_sql::{Dialect, DialectDisplay};
     use readyset_sql_parsing::parse_query;
+    use std::cell::RefMut;
 
     use super::{AliasRemoval, TableAliasRewrite};
 
@@ -246,7 +248,8 @@ mod tests {
         ($before: expr_2021, $after: expr_2021) => {{
             let mut q = parse_query(Dialect::MySQL, $before).unwrap();
             let expected = parse_query(Dialect::MySQL, $after).unwrap();
-            q.rewrite_table_aliases("query", None).unwrap();
+            q.rewrite_table_aliases("query", None::<RefMut<'static, Vec<TableAliasRewrite>>>)
+                .unwrap();
             assert_eq!(
                 q,
                 expected,

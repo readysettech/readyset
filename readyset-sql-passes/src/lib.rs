@@ -26,6 +26,7 @@ mod unnest_subqueries_3vl;
 mod util;
 mod validate_window_functions;
 
+use std::cell::RefMut;
 use std::collections::{HashMap, HashSet};
 
 use alias_removal::TableAliasRewrite;
@@ -60,56 +61,6 @@ pub use crate::util::{
 };
 pub use crate::validate_window_functions::ValidateWindowFunctions;
 
-/// Context provided to all query rewriting passes.
-#[derive(Debug)]
-pub struct RewriteContext<'a> {
-    /// Map from names of views and tables in the database, to (ordered) lists of the column names
-    /// in those views
-    pub view_schemas: &'a HashMap<Relation, Vec<SqlIdentifier>>,
-
-    /// Map from names of *tables* in the database, to the body of the `CREATE TABLE` statement
-    /// that was used to create that table. Each key in this map should also exist in
-    /// [`view_schemas`].
-    pub base_schemas: HashMap<&'a Relation, &'a CreateTableBody>,
-
-    /// List of views that are known to exist but have not yet been compiled (so we can't know
-    /// their fields yet)
-    pub uncompiled_views: &'a [&'a Relation],
-
-    /// Set of relations that are known to exist in the upstream database, but are not being
-    /// replicated. Used as part of schema resolution to ensure that queries that would resolve to
-    /// these tables if they *were* being replicated correctly return an error
-    pub non_replicated_relations: &'a HashSet<NonReplicatedRelation>,
-
-    /// Map from schema name to the set of custom types in that schema
-    pub custom_types: &'a HashMap<&'a SqlIdentifier, HashSet<&'a SqlIdentifier>>,
-
-    /// Ordered list of schema names to search in when resolving schema names of tables
-    pub search_path: &'a [SqlIdentifier],
-
-    /// SQL dialect to use for all expressions and types within the query
-    pub dialect: Dialect,
-
-    /// Optional list of tables which, if created, should invalidate this query.
-    ///
-    /// This is (optionally) inserted into during rewriting of certain queries when the
-    /// [resolve_schemas pass][] attempts to resolve a table within a schema but is unable to.
-    ///
-    /// [resolve_schemas pass]: crate::resolve_schemas
-    pub invalidating_tables: Option<&'a mut Vec<Relation>>,
-
-    /// Optional list of aliases that were removed during a rewrite.
-    ///
-    /// This is (optionally) inserted into during rewriting of certain queries when the
-    /// [alias_removal][] removes aliases to other relations in a query.
-    ///
-    /// [alias_removal]: crate::alias_removal
-    pub table_alias_rewrites: Option<&'a mut Vec<TableAliasRewrite>>,
-
-    /// The name of the cache for a migrated query.
-    pub query_name: Option<&'a str>,
-}
-
 /// Can a particular relation (in the map passed to [`ResolveSchemas::resolve_schemas`]) be queried
 /// from?
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,16 +69,68 @@ pub enum CanQuery {
     No,
 }
 
-impl<'a> RewriteContext<'a> {
-    pub(crate) fn tables(
-        &self,
-    ) -> HashMap<&'a SqlIdentifier, HashMap<&'a SqlIdentifier, CanQuery>> {
-        self.view_schemas
+/// Context provided to all server-side query rewriting passes, i.e. those performed at migration
+/// time, not those performed in the adapter on the hot path. For those passes, see
+/// [`crate::adapter_rewrites`].
+pub trait RewriteContext {
+    /// Map from names of views and tables in the database, to (ordered) lists of the column names
+    /// in those views
+    fn view_schemas(&self) -> &HashMap<Relation, Vec<SqlIdentifier>>;
+
+    /// Map from names of *tables* in the database, to the body of the `CREATE TABLE` statement
+    /// that was used to create that table. Each key in this map should also exist in
+    /// [`view_schemas`].
+    fn base_schemas(&self) -> &HashMap<&Relation, &CreateTableBody>;
+
+    /// List of views that are known to exist but have not yet been compiled (so we can't know
+    /// their fields yet)
+    fn uncompiled_views(&self) -> &[&Relation];
+
+    /// Set of relations that are known to exist in the upstream database, but are not being
+    /// replicated. Used as part of schema resolution to ensure that queries that would resolve to
+    /// these tables if they *were* being replicated correctly return an error
+    fn non_replicated_relations(&self) -> &HashSet<NonReplicatedRelation>;
+
+    /// Map from schema name to the set of custom types in that schema
+    fn custom_types(&self) -> &HashMap<&SqlIdentifier, HashSet<&SqlIdentifier>>;
+
+    /// Ordered list of schema names to search in when resolving schema names of tables
+    fn search_path(&self) -> &[SqlIdentifier];
+
+    /// SQL dialect to use for all expressions and types within the query
+    fn dialect(&self) -> Dialect;
+
+    /// Optional list of tables which, if created, should invalidate this query.
+    ///
+    /// This is (optionally) inserted into during rewriting of certain queries when the
+    /// [resolve_schemas pass][] attempts to resolve a table within a schema but is unable to.
+    ///
+    /// [resolve_schemas pass]: crate::resolve_schemas
+    fn invalidating_tables(&self) -> Option<RefMut<'_, Vec<Relation>>>;
+
+    /// Optional list of aliases that were removed during a rewrite.
+    ///
+    /// This is (optionally) inserted into during rewriting of certain queries when the
+    /// [alias_removal][] removes aliases to other relations in a query.
+    ///
+    /// [alias_removal]: crate::alias_removal
+    fn table_alias_rewrites(&self) -> Option<RefMut<'_, Vec<TableAliasRewrite>>>;
+
+    /// The name of the cache for a migrated query.
+    fn query_name(&self) -> Option<&str>;
+
+    /// All tables, views, uncompiled views, and non-replicated relations indexable by schema and
+    /// tagged with whether they can be queried.
+    //
+    // TODO(mvzink): Don't recalculate this on the fly; this may mean not providing it as a default
+    // implementation for implementors and making them do it on construction.
+    fn tables(&self) -> HashMap<&SqlIdentifier, HashMap<&SqlIdentifier, CanQuery>> {
+        self.view_schemas()
             .keys()
-            .chain(self.uncompiled_views.iter().copied())
+            .chain(self.uncompiled_views().iter().copied())
             .map(|t| (t, CanQuery::Yes))
             .chain(
-                self.non_replicated_relations
+                self.non_replicated_relations()
                     .iter()
                     .map(|t| (&(t.name), CanQuery::No)),
             )
@@ -143,24 +146,64 @@ impl<'a> RewriteContext<'a> {
     }
 }
 
+impl<C: RewriteContext> RewriteContext for &C {
+    fn view_schemas(&self) -> &HashMap<Relation, Vec<SqlIdentifier>> {
+        (*self).view_schemas()
+    }
+
+    fn base_schemas(&self) -> &HashMap<&Relation, &CreateTableBody> {
+        (*self).base_schemas()
+    }
+
+    fn uncompiled_views(&self) -> &[&Relation] {
+        (*self).uncompiled_views()
+    }
+
+    fn non_replicated_relations(&self) -> &HashSet<NonReplicatedRelation> {
+        (*self).non_replicated_relations()
+    }
+
+    fn custom_types(&self) -> &HashMap<&SqlIdentifier, HashSet<&SqlIdentifier>> {
+        (*self).custom_types()
+    }
+
+    fn search_path(&self) -> &[SqlIdentifier] {
+        (*self).search_path()
+    }
+
+    fn dialect(&self) -> Dialect {
+        (*self).dialect()
+    }
+
+    fn invalidating_tables(&self) -> Option<RefMut<'_, Vec<Relation>>> {
+        (*self).invalidating_tables()
+    }
+
+    fn table_alias_rewrites(&self) -> Option<RefMut<'_, Vec<TableAliasRewrite>>> {
+        (*self).table_alias_rewrites()
+    }
+
+    fn query_name(&self) -> Option<&str> {
+        (*self).query_name()
+    }
+}
+
 /// Extension trait providing the ability to rewrite a query to normalize, validate and desugar it.
 ///
 /// Rewriting, which should never change the semantics of a query, can happen for any SQL statement,
-/// and is provided a [context] with the schema of the database.
-///
-/// [context]: RewriteContext
+/// and is provided a [`RewriteContext`] with the schema of the database.
 pub trait Rewrite: Sized {
     /// Rewrite this SQL statement to normalize, validate, and desugar it
-    fn rewrite(&mut self, _context: &mut RewriteContext) -> ReadySetResult<&mut Self>;
+    fn rewrite<C: RewriteContext>(&mut self, context: C) -> ReadySetResult<&mut Self>;
 }
 
 impl Rewrite for CreateTableStatement {
-    fn rewrite(&mut self, context: &mut RewriteContext) -> ReadySetResult<&mut Self> {
+    fn rewrite<C: RewriteContext>(&mut self, context: C) -> ReadySetResult<&mut Self> {
         self.resolve_schemas(
             context.tables(),
-            context.custom_types,
-            context.search_path,
-            context.invalidating_tables.as_deref_mut(),
+            context.custom_types(),
+            context.search_path(),
+            context.invalidating_tables(),
         )?
         .normalize_create_table_columns()
         .coalesce_key_definitions();
@@ -169,47 +212,47 @@ impl Rewrite for CreateTableStatement {
 }
 
 impl Rewrite for SelectStatement {
-    fn rewrite(&mut self, context: &mut RewriteContext) -> ReadySetResult<&mut Self> {
-        let query_name = context.query_name.unwrap_or("unknown");
+    fn rewrite<C: RewriteContext>(&mut self, context: C) -> ReadySetResult<&mut Self> {
+        let query_name = context.query_name().unwrap_or("unknown");
 
         self.rewrite_between()
             .disallow_row()?
             .validate_window_functions()?
-            .scalar_optimize_expressions(context.dialect)
+            .scalar_optimize_expressions(context.dialect())
             .resolve_schemas(
                 context.tables(),
-                context.custom_types,
-                context.search_path,
-                context.invalidating_tables.as_deref_mut(),
+                context.custom_types(),
+                context.search_path(),
+                context.invalidating_tables(),
             )?
             .expand_stars(
-                context.view_schemas,
-                context.non_replicated_relations,
-                context.dialect.into(),
+                context.view_schemas(),
+                context.non_replicated_relations(),
+                context.dialect().into(),
             )?
-            .expand_implied_tables(context.view_schemas, context.dialect.into())?
-            .unnest_subqueries(context)?
-            .normalize_topk_with_aggregate(context.dialect.into())?
+            .expand_implied_tables(context.view_schemas(), context.dialect().into())?
+            .unnest_subqueries(&context)?
+            .normalize_topk_with_aggregate(context.dialect().into())?
             .detect_problematic_self_joins()?
             .remove_numeric_field_references()?
-            .order_limit_removal(&context.base_schemas)?
-            .rewrite_table_aliases(query_name, context.table_alias_rewrites.as_deref_mut())?;
+            .order_limit_removal(context.base_schemas())?
+            .rewrite_table_aliases(query_name, context.table_alias_rewrites())?;
 
         Ok(self)
     }
 }
 
 impl Rewrite for CompoundSelectStatement {
-    fn rewrite(&mut self, context: &mut RewriteContext) -> ReadySetResult<&mut Self> {
+    fn rewrite<C: RewriteContext>(&mut self, context: C) -> ReadySetResult<&mut Self> {
         for (_op, sq) in &mut self.selects {
-            sq.rewrite(context)?;
+            sq.rewrite(&context)?;
         }
         Ok(self)
     }
 }
 
 impl Rewrite for SelectSpecification {
-    fn rewrite(&mut self, context: &mut RewriteContext) -> ReadySetResult<&mut Self> {
+    fn rewrite<C: RewriteContext>(&mut self, context: C) -> ReadySetResult<&mut Self> {
         match self {
             SelectSpecification::Compound(csq) => {
                 csq.rewrite(context)?;
@@ -223,9 +266,9 @@ impl Rewrite for SelectSpecification {
 }
 
 impl Rewrite for CreateViewStatement {
-    fn rewrite(&mut self, context: &mut RewriteContext) -> ReadySetResult<&mut Self> {
+    fn rewrite<C: RewriteContext>(&mut self, context: C) -> ReadySetResult<&mut Self> {
         if self.name.schema.is_none()
-            && let Some(first_schema) = context.search_path.first()
+            && let Some(first_schema) = context.search_path().first()
         {
             self.name.schema = Some(first_schema.clone())
         }
@@ -237,7 +280,7 @@ impl Rewrite for CreateViewStatement {
 }
 
 impl Rewrite for CreateCacheStatement {
-    fn rewrite(&mut self, _context: &mut RewriteContext) -> ReadySetResult<&mut Self> {
+    fn rewrite<C: RewriteContext>(&mut self, _context: C) -> ReadySetResult<&mut Self> {
         self.detect_and_validate_bucket_always()?;
         Ok(self)
     }

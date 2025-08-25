@@ -1,4 +1,6 @@
+use std::cell::{RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
+use std::ops::DerefMut;
 use std::str;
 use std::vec::Vec;
 
@@ -199,22 +201,21 @@ impl SqlIncorporator {
         query_name: Option<&str>,
         search_path: &[SqlIdentifier],
         dialect: Dialect,
-        invalidating_tables: Option<&mut Vec<Relation>>,
-        table_alias_rewrites: Option<&mut Vec<TableAliasRewrite>>,
+        invalidating_tables: Option<&RefCell<Vec<Relation>>>,
+        table_alias_rewrites: Option<&RefCell<Vec<TableAliasRewrite>>>,
     ) -> ReadySetResult<S>
     where
         S: Rewrite,
     {
-        stmt.rewrite(&mut RewriteContext {
-            view_schemas: &self.view_schemas,
+        stmt.rewrite(&SqlIncorporatorRewriteContext {
+            this: self,
             base_schemas: self
                 .base_schemas
                 .iter()
                 .map(|(k, BaseSchema { statement, .. })| (k, statement))
                 .collect(),
-            uncompiled_views: &self.uncompiled_views.keys().collect::<Vec<_>>(),
-            non_replicated_relations: &self.mir_converter.non_replicated_relations,
-            custom_types: &self
+            uncompiled_views: self.uncompiled_views.keys().collect::<Vec<_>>(),
+            custom_types: self
                 .custom_types
                 .keys()
                 .filter_map(|t| Some((t.schema.as_ref()?, &t.name)))
@@ -650,7 +651,7 @@ impl SqlIncorporator {
         // modified to contain references to nodes we won't actually add to the dataflow graph.
         let mut next = self.clone();
 
-        let mut invalidating_tables = vec![];
+        let invalidating_tables = RefCell::new(Vec::new());
         let detect_placeholders_config =
             readyset_sql_passes::detect_unsupported_placeholders::Config {
                 allow_mixed_comparisons: next.mir_converter.config.allow_mixed_comparisons,
@@ -662,7 +663,7 @@ impl SqlIncorporator {
                     name.clone(),
                     &mut stmt,
                     schema_search_path,
-                    Some(&mut invalidating_tables),
+                    Some(invalidating_tables.borrow_mut().deref_mut()),
                     LeafBehavior::Leaf,
                     mig,
                 )
@@ -673,13 +674,13 @@ impl SqlIncorporator {
             // existing cached query.
             Err(err @ ReadySetError::UnsupportedPlaceholders { .. }) => {
                 // We must rewrite before looking for a query we can reuse.
-                invalidating_tables.clear();
+                invalidating_tables.borrow_mut().clear();
                 let rewritten_stmt = next.rewrite(
                     stmt.clone(),
                     Some(&name.name),
                     schema_search_path,
                     mig.dialect,
-                    Some(&mut invalidating_tables),
+                    Some(&invalidating_tables),
                     None,
                 )?;
                 let caches = next.registry.caches_for_query(rewritten_stmt)?;
@@ -724,7 +725,7 @@ impl SqlIncorporator {
 
         self.registry.add_query(expression)?;
         self.registry
-            .insert_invalidating_tables(name.clone(), invalidating_tables)?;
+            .insert_invalidating_tables(name.clone(), invalidating_tables.into_inner())?;
 
         if exists {
             return Ok(name);
@@ -1181,20 +1182,20 @@ impl SqlIncorporator {
         // TODO(aspen): This is a janky and inefficient way of making this happen. Someday, when
         // SqlIncorporator and SqlToMirConverter are merged into one, this ought to not be
         // necesssary - instead, we can just migrate the view as part of the `get_relation` method
-        let mut tables = vec![];
+        let tables = RefCell::new(vec![]);
         loop {
             let compile_res = self.select_query_to_mir_inner(
                 &query_name,
                 stmt,
                 search_path,
-                invalidating_tables.is_some().then_some(&mut tables),
+                invalidating_tables.is_some().then_some(&tables),
                 leaf_behavior,
                 mig,
             );
             match compile_res {
                 Ok(mir_leaf) => {
                     if let Some(its) = invalidating_tables.as_mut() {
-                        its.extend(tables);
+                        its.extend(tables.into_inner());
                     }
                     return Ok(mir_leaf);
                 }
@@ -1236,19 +1237,19 @@ impl SqlIncorporator {
         query_name: &Relation,
         stmt: &mut SelectStatement,
         search_path: &[SqlIdentifier],
-        invalidating_tables: Option<&mut Vec<Relation>>,
+        invalidating_tables: Option<&RefCell<Vec<Relation>>>,
         leaf_behavior: LeafBehavior,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirNodeIndex> {
         trace!(stmt = %stmt.display(mig.dialect.into()), "Adding select query");
-        let mut table_alias_rewrites = vec![];
+        let table_alias_rewrites = RefCell::new(Vec::new());
         *stmt = self.rewrite(
             stmt.clone(),
             Some(&query_name.name),
             search_path,
             mig.dialect,
             invalidating_tables,
-            Some(&mut table_alias_rewrites),
+            Some(&table_alias_rewrites),
         )?;
 
         self.num_queries += 1;
@@ -1257,7 +1258,7 @@ impl SqlIncorporator {
         // the table itself in order to prevent ambiguity. (This may occur when a single table
         // is referenced using more than one alias).
         let mut anon_queries = HashMap::new();
-        for r in table_alias_rewrites {
+        for r in table_alias_rewrites.into_inner() {
             match r {
                 TableAliasRewrite::View {
                     to_view, for_table, ..
@@ -1462,5 +1463,59 @@ impl SqlIncorporator {
     fn register_query(&mut self, query_name: Relation, fields: Vec<SqlIdentifier>) {
         debug!(query_name = %query_name.display_unquoted(), "registering query");
         self.view_schemas.insert(query_name, fields);
+    }
+}
+
+struct SqlIncorporatorRewriteContext<'a> {
+    this: &'a SqlIncorporator,
+    base_schemas: HashMap<&'a Relation, &'a CreateTableBody>,
+    uncompiled_views: Vec<&'a Relation>,
+    custom_types: HashMap<&'a SqlIdentifier, HashSet<&'a SqlIdentifier>>,
+    search_path: &'a [SqlIdentifier],
+    dialect: Dialect,
+    invalidating_tables: Option<&'a RefCell<Vec<Relation>>>,
+    table_alias_rewrites: Option<&'a RefCell<Vec<TableAliasRewrite>>>,
+    query_name: Option<&'a str>,
+}
+
+impl RewriteContext for SqlIncorporatorRewriteContext<'_> {
+    fn view_schemas(&self) -> &HashMap<Relation, Vec<SqlIdentifier>> {
+        &self.this.view_schemas
+    }
+
+    fn base_schemas(&self) -> &HashMap<&Relation, &CreateTableBody> {
+        &self.base_schemas
+    }
+
+    fn uncompiled_views(&self) -> &[&Relation] {
+        &self.uncompiled_views
+    }
+
+    fn non_replicated_relations(&self) -> &HashSet<NonReplicatedRelation> {
+        &self.this.mir_converter.non_replicated_relations
+    }
+
+    fn custom_types(&self) -> &HashMap<&SqlIdentifier, HashSet<&SqlIdentifier>> {
+        &self.custom_types
+    }
+
+    fn search_path(&self) -> &[SqlIdentifier] {
+        self.search_path
+    }
+
+    fn dialect(&self) -> Dialect {
+        self.dialect
+    }
+
+    fn invalidating_tables(&self) -> Option<RefMut<'_, Vec<Relation>>> {
+        self.invalidating_tables.map(|cell| cell.borrow_mut())
+    }
+
+    fn table_alias_rewrites(&self) -> Option<RefMut<'_, Vec<TableAliasRewrite>>> {
+        self.table_alias_rewrites.map(|cell| cell.borrow_mut())
+    }
+
+    fn query_name(&self) -> Option<&str> {
+        self.query_name
     }
 }
