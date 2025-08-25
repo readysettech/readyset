@@ -1,13 +1,13 @@
 use readyset_sql::ast::{ColumnConstraint, ColumnSpecification, CreateTableStatement, TableKey};
 
 pub trait KeyDefinitionCoalescing {
-    fn coalesce_key_definitions(self) -> Self;
+    fn coalesce_key_definitions(&mut self) -> &mut Self;
 }
 
 impl KeyDefinitionCoalescing for CreateTableStatement {
-    fn coalesce_key_definitions(mut self) -> CreateTableStatement {
+    fn coalesce_key_definitions(&mut self) -> &mut Self {
         // TODO(malte): only handles primary keys so far!
-        self.body = self.body.map(|mut body| {
+        if let Ok(body) = &mut self.body {
             let pkeys: Vec<&ColumnSpecification> = body
                 .fields
                 .iter()
@@ -18,29 +18,26 @@ impl KeyDefinitionCoalescing for CreateTableStatement {
                 pk.push(cs.column.clone())
             }
             if !pk.is_empty() {
-                body.keys = match body.keys {
-                    None => Some(vec![TableKey::PrimaryKey {
+                if let Some(ks) = &mut body.keys {
+                    let new_key = TableKey::PrimaryKey {
                         index_name: None,
                         constraint_name: None,
                         constraint_timing: None,
                         columns: pk,
-                    }]),
-                    Some(mut ks) => {
-                        let new_key = TableKey::PrimaryKey {
-                            index_name: None,
-                            constraint_name: None,
-                            constraint_timing: None,
-                            columns: pk,
-                        };
-                        if !ks.contains(&new_key) {
-                            ks.push(new_key);
-                        }
-                        Some(ks)
+                    };
+                    if !ks.contains(&new_key) {
+                        ks.push(new_key);
                     }
+                } else {
+                    body.keys = Some(vec![TableKey::PrimaryKey {
+                        index_name: None,
+                        constraint_name: None,
+                        constraint_timing: None,
+                        columns: pk,
+                    }])
                 }
             }
-            body
-        });
+        };
 
         self
     }
@@ -59,7 +56,7 @@ mod tests {
         // CREATE TABLE t (id text PRIMARY KEY, val text)
         // -->
         // CREATE TABLE t (id text, val text, PRIMARY KEY (id))
-        let q = CreateTableStatement {
+        let mut q = CreateTableStatement {
             if_not_exists: false,
             table: Relation::from("t"),
             body: Ok(CreateTableBody {
@@ -76,10 +73,10 @@ mod tests {
             options: Ok(vec![]),
         };
 
-        let ctq = q.coalesce_key_definitions();
-        assert_eq!(ctq.table, Relation::from("t"));
+        q.coalesce_key_definitions();
+        assert_eq!(q.table, Relation::from("t"));
         assert_eq!(
-            ctq.body.as_ref().unwrap().fields,
+            q.body.as_ref().unwrap().fields,
             vec![
                 ColumnSpecification::with_constraints(
                     Column::from("t.id"),
@@ -90,7 +87,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            ctq.body.as_ref().unwrap().keys,
+            q.body.as_ref().unwrap().keys,
             Some(vec![TableKey::PrimaryKey {
                 index_name: None,
                 constraint_name: None,
