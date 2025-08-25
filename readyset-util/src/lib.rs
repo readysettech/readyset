@@ -17,6 +17,7 @@ pub mod hash;
 pub mod indexmap;
 pub mod intervals;
 pub mod iter;
+pub mod logging;
 pub mod math;
 pub mod progress;
 pub mod properties;

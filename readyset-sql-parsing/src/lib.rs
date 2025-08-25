@@ -1,8 +1,5 @@
 use std::any::Any;
 use std::num::ParseIntError;
-use std::sync::LazyLock;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::ValueEnum;
 use readyset_errors::ReadySetError;
@@ -12,6 +9,7 @@ use readyset_sql::ast::{
     SelectStatement, SqlQuery, SqlType, TableKey,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
+use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
 use serde::{Deserialize, Serialize};
 use sqlparser::{
     keywords::Keyword,
@@ -150,39 +148,6 @@ impl From<ParsingPreset> for ParsingConfig {
     fn from(value: ParsingPreset) -> Self {
         value.into_config()
     }
-}
-
-static RATE_LIMIT_INTERVAL: LazyLock<Duration> = LazyLock::new(|| {
-    let secs = std::env::var("PARSING_LOG_RATE_LIMIT_SECS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(60);
-    Duration::from_secs(secs)
-});
-
-fn check_rate_limit() -> bool {
-    static NEXT_LOG_TIME: AtomicU64 = AtomicU64::new(0);
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Couldn't get system time");
-
-    let next_log = NEXT_LOG_TIME.load(Ordering::Relaxed);
-    let should_log = now.as_secs() >= next_log;
-
-    if should_log {
-        NEXT_LOG_TIME.store((now + *RATE_LIMIT_INTERVAL).as_secs(), Ordering::Relaxed);
-    }
-
-    should_log
-}
-
-macro_rules! rate_limit {
-    ($should_limit:expr, $body:expr) => {
-        if !$should_limit || check_rate_limit() {
-            $body
-        }
-    };
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -881,15 +846,18 @@ where
                         || (is_not_query_or_should_log(&nom_ast)
                             || is_not_query_or_should_log(&sqlparser_ast)))
                 {
-                    rate_limit!(
+                    rate_limit(
                         config.rate_limit_logging,
-                        tracing::warn!(
-                            ?dialect,
-                            input = %input.as_ref(),
-                            ?nom_ast,
-                            ?sqlparser_ast,
-                            "nom-sql AST differs from sqlparser-rs AST",
-                        )
+                        PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED,
+                        || {
+                            tracing::warn!(
+                                ?dialect,
+                                input = %input.as_ref(),
+                                ?nom_ast,
+                                ?sqlparser_ast,
+                                "nom-sql AST differs from sqlparser-rs AST",
+                            )
+                        },
                     );
                 }
                 if config.error_on_mismatch {
@@ -926,15 +894,18 @@ where
                     if config.log_on_mismatch
                         && (!config.log_only_selects || is_not_query_or_should_log(&nom_ast))
                     {
-                        rate_limit!(
+                        rate_limit(
                             config.rate_limit_logging,
-                            tracing::warn!(
-                                ?dialect,
-                                input = %input.as_ref(),
-                                %sqlparser_error,
-                                ?nom_ast,
-                                "sqlparser-rs failed but nom-sql succeeded"
-                            )
+                            PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED,
+                            || {
+                                tracing::warn!(
+                                    ?dialect,
+                                    input = %input.as_ref(),
+                                    %sqlparser_error,
+                                    ?nom_ast,
+                                    "sqlparser-rs failed but nom-sql succeeded"
+                                )
+                            },
                         );
                     }
                     if config.error_on_mismatch || config.prefer_sqlparser {
@@ -950,15 +921,18 @@ where
                 if config.log_on_mismatch
                     && (!config.log_only_selects || is_not_query_or_should_log(&sqlparser_ast))
                 {
-                    rate_limit!(
+                    rate_limit(
                         config.rate_limit_logging,
-                        tracing::debug!(
-                            ?dialect,
-                            input = %input.as_ref(),
-                            %nom_error,
-                            ?sqlparser_ast,
-                            "nom-sql failed but sqlparser-rs succeeded"
-                        )
+                        PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED,
+                        || {
+                            tracing::debug!(
+                                ?dialect,
+                                input = %input.as_ref(),
+                                %nom_error,
+                                ?sqlparser_ast,
+                                "nom-sql failed but sqlparser-rs succeeded"
+                            )
+                        },
                     );
                 }
                 if config.prefer_sqlparser {

@@ -16,6 +16,7 @@ serde = { workspace = true, features = ["rc", "derive"] }
 sqlparser = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
 proptest = { workspace = true }

@@ -5251,6 +5251,7 @@ dependencies = [
  "proptest",
  "readyset-errors",
  "readyset-sql",
+ "readyset-util",
  "serde",
  "sqlparser",
  "test-strategy",

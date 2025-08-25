@@ -16,6 +16,7 @@ use readyset_client::{
     KeyComparison, PacketData, PacketPayload, Tagged, CONNECTION_FROM_BASE, CONNECTION_MAGIC_NUMBER,
 };
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_util::logging::{rate_limit, TCP_CONNECTION_LOG_RECEIVED_FROM_UNKNOWN_SOURCE};
 use readyset_util::time_scope;
 use strawpoll::Strawpoll;
 use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
@@ -151,11 +152,18 @@ impl Replica {
         let mut magic: [u8; 4] = [0; 4];
         stream.read_exact(&mut magic).await?;
         if magic != CONNECTION_MAGIC_NUMBER {
-            warn!(
+            rate_limit(
+                true,
+                TCP_CONNECTION_LOG_RECEIVED_FROM_UNKNOWN_SOURCE,
+                || {
+                    warn!(
                 "Replica received connection from unknown source: Magic: {:?} Address: {:?}",
                 magic,
-                stream.peer_addr().unwrap()
+                    stream.peer_addr().unwrap()
+                );
+                },
             );
+
             return Err(ReadySetError::TcpSendError(
                 "Replica received connection from unknown source".to_string(),
             ));
