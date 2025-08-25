@@ -163,10 +163,9 @@ impl Rewrite for CreateTableStatement {
             context.custom_types,
             context.search_path,
             context.invalidating_tables.as_deref_mut(),
-        )?;
-        Ok(self
-            .normalize_create_table_columns()
-            .coalesce_key_definitions())
+        )?
+        .normalize_create_table_columns();
+        Ok(self.coalesce_key_definitions())
     }
 }
 

@@ -29,12 +29,12 @@ impl<'ast> VisitorMut<'ast> for CreateTableColumnsVisitor {
 }
 
 pub trait CreateTableColumns {
-    fn normalize_create_table_columns(self) -> Self;
+    fn normalize_create_table_columns(&mut self) -> &mut Self;
 }
 
 impl CreateTableColumns for CreateTableStatement {
-    fn normalize_create_table_columns(mut self) -> Self {
-        let Ok(()) = CreateTableColumnsVisitor::default().visit_create_table_statement(&mut self);
+    fn normalize_create_table_columns(&mut self) -> &mut Self {
+        let Ok(()) = CreateTableColumnsVisitor::default().visit_create_table_statement(self);
         self
     }
 }
@@ -48,19 +48,13 @@ mod tests {
 
     #[test]
     fn simple_create_table() {
-        let orig = parse_create_table(
+        let mut orig = parse_create_table(
             Dialect::MySQL,
             "CREATE TABLE x.t (a int, b int, unique (a))",
         )
         .unwrap();
         let expected = "CREATE TABLE `x`.`t` (`a` INT, `b` INT, UNIQUE KEY (`x`.`t`.`a`))";
-        assert_eq!(
-            format!(
-                "{}",
-                orig.normalize_create_table_columns()
-                    .display(Dialect::MySQL)
-            ),
-            expected
-        );
+        orig.normalize_create_table_columns();
+        assert_eq!(format!("{}", orig.display(Dialect::MySQL)), expected);
     }
 }
