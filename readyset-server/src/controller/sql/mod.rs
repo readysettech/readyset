@@ -195,7 +195,7 @@ impl SqlIncorporator {
     // rid of that.
     pub(crate) fn rewrite<S>(
         &self,
-        stmt: S,
+        mut stmt: S,
         query_name: Option<&str>,
         search_path: &[SqlIdentifier],
         dialect: Dialect,
@@ -227,7 +227,8 @@ impl SqlIncorporator {
             invalidating_tables,
             table_alias_rewrites,
             query_name,
-        })
+        })?;
+        Ok(stmt)
     }
 
     /// Apply the change list to the current migration.

@@ -151,13 +151,11 @@ impl<'a> RewriteContext<'a> {
 /// [context]: RewriteContext
 pub trait Rewrite: Sized {
     /// Rewrite this SQL statement to normalize, validate, and desugar it
-    fn rewrite(self, _context: &mut RewriteContext) -> ReadySetResult<Self> {
-        Ok(self)
-    }
+    fn rewrite(&mut self, _context: &mut RewriteContext) -> ReadySetResult<&mut Self>;
 }
 
 impl Rewrite for CreateTableStatement {
-    fn rewrite(mut self, context: &mut RewriteContext) -> ReadySetResult<Self> {
+    fn rewrite(&mut self, context: &mut RewriteContext) -> ReadySetResult<&mut Self> {
         self.resolve_schemas(
             context.tables(),
             context.custom_types,
@@ -171,7 +169,7 @@ impl Rewrite for CreateTableStatement {
 }
 
 impl Rewrite for SelectStatement {
-    fn rewrite(mut self, context: &mut RewriteContext) -> ReadySetResult<Self> {
+    fn rewrite(&mut self, context: &mut RewriteContext) -> ReadySetResult<&mut Self> {
         let query_name = context.query_name.unwrap_or("unknown");
 
         self.rewrite_between()
@@ -202,49 +200,44 @@ impl Rewrite for SelectStatement {
 }
 
 impl Rewrite for CompoundSelectStatement {
-    fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
-        Ok(CompoundSelectStatement {
-            selects: self
-                .selects
-                .into_iter()
-                .map(|(op, sq)| Ok((op, sq.rewrite(context)?)))
-                .collect::<ReadySetResult<_>>()?,
-            ..self
-        })
+    fn rewrite(&mut self, context: &mut RewriteContext) -> ReadySetResult<&mut Self> {
+        for (_op, sq) in &mut self.selects {
+            sq.rewrite(context)?;
+        }
+        Ok(self)
     }
 }
 
 impl Rewrite for SelectSpecification {
-    fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
-        Ok(match self {
+    fn rewrite(&mut self, context: &mut RewriteContext) -> ReadySetResult<&mut Self> {
+        match self {
             SelectSpecification::Compound(csq) => {
-                SelectSpecification::Compound(csq.rewrite(context)?)
+                csq.rewrite(context)?;
             }
-            SelectSpecification::Simple(sq) => SelectSpecification::Simple(sq.rewrite(context)?),
-        })
+            SelectSpecification::Simple(sq) => {
+                sq.rewrite(context)?;
+            }
+        }
+        Ok(self)
     }
 }
 
 impl Rewrite for CreateViewStatement {
-    fn rewrite(mut self, context: &mut RewriteContext) -> ReadySetResult<Self> {
+    fn rewrite(&mut self, context: &mut RewriteContext) -> ReadySetResult<&mut Self> {
         if self.name.schema.is_none()
             && let Some(first_schema) = context.search_path.first()
         {
             self.name.schema = Some(first_schema.clone())
         }
-
-        Ok(Self {
-            definition: match self.definition {
-                Ok(def) => Ok(Box::new(def.rewrite(context)?)),
-                Err(unparsed) => Err(unparsed),
-            },
-            ..self
-        })
+        if let Ok(def) = &mut self.definition {
+            def.rewrite(context)?;
+        }
+        Ok(self)
     }
 }
 
 impl Rewrite for CreateCacheStatement {
-    fn rewrite(self, _context: &mut RewriteContext) -> ReadySetResult<Self> {
+    fn rewrite(&mut self, _context: &mut RewriteContext) -> ReadySetResult<&mut Self> {
         self.detect_and_validate_bucket_always()?;
         Ok(self)
     }
