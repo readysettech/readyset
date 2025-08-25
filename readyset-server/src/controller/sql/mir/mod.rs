@@ -2084,7 +2084,7 @@ impl SqlToMirConverter {
             // it for now. Making the execution "smarter" with how it handles
             // its inputs and outputs will make this possible, but should be left
             // as a future improvement
-            unsupported!("Multiple window functions not yet supported");
+            unsupported!("Using multiple window functions is not yet supported");
         }
 
         let dialect = readyset_sql::Dialect::MySQL;
@@ -2502,7 +2502,7 @@ impl SqlToMirConverter {
 
             // 8. Add window functions or grouped nodes (mutually exclusive for now)
             if !query_graph.aggregates.is_empty() && !query_graph.window_functions.is_empty() {
-                unsupported!("Mixing window functions and aggregates is not supported yet")
+                unsupported!("Mixing window functions and aggregates is not yet supported")
             };
 
             let group_by: Vec<_> = view_key.columns.iter().map(|(c, _)| c.clone()).collect();

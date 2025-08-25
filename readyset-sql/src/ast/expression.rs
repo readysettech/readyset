@@ -1703,18 +1703,31 @@ fn sqlparser_window_to_window_function(
     dialect: Dialect,
     expr: Expr,
 ) -> Result<Expr, AstConversionError> {
+    use sqlparser::ast::WindowSpec;
     use sqlparser::ast::WindowType;
+
     match window {
         WindowType::NamedWindow(_) => unsupported!("named window"),
-        WindowType::WindowSpec(window) => {
-            let partition_by: Vec<Expr> = window
-                .partition_by
+        WindowType::WindowSpec(WindowSpec {
+            partition_by,
+            order_by,
+            window_name,
+            window_frame,
+        }) => {
+            if window_name.is_some() {
+                return unsupported!("Window name in Window Spec");
+            }
+
+            if window_frame.is_some() {
+                return unsupported!("Window frame in Window Spec");
+            }
+
+            let partition_by: Vec<Expr> = partition_by
                 .into_iter()
                 .map(|p| p.try_into_dialect(dialect))
                 .try_collect()?;
 
-            let order_by: Vec<(Expr, OrderType, NullOrder)> = window
-                .order_by
+            let order_by: Vec<(Expr, OrderType, NullOrder)> = order_by
                 .into_iter()
                 .map(|o| o.try_into_dialect(dialect))
                 .try_collect()?;
@@ -1744,7 +1757,7 @@ fn sqlparser_window_to_window_function(
                     order_by,
                 }),
                 _ => {
-                    failed!("{expr:?} is not supported as a window function")
+                    unsupported!("{expr:?} is not supported as a window function")
                 }
             }
         }

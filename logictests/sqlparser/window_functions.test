@@ -637,3 +637,15 @@ SELECT SUM(DISTINCT a) OVER (PARTITION BY a) FROM t;
 onlyif readyset
 statement error: Query failed to parse
 SELECT AVG(DISTINCT a) OVER (PARTITION BY a) FROM t;
+
+onlyif readyset
+statement error: Window name in Window Spec
+SELECT a, sum(b) OVER (w) FROM t WINDOW w AS (PARTITION BY a);
+
+onlyif readyset
+statement error: Window frame in Window Spec
+SELECT a, sum(b) OVER (PARTITION BY a ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM t;
+
+onlyif readyset
+statement error: Using multiple window functions is not yet supported
+SELECT a, sum(b) OVER (PARTITION BY a), avg(b) OVER (PARTITION BY a) FROM t;
