@@ -1940,7 +1940,7 @@ async fn test_explain_create_cache() {
         },
         then_assert: |res| {
             assert_eq!(res.supported, "yes");
-            assert_eq!(res.rewritten_query, r#"SELECT "t"."x", "t"."y" FROM "t" WHERE ("x" = $1)"#);
+            assert_eq!(res.rewritten_query, r#"SELECT "t"."x", "t"."y" FROM "t" WHERE ("t"."x" = $1)"#);
         }
     }
 
@@ -1962,7 +1962,7 @@ async fn test_explain_create_cache() {
     assert_eq!(res.supported, "cached");
     assert_eq!(
         res.rewritten_query,
-        r#"SELECT "t"."x", "t"."y" FROM "t" WHERE ("x" = $1)"#
+        r#"SELECT "t"."x", "t"."y" FROM "t" WHERE ("t"."x" = $1)"#
     );
 
     shutdown_tx.shutdown().await;

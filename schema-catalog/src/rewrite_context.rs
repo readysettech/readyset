@@ -3,8 +3,8 @@ use std::sync::Arc;
 use readyset_data::Dialect;
 use readyset_sql::ast::{NonReplicatedRelation, Relation, SqlIdentifier};
 use readyset_sql_passes::{
-    CanQuery, ResolveSchemasContext, RewriteDialectContext, StarExpansionContext,
-    adapter_rewrites::AdapterRewriteContext,
+    CanQuery, ImpliedTablesContext, ResolveSchemasContext, RewriteDialectContext,
+    StarExpansionContext, adapter_rewrites::AdapterRewriteContext,
 };
 
 use crate::{SchemaCatalog, SchemaGeneration};
@@ -138,5 +138,11 @@ impl StarExpansionContext for RewriteContext {
 impl RewriteDialectContext for RewriteContext {
     fn dialect(&self) -> Dialect {
         self.dialect
+    }
+}
+
+impl ImpliedTablesContext for RewriteContext {
+    fn all_schemas(&self) -> impl IntoIterator<Item = (Relation, Vec<SqlIdentifier>)> {
+        self.schema_catalog.view_schemas.clone()
     }
 }
