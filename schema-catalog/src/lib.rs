@@ -10,6 +10,10 @@ use std::collections::{HashMap, HashSet};
 mod handle;
 pub use handle::{SchemaCatalogHandle, SchemaCatalogProvider, SchemaCatalogSynchronizer};
 
+mod rewrite_context;
+
+pub use rewrite_context::RewriteContext;
+
 /// A serializable catalog of schema information that can be shared between the Readyset adapter and
 /// server. This contains the core schema state needed for query rewriting and schema resolution.
 ///

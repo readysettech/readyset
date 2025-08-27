@@ -17,10 +17,12 @@ use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetResult, internal_err};
 use readyset_sql::ast::CacheType;
+use readyset_sql::ast::SqlIdentifier;
 use readyset_sql::{DialectDisplay, ast::Literal};
 use readyset_sql_passes::InlineLiterals;
 use readyset_util::redacted::Sensitive;
 use readyset_util::shutdown::ShutdownReceiver;
+use schema_catalog::{RewriteContext, SchemaCatalogHandle};
 use tokio::select;
 use tracing::{debug, error, info};
 
@@ -41,6 +43,10 @@ pub struct MigrationHandler {
     /// determine which queries require processing.
     query_status_cache: &'static QueryStatusCache,
 
+    /// A handle to the SchemaCatalog used for rewrite contexts and invalidating dry run migrations
+    /// if the schema is updated while they are in flight.
+    schema_catalog_handle: SchemaCatalogHandle,
+
     /// The minimum interval between subsequent polls to the query
     /// status cache. In practice it may be longer if the queries
     /// that require processing take longer than `min_poll_interval`.
@@ -60,11 +66,13 @@ pub struct MigrationHandler {
 }
 
 impl MigrationHandler {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         noria: NoriaConnector,
         controller: Option<ReadySetHandle>,
-        query_status_cache: &'static QueryStatusCache,
         dialect: Dialect,
+        query_status_cache: &'static QueryStatusCache,
+        schema_catalog_handle: SchemaCatalogHandle,
         min_poll_interval: std::time::Duration,
         max_retry: std::time::Duration,
         shutdown_recv: ShutdownReceiver,
@@ -74,6 +82,7 @@ impl MigrationHandler {
             controller,
             dialect,
             query_status_cache,
+            schema_catalog_handle,
             min_poll_interval,
             max_retry,
             shutdown_recv,
@@ -223,16 +232,20 @@ impl MigrationHandler {
             self.start_time.insert(view_request.clone(), Instant::now());
         }
 
-        // Check if we can successfully prepare against noria as well.
-        match self
-            .noria
-            .prepare_select(
-                view_request.statement.clone(),
-                true,
-                Some(view_request.schema_search_path.clone()),
-            )
+        let result = match self
+            .rewrite_context(view_request.schema_search_path.clone())
             .await
         {
+            Ok(rewrite_context) => {
+                self.noria
+                    .prepare_select(view_request.statement.clone(), true, &rewrite_context)
+                    .await
+            }
+            Err(e) => Err(e),
+        };
+
+        // Check if we can successfully prepare against noria as well.
+        match result {
             Ok(_) => {
                 counter!(recorded::MIGRATION_HANDLER_ALLOWED).increment(1);
                 self.start_time.remove(view_request);
@@ -385,5 +398,16 @@ impl MigrationHandler {
         let now = Instant::now();
         self.start_time
             .retain(|_, start_time| now - *start_time <= self.max_retry);
+    }
+
+    async fn rewrite_context(
+        &self,
+        search_path: Vec<SqlIdentifier>,
+    ) -> ReadySetResult<RewriteContext> {
+        Ok(RewriteContext::new(
+            self.dialect,
+            self.schema_catalog_handle.get_catalog().await?,
+            search_path,
+        ))
     }
 }

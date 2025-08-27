@@ -46,7 +46,7 @@ use readyset_sql::ast::{
     SqlQuery, TableKey,
 };
 use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
-use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
+use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteContext, AdapterRewriteParams};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 use tracing::error;
@@ -491,9 +491,10 @@ impl Change {
     /// Parse a `Change` from the given [`CacheDDLRequest`], using the encapsulated [`Dialect`] and
     /// schema search path for expression evaluation semantics. This function performs the adapter
     /// rewrites on the parsed query string before passing it to the server via `/extend_recipe`.
-    pub fn from_cache_ddl_request(
+    pub fn from_cache_ddl_request<C: AdapterRewriteContext>(
         ddl_req: &CacheDDLRequest,
         adapter_rewrite_params: AdapterRewriteParams,
+        adapter_rewrite_context: C,
         parsing_preset: ParsingPreset,
     ) -> ReadySetResult<Self> {
         match parse_query_with_config(
@@ -526,7 +527,8 @@ impl Change {
 
                 adapter_rewrites::rewrite_query(
                     &mut statement,
-                    adapter_rewrite_params
+                    adapter_rewrite_params,
+                    adapter_rewrite_context,
                 )?;
 
                 Ok(Change::CreateCache(CreateCache {

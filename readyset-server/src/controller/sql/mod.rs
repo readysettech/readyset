@@ -24,6 +24,7 @@ use readyset_sql::ast::{
     SelectStatement, SqlIdentifier, SqlType, TableExpr, TableKey,
 };
 use readyset_sql::DialectDisplay;
+use readyset_sql_passes::adapter_rewrites::AdapterRewriteContext;
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{
     CanQuery, DetectUnsupportedPlaceholders, ImpliedTablesContext, ResolveSchemasContext, Rewrite,
@@ -1553,6 +1554,8 @@ impl RewriteContext for SqlIncorporatorRewriteContext<'_> {
         self.query_name
     }
 }
+
+impl AdapterRewriteContext for SqlIncorporatorRewriteContext<'_> {}
 
 impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
     fn add_invalidating_table(&self, table: Relation) {

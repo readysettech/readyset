@@ -109,8 +109,8 @@ use readyset_sql::ast::{
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::{
-    AdapterRewriteParams, DfQueryParameters, ParameterizeMode, QueryParameters,
-    ShallowQueryParameters, convert_placeholders_to_question_marks,
+    AdapterRewriteParams, DfQueryParameters, QueryParameters, ShallowQueryParameters,
+    convert_placeholders_to_question_marks,
 };
 use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -131,7 +131,7 @@ use crate::status_reporter::ReadySetStatusReporter;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::utils::{create_dummy_column, time_or_null};
 use crate::{QueryHandler, UpstreamDatabase, UpstreamDestination, create_dummy_schema};
-use schema_catalog::SchemaCatalogHandle;
+use schema_catalog::{RewriteContext, SchemaCatalogHandle};
 
 pub mod noria_connector;
 
@@ -719,7 +719,6 @@ where
     /// to the index of the prepared statement in `prepared_statements`.
     unnamed_prepared_statements: HashMap<String, usize>,
     /// Handle to access the cached schema catalog
-    #[expect(unused)]
     schema_handle: SchemaCatalogHandle,
 }
 
@@ -1107,6 +1106,7 @@ where
         statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
+        let rewrite_context = self.rewrite_context(None).await?;
         let up_prep: OptionFuture<_> = self
             .upstream
             .as_mut()
@@ -1117,7 +1117,7 @@ where
             .then_some(self.noria.prepare_select(
                 select_meta.stmt.clone(),
                 select_meta.must_migrate,
-                None,
+                &rewrite_context,
             ))
             .into();
 
@@ -1285,15 +1285,19 @@ where
     }
 
     /// Provides metadata required to prepare a select query
-    fn plan_prepare_select(&mut self, stmt: SelectStatement) -> PrepareMeta {
+    async fn plan_prepare_select(&mut self, stmt: SelectStatement) -> ReadySetResult<PrepareMeta> {
+        let rewrite_context = self.rewrite_context(None).await?;
         let mut rewritten = stmt.clone();
-        if let Err(e) = adapter_rewrites::rewrite_query(&mut rewritten, self.noria.rewrite_params())
-        {
+        if let Err(e) = adapter_rewrites::rewrite_query(
+            &mut rewritten,
+            self.noria.rewrite_params(),
+            &rewrite_context,
+        ) {
             warn!(
                 statement = %Sensitive(&stmt.display(self.settings.dialect)),
                 "This statement could not be rewritten for Readyset"
             );
-            return PrepareMeta::FailedToRewrite(e);
+            return Ok(PrepareMeta::FailedToRewrite(e));
         };
 
         let status = self
@@ -1304,11 +1308,11 @@ where
                 self.noria.schema_search_path().to_owned(),
             ));
         if self.state.proxy_state == ProxyState::ProxyAlways && !status.always {
-            PrepareMeta::Proxy
+            Ok(PrepareMeta::Proxy)
         } else {
             let should_do_readyset =
                 !matches!(status.migration_state, MigrationState::Unsupported(_));
-            PrepareMeta::Select(PrepareSelectMeta {
+            Ok(PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
                 rewritten,
                 // For select statements only InRequestPath should trigger migrations
@@ -1317,12 +1321,16 @@ where
                     || !self.has_fallback(),
                 should_do_noria: should_do_readyset,
                 always: status.always,
-            })
+            }))
         }
     }
 
     /// Provides metadata required to prepare a query
-    async fn plan_prepare(&mut self, query: &str, event: &mut QueryExecutionEvent) -> PrepareMeta {
+    async fn plan_prepare(
+        &mut self,
+        query: &str,
+        event: &mut QueryExecutionEvent,
+    ) -> ReadySetResult<PrepareMeta> {
         let (parsed, shallow_parsed) = match self.state.parsed_query_cache.get(query) {
             Some(cached_query) => {
                 let _t = event.start_parse_timer();
@@ -1343,36 +1351,36 @@ where
         };
 
         if let Some((query_id, stmt, params, always)) = self.should_query_shallow(shallow_parsed) {
-            return PrepareMeta::ShallowSelect(PrepareShallowSelectMeta {
+            return Ok(PrepareMeta::ShallowSelect(PrepareShallowSelectMeta {
                 query_id,
                 stmt,
                 params,
                 always,
-            });
+            }));
         }
 
         match parsed {
-            Ok(SqlQuery::Select(stmt)) => self.plan_prepare_select(stmt),
+            Ok(SqlQuery::Select(stmt)) => self.plan_prepare_select(stmt).await,
             Ok(
                 query @ SqlQuery::Insert(_)
                 | query @ SqlQuery::Update(_)
                 | query @ SqlQuery::Delete(_),
-            ) => PrepareMeta::Write { stmt: query },
+            ) => Ok(PrepareMeta::Write { stmt: query }),
             Ok(
                 query @ SqlQuery::StartTransaction(_)
                 | query @ SqlQuery::Commit(_)
                 | query @ SqlQuery::Rollback(_),
-            ) => PrepareMeta::Transaction { stmt: query },
-            Ok(SqlQuery::Set(s)) => PrepareMeta::Set { stmt: s },
+            ) => Ok(PrepareMeta::Transaction { stmt: query }),
+            Ok(SqlQuery::Set(s)) => Ok(PrepareMeta::Set { stmt: s }),
             Ok(pq) => {
                 debug!(
                     statement = %pq.display(self.settings.dialect),
                     "Statement cannot be prepared by Readyset"
                 );
-                PrepareMeta::Unimplemented(unsupported_err!(
+                Ok(PrepareMeta::Unimplemented(unsupported_err!(
                     "{} not supported without an upstream",
                     pq.query_type()
-                ))
+                )))
             }
             Err(_) => {
                 let mode = if self.state.proxy_state == ProxyState::Never {
@@ -1381,7 +1389,7 @@ where
                     PrepareMeta::Proxy
                 };
                 debug!(query = %Sensitive(&query), plan = ?mode, "Readyset failed to parse query");
-                mode
+                Ok(mode)
             }
         }
     }
@@ -1555,7 +1563,7 @@ where
         }
 
         let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
-        let meta = self.plan_prepare(query, &mut query_event).await;
+        let meta = self.plan_prepare(query, &mut query_event).await?;
         let prep = self
             .do_prepare(&meta, query, data, statement_type, &mut query_event)
             .await?;
@@ -1841,6 +1849,7 @@ where
     async fn update_noria_prepare(
         noria: &mut NoriaConnector,
         cached_entry: &mut PreparedStatement<DB>,
+        rewrite_context: &RewriteContext,
     ) -> ReadySetResult<()> {
         debug_assert!(
             cached_entry.migration_state.is_pending() || cached_entry.migration_state.is_inlined()
@@ -1859,14 +1868,7 @@ where
         let noria_prep = match &**parsed_statement {
             SqlQuery::Select(stmt) => {
                 noria
-                    .prepare_select(
-                        stmt.clone(),
-                        false,
-                        cached_entry
-                            .view_request
-                            .as_ref()
-                            .map(|pr| pr.schema_search_path.clone()),
-                    )
+                    .prepare_select(stmt.clone(), false, rewrite_context)
                     .await?
             }
             _ => internal!("Only SELECT statements can be pending migration"),
@@ -1935,6 +1937,11 @@ where
         exec_meta: &'a DB::ExecMeta,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         self.last_query = None;
+        // The rewrite context isn't needed until we have looked up the statement and checked its
+        // migration status, but it requires an immutable borrow of the backend while looking up the
+        // statement requires a mutable borrow. To get around this, we just construct it
+        // possibly-prematurely.
+        let mut rewrite_context = self.rewrite_context(None).await?;
         let cached_statement = self
             .state
             .prepared_statements
@@ -1963,9 +1970,17 @@ where
                 .query_migration_state(cached_statement.as_view_request()?)
                 .1;
 
+            if let Some(search_path) = cached_statement
+                .view_request
+                .as_ref()
+                .map(|pr| pr.schema_search_path.clone())
+            {
+                rewrite_context.set_search_path(search_path);
+            }
+
             if matches!(new_migration_state, MigrationState::Successful(_)) {
                 // Attempt to prepare on ReadySet
-                let _ = Self::update_noria_prepare(noria, cached_statement).await;
+                let _ = Self::update_noria_prepare(noria, cached_statement, &rewrite_context).await;
             } else if let MigrationState::Inlined(new_state) = new_migration_state
                 && let MigrationState::Inlined(ref old_state) = cached_statement.migration_state
             {
@@ -1991,7 +2006,7 @@ where
                     if updated_view_cache
                         && matches!(cached_statement.prep.inner, PrepareResultInner::Upstream(_))
                     {
-                        if Self::update_noria_prepare(noria, cached_statement)
+                        if Self::update_noria_prepare(noria, cached_statement, &rewrite_context)
                             .await
                             .is_ok()
                         {
@@ -2479,7 +2494,7 @@ where
     }
 
     /// Extract the deep and shallow representations of the query.
-    fn query_from_cache_inner(
+    async fn query_from_cache_inner(
         &self,
         inner: &CacheInner,
     ) -> ReadySetResult<(
@@ -2492,13 +2507,20 @@ where
                 let shallow = shallow.clone();
 
                 // Rewrite for deep.
+                let rewrite_context = self.rewrite_context(None).await?;
                 let deep = match deep {
                     Ok(mut deep) => {
-                        adapter_rewrites::rewrite_query(&mut deep, self.noria.rewrite_params())?;
-                        Ok(ViewCreateRequest::new(
-                            *deep,
-                            self.noria.schema_search_path().to_owned(),
-                        ))
+                        match adapter_rewrites::rewrite_query(
+                            &mut deep,
+                            self.noria.rewrite_params(),
+                            &rewrite_context,
+                        ) {
+                            Ok(_params) => Ok(ViewCreateRequest::new(
+                                *deep,
+                                rewrite_context.search_path().to_owned(),
+                            )),
+                            Err(e) => Err(e),
+                        }
                     }
                     Err(e) => Err(ReadySetError::UnparseableQuery(e)),
                 };
@@ -2538,7 +2560,7 @@ where
     }
 
     /// Extract the deep and shallow representations of the query from the EXPLAIN.
-    fn query_from_explain(
+    async fn query_from_explain(
         &self,
         explain: &ExplainStatement,
     ) -> ReadySetResult<(
@@ -2549,7 +2571,7 @@ where
             internal!("Unexpected EXPLAIN: {explain:?}");
         };
 
-        self.query_from_cache_inner(inner)
+        self.query_from_cache_inner(inner).await
     }
 
     // Determine the migration state of the deep representation, performing a dry run if necessary.
@@ -2649,7 +2671,7 @@ where
         let cache_type = Self::requested_cache_type(explain)?;
 
         // Get the deep and shallow representations of the query.
-        let (deep, shallow) = self.query_from_explain(explain)?;
+        let (deep, shallow) = self.query_from_explain(explain).await?;
 
         // The only time we care about the migration state of a shallow representation is if we've
         // marked one as cached in the query status cache.
@@ -3232,7 +3254,7 @@ where
                     concurrently,
                     unparsed_create_cache_statement,
                 } = create_cache_stmt;
-                let (deep, shallow) = self.query_from_cache_inner(inner)?;
+                let (deep, shallow) = self.query_from_cache_inner(inner).await?;
 
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
@@ -4270,10 +4292,11 @@ where
                 }
             }
             Ok(SqlQuery::Select(mut stmt)) => {
-                let params = match adapter_rewrites::rewrite_equivalent(
+                let rewrite_context = self.rewrite_context(None).await?;
+                let params = match adapter_rewrites::rewrite_equivalent_deep(
                     &mut stmt,
                     self.noria.rewrite_params(),
-                    ParameterizeMode::Auto,
+                    &rewrite_context,
                 ) {
                     Ok(params) => params,
                     Err(_) if self.has_fallback() => {
@@ -4468,6 +4491,17 @@ where
 
     pub fn in_transaction(&self) -> bool {
         self.state.proxy_state.in_transaction()
+    }
+
+    async fn rewrite_context(
+        &self,
+        search_path: Option<Vec<SqlIdentifier>>,
+    ) -> ReadySetResult<RewriteContext> {
+        Ok(RewriteContext::new(
+            self.settings.dialect.into(),
+            self.state.schema_handle.get_catalog_retrying().await?,
+            search_path.unwrap_or_else(|| self.noria.schema_search_path().to_vec()),
+        ))
     }
 }
 

@@ -885,12 +885,16 @@ impl Controller {
         &self,
         ddl_reqs: Vec<CacheDDLRequest>,
     ) -> ReadySetResult<Vec<ChangeList>> {
-        let adapter_rewrite_params = if let Some(ref inner) = *self.inner.read().await {
-            let ds = inner.dataflow_state_handle.read().await;
-            ds.recipe.adapter_rewrite_params()
-        } else {
-            return Err(ReadySetError::NotLeader);
-        };
+        let (adapter_rewrite_params, schema_catalog) =
+            if let Some(ref inner) = *self.inner.read().await {
+                let ds = inner.dataflow_state_handle.read().await;
+                (
+                    ds.recipe.adapter_rewrite_params(),
+                    Arc::new(ds.recipe.schema_catalog()),
+                )
+            } else {
+                return Err(ReadySetError::NotLeader);
+            };
 
         debug_assert!(
             ddl_reqs
@@ -899,6 +903,11 @@ impl Controller {
                     Change::from_cache_ddl_request(
                         req,
                         adapter_rewrite_params,
+                        schema_catalog::RewriteContext::new(
+                            req.dialect,
+                            schema_catalog.clone(),
+                            req.schema_search_path.clone(),
+                        ),
                         self.parsing_preset,
                     ),
                     Ok(Change::Drop { .. })
@@ -914,6 +923,11 @@ impl Controller {
                     Change::from_cache_ddl_request(
                         req,
                         adapter_rewrite_params,
+                        schema_catalog::RewriteContext::new(
+                            req.dialect,
+                            schema_catalog.clone(),
+                            req.schema_search_path.clone(),
+                        ),
                         self.parsing_preset,
                     ),
                     Ok(Change::Drop { .. })
@@ -929,6 +943,11 @@ impl Controller {
                     Change::from_cache_ddl_request(
                         req,
                         adapter_rewrite_params,
+                        schema_catalog::RewriteContext::new(
+                            req.dialect,
+                            schema_catalog.clone(),
+                            req.schema_search_path.clone(),
+                        ),
                         self.parsing_preset,
                     ),
                     Ok(Change::CreateCache(_))
@@ -947,6 +966,11 @@ impl Controller {
             match Change::from_cache_ddl_request(
                 &ddl_req,
                 adapter_rewrite_params,
+                schema_catalog::RewriteContext::new(
+                    ddl_req.dialect,
+                    schema_catalog.clone(),
+                    ddl_req.schema_search_path.clone(),
+                ),
                 self.parsing_preset,
             ) {
                 Ok(change) => {

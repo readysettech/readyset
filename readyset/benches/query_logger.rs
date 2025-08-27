@@ -8,6 +8,7 @@ use readyset_server::PrometheusBuilder;
 use readyset_sql::ast::SqlQuery;
 use readyset_sql::Dialect;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
+use schema_catalog::SchemaCatalogHandle;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -71,10 +72,18 @@ fn create_event(
     }
 }
 
-fn event_logging_bench(c: &mut Criterion, mode: QueryLogMode) {
+fn event_logging_bench(c: &mut Criterion, mode: QueryLogMode, rt: &tokio::runtime::Runtime) {
     let adapter_rewrite_params = AdapterRewriteParams::new(DIALECT);
+    let search_path = vec!["public".into()];
+    let schema_catalog = SchemaCatalogHandle::new();
 
-    let mut logger = QueryLogger::new(mode, DIALECT, adapter_rewrite_params);
+    let mut logger = QueryLogger::new(
+        mode,
+        adapter_rewrite_params,
+        DIALECT,
+        search_path,
+        schema_catalog,
+    );
 
     let test_cases = vec![
         ("no-query", false, false, false, false, false),
@@ -106,7 +115,7 @@ fn event_logging_bench(c: &mut Criterion, mode: QueryLogMode) {
             ),
             |b: &mut Bencher, event| {
                 b.iter(|| {
-                    logger.handle_event(event);
+                    rt.block_on(logger.handle_event(event));
                     black_box(())
                 });
             },
@@ -122,8 +131,8 @@ fn query_logger_bench(c: &mut Criterion) {
     let recorder = PrometheusBuilder::new().build_recorder();
     metrics::set_global_recorder(recorder).expect("failed to install Prometheus recorder");
 
-    event_logging_bench(c, QueryLogMode::Enabled);
-    event_logging_bench(c, QueryLogMode::Verbose);
+    event_logging_bench(c, QueryLogMode::Enabled, &rt);
+    event_logging_bench(c, QueryLogMode::Verbose, &rt);
 }
 
 // Instead of running with the Standard Criterion timer profile, plug-in the

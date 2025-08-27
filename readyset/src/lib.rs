@@ -1085,38 +1085,6 @@ where
             rt.handle().spawn(report_allocator_metrics(alloc_shutdown));
         }
 
-        // Gate query log code path on the log flag existing.
-        let qlog_sender = if options.query_log_mode.is_enabled() {
-            rs_connect.in_scope(|| info!("Query logs are enabled. Spawning query logger"));
-            let (qlog_sender, qlog_receiver) = tokio::sync::mpsc::unbounded_channel();
-
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .max_blocking_threads(1)
-                .build()
-                .unwrap();
-
-            let shutdown_rx = shutdown_rx.clone();
-            // Spawn the actual thread to run the logger
-            let query_log_mode = options.query_log_mode;
-            let rewrite_params = adapter_rewrite_params;
-            let dialect = self.parse_dialect;
-            std::thread::Builder::new()
-                .name("Query logger".to_string())
-                .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
-                .spawn_wrapper(move || {
-                    let mut logger =
-                        query_logger::QueryLogger::new(query_log_mode, dialect, rewrite_params);
-                    runtime.block_on(logger.run(qlog_receiver, shutdown_rx));
-                    runtime.shutdown_background();
-                })?;
-
-            Some(qlog_sender)
-        } else {
-            rs_connect.in_scope(|| info!("Query logs are disabled"));
-            None
-        };
-
         let noria_read_behavior = if options.non_blocking_reads {
             rs_connect.in_scope(|| info!("Will perform NonBlocking Reads"));
             ReadBehavior::NonBlocking
@@ -1207,6 +1175,24 @@ where
             no_upstream_connections,
         ));
 
+        macro_rules! await_sys_props {
+            ($sys_props:ident, $shutdown_rx:ident) => {{
+                let retry_loop = async {
+                    loop {
+                        if let Ok(v) = &*$sys_props.read().await {
+                            break v.clone();
+                        }
+                        sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await
+                    }
+                };
+
+                tokio::select! {
+                    v = retry_loop => Some(v),
+                    _ = $shutdown_rx.recv() => None,
+                }
+            }};
+        }
+
         if let MigrationMode::OutOfBand = migration_mode {
             set_failpoint!(failpoints::ADAPTER_OUT_OF_BAND);
             let rh = rh.clone();
@@ -1219,26 +1205,17 @@ where
             let dry_run = matches!(migration_style, MigrationStyle::Explicit);
             let expr_dialect = self.expr_dialect;
             let parse_dialect = self.parse_dialect;
-            let sys_props = Arc::clone(&sys_props);
+            let schema_catalog = schema_catalog.clone();
+            let sys_props = sys_props.clone();
 
             rs_connect.in_scope(|| info!("Spawning migration handler task"));
             let fut = async move {
                 let connection = span!(Level::INFO, "migration task upstream database connection");
 
-                let sys_props = {
-                    let retry_loop = async {
-                        loop {
-                            if let Ok(v) = &*sys_props.read().await {
-                                break v.clone();
-                            }
-                            sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await
-                        }
-                    };
-
-                    tokio::select! {
-                        v = retry_loop => v,
-                        _ = shutdown_rx.recv() => return Ok(()),
-                    }
+                let sys_props = await_sys_props!(sys_props, shutdown_rx);
+                let Some(sys_props) = sys_props else {
+                    debug!("Failed to retrieve system properties before receiving shutdown");
+                    return Ok(());
                 };
 
                 if let Err(e) = init_system_props(&sys_props) {
@@ -1266,8 +1243,9 @@ where
                 let mut migration_handler = MigrationHandler::new(
                     noria,
                     controller_handle,
-                    query_status_cache,
                     expr_dialect,
+                    query_status_cache,
+                    schema_catalog,
                     std::time::Duration::from_millis(loop_interval),
                     std::time::Duration::from_secs(max_retry * 60),
                     shutdown_rx.clone(),
@@ -1281,6 +1259,53 @@ where
 
             rt.handle().spawn(abort_on_panic(fut));
         }
+
+        // Gate query log code path on the log flag existing.
+        let qlog_sender = if options.query_log_mode.is_enabled() {
+            let mut shutdown_rx_props = shutdown_rx.clone();
+            let sys_props = sys_props.clone();
+            let sys_props =
+                rt.block_on(async move { await_sys_props!(sys_props, shutdown_rx_props) });
+            let Some(sys_props) = sys_props else {
+                debug!("Failed to retrieve system properties before receiving shutdown");
+                return Ok(());
+            };
+
+            rs_connect.in_scope(|| info!("Query logs are enabled. Spawning query logger"));
+            let (qlog_sender, qlog_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .max_blocking_threads(1)
+                .build()
+                .unwrap();
+
+            let shutdown_rx = shutdown_rx.clone();
+            // Spawn the actual thread to run the logger
+            let query_log_mode = options.query_log_mode;
+            let rewrite_params = adapter_rewrite_params;
+            let dialect = self.parse_dialect;
+            let schema_catalog_handle = schema_catalog.clone();
+            std::thread::Builder::new()
+                .name("Query logger".to_string())
+                .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
+                .spawn_wrapper(move || {
+                    let mut logger = query_logger::QueryLogger::new(
+                        query_log_mode,
+                        rewrite_params,
+                        dialect,
+                        sys_props.search_path,
+                        schema_catalog_handle,
+                    );
+                    runtime.block_on(logger.run(qlog_receiver, shutdown_rx));
+                    runtime.shutdown_background();
+                })?;
+
+            Some(qlog_sender)
+        } else {
+            rs_connect.in_scope(|| info!("Query logs are disabled"));
+            None
+        };
 
         if matches!(migration_style, MigrationStyle::Explicit) {
             rs_connect.in_scope(|| info!("Spawning explicit migrations task"));

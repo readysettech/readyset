@@ -31,6 +31,7 @@ use readyset_sql::{DialectDisplay, TryFromDialect as _, TryIntoDialect as _};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams, DfQueryParameters};
 use readyset_util::redacted::Sensitive;
 use readyset_util::shared_cache::{self, LocalCache};
+use schema_catalog::RewriteContext;
 use tokio::sync::RwLock;
 use tracing::{error, info, trace, warn};
 
@@ -1416,7 +1417,7 @@ impl NoriaConnector {
         &mut self,
         mut statement: SelectStatement,
         create_if_not_exist: bool,
-        override_schema_search_path: Option<Vec<SqlIdentifier>>,
+        rewrite_context: &RewriteContext,
     ) -> ReadySetResult<PrepareResult> {
         // extract parameter columns *for the client*
         // note that we have to do this *before* processing the query, otherwise the
@@ -1437,8 +1438,11 @@ impl NoriaConnector {
             .collect();
 
         trace!("select::collapse where-in clauses");
-        let processed_query_params =
-            adapter_rewrites::rewrite_query(&mut statement, self.rewrite_params())?;
+        let processed_query_params = adapter_rewrites::rewrite_query(
+            &mut statement,
+            self.rewrite_params(),
+            rewrite_context,
+        )?;
 
         // check if we already have this query prepared
         trace!("select::access view");
@@ -1447,7 +1451,7 @@ impl NoriaConnector {
                 &statement,
                 true,
                 create_if_not_exist,
-                override_schema_search_path,
+                Some(rewrite_context.search_path().to_vec()),
             )
             .await?;
 

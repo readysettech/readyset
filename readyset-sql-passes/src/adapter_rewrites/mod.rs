@@ -156,6 +156,10 @@ impl AdapterRewriteParams {
     }
 }
 
+pub trait AdapterRewriteContext {}
+
+impl<C: AdapterRewriteContext> AdapterRewriteContext for &C {}
+
 /// How to handle parameterization.
 #[derive(Debug, Copy, Clone)]
 pub enum ParameterizeMode {
@@ -165,7 +169,8 @@ pub enum ParameterizeMode {
     Full,
 }
 
-/// An initial rewrite pass mostly for autoparameterization.
+/// An initial rewrite pass mostly for autoparameterization, appropriate on its own for shallow
+/// caching.
 ///
 /// The transformations applied to the query result in a query that is equivalent to the
 /// original query.
@@ -175,17 +180,13 @@ pub enum ParameterizeMode {
 ///   dataflow representation of the query. Note that this pass may not replace all literals and is
 ///   therefore cannot guarantee that the rewritten query is free of user PII.
 /// - If full parameterization is requested, all literals are replaced with placeholders.
-pub fn rewrite_equivalent(
+pub fn rewrite_equivalent_parameters(
     query: &mut SelectStatement,
     flags: AdapterRewriteParams,
     mode: ParameterizeMode,
 ) -> ReadySetResult<QueryParameters> {
-    let span = trace_span!("adapter_rewrites", part = "equivalent").entered();
-    trace!(
-        parent: &span,
-        query = %query.display(flags.dialect),
-        "Going to rewrite query placeholders"
-    );
+    let span = trace_span!("adapter_rewrites", part = "equivalent_parameters").entered();
+    trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite query placeholders");
 
     let reordered_placeholders = reorder_numbered_placeholders(query);
     trace!(
@@ -229,6 +230,26 @@ pub fn rewrite_equivalent(
         reordered_placeholders,
         auto_parameters,
     })
+}
+
+/// Rewrites that keep the query semantically equivalent, but are appropriate for deep caching.
+///
+/// The distinction is basically derived from the fact that there are some schema-aware rewrites
+/// (e.g. resolve schemas) which must happen *before autoparameterization* (e.g. to allow subquery
+/// unnesting), but are not needed for shallow caching.
+///
+/// This is currently a placeholder for future adapter rewrites.
+pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
+    query: &mut SelectStatement,
+    flags: AdapterRewriteParams,
+    _context: C,
+) -> ReadySetResult<QueryParameters> {
+    let span = trace_span!("adapter_rewrites", part = "equivalent_deep").entered();
+    trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite for deep caching");
+
+    // XXX: new adapter rewrites moved from server will go here
+
+    rewrite_equivalent_parameters(query, flags, ParameterizeMode::Auto)
 }
 
 /// Additional rewrites for Readyset requirements.
@@ -294,11 +315,12 @@ pub fn rewrite_for_readyset(
 }
 
 /// Perform both generic SQL and Readyset-specific query rewriting.
-pub fn rewrite_query(
+pub fn rewrite_query<C: AdapterRewriteContext>(
     query: &mut SelectStatement,
     flags: AdapterRewriteParams,
+    context: C,
 ) -> ReadySetResult<DfQueryParameters> {
-    let params = rewrite_equivalent(query, flags, ParameterizeMode::Auto)?;
+    let params = rewrite_equivalent_deep(query, flags, context)?;
     rewrite_for_readyset(query, flags, params)
 }
 
@@ -1644,13 +1666,22 @@ mod tests {
             }
         }
 
+        struct TestAdapterRewriteContext {}
+
+        impl AdapterRewriteContext for TestAdapterRewriteContext {}
+
+        fn rewrite_context() -> impl AdapterRewriteContext {
+            TestAdapterRewriteContext {}
+        }
+
         fn process_and_make_keys(
             query: &str,
             params: Vec<DfValue>,
             dialect: Dialect,
         ) -> (Vec<Vec<DfValue>>, SelectStatement) {
             let mut query = parse_select_statement(query, dialect);
-            let processed = rewrite_query(&mut query, rewrite_params(dialect)).unwrap();
+            let processed =
+                rewrite_query(&mut query, rewrite_params(dialect), rewrite_context()).unwrap();
             (
                 processed
                     .make_keys(&params)
@@ -1684,6 +1715,7 @@ mod tests {
             let proc = rewrite_query(
                 &mut parse_select_statement(query, dialect),
                 rewrite_params(dialect),
+                rewrite_context(),
             )
             .unwrap();
             proc.limit_offset_params(params).unwrap()
@@ -1706,8 +1738,12 @@ mod tests {
                 "SELECT id FROM users WHERE credit_card_number = $1 AND id = $2",
             );
 
-            rewrite_query(&mut query, rewrite_params(Dialect::PostgreSQL))
-                .expect("Should be able to rewrite query");
+            rewrite_query(
+                &mut query,
+                rewrite_params(Dialect::PostgreSQL),
+                rewrite_context(),
+            )
+            .expect("Should be able to rewrite query");
             assert_eq!(
                 query.display(Dialect::PostgreSQL).to_string(),
                 expected.display(Dialect::PostgreSQL).to_string()
@@ -1723,8 +1759,12 @@ mod tests {
                 "SELECT id FROM users WHERE credit_card_number = $1 AND id = $2",
             );
 
-            rewrite_query(&mut query, rewrite_params(Dialect::PostgreSQL))
-                .expect("Should be able to rewrite query");
+            rewrite_query(
+                &mut query,
+                rewrite_params(Dialect::PostgreSQL),
+                rewrite_context(),
+            )
+            .expect("Should be able to rewrite query");
             assert_eq!(
                 query.display(Dialect::PostgreSQL).to_string(),
                 expected.display(Dialect::PostgreSQL).to_string()
@@ -1739,8 +1779,12 @@ mod tests {
             let expected = parse_select_statement_postgres(
                 "SELECT id + 3 FROM users WHERE credit_card_number = $1",
             );
-            rewrite_query(&mut query, rewrite_params(Dialect::PostgreSQL))
-                .expect("Should be able to rewrite query");
+            rewrite_query(
+                &mut query,
+                rewrite_params(Dialect::PostgreSQL),
+                rewrite_context(),
+            )
+            .expect("Should be able to rewrite query");
             assert_eq!(query, expected);
         }
 
@@ -2269,7 +2313,11 @@ mod tests {
             );
 
             let mut query = parse_select_statement_postgres(&query_str);
-            let result = rewrite_query(&mut query, rewrite_params(Dialect::PostgreSQL));
+            let result = rewrite_query(
+                &mut query,
+                rewrite_params(Dialect::PostgreSQL),
+                rewrite_context(),
+            );
             assert!(
                 result.is_err(),
                 "Should reject excessive IN clause combinations"

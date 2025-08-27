@@ -8,7 +8,9 @@ edition = "2024"
 [dependencies]
 async-trait = { workspace = true }
 readyset-errors = { path = "../readyset-errors" }
+readyset-data = { path = "../readyset-data" }
 readyset-sql = { path = "../readyset-sql" }
+readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-util = { path = "../readyset-util" }
 serde = { workspace = true }
 tokio = { workspace = true }

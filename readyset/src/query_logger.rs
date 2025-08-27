@@ -1,15 +1,18 @@
+use std::sync::Arc;
+
 use metrics::{counter, gauge, histogram, Counter, SharedString};
 use readyset_client::query::QueryId;
 use readyset_client_metrics::{
     recorded, DatabaseType, EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode,
     ReadysetExecutionEvent,
 };
-use readyset_sql::ast::SqlQuery;
+use readyset_sql::ast::{SqlIdentifier, SqlQuery};
 
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
 use readyset_sql_passes::anonymize::anonymize_literals;
 use readyset_util::shutdown::ShutdownReceiver;
+use schema_catalog::{RewriteContext, SchemaCatalog, SchemaCatalogHandle};
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::info;
@@ -28,10 +31,18 @@ pub struct QueryLogger {
     log_mode: QueryLogMode,
     rewrite_params: AdapterRewriteParams,
     dialect: Dialect,
+    search_path: Vec<SqlIdentifier>,
+    schema_catalog_handle: SchemaCatalogHandle,
 }
 
 impl QueryLogger {
-    pub fn new(mode: QueryLogMode, dialect: Dialect, rewrite_params: AdapterRewriteParams) -> Self {
+    pub fn new(
+        mode: QueryLogMode,
+        rewrite_params: AdapterRewriteParams,
+        dialect: Dialect,
+        search_path: Vec<SqlIdentifier>,
+        schema_catalog_handle: SchemaCatalogHandle,
+    ) -> Self {
         QueryLogger {
             parse_error_count: counter!(readyset_client_metrics::recorded::QUERY_LOG_PARSE_ERRORS,),
             set_disallowed_count: counter!(
@@ -49,6 +60,8 @@ impl QueryLogger {
             log_mode: mode,
             rewrite_params,
             dialect,
+            search_path,
+            schema_catalog_handle,
         }
     }
 
@@ -57,11 +70,14 @@ impl QueryLogger {
         query_id_wrapper: &QueryIdWrapper,
         rewrite_params: AdapterRewriteParams,
         dialect: Dialect,
+        rewrite_context: RewriteContext,
     ) -> (SharedString, Option<SharedString>) {
         match query {
             SqlQuery::Select(stmt) => {
                 let mut stmt = stmt.clone();
-                if adapter_rewrites::rewrite_query(&mut stmt, rewrite_params).is_ok() {
+                if adapter_rewrites::rewrite_query(&mut stmt, rewrite_params, &rewrite_context)
+                    .is_ok()
+                {
                     anonymize_literals(&mut stmt);
                     let query_string = stmt.display(dialect).to_string();
 
@@ -152,7 +168,7 @@ impl QueryLogger {
         }
     }
 
-    pub fn handle_event(&mut self, event: &QueryExecutionEvent) {
+    pub async fn handle_event(&mut self, event: &QueryExecutionEvent) {
         if let Some(error) = &event.noria_error {
             if error.caused_by_unparseable_query() {
                 self.parse_error_count.increment(1);
@@ -181,8 +197,13 @@ impl QueryLogger {
             None => return,
         };
 
-        let (query_string, query_id) =
-            Self::process_query(query, &event.query_id, self.rewrite_params, self.dialect);
+        let (query_string, query_id) = Self::process_query(
+            query,
+            &event.query_id,
+            self.rewrite_params,
+            self.dialect,
+            self.rewrite_context().await,
+        );
 
         if let Some(duration) = event.parse_duration {
             let mut labels = Self::create_labels(
@@ -222,7 +243,7 @@ impl QueryLogger {
                     backlog_size.set(receiver.len() as f64);
                     match event {
                         Some(event) => {
-                            self.handle_event(&event);
+                            self.handle_event(&event).await;
                             processed_events.increment(1);
                         }
                         None => {
@@ -234,5 +255,19 @@ impl QueryLogger {
                 }
             }
         }
+    }
+
+    async fn rewrite_context(&self) -> RewriteContext {
+        // Unlike in the adapter, we just chug along if there's no schema catalog available.
+        let schema_catalog = self
+            .schema_catalog_handle
+            .get_catalog()
+            .await
+            .unwrap_or_else(|_err| Arc::new(SchemaCatalog::new()));
+        RewriteContext::new(
+            self.dialect.into(),
+            schema_catalog,
+            self.search_path.clone(),
+        )
     }
 }
