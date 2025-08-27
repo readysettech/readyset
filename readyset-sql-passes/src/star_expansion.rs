@@ -10,24 +10,42 @@ use readyset_sql::ast::{
 
 use crate::{outermost_table_exprs, util};
 
-pub trait StarExpansion: Sized {
+pub trait StarExpansionContext {
+    /// Map from names of views and tables in the database, to (ordered) lists of the column names
+    /// in those views
+    fn schema_for_relation(
+        &self,
+        relation: &Relation,
+    ) -> Option<impl IntoIterator<Item = SqlIdentifier>>;
+}
+
+impl<S: StarExpansionContext> StarExpansionContext for &S {
+    fn schema_for_relation(
+        &self,
+        relation: &Relation,
+    ) -> Option<impl IntoIterator<Item = SqlIdentifier>> {
+        (*self).schema_for_relation(relation)
+    }
+}
+
+pub trait StarExpansion {
     /// Expand all `*` column references in the query given a map from tables to the lists of
     /// columns in those tables
-    fn expand_stars(
+    fn expand_stars<S: StarExpansionContext>(
         &mut self,
-        table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
+        context: S,
         non_replicated_relations: &HashSet<NonReplicatedRelation>,
         dialect: readyset_sql::Dialect,
     ) -> ReadySetResult<&mut Self>;
 }
 
-struct ExpandStarsVisitor<'schema> {
-    table_columns: &'schema HashMap<Relation, Vec<SqlIdentifier>>,
+struct ExpandStarsVisitor<'schema, S: StarExpansionContext> {
+    context: S,
     non_replicated_relations: &'schema HashSet<NonReplicatedRelation>,
     dialect: readyset_sql::Dialect,
 }
 
-impl<'ast> VisitorMut<'ast> for ExpandStarsVisitor<'_> {
+impl<'ast, S: StarExpansionContext> VisitorMut<'ast> for ExpandStarsVisitor<'_, S> {
     type Error = ReadySetError;
 
     fn visit_select_statement(
@@ -51,13 +69,15 @@ impl<'ast> VisitorMut<'ast> for ExpandStarsVisitor<'_> {
         let expand_table = |table: Relation, alias: Option<SqlIdentifier>| -> ReadySetResult<_> {
             Ok(if table.schema.is_none() {
                 // Can only reference subqueries with tables that don't have a schema
-                subquery_schemas
-                    .get(&table.name)
-                    .map(|fs| fs.iter().collect::<Vec<_>>())
+                subquery_schemas.get(&table.name).cloned()
             } else {
                 None
             }
-            .or_else(|| self.table_columns.get(&table).map(|fs| fs.iter().collect()))
+            .or_else(|| {
+                self.context
+                    .schema_for_relation(&table)
+                    .map(|fs| fs.into_iter().collect())
+            })
             .ok_or_else(|| {
                 let non_replicated_relation = NonReplicatedRelation::new(table.clone());
                 if self
@@ -147,14 +167,14 @@ impl<'ast> VisitorMut<'ast> for ExpandStarsVisitor<'_> {
 }
 
 impl StarExpansion for SelectStatement {
-    fn expand_stars(
+    fn expand_stars<S: StarExpansionContext>(
         &mut self,
-        table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
+        context: S,
         non_replicated_relations: &HashSet<NonReplicatedRelation>,
         dialect: readyset_sql::Dialect,
     ) -> ReadySetResult<&mut Self> {
         let mut visitor = ExpandStarsVisitor {
-            table_columns,
+            context,
             non_replicated_relations,
             dialect,
         };
@@ -164,14 +184,14 @@ impl StarExpansion for SelectStatement {
 }
 
 impl StarExpansion for SqlQuery {
-    fn expand_stars(
+    fn expand_stars<S: StarExpansionContext>(
         &mut self,
-        write_schemas: &HashMap<Relation, Vec<SqlIdentifier>>,
+        context: S,
         non_replicated_relations: &HashSet<NonReplicatedRelation>,
         dialect: readyset_sql::Dialect,
     ) -> ReadySetResult<&mut Self> {
         if let SqlQuery::Select(sq) = self {
-            sq.expand_stars(write_schemas, non_replicated_relations, dialect)?;
+            sq.expand_stars(context, non_replicated_relations, dialect)?;
         }
         Ok(self)
     }
@@ -184,12 +204,29 @@ mod tests {
 
     use super::*;
 
+    struct TestSchemaContext {
+        schema: HashMap<Relation, Vec<SqlIdentifier>>,
+    }
+
+    impl StarExpansionContext for TestSchemaContext {
+        fn schema_for_relation(
+            &self,
+            table: &Relation,
+        ) -> Option<impl IntoIterator<Item = SqlIdentifier>> {
+            self.schema.get(table).cloned()
+        }
+    }
+
     #[track_caller]
     fn expands_stars(source: &str, expected: &str, schema: HashMap<Relation, Vec<SqlIdentifier>>) {
         let mut q = parse_query(Dialect::MySQL, source).unwrap();
         let expected = parse_query(Dialect::MySQL, expected).unwrap();
-        q.expand_stars(&schema, &Default::default(), readyset_sql::Dialect::MySQL)
-            .unwrap();
+        q.expand_stars(
+            TestSchemaContext { schema },
+            &Default::default(),
+            readyset_sql::Dialect::MySQL,
+        )
+        .unwrap();
         assert_eq!(
             q,
             expected,

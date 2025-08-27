@@ -27,6 +27,7 @@ use readyset_sql::DialectDisplay;
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{
     DetectUnsupportedPlaceholders, ResolveSchemasContext, Rewrite, RewriteContext,
+    StarExpansionContext,
 };
 use readyset_util::redacted::Sensitive;
 use tracing::{debug, error, info, trace, warn};
@@ -1539,5 +1540,14 @@ impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
         self.custom_types
             .get(schema)
             .is_some_and(|tys| tys.contains(custom_type))
+    }
+}
+
+impl StarExpansionContext for SqlIncorporatorRewriteContext<'_> {
+    fn schema_for_relation(
+        &self,
+        table: &Relation,
+    ) -> Option<impl IntoIterator<Item = SqlIdentifier>> {
+        self.this.view_schemas.get(table).cloned()
     }
 }

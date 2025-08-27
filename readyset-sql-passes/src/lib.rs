@@ -55,6 +55,7 @@ pub use crate::resolve_schemas::ResolveSchemas;
 pub use crate::resolve_schemas::ResolveSchemasContext;
 pub use crate::rewrite_between::RewriteBetween;
 pub use crate::star_expansion::StarExpansion;
+pub use crate::star_expansion::StarExpansionContext;
 pub use crate::strip_literals::{SelectStatementSkeleton, StripLiterals};
 use crate::unnest_subqueries::UnnestSubqueries;
 pub use crate::util::{
@@ -73,7 +74,7 @@ pub enum CanQuery {
 /// Context provided to all server-side query rewriting passes, i.e. those performed at migration
 /// time, not those performed in the adapter on the hot path. For those passes, see
 /// [`crate::adapter_rewrites`].
-pub trait RewriteContext: ResolveSchemasContext {
+pub trait RewriteContext: ResolveSchemasContext + StarExpansionContext {
     /// Map from names of views and tables in the database, to (ordered) lists of the column names
     /// in those views
     fn view_schemas(&self) -> &HashMap<Relation, Vec<SqlIdentifier>>;
@@ -191,7 +192,7 @@ impl Rewrite for SelectStatement {
             .scalar_optimize_expressions(context.dialect())
             .resolve_schemas(&context)?
             .expand_stars(
-                context.view_schemas(),
+                &context,
                 context.non_replicated_relations(),
                 context.dialect().into(),
             )?
