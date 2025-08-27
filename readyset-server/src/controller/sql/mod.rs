@@ -1524,4 +1524,14 @@ impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
             cell.borrow_mut().push(table)
         }
     }
+
+    fn can_query_table(
+        &self,
+        schema: &SqlIdentifier,
+        table: &SqlIdentifier,
+    ) -> Option<readyset_sql_passes::CanQuery> {
+        self.tables()
+            .get(schema)
+            .and_then(|tables| tables.get(table).copied())
+    }
 }

@@ -22,19 +22,24 @@ pub trait ResolveSchemasContext {
     /// Note that this takes `&self`, effectively requiring interior mutability, (for now) because
     /// its implementors are effectively partially borrowed (for now).
     fn add_invalidating_table(&self, table: Relation);
+
+    /// Look up a table in a given schema, returning whether it can be queried.
+    // tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
+    fn can_query_table(&self, schema: &SqlIdentifier, table: &SqlIdentifier) -> Option<CanQuery>;
 }
 
 impl<R: ResolveSchemasContext> ResolveSchemasContext for &R {
     fn add_invalidating_table(&self, table: Relation) {
         (*self).add_invalidating_table(table);
     }
+
+    fn can_query_table(&self, schema: &SqlIdentifier, table: &SqlIdentifier) -> Option<CanQuery> {
+        (*self).can_query_table(schema, table)
+    }
 }
 
 struct ResolveSchemaVisitor<'schema, R: ResolveSchemasContext> {
     context: R,
-
-    /// Map from schema name to the set of table names in that schema
-    tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
 
     /// Map from schema name to the set of custom types in that schema
     custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
@@ -63,12 +68,7 @@ where
 
     fn resolve_schema(&mut self, table: &mut Relation) -> Result<(), ReadySetError> {
         for schema in self.search_path {
-            let found = self
-                .tables
-                .get(schema)
-                .into_iter()
-                .find_map(|ts| ts.get(&table.name).copied());
-            match found {
+            match self.context.can_query_table(schema, &table.name) {
                 Some(CanQuery::Yes) => {
                     table.schema = Some(schema.clone());
                     return Ok(());
@@ -290,7 +290,6 @@ pub trait ResolveSchemas: Sized {
     fn resolve_schemas<'schema, R: ResolveSchemasContext>(
         &mut self,
         context: R,
-        tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
         custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
     ) -> ReadySetResult<&mut Self>;
@@ -300,13 +299,11 @@ impl ResolveSchemas for SelectStatement {
     fn resolve_schemas<'schema, R: ResolveSchemasContext>(
         &mut self,
         context: R,
-        tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
         custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
     ) -> ReadySetResult<&mut Self> {
         ResolveSchemaVisitor {
             context,
-            tables,
             custom_types,
             search_path,
             alias_stack: Default::default(),
@@ -320,13 +317,11 @@ impl ResolveSchemas for CreateTableStatement {
     fn resolve_schemas<'schema, R: ResolveSchemasContext>(
         &mut self,
         context: R,
-        tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
         custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
     ) -> ReadySetResult<&mut Self> {
         ResolveSchemaVisitor {
             context,
-            tables,
             custom_types,
             search_path,
             alias_stack: Default::default(),
@@ -349,12 +344,14 @@ mod tests {
     use crate::util::parse_select_statement;
 
     struct TestRewriteContext {
+        tables: HashMap<SqlIdentifier, HashMap<SqlIdentifier, CanQuery>>,
         invalidating_tables: RefCell<Vec<Relation>>,
     }
 
     impl TestRewriteContext {
-        fn new() -> Self {
+        fn new(tables: HashMap<SqlIdentifier, HashMap<SqlIdentifier, CanQuery>>) -> Self {
             Self {
+                tables,
                 invalidating_tables: RefCell::new(Vec::new()),
             }
         }
@@ -363,6 +360,16 @@ mod tests {
     impl ResolveSchemasContext for TestRewriteContext {
         fn add_invalidating_table(&self, table: Relation) {
             self.invalidating_tables.borrow_mut().push(table);
+        }
+
+        fn can_query_table(
+            &self,
+            schema: &SqlIdentifier,
+            table: &SqlIdentifier,
+        ) -> Option<CanQuery> {
+            self.tables
+                .get(schema)
+                .and_then(|tables| tables.get(table).copied())
         }
     }
 
@@ -378,26 +385,25 @@ mod tests {
         let mut q = parser(input);
         let expected = parser(expected);
         q.resolve_schemas(
-            TestRewriteContext::new(),
-            HashMap::from([
+            TestRewriteContext::new(HashMap::from([
                 (
-                    &"s1".into(),
+                    "s1".into(),
                     HashMap::from([
-                        (&"t1".into(), CanQuery::Yes),
-                        (&"t2".into(), CanQuery::Yes),
-                        (&"t_ignored".into(), CanQuery::No),
+                        ("t1".into(), CanQuery::Yes),
+                        ("t2".into(), CanQuery::Yes),
+                        ("t_ignored".into(), CanQuery::No),
                     ]),
                 ),
                 (
-                    &"s2".into(),
+                    "s2".into(),
                     HashMap::from([
-                        (&"t1".into(), CanQuery::Yes),
-                        (&"t2".into(), CanQuery::Yes),
-                        (&"t3".into(), CanQuery::Yes),
+                        ("t1".into(), CanQuery::Yes),
+                        ("t2".into(), CanQuery::Yes),
+                        ("t3".into(), CanQuery::Yes),
                     ]),
                 ),
-                (&"s3".into(), HashMap::from([(&"t4".into(), CanQuery::Yes)])),
-            ]),
+                ("s3".into(), HashMap::from([("t4".into(), CanQuery::Yes)])),
+            ])),
             &HashMap::from([(&"s2".into(), HashSet::from([&"abc".into()]))]),
             &["s1".into(), "s2".into()],
         )
@@ -545,14 +551,12 @@ mod tests {
     #[test]
     fn writes_to_invalidating_tables() {
         let mut q = parse_select_statement("select * from t");
-        let context = TestRewriteContext::new();
-        q.resolve_schemas(
-            &context,
-            HashMap::from([(&"s2".into(), HashMap::from([(&"t".into(), CanQuery::Yes)]))]),
-            &HashMap::new(),
-            &["s1".into(), "s2".into()],
-        )
-        .unwrap();
+        let context = TestRewriteContext::new(HashMap::from([(
+            "s2".into(),
+            HashMap::from([("t".into(), CanQuery::Yes)]),
+        )]));
+        q.resolve_schemas(&context, &HashMap::new(), &["s1".into(), "s2".into()])
+            .unwrap();
 
         assert_eq!(
             context.invalidating_tables.into_inner(),
@@ -567,11 +571,10 @@ mod tests {
     fn cant_query_returns_error() {
         let mut q = parse_select_statement("select * from t");
         let result = q.resolve_schemas(
-            TestRewriteContext::new(),
-            HashMap::from([
-                (&"s1".into(), HashMap::from([(&"t".into(), CanQuery::No)])),
-                (&"s2".into(), HashMap::from([(&"t".into(), CanQuery::Yes)])),
-            ]),
+            TestRewriteContext::new(HashMap::from([
+                ("s1".into(), HashMap::from([("t".into(), CanQuery::No)])),
+                ("s2".into(), HashMap::from([("t".into(), CanQuery::Yes)])),
+            ])),
             &HashMap::new(),
             &["s1".into(), "s2".into()],
         );
@@ -589,11 +592,10 @@ mod tests {
     fn unresolved_cant_query_works() {
         let mut q = parse_select_statement("select * from t");
         q.resolve_schemas(
-            TestRewriteContext::new(),
-            HashMap::from([
-                (&"s1".into(), HashMap::from([(&"t".into(), CanQuery::Yes)])),
-                (&"s2".into(), HashMap::from([(&"t".into(), CanQuery::No)])),
-            ]),
+            TestRewriteContext::new(HashMap::from([
+                ("s1".into(), HashMap::from([("t".into(), CanQuery::Yes)])),
+                ("s2".into(), HashMap::from([("t".into(), CanQuery::No)])),
+            ])),
             &HashMap::new(),
             &["s1".into(), "s2".into()],
         )

@@ -188,14 +188,9 @@ pub trait Rewrite: Sized {
 
 impl Rewrite for CreateTableStatement {
     fn rewrite<C: RewriteContext>(&mut self, context: C) -> ReadySetResult<&mut Self> {
-        self.resolve_schemas(
-            &context,
-            context.tables(),
-            context.custom_types(),
-            context.search_path(),
-        )?
-        .normalize_create_table_columns()
-        .coalesce_key_definitions();
+        self.resolve_schemas(&context, context.custom_types(), context.search_path())?
+            .normalize_create_table_columns()
+            .coalesce_key_definitions();
         Ok(self)
     }
 }
@@ -208,12 +203,7 @@ impl Rewrite for SelectStatement {
             .disallow_row()?
             .validate_window_functions()?
             .scalar_optimize_expressions(context.dialect())
-            .resolve_schemas(
-                &context,
-                context.tables(),
-                context.custom_types(),
-                context.search_path(),
-            )?
+            .resolve_schemas(&context, context.custom_types(), context.search_path())?
             .expand_stars(
                 context.view_schemas(),
                 context.non_replicated_relations(),
