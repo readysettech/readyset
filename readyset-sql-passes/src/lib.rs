@@ -95,9 +95,6 @@ pub trait RewriteContext: ResolveSchemasContext {
     /// Map from schema name to the set of custom types in that schema
     fn custom_types(&self) -> &HashMap<&SqlIdentifier, HashSet<&SqlIdentifier>>;
 
-    /// Ordered list of schema names to search in when resolving schema names of tables
-    fn search_path(&self) -> &[SqlIdentifier];
-
     /// SQL dialect to use for all expressions and types within the query
     fn dialect(&self) -> Dialect;
 
@@ -160,10 +157,6 @@ impl<C: RewriteContext> RewriteContext for &C {
         (*self).custom_types()
     }
 
-    fn search_path(&self) -> &[SqlIdentifier] {
-        (*self).search_path()
-    }
-
     fn dialect(&self) -> Dialect {
         (*self).dialect()
     }
@@ -188,7 +181,7 @@ pub trait Rewrite: Sized {
 
 impl Rewrite for CreateTableStatement {
     fn rewrite<C: RewriteContext>(&mut self, context: C) -> ReadySetResult<&mut Self> {
-        self.resolve_schemas(&context, context.custom_types(), context.search_path())?
+        self.resolve_schemas(&context, context.custom_types())?
             .normalize_create_table_columns()
             .coalesce_key_definitions();
         Ok(self)
@@ -203,7 +196,7 @@ impl Rewrite for SelectStatement {
             .disallow_row()?
             .validate_window_functions()?
             .scalar_optimize_expressions(context.dialect())
-            .resolve_schemas(&context, context.custom_types(), context.search_path())?
+            .resolve_schemas(&context, context.custom_types())?
             .expand_stars(
                 context.view_schemas(),
                 context.non_replicated_relations(),

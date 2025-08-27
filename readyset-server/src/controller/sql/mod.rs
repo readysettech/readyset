@@ -1501,10 +1501,6 @@ impl RewriteContext for SqlIncorporatorRewriteContext<'_> {
         &self.custom_types
     }
 
-    fn search_path(&self) -> &[SqlIdentifier] {
-        self.search_path
-    }
-
     fn dialect(&self) -> Dialect {
         self.dialect
     }
@@ -1533,5 +1529,9 @@ impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
         self.tables()
             .get(schema)
             .and_then(|tables| tables.get(table).copied())
+    }
+
+    fn search_path(&self) -> &[SqlIdentifier] {
+        self.search_path
     }
 }
