@@ -46,6 +46,7 @@ pub use crate::detect_problematic_self_joins::DetectProblematicSelfJoins;
 pub use crate::detect_unsupported_placeholders::DetectUnsupportedPlaceholders;
 pub use crate::expr::ScalarOptimizeExpressions;
 pub use crate::implied_tables::ImpliedTableExpansion;
+pub use crate::implied_tables::ImpliedTablesContext;
 pub use crate::inline_literals::InlineLiterals;
 pub use crate::key_def_coalescing::KeyDefinitionCoalescing;
 pub use crate::normalize_topk_with_aggregate::NormalizeTopKWithAggregate;
@@ -74,7 +75,9 @@ pub enum CanQuery {
 /// Context provided to all server-side query rewriting passes, i.e. those performed at migration
 /// time, not those performed in the adapter on the hot path. For those passes, see
 /// [`crate::adapter_rewrites`].
-pub trait RewriteContext: ResolveSchemasContext + StarExpansionContext {
+pub trait RewriteContext:
+    ResolveSchemasContext + StarExpansionContext + ImpliedTablesContext
+{
     /// Map from names of views and tables in the database, to (ordered) lists of the column names
     /// in those views
     fn view_schemas(&self) -> &HashMap<Relation, Vec<SqlIdentifier>>;
@@ -110,8 +113,9 @@ pub trait RewriteContext: ResolveSchemasContext + StarExpansionContext {
     /// All tables, views, uncompiled views, and non-replicated relations indexable by schema and
     /// tagged with whether they can be queried.
     //
-    // TODO(mvzink): Don't recalculate this on the fly; this may mean not providing it as a default
-    // implementation for implementors and making them do it on construction.
+    // TODO(mvzink): Don't recalculate this on the fly, nor require `view_schemas`; this may mean
+    // not providing it as a default implementation for implementors and making them do it on
+    // construction.
     fn tables(&self) -> HashMap<&SqlIdentifier, HashMap<&SqlIdentifier, CanQuery>> {
         self.view_schemas()
             .keys()
@@ -196,7 +200,7 @@ impl Rewrite for SelectStatement {
                 context.non_replicated_relations(),
                 context.dialect().into(),
             )?
-            .expand_implied_tables(context.view_schemas(), context.dialect().into())?
+            .expand_implied_tables(&context, context.dialect().into())?
             .unnest_subqueries(&context)?
             .normalize_topk_with_aggregate(context.dialect().into())?
             .detect_problematic_self_joins()?
