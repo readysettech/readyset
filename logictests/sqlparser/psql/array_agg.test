@@ -1,0 +1,97 @@
+statement ok
+create table dogs (id int, name text);
+
+statement ok
+insert into dogs values
+  (1, 'kidnap'),
+  (2, 'snoopy');
+
+statement ok
+create table tags (d_id int, tag text);
+
+statement ok
+insert into tags values
+  (1, 'bbb'),
+  (1, 'aaa'),
+  (1, 'ccc'),
+  (2, 'yyy'),
+  (2, 'zzz');
+
+
+# simple query (no NULLs in data)
+query T
+select array_agg(t.tag) from tags t where d_id = 1;
+----
+{bbb,aaa,ccc}
+
+statement ok
+insert into tags values (1, 'bbb');
+
+# simple query (no NULLs in data)
+query T
+select array_agg(t.tag) from tags t where d_id = 1;
+----
+{bbb,aaa,ccc,bbb}
+
+
+# simple query (with NULLs in data)
+# Note: array_agg() _does_ include nulls in the output
+statement ok
+insert into tags values
+  (1, NULL),
+  (1, 'aaa');
+
+query T
+select array_agg(t.tag) from tags t where d_id = 1;
+----
+{bbb,aaa,ccc,bbb,NULL,aaa}
+
+
+# multiple aggregations
+query IT
+select sum(d_id), array_agg(t.tag) from tags t where d_id = 1;
+----
+6
+{bbb,aaa,ccc,bbb,NULL,aaa}
+
+
+# join and group by clause
+query ITT
+select d.id, d.name, array_agg(t.tag) as tag_arr
+  from dogs as d
+  left join tags as t on d.id = t.d_id
+  where d.id = 1
+  group by d.id, d.name;
+----
+1
+kidnap
+{bbb,aaa,ccc,bbb,NULL,aaa}
+
+
+#######
+# test only empty/NULL inputs
+
+# empty results
+query
+select array_agg(tag) from tags where d_id = 3;
+----
+NULL
+
+statement ok
+insert into tags values
+  (3, NULL);
+
+# only NULL rows
+query
+select array_agg(tag) from tags where d_id = 3;
+----
+{NULL}
+
+
+#####
+# post-lookup aggregations
+
+query T
+select array_agg(t.tag) from tags t where d_id in (1, 2);
+----
+{bbb,aaa,ccc,bbb,NULL,aaa,yyy,zzz}

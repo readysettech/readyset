@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 // TODO(aspen): It would be really nice to deduplicate this somehow with the grouped operator itself
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub enum PostLookupAggregateFunction {
+    ArrayAgg,
     /// Add together all the input numbers
     ///
     /// Note that this encapsulates both `SUM` *and* `COUNT` in base SQL, as re-aggregating counts
@@ -21,15 +22,21 @@ pub enum PostLookupAggregateFunction {
     /// Multiply together all the input numbers
     Product,
     /// Concatenate together all the input strings with the given separator
-    GroupConcat { separator: String },
+    GroupConcat {
+        separator: String,
+    },
     /// Take the maximum input value
     Max,
     /// Take the minimum input value
     Min,
     /// Use specified Key-value pair to build a JSON Object
-    JsonObjectAgg { allow_duplicate_keys: bool },
+    JsonObjectAgg {
+        allow_duplicate_keys: bool,
+    },
     /// Concatenate together all the input strings with the given separator
-    StringAgg { separator: String },
+    StringAgg {
+        separator: String,
+    },
 }
 
 impl PostLookupAggregateFunction {
@@ -38,6 +45,15 @@ impl PostLookupAggregateFunction {
     /// This forms a semigroup.
     pub fn apply(&self, val1: &DfValue, val2: &DfValue) -> ReadySetResult<DfValue> {
         match self {
+            PostLookupAggregateFunction::ArrayAgg => match (val1, val2) {
+                (DfValue::Array(a1), DfValue::Array(a2)) => {
+                    let result: Vec<_> = a1.values().chain(a2.values()).cloned().collect();
+                    Ok(DfValue::Array(std::sync::Arc::new(
+                        readyset_data::Array::from(result),
+                    )))
+                }
+                _ => internal!("trying to using `array_agg()` for non-array types"),
+            },
             PostLookupAggregateFunction::Sum => val1 + val2,
             PostLookupAggregateFunction::Product => val1 * val2,
             PostLookupAggregateFunction::GroupConcat { separator } => Ok(format!(

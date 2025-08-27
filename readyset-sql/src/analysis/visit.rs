@@ -567,6 +567,7 @@ pub fn walk_function_expr<'ast, V: Visitor<'ast>>(
     function_expr: &'ast FunctionExpr,
 ) -> Result<(), V::Error> {
     match function_expr {
+        FunctionExpr::ArrayAgg { expr } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Avg { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Count { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Sum { expr, .. } => visitor.visit_expr(expr.as_ref()),

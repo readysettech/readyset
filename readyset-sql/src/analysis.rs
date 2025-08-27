@@ -103,6 +103,7 @@ impl<'a> ReferredColumnsIter<'a> {
         use FunctionExpr::*;
 
         match fexpr {
+            ArrayAgg { expr, .. } => self.visit_expr(expr),
             Avg { expr, .. } => self.visit_expr(expr),
             Count { expr, .. } => self.visit_expr(expr),
             JsonObjectAgg { key, value, .. } => {
@@ -243,6 +244,7 @@ impl<'a> ReferredColumnsMut<'a> {
         use FunctionExpr::*;
 
         match fexpr {
+            ArrayAgg { expr, .. } => self.visit_expr(expr),
             Avg { expr, .. } => self.visit_expr(expr),
             Count { expr, .. } => self.visit_expr(expr),
             CountStar | RowNumber | Rank | DenseRank => None,
@@ -392,7 +394,8 @@ impl SelectStatement {
 /// Returns true if the given [`FunctionExpr`] represents an aggregate function
 pub fn is_aggregate(function: &FunctionExpr) -> bool {
     match function {
-        FunctionExpr::Avg { .. }
+        FunctionExpr::ArrayAgg { .. }
+        | FunctionExpr::Avg { .. }
         | FunctionExpr::Count { .. }
         | FunctionExpr::CountStar
         | FunctionExpr::Sum { .. }

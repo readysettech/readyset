@@ -468,18 +468,26 @@ impl SelectStatement {
     pub fn contains_aggregate_select(&self) -> bool {
         self.fields.iter().any(|e| match e {
             FieldDefinitionExpr::Expr { expr, .. } => match expr {
-                Expr::Call(func) => matches!(
-                    func,
-                    FunctionExpr::Avg { .. }
-                        | FunctionExpr::Count { .. }
-                        | FunctionExpr::CountStar
-                        | FunctionExpr::Sum { .. }
-                        | FunctionExpr::Max(_)
-                        | FunctionExpr::Min(_)
-                        | FunctionExpr::GroupConcat { .. }
-                        | FunctionExpr::JsonObjectAgg { .. }
-                        | FunctionExpr::StringAgg { .. }
-                ),
+                Expr::Call(func) => match func {
+                    FunctionExpr::ArrayAgg { .. }
+                    | FunctionExpr::Avg { .. }
+                    | FunctionExpr::Count { .. }
+                    | FunctionExpr::CountStar
+                    | FunctionExpr::Sum { .. }
+                    | FunctionExpr::Max(_)
+                    | FunctionExpr::Min(_)
+                    | FunctionExpr::GroupConcat { .. }
+                    | FunctionExpr::JsonObjectAgg { .. }
+                    | FunctionExpr::StringAgg { .. } => true,
+                    FunctionExpr::Call { .. }
+                    | FunctionExpr::Extract { .. }
+                    | FunctionExpr::Lower { .. }
+                    | FunctionExpr::DenseRank
+                    | FunctionExpr::Rank
+                    | FunctionExpr::RowNumber
+                    | FunctionExpr::Substring { .. }
+                    | FunctionExpr::Upper { .. } => false,
+                },
                 Expr::NestedSelect(select) => select.contains_aggregate_select(),
                 _ => false,
             },

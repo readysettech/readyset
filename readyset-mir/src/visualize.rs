@@ -159,6 +159,7 @@ impl GraphViz for MirNodeInner {
                 ..
             } => {
                 let op_string = match kind {
+                    AccumulationKind::ArrayAgg => format!("ArrayAgg({on})"),
                     AccumulationKind::GroupConcat { separator: s } => {
                         format!("GroupConcat({on}, \\\"{s}\\\")")
                     }
@@ -301,6 +302,7 @@ impl GraphViz for MirNodeInner {
                             .map(|aggregate| format!(
                                 "{}({})",
                                 match aggregate.function {
+                                    PostLookupAggregateFunction::ArrayAgg => "ArrayAgg",
                                     PostLookupAggregateFunction::Sum => "Σ",
                                     PostLookupAggregateFunction::Product => "Π",
                                     PostLookupAggregateFunction::GroupConcat { .. } => "GC",

@@ -46,6 +46,10 @@ impl Accumulator {
         let collation = over_col_ty.collation().unwrap_or(Collation::Utf8);
 
         let out_ty = match &op {
+            AccumulationOp::ArrayAgg => {
+                antithesis_sdk::assert_reachable!("Accumulation::ArrayAgg");
+                DfType::Array(Box::new(over_col_ty.clone()))
+            }
             AccumulationOp::GroupConcat { .. } => {
                 antithesis_sdk::assert_reachable!("Accumulation::GroupConcat");
                 DfType::Text(collation)
@@ -147,7 +151,7 @@ impl GroupedOperation for Accumulator {
             group_hash,
         } in diffs
         {
-            if value.is_none() {
+            if self.op.ignore_nulls() && value.is_none() {
                 continue;
             }
 
@@ -182,6 +186,9 @@ impl GroupedOperation for Accumulator {
 
     fn description(&self) -> String {
         let op_string = match &self.op {
+            AccumulationOp::ArrayAgg => {
+                format!("ArrayAgg({})", self.over)
+            }
             AccumulationOp::GroupConcat { separator } => {
                 format!("GroupConcat({}, {:?})", self.over, separator)
             }

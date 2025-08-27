@@ -882,6 +882,11 @@ impl SqlToMirConverter {
         }
 
         Ok(match function {
+            ArrayAgg { ref expr } => mknode(
+                Column::from(get_column(expr)),
+                GroupedNodeType::Accumulation(AccumulationOp::ArrayAgg),
+                false,
+            ),
             Sum { ref expr, distinct } if is_column(expr) => mknode(
                 Column::from(get_column(expr)),
                 GroupedNodeType::Aggregation(Aggregation::Sum),

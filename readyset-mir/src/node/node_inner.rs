@@ -447,6 +447,7 @@ impl MirNodeInner {
                 ..
             } => {
                 let op_string = match kind {
+                    AccumulationOp::ArrayAgg => format!("ArrayAgg({})", on.name.as_str()),
                     AccumulationOp::GroupConcat { separator } => {
                         format!(
                             "GroupConcat([{}], \"{}\")",

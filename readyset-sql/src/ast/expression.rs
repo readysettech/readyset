@@ -19,6 +19,13 @@ use crate::{
 /// Function call expressions
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
 pub enum FunctionExpr {
+    /// `ARRAY_AGG` aggregation - PostgreSQL array aggregation function
+    ///
+    /// Syntax: `ARRAY_AGG(expr [ORDER BY sort_expr [ASC|DESC], ...])`
+    ArrayAgg {
+        expr: Box<Expr>,
+    },
+
     /// `AVG` aggregation. The boolean argument is `true` if `DISTINCT`
     Avg {
         expr: Box<Expr>,
@@ -129,6 +136,9 @@ pub enum FunctionExpr {
 impl FunctionExpr {
     pub fn alias(&self, dialect: Dialect) -> Option<String> {
         Some(match self {
+            FunctionExpr::ArrayAgg { expr } => {
+                format!("array_agg({})", expr.alias(dialect)?)
+            }
             FunctionExpr::Avg { expr, .. } => format!("avg({})", expr.alias(dialect)?),
             FunctionExpr::Count { expr, .. } => format!("count({})", expr.alias(dialect)?),
             FunctionExpr::Sum { expr, .. } => format!("sum({})", expr.alias(dialect)?),
@@ -234,7 +244,8 @@ impl FunctionExpr {
     #[concrete_iter]
     pub fn arguments<'a>(&'a self) -> impl Iterator<Item = &'a Expr> {
         match self {
-            FunctionExpr::Avg { expr: arg, .. }
+            FunctionExpr::ArrayAgg { expr: arg }
+            | FunctionExpr::Avg { expr: arg, .. }
             | FunctionExpr::Count { expr: arg, .. }
             | FunctionExpr::Sum { expr: arg, .. }
             | FunctionExpr::Max(arg)
@@ -274,6 +285,9 @@ impl FunctionExpr {
 impl DialectDisplay for FunctionExpr {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
+            FunctionExpr::ArrayAgg { expr } => {
+                write!(f, "array_agg({})", expr.display(dialect))
+            }
             FunctionExpr::Avg {
                 expr,
                 distinct: true,
@@ -1684,6 +1698,8 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             };
 
             Self::Call(FunctionExpr::StringAgg { expr, separator })
+        } else if ident.value.eq_ignore_ascii_case("ARRAY_AGG") {
+            Self::Call(FunctionExpr::ArrayAgg { expr: next_expr()? })
         } else if ident.value.eq_ignore_ascii_case("JSON_OBJECT_AGG") {
             Self::Call(FunctionExpr::JsonObjectAgg {
                 key: next_expr()?,
@@ -2116,6 +2132,7 @@ impl Arbitrary for Expr {
                 }),
                 (box_expr.clone(), any::<Option<String>>())
                     .prop_map(|(expr, separator)| { FunctionExpr::StringAgg { expr, separator } }),
+                (box_expr.clone()).prop_map(|expr| { FunctionExpr::ArrayAgg { expr } }),
                 (
                     box_expr.clone(),
                     option::of(box_expr.clone()),

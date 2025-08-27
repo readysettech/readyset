@@ -1129,6 +1129,8 @@ impl Arbitrary for WindowFunctionConfig {
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 #[arbitrary(args = QueryDialect)]
 pub enum AggregateType {
+    #[weight(u32::from(*args_shared == ParseDialect::PostgreSQL))]
+    ArrayAgg,
     Count {
         #[any(generate_arrays = false, dialect = Some(args_shared.0))]
         column_type: SqlType,
@@ -1164,6 +1166,7 @@ pub enum AggregateType {
 impl AggregateType {
     pub fn column_type(&self) -> SqlType {
         match self {
+            AggregateType::ArrayAgg => SqlType::Text,
             AggregateType::Avg { column_type, .. } => column_type.clone(),
             AggregateType::Count { column_type, .. } => column_type.clone(),
             AggregateType::GroupConcat => SqlType::Text,
@@ -1180,7 +1183,8 @@ impl AggregateType {
             AggregateType::Avg { distinct, .. } => *distinct,
             AggregateType::Count { distinct, .. } => *distinct,
             AggregateType::Sum { distinct, .. } => *distinct,
-            AggregateType::GroupConcat
+            AggregateType::ArrayAgg
+            | AggregateType::GroupConcat
             | AggregateType::JsonObjectAgg { .. }
             | AggregateType::Max { .. }
             | AggregateType::Min { .. }
@@ -1646,6 +1650,7 @@ const ALL_PAGINATE: &[QueryOperation] = &[
 ];
 
 const ALL_AGGREGATE_TYPES: &[AggregateType] = &[
+    AggregateType::ArrayAgg,
     AggregateType::Count {
         column_type: SqlType::Int(None),
         distinct: true,
@@ -1910,6 +1915,7 @@ impl QueryOperation {
                 }));
 
                 let func = match *agg {
+                    ArrayAgg => FunctionExpr::ArrayAgg { expr },
                     Avg { distinct, .. } => FunctionExpr::Avg { expr, distinct },
                     Count { distinct, .. } => FunctionExpr::Count { expr, distinct },
                     GroupConcat => FunctionExpr::GroupConcat {
@@ -2667,6 +2673,7 @@ impl FromStr for Operations {
             .into()),
             "topk" => Ok(ALL_TOPK.to_vec().into()),
             "paginate" => Ok(ALL_PAGINATE.to_vec().into()),
+            "array_agg" => Ok(vec![ColumnAggregate(AggregateType::ArrayAgg)].into()),
             "string_agg" => Ok(vec![ColumnAggregate(AggregateType::StringAgg)].into()),
             s => Err(anyhow!("unknown query operation: {}", s)),
         }
@@ -3315,6 +3322,7 @@ mod tests {
             res,
             vec![
                 Operations(vec![
+                    QueryOperation::ColumnAggregate(AggregateType::ArrayAgg),
                     QueryOperation::ColumnAggregate(AggregateType::Count {
                         column_type: SqlType::Int(None),
                         distinct: true,

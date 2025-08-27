@@ -379,6 +379,18 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             Type::FLOAT8 => Ok(Self::from(f64::from_sql(ty, raw)?)),
             Type::NUMERIC => Ok(Self::Numeric(Decimal::from_sql(ty, raw)?)),
             Type::TEXT => Ok(Self::Text(String::from_sql(ty, raw)?)),
+            Type::TEXT_ARRAY => {
+                // convert a text array into something like "{string1,string2,NULL,string3}"
+                // we need to handle NULLs in some sane way, and this mimics what
+                // pg's array_agg() function does.
+                let string_array = Vec::<Option<String>>::from_sql(ty, raw)?;
+                let joined = string_array
+                    .iter()
+                    .map(|opt| opt.as_deref().unwrap_or("NULL"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                Ok(Self::Text(format!("{{{}}}", joined)))
+            }
             Type::DATE => {
                 // This is a hack to work around the fact that we don't have
                 // a distinct 'Date' type, and that the existing 'Date' is
@@ -422,6 +434,7 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             | Type::FLOAT8
             | Type::NUMERIC
             | Type::TEXT
+            | Type::TEXT_ARRAY
             | Type::DATE
             | Type::TIMESTAMP
             | Type::TIMESTAMPTZ

@@ -340,6 +340,10 @@ pub(super) fn post_lookup_aggregates(
         aggregates.push(PostLookupAggregate {
             column: Column::named(alias.clone()).aliased_as_table(query_name.clone()),
             function: match function {
+                ArrayAgg { .. } => {
+                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::ArrayAgg");
+                    PostLookupAggregateFunction::ArrayAgg
+                }
                 Avg { .. } => {
                     unsupported!("Average is not supported as a post-lookup aggregate")
                 }

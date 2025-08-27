@@ -1,6 +1,6 @@
 //! This module implements SQL aggregation functions that accumulate multiple input values
-//! into a single output value. Currently only supports mysql's `GROUP_CONCAT`, postgres' `STRING_AGG`,
-//! and the various JSON object aggregation functions.
+//! into a single output value. Currently only supports mysql's `GROUP_CONCAT`, postgres' `STRING_AGG`
+//! and `ARRAY_AGG`, and the various JSON object aggregation functions.
 use crate::eval::json;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetResult};
@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 /// Supported accumulation operators.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AccumulationOp {
+    /// Concatenate values into an array. Allows NULL values in the output array.
+    ArrayAgg,
     /// Concatenates using the given separator between values. The string result is with the concatenated non-NULL
     /// values from a group. It returns NULL if there are no non-NULL values.
     GroupConcat { separator: String },
@@ -21,6 +23,25 @@ pub enum AccumulationOp {
 }
 
 impl AccumulationOp {
+    pub fn ignore_nulls(&self) -> bool {
+        match self {
+            Self::ArrayAgg { .. } => false,
+            Self::GroupConcat { .. } | Self::JsonObjectAgg { .. } | Self::StringAgg { .. } => true,
+        }
+    }
+
+    fn apply_array_agg(&self, data: &[DfValue]) -> ReadySetResult<DfValue> {
+        if data.is_empty() {
+            Ok(DfValue::Array(std::sync::Arc::new(
+                readyset_data::Array::from(vec![]),
+            )))
+        } else {
+            Ok(DfValue::Array(std::sync::Arc::new(
+                readyset_data::Array::from(data.to_vec()),
+            )))
+        }
+    }
+
     fn apply_group_concat(&self, data: &[DfValue], separator: &str) -> ReadySetResult<DfValue> {
         // return SQL NULL if no non-NULL values in the `data`. we won't have NULL values as we've
         // filtered those out already.
@@ -70,6 +91,7 @@ impl AccumulationOp {
 
     pub fn apply(&self, data: &[DfValue]) -> ReadySetResult<DfValue> {
         match self {
+            AccumulationOp::ArrayAgg => self.apply_array_agg(data),
             AccumulationOp::GroupConcat { separator } => self.apply_group_concat(data, separator),
             AccumulationOp::JsonObjectAgg {
                 allow_duplicate_keys,
