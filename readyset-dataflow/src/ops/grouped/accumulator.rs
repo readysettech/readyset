@@ -149,6 +149,10 @@ impl GroupedOperation for Accumulator {
             group_by,
         } in diffs
         {
+            if value.is_none() {
+                continue;
+            }
+
             invariant_eq!(group_by, group);
             if is_positive {
                 prev_state.data.push(value);
@@ -399,6 +403,24 @@ mod tests {
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
             if r[0] == 3.into() {
                 assert_eq!(r[1], "3".into());
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }));
+
+        // Test that NULL values are ignored
+        let u: Record = vec![1.into(), DfValue::None].into();
+        let rs = c.narrow_one(u, true);
+
+        // Should still have the same output as before since NULL is ignored
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+            if r[0] == 1.into() {
+                // The output should still be "2#1#2" and not include NULL
+                assert_eq!(r[1], "2#1#2".into());
+                assert!(!r[1].to_string().contains("NULL"));
                 true
             } else {
                 false

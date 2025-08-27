@@ -9,17 +9,25 @@ use serde::{Deserialize, Serialize};
 /// Supported accumulation operators.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AccumulationOp {
-    /// Concatenates using the given separator between values.
+    /// Concatenates using the given separator between values. The string result is with the concatenated non-NULL
+    /// values from a group. It returns NULL if there are no non-NULL values.
     GroupConcat { separator: String },
     /// Aggregates key-value pairs into JSON object.
     JsonObjectAgg { allow_duplicate_keys: bool },
     /// Concatenates using the given separator between values. Postgres allows the separator
-    /// to be `NULL` (yet it must be specified in the query string).
+    /// to be `NULL` (yet it must be specified in the query string). The string result is the
+    /// concatenated non-NULL values from a group. It returns NULL if there are no non-NULL values.
     StringAgg { separator: Option<String> },
 }
 
 impl AccumulationOp {
     fn apply_group_concat(&self, data: &[DfValue], separator: &str) -> ReadySetResult<DfValue> {
+        // return SQL NULL if no non-NULL values in the `data`. we won't have NULL values as we've
+        // filtered those out already.
+        if data.is_empty() {
+            return Ok(DfValue::None);
+        }
+
         let out_str = data
             .iter()
             .map(|piece| piece.to_string())

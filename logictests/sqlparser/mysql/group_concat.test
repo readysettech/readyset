@@ -32,12 +32,25 @@ select group_concat(t.tag separator '::') from tags t where d_id = 1;
 ----
 bbb::aaa::ccc::bbb
 
+# simple query (with NULLs in data)
+statement ok
+insert into tags values
+  (1, NULL),
+  (1, 'aaa');
+
+# simple query (with NULLs in data)
+query T
+select group_concat(t.tag separator '::') from tags t where d_id = 1;
+----
+bbb::aaa::ccc::bbb::aaa
+
+
 # multiple aggregations
 query IT
 select sum(d_id), group_concat(t.tag separator '::') from tags t where d_id = 1;
 ----
-4
-bbb::aaa::ccc::bbb
+6
+bbb::aaa::ccc::bbb::aaa
 
 # join/group by clause
 query ITT
@@ -49,7 +62,27 @@ select d.id, d.name, group_concat(t.tag separator '::') as tag_arr
 ----
 1
 kidnap
-bbb::aaa::ccc::bbb
+bbb::aaa::ccc::bbb::aaa
+
+
+#######
+# test only empty/NULL inputs
+
+# empty results
+query
+select group_concat(tag) from tags where d_id = 3;
+----
+NULL
+
+statement ok
+insert into tags values
+  (3, NULL);
+
+# only NULL rows
+query
+select group_concat(tag) from tags where d_id = 3;
+----
+NULL
 
 
 ######
@@ -58,5 +91,4 @@ bbb::aaa::ccc::bbb
 query T
 select group_concat(t.tag separator '::') from tags t where d_id in (1, 2);
 ----
-bbb::aaa::ccc::bbb::yyy::zzz
-
+bbb::aaa::ccc::bbb::aaa::yyy::zzz

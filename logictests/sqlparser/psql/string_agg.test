@@ -40,15 +40,29 @@ select string_agg(t.tag, NULL) from tags t where d_id = 1;
 bbbaaacccbbb
 
 
+# simple query (with NULLs in data)
+statement ok
+insert into tags values
+  (1, NULL),
+  (1, 'aaa');
+
+query T
+select string_agg(t.tag, '::') from tags t where d_id = 1;
+----
+bbb::aaa::ccc::bbb::aaa
+
+
 # multiple aggregations
+# Note: the sum() should include a count for the NULL row, even though
+# it is not output by string_agg().
 query IT
 select sum(d_id), string_agg(t.tag, '::') from tags t where d_id = 1;
 ----
-4
-bbb::aaa::ccc::bbb
+6
+bbb::aaa::ccc::bbb::aaa
 
 
-# join/group by clause
+# join and group by clause
 query ITT
 select d.id, d.name, string_agg(t.tag, '::') as tag_arr
   from dogs as d
@@ -58,7 +72,27 @@ select d.id, d.name, string_agg(t.tag, '::') as tag_arr
 ----
 1
 kidnap
-bbb::aaa::ccc::bbb
+bbb::aaa::ccc::bbb::aaa
+
+
+#######
+# test only empty/NULL inputs
+
+# empty results
+query
+select string_agg(tag, '::') from tags where d_id = 3;
+----
+NULL
+
+statement ok
+insert into tags values
+  (3, NULL);
+
+# only NULL rows
+query
+select string_agg(tag, '::') from tags where d_id = 3;
+----
+NULL
 
 
 #####
@@ -67,4 +101,4 @@ bbb::aaa::ccc::bbb
 query T
 select string_agg(t.tag, '::') from tags t where d_id in (1, 2);
 ----
-bbb::aaa::ccc::bbb::yyy::zzz
+bbb::aaa::ccc::bbb::aaa::yyy::zzz
