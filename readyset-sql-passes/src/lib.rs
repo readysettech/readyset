@@ -195,11 +195,7 @@ impl Rewrite for SelectStatement {
             .validate_window_functions()?
             .scalar_optimize_expressions(context.dialect())
             .resolve_schemas(&context)?
-            .expand_stars(
-                &context,
-                context.non_replicated_relations(),
-                context.dialect().into(),
-            )?
+            .expand_stars(&context, context.dialect().into())?
             .expand_implied_tables(&context, context.dialect().into())?
             .unnest_subqueries(&context)?
             .normalize_topk_with_aggregate(context.dialect().into())?

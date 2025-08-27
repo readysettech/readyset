@@ -1550,6 +1550,12 @@ impl StarExpansionContext for SqlIncorporatorRewriteContext<'_> {
     ) -> Option<impl IntoIterator<Item = SqlIdentifier>> {
         self.this.view_schemas.get(table).cloned()
     }
+
+    fn is_relation_non_replicated(&self, relation: &Relation) -> bool {
+        self.this
+            .non_replicated_relations()
+            .contains(&NonReplicatedRelation::new(relation.clone()))
+    }
 }
 
 impl ImpliedTablesContext for SqlIncorporatorRewriteContext<'_> {

@@ -1,11 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::mem;
 
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
-    Column, Expr, FieldDefinitionExpr, NonReplicatedRelation, Relation, SelectStatement,
-    SqlIdentifier, SqlQuery,
+    Column, Expr, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery,
 };
 
 use crate::{outermost_table_exprs, util};
@@ -17,6 +16,12 @@ pub trait StarExpansionContext {
         &self,
         relation: &Relation,
     ) -> Option<impl IntoIterator<Item = SqlIdentifier>>;
+
+    /// Check whether a relation has been denied replication.
+    //
+    // TODO: We ostensibly have the reason *why* it's not replicated, and we could return that in
+    // the error up to the user.
+    fn is_relation_non_replicated(&self, relation: &Relation) -> bool;
 }
 
 impl<S: StarExpansionContext> StarExpansionContext for &S {
@@ -26,6 +31,10 @@ impl<S: StarExpansionContext> StarExpansionContext for &S {
     ) -> Option<impl IntoIterator<Item = SqlIdentifier>> {
         (*self).schema_for_relation(relation)
     }
+
+    fn is_relation_non_replicated(&self, relation: &Relation) -> bool {
+        (*self).is_relation_non_replicated(relation)
+    }
 }
 
 pub trait StarExpansion {
@@ -34,18 +43,16 @@ pub trait StarExpansion {
     fn expand_stars<S: StarExpansionContext>(
         &mut self,
         context: S,
-        non_replicated_relations: &HashSet<NonReplicatedRelation>,
         dialect: readyset_sql::Dialect,
     ) -> ReadySetResult<&mut Self>;
 }
 
-struct ExpandStarsVisitor<'schema, S: StarExpansionContext> {
+struct ExpandStarsVisitor<S: StarExpansionContext> {
     context: S,
-    non_replicated_relations: &'schema HashSet<NonReplicatedRelation>,
     dialect: readyset_sql::Dialect,
 }
 
-impl<'ast, S: StarExpansionContext> VisitorMut<'ast> for ExpandStarsVisitor<'_, S> {
+impl<'ast, S: StarExpansionContext> VisitorMut<'ast> for ExpandStarsVisitor<S> {
     type Error = ReadySetError;
 
     fn visit_select_statement(
@@ -79,11 +86,7 @@ impl<'ast, S: StarExpansionContext> VisitorMut<'ast> for ExpandStarsVisitor<'_, 
                     .map(|fs| fs.into_iter().collect())
             })
             .ok_or_else(|| {
-                let non_replicated_relation = NonReplicatedRelation::new(table.clone());
-                if self
-                    .non_replicated_relations
-                    .contains(&non_replicated_relation)
-                {
+                if self.context.is_relation_non_replicated(&table) {
                     ReadySetError::TableNotReplicated {
                         name: table.name.clone().into(),
                         schema: table.schema.clone().map(Into::into),
@@ -170,14 +173,9 @@ impl StarExpansion for SelectStatement {
     fn expand_stars<S: StarExpansionContext>(
         &mut self,
         context: S,
-        non_replicated_relations: &HashSet<NonReplicatedRelation>,
         dialect: readyset_sql::Dialect,
     ) -> ReadySetResult<&mut Self> {
-        let mut visitor = ExpandStarsVisitor {
-            context,
-            non_replicated_relations,
-            dialect,
-        };
+        let mut visitor = ExpandStarsVisitor { context, dialect };
         visitor.visit_select_statement(self)?;
         Ok(self)
     }
@@ -187,11 +185,10 @@ impl StarExpansion for SqlQuery {
     fn expand_stars<S: StarExpansionContext>(
         &mut self,
         context: S,
-        non_replicated_relations: &HashSet<NonReplicatedRelation>,
         dialect: readyset_sql::Dialect,
     ) -> ReadySetResult<&mut Self> {
         if let SqlQuery::Select(sq) = self {
-            sq.expand_stars(context, non_replicated_relations, dialect)?;
+            sq.expand_stars(context, dialect)?;
         }
         Ok(self)
     }
@@ -215,18 +212,19 @@ mod tests {
         ) -> Option<impl IntoIterator<Item = SqlIdentifier>> {
             self.schema.get(table).cloned()
         }
+
+        fn is_relation_non_replicated(&self, _relation: &Relation) -> bool {
+            // TODO: Unfortunately this path isn't tested here.
+            false
+        }
     }
 
     #[track_caller]
     fn expands_stars(source: &str, expected: &str, schema: HashMap<Relation, Vec<SqlIdentifier>>) {
         let mut q = parse_query(Dialect::MySQL, source).unwrap();
         let expected = parse_query(Dialect::MySQL, expected).unwrap();
-        q.expand_stars(
-            TestSchemaContext { schema },
-            &Default::default(),
-            readyset_sql::Dialect::MySQL,
-        )
-        .unwrap();
+        q.expand_stars(TestSchemaContext { schema }, readyset_sql::Dialect::MySQL)
+            .unwrap();
         assert_eq!(
             q,
             expected,
