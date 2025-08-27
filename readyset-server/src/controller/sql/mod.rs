@@ -25,7 +25,9 @@ use readyset_sql::ast::{
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
-use readyset_sql_passes::{DetectUnsupportedPlaceholders, Rewrite, RewriteContext};
+use readyset_sql_passes::{
+    DetectUnsupportedPlaceholders, ResolveSchemasContext, Rewrite, RewriteContext,
+};
 use readyset_util::redacted::Sensitive;
 use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
@@ -1507,15 +1509,19 @@ impl RewriteContext for SqlIncorporatorRewriteContext<'_> {
         self.dialect
     }
 
-    fn invalidating_tables(&self) -> Option<RefMut<'_, Vec<Relation>>> {
-        self.invalidating_tables.map(|cell| cell.borrow_mut())
-    }
-
     fn table_alias_rewrites(&self) -> Option<RefMut<'_, Vec<TableAliasRewrite>>> {
         self.table_alias_rewrites.map(|cell| cell.borrow_mut())
     }
 
     fn query_name(&self) -> Option<&str> {
         self.query_name
+    }
+}
+
+impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
+    fn add_invalidating_table(&self, table: Relation) {
+        if let Some(cell) = self.invalidating_tables {
+            cell.borrow_mut().push(table)
+        }
     }
 }

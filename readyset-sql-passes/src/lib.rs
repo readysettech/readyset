@@ -52,6 +52,7 @@ pub use crate::normalize_topk_with_aggregate::NormalizeTopKWithAggregate;
 pub use crate::order_limit_removal::OrderLimitRemoval;
 pub use crate::remove_numeric_field_references::RemoveNumericFieldReferences;
 pub use crate::resolve_schemas::ResolveSchemas;
+pub use crate::resolve_schemas::ResolveSchemasContext;
 pub use crate::rewrite_between::RewriteBetween;
 pub use crate::star_expansion::StarExpansion;
 pub use crate::strip_literals::{SelectStatementSkeleton, StripLiterals};
@@ -72,7 +73,7 @@ pub enum CanQuery {
 /// Context provided to all server-side query rewriting passes, i.e. those performed at migration
 /// time, not those performed in the adapter on the hot path. For those passes, see
 /// [`crate::adapter_rewrites`].
-pub trait RewriteContext {
+pub trait RewriteContext: ResolveSchemasContext {
     /// Map from names of views and tables in the database, to (ordered) lists of the column names
     /// in those views
     fn view_schemas(&self) -> &HashMap<Relation, Vec<SqlIdentifier>>;
@@ -99,14 +100,6 @@ pub trait RewriteContext {
 
     /// SQL dialect to use for all expressions and types within the query
     fn dialect(&self) -> Dialect;
-
-    /// Optional list of tables which, if created, should invalidate this query.
-    ///
-    /// This is (optionally) inserted into during rewriting of certain queries when the
-    /// [resolve_schemas pass][] attempts to resolve a table within a schema but is unable to.
-    ///
-    /// [resolve_schemas pass]: crate::resolve_schemas
-    fn invalidating_tables(&self) -> Option<RefMut<'_, Vec<Relation>>>;
 
     /// Optional list of aliases that were removed during a rewrite.
     ///
@@ -175,10 +168,6 @@ impl<C: RewriteContext> RewriteContext for &C {
         (*self).dialect()
     }
 
-    fn invalidating_tables(&self) -> Option<RefMut<'_, Vec<Relation>>> {
-        (*self).invalidating_tables()
-    }
-
     fn table_alias_rewrites(&self) -> Option<RefMut<'_, Vec<TableAliasRewrite>>> {
         (*self).table_alias_rewrites()
     }
@@ -200,10 +189,10 @@ pub trait Rewrite: Sized {
 impl Rewrite for CreateTableStatement {
     fn rewrite<C: RewriteContext>(&mut self, context: C) -> ReadySetResult<&mut Self> {
         self.resolve_schemas(
+            &context,
             context.tables(),
             context.custom_types(),
             context.search_path(),
-            context.invalidating_tables(),
         )?
         .normalize_create_table_columns()
         .coalesce_key_definitions();
@@ -220,10 +209,10 @@ impl Rewrite for SelectStatement {
             .validate_window_functions()?
             .scalar_optimize_expressions(context.dialect())
             .resolve_schemas(
+                &context,
                 context.tables(),
                 context.custom_types(),
                 context.search_path(),
-                context.invalidating_tables(),
             )?
             .expand_stars(
                 context.view_schemas(),
