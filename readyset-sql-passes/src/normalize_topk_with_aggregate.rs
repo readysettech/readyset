@@ -1,11 +1,13 @@
 use std::mem;
 
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_sql::DialectDisplay;
 use readyset_sql::analysis::contains_aggregate;
 use readyset_sql::ast::{
     Expr, FieldDefinitionExpr, FieldReference, LimitClause, OrderBy, SelectStatement, SqlQuery,
 };
-use readyset_sql::{Dialect, DialectDisplay};
+
+use crate::RewriteDialectContext;
 
 pub trait NormalizeTopKWithAggregate: Sized {
     /// Remove any topk clause (order by, limit, offset) from a query with an aggregate without a
@@ -15,11 +17,17 @@ pub trait NormalizeTopKWithAggregate: Sized {
     /// If the query *has* a GROUP BY clause, this query checks that all the columns in the ORDER BY
     /// clause either appear in the GROUP BY clause, or reference the results of aggregates, and
     /// returns an error otherwise.
-    fn normalize_topk_with_aggregate(&mut self, dialect: Dialect) -> ReadySetResult<&mut Self>;
+    fn normalize_topk_with_aggregate<C: RewriteDialectContext>(
+        &mut self,
+        context: C,
+    ) -> ReadySetResult<&mut Self>;
 }
 
 impl NormalizeTopKWithAggregate for SelectStatement {
-    fn normalize_topk_with_aggregate(&mut self, dialect: Dialect) -> ReadySetResult<&mut Self> {
+    fn normalize_topk_with_aggregate<C: RewriteDialectContext>(
+        &mut self,
+        context: C,
+    ) -> ReadySetResult<&mut Self> {
         if let Some(order) = self.order.take() {
             let aggs = self
                 .fields
@@ -66,7 +74,9 @@ impl NormalizeTopKWithAggregate for SelectStatement {
 
                             if !in_group_by_clause && !references_aggregate {
                                 return Err(ReadySetError::ExprNotInGroupBy {
-                                    expression: order_field.display(dialect).to_string(),
+                                    expression: order_field
+                                        .display(context.dialect().into())
+                                        .to_string(),
                                     position: "ORDER BY".to_owned(),
                                 });
                             }
@@ -102,9 +112,12 @@ impl NormalizeTopKWithAggregate for SelectStatement {
 }
 
 impl NormalizeTopKWithAggregate for SqlQuery {
-    fn normalize_topk_with_aggregate(&mut self, dialect: Dialect) -> ReadySetResult<&mut Self> {
+    fn normalize_topk_with_aggregate<C: RewriteDialectContext>(
+        &mut self,
+        context: C,
+    ) -> ReadySetResult<&mut Self> {
         if let SqlQuery::Select(stmt) = self {
-            stmt.normalize_topk_with_aggregate(dialect)?;
+            stmt.normalize_topk_with_aggregate(context)?;
         }
         Ok(self)
     }

@@ -7,9 +7,9 @@ use readyset_sql::ast::{
     Column, Expr, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery,
 };
 
-use crate::{outermost_table_exprs, util};
+use crate::{RewriteDialectContext, outermost_table_exprs, util};
 
-pub trait StarExpansionContext {
+pub trait StarExpansionContext: RewriteDialectContext {
     /// Map from names of views and tables in the database, to (ordered) lists of the column names
     /// in those views
     fn schema_for_relation(
@@ -40,11 +40,7 @@ impl<S: StarExpansionContext> StarExpansionContext for &S {
 pub trait StarExpansion {
     /// Expand all `*` column references in the query given a map from tables to the lists of
     /// columns in those tables
-    fn expand_stars<S: StarExpansionContext>(
-        &mut self,
-        context: S,
-        dialect: readyset_sql::Dialect,
-    ) -> ReadySetResult<&mut Self>;
+    fn expand_stars<S: StarExpansionContext>(&mut self, context: S) -> ReadySetResult<&mut Self>;
 }
 
 struct ExpandStarsVisitor<S: StarExpansionContext> {
@@ -170,11 +166,8 @@ impl<'ast, S: StarExpansionContext> VisitorMut<'ast> for ExpandStarsVisitor<S> {
 }
 
 impl StarExpansion for SelectStatement {
-    fn expand_stars<S: StarExpansionContext>(
-        &mut self,
-        context: S,
-        dialect: readyset_sql::Dialect,
-    ) -> ReadySetResult<&mut Self> {
+    fn expand_stars<S: StarExpansionContext>(&mut self, context: S) -> ReadySetResult<&mut Self> {
+        let dialect = context.dialect().into();
         let mut visitor = ExpandStarsVisitor { context, dialect };
         visitor.visit_select_statement(self)?;
         Ok(self)
@@ -182,13 +175,9 @@ impl StarExpansion for SelectStatement {
 }
 
 impl StarExpansion for SqlQuery {
-    fn expand_stars<S: StarExpansionContext>(
-        &mut self,
-        context: S,
-        dialect: readyset_sql::Dialect,
-    ) -> ReadySetResult<&mut Self> {
+    fn expand_stars<S: StarExpansionContext>(&mut self, context: S) -> ReadySetResult<&mut Self> {
         if let SqlQuery::Select(sq) = self {
-            sq.expand_stars(context, dialect)?;
+            sq.expand_stars(context)?;
         }
         Ok(self)
     }
@@ -203,6 +192,12 @@ mod tests {
 
     struct TestSchemaContext {
         schema: HashMap<Relation, Vec<SqlIdentifier>>,
+    }
+
+    impl RewriteDialectContext for TestSchemaContext {
+        fn dialect(&self) -> readyset_data::Dialect {
+            readyset_data::Dialect::DEFAULT_MYSQL
+        }
     }
 
     impl StarExpansionContext for TestSchemaContext {
@@ -223,8 +218,7 @@ mod tests {
     fn expands_stars(source: &str, expected: &str, schema: HashMap<Relation, Vec<SqlIdentifier>>) {
         let mut q = parse_query(Dialect::MySQL, source).unwrap();
         let expected = parse_query(Dialect::MySQL, expected).unwrap();
-        q.expand_stars(TestSchemaContext { schema }, readyset_sql::Dialect::MySQL)
-            .unwrap();
+        q.expand_stars(TestSchemaContext { schema }).unwrap();
         assert_eq!(
             q,
             expected,

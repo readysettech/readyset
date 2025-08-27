@@ -30,8 +30,8 @@ use std::cell::RefMut;
 use std::collections::{HashMap, HashSet};
 
 use alias_removal::TableAliasRewrite;
-use dataflow_expression::Dialect;
 use disallow_row::DisallowRow;
+use readyset_data::Dialect;
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{
     CompoundSelectStatement, CreateCacheStatement, CreateTableBody, CreateTableStatement,
@@ -72,11 +72,34 @@ pub enum CanQuery {
     No,
 }
 
+pub trait RewriteDialectContext {
+    /// The dialect used for dataflow expression evaluation.
+    fn dialect(&self) -> Dialect;
+}
+
+impl<C: RewriteDialectContext> RewriteDialectContext for &C {
+    fn dialect(&self) -> Dialect {
+        (*self).dialect()
+    }
+}
+
+impl RewriteDialectContext for Dialect {
+    fn dialect(&self) -> Dialect {
+        *self
+    }
+}
+
+impl RewriteDialectContext for readyset_sql::Dialect {
+    fn dialect(&self) -> Dialect {
+        (*self).into()
+    }
+}
+
 /// Context provided to all server-side query rewriting passes, i.e. those performed at migration
 /// time, not those performed in the adapter on the hot path. For those passes, see
 /// [`crate::adapter_rewrites`].
 pub trait RewriteContext:
-    ResolveSchemasContext + StarExpansionContext + ImpliedTablesContext
+    ResolveSchemasContext + StarExpansionContext + ImpliedTablesContext + RewriteDialectContext
 {
     /// Map from names of views and tables in the database, to (ordered) lists of the column names
     /// in those views
@@ -95,9 +118,6 @@ pub trait RewriteContext:
     /// replicated. Used as part of schema resolution to ensure that queries that would resolve to
     /// these tables if they *were* being replicated correctly return an error
     fn non_replicated_relations(&self) -> &HashSet<NonReplicatedRelation>;
-
-    /// SQL dialect to use for all expressions and types within the query
-    fn dialect(&self) -> Dialect;
 
     /// Optional list of aliases that were removed during a rewrite.
     ///
@@ -155,10 +175,6 @@ impl<C: RewriteContext> RewriteContext for &C {
         (*self).non_replicated_relations()
     }
 
-    fn dialect(&self) -> Dialect {
-        (*self).dialect()
-    }
-
     fn table_alias_rewrites(&self) -> Option<RefMut<'_, Vec<TableAliasRewrite>>> {
         (*self).table_alias_rewrites()
     }
@@ -193,12 +209,12 @@ impl Rewrite for SelectStatement {
         self.rewrite_between()
             .disallow_row()?
             .validate_window_functions()?
-            .scalar_optimize_expressions(context.dialect())
+            .scalar_optimize_expressions(&context)
             .resolve_schemas(&context)?
-            .expand_stars(&context, context.dialect().into())?
-            .expand_implied_tables(&context, context.dialect().into())?
+            .expand_stars(&context)?
+            .expand_implied_tables(&context)?
             .unnest_subqueries(&context)?
-            .normalize_topk_with_aggregate(context.dialect().into())?
+            .normalize_topk_with_aggregate(&context)?
             .detect_problematic_self_joins()?
             .remove_numeric_field_references()?
             .order_limit_removal(context.base_schemas())?

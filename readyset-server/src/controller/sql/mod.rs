@@ -27,7 +27,7 @@ use readyset_sql::DialectDisplay;
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{
     DetectUnsupportedPlaceholders, ImpliedTablesContext, ResolveSchemasContext, Rewrite,
-    RewriteContext, StarExpansionContext,
+    RewriteContext, RewriteDialectContext, StarExpansionContext,
 };
 use readyset_util::redacted::Sensitive;
 use tracing::{debug, error, info, trace, warn};
@@ -1498,10 +1498,6 @@ impl RewriteContext for SqlIncorporatorRewriteContext<'_> {
         &self.this.mir_converter.non_replicated_relations
     }
 
-    fn dialect(&self) -> Dialect {
-        self.dialect
-    }
-
     fn table_alias_rewrites(&self) -> Option<RefMut<'_, Vec<TableAliasRewrite>>> {
         self.table_alias_rewrites.map(|cell| cell.borrow_mut())
     }
@@ -1561,5 +1557,11 @@ impl StarExpansionContext for SqlIncorporatorRewriteContext<'_> {
 impl ImpliedTablesContext for SqlIncorporatorRewriteContext<'_> {
     fn all_schemas(&self) -> impl IntoIterator<Item = (Relation, Vec<SqlIdentifier>)> {
         self.this.view_schemas.clone()
+    }
+}
+
+impl RewriteDialectContext for SqlIncorporatorRewriteContext<'_> {
+    fn dialect(&self) -> Dialect {
+        self.dialect
     }
 }
