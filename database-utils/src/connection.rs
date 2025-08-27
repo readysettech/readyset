@@ -302,6 +302,15 @@ impl DatabaseConnection {
         }
     }
 
+    /// Returns true if the connection is closed
+    pub fn is_closed(&self) -> bool {
+        match self {
+            Self::PostgreSQL(client, _) => client.is_closed(),
+            Self::PostgreSQLPool(client) => client.is_closed(),
+            Self::MySQL(conn) => conn.is_disconnected(),
+        }
+    }
+
     /// Returns the SQL dialect associated with the underlying connection type.
     pub fn dialect(&self) -> Dialect {
         match self {

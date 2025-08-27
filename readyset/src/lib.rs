@@ -419,6 +419,27 @@ pub struct Options {
     /// * "required" - Only TLS connections are allowed; plain connections are rejected.
     #[arg(long, env = "TLS_MODE", default_value = "optional")]
     pub tls_mode: TlsMode,
+
+    /// Specifies the sample rate for the background query sampler.
+    #[arg(long, env = "SAMPLER_SAMPLE_RATE", default_value = "0.001")]
+    sampler_sample_rate: f64,
+
+    /// Specifies the maximum queue size for the background query sampler.
+    /// Exceeding this size will cause the adaptor to not add new queries to the sampler queue.
+    #[arg(long, env = "SAMPLER_QUEUE_CAPACITY", default_value = "1024")]
+    sampler_queue_capacity: usize,
+
+    /// Specifies the maximum number of retries for a mismatched query.
+    #[arg(long, env = "SAMPLER_MAX_RETRIES", default_value = "6")]
+    sampler_max_retries: u8,
+
+    /// Specifies the delay between retries for a mismatched query.
+    #[arg(long, env = "SAMPLER_RETRY_DELAY_MS", default_value = "10000")]
+    sampler_retry_delay_ms: u64,
+
+    /// Specifies the maximum number of queries to sample per second.
+    #[arg(long, env = "SAMPLER_MAX_QUERIES_PER_SECOND", default_value = "100")]
+    sampler_max_queries_per_second: u64,
 }
 
 impl Options {
@@ -1223,6 +1244,51 @@ where
 
         let expr_dialect = self.expr_dialect;
         let parse_dialect = self.parse_dialect;
+        let schema_search_path = rt.block_on(async {
+            match &*sys_props.read().await {
+                Ok(sp) => sp.search_path.clone(),
+                Err(_) => vec![],
+            }
+        });
+
+        let (sampler, global_sampler_tx) = rt.block_on(readyset_adapter::sampler::sampler_builder(
+            readyset_adapter::sampler::SamplerConfig {
+                sample_rate: options.sampler_sample_rate,
+                queue_capacity: options.sampler_queue_capacity,
+                upstream_timeout: Duration::from_secs(1),
+                max_retry_attempts: options.sampler_max_retries,
+                retry_delay: Duration::from_millis(options.sampler_retry_delay_ms),
+                max_qps: options.sampler_max_queries_per_second,
+            },
+            rh.clone(),
+            auto_increments.clone(),
+            view_name_cache.clone().new_local(),
+            view_cache.clone().new_local(),
+            adapter_rewrite_params,
+            schema_search_path,
+            upstream_config.clone(),
+            options.deployment_mode,
+            readers.clone(),
+            parse_dialect,
+            expr_dialect,
+            shutdown_rx.clone(),
+        ));
+
+        if let Some(mut sampler) = sampler {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .max_blocking_threads(1)
+                .build()
+                .unwrap();
+            std::thread::Builder::new()
+                .name("Query Sampler".to_string())
+                .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
+                .spawn_wrapper(move || {
+                    runtime.block_on(sampler.run_sampler());
+                    runtime.shutdown_background();
+                })?;
+        }
+
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let client_addr = s.peer_addr()?;
             let connection = info_span!("connection", addr = %client_addr);
@@ -1260,7 +1326,8 @@ where
                 .fallback_recovery_seconds(options.fallback_recovery_seconds)
                 .set_placeholder_inlining(options.feature_placeholder_inlining)
                 .connections(connections.clone())
-                .metrics_handle(prometheus_handle.clone().map(MetricsHandle::new));
+                .metrics_handle(prometheus_handle.clone().map(MetricsHandle::new))
+                .sampler_tx(global_sampler_tx.clone());
             let telemetry_sender = telemetry_sender.clone();
 
             // Initialize the reader layer for the adapter.

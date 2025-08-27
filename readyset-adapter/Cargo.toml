@@ -37,6 +37,8 @@ lru = { workspace = true }
 crossbeam-skiplist = { workspace = true }
 slab = { workspace = true }
 xxhash-rust = { workspace = true }
+rand = { workspace = true }
+streaming-iterator = { workspace = true }
 
 readyset-adapter-types = { path = "../readyset-adapter-types/" }
 readyset-alloc = { path = "../readyset-alloc/" }
@@ -46,6 +48,8 @@ readyset-data = { path = "../readyset-data/" }
 readyset-server = { path = "../readyset-server" }
 dataflow-expression = { path = "../dataflow-expression" }
 readyset-tracing = { path = "../readyset-tracing" }
+readyset-dataflow = { path = "../readyset-dataflow" }
+
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 readyset-sql = { path = "../readyset-sql" }

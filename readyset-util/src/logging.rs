@@ -11,6 +11,9 @@ pub const PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED: &str = "PARSING";
 /// Key for TCP connection logging.
 pub const TCP_CONNECTION_LOG_RECEIVED_FROM_UNKNOWN_SOURCE: &str = "TCP";
 
+/// Key for sampler logging.
+pub const SAMPLER_LOG_SAMPLER: &str = "SAMPLER";
+
 fn interval_for_key(key: &str) -> Duration {
     let var_name = format!("{}_LOG_RATE_LIMIT_SECS", key.to_ascii_uppercase());
     std::env::var(var_name)

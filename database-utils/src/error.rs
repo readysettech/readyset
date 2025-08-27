@@ -33,6 +33,12 @@ pub enum DatabaseError {
 
     #[error("Error interpolating parameters into query: {0}")]
     Interpolation(Box<dyn std::error::Error + Send + Sync>),
+
+    #[error("Upstream connection is None")]
+    UpstreamConnectionNone,
+
+    #[error("Upstream query timeout")]
+    UpstreamQueryTimeout,
 }
 
 impl DatabaseError {

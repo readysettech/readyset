@@ -294,6 +294,7 @@ pub struct BackendBuilder {
     metrics_handle: Option<MetricsHandle>,
     connections: Option<Arc<SkipSet<SocketAddr>>>,
     allow_cache_ddl: bool,
+    sampler_tx: Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String)>>,
 }
 
 impl Default for BackendBuilder {
@@ -316,6 +317,7 @@ impl Default for BackendBuilder {
             metrics_handle: None,
             connections: None,
             allow_cache_ddl: true,
+            sampler_tx: None,
         }
     }
 }
@@ -380,6 +382,7 @@ impl BackendBuilder {
             status_reporter,
             allow_cache_ddl: self.allow_cache_ddl,
             adapter_start_time,
+            sampler_tx: self.sampler_tx,
             _query_handler: PhantomData,
         }
     }
@@ -472,6 +475,15 @@ impl BackendBuilder {
 
     pub fn metrics_handle(mut self, metrics_handle: Option<MetricsHandle>) -> Self {
         self.metrics_handle = metrics_handle;
+        self
+    }
+
+    /// Set the sender used to enqueue original queries for background sampling/verification
+    pub fn sampler_tx(
+        mut self,
+        tx: Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String)>>,
+    ) -> Self {
+        self.sampler_tx = tx;
         self
     }
 }
@@ -587,6 +599,9 @@ where
 
     /// The time at which the adapter started.
     adapter_start_time: SystemTime,
+
+    /// Optional sender to enqueue original queries for background sampling/verification
+    sampler_tx: Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String)>>,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -3124,7 +3139,7 @@ where
                     self.noria_should_try_select(&mut view_request);
 
                 if noria_should_try {
-                    Self::query_adhoc_select(
+                    let result = Self::query_adhoc_select(
                         &mut self.noria,
                         self.upstream.as_mut(),
                         &self.settings,
@@ -3135,7 +3150,16 @@ where
                         &mut event,
                         processed_query_params.unwrap(),
                     )
-                    .await
+                    .await;
+
+                    // Enqueue the original query for background sampling if enabled. We clone here
+                    // for simplicity and to avoid borrow issues in the hot path; bounded channel
+                    // will drop on overflow.
+                    if let Some(tx) = &self.sampler_tx {
+                        let _ = tx.try_send((event.clone(), query.to_string()));
+                    }
+
+                    result
                 } else {
                     Self::query_fallback(self.upstream.as_mut(), query, &mut event).await
                 }

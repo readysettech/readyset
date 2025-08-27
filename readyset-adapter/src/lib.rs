@@ -6,6 +6,7 @@ pub mod migration_handler;
 pub mod proxied_queries_reporter;
 mod query_handler;
 pub mod query_status_cache;
+pub mod sampler;
 mod status_reporter;
 pub mod upstream_database;
 mod utils;
