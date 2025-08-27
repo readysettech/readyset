@@ -10,7 +10,7 @@ use readyset_sql::ast::{
     CreateTableStatement, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlType,
     TableExpr, TableExprInner,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::iter;
 
 pub trait ResolveSchemasContext {
@@ -30,6 +30,13 @@ pub trait ResolveSchemasContext {
     /// List of schema names to use to resolve schemas for tables. Schemas earlier in this list
     /// will take precedence over schemas later in this list.
     fn search_path(&self) -> &[SqlIdentifier];
+
+    /// Find the first schema in the search path, if any, which contains the given custom type.
+    fn schema_contains_custom_type(
+        &self,
+        schema: &SqlIdentifier,
+        custom_type: &SqlIdentifier,
+    ) -> bool;
 }
 
 impl<R: ResolveSchemasContext> ResolveSchemasContext for &R {
@@ -44,13 +51,18 @@ impl<R: ResolveSchemasContext> ResolveSchemasContext for &R {
     fn search_path(&self) -> &[SqlIdentifier] {
         (*self).search_path()
     }
+
+    fn schema_contains_custom_type(
+        &self,
+        schema: &SqlIdentifier,
+        custom_type: &SqlIdentifier,
+    ) -> bool {
+        (*self).schema_contains_custom_type(schema, custom_type)
+    }
 }
 
-struct ResolveSchemaVisitor<'schema, R: ResolveSchemasContext> {
+struct ResolveSchemaVisitor<R: ResolveSchemasContext> {
     context: R,
-
-    /// Map from schema name to the set of custom types in that schema
-    custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
 
     /// Stack of visible aliases for table expressions, which should not be resolved to tables in
     /// the database schema.
@@ -60,7 +72,7 @@ struct ResolveSchemaVisitor<'schema, R: ResolveSchemasContext> {
     alias_stack: Vec<HashSet<SqlIdentifier>>,
 }
 
-impl<R> ResolveSchemaVisitor<'_, R>
+impl<R> ResolveSchemaVisitor<R>
 where
     R: ResolveSchemasContext,
 {
@@ -125,18 +137,17 @@ where
     }
 }
 
-impl<'ast, R: ResolveSchemasContext> VisitorMut<'ast> for ResolveSchemaVisitor<'_, R> {
+impl<'ast, R: ResolveSchemasContext> VisitorMut<'ast> for ResolveSchemaVisitor<R> {
     type Error = ReadySetError;
 
     fn visit_sql_type(&mut self, sql_type: &'ast mut SqlType) -> Result<(), Self::Error> {
         if let SqlType::Other(ty) = sql_type
             && ty.schema.is_none()
-            && let Some(schema) = self.context.search_path().iter().find(|schema| {
-                self.custom_types
-                    .get(schema)
-                    .into_iter()
-                    .any(|tys| tys.contains(&ty.name))
-            })
+            && let Some(schema) = self
+                .context
+                .search_path()
+                .iter()
+                .find(|schema| self.context.schema_contains_custom_type(schema, &ty.name))
         {
             ty.schema = Some(schema.clone());
         }
@@ -291,22 +302,19 @@ pub trait ResolveSchemas: Sized {
     ///   exist).
     /// * Any unqualified references to aliases for tables (including CTEs) will not be rewritten,
     ///   as they should take precedence over tables in the database
-    fn resolve_schemas<'schema, R: ResolveSchemasContext>(
+    fn resolve_schemas<R: ResolveSchemasContext>(
         &mut self,
         context: R,
-        custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
     ) -> ReadySetResult<&mut Self>;
 }
 
 impl ResolveSchemas for SelectStatement {
-    fn resolve_schemas<'schema, R: ResolveSchemasContext>(
+    fn resolve_schemas<R: ResolveSchemasContext>(
         &mut self,
         context: R,
-        custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
     ) -> ReadySetResult<&mut Self> {
         ResolveSchemaVisitor {
             context,
-            custom_types,
             alias_stack: Default::default(),
         }
         .visit_select_statement(self)?;
@@ -315,14 +323,12 @@ impl ResolveSchemas for SelectStatement {
 }
 
 impl ResolveSchemas for CreateTableStatement {
-    fn resolve_schemas<'schema, R: ResolveSchemasContext>(
+    fn resolve_schemas<R: ResolveSchemasContext>(
         &mut self,
         context: R,
-        custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
     ) -> ReadySetResult<&mut Self> {
         ResolveSchemaVisitor {
             context,
-            custom_types,
             alias_stack: Default::default(),
         }
         .visit_create_table_statement(self)?;
@@ -334,7 +340,7 @@ impl ResolveSchemas for CreateTableStatement {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use std::{cell::RefCell, fmt::Debug};
+    use std::{cell::RefCell, collections::HashMap, fmt::Debug};
 
     use readyset_sql::{Dialect, DialectDisplay};
     use readyset_sql_parsing::parse_create_table;
@@ -345,6 +351,7 @@ mod tests {
     struct TestRewriteContext {
         tables: HashMap<SqlIdentifier, HashMap<SqlIdentifier, CanQuery>>,
         search_path: Vec<SqlIdentifier>,
+        custom_types: HashMap<SqlIdentifier, HashSet<SqlIdentifier>>,
         invalidating_tables: RefCell<Vec<Relation>>,
     }
 
@@ -352,10 +359,12 @@ mod tests {
         fn new(
             tables: HashMap<SqlIdentifier, HashMap<SqlIdentifier, CanQuery>>,
             search_path: Vec<SqlIdentifier>,
+            custom_types: HashMap<SqlIdentifier, HashSet<SqlIdentifier>>,
         ) -> Self {
             Self {
                 tables,
                 search_path,
+                custom_types,
                 invalidating_tables: RefCell::new(Vec::new()),
             }
         }
@@ -379,6 +388,16 @@ mod tests {
         fn search_path(&self) -> &[SqlIdentifier] {
             &self.search_path
         }
+
+        fn schema_contains_custom_type(
+            &self,
+            schema: &SqlIdentifier,
+            custom_type: &SqlIdentifier,
+        ) -> bool {
+            self.custom_types
+                .get(schema)
+                .is_some_and(|tys| tys.contains(custom_type))
+        }
     }
 
     #[track_caller]
@@ -392,31 +411,29 @@ mod tests {
     {
         let mut q = parser(input);
         let expected = parser(expected);
-        q.resolve_schemas(
-            TestRewriteContext::new(
-                HashMap::from([
-                    (
-                        "s1".into(),
-                        HashMap::from([
-                            ("t1".into(), CanQuery::Yes),
-                            ("t2".into(), CanQuery::Yes),
-                            ("t_ignored".into(), CanQuery::No),
-                        ]),
-                    ),
-                    (
-                        "s2".into(),
-                        HashMap::from([
-                            ("t1".into(), CanQuery::Yes),
-                            ("t2".into(), CanQuery::Yes),
-                            ("t3".into(), CanQuery::Yes),
-                        ]),
-                    ),
-                    ("s3".into(), HashMap::from([("t4".into(), CanQuery::Yes)])),
-                ]),
-                vec!["s1".into(), "s2".into()],
-            ),
-            &HashMap::from([(&"s2".into(), HashSet::from([&"abc".into()]))]),
-        )
+        q.resolve_schemas(TestRewriteContext::new(
+            HashMap::from([
+                (
+                    "s1".into(),
+                    HashMap::from([
+                        ("t1".into(), CanQuery::Yes),
+                        ("t2".into(), CanQuery::Yes),
+                        ("t_ignored".into(), CanQuery::No),
+                    ]),
+                ),
+                (
+                    "s2".into(),
+                    HashMap::from([
+                        ("t1".into(), CanQuery::Yes),
+                        ("t2".into(), CanQuery::Yes),
+                        ("t3".into(), CanQuery::Yes),
+                    ]),
+                ),
+                ("s3".into(), HashMap::from([("t4".into(), CanQuery::Yes)])),
+            ]),
+            vec!["s1".into(), "s2".into()],
+            HashMap::from([("s2".into(), HashSet::from(["abc".into()]))]),
+        ))
         .unwrap();
 
         assert_eq!(
@@ -564,8 +581,9 @@ mod tests {
         let context = TestRewriteContext::new(
             HashMap::from([("s2".into(), HashMap::from([("t".into(), CanQuery::Yes)]))]),
             vec!["s1".into(), "s2".into()],
+            HashMap::new(),
         );
-        q.resolve_schemas(&context, &HashMap::new()).unwrap();
+        q.resolve_schemas(&context).unwrap();
 
         assert_eq!(
             context.invalidating_tables.into_inner(),
@@ -579,16 +597,14 @@ mod tests {
     #[test]
     fn cant_query_returns_error() {
         let mut q = parse_select_statement("select * from t");
-        let result = q.resolve_schemas(
-            TestRewriteContext::new(
-                HashMap::from([
-                    ("s1".into(), HashMap::from([("t".into(), CanQuery::No)])),
-                    ("s2".into(), HashMap::from([("t".into(), CanQuery::Yes)])),
-                ]),
-                vec!["s1".into(), "s2".into()],
-            ),
-            &HashMap::new(),
-        );
+        let result = q.resolve_schemas(TestRewriteContext::new(
+            HashMap::from([
+                ("s1".into(), HashMap::from([("t".into(), CanQuery::No)])),
+                ("s2".into(), HashMap::from([("t".into(), CanQuery::Yes)])),
+            ]),
+            vec!["s1".into(), "s2".into()],
+            HashMap::new(),
+        ));
         let err = result.unwrap_err();
         assert_eq!(
             err,
@@ -602,16 +618,14 @@ mod tests {
     #[test]
     fn unresolved_cant_query_works() {
         let mut q = parse_select_statement("select * from t");
-        q.resolve_schemas(
-            TestRewriteContext::new(
-                HashMap::from([
-                    ("s1".into(), HashMap::from([("t".into(), CanQuery::Yes)])),
-                    ("s2".into(), HashMap::from([("t".into(), CanQuery::No)])),
-                ]),
-                vec!["s1".into(), "s2".into()],
-            ),
-            &HashMap::new(),
-        )
+        q.resolve_schemas(TestRewriteContext::new(
+            HashMap::from([
+                ("s1".into(), HashMap::from([("t".into(), CanQuery::Yes)])),
+                ("s2".into(), HashMap::from([("t".into(), CanQuery::No)])),
+            ]),
+            vec!["s1".into(), "s2".into()],
+            HashMap::new(),
+        ))
         .unwrap();
         assert_eq!(q, parse_select_statement("select * from s1.t"));
     }

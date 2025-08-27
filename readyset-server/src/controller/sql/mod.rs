@@ -1497,10 +1497,6 @@ impl RewriteContext for SqlIncorporatorRewriteContext<'_> {
         &self.this.mir_converter.non_replicated_relations
     }
 
-    fn custom_types(&self) -> &HashMap<&SqlIdentifier, HashSet<&SqlIdentifier>> {
-        &self.custom_types
-    }
-
     fn dialect(&self) -> Dialect {
         self.dialect
     }
@@ -1533,5 +1529,15 @@ impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
 
     fn search_path(&self) -> &[SqlIdentifier] {
         self.search_path
+    }
+
+    fn schema_contains_custom_type(
+        &self,
+        schema: &SqlIdentifier,
+        custom_type: &SqlIdentifier,
+    ) -> bool {
+        self.custom_types
+            .get(schema)
+            .is_some_and(|tys| tys.contains(custom_type))
     }
 }

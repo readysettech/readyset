@@ -92,9 +92,6 @@ pub trait RewriteContext: ResolveSchemasContext {
     /// these tables if they *were* being replicated correctly return an error
     fn non_replicated_relations(&self) -> &HashSet<NonReplicatedRelation>;
 
-    /// Map from schema name to the set of custom types in that schema
-    fn custom_types(&self) -> &HashMap<&SqlIdentifier, HashSet<&SqlIdentifier>>;
-
     /// SQL dialect to use for all expressions and types within the query
     fn dialect(&self) -> Dialect;
 
@@ -153,10 +150,6 @@ impl<C: RewriteContext> RewriteContext for &C {
         (*self).non_replicated_relations()
     }
 
-    fn custom_types(&self) -> &HashMap<&SqlIdentifier, HashSet<&SqlIdentifier>> {
-        (*self).custom_types()
-    }
-
     fn dialect(&self) -> Dialect {
         (*self).dialect()
     }
@@ -181,7 +174,7 @@ pub trait Rewrite: Sized {
 
 impl Rewrite for CreateTableStatement {
     fn rewrite<C: RewriteContext>(&mut self, context: C) -> ReadySetResult<&mut Self> {
-        self.resolve_schemas(&context, context.custom_types())?
+        self.resolve_schemas(&context)?
             .normalize_create_table_columns()
             .coalesce_key_definitions();
         Ok(self)
@@ -196,7 +189,7 @@ impl Rewrite for SelectStatement {
             .disallow_row()?
             .validate_window_functions()?
             .scalar_optimize_expressions(context.dialect())
-            .resolve_schemas(&context, context.custom_types())?
+            .resolve_schemas(&context)?
             .expand_stars(
                 context.view_schemas(),
                 context.non_replicated_relations(),
