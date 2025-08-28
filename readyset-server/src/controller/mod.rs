@@ -139,7 +139,7 @@ impl ControllerState {
                 config
                     .replicator_config
                     .get_cdc_db_url()
-                    .expect("Failed to get CDC database URL")
+                    .expect("Failed to get CDC database URL; provide URL or explicit dialect")
                     .database_type()
                     .into()
             })

@@ -329,17 +329,18 @@ impl TestHandle {
         mut builder: Builder,
     ) -> ReadySetResult<(TestHandle, ShutdownSender)> {
         readyset_tracing::init_test_logging();
+
         let persistence = readyset_server::PersistenceParameters {
             mode: readyset_server::DurabilityMode::DeleteOnExit,
             ..Default::default()
         };
         builder.set_persistence(persistence);
+
         let parsing_preset = builder.parsing_preset;
         let telemetry_sender = builder.telemetry.clone();
         let (noria, shutdown_tx) = builder.start(Arc::clone(&authority)).await.unwrap();
 
         let dialect = data_dialect_from_url(&url);
-
         let mut handle = TestHandle {
             url,
             dialect,
@@ -2082,16 +2083,16 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow, mysql_upstream)]
 async fn snapshot_telemetry_mysql() {
-    snapshot_telemetry_inner(&mysql_url()).await
+    snapshot_telemetry_inner(readyset_sql::Dialect::MySQL, &mysql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow, postgres_upstream)]
 async fn snapshot_telemetry_postgresql() {
-    snapshot_telemetry_inner(&pgsql_url()).await
+    snapshot_telemetry_inner(readyset_sql::Dialect::PostgreSQL, &pgsql_url()).await
 }
 
-async fn snapshot_telemetry_inner(url: &String) {
+async fn snapshot_telemetry_inner(dialect: readyset_sql::Dialect, url: &String) {
     readyset_tracing::init_test_logging();
     let mut client = DbConnection::connect(url).await.unwrap();
     client.query(CREATE_SCHEMA).await.unwrap();
@@ -2100,6 +2101,7 @@ async fn snapshot_telemetry_inner(url: &String) {
     let (sender, mut reporter) = TelemetryInitializer::test_init();
     let mut builder = Builder::for_tests();
     builder.set_telemetry_sender(sender);
+    builder.set_dialect(dialect);
     let (mut ctx, shutdown_tx) =
         TestHandle::start_noria_with_builder(url.to_string(), None, builder)
             .await
