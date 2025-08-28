@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -20,6 +21,7 @@ use readyset_util::select;
 use replication_offset::postgres::{CommitLsn, Lsn, PostgresPosition};
 use replication_offset::ReplicationOffset;
 use tokio_postgres as pgsql;
+use tokio_postgres::error::{DbError, SqlState};
 use tracing::{debug, error, info, trace, warn};
 
 use super::ddl_replication::setup_ddl_replication;
@@ -138,10 +140,17 @@ impl PostgresWalConnector {
         }
         pg_config.dbname(dbname.as_ref()).set_replication_database();
 
-        let (client, connection) = pg_config
-            .connect(tls_connector)
-            .await
-            .map_err(|e| ReadySetError::ReplicationFailed(format!("Failed to connect: {e}")))?;
+        let (client, connection) = pg_config.connect(tls_connector).await.map_err(|e| {
+            if let Some(e) = e.source().and_then(|e| e.downcast_ref::<DbError>()) {
+                if e.code() == &SqlState::INVALID_AUTHORIZATION_SPECIFICATION {
+                    // Can be caused by rds.logical_replication = 0 on RDS.
+                    return ReadySetError::ReplicationFailed(format!(
+                        "Failed to connect (remember to enable logical replication): {e}"
+                    ));
+                }
+            }
+            ReadySetError::ReplicationFailed(format!("Failed to connect: {e}"))
+        })?;
         let connection_handle = tokio::spawn(connection);
         let status_update_interval = Duration::from_secs(config.status_update_interval_secs as u64);
 
