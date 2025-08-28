@@ -64,16 +64,16 @@ pub struct UpstreamConfig {
     #[serde(default)]
     pub ssl_root_cert: Option<PathBuf>,
 
-    /// Disable running DDL Streaming Replication Setup for PostgreSQL. If this flag is set
-    /// the DDL Streaming Replication Setup SQL queries will need to be manually run on the
-    /// primary server before streaming replication will start.
+    /// Disable running DDL Streaming Replication Setup for PostgreSQL. If this flag is set the DDL
+    /// Streaming Replication Setup SQL queries will need to be manually run on the primary server
+    /// before streaming replication will start.
     #[arg(long, env = "DISABLE_SETUP_DDL_REPLICATION", hide = true)]
     #[serde(default)]
     pub disable_setup_ddl_replication: bool,
 
-    /// Disable running CREATE PUBLICATION query for PostgreSQL. If this flag is set
-    /// a publication named readyset should be adced for all tables manually on the
-    /// primary server before streaming replication will start.
+    /// Disable running CREATE PUBLICATION query for PostgreSQL. If this flag is set a publication
+    /// named readyset should be added for all tables manually on the primary server before
+    /// streaming replication will start.
     #[arg(long, env = "DISABLE_CREATE_PUBLICATION", hide = true)]
     #[serde(default)]
     pub disable_create_publication: bool,
