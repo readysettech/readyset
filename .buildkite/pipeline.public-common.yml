@@ -252,6 +252,7 @@ steps:
       - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/mysql --database-type mysql --replication-url mysql://root:noria@mysql/noria'
       - 'cargo --locked run --bin readyset-logictest -- verify logictests/sqlparser --parsing-preset=only-sqlparser'
       - 'cargo --locked run --bin readyset-logictest -- verify logictests/sqlparser/mysql --parsing-preset=only-sqlparser --database-type mysql'
+      - 'cargo --locked run --bin readyset-logictest -- verify logictests/sqlparser/psql --parsing-preset=only-sqlparser --database-type postgresql'
     timeout_in_minutes: 60
     plugins:
       - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:

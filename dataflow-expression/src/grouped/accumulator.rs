@@ -1,6 +1,6 @@
 //! This module implements SQL aggregation functions that accumulate multiple input values
-//! into a single output value. Currently only supports mysql's `GROUP_CONCAT` and the various
-//! JSON object aggregation functions.
+//! into a single output value. Currently only supports mysql's `GROUP_CONCAT`, postgres' `STRING_AGG`,
+//! and the various JSON object aggregation functions.
 use crate::eval::json;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetResult};
@@ -13,6 +13,9 @@ pub enum AccumulationOp {
     GroupConcat { separator: String },
     /// Aggregates key-value pairs into JSON object.
     JsonObjectAgg { allow_duplicate_keys: bool },
+    /// Concatenates using the given separator between values. Postgres allows the separator
+    /// to be `NULL` (yet it must be specified in the query string).
+    StringAgg { separator: Option<String> },
 }
 
 impl AccumulationOp {
@@ -63,6 +66,10 @@ impl AccumulationOp {
             AccumulationOp::JsonObjectAgg {
                 allow_duplicate_keys,
             } => self.apply_json_object_agg(data, *allow_duplicate_keys),
+            AccumulationOp::StringAgg { separator } => {
+                let sep = separator.clone().unwrap_or("".to_string());
+                self.apply_group_concat(data, &sep)
+            }
         }
     }
 }

@@ -89,6 +89,12 @@ pub enum FunctionExpr {
     Rank,
     DenseRank,
 
+    /// `STRING_AGG` aggregation
+    StringAgg {
+        expr: Box<Expr>,
+        separator: Option<String>,
+    },
+
     /// The SQL `SUBSTRING`/`SUBSTR` function.
     ///
     /// The supported syntax is one of:
@@ -156,6 +162,14 @@ impl FunctionExpr {
                     .as_ref()
                     .map(|s| format!("'{}'", s.replace('\'', "''").replace('\\', "\\\\")))
                     .unwrap_or_default(),
+            ),
+            FunctionExpr::StringAgg { expr, separator } => format!(
+                "string_agg({}, {})",
+                expr.alias(dialect)?,
+                separator
+                    .as_ref()
+                    .map(|s| format!("'{}'", s.replace('\'', "''").replace('\\', "\\\\")))
+                    .unwrap_or("NULL".to_string()),
             ),
             FunctionExpr::Substring { string, pos, len } => format!(
                 "substring({}, {}, {})",
@@ -226,6 +240,7 @@ impl FunctionExpr {
             | FunctionExpr::Max(arg)
             | FunctionExpr::Min(arg)
             | FunctionExpr::GroupConcat { expr: arg, .. }
+            | FunctionExpr::StringAgg { expr: arg, .. }
             | FunctionExpr::Extract { expr: arg, .. }
             | FunctionExpr::Lower { expr: arg, .. }
             | FunctionExpr::Upper { expr: arg, .. } => {
@@ -285,6 +300,19 @@ impl DialectDisplay for FunctionExpr {
                         " separator '{}'",
                         separator.replace('\'', "''").replace('\\', "\\\\")
                     )?;
+                }
+                write!(f, ")")
+            }
+            FunctionExpr::StringAgg { expr, separator } => {
+                write!(f, "string_agg({}", expr.display(dialect),)?;
+                if let Some(separator) = separator {
+                    write!(
+                        f,
+                        ", '{}'",
+                        separator.replace('\'', "''").replace('\\', "\\\\")
+                    )?;
+                } else {
+                    write!(f, ", NULL")?;
                 }
                 write!(f, ")")
             }
@@ -1576,20 +1604,15 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             return Ok(Expr::Call(FunctionExpr::CountStar));
         };
 
-        let (args, distinct, separator) = match args {
+        let (args, distinct, clauses) = match args {
             sqlparser::ast::FunctionArguments::List(sqlparser::ast::FunctionArgumentList {
                 args,
                 duplicate_treatment,
-                clauses, // TODO: handle other stuff like order/limit, etc.
+                clauses,
             }) => (
                 args,
                 duplicate_treatment == Some(sqlparser::ast::DuplicateTreatment::Distinct),
-                clauses.into_iter().find_map(|clause| match clause {
-                    sqlparser::ast::FunctionArgumentClause::Separator(separator) => {
-                        Some(sqlparser_value_into_string(separator))
-                    }
-                    _ => None,
-                }),
+                clauses,
             ),
             sqlparser::ast::FunctionArguments::None => {
                 ident.value.make_ascii_lowercase();
@@ -1598,11 +1621,20 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                     arguments: None,
                 }));
             }
-            other => {
+            sqlparser::ast::FunctionArguments::Subquery(query) => {
                 return not_yet_implemented!(
-                    "subquery function call argument for {ident}: {other:?}"
+                    "subquery function call argument for {ident}: Subquery<{query}>"
                 );
             }
+        };
+
+        let find_separator = || {
+            clauses.iter().find_map(|clause| match clause {
+                sqlparser::ast::FunctionArgumentClause::Separator(separator) => {
+                    Some(sqlparser_value_into_string(separator.clone()))
+                }
+                _ => None,
+            })
         };
 
         let mut exprs = args.into_iter().map(|arg| arg.try_into_dialect(dialect));
@@ -1633,10 +1665,25 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
         } else if ident.value.eq_ignore_ascii_case("EXTRACT") {
             return failed!("{ident} should have been converted earlier");
         } else if ident.value.eq_ignore_ascii_case("GROUP_CONCAT") {
+            // group_concat() is a mysql-specific function, and caller optionally sets
+            // the output separator with special `SEPARATOR ''` syntax. we fish that value
+            // out of the `clauses` list above.
             Self::Call(FunctionExpr::GroupConcat {
                 expr: next_expr()?,
-                separator,
+                separator: find_separator(),
             })
+        } else if ident.value.eq_ignore_ascii_case("STRING_AGG") {
+            // `string_agg()` is a pg-specific function, and we get the mandatory separator
+            // from the second parameter to the function.
+            let expr = next_expr()?;
+            let sep = next_expr()?;
+            let separator = match *sep {
+                Expr::Literal(Literal::String(s)) => Some(s),
+                Expr::Literal(Literal::Null) => None,
+                s => return unsupported!("Unsupported separator: {:?}", s),
+            };
+
+            Self::Call(FunctionExpr::StringAgg { expr, separator })
         } else if ident.value.eq_ignore_ascii_case("JSON_OBJECT_AGG") {
             Self::Call(FunctionExpr::JsonObjectAgg {
                 key: next_expr()?,
@@ -2067,6 +2114,8 @@ impl Arbitrary for Expr {
                 (box_expr.clone(), any::<Option<String>>()).prop_map(|(expr, separator)| {
                     FunctionExpr::GroupConcat { expr, separator }
                 }),
+                (box_expr.clone(), any::<Option<String>>())
+                    .prop_map(|(expr, separator)| { FunctionExpr::StringAgg { expr, separator } }),
                 (
                     box_expr.clone(),
                     option::of(box_expr.clone()),

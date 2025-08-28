@@ -463,6 +463,13 @@ impl MirNodeInner {
                             format!("JsonbObjectAgg({})", on.name.as_str())
                         }
                     }
+                    AccumulationOp::StringAgg { separator } => {
+                        let sep = match separator {
+                            Some(s) => s,
+                            None => "NULL",
+                        };
+                        format!("StringAgg([{}], \"{}\")", on.name.as_str(), sep)
+                    }
                 };
                 let group_cols = group_by
                     .iter()

@@ -1157,6 +1157,8 @@ pub enum AggregateType {
     JsonObjectAgg {
         allow_duplicate_keys: bool,
     },
+    #[weight(u32::from(*args_shared == ParseDialect::PostgreSQL))]
+    StringAgg,
 }
 
 impl AggregateType {
@@ -1168,6 +1170,7 @@ impl AggregateType {
             AggregateType::JsonObjectAgg { .. } => SqlType::Text,
             AggregateType::Max { column_type } => column_type.clone(),
             AggregateType::Min { column_type } => column_type.clone(),
+            AggregateType::StringAgg => SqlType::Text,
             AggregateType::Sum { column_type, .. } => column_type.clone(),
         }
     }
@@ -1180,7 +1183,8 @@ impl AggregateType {
             AggregateType::GroupConcat
             | AggregateType::JsonObjectAgg { .. }
             | AggregateType::Max { .. }
-            | AggregateType::Min { .. } => false,
+            | AggregateType::Min { .. }
+            | AggregateType::StringAgg => false,
         }
     }
 }
@@ -1679,6 +1683,7 @@ const ALL_AGGREGATE_TYPES: &[AggregateType] = &[
     AggregateType::JsonObjectAgg {
         allow_duplicate_keys: false,
     },
+    AggregateType::StringAgg,
 ];
 
 const ALL_SUBQUERY_POSITIONS: &[SubqueryPosition] = &[
@@ -1927,6 +1932,10 @@ impl QueryOperation {
                     }
                     Max { .. } => FunctionExpr::Max(expr),
                     Min { .. } => FunctionExpr::Min(expr),
+                    StringAgg => FunctionExpr::StringAgg {
+                        expr,
+                        separator: Some(", ".to_owned()),
+                    },
                     Sum { distinct, .. } => FunctionExpr::Sum { expr, distinct },
                 };
 
@@ -2488,6 +2497,7 @@ impl QueryOperation {
 /// | avg                                     | AVG aggregates                          |
 /// | avg_distinct                            | AVG(DISTINCT) aggregates                |
 /// | group_concat                            | GROUP_CONCAT aggregates                 |
+/// | string_agg                              | STRING_AGG aggregates                   |
 /// | json_object                             | JSON OBJECT aggregates (w/o duplicates) |
 /// | json_object_dupes                       | JSON OBJECT aggregates (with duplicates)|
 /// | max                                     | MAX aggregates                          |
@@ -2657,6 +2667,7 @@ impl FromStr for Operations {
             .into()),
             "topk" => Ok(ALL_TOPK.to_vec().into()),
             "paginate" => Ok(ALL_PAGINATE.to_vec().into()),
+            "string_agg" => Ok(vec![ColumnAggregate(AggregateType::StringAgg)].into()),
             s => Err(anyhow!("unknown query operation: {}", s)),
         }
     }
@@ -3341,6 +3352,7 @@ mod tests {
                     QueryOperation::ColumnAggregate(AggregateType::JsonObjectAgg {
                         allow_duplicate_keys: false
                     }),
+                    QueryOperation::ColumnAggregate(AggregateType::StringAgg),
                 ]),
                 Operations(vec![
                     QueryOperation::Join(JoinOperator::LeftJoin),

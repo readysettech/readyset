@@ -171,6 +171,13 @@ impl GraphViz for MirNodeInner {
                             format!("JsonbObjectAgg({on})")
                         }
                     }
+                    AccumulationKind::StringAgg { separator } => {
+                        let sep = match separator {
+                            Some(s) => s,
+                            None => "NULL",
+                        };
+                        format!("StringAgg({on}, \\\"{sep}\\\")")
+                    }
                 };
                 let group_cols = group_by.iter().join(", ");
                 write!(f, "{op_string} | γ: {group_cols}")
@@ -305,6 +312,7 @@ impl GraphViz for MirNodeInner {
                                     PostLookupAggregateFunction::JsonObjectAgg {
                                         allow_duplicate_keys: true,
                                     } => "JsonbObjectAgg",
+                                    PostLookupAggregateFunction::StringAgg { .. } => "StringAgg",
                                 },
                                 &aggregate.column
                             ))

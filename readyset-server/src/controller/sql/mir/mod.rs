@@ -978,6 +978,14 @@ impl SqlToMirConverter {
                 }),
                 false,
             ),
+            StringAgg {
+                ref expr,
+                separator,
+            } if is_column(expr) => mknode(
+                Column::from(get_column(expr)),
+                GroupedNodeType::Accumulation(AccumulationOp::StringAgg { separator }),
+                false,
+            ),
             _ => {
                 internal!("not an aggregate: {:?}", Sensitive(&function));
             }

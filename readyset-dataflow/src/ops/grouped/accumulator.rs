@@ -53,6 +53,10 @@ impl Accumulator {
                 antithesis_sdk::assert_reachable!("Accumulation::JsonObjectAgg");
                 DfType::Text(collation)
             }
+            AccumulationOp::StringAgg { .. } => {
+                antithesis_sdk::assert_reachable!("Accumulation::StringAgg");
+                DfType::Text(collation)
+            }
         };
 
         Ok(GroupedOperator::new(
@@ -187,6 +191,10 @@ impl GroupedOperation for Accumulator {
                 } else {
                     format!("JsonbObjectAgg({})", self.over)
                 }
+            }
+            AccumulationOp::StringAgg { separator } => {
+                let sep = separator.clone().unwrap_or("NULL".to_string());
+                format!("StringAgg({}, {:?})", self.over, sep)
             }
         };
         format!("{} γ{:?}", op_string, self.group)

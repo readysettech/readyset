@@ -117,6 +117,7 @@ impl<'a> ReferredColumnsIter<'a> {
             Max(arg) => self.visit_expr(arg),
             Min(arg) => self.visit_expr(arg),
             GroupConcat { expr, .. } => self.visit_expr(expr),
+            StringAgg { expr, .. } => self.visit_expr(expr),
             Call {
                 arguments: None, ..
             } => None,
@@ -252,6 +253,7 @@ impl<'a> ReferredColumnsMut<'a> {
             Max(arg) => self.visit_expr(arg),
             Min(arg) => self.visit_expr(arg),
             GroupConcat { expr, .. } => self.visit_expr(expr),
+            StringAgg { expr, .. } => self.visit_expr(expr),
             Call {
                 arguments: None, ..
             } => None,
@@ -397,7 +399,8 @@ pub fn is_aggregate(function: &FunctionExpr) -> bool {
         | FunctionExpr::Max(_)
         | FunctionExpr::Min(_)
         | FunctionExpr::GroupConcat { .. }
-        | FunctionExpr::JsonObjectAgg { .. } => true,
+        | FunctionExpr::JsonObjectAgg { .. }
+        | FunctionExpr::StringAgg { .. } => true,
         FunctionExpr::Extract { .. }
         | FunctionExpr::Substring { .. }
         | FunctionExpr::Lower { .. }

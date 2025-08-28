@@ -592,6 +592,7 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
         FunctionExpr::Max(expr) => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Min(expr) => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::GroupConcat { expr, .. } => visitor.visit_expr(expr.as_mut()),
+        FunctionExpr::StringAgg { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::CountStar
         | FunctionExpr::RowNumber
         | FunctionExpr::Rank

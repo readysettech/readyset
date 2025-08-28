@@ -387,6 +387,12 @@ pub(super) fn post_lookup_aggregates(
                         allow_duplicate_keys: *allow_duplicate_keys,
                     }
                 }
+                StringAgg { separator, .. } => {
+                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::StringAgg");
+                    PostLookupAggregateFunction::StringAgg {
+                        separator: separator.clone().unwrap_or_else(|| ",".to_owned()),
+                    }
+                }
             },
         });
     }

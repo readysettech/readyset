@@ -28,6 +28,8 @@ pub enum PostLookupAggregateFunction {
     Min,
     /// Use specified Key-value pair to build a JSON Object
     JsonObjectAgg { allow_duplicate_keys: bool },
+    /// Concatenate together all the input strings with the given separator
+    StringAgg { separator: String },
 }
 
 impl PostLookupAggregateFunction {
@@ -50,6 +52,13 @@ impl PostLookupAggregateFunction {
             PostLookupAggregateFunction::JsonObjectAgg { .. } => {
                 unsupported!("JsonObjectAgg is not supported as a post-lookup aggregate")
             }
+            PostLookupAggregateFunction::StringAgg { separator } => Ok(format!(
+                "{}{}{}",
+                String::try_from(val1)?,
+                separator,
+                String::try_from(val2)?
+            )
+            .into()),
         }
     }
 }
