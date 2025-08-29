@@ -105,6 +105,7 @@ steps:
             - BUILDKITE_PIPELINE_SLUG
             - BUILDKITE_BRANCH
             - BUILDKITE_STEP_KEY
+            - BUILDKITE_LABEL
             - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
             - SCCACHE_REGION=us-east-2
             - CARGO_INCREMENTAL=0
@@ -167,6 +168,7 @@ steps:
             - BUILDKITE_PIPELINE_SLUG
             - BUILDKITE_BRANCH
             - BUILDKITE_STEP_KEY
+            - BUILDKITE_LABEL
             - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
             - SCCACHE_REGION=us-east-2
             - CARGO_INCREMENTAL=0
@@ -212,6 +214,7 @@ steps:
             - BUILDKITE_PIPELINE_SLUG
             - BUILDKITE_BRANCH
             - BUILDKITE_STEP_KEY
+            - BUILDKITE_LABEL
             - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
             - SCCACHE_REGION=us-east-2
             - CARGO_INCREMENTAL=0
