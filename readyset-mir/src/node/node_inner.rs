@@ -447,12 +447,13 @@ impl MirNodeInner {
                 ..
             } => {
                 let op_string = match kind {
-                    AccumulationOp::ArrayAgg { distinct } => {
+                    AccumulationOp::ArrayAgg { distinct, .. } => {
                         format!("ArrayAgg({}{})", distinct, on.name.as_str())
                     }
                     AccumulationOp::GroupConcat {
                         separator,
                         distinct,
+                        ..
                     } => {
                         format!(
                             "GroupConcat([{}{}], \"{}\")",
@@ -473,6 +474,7 @@ impl MirNodeInner {
                     AccumulationOp::StringAgg {
                         separator,
                         distinct,
+                        ..
                     } => {
                         let sep = match separator {
                             Some(s) => s,

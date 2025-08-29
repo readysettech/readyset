@@ -1927,6 +1927,7 @@ impl QueryOperation {
                     ArrayAgg { distinct } => FunctionExpr::ArrayAgg {
                         expr,
                         distinct: distinct.into(),
+                        order_by: None,
                     },
                     Avg { distinct, .. } => FunctionExpr::Avg { expr, distinct },
                     Count { distinct, .. } => FunctionExpr::Count { expr, distinct },
@@ -1934,6 +1935,7 @@ impl QueryOperation {
                         expr,
                         separator: Some(", ".to_owned()),
                         distinct: distinct.into(),
+                        order_by: None,
                     },
                     JsonObjectAgg {
                         allow_duplicate_keys,
@@ -1955,6 +1957,7 @@ impl QueryOperation {
                         expr,
                         separator: Some(", ".to_owned()),
                         distinct: distinct.into(),
+                        order_by: None,
                     },
                     Sum { distinct, .. } => FunctionExpr::Sum { expr, distinct },
                 };

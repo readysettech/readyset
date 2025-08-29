@@ -163,7 +163,7 @@ impl GroupedOperation for Accumulator {
             if is_positive {
                 prev_state.data.add(&self.op, value);
             } else {
-                prev_state.data.remove(value)?;
+                prev_state.data.remove(&self.op, value)?;
             }
         }
         let output_value = self.op.apply(&prev_state.data)?;
@@ -173,15 +173,46 @@ impl GroupedOperation for Accumulator {
     }
 
     fn description(&self) -> String {
+        macro_rules! order_by_str {
+            ($order_by:expr) => {
+                order_by_str!($order_by, true)
+            };
+            ($order_by:expr, $include_null_order:expr) => {
+                match $order_by {
+                    Some((order_type, null_order)) => {
+                        // the '1' indicates the first column listed in the function args
+                        if $include_null_order {
+                            format!(" ORDER BY 1 {} {}", order_type, null_order)
+                        } else {
+                            format!(" ORDER BY 1 {}", order_type)
+                        }
+                    }
+                    None => "".to_string(),
+                }
+            };
+        }
+
         let op_string = match &self.op {
-            AccumulationOp::ArrayAgg { distinct } => {
-                format!("ArrayAgg({}{})", distinct, self.over)
+            AccumulationOp::ArrayAgg { distinct, order_by } => {
+                format!(
+                    "ArrayAgg({}{}{})",
+                    distinct,
+                    self.over,
+                    order_by_str!(order_by)
+                )
             }
             AccumulationOp::GroupConcat {
                 separator,
                 distinct,
+                order_by,
             } => {
-                format!("GroupConcat({}{}, {:?})", distinct, self.over, separator)
+                format!(
+                    "GroupConcat({}{}{}, {:?})",
+                    distinct,
+                    self.over,
+                    order_by_str!(order_by, false),
+                    separator,
+                )
             }
             AccumulationOp::JsonObjectAgg {
                 allow_duplicate_keys,
@@ -195,9 +226,19 @@ impl GroupedOperation for Accumulator {
             AccumulationOp::StringAgg {
                 separator,
                 distinct,
+                order_by,
             } => {
-                let sep = separator.clone().unwrap_or("NULL".to_string());
-                format!("StringAgg({}{}, {:?})", distinct, self.over, sep,)
+                let sep = match separator {
+                    Some(s) => format!("\"{s}\""),
+                    None => "NULL".to_string(),
+                };
+                format!(
+                    "StringAgg({}{}, {}{})",
+                    distinct,
+                    self.over,
+                    sep,
+                    order_by_str!(order_by),
+                )
             }
         };
         format!("{} γ{:?}", op_string, self.group)
@@ -228,16 +269,22 @@ pub struct AccumulatorState {
 
 #[cfg(test)]
 mod tests {
+    use readyset_sql::ast::{NullOrder, OrderType};
+
     use super::*;
     use crate::{ops, LookupIndex};
 
-    fn setup(mat: bool, distinct: bool) -> ops::test::MockGraph {
+    fn setup(mat: bool, op: Option<AccumulationOp>) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
 
-        let op = AccumulationOp::GroupConcat {
-            separator: "#".to_string(),
-            distinct: distinct.into(),
+        let op = match op {
+            Some(op) => op,
+            None => AccumulationOp::GroupConcat {
+                separator: "#".to_string(),
+                distinct: false.into(),
+                order_by: None,
+            },
         };
         let c = Accumulator::over(
             op,
@@ -248,21 +295,113 @@ mod tests {
             &Dialect::DEFAULT_MYSQL,
         )
         .unwrap();
-
         g.set_op("concat", &["x", "ys"], c, mat);
         g
     }
 
     #[test]
-    fn it_describes() {
-        let c = setup(true, false);
+    fn describe_group_concat() {
+        macro_rules! mk_op {
+            ($d:expr, $o:expr) => {
+                AccumulationOp::GroupConcat {
+                    separator: "#".to_string(),
+                    distinct: $d.into(),
+                    order_by: $o,
+                }
+            };
+        }
+
+        let c = setup(true, Some(mk_op!(false, None)));
         assert_eq!(c.node().description(), "GroupConcat(1, \"#\") γ[0]",);
+        let c = setup(true, Some(mk_op!(true, None)));
+        assert_eq!(
+            c.node().description(),
+            "GroupConcat(DISTINCT 1, \"#\") γ[0]",
+        );
+        let c = setup(
+            true,
+            Some(mk_op!(
+                true,
+                Some((OrderType::OrderDescending, NullOrder::NullsFirst))
+            )),
+        );
+        assert_eq!(
+            c.node().description(),
+            "GroupConcat(DISTINCT 1 ORDER BY 1 DESC, \"#\") γ[0]",
+        );
+    }
+
+    #[test]
+    fn describe_array_agg() {
+        macro_rules! mk_op {
+            ($d:expr, $o:expr) => {
+                AccumulationOp::ArrayAgg {
+                    distinct: $d.into(),
+                    order_by: $o,
+                }
+            };
+        }
+
+        let c = setup(true, Some(mk_op!(false, None)));
+        assert_eq!(c.node().description(), "ArrayAgg(1) γ[0]",);
+        let c = setup(true, Some(mk_op!(true, None)));
+        assert_eq!(c.node().description(), "ArrayAgg(DISTINCT 1) γ[0]",);
+        let c = setup(
+            true,
+            Some(mk_op!(
+                true,
+                Some((OrderType::OrderDescending, NullOrder::NullsFirst))
+            )),
+        );
+        assert_eq!(
+            c.node().description(),
+            "ArrayAgg(DISTINCT 1 ORDER BY 1 DESC NULLS FIRST) γ[0]",
+        );
+    }
+
+    #[test]
+    fn describe_string_agg() {
+        macro_rules! mk_op {
+            ($d:expr, $o:expr) => {
+                AccumulationOp::StringAgg {
+                    separator: Some("#".to_string()),
+                    distinct: $d.into(),
+                    order_by: $o,
+                }
+            };
+        }
+
+        let c = setup(true, Some(mk_op!(false, None)));
+        assert_eq!(c.node().description(), "StringAgg(1, \"#\") γ[0]",);
+        let c = setup(true, Some(mk_op!(true, None)));
+        assert_eq!(c.node().description(), "StringAgg(DISTINCT 1, \"#\") γ[0]",);
+        let c = setup(
+            true,
+            Some(mk_op!(
+                true,
+                Some((OrderType::OrderDescending, NullOrder::NullsFirst))
+            )),
+        );
+        assert_eq!(
+            c.node().description(),
+            "StringAgg(DISTINCT 1, \"#\" ORDER BY 1 DESC NULLS FIRST) γ[0]",
+        );
+
+        let c = setup(
+            true,
+            Some(AccumulationOp::StringAgg {
+                separator: None,
+                distinct: false.into(),
+                order_by: None,
+            }),
+        );
+        assert_eq!(c.node().description(), "StringAgg(1, NULL) γ[0]",);
     }
 
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn it_forwards() {
-        let mut c = setup(true, false);
+        let mut c = setup(true, None);
 
         let u: Record = vec![1.into(), 1.into()].into();
 
@@ -433,7 +572,7 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         let me = 1.into();
-        let c = setup(false, false);
+        let c = setup(false, None);
         let idx = c.node().suggest_indexes(me);
 
         // should only add index on own columns
@@ -446,7 +585,7 @@ mod tests {
 
     #[test]
     fn it_resolves() {
-        let c = setup(false, false);
+        let c = setup(false, None);
         assert_eq!(
             c.node().resolve(0),
             Some(vec![(c.narrow_base_id().as_global(), 0)])

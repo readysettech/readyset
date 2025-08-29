@@ -74,6 +74,101 @@ kidnap
 {bbb,aaa,ccc,bbb,NULL,aaa}
 
 
+# add in an extra NULL, for fun (for testing distinct in the order by clauses)
+statement ok
+insert into tags values
+  (1, NULL);
+
+query T
+select array_agg(t.tag) from tags t where d_id = 1;
+----
+{bbb,aaa,ccc,bbb,NULL,aaa,NULL}
+
+
+#####
+## order by ASC testing
+####
+
+# order by asc 
+query T
+select array_agg(t.tag order by tag) from tags t where d_id = 1;
+----
+{aaa,aaa,bbb,bbb,ccc,NULL,NULL}
+
+# order by asc, NULLs first
+query T
+select array_agg(t.tag order by tag nulls first) from tags t where d_id = 1;
+----
+{NULL,NULL,aaa,aaa,bbb,bbb,ccc}
+
+# order by asc, NULLs last
+query T
+select array_agg(t.tag order by tag nulls last) from tags t where d_id = 1;
+----
+{aaa,aaa,bbb,bbb,ccc,NULL,NULL}
+
+
+# order by asc with distinct
+query T
+select array_agg(distinct t.tag order by tag) from tags t where d_id = 1;
+----
+{aaa,bbb,ccc,NULL}
+
+# order by asc, NULLs first, with distinct
+query T
+select array_agg(distinct t.tag order by tag nulls first) from tags t where d_id = 1;
+----
+{NULL,aaa,bbb,ccc}
+
+# order by asc, NULLs last, with distinct
+query T
+select array_agg(distinct t.tag order by tag nulls last) from tags t where d_id = 1;
+----
+{aaa,bbb,ccc,NULL}
+
+
+#####
+## order by DESC testing
+####
+
+# order by desc 
+query T
+select array_agg(t.tag order by tag desc) from tags t where d_id = 1;
+----
+{NULL,NULL,ccc,bbb,bbb,aaa,aaa}
+
+# order by desc, NULLs first
+query T
+select array_agg(t.tag order by tag desc nulls first) from tags t where d_id = 1;
+----
+{NULL,NULL,ccc,bbb,bbb,aaa,aaa}
+
+# order by desc, NULLs last
+query T
+select array_agg(t.tag order by tag desc nulls last) from tags t where d_id = 1;
+----
+{ccc,bbb,bbb,aaa,aaa,NULL,NULL}
+
+
+# order by desc with distinct
+query T
+select array_agg(distinct t.tag order by tag desc) from tags t where d_id = 1;
+----
+{NULL,ccc,bbb,aaa}
+
+# order by desc, NULLs first, with distinct
+query T
+select array_agg(distinct t.tag order by tag desc nulls first) from tags t where d_id = 1;
+----
+{NULL,ccc,bbb,aaa}
+
+# order by desc, NULLs last, with distinct
+query T
+select array_agg(distinct t.tag order by tag desc nulls last) from tags t where d_id = 1;
+----
+{ccc,bbb,aaa,NULL}
+
+
 #######
 # test only empty/NULL inputs
 
@@ -100,4 +195,4 @@ select array_agg(tag) from tags where d_id = 3;
 query T
 select array_agg(t.tag) from tags t where d_id in (1, 2);
 ----
-{bbb,aaa,ccc,bbb,NULL,aaa,yyy,zzz}
+{bbb,aaa,ccc,bbb,NULL,aaa,NULL,yyy,zzz}

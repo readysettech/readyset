@@ -70,6 +70,30 @@ select d.id, d.name, group_concat(t.tag separator '::') as tag_arr
 kidnap
 bbb::aaa::ccc::bbb::aaa
 
+# order by asc 
+query T
+select group_concat(t.tag  order by tag separator '::') from tags t where d_id = 1;
+----
+aaa::aaa::bbb::bbb::ccc
+
+# order by asc with distinct
+query T
+select group_concat(distinct t.tag order by tag separator '::') from tags t where d_id = 1;
+----
+aaa::bbb::ccc
+
+# order by desc
+query T
+select group_concat(t.tag order by tag desc separator '::') from tags t where d_id = 1;
+----
+ccc::bbb::bbb::aaa::aaa
+
+# order by desc with distinct
+query T
+select group_concat(distinct t.tag order by tag desc separator '::') from tags t where d_id = 1;
+----
+ccc::bbb::aaa
+
 
 #######
 # test only empty/NULL inputs

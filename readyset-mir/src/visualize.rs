@@ -159,12 +159,13 @@ impl GraphViz for MirNodeInner {
                 ..
             } => {
                 let op_string = match kind {
-                    AccumulationKind::ArrayAgg { distinct } => {
+                    AccumulationKind::ArrayAgg { distinct, .. } => {
                         format!("ArrayAgg({}{on})", distinct)
                     }
                     AccumulationKind::GroupConcat {
                         separator: s,
                         distinct,
+                        ..
                     } => {
                         format!("GroupConcat({}{on}, \\\"{s}\\\")", distinct)
                     }
@@ -180,6 +181,7 @@ impl GraphViz for MirNodeInner {
                     AccumulationKind::StringAgg {
                         separator,
                         distinct,
+                        ..
                     } => {
                         let sep = match separator {
                             Some(s) => s,

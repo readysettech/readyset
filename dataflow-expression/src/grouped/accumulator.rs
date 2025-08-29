@@ -1,24 +1,41 @@
 //! This module implements SQL aggregation functions that accumulate multiple input values
 //! into a single output value. Currently only supports mysql's `GROUP_CONCAT`, postgres' `STRING_AGG`
 //! and `ARRAY_AGG`, and the various JSON object aggregation functions.
+//!
+//! Both mysql and postgres generally allow the argument to the function to be a free-wheeling `expr`,
+//! but we currently limit this to being a column.
+//!
+//! Some of the supported functions allow elements to be distinct and/or ordered within their result.
+//! For example, `select group_concat(distinct col1 order by col1 desc nulls last separator "::")`.
+//! Currently, the `ORDER BY` expr must either be a positional indicator and must be a value of `1`,
+//! or must match the column name of the function's expr (which currently must be a column).
+
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::fmt::{Display, Formatter, Result};
 
 use crate::eval::json;
 use readyset_data::DfValue;
-use readyset_errors::{internal, internal_err, ReadySetResult};
-use readyset_sql::ast::DistinctOption;
+use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_sql::ast::{
+    Column, DistinctOption, Expr, FieldReference, FunctionExpr, NullOrder, OrderClause, OrderType,
+};
 use serde::{Deserialize, Serialize};
 
 /// Supported accumulation operators.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AccumulationOp {
     /// Concatenate values into an array. Allows NULL values in the output array.
-    ArrayAgg { distinct: DistinctOption },
+    ArrayAgg {
+        distinct: DistinctOption,
+        order_by: Option<(OrderType, NullOrder)>,
+    },
     /// Concatenates using the given separator between values. The string result is with the concatenated non-NULL
     /// values from a group. It returns NULL if there are no non-NULL values.
     GroupConcat {
         separator: String,
         distinct: DistinctOption,
+        order_by: Option<(OrderType, NullOrder)>,
     },
     /// Aggregates key-value pairs into JSON object.
     JsonObjectAgg { allow_duplicate_keys: bool },
@@ -28,6 +45,7 @@ pub enum AccumulationOp {
     StringAgg {
         separator: Option<String>,
         distinct: DistinctOption,
+        order_by: Option<(OrderType, NullOrder)>,
     },
 }
 
@@ -41,11 +59,20 @@ impl AccumulationOp {
 
     fn is_distinct(&self) -> bool {
         match self {
-            Self::ArrayAgg { distinct }
+            Self::ArrayAgg { distinct, .. }
             | Self::GroupConcat { distinct, .. }
             | Self::StringAgg { distinct, .. } => *distinct == DistinctOption::IsDistinct,
             // uniqueness is handled is slightly differently for the JSON aggregators
             Self::JsonObjectAgg { .. } => false,
+        }
+    }
+
+    fn order_by(&self) -> Option<(OrderType, NullOrder)> {
+        match self {
+            AccumulationOp::ArrayAgg { order_by, .. }
+            | AccumulationOp::GroupConcat { order_by, .. }
+            | AccumulationOp::StringAgg { order_by, .. } => *order_by,
+            AccumulationOp::JsonObjectAgg { .. } => None,
         }
     }
 
@@ -65,7 +92,7 @@ impl AccumulationOp {
                     .iter()
                     .flat_map(|(k, &count)| {
                         let repeat_count = if self.is_distinct() { 1 } else { count };
-                        std::iter::repeat_n(k.clone(), repeat_count)
+                        std::iter::repeat_n(k.value.clone(), repeat_count)
                     })
                     .collect();
 
@@ -172,12 +199,54 @@ pub enum AccumulatorData {
     /// Note: the current implementation will order keys by their natural order (`DfValue`).
     /// This has the effect of sorting SQL NULLs (`DfValue::None`) to the beginning of the orderings;
     /// for most the functions implemented here, the upstream databases default NULLs to the end of the orderings.
-    /// When we add support for `order by`, we'll need to do some surgery here anyway, so we can
-    /// resolve the default NULL ordering then, as well. (Also, fwiw, if the user didn't specify an ordering
-    /// via an `order by` clause, they get what they get and this "NULLs ordered first" is not a bug :shrug:).
-    /// Further note: the `group_concat()` and `string_agg()` functions don't output NULLs, so really this
-    /// only affects `array_agg()` which does output NULLs.
-    DistinctOrdered(BTreeMap<DfValue, usize>),
+    /// If the user didn't specify an ordering via an `order by` clause, they get what they get and
+    /// this "NULLs ordered first" is not a bug :shrug:). Further note: the `group_concat()` and `string_agg()`
+    /// functions don't output NULLs, so really this only affects `array_agg()` which does output NULLs.
+    DistinctOrdered(BTreeMap<OrderableDfValue, usize>),
+}
+
+/// A wrapper for DfValue + order_by information.
+///
+/// Wanted this to be a newtype wrapper, but life is hard.
+/// The comparison functions consider the order_by then the DfValue;
+/// `Eq` simply defers to the DfValue.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OrderableDfValue {
+    value: DfValue,
+    order_by: Option<(OrderType, NullOrder)>,
+}
+
+impl Ord for OrderableDfValue {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if let Some((order_type, null_order)) = self.order_by {
+            null_order
+                .apply(self.value.is_none(), other.value.is_none())
+                .then(order_type.apply(self.value.cmp(&other.value)))
+        } else {
+            self.value.cmp(&other.value)
+        }
+    }
+}
+
+impl PartialOrd for OrderableDfValue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for OrderableDfValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl Eq for OrderableDfValue {}
+
+impl Display for OrderableDfValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "{}", self.value)?;
+        Ok(())
+    }
 }
 
 impl AccumulatorData {
@@ -189,12 +258,14 @@ impl AccumulatorData {
                 v.push(value);
             }
             AccumulatorData::DistinctOrdered(v) => {
-                v.entry(value).and_modify(|cnt| *cnt += 1).or_insert(1);
+                let order_by = op.order_by();
+                let key = OrderableDfValue { value, order_by };
+                v.entry(key).and_modify(|cnt| *cnt += 1).or_insert(1);
             }
         }
     }
 
-    pub fn remove(&mut self, value: DfValue) -> ReadySetResult<()> {
+    pub fn remove(&mut self, op: &AccumulationOp, value: DfValue) -> ReadySetResult<()> {
         match self {
             AccumulatorData::Simple(v) => {
                 let item_pos = v
@@ -204,10 +275,14 @@ impl AccumulatorData {
                 v.remove(item_pos);
             }
             AccumulatorData::DistinctOrdered(v) => {
-                match v.get_mut(&value) {
+                let key = OrderableDfValue {
+                    value,
+                    order_by: op.order_by(),
+                };
+                match v.get_mut(&key) {
                     Some(cnt) => {
                         if *cnt == 1 {
-                            v.remove(&value);
+                            v.remove(&key);
                         } else {
                             *cnt -= 1;
                         }
@@ -237,13 +312,110 @@ impl From<&AccumulationOp> for AccumulatorData {
         match value {
             // uniqueness is handled is slightly differently for the JSON aggregators
             JsonObjectAgg { .. } => AccumulatorData::Simple(Default::default()),
-            ArrayAgg { distinct } | GroupConcat { distinct, .. } | StringAgg { distinct, .. } => {
-                if *distinct == DistinctOption::IsDistinct {
+            ArrayAgg { distinct, order_by }
+            | GroupConcat {
+                distinct, order_by, ..
+            }
+            | StringAgg {
+                distinct, order_by, ..
+            } => {
+                if *distinct == DistinctOption::IsDistinct || order_by.is_some() {
                     AccumulatorData::DistinctOrdered(Default::default())
                 } else {
                     AccumulatorData::Simple(Default::default())
                 }
             }
         }
+    }
+}
+
+fn validate_accumulator_order_by(
+    over_col: &Column,
+    order_by: &Option<OrderClause>,
+) -> ReadySetResult<Option<(OrderType, NullOrder)>> {
+    match order_by {
+        Some(o) if o.order_by.is_empty() => Ok(None),
+        Some(o) => {
+            if o.order_by.len() > 1 {
+                unsupported!("Multiple ORDER BY expressions not supported")
+            }
+
+            let order_by_expr = &o.order_by[0];
+
+            // Ensure the ORDER BY expr is either a position indicator (which must be 1)
+            // or match the column name in the function.
+            match &order_by_expr.field {
+                FieldReference::Numeric(ref i) => {
+                    if *i != 1 {
+                        unsupported!("ORDER BY position indicator must be '1'")
+                    }
+                }
+                FieldReference::Expr(e) => {
+                    let order_by_col = match e {
+                        Expr::Column(c) => c,
+                        _ => unsupported!("ORDER BY expr must be a column"),
+                    };
+
+                    if over_col != order_by_col {
+                        unsupported!("ORDER BY column must equal the function's column: {:?}, order_by expr: {:?}", over_col, order_by_col)
+                    }
+                }
+            };
+            let order_type = order_by_expr.order_type.unwrap_or_default();
+            Ok(Some((order_type, order_by_expr.null_order)))
+        }
+        None => Ok(None),
+    }
+}
+impl TryFrom<&FunctionExpr> for AccumulationOp {
+    type Error = ReadySetError;
+
+    fn try_from(fn_expr: &FunctionExpr) -> ReadySetResult<AccumulationOp> {
+        // Enforce only column references, not any random expr
+        let over_col = |expr: &Expr| -> ReadySetResult<Column> {
+            match *expr {
+                Expr::Column(ref c) => Ok(c.clone()),
+                _ => unsupported!("expr must be a column"),
+            }
+        };
+
+        let op = match fn_expr {
+            FunctionExpr::ArrayAgg {
+                expr,
+                distinct,
+                order_by,
+            } => AccumulationOp::ArrayAgg {
+                distinct: *distinct,
+                order_by: validate_accumulator_order_by(&over_col(expr)?, order_by)?,
+            },
+            FunctionExpr::GroupConcat {
+                expr,
+                separator,
+                distinct,
+                order_by,
+            } => AccumulationOp::GroupConcat {
+                separator: separator.clone().unwrap_or_else(|| ",".to_owned()),
+                distinct: *distinct,
+                order_by: validate_accumulator_order_by(&over_col(expr)?, order_by)?,
+            },
+            FunctionExpr::JsonObjectAgg {
+                allow_duplicate_keys,
+                ..
+            } => AccumulationOp::JsonObjectAgg {
+                allow_duplicate_keys: *allow_duplicate_keys,
+            },
+            FunctionExpr::StringAgg {
+                expr,
+                separator,
+                distinct,
+                order_by,
+            } => AccumulationOp::StringAgg {
+                separator: separator.clone(),
+                distinct: *distinct,
+                order_by: validate_accumulator_order_by(&over_col(expr)?, order_by)?,
+            },
+            _ => internal!("Unsupported accumulation for function expr: {:?}", fn_expr),
+        };
+        Ok(op)
     }
 }

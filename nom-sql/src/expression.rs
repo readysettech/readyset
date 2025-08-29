@@ -1835,6 +1835,7 @@ mod tests {
                     expr: Box::new(Expr::Column("x".into())),
                     separator: Some("a".into()),
                     distinct: false.into(),
+                    order_by: None,
                 }
                 .display(Dialect::MySQL)
                 .to_string(),
@@ -1845,6 +1846,7 @@ mod tests {
                     expr: Box::new(Expr::Column("x".into())),
                     separator: Some("'".into()),
                     distinct: false.into(),
+                    order_by: None,
                 }
                 .display(Dialect::MySQL)
                 .to_string(),
@@ -1855,6 +1857,7 @@ mod tests {
                     expr: Box::new(Expr::Column("x".into())),
                     separator: None,
                     distinct: false.into(),
+                    order_by: None,
                 }
                 .display(Dialect::MySQL)
                 .to_string(),

@@ -408,6 +408,7 @@ pub fn function_expr(
                     expr: Box::new(expr),
                     separator,
                     distinct: false.into(), // not supporting this under nom-sql
+                    order_by: None,         // not supporting order by under nom-sql
                 },
             ),
             map(
@@ -779,6 +780,7 @@ mod tests {
             expr: Box::new(Expr::Column(Column::from("x"))),
             separator: Some(", ".to_owned()),
             distinct: false.into(),
+            order_by: None,
         };
         let res = to_nom_result(function_expr(Dialect::MySQL)(LocatedSpan::new(qs)));
         assert_eq!(res.unwrap().1, expected);
@@ -789,6 +791,7 @@ mod tests {
                 expr: Box::new(Expr::Literal("a".into())),
                 separator: None,
                 distinct: false.into(),
+                order_by: None,
             }
         );
         assert_eq!(
@@ -797,6 +800,7 @@ mod tests {
                 expr: Box::new(Expr::Column("a".into())),
                 separator: None,
                 distinct: false.into(),
+                order_by: None,
             }
         );
         assert_eq!(
@@ -805,6 +809,7 @@ mod tests {
                 expr: Box::new(Expr::Column("a".into())),
                 separator: None,
                 distinct: false.into(),
+                order_by: None,
             }
         );
     }

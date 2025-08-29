@@ -583,7 +583,13 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
     function_expr: &'ast mut FunctionExpr,
 ) -> Result<(), V::Error> {
     match function_expr {
-        FunctionExpr::ArrayAgg { expr, .. } => visitor.visit_expr(expr.as_mut()),
+        FunctionExpr::ArrayAgg { expr, order_by, .. } => {
+            visitor.visit_expr(expr.as_mut())?;
+            if let Some(order_by) = order_by {
+                visitor.visit_order_clause(order_by)?;
+            }
+            Ok(())
+        }
         FunctionExpr::Avg { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Count { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Extract { expr, .. } => visitor.visit_expr(expr.as_mut()),
@@ -592,8 +598,20 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
         FunctionExpr::Sum { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Max(expr) => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Min(expr) => visitor.visit_expr(expr.as_mut()),
-        FunctionExpr::GroupConcat { expr, .. } => visitor.visit_expr(expr.as_mut()),
-        FunctionExpr::StringAgg { expr, .. } => visitor.visit_expr(expr.as_mut()),
+        FunctionExpr::GroupConcat { expr, order_by, .. } => {
+            visitor.visit_expr(expr.as_mut())?;
+            if let Some(order_by) = order_by {
+                visitor.visit_order_clause(order_by)?;
+            }
+            Ok(())
+        }
+        FunctionExpr::StringAgg { expr, order_by, .. } => {
+            visitor.visit_expr(expr.as_mut())?;
+            if let Some(order_by) = order_by {
+                visitor.visit_order_clause(order_by)?;
+            }
+            Ok(())
+        }
         FunctionExpr::CountStar
         | FunctionExpr::RowNumber
         | FunctionExpr::Rank

@@ -259,7 +259,7 @@ mod tests {
         BinaryOperator, Column, Expr, FieldDefinitionExpr, SelectStatement, SqlQuery, TableExpr,
     };
     use readyset_sql::{Dialect, DialectDisplay};
-    use readyset_sql_parsing::parse_query;
+    use readyset_sql_parsing::{parse_query, parse_query_with_config, ParsingPreset};
 
     use super::*;
 
@@ -596,6 +596,33 @@ Dialect::MySQL,
             "\n left: {}\nright: {}",
             q.display(readyset_sql::Dialect::MySQL),
             expected.display(readyset_sql::Dialect::MySQL)
+        );
+    }
+
+    #[test]
+    fn aggregate_order_by() {
+        let mut q = parse_query_with_config(
+            ParsingPreset::OnlySqlparser,
+            Dialect::PostgreSQL,
+            "SELECT array_agg(t1.x ORDER BY x ASC) FROM t1",
+        )
+        .unwrap();
+        let expected = parse_query_with_config(
+            ParsingPreset::OnlySqlparser,
+            Dialect::PostgreSQL,
+            "SELECT array_agg(t1.x ORDER BY t1.x ASC) FROM t1",
+        )
+        .unwrap();
+        let schema = [(Relation::from("t1"), vec!["x".into()])].into();
+
+        q.expand_implied_tables(&schema, readyset_sql::Dialect::PostgreSQL)
+            .unwrap();
+        assert_eq!(
+            q,
+            expected,
+            "\n left: {}\nright: {}",
+            q.display(readyset_sql::Dialect::PostgreSQL),
+            expected.display(readyset_sql::Dialect::PostgreSQL)
         );
     }
 }

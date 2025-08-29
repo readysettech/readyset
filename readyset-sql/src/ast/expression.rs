@@ -25,6 +25,7 @@ pub enum FunctionExpr {
     ArrayAgg {
         expr: Box<Expr>,
         distinct: DistinctOption,
+        order_by: Option<OrderClause>,
     },
 
     /// `AVG` aggregation. The boolean argument is `true` if `DISTINCT`
@@ -85,6 +86,7 @@ pub enum FunctionExpr {
         expr: Box<Expr>,
         separator: Option<String>,
         distinct: DistinctOption,
+        order_by: Option<OrderClause>,
     },
 
     /// The standard SQL Window Functions
@@ -103,6 +105,7 @@ pub enum FunctionExpr {
         expr: Box<Expr>,
         separator: Option<String>,
         distinct: DistinctOption,
+        order_by: Option<OrderClause>,
     },
 
     /// The SQL `SUBSTRING`/`SUBSTR` function.
@@ -136,11 +139,28 @@ pub enum FunctionExpr {
     },
 }
 
+macro_rules! order_by_clause_str {
+    ($o:expr, $dialect:expr) => {
+        $o.as_ref()
+            .map(|clause| clause.display($dialect).to_string())
+            .unwrap_or_else(String::new)
+    };
+}
+
 impl FunctionExpr {
     pub fn alias(&self, dialect: Dialect) -> Option<String> {
         Some(match self {
-            FunctionExpr::ArrayAgg { expr, distinct } => {
-                format!("array_agg({}{})", distinct, expr.alias(dialect)?)
+            FunctionExpr::ArrayAgg {
+                expr,
+                distinct,
+                order_by,
+            } => {
+                format!(
+                    "array_agg({}{}{})",
+                    distinct,
+                    expr.alias(dialect)?,
+                    order_by_clause_str!(order_by, dialect),
+                )
             }
             FunctionExpr::Avg { expr, .. } => format!("avg({})", expr.alias(dialect)?),
             FunctionExpr::Count { expr, .. } => format!("count({})", expr.alias(dialect)?),
@@ -172,10 +192,12 @@ impl FunctionExpr {
                 expr,
                 separator,
                 distinct,
+                order_by,
             } => format!(
-                "group_concat({}{}, {})",
+                "group_concat({}{}{} {})",
                 distinct,
                 expr.alias(dialect)?,
+                order_by_clause_str!(order_by, dialect),
                 separator
                     .as_ref()
                     .map(|s| format!("'{}'", s.replace('\'', "''").replace('\\', "\\\\")))
@@ -185,14 +207,16 @@ impl FunctionExpr {
                 expr,
                 separator,
                 distinct,
+                order_by,
             } => format!(
-                "string_agg({}{}, {})",
+                "string_agg({}{}, {}{})",
                 distinct,
                 expr.alias(dialect)?,
                 separator
                     .as_ref()
                     .map(|s| format!("'{}'", s.replace('\'', "''").replace('\\', "\\\\")))
                     .unwrap_or("NULL".to_string()),
+                order_by_clause_str!(order_by, dialect),
             ),
             FunctionExpr::Substring { string, pos, len } => format!(
                 "substring({}, {}, {})",
@@ -298,8 +322,18 @@ impl FunctionExpr {
 impl DialectDisplay for FunctionExpr {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
-            FunctionExpr::ArrayAgg { expr, distinct } => {
-                write!(f, "array_agg({}{})", distinct, expr.display(dialect))
+            FunctionExpr::ArrayAgg {
+                expr,
+                distinct,
+                order_by,
+            } => {
+                write!(
+                    f,
+                    "array_agg({}{}{})",
+                    distinct,
+                    expr.display(dialect),
+                    order_by_clause_str!(order_by, dialect),
+                )
             }
             FunctionExpr::Avg {
                 expr,
@@ -323,8 +357,15 @@ impl DialectDisplay for FunctionExpr {
                 expr,
                 separator,
                 distinct,
+                order_by,
             } => {
-                write!(f, "group_concat({}{}", distinct, expr.display(dialect),)?;
+                write!(
+                    f,
+                    "group_concat({}{}{}",
+                    distinct,
+                    expr.display(dialect),
+                    order_by_clause_str!(order_by, dialect),
+                )?;
                 if let Some(separator) = separator {
                     write!(
                         f,
@@ -338,8 +379,15 @@ impl DialectDisplay for FunctionExpr {
                 expr,
                 separator,
                 distinct,
+                order_by,
             } => {
-                write!(f, "string_agg({}{}", distinct, expr.display(dialect),)?;
+                write!(
+                    f,
+                    "string_agg({}{}{}",
+                    distinct,
+                    expr.display(dialect),
+                    order_by_clause_str!(order_by, dialect),
+                )?;
                 if let Some(separator) = separator {
                     write!(
                         f,
@@ -1672,6 +1720,19 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             })
         };
 
+        let order_by_clause = || -> Option<OrderClause> {
+            clauses.iter().find_map(|clause| match clause {
+                sqlparser::ast::FunctionArgumentClause::OrderBy(o) => {
+                    let order_by: Result<Vec<OrderBy>, _> = o
+                        .iter()
+                        .map(|expr| expr.clone().try_into_dialect(dialect))
+                        .collect();
+                    order_by.ok().map(|order_by| OrderClause { order_by })
+                }
+                _ => None,
+            })
+        };
+
         let mut exprs = args.into_iter().map(|arg| arg.try_into_dialect(dialect));
         let mut next_expr = || {
             exprs
@@ -1703,10 +1764,12 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             // group_concat() is a mysql-specific function, and caller optionally sets
             // the output separator with special `SEPARATOR ''` syntax. we fish that value
             // out of the `clauses` list above.
+            let order_by = order_by_clause();
             Self::Call(FunctionExpr::GroupConcat {
                 expr: next_expr()?,
                 separator: find_separator(),
                 distinct: distinct.into(),
+                order_by,
             })
         } else if ident.value.eq_ignore_ascii_case("STRING_AGG") {
             // `string_agg()` is a pg-specific function, and we get the mandatory separator
@@ -1718,16 +1781,20 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 Expr::Literal(Literal::Null) => None,
                 s => return unsupported!("Unsupported separator: {:?}", s),
             };
+            let order_by = order_by_clause();
 
             Self::Call(FunctionExpr::StringAgg {
                 expr,
                 separator,
                 distinct: distinct.into(),
+                order_by,
             })
         } else if ident.value.eq_ignore_ascii_case("ARRAY_AGG") {
+            let order_by = order_by_clause();
             Self::Call(FunctionExpr::ArrayAgg {
                 expr: next_expr()?,
                 distinct: distinct.into(),
+                order_by,
             })
         } else if ident.value.eq_ignore_ascii_case("JSON_OBJECT_AGG") {
             Self::Call(FunctionExpr::JsonObjectAgg {
@@ -2162,6 +2229,7 @@ impl Arbitrary for Expr {
                             expr,
                             separator,
                             distinct: distinct.into(),
+                            order_by: None,
                         }
                     }
                 ),
@@ -2171,6 +2239,7 @@ impl Arbitrary for Expr {
                             expr,
                             separator,
                             distinct: distinct.into(),
+                            order_by: None,
                         }
                     }
                 ),
@@ -2178,6 +2247,7 @@ impl Arbitrary for Expr {
                     FunctionExpr::ArrayAgg {
                         expr,
                         distinct: distinct.into(),
+                        order_by: None,
                     }
                 }),
                 (

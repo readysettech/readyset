@@ -567,14 +567,32 @@ pub fn walk_function_expr<'ast, V: Visitor<'ast>>(
     function_expr: &'ast FunctionExpr,
 ) -> Result<(), V::Error> {
     match function_expr {
-        FunctionExpr::ArrayAgg { expr, .. } => visitor.visit_expr(expr.as_ref()),
+        FunctionExpr::ArrayAgg { expr, order_by, .. } => {
+            visitor.visit_expr(expr.as_ref())?;
+            if let Some(order_by) = order_by {
+                visitor.visit_order_clause(order_by)?;
+            }
+            Ok(())
+        }
         FunctionExpr::Avg { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Count { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Sum { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Max(expr) => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Min(expr) => visitor.visit_expr(expr.as_ref()),
-        FunctionExpr::GroupConcat { expr, .. } => visitor.visit_expr(expr.as_ref()),
-        FunctionExpr::StringAgg { expr, .. } => visitor.visit_expr(expr.as_ref()),
+        FunctionExpr::GroupConcat { expr, order_by, .. } => {
+            visitor.visit_expr(expr.as_ref())?;
+            if let Some(order_by) = order_by {
+                visitor.visit_order_clause(order_by)?;
+            }
+            Ok(())
+        }
+        FunctionExpr::StringAgg { expr, order_by, .. } => {
+            visitor.visit_expr(expr.as_ref())?;
+            if let Some(order_by) = order_by {
+                visitor.visit_order_clause(order_by)?;
+            }
+            Ok(())
+        }
         FunctionExpr::Extract { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Lower { expr, .. } => visitor.visit_expr(expr.as_ref()),
         FunctionExpr::Upper { expr, .. } => visitor.visit_expr(expr.as_ref()),

@@ -882,9 +882,9 @@ impl SqlToMirConverter {
         }
 
         Ok(match function {
-            ArrayAgg { ref expr, distinct } => mknode(
+            ArrayAgg { ref expr, .. } => mknode(
                 Column::from(get_column(expr)),
-                GroupedNodeType::Accumulation(AccumulationOp::ArrayAgg { distinct }),
+                GroupedNodeType::Accumulation(AccumulationOp::try_from(&function)?),
                 false,
             ),
             Sum { ref expr, distinct } if is_column(expr) => mknode(
@@ -963,38 +963,19 @@ impl SqlToMirConverter {
                 GroupedNodeType::Extremum(Extremum::Min),
                 false,
             ),
-            GroupConcat {
-                ref expr,
-                separator,
-                distinct,
-            } if is_column(expr) => mknode(
+            GroupConcat { ref expr, .. } if is_column(expr) => mknode(
                 Column::from(get_column(expr)),
-                GroupedNodeType::Accumulation(AccumulationOp::GroupConcat {
-                    separator: separator.unwrap_or_else(|| ",".to_owned()),
-                    distinct,
-                }),
+                GroupedNodeType::Accumulation(AccumulationOp::try_from(&function)?),
                 false,
             ),
-            JsonObjectAgg {
-                allow_duplicate_keys,
-                ..
-            } => mknode(
+            JsonObjectAgg { .. } => mknode(
                 Column::named("__json_objects__"),
-                GroupedNodeType::Accumulation(AccumulationOp::JsonObjectAgg {
-                    allow_duplicate_keys,
-                }),
+                GroupedNodeType::Accumulation(AccumulationOp::try_from(&function)?),
                 false,
             ),
-            StringAgg {
-                ref expr,
-                separator,
-                distinct,
-            } if is_column(expr) => mknode(
+            StringAgg { ref expr, .. } if is_column(expr) => mknode(
                 Column::from(get_column(expr)),
-                GroupedNodeType::Accumulation(AccumulationOp::StringAgg {
-                    separator,
-                    distinct,
-                }),
+                GroupedNodeType::Accumulation(AccumulationOp::try_from(&function)?),
                 false,
             ),
             _ => {

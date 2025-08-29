@@ -80,6 +80,30 @@ select d.id, d.name, string_agg(t.tag, '::') as tag_arr
 kidnap
 bbb::aaa::ccc::bbb::aaa
 
+# order by asc
+query T
+select string_agg(t.tag, '::' order by tag) from tags t where d_id = 1;
+----
+aaa::aaa::bbb::bbb::ccc
+
+# order by asc with distinct
+query T
+select string_agg(distinct t.tag, '::' order by tag) from tags t where d_id = 1;
+----
+aaa::bbb::ccc
+
+# order by desc
+query T
+select string_agg(t.tag, '::' order by tag desc) from tags t where d_id = 1;
+----
+ccc::bbb::bbb::aaa::aaa
+
+# order by desc with distinct
+query T
+select string_agg(distinct t.tag, '::' order by tag desc) from tags t where d_id = 1;
+----
+ccc::bbb::aaa
+
 
 #######
 # test only empty/NULL inputs
