@@ -407,6 +407,7 @@ pub fn function_expr(
                 |(expr, separator)| FunctionExpr::GroupConcat {
                     expr: Box::new(expr),
                     separator,
+                    distinct: false.into(), // not supporting this under nom-sql
                 },
             ),
             map(
@@ -777,6 +778,7 @@ mod tests {
         let expected = FunctionExpr::GroupConcat {
             expr: Box::new(Expr::Column(Column::from("x"))),
             separator: Some(", ".to_owned()),
+            distinct: false.into(),
         };
         let res = to_nom_result(function_expr(Dialect::MySQL)(LocatedSpan::new(qs)));
         assert_eq!(res.unwrap().1, expected);
@@ -785,21 +787,24 @@ mod tests {
             test_parse!(function_expr(Dialect::MySQL), b"group_concat('a')"),
             FunctionExpr::GroupConcat {
                 expr: Box::new(Expr::Literal("a".into())),
-                separator: None
+                separator: None,
+                distinct: false.into(),
             }
         );
         assert_eq!(
             test_parse!(function_expr(Dialect::MySQL), b"group_concat (a)"),
             FunctionExpr::GroupConcat {
                 expr: Box::new(Expr::Column("a".into())),
-                separator: None
+                separator: None,
+                distinct: false.into(),
             }
         );
         assert_eq!(
             test_parse!(function_expr(Dialect::MySQL), b"group_concat ( a )"),
             FunctionExpr::GroupConcat {
                 expr: Box::new(Expr::Column("a".into())),
-                separator: None
+                separator: None,
+                distinct: false.into(),
             }
         );
     }

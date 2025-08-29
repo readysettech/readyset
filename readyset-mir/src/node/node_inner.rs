@@ -447,10 +447,16 @@ impl MirNodeInner {
                 ..
             } => {
                 let op_string = match kind {
-                    AccumulationOp::ArrayAgg => format!("ArrayAgg({})", on.name.as_str()),
-                    AccumulationOp::GroupConcat { separator } => {
+                    AccumulationOp::ArrayAgg { distinct } => {
+                        format!("ArrayAgg({}{})", distinct, on.name.as_str())
+                    }
+                    AccumulationOp::GroupConcat {
+                        separator,
+                        distinct,
+                    } => {
                         format!(
-                            "GroupConcat([{}], \"{}\")",
+                            "GroupConcat([{}{}], \"{}\")",
+                            distinct,
                             on.name.as_str(),
                             separator.as_str()
                         )
@@ -464,12 +470,15 @@ impl MirNodeInner {
                             format!("JsonbObjectAgg({})", on.name.as_str())
                         }
                     }
-                    AccumulationOp::StringAgg { separator } => {
+                    AccumulationOp::StringAgg {
+                        separator,
+                        distinct,
+                    } => {
                         let sep = match separator {
                             Some(s) => s,
                             None => "NULL",
                         };
-                        format!("StringAgg([{}], \"{}\")", on.name.as_str(), sep)
+                        format!("StringAgg([{}{}], \"{}\")", distinct, on.name.as_str(), sep,)
                     }
                 };
                 let group_cols = group_by

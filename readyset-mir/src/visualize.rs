@@ -159,9 +159,14 @@ impl GraphViz for MirNodeInner {
                 ..
             } => {
                 let op_string = match kind {
-                    AccumulationKind::ArrayAgg => format!("ArrayAgg({on})"),
-                    AccumulationKind::GroupConcat { separator: s } => {
-                        format!("GroupConcat({on}, \\\"{s}\\\")")
+                    AccumulationKind::ArrayAgg { distinct } => {
+                        format!("ArrayAgg({}{on})", distinct)
+                    }
+                    AccumulationKind::GroupConcat {
+                        separator: s,
+                        distinct,
+                    } => {
+                        format!("GroupConcat({}{on}, \\\"{s}\\\")", distinct)
                     }
                     AccumulationKind::JsonObjectAgg {
                         allow_duplicate_keys,
@@ -172,12 +177,15 @@ impl GraphViz for MirNodeInner {
                             format!("JsonbObjectAgg({on})")
                         }
                     }
-                    AccumulationKind::StringAgg { separator } => {
+                    AccumulationKind::StringAgg {
+                        separator,
+                        distinct,
+                    } => {
                         let sep = match separator {
                             Some(s) => s,
                             None => "NULL",
                         };
-                        format!("StringAgg({on}, \\\"{sep}\\\")")
+                        format!("StringAgg({}{on}, \\\"{sep}\\\")", distinct)
                     }
                 };
                 let group_cols = group_by.iter().join(", ");

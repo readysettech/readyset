@@ -51,6 +51,12 @@ select string_agg(t.tag, '::') from tags t where d_id = 1;
 ----
 bbb::aaa::ccc::bbb::aaa
 
+# simple query (with NULLs and dupes!)
+query T
+select string_agg(distinct t.tag, '::') from tags t where d_id = 1;
+----
+aaa::bbb::ccc
+
 
 # multiple aggregations
 # Note: the sum() should include a count for the NULL row, even though

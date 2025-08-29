@@ -1130,7 +1130,9 @@ impl Arbitrary for WindowFunctionConfig {
 #[arbitrary(args = QueryDialect)]
 pub enum AggregateType {
     #[weight(u32::from(*args_shared == ParseDialect::PostgreSQL))]
-    ArrayAgg,
+    ArrayAgg {
+        distinct: bool,
+    },
     Count {
         #[any(generate_arrays = false, dialect = Some(args_shared.0))]
         column_type: SqlType,
@@ -1147,7 +1149,9 @@ pub enum AggregateType {
         distinct: bool,
     },
     #[weight(u32::from(*args_shared == ParseDialect::MySQL))]
-    GroupConcat,
+    GroupConcat {
+        distinct: bool,
+    },
     Max {
         #[strategy(min_max_arg_type(args.0))]
         column_type: SqlType,
@@ -1160,35 +1164,37 @@ pub enum AggregateType {
         allow_duplicate_keys: bool,
     },
     #[weight(u32::from(*args_shared == ParseDialect::PostgreSQL))]
-    StringAgg,
+    StringAgg {
+        distinct: bool,
+    },
 }
 
 impl AggregateType {
     pub fn column_type(&self) -> SqlType {
         match self {
-            AggregateType::ArrayAgg => SqlType::Text,
+            AggregateType::ArrayAgg { .. } => SqlType::Text,
             AggregateType::Avg { column_type, .. } => column_type.clone(),
             AggregateType::Count { column_type, .. } => column_type.clone(),
-            AggregateType::GroupConcat => SqlType::Text,
+            AggregateType::GroupConcat { .. } => SqlType::Text,
             AggregateType::JsonObjectAgg { .. } => SqlType::Text,
             AggregateType::Max { column_type } => column_type.clone(),
             AggregateType::Min { column_type } => column_type.clone(),
-            AggregateType::StringAgg => SqlType::Text,
+            AggregateType::StringAgg { .. } => SqlType::Text,
             AggregateType::Sum { column_type, .. } => column_type.clone(),
         }
     }
 
     pub fn is_distinct(&self) -> bool {
         match self {
-            AggregateType::Avg { distinct, .. } => *distinct,
-            AggregateType::Count { distinct, .. } => *distinct,
-            AggregateType::Sum { distinct, .. } => *distinct,
-            AggregateType::ArrayAgg
-            | AggregateType::GroupConcat
-            | AggregateType::JsonObjectAgg { .. }
+            AggregateType::ArrayAgg { distinct }
+            | AggregateType::Avg { distinct, .. }
+            | AggregateType::Count { distinct, .. }
+            | AggregateType::GroupConcat { distinct }
+            | AggregateType::StringAgg { distinct }
+            | AggregateType::Sum { distinct, .. } => *distinct,
+            AggregateType::JsonObjectAgg { .. }
             | AggregateType::Max { .. }
-            | AggregateType::Min { .. }
-            | AggregateType::StringAgg => false,
+            | AggregateType::Min { .. } => false,
         }
     }
 }
@@ -1650,7 +1656,8 @@ const ALL_PAGINATE: &[QueryOperation] = &[
 ];
 
 const ALL_AGGREGATE_TYPES: &[AggregateType] = &[
-    AggregateType::ArrayAgg,
+    AggregateType::ArrayAgg { distinct: true },
+    AggregateType::ArrayAgg { distinct: false },
     AggregateType::Count {
         column_type: SqlType::Int(None),
         distinct: true,
@@ -1675,7 +1682,8 @@ const ALL_AGGREGATE_TYPES: &[AggregateType] = &[
         column_type: SqlType::Int(None),
         distinct: false,
     },
-    AggregateType::GroupConcat,
+    AggregateType::GroupConcat { distinct: true },
+    AggregateType::GroupConcat { distinct: false },
     AggregateType::Max {
         column_type: SqlType::Int(None),
     },
@@ -1688,7 +1696,8 @@ const ALL_AGGREGATE_TYPES: &[AggregateType] = &[
     AggregateType::JsonObjectAgg {
         allow_duplicate_keys: false,
     },
-    AggregateType::StringAgg,
+    AggregateType::StringAgg { distinct: true },
+    AggregateType::StringAgg { distinct: false },
 ];
 
 const ALL_SUBQUERY_POSITIONS: &[SubqueryPosition] = &[
@@ -1915,12 +1924,16 @@ impl QueryOperation {
                 }));
 
                 let func = match *agg {
-                    ArrayAgg => FunctionExpr::ArrayAgg { expr },
+                    ArrayAgg { distinct } => FunctionExpr::ArrayAgg {
+                        expr,
+                        distinct: distinct.into(),
+                    },
                     Avg { distinct, .. } => FunctionExpr::Avg { expr, distinct },
                     Count { distinct, .. } => FunctionExpr::Count { expr, distinct },
-                    GroupConcat => FunctionExpr::GroupConcat {
+                    GroupConcat { distinct } => FunctionExpr::GroupConcat {
                         expr,
                         separator: Some(", ".to_owned()),
+                        distinct: distinct.into(),
                     },
                     JsonObjectAgg {
                         allow_duplicate_keys,
@@ -1938,9 +1951,10 @@ impl QueryOperation {
                     }
                     Max { .. } => FunctionExpr::Max(expr),
                     Min { .. } => FunctionExpr::Min(expr),
-                    StringAgg => FunctionExpr::StringAgg {
+                    StringAgg { distinct } => FunctionExpr::StringAgg {
                         expr,
                         separator: Some(", ".to_owned()),
+                        distinct: distinct.into(),
                     },
                     Sum { distinct, .. } => FunctionExpr::Sum { expr, distinct },
                 };
@@ -2496,6 +2510,8 @@ impl QueryOperation {
 /// | Specification                           | Meaning                                 |
 /// |-----------------------------------------|-----------------------------------------|
 /// | aggregates                              | All [`AggregateType`]s                  |
+/// | array_agg                               | ARRAY_AGG aggregates                    |
+/// | array_agg_distinct                      | ARRAY_AGG(DISTINCT) aggregates          |
 /// | count                                   | COUNT aggregates                        |
 /// | count_distinct                          | COUNT(DISTINCT) aggregates              |
 /// | sum                                     | SUM aggregates                          |
@@ -2503,6 +2519,7 @@ impl QueryOperation {
 /// | avg                                     | AVG aggregates                          |
 /// | avg_distinct                            | AVG(DISTINCT) aggregates                |
 /// | group_concat                            | GROUP_CONCAT aggregates                 |
+/// | group_concat_distinct                   | GROUP_CONCAT(DISTINCT) aggregates       |
 /// | string_agg                              | STRING_AGG aggregates                   |
 /// | json_object                             | JSON OBJECT aggregates (w/o duplicates) |
 /// | json_object_dupes                       | JSON OBJECT aggregates (with duplicates)|
@@ -2522,6 +2539,8 @@ impl QueryOperation {
 /// | inner_join                              | `INNER JOIN`s                           |
 /// | left_join                               | `LEFT JOIN`s                            |
 /// | single_parameter / single_param / param | A single query parameter                |
+/// | string_agg                              | STRING_AGG aggregates                   |
+/// | string_agg_distinct                     | STRING_AGG(DISTINCT) aggregates         |
 /// | range_param                             | A range query parameter                 |
 /// | multiple_parameters / params            | Multiple query parameters               |
 /// | multiple_range_params                   | Multiple range query parameters         |
@@ -2580,7 +2599,14 @@ impl FromStr for Operations {
                 distinct: true,
             })]
             .into()),
-            "group_concat" => Ok(vec![ColumnAggregate(AggregateType::GroupConcat)].into()),
+            "group_concat" => Ok(vec![ColumnAggregate(AggregateType::GroupConcat {
+                distinct: false,
+            })]
+            .into()),
+            "group_concat_distinct" => Ok(vec![ColumnAggregate(AggregateType::GroupConcat {
+                distinct: true,
+            })]
+            .into()),
             "json_object" => Ok(vec![ColumnAggregate(AggregateType::JsonObjectAgg {
                 allow_duplicate_keys: false,
             })]
@@ -2673,8 +2699,19 @@ impl FromStr for Operations {
             .into()),
             "topk" => Ok(ALL_TOPK.to_vec().into()),
             "paginate" => Ok(ALL_PAGINATE.to_vec().into()),
-            "array_agg" => Ok(vec![ColumnAggregate(AggregateType::ArrayAgg)].into()),
-            "string_agg" => Ok(vec![ColumnAggregate(AggregateType::StringAgg)].into()),
+            "array_agg" => {
+                Ok(vec![ColumnAggregate(AggregateType::ArrayAgg { distinct: false })].into())
+            }
+            "array_agg_distinct" => {
+                Ok(vec![ColumnAggregate(AggregateType::ArrayAgg { distinct: true })].into())
+            }
+            "string_agg" => Ok(vec![ColumnAggregate(AggregateType::StringAgg {
+                distinct: false,
+            })]
+            .into()),
+            "string_agg_distinct" => {
+                Ok(vec![ColumnAggregate(AggregateType::StringAgg { distinct: true })].into())
+            }
             s => Err(anyhow!("unknown query operation: {}", s)),
         }
     }
@@ -3322,7 +3359,8 @@ mod tests {
             res,
             vec![
                 Operations(vec![
-                    QueryOperation::ColumnAggregate(AggregateType::ArrayAgg),
+                    QueryOperation::ColumnAggregate(AggregateType::ArrayAgg { distinct: true }),
+                    QueryOperation::ColumnAggregate(AggregateType::ArrayAgg { distinct: false }),
                     QueryOperation::ColumnAggregate(AggregateType::Count {
                         column_type: SqlType::Int(None),
                         distinct: true,
@@ -3347,7 +3385,8 @@ mod tests {
                         column_type: SqlType::Int(None),
                         distinct: false,
                     }),
-                    QueryOperation::ColumnAggregate(AggregateType::GroupConcat),
+                    QueryOperation::ColumnAggregate(AggregateType::GroupConcat { distinct: true }),
+                    QueryOperation::ColumnAggregate(AggregateType::GroupConcat { distinct: false }),
                     QueryOperation::ColumnAggregate(AggregateType::Max {
                         column_type: SqlType::Int(None)
                     }),
@@ -3360,7 +3399,8 @@ mod tests {
                     QueryOperation::ColumnAggregate(AggregateType::JsonObjectAgg {
                         allow_duplicate_keys: false
                     }),
-                    QueryOperation::ColumnAggregate(AggregateType::StringAgg),
+                    QueryOperation::ColumnAggregate(AggregateType::StringAgg { distinct: true }),
+                    QueryOperation::ColumnAggregate(AggregateType::StringAgg { distinct: false }),
                 ]),
                 Operations(vec![
                     QueryOperation::Join(JoinOperator::LeftJoin),

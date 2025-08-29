@@ -1833,7 +1833,8 @@ mod tests {
             assert_eq!(
                 FunctionExpr::GroupConcat {
                     expr: Box::new(Expr::Column("x".into())),
-                    separator: Some("a".into())
+                    separator: Some("a".into()),
+                    distinct: false.into(),
                 }
                 .display(Dialect::MySQL)
                 .to_string(),
@@ -1842,7 +1843,8 @@ mod tests {
             assert_eq!(
                 FunctionExpr::GroupConcat {
                     expr: Box::new(Expr::Column("x".into())),
-                    separator: Some("'".into())
+                    separator: Some("'".into()),
+                    distinct: false.into(),
                 }
                 .display(Dialect::MySQL)
                 .to_string(),
@@ -1851,7 +1853,8 @@ mod tests {
             assert_eq!(
                 FunctionExpr::GroupConcat {
                     expr: Box::new(Expr::Column("x".into())),
-                    separator: None
+                    separator: None,
+                    distinct: false.into(),
                 }
                 .display(Dialect::MySQL)
                 .to_string(),

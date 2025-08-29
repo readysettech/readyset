@@ -46,6 +46,12 @@ select array_agg(t.tag) from tags t where d_id = 1;
 ----
 {bbb,aaa,ccc,bbb,NULL,aaa}
 
+# simple query (with NULLs and dupes!)
+query T
+select array_agg(distinct t.tag) from tags t where d_id = 1;
+----
+{NULL,aaa,bbb,ccc}
+
 
 # multiple aggregations
 query IT

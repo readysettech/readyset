@@ -221,6 +221,7 @@ mod tests {
                     output_column: Column::named("agg"),
                     kind: accumulator::AccumulationOp::GroupConcat {
                         separator: ",".to_string(),
+                        distinct: false.into(),
                     },
                 },
                 vec![Column::new(Some("base"), "b"), Column::named("agg")],

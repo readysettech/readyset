@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use common::DfValue;
-use dataflow_expression::grouped::accumulator::AccumulationOp;
+use dataflow_expression::grouped::accumulator::{AccumulationOp, AccumulatorData};
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{internal_err, invariant_eq, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -15,12 +15,12 @@ use crate::prelude::*;
 use super::{hash_grouped_records, GroupHash};
 
 /// The last stored state for a given group.
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct LastState {
     /// The last output value we emitted for this group.
     last_output: Option<DfValue>,
-    /// A vector containing the actual data
-    data: Vec<DfValue>,
+    /// The actual data
+    data: AccumulatorData,
 }
 
 /// `Accumulator` implements accumulation-based aggregation operations that collect
@@ -46,7 +46,7 @@ impl Accumulator {
         let collation = over_col_ty.collation().unwrap_or(Collation::Utf8);
 
         let out_ty = match &op {
-            AccumulationOp::ArrayAgg => {
+            AccumulationOp::ArrayAgg { .. } => {
                 antithesis_sdk::assert_reachable!("Accumulation::ArrayAgg");
                 DfType::Array(Box::new(over_col_ty.clone()))
             }
@@ -143,8 +143,12 @@ impl GroupedOperation for Accumulator {
                 return Ok(None);
             }
             // if we're recreating or this is the first record for the group, make a new state
-            None => LastState::default(),
+            None => LastState {
+                last_output: None,
+                data: (&self.op).into(),
+            },
         };
+
         for AccumulationDiff {
             value,
             is_positive,
@@ -157,25 +161,9 @@ impl GroupedOperation for Accumulator {
 
             invariant_eq!(group_hash, group);
             if is_positive {
-                prev_state.data.push(value);
+                prev_state.data.add(&self.op, value);
             } else {
-                let item_pos = prev_state
-                    .data
-                    .iter()
-                    .rposition(|x| x == &value)
-                    .ok_or_else(|| {
-                        #[cfg(feature = "display_literals")]
-                        {
-                            internal_err!(
-                                "group_concat couldn't remove {:?} from {:?}",
-                                value,
-                                prev_state.data
-                            )
-                        }
-                        #[cfg(not(feature = "display_literals"))]
-                        internal_err!("group_concat couldn't remove value from data")
-                    })?;
-                prev_state.data.remove(item_pos);
+                prev_state.data.remove(value)?;
             }
         }
         let output_value = self.op.apply(&prev_state.data)?;
@@ -186,11 +174,14 @@ impl GroupedOperation for Accumulator {
 
     fn description(&self) -> String {
         let op_string = match &self.op {
-            AccumulationOp::ArrayAgg => {
-                format!("ArrayAgg({})", self.over)
+            AccumulationOp::ArrayAgg { distinct } => {
+                format!("ArrayAgg({}{})", distinct, self.over)
             }
-            AccumulationOp::GroupConcat { separator } => {
-                format!("GroupConcat({}, {:?})", self.over, separator)
+            AccumulationOp::GroupConcat {
+                separator,
+                distinct,
+            } => {
+                format!("GroupConcat({}{}, {:?})", distinct, self.over, separator)
             }
             AccumulationOp::JsonObjectAgg {
                 allow_duplicate_keys,
@@ -201,9 +192,12 @@ impl GroupedOperation for Accumulator {
                     format!("JsonbObjectAgg({})", self.over)
                 }
             }
-            AccumulationOp::StringAgg { separator } => {
+            AccumulationOp::StringAgg {
+                separator,
+                distinct,
+            } => {
                 let sep = separator.clone().unwrap_or("NULL".to_string());
-                format!("StringAgg({}, {:?})", self.over, sep)
+                format!("StringAgg({}{}, {:?})", distinct, self.over, sep,)
             }
         };
         format!("{} γ{:?}", op_string, self.group)
@@ -237,12 +231,13 @@ mod tests {
     use super::*;
     use crate::{ops, LookupIndex};
 
-    fn setup(mat: bool) -> ops::test::MockGraph {
+    fn setup(mat: bool, distinct: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
 
         let op = AccumulationOp::GroupConcat {
             separator: "#".to_string(),
+            distinct: distinct.into(),
         };
         let c = Accumulator::over(
             op,
@@ -260,14 +255,14 @@ mod tests {
 
     #[test]
     fn it_describes() {
-        let c = setup(true);
+        let c = setup(true, false);
         assert_eq!(c.node().description(), "GroupConcat(1, \"#\") γ[0]",);
     }
 
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn it_forwards() {
-        let mut c = setup(true);
+        let mut c = setup(true, false);
 
         let u: Record = vec![1.into(), 1.into()].into();
 
@@ -438,7 +433,7 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         let me = 1.into();
-        let c = setup(false);
+        let c = setup(false, false);
         let idx = c.node().suggest_indexes(me);
 
         // should only add index on own columns
@@ -451,7 +446,7 @@ mod tests {
 
     #[test]
     fn it_resolves() {
-        let c = setup(false);
+        let c = setup(false, false);
         assert_eq!(
             c.node().resolve(0),
             Some(vec![(c.narrow_base_id().as_global(), 0)])

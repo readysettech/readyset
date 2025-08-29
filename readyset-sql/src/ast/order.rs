@@ -189,3 +189,33 @@ impl DialectDisplay for OrderClause {
         })
     }
 }
+
+/// Attribute to indicate if an item is distinct.
+///
+/// This enum exists as 1) a type to pass around instead of a naked boolean, and
+/// 2) a single place to get a string representation from.
+#[derive(
+    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
+)]
+pub enum DistinctOption {
+    IsDistinct,
+    NotDistinct,
+}
+
+impl From<bool> for DistinctOption {
+    fn from(b: bool) -> Self {
+        match b {
+            true => DistinctOption::IsDistinct,
+            false => DistinctOption::NotDistinct,
+        }
+    }
+}
+
+impl fmt::Display for DistinctOption {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DistinctOption::IsDistinct => write!(f, "DISTINCT "),
+            DistinctOption::NotDistinct => write!(f, ""),
+        }
+    }
+}

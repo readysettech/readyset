@@ -882,9 +882,9 @@ impl SqlToMirConverter {
         }
 
         Ok(match function {
-            ArrayAgg { ref expr } => mknode(
+            ArrayAgg { ref expr, distinct } => mknode(
                 Column::from(get_column(expr)),
-                GroupedNodeType::Accumulation(AccumulationOp::ArrayAgg),
+                GroupedNodeType::Accumulation(AccumulationOp::ArrayAgg { distinct }),
                 false,
             ),
             Sum { ref expr, distinct } if is_column(expr) => mknode(
@@ -966,10 +966,12 @@ impl SqlToMirConverter {
             GroupConcat {
                 ref expr,
                 separator,
+                distinct,
             } if is_column(expr) => mknode(
                 Column::from(get_column(expr)),
                 GroupedNodeType::Accumulation(AccumulationOp::GroupConcat {
                     separator: separator.unwrap_or_else(|| ",".to_owned()),
+                    distinct,
                 }),
                 false,
             ),
@@ -986,9 +988,13 @@ impl SqlToMirConverter {
             StringAgg {
                 ref expr,
                 separator,
+                distinct,
             } if is_column(expr) => mknode(
                 Column::from(get_column(expr)),
-                GroupedNodeType::Accumulation(AccumulationOp::StringAgg { separator }),
+                GroupedNodeType::Accumulation(AccumulationOp::StringAgg {
+                    separator,
+                    distinct,
+                }),
                 false,
             ),
             _ => {

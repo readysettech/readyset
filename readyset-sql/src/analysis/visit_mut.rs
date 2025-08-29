@@ -583,7 +583,7 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
     function_expr: &'ast mut FunctionExpr,
 ) -> Result<(), V::Error> {
     match function_expr {
-        FunctionExpr::ArrayAgg { expr } => visitor.visit_expr(expr.as_mut()),
+        FunctionExpr::ArrayAgg { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Avg { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Count { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Extract { expr, .. } => visitor.visit_expr(expr.as_mut()),

@@ -44,6 +44,12 @@ select group_concat(t.tag separator '::') from tags t where d_id = 1;
 ----
 bbb::aaa::ccc::bbb::aaa
 
+# simple query (with NULLs and dupes!)
+query T
+select group_concat(distinct t.tag separator '::') from tags t where d_id = 1;
+----
+aaa::bbb::ccc
+
 
 # multiple aggregations
 query IT

@@ -24,6 +24,7 @@ pub enum FunctionExpr {
     /// Syntax: `ARRAY_AGG(expr [ORDER BY sort_expr [ASC|DESC], ...])`
     ArrayAgg {
         expr: Box<Expr>,
+        distinct: DistinctOption,
     },
 
     /// `AVG` aggregation. The boolean argument is `true` if `DISTINCT`
@@ -83,6 +84,7 @@ pub enum FunctionExpr {
     GroupConcat {
         expr: Box<Expr>,
         separator: Option<String>,
+        distinct: DistinctOption,
     },
 
     /// The standard SQL Window Functions
@@ -100,6 +102,7 @@ pub enum FunctionExpr {
     StringAgg {
         expr: Box<Expr>,
         separator: Option<String>,
+        distinct: DistinctOption,
     },
 
     /// The SQL `SUBSTRING`/`SUBSTR` function.
@@ -136,8 +139,8 @@ pub enum FunctionExpr {
 impl FunctionExpr {
     pub fn alias(&self, dialect: Dialect) -> Option<String> {
         Some(match self {
-            FunctionExpr::ArrayAgg { expr } => {
-                format!("array_agg({})", expr.alias(dialect)?)
+            FunctionExpr::ArrayAgg { expr, distinct } => {
+                format!("array_agg({}{})", distinct, expr.alias(dialect)?)
             }
             FunctionExpr::Avg { expr, .. } => format!("avg({})", expr.alias(dialect)?),
             FunctionExpr::Count { expr, .. } => format!("count({})", expr.alias(dialect)?),
@@ -165,16 +168,26 @@ impl FunctionExpr {
                     "".to_string()
                 }
             ),
-            FunctionExpr::GroupConcat { expr, separator } => format!(
-                "group_concat({}, {})",
+            FunctionExpr::GroupConcat {
+                expr,
+                separator,
+                distinct,
+            } => format!(
+                "group_concat({}{}, {})",
+                distinct,
                 expr.alias(dialect)?,
                 separator
                     .as_ref()
                     .map(|s| format!("'{}'", s.replace('\'', "''").replace('\\', "\\\\")))
                     .unwrap_or_default(),
             ),
-            FunctionExpr::StringAgg { expr, separator } => format!(
-                "string_agg({}, {})",
+            FunctionExpr::StringAgg {
+                expr,
+                separator,
+                distinct,
+            } => format!(
+                "string_agg({}{}, {})",
+                distinct,
                 expr.alias(dialect)?,
                 separator
                     .as_ref()
@@ -244,7 +257,7 @@ impl FunctionExpr {
     #[concrete_iter]
     pub fn arguments<'a>(&'a self) -> impl Iterator<Item = &'a Expr> {
         match self {
-            FunctionExpr::ArrayAgg { expr: arg }
+            FunctionExpr::ArrayAgg { expr: arg, .. }
             | FunctionExpr::Avg { expr: arg, .. }
             | FunctionExpr::Count { expr: arg, .. }
             | FunctionExpr::Sum { expr: arg, .. }
@@ -285,8 +298,8 @@ impl FunctionExpr {
 impl DialectDisplay for FunctionExpr {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
-            FunctionExpr::ArrayAgg { expr } => {
-                write!(f, "array_agg({})", expr.display(dialect))
+            FunctionExpr::ArrayAgg { expr, distinct } => {
+                write!(f, "array_agg({}{})", distinct, expr.display(dialect))
             }
             FunctionExpr::Avg {
                 expr,
@@ -306,8 +319,12 @@ impl DialectDisplay for FunctionExpr {
             FunctionExpr::Sum { expr, .. } => write!(f, "sum({})", expr.display(dialect)),
             FunctionExpr::Max(col) => write!(f, "max({})", col.display(dialect)),
             FunctionExpr::Min(col) => write!(f, "min({})", col.display(dialect)),
-            FunctionExpr::GroupConcat { expr, separator } => {
-                write!(f, "group_concat({}", expr.display(dialect),)?;
+            FunctionExpr::GroupConcat {
+                expr,
+                separator,
+                distinct,
+            } => {
+                write!(f, "group_concat({}{}", distinct, expr.display(dialect),)?;
                 if let Some(separator) = separator {
                     write!(
                         f,
@@ -317,8 +334,12 @@ impl DialectDisplay for FunctionExpr {
                 }
                 write!(f, ")")
             }
-            FunctionExpr::StringAgg { expr, separator } => {
-                write!(f, "string_agg({}", expr.display(dialect),)?;
+            FunctionExpr::StringAgg {
+                expr,
+                separator,
+                distinct,
+            } => {
+                write!(f, "string_agg({}{}", distinct, expr.display(dialect),)?;
                 if let Some(separator) = separator {
                     write!(
                         f,
@@ -1685,6 +1706,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             Self::Call(FunctionExpr::GroupConcat {
                 expr: next_expr()?,
                 separator: find_separator(),
+                distinct: distinct.into(),
             })
         } else if ident.value.eq_ignore_ascii_case("STRING_AGG") {
             // `string_agg()` is a pg-specific function, and we get the mandatory separator
@@ -1697,9 +1719,16 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 s => return unsupported!("Unsupported separator: {:?}", s),
             };
 
-            Self::Call(FunctionExpr::StringAgg { expr, separator })
+            Self::Call(FunctionExpr::StringAgg {
+                expr,
+                separator,
+                distinct: distinct.into(),
+            })
         } else if ident.value.eq_ignore_ascii_case("ARRAY_AGG") {
-            Self::Call(FunctionExpr::ArrayAgg { expr: next_expr()? })
+            Self::Call(FunctionExpr::ArrayAgg {
+                expr: next_expr()?,
+                distinct: distinct.into(),
+            })
         } else if ident.value.eq_ignore_ascii_case("JSON_OBJECT_AGG") {
             Self::Call(FunctionExpr::JsonObjectAgg {
                 key: next_expr()?,
@@ -2127,12 +2156,30 @@ impl Arbitrary for Expr {
                     .prop_map(|(expr, field)| FunctionExpr::Extract { expr, field }),
                 box_expr.clone().prop_map(FunctionExpr::Max),
                 box_expr.clone().prop_map(FunctionExpr::Min),
-                (box_expr.clone(), any::<Option<String>>()).prop_map(|(expr, separator)| {
-                    FunctionExpr::GroupConcat { expr, separator }
+                (box_expr.clone(), any::<Option<String>>(), any::<bool>()).prop_map(
+                    |(expr, separator, distinct)| {
+                        FunctionExpr::GroupConcat {
+                            expr,
+                            separator,
+                            distinct: distinct.into(),
+                        }
+                    }
+                ),
+                (box_expr.clone(), any::<Option<String>>(), any::<bool>()).prop_map(
+                    |(expr, separator, distinct)| {
+                        FunctionExpr::StringAgg {
+                            expr,
+                            separator,
+                            distinct: distinct.into(),
+                        }
+                    }
+                ),
+                (box_expr.clone(), any::<bool>()).prop_map(|(expr, distinct)| {
+                    FunctionExpr::ArrayAgg {
+                        expr,
+                        distinct: distinct.into(),
+                    }
                 }),
-                (box_expr.clone(), any::<Option<String>>())
-                    .prop_map(|(expr, separator)| { FunctionExpr::StringAgg { expr, separator } }),
-                (box_expr.clone()).prop_map(|expr| { FunctionExpr::ArrayAgg { expr } }),
                 (
                     box_expr.clone(),
                     option::of(box_expr.clone()),
