@@ -2,11 +2,11 @@
 name = "readyset-server"
 version = "0.7.0"
 publish = false
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 readme = "README.md"
-description = "The ReadySet data-flow database server"
+description = "The Readyset data-flow database server"
 
 keywords = ["database", "dataflow", "backend", "storage", "sql"]
 categories = ["database", "database-implementations"]

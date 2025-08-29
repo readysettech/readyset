@@ -1,7 +1,7 @@
-# Jepsen tests for ReadySet
+# Jepsen tests for Readyset
 
-This directory contains a suite of [jepsen][] tests for ReadySet. We run them
-periodically to test for ReadySet's eventual consistency and liveness guarantees
+This directory contains a suite of [jepsen][] tests for Readyset. We run them
+periodically to test for Readyset's eventual consistency and liveness guarantees
 under a high-availability configuration.
 
 [jepsen]: https://github.com/jepsen-io/jepsen
@@ -12,7 +12,7 @@ First, you'll need a cluster of nodes to run the tests on. Jepsen works by
 SSHing into a pool of nodes to set up the database, then issuing commands to the
 nodes over the network. To test a full high-availability configuration, you need
 a minimum of 6 nodes: one for each of the load balancer, upstream DB, consul,
-and `readyset-server`, and two for the ReadySet adapters.
+and `readyset-server`, and two for the Readyset adapters.
 
 During development of these Jepsen tests, I set up a cluster of 6 EC2 instances
 using the AWS console then installed Tailscale on them. This was the simplest
@@ -23,7 +23,7 @@ ports 22, 5432, and 8500 from the machine you're running Jepsen on to each node.
 
 As far as the instances go, this test is written to use Ubuntu Server (but would
 probably work, perhaps with minimal modification, on Debian). The
-readyset-server and readyset-adapter instances will compile the ReadySet
+readyset-server and readyset-adapter instances will compile the Readyset
 binaries in release mode, so you'll want to make them big enough. During
 development I used `c4.2xlarge` instances. You'll also need to make sure you
 have enough disk space - generally 100GB should be enough for the root volume.

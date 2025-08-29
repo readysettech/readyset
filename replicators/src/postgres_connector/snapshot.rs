@@ -1116,13 +1116,13 @@ impl<'a> PostgresReplicator<'a> {
                 // All base tables under Postgres should have a schema, so if this happens then
                 // something truly weird is going on. Don't mark this as an leftover table since we
                 // don't know what it actually is, but do warn the user via a log message:
-                warn!("Existing ReadySet cache table {} has no schema", rel.name);
+                warn!("Existing Readyset cache table {} has no schema", rel.name);
                 false
             }
         });
         if !leftover_tables.is_empty() {
             warn!(
-                "Removing existing ReadySet cache tables with no upstream table/view: {}",
+                "Removing existing Readyset cache tables with no upstream table/view: {}",
                 leftover_tables
                     .keys()
                     .map(|r| r.display(Dialect::PostgreSQL))

@@ -166,7 +166,7 @@
     },
     {
       "datasource": "DS_PROMETHEUS",
-      "description": "This measures the query end-to-end latency from the time the request is received by ReadySet.",
+      "description": "This measures the query end-to-end latency from the time the request is received by Readyset.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -372,7 +372,7 @@
     },
     {
       "datasource": "DS_PROMETHEUS",
-      "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
+      "description": "The number of queries per second executed against Readyset split by the Readyset and MySQL backends.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -433,7 +433,7 @@
     },
     {
       "datasource": "DS_PROMETHEUS",
-      "description": "The cache hit rate observed at the first layer of ReadySet caches. In the absence of queries this graph shows a cache hit rate of 0%.",
+      "description": "The cache hit rate observed at the first layer of Readyset caches. In the absence of queries this graph shows a cache hit rate of 0%.",
       "fieldConfig": {
         "defaults": {
           "color": {

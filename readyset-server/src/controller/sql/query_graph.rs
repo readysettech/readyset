@@ -453,7 +453,7 @@ impl QueryGraph {
 
             if let Some(offset) = offset {
                 if index_type == Some(IndexType::BTreeMap) {
-                    unsupported!("ReadySet does not support Pagination and range queries")
+                    unsupported!("Readyset does not support Pagination and range queries")
                 } else {
                     columns.push((mir::Column::named(PAGE_NUMBER_COL.clone()), offset));
                 }
@@ -856,7 +856,7 @@ pub(crate) fn extract_limit_offset(
     limit_clause: &LimitClause,
 ) -> ReadySetResult<Option<(usize, Option<ViewPlaceholder>)>> {
     if limit_clause.limit().is_none() && limit_clause.offset().is_some() {
-        unsupported!("ReadySet does not support OFFSET without LIMIT");
+        unsupported!("Readyset does not support OFFSET without LIMIT");
     }
 
     let limit = if let Some(limit) = limit_clause.limit() {
@@ -870,7 +870,7 @@ pub(crate) fn extract_limit_offset(
         Literal::Integer(val) => u64::try_from(*val)
             .map_err(|_| unsupported_err!("LIMIT field cannot have a negative value"))?,
         Literal::Placeholder(_) => {
-            unsupported!("ReadySet does not support parameterized LIMIT fields")
+            unsupported!("Readyset does not support parameterized LIMIT fields")
         }
         _ => unsupported!("Invalid LIMIT statement"),
     };

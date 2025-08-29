@@ -29,7 +29,7 @@
   (c/exec "echo" s (c/lit ">>") file))
 
 (defn db
-  "ReadySet DB at a given git ref"
+  "Readyset DB at a given git ref"
   [ref]
   (let [consul (consul.db/db "1.16.1")]
     (reify db/DB
@@ -108,7 +108,7 @@
 
                 (let [ds (rs/test-datasource test)]
                   (rs/wait-for-snapshot-completed ds))
-                (info "ReadySet is running"))))
+                (info "Readyset is running"))))
 
           (error node "unknown role")))
 
@@ -137,7 +137,7 @@
               :node-role/readyset-adapter
               (c/su
                (cu/stop-daemon! "/var/run/readyset.pid")
-               (info node "ReadySet Adapter killed")
+               (info node "Readyset Adapter killed")
                (c/exec :rm :-rf
                        "/var/run/readyset.pid"
                        "/var/log/readyset.log"))
@@ -145,7 +145,7 @@
               :node-role/readyset-server
               (c/su
                (cu/stop-daemon! "/var/run/readyset-server.pid")
-               (info node "ReadySet Server killed")
+               (info node "Readyset Server killed")
                (c/exec :rm :-rf
                        "/var/run/readyset-server.pid"
                        "/var/log/readyset-server.log"
@@ -185,7 +185,7 @@
     (merge
      tests/noop-test
      opts
-     {:name "ReadySet"
+     {:name "Readyset"
       :os ubuntu/os
       :db (db "d7232218f74d9af117046fa1101b107d0d5f848d"  ; Needs at least this commit
               #_"refs/tags/beta-2023-07-26")
@@ -270,7 +270,7 @@
                            (map name)
                            (str/join ", "))
                       ")")]]
-     [nil "--log-level LOG_LEVEL" "Log level for ReadySet processes"
+     [nil "--log-level LOG_LEVEL" "Log level for Readyset processes"
       :default "info"]
      [nil "--force-install" "Force install readyset binaries"]
      ["-r" "--rate HZ" "Approximate number of requests per second, per thread"

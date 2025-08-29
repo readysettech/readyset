@@ -292,7 +292,7 @@ pub enum ReadySetError {
     /// A query was made referencing a table that exists in the upstream database, but is not being
     /// replicated
     #[error(
-        "Table '{}{}' is not being replicated by ReadySet",
+        "Table '{}{}' is not being replicated by Readyset",
         schema.as_ref().map(|s| format!("{s}.")).unwrap_or_default(),
         name
     )]
@@ -736,7 +736,7 @@ pub enum ReadySetError {
     IncorrectNodeState(String),
 
     /// Failed to reach the Controller
-    #[error("The ReadySet Controller could not be reached")]
+    #[error("The Readyset Controller could not be reached")]
     ControllerUnavailable,
 
     /// Error decoding bytes from a source encoding to UTF-8

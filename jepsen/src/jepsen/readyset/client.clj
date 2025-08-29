@@ -1,5 +1,5 @@
 (ns jepsen.readyset.client
-  "Utilities for interacting with a ReadySet cluster"
+  "Utilities for interacting with a Readyset cluster"
   (:require
    [clojure.core.match :refer [match]]
    [clojure.datafy :refer [datafy]]
@@ -22,7 +22,7 @@
 (def pgdatabase "jepsen")
 
 (defn make-datasource
-  "Make a new JDBC DataSource for connecting to ReadySet, using the options
+  "Make a new JDBC DataSource for connecting to Readyset, using the options
   accepted by `jdbc/get-datasource`"
   [db-info]
   (jdbc/get-datasource
@@ -35,7 +35,7 @@
           :assumeMinServerVersion "9.0")))
 
 (defn test-datasource
-  "Build a JDBC DataSource for connecting to the ReadySet cluster in the given
+  "Build a JDBC DataSource for connecting to the Readyset cluster in the given
   test"
   [test]
   (make-datasource
@@ -47,10 +47,10 @@
     :port 5432}))
 
 (defn wait-for-connection
-  "Wait for a connection to the given ReadySet datasource (as creaated by
+  "Wait for a connection to the given Readyset datasource (as creaated by
   `make-datasource`) to succeed"
   [ds]
-  (info "Waiting for ReadySet to be connectable")
+  (info "Waiting for Readyset to be connectable")
   (with-retry [attempts 5]
     (jdbc/execute! ds ["show readyset version"])
     (catch PSQLException e
@@ -63,7 +63,7 @@
                  :exception e})))))
 
 (defn readyset-status
-  "Return the status of the ReadySet cluster for the given data source,
+  "Return the status of the Readyset cluster for the given data source,
   represented as a map giving the results of the `SHOW READYSET STATUS` command"
   [ds]
   (let [res (jdbc/execute! ds ["show readyset status"])]
@@ -77,7 +77,7 @@
       "Last Started Replication" :last-started-replication})))
 
 (defn wait-for-snapshot-completed
-  "Wait for the ReadySet cluster at the given datasource to report that
+  "Wait for the Readyset cluster at the given datasource to report that
   snapshotting has completed"
   [ds]
   (wait-for-connection ds)
@@ -274,7 +274,7 @@
     (dissoc this :conn)))
 
 (defn new-client
-  "Create a new jepsen Client for ReadySet
+  "Create a new jepsen Client for Readyset
 
   Options supported:
 

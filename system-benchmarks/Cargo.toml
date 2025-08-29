@@ -2,7 +2,7 @@
 name = "system-benchmarks"
 version = "0.1.0"
 edition = "2021"
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 publish = false
 
 [dependencies]

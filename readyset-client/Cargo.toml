@@ -2,11 +2,11 @@
 name = "readyset-client"
 version = "0.7.0"
 publish = false
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 readme = "README.md"
-description = "Client bindings for ReadySet"
+description = "Client bindings for Readyset"
 
 keywords = ["database", "dataflow", "backend", "storage", "sql"]
 categories = ["api-bindings", "database"]

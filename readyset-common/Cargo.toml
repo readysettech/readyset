@@ -2,10 +2,10 @@
 name = "readyset-common"
 version = "0.7.0"
 publish = false
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2024"
 
-description = "Artifacts commonly shared among other ReadySet crates"
+description = "Artifacts commonly shared among other Readyset crates"
 
 [dependencies]
 chrono = { workspace = true, features = ["serde"] }

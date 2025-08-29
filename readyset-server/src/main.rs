@@ -166,7 +166,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
     });
-    info!(?opts, "Starting ReadySet server");
+    info!(?opts, "Starting Readyset server");
 
     info!(version = %VERSION_STR_ONELINE);
 

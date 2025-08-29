@@ -2,7 +2,7 @@
 name = "mysql-srv"
 version = "0.8.8"
 publish = false
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 description = "Bindings for emulating a MySQL/MariaDB server"

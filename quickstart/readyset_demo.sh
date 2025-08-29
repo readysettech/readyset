@@ -76,19 +76,19 @@ check_dependencies() {
 }
 
 download_demo_compose_file() {
-  echo -e "${BLUE}${WHALE}Downloading the ReadySet Docker Compose file... ${NOCOLOR}"
+  echo -e "${BLUE}${WHALE}Downloading the Readyset Docker Compose file... ${NOCOLOR}"
   curl -Ls -o readyset.compose.yml "https://raw.githubusercontent.com/readysettech/readyset/current/quickstart/compose.postgres.yml"
 }
 
 download_byo_compose_file() {
-  echo -e "${BLUE}${WHALE}Downloading the ReadySet Docker Compose file... ${NOCOLOR}"
+  echo -e "${BLUE}${WHALE}Downloading the Readyset Docker Compose file... ${NOCOLOR}"
   curl -Ls -o /tmp/readyset.compose.yml "https://raw.githubusercontent.com/readysettech/readyset/current/quickstart/compose.yml"
 }
 
 run_docker_compose() {
-  echo -e "${BLUE}${WHALE}Running the ReadySet Docker Compose setup... ${NOCOLOR}"
+  echo -e "${BLUE}${WHALE}Running the Readyset Docker Compose setup... ${NOCOLOR}"
   if ! docker compose -f readyset.compose.yml pull; then
-    echo -e "${RED}${ROTATING_LIGHT}Unable to pull ReadySet images.${NOCOLOR}"
+    echo -e "${RED}${ROTATING_LIGHT}Unable to pull Readyset images.${NOCOLOR}"
     exit 1
   fi
   if ! docker compose -f readyset.compose.yml up -d --wait; then
@@ -96,7 +96,7 @@ run_docker_compose() {
     exit 1
   fi
 
-  echo -e "${GREEN}${GREEN_CHECK}ReadySet Docker Compose setup complete! ${NOCOLOR}"
+  echo -e "${GREEN}${GREEN_CHECK}Readyset Docker Compose setup complete! ${NOCOLOR}"
   echo -e "${INFO}To clean up, run \`docker-compose -f readyset.compose.yml down\`"
 }
 
@@ -159,7 +159,7 @@ import_data() {
 
 display_arm_warning() {
   if [[ $(uname -m) == "arm64" ]]; then
-    echo -e "${YELLOW}${WARNING}You are running on an ARM-based Machine, but ReadySet is currently built for x86_64."
+    echo -e "${YELLOW}${WARNING}You are running on an ARM-based Machine, but Readyset is currently built for x86_64."
     echo -e "   Query performance will be slower due to virtualization overhead.${NOCOLOR}"
   fi
 }
@@ -169,7 +169,7 @@ explore_data() {
     read -rp "Explore sample data in psql? (y/n, default: y): " explore_choice
     explore_choice=${explore_choice:-y}
     if [[ $explore_choice == "y" ]]; then
-      echo -e "${BLUE}${MAGNIFYING_GLASS}Connecting to ReadySet to explore the dataset.${NOCOLOR}"
+      echo -e "${BLUE}${MAGNIFYING_GLASS}Connecting to Readyset to explore the dataset.${NOCOLOR}"
   psql $CONNECTION_STRING <<EOF
 \set QUIET 1
 \o /dev/null
@@ -181,7 +181,7 @@ UPDATE title_ratings
 DROP CACHE q_bccd97aea07c545f;
 \o
 \timing
-\! echo "${BLUE}Let's cache a query with ReadySet!${NOCOLOR}"
+\! echo "${BLUE}Let's cache a query with Readyset!${NOCOLOR}"
 \set QUIET 1
 \! echo 'Press enter to continue.'
 \prompt c
@@ -274,7 +274,7 @@ AND title_ratings.averagerating > 5;
 \! echo "To see the difference in our our ${BLUE}Grafana dashboard${NOCOLOR}, open up http://127.0.0.1:4000"
 \! echo "Press enter to continue."
 \prompt c
-\! echo "${BLUE}Next, let's see how ReadySet updates the cache automatically when we change it.${NOCOLOR}"
+\! echo "${BLUE}Next, let's see how Readyset updates the cache automatically when we change it.${NOCOLOR}"
 \echo 'Press enter to continue.'
 \prompt c
 \! echo "The query we have been running returns the count of movies in the year"
@@ -355,11 +355,11 @@ AND title_ratings.averagerating > 5;
 \prompt c
 \! echo '${BLUE}Give these commands a try next!${NOCOLOR}'
 \! echo ''
-\! echo ' ${BLUE}Show status info. about ReadySet.${NOCOLOR}'
+\! echo ' ${BLUE}Show status info. about Readyset.${NOCOLOR}'
 \! echo '    SHOW READYSET STATUS;'
 \! echo ' ${BLUE}List information about current caches${NOCOLOR}'
 \! echo '    SHOW CACHES;'
-\! echo ' ${BLUE}List tables that ReadySet has snapshotted${NOCOLOR}'
+\! echo ' ${BLUE}List tables that Readyset has snapshotted${NOCOLOR}'
 \! echo '    SHOW READYSET TABLES;'
 \! echo ' ${BLUE}Show queries that havent been cached and if they are supported or not.${NOCOLOR}'
 \! echo '    SHOW PROXIED QUERIES;'
@@ -376,7 +376,7 @@ EOF
 }
 
 free_form_connect() {
-  echo -e "${BLUE}Connecting to ReadySet...${NOCOLOR}"
+  echo -e "${BLUE}Connecting to Readyset...${NOCOLOR}"
   if [[ $1 == "psql" ]]; then
     echo -e "${BLUE}Type \q to exit.${NOCOLOR}"
     psql $CONNECTION_STRING
@@ -396,10 +396,10 @@ print_exit_message() {
   print_dashboard_link
 
   if [[ $1 == "psql" ]]; then
-    echo -e "${BLUE}To connect to ReadySet again, run:${NOCOLOR}"
+    echo -e "${BLUE}To connect to Readyset again, run:${NOCOLOR}"
     echo -e "    psql $CONNECTION_STRING"
   elif [[ $1 == "mysql" ]]; then
-    echo -e "${BLUE}To connect to ReadySet again, run:${NOCOLOR}"
+    echo -e "${BLUE}To connect to Readyset again, run:${NOCOLOR}"
     echo -e "mysql -h 127.0.0.1 -P 3307 -u $username -p$password"
   fi
 }
@@ -456,7 +456,7 @@ wait_for_snapshot() {
     expected_log="Starting binlog replication"
   fi
 
-  echo -e "${BLUE}ReadySet will now snapshot the connected database.${NOCOLOR}"
+  echo -e "${BLUE}Readyset will now snapshot the connected database.${NOCOLOR}"
   echo -e "${BLUE}This may take a while if the data set is large.${NOCOLOR}"
   echo -e "${WHALE} Watching logs for \"$expected_log\" ${NOCOLOR}"
   echo "   with \`docker logs -f readyset-cache-1\`"
@@ -490,9 +490,9 @@ print_dashboard_link() {
 }
 
 explore_connection() {
-  echo -e "${BLUE}Welcome to ReadySet!${NOCOLOR}"
-  echo -e "${BLUE}Give these custom ReadySet SQL commands a try!${NOCOLOR}"
-  echo -e " ${BLUE}Show status info. about ReadySet.${NOCOLOR}"
+  echo -e "${BLUE}Welcome to Readyset!${NOCOLOR}"
+  echo -e "${BLUE}Give these custom Readyset SQL commands a try!${NOCOLOR}"
+  echo -e " ${BLUE}Show status info. about Readyset.${NOCOLOR}"
   echo -e "    SHOW READYSET STATUS;"
   echo -e " ${BLUE}Show version info.${NOCOLOR}"
   echo -e "    SHOW READYSET VERSION;"
@@ -500,7 +500,7 @@ explore_connection() {
   echo -e "    CREATE CACHE FROM <query, e.g. SELECT * from foo where bar = 1>;"
   echo -e " ${BLUE}List information about current caches${NOCOLOR}"
   echo -e "    SHOW CACHES;"
-  echo -e " ${BLUE}List tables that ReadySet has snapshotted${NOCOLOR}"
+  echo -e " ${BLUE}List tables that Readyset has snapshotted${NOCOLOR}"
   echo -e "    SHOW READYSET TABLES;"
   echo -e " ${BLUE}Show queries that havent been cached and if they are supported or not.${NOCOLOR}"
   echo -e "    SHOW PROXIED QUERIES;"

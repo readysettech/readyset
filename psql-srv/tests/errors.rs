@@ -102,7 +102,7 @@ impl PsqlBackend for ErrorBackend {
     }
 
     fn version(&self) -> String {
-        "13.4 ReadySet".to_string()
+        "13.4 Readyset".to_string()
     }
 
     fn in_transaction(&self) -> bool {

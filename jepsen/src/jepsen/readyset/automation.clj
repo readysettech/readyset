@@ -12,7 +12,7 @@
   "/opt/readyset/data")
 
 (def deployment
-  "The name of the ReadySet deployment"
+  "The name of the Readyset deployment"
   "jepsen")
 
 (def deployment-dir

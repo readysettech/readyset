@@ -40,7 +40,7 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
     let adapter_options = Options::parse_from(options);
 
     let mut adapter = NoriaAdapter {
-        description: "ReadySet test adapter",
+        description: "Readyset test adapter",
         default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 54351),
         connection_handler: PsqlHandler {
             authentication_method: AuthenticationMethod::Cleartext,

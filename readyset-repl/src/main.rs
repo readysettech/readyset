@@ -157,7 +157,7 @@ impl ReplContext {
                 println!(
                     "{}",
                     textwrap::fill(
-                        "\nWelcome to the ReadySet REPL!\n\n\
+                        "\nWelcome to the Readyset REPL!\n\n\
                     By default, all commands will be sent unchanged to the database (remember to end \
                     each command with a semicolon)\n\n\
                     Queries can be prefixed with `prepare` to create a new prepared statement. After \
@@ -275,7 +275,7 @@ async fn main() -> Result<()> {
     let options: Options = Options::parse();
     let mut context = ReplContext::new(options).await?;
 
-    println!("Welcome to the ReadySet REPL!\n\nType `help` for help.\n");
+    println!("Welcome to the Readyset REPL!\n\nType `help` for help.\n");
 
     let mut rl = Editor::new()?;
     rl.set_helper(Some(WaitForSemicolon));

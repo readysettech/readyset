@@ -202,7 +202,7 @@
     },
     {
       "datasource": "DS_PROMETHEUS",
-      "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
+      "description": "The number of queries per second executed against Readyset split by the Readyset and MySQL backends.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -483,7 +483,7 @@
           "refId": "A"
         }
       ],
-      "title": "ReadySet Adapters",
+      "title": "Readyset Adapters",
       "type": "stat"
     },
     {
@@ -544,7 +544,7 @@
           "refId": "A"
         }
       ],
-      "title": "ReadySet Adapters",
+      "title": "Readyset Adapters",
       "type": "stat"
     }
   ],

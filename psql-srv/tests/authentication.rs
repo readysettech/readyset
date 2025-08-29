@@ -40,7 +40,7 @@ impl PsqlBackend for ScramSha256Backend {
     type Resultset = stream::Iter<vec::IntoIter<Result<PsqlSrvRow, psql_srv::Error>>>;
 
     fn version(&self) -> String {
-        "13.4 ReadySet".to_string()
+        "13.4 Readyset".to_string()
     }
 
     async fn set_auth_info(&mut self, _user: &str, _password: Option<RedactedString>) {}

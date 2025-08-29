@@ -1,7 +1,7 @@
 # proptest-stateful
 
 `proptest-stateful` is a Rust library created by
-[ReadySet](https://readyset.io/) for writing stateful property-based tests
+[Readyset](https://readyset.io/) for writing stateful property-based tests
 using the
 [proptest](https://altsysrq.github.io/proptest-book/proptest/index.html) crate.
 
@@ -192,7 +192,7 @@ You can see the completed code and run this yourself via the `tests/counter.rs`
 file.
 
 For more complex real-world examples, check out these test suites we've written
-for ReadySet:
+for Readyset:
  * [ddl_vertical.rs](https://github.com/readysettech/readyset/blob/main/replicators/tests/ddl_vertical.rs)
  * [vertical.rs](https://github.com/readysettech/readyset/blob/main/readyset-mysql/tests/vertical.rs)
 

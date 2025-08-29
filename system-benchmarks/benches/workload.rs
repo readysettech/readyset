@@ -703,7 +703,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
     match database_type {
         DatabaseType::MySQL => {
             let mut adapter = NoriaAdapter {
-                description: "ReadySet benchmark adapter",
+                description: "Readyset benchmark adapter",
                 default_address: SocketAddr::new(
                     IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                     BENCHMARK_PORT,
@@ -722,7 +722,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
         }
         DatabaseType::PostgreSQL => {
             let mut adapter = NoriaAdapter {
-                description: "ReadySet benchmark adapter",
+                description: "Readyset benchmark adapter",
                 default_address: SocketAddr::new(
                     IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                     BENCHMARK_PORT,

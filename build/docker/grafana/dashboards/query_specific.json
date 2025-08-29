@@ -260,7 +260,7 @@
           "type": "prometheus",
           "uid": "PBFE396EC0B189D67"
         },
-        "description": "This measures the query end-to-end latency from the time the request is received by ReadySet.",
+        "description": "This measures the query end-to-end latency from the time the request is received by Readyset.",
         "fieldConfig": {
           "defaults": {
             "color": {
@@ -355,7 +355,7 @@
             "hide": false,
             "instant": false,
             "interval": "",
-            "legendFormat": "ReadySet 50p",
+            "legendFormat": "Readyset 50p",
             "refId": "A"
           },
           {
@@ -398,7 +398,7 @@
           "type": "prometheus",
           "uid": "PBFE396EC0B189D67"
         },
-        "description": "This measures the query end-to-end latency from the time the request is received by ReadySet.",
+        "description": "This measures the query end-to-end latency from the time the request is received by Readyset.",
         "fieldConfig": {
           "defaults": {
             "color": {
@@ -493,7 +493,7 @@
             "hide": false,
             "instant": false,
             "interval": "",
-            "legendFormat": "ReadySet 90p",
+            "legendFormat": "Readyset 90p",
             "refId": "A"
           },
           {
@@ -536,7 +536,7 @@
           "type": "prometheus",
           "uid": "PBFE396EC0B189D67"
         },
-        "description": "This measures the query end-to-end latency from the time the request is received by ReadySet.",
+        "description": "This measures the query end-to-end latency from the time the request is received by Readyset.",
         "fieldConfig": {
           "defaults": {
             "color": {
@@ -631,7 +631,7 @@
             "hide": false,
             "instant": false,
             "interval": "",
-            "legendFormat": "ReadySet 99p",
+            "legendFormat": "Readyset 99p",
             "refId": "A"
           },
           {
@@ -723,7 +723,7 @@
                 "options": {
                   "noria": {
                     "index": 0,
-                    "text": "ReadySet"
+                    "text": "Readyset"
                   }
                 },
                 "type": "value"
@@ -786,7 +786,7 @@
             "expr": "readyset_query_log_execution_time_us_count{deployment=\"$deployment\", query_id=\"${queryfilter:raw}\",database_type=\"readyset\"}",
             "hide": false,
             "interval": "",
-            "legendFormat": "ReadySet",
+            "legendFormat": "Readyset",
             "range": true,
             "refId": "B"
           }
@@ -1013,7 +1013,7 @@
             "expr": "rate(readyset_query_log_execution_time_us_count{deployment=\"$deployment\", query_id=\"${queryfilter:raw}\",database_type=\"readyset\"}[$__rate_interval])",
             "hide": false,
             "interval": "",
-            "legendFormat": "Queries Per Second (ReadySet)",
+            "legendFormat": "Queries Per Second (Readyset)",
             "range": true,
             "refId": "B"
           }

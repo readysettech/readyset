@@ -1,5 +1,5 @@
 (ns jepsen.readyset.model
-  "A Knossos Model for ReadySet eventual consistency"
+  "A Knossos Model for Readyset eventual consistency"
   (:require
    [knossos.model :as model])
   (:import

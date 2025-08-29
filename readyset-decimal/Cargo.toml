@@ -1,6 +1,6 @@
 [package]
 name = "readyset-decimal"
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 version = "0.1.0"
 edition = "2024"
 publish = false

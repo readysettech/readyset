@@ -27,7 +27,7 @@
   "panels": [
     {
       "datasource": "DS_PROMETHEUS",
-      "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
+      "description": "The number of queries per second executed against Readyset split by the Readyset and MySQL backends.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -308,7 +308,7 @@
           "refId": "A"
         }
       ],
-      "title": "ReadySet Adapters",
+      "title": "Readyset Adapters",
       "type": "stat"
     },
     {
@@ -369,12 +369,12 @@
           "refId": "A"
         }
       ],
-      "title": "ReadySet Servers",
+      "title": "Readyset Servers",
       "type": "stat"
     },
     {
       "datasource": "DS_PROMETHEUS",
-      "description": "The end-to-end read latencies of queries executed against the ReadySet and MySQL backends at the median, 50th and 90th percentiles.",
+      "description": "The end-to-end read latencies of queries executed against the Readyset and MySQL backends at the median, 50th and 90th percentiles.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -490,7 +490,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "ReadySet 90p"
+              "options": "Readyset 90p"
             },
             "properties": [
               {
@@ -502,7 +502,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "ReadySet 99p"
+              "options": "Readyset 99p"
             },
             "properties": [
               {
@@ -514,7 +514,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "ReadySet Count"
+              "options": "Readyset Count"
             },
             "properties": [
               {
@@ -554,7 +554,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "ReadySet 50p"
+              "options": "Readyset 50p"
             },
             "properties": [
               {
@@ -660,11 +660,11 @@
               "Value #50p Noria": "Noria 50p",
               "Value #90p Noria": "Noria 90p",
               "Value #99p Noria": "Noria 99p",
-              "Value #A": "ReadySet 50p",
-              "Value #B": "ReadySet Count",
-              "Value #C": "ReadySet 90p",
+              "Value #A": "Readyset 50p",
+              "Value #B": "Readyset Count",
+              "Value #C": "Readyset 90p",
               "Value #D": "MySQL Count",
-              "Value #E": "ReadySet 99p",
+              "Value #E": "Readyset 99p",
               "Value #F": "MySQL 99p",
               "query": "Query Text"
             }
@@ -676,7 +676,7 @@
             "fields": {},
             "sort": [
               {
-                "field": "ReadySet 50p"
+                "field": "Readyset 50p"
               }
             ]
           }
@@ -776,7 +776,7 @@
     },
     {
       "datasource": "DS_PROMETHEUS",
-      "description": "This measures the query end-to-end latency from the time the request is received by ReadySet.",
+      "description": "This measures the query end-to-end latency from the time the request is received by Readyset.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -870,7 +870,7 @@
     },
     {
       "datasource": "DS_PROMETHEUS",
-      "description": "The cache hit rate observed at the first layer of ReadySet caches. In the absence of queries this graph shows a cache hit rate of 0%.",
+      "description": "The cache hit rate observed at the first layer of Readyset caches. In the absence of queries this graph shows a cache hit rate of 0%.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1212,7 +1212,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "ReadySet Overview",
+  "title": "Readyset Overview",
   "uid": "jAoEkfF7z",
   "version": 1
 }

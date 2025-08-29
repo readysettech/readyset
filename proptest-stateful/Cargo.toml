@@ -9,7 +9,7 @@ documentation = "https://docs.rs/proptest-stateful/"
 readme = "README.md"
 keywords = ["property", "testing", "proptest", "stateful", "quickcheck"]
 categories = ["development-tools::testing"]
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2024"
 
 [dependencies]

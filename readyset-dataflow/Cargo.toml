@@ -2,10 +2,10 @@
 name = "readyset-dataflow"
 version = "0.7.0"
 publish = false
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
-description = "ReadySet dataflow crate"
+description = "Readyset dataflow crate"
 
 [dependencies]
 ahash = { workspace = true }

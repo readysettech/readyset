@@ -2,7 +2,7 @@
 name = "data-generator"
 publish = false
 version = "0.1.0"
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]

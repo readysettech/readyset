@@ -6,9 +6,9 @@ from prometheus_client.parser import text_string_to_metric_families
 from tabulate import tabulate, SEPARATING_LINE
 
 parser = argparse.ArgumentParser(
-    description="print out formatted ReadySet query statistics from the metrics endpoint")
+    description="print out formatted Readyset query statistics from the metrics endpoint")
 parser.add_argument("--host",
-		    help="host for running ReadySet instance",
+		    help="host for running Readyset instance",
 					default="localhost")
 parser.add_argument("--filter-queries",
 		    help="filter output by piping in output from 'SHOW PROXIED QUERIES'/'SHOW CACHES'",
@@ -88,7 +88,7 @@ try:
 			print (tabulate(tabulated_rows, headers=["query text", "count", "p50 (ms)", "p90 (ms)", "p99 (ms)"], tablefmt="psql", floatfmt=".3f", maxcolwidths=70))
 
 		if (len(readyset_results.keys()) > 0):
-			print ("ReadySet Queries")
+			print ("Readyset Queries")
 			print (tabulate(tabulated_readyset_rows, headers=["query text", "count", "p50 (ms)", "p90 (ms)", "p99 (ms)"], tablefmt="psql", floatfmt=".3f", maxcolwidths=70))
 	else:
 		raise ValueError("Oops! There are no query-specific metrics. Have you run a query yet?")

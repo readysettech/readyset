@@ -2,7 +2,7 @@
 name = "readyset-clustertest-macros"
 version = "0.1.0"
 publish = false
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]

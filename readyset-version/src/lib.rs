@@ -86,7 +86,7 @@ pub static READYSET_VERSION: ReadySetVersion = ReadySetVersion {
 impl From<ReadySetVersion> for Vec<(String, String)> {
     fn from(version: ReadySetVersion) -> Vec<(String, String)> {
         vec![
-            ("ReadySet".to_string(), "Version Information".to_string()),
+            ("Readyset".to_string(), "Version Information".to_string()),
             (
                 "release version".to_string(),
                 version.release_version.to_string(),

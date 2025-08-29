@@ -26,7 +26,7 @@
   "panels": [
     {
       "datasource": "DS_PROMETHEUS",
-      "description": "The end-to-end read latencies of queries executed against the ReadySet and MySQL backends at the median, 50th and 90th percentiles.",
+      "description": "The end-to-end read latencies of queries executed against the Readyset and MySQL backends at the median, 50th and 90th percentiles.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -71,7 +71,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "ReadySet 90p"
+              "options": "Readyset 90p"
             },
             "properties": [
               {
@@ -87,7 +87,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "ReadySet 99p"
+              "options": "Readyset 99p"
             },
             "properties": [
               {
@@ -103,7 +103,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "ReadySet Count"
+              "options": "Readyset Count"
             },
             "properties": [
               {
@@ -143,7 +143,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "ReadySet 50p"
+              "options": "Readyset 50p"
             },
             "properties": [
               {
@@ -373,15 +373,15 @@
               "Value #50p Noria": "Noria 50p",
               "Value #90p Noria": "Noria 90p",
               "Value #99p Noria": "Noria 99p",
-              "Value #A": "ReadySet 50p",
+              "Value #A": "Readyset 50p",
               "Value #B": "old rs count",
-              "Value #C": "ReadySet 90p",
+              "Value #C": "Readyset 90p",
               "Value #D": "old msqyl count",
-              "Value #E": "ReadySet 99p",
+              "Value #E": "Readyset 99p",
               "Value #F": "Total Duration",
               "Value #MySQL count": "MySQL Count",
               "Value #Readyset Count": "Readyset Count",
-              "Value #Readyset count": "ReadySet Count",
+              "Value #Readyset count": "Readyset Count",
               "Value #test": "Readyset Count",
               "query": "Query Text"
             }
@@ -404,7 +404,7 @@
           "options": {
             "alias": "Status",
             "binary": {
-              "left": "ReadySet Count",
+              "left": "Readyset Count",
               "operator": "-",
               "reducer": "sum",
               "right": "MySQL Count"
@@ -412,7 +412,7 @@
             "mode": "binary",
             "reduce": {
               "include": [
-                "ReadySet Count",
+                "Readyset Count",
                 "MySQL Count"
               ],
               "reducer": "diff"

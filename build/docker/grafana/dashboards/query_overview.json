@@ -273,7 +273,7 @@
           "interval": "",
           "legendFormat": "{{label_name}}",
           "range": true,
-          "refId": "ReadySet QPS"
+          "refId": "Readyset QPS"
         },
         {
           "datasource": {
@@ -303,7 +303,7 @@
           "instant": true,
           "interval": "",
           "legendFormat": "",
-          "refId": "ReadySet 50p"
+          "refId": "Readyset 50p"
         },
         {
           "datasource": {
@@ -318,7 +318,7 @@
           "instant": true,
           "interval": "",
           "legendFormat": "",
-          "refId": "ReadySet 90p"
+          "refId": "Readyset 90p"
         },
         {
           "datasource": {
@@ -333,7 +333,7 @@
           "instant": true,
           "interval": "",
           "legendFormat": "",
-          "refId": "ReadySet 99p"
+          "refId": "Readyset 99p"
         },
         {
           "datasource": {
@@ -406,7 +406,7 @@
               "Time 5": true,
               "Time 6": true,
               "Time 7": true,
-              "Value #ReadySet QPS": true,
+              "Value #Readyset QPS": true,
               "cache name": true,
               "count": true,
               "fallback behavior": true,
@@ -423,10 +423,10 @@
               "Time 6": 13,
               "Value #Count": 2,
               "Value #RS Duration": 11,
-              "Value #ReadySet 50p": 6,
-              "Value #ReadySet 90p": 8,
-              "Value #ReadySet 99p": 10,
-              "Value #ReadySet QPS": 12,
+              "Value #Readyset 50p": 6,
+              "Value #Readyset 90p": 8,
+              "Value #Readyset 99p": 10,
+              "Value #Readyset QPS": 12,
               "cache name": 14,
               "count": 16,
               "fallback behavior": 15,
@@ -440,10 +440,10 @@
               "Value #Cache Hit Rate": "Cache Hit Rate",
               "Value #Count": "Count",
               "Value #RS Duration": "Total Duration",
-              "Value #ReadySet 50p": "50p Latency",
-              "Value #ReadySet 90p": "90p Latency",
-              "Value #ReadySet 99p": "99p Latency",
-              "Value #ReadySet QPS": "ReadySet QPS",
+              "Value #Readyset 50p": "50p Latency",
+              "Value #Readyset 90p": "90p Latency",
+              "Value #Readyset 99p": "99p Latency",
+              "Value #Readyset QPS": "Readyset QPS",
               "name results": "Query ID",
               "query": "Query Text",
               "query text": "Query Text",
@@ -609,7 +609,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "ReadySet supported?"
+              "options": "Readyset supported?"
             },
             "properties": [
               {
@@ -818,7 +818,7 @@
               "Value #MySQL 50p": false,
               "Value #MySQL 90p": false,
               "Value #MySQL 99p": false,
-              "Value #ReadySet 50p": false,
+              "Value #Readyset 50p": false,
               "Value #Readyset count": false,
               "count": true,
               "deployment": true,
@@ -846,12 +846,12 @@
               "Value #50p Noria": "Noria 50p",
               "Value #90p Noria": "Noria 90p",
               "Value #99p Noria": "Noria 99p",
-              "Value #A": "ReadySet 50p",
+              "Value #A": "Readyset 50p",
               "Value #B": "old rs count",
-              "Value #C": "ReadySet 90p",
+              "Value #C": "Readyset 90p",
               "Value #Count": "Count",
               "Value #D": "old msqyl count",
-              "Value #E": "ReadySet 99p",
+              "Value #E": "Readyset 99p",
               "Value #F": "Total Duration",
               "Value #MySQL 50p": "50p Latency",
               "Value #MySQL 90p": "90p Latency",
@@ -859,10 +859,10 @@
               "Value #MySQL QPS": "MySQL QPS",
               "Value #MySQL count": "MySQL QPS",
               "Value #RS Duration": "Total Duration",
-              "Value #RS count": "ReadySet QPS",
-              "Value #ReadySet QPS": "ReadySet QPS",
+              "Value #RS count": "Readyset QPS",
+              "Value #Readyset QPS": "Readyset QPS",
               "Value #Readyset Count": "Readyset Count",
-              "Value #Readyset count": "ReadySet Count",
+              "Value #Readyset count": "Readyset Count",
               "Value #Upstream 50p": "50p Latency",
               "Value #Upstream 90p": "90p Latency",
               "Value #Upstream 99p": "99p Latency",
@@ -874,8 +874,8 @@
               "query id": "Query ID",
               "query id results": "Query ID",
               "query_id": "Query ID",
-              "readyset supported": "Supported By ReadySet",
-              "readyset supported results": "Supported By ReadySet",
+              "readyset supported": "Supported By Readyset",
+              "readyset supported results": "Supported By Readyset",
               "{query=\"SELECT `column_name` FROM `information_schema`.`statistics` WHERE ((`index_name` = '<anonymized>') AND ((`table_schema` = database()) AND (`table_name` = '<anonymized>'))) ORDER BY `seq_in_index`\"}": "MySQL90p"
             }
           }

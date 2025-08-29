@@ -135,7 +135,7 @@ impl MigrationHandler {
                         debug!(
                             error = %e,
                             query = %Sensitive(&query.query().statement.display(self.dialect.into())),
-                            "Select query is unsupported in ReadySet"
+                            "Select query is unsupported in Readyset"
                         );
                         self.query_status_cache
                             .unsupported_inlined_migration(query.query());
@@ -241,7 +241,7 @@ impl MigrationHandler {
                 debug!(
                     error = %e,
                     query = %Sensitive(&view_request.statement.display(self.dialect.into())),
-                    "Select query is unsupported in ReadySet"
+                    "Select query is unsupported in Readyset"
                 );
 
                 self.start_time.remove(view_request);

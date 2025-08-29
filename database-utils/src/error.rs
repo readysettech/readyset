@@ -78,7 +78,7 @@ pub enum DatabaseURLParseError {
     InvalidFormat,
 
     #[error(
-        "Invalid database URL format; ReadySet requires that Postgres database URLs contain a database name"
+        "Invalid database URL format; Readyset requires that Postgres database URLs contain a database name"
     )]
     MissingPostgresDbName,
 

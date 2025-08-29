@@ -2,7 +2,7 @@
 name = "dataflow-state"
 version = "0.0.1"
 publish = false
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]

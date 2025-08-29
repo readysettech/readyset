@@ -1,5 +1,5 @@
 # Overview
-This docker stack spins up ReadySet's monitoring services locally. It can be used to test Grafana and Prometheus integrations.
+This docker stack spins up Readyset's monitoring services locally. It can be used to test Grafana and Prometheus integrations.
 
 This docker stack is provided in order to facilitate testing the experiments with Grafana integration.
 

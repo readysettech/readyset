@@ -1280,7 +1280,7 @@ mod tests {
         type Resultset = stream::Iter<vec::IntoIter<Result<PsqlSrvRow, Error>>>;
 
         fn version(&self) -> String {
-            "14.5 ReadySet".to_string()
+            "14.5 Readyset".to_string()
         }
 
         async fn set_auth_info(&mut self, _user: &str, _password: Option<RedactedString>) {}

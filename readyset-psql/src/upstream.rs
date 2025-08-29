@@ -198,7 +198,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     type PrepareData<'a> = &'a [Type];
     type ExecMeta<'a> = &'a [TransferFormat];
     type Error = Error;
-    const DEFAULT_DB_VERSION: &'static str = "13.4 (ReadySet)";
+    const DEFAULT_DB_VERSION: &'static str = "13.4 (Readyset)";
     const SQL_DIALECT: readyset_sql::Dialect = readyset_sql::Dialect::PostgreSQL;
 
     async fn connect(
@@ -264,7 +264,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                 min_minor: MIN_UPSTREAM_MINOR_VERSION,
             }));
         }
-        let version = format!("{version} ReadySet");
+        let version = format!("{version} Readyset");
         let _connection_handle = tokio::spawn(connection);
         span.in_scope(|| debug!("Established connection to upstream"));
         metrics::gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS).increment(1.0);

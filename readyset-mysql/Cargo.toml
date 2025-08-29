@@ -2,7 +2,7 @@
 name = "readyset-mysql"
 version = "0.4.0"
 publish = false
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]

@@ -35,7 +35,7 @@
   [test node]
   (assert
    (>= (count (:nodes test)) 5)
-   "Must have at least 5 nodes to run a high-availability ReadySet cluster")
+   "Must have at least 5 nodes to run a high-availability Readyset cluster")
   (get (node->role test) node))
 
 (defn node-with-role

@@ -1,5 +1,5 @@
 (ns jepsen.readyset.workloads
-  "ReadySet workloads.
+  "Readyset workloads.
 
   Workloads are represented as maps with the following required keys:
 

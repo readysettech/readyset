@@ -2,9 +2,9 @@
 name = "readyset-mir"
 version = "0.7.0"
 publish = false
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
-description = "ReadySet MIR crate"
+description = "Readyset MIR crate"
 
 [dependencies]
 regex = { workspace = true }

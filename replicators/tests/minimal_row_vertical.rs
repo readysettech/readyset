@@ -810,8 +810,8 @@ impl ModelState for DDLModelState {
             rs_results.sort_unstable();
             mysql_results.sort_unstable();
 
-            pretty_assertions::assert_eq!(mysql_results, rs_results, "MySQL(left) and ReadySet(right) results do not match for table: {TABLE_NAME}");
-            pretty_assertions::assert_eq!(rs_executed_at.0, "readyset", "ReadySet did not execute the last statement for table: {TABLE_NAME}");
+            pretty_assertions::assert_eq!(mysql_results, rs_results, "MySQL(left) and Readyset(right) results do not match for table: {TABLE_NAME}");
+            pretty_assertions::assert_eq!(rs_executed_at.0, "readyset", "Readyset did not execute the last statement for table: {TABLE_NAME}");
         });
     }
 

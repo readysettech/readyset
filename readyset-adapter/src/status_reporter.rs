@@ -50,7 +50,7 @@ impl ReadySetStatus {
             status.append(&mut Vec::<(String, String)>::from(controller_status));
         } else {
             status.push((
-                "ReadySet Controller Status".to_string(),
+                "Readyset Controller Status".to_string(),
                 "Unavailable".to_string(),
             ));
         }

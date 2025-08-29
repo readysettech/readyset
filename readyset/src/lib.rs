@@ -751,7 +751,7 @@ where
 
         let _guard =
             rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?;
-        info!(?options, "Starting ReadySet adapter");
+        info!(?options, "Starting Readyset adapter");
 
         if options.deployment_mode.is_standalone() {
             maybe_increase_nofile_limit(
@@ -868,7 +868,7 @@ where
             )
         })?;
 
-        rs_connect.in_scope(|| info!("ReadySetHandle created"));
+        rs_connect.in_scope(|| info!("ReadysetHandle created"));
 
         let status_reporter = ReadySetStatusReporter::new(
             upstream_config.clone(),

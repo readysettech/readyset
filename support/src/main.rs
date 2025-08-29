@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "readyset-support", about = "ReadySet support tools")]
+#[command(name = "readyset-support", about = "Readyset support tools")]
 struct Options {
     /// Path to RocksDB data directory
     #[arg(long, env = "READYSET_ROCKSDB_DATADIR")]

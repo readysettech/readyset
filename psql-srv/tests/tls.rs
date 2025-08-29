@@ -75,7 +75,7 @@ impl PsqlBackend for TestBackend {
     }
 
     fn version(&self) -> String {
-        "ReadySet".to_string()
+        "Readyset".to_string()
     }
 
     fn in_transaction(&self) -> bool {

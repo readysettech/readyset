@@ -2,7 +2,7 @@
 name = "readyset-adapter-types"
 version = "0.1.0"
 publish = false
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2024"
 
 description = "Types shared between the adapter and database-specific front-end crates"

@@ -1,5 +1,5 @@
 (defproject jepsen.readyset "0.1.0-SNAPSHOT"
-  :description "ReadySet Jepsen test"
+  :description "Readyset Jepsen test"
   :dependencies [[org.clojure/clojure "1.11.1"]
                  [jepsen "0.3.3-SNAPSHOT"]
 

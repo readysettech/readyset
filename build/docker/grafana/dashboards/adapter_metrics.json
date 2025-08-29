@@ -44,7 +44,7 @@
             "refId": "A"
           }
         ],
-        "title": "ReadySet query latencies",
+        "title": "Readyset query latencies",
         "type": "row"
       },
       {
@@ -145,7 +145,7 @@
             "useBackend": false
           }
         ],
-        "title": "ReadySet QPS",
+        "title": "Readyset QPS",
         "type": "timeseries"
       },
       {
@@ -1367,7 +1367,7 @@
             "refId": "A"
           }
         ],
-        "title": "ReadySet misc",
+        "title": "Readyset misc",
         "type": "row"
       },
       {
@@ -1485,7 +1485,7 @@
             "useBackend": false
           }
         ],
-        "title": "ReadySet cache misses",
+        "title": "Readyset cache misses",
         "type": "timeseries"
       },
       {

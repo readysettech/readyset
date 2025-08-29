@@ -126,7 +126,7 @@ pub mod noria_connector;
 pub use self::noria_connector::NoriaConnector;
 use self::noria_connector::{MetaVariable, PreparedSelectTypes};
 
-const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned through ReadySet Cloud. Please use the ReadySet Cloud UI to manage caches. You may continue to use the SQL interface to run other 'read' commands.";
+const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned through Readyset Cloud. Please use the Readyset Cloud UI to manage caches. You may continue to use the SQL interface to run other 'read' commands.";
 
 /// Unique identifier for a prepared statement, local to a single [`Backend`].
 pub type StatementId = u32;
@@ -671,7 +671,7 @@ impl FromRow for QueryInfo {
                 if c.name_str() == "Query_destination" {
                     res.destination =
                         QueryDestination::try_from(dest).map_err(|_| FromRowError(row.clone()))?;
-                } else if c.name_str() == "ReadySet_error" {
+                } else if c.name_str() == "Readyset_error" {
                     res.noria_error = std::str::from_utf8(d)
                         .map_err(|_| FromRowError(row.clone()))?
                         .to_string();
@@ -1240,7 +1240,7 @@ where
                 } else {
                     PrepareMeta::Proxy
                 };
-                debug!(query = %Sensitive(&query), plan = ?mode, "ReadySet failed to parse query");
+                debug!(query = %Sensitive(&query), plan = ?mode, "Readyset failed to parse query");
                 mode
             }
         }
@@ -1921,7 +1921,7 @@ where
 
         Ok(noria_connector::QueryResult::Meta(vec![
             ("Query_destination", destination).into(),
-            ("ReadySet_error", error).into(),
+            ("Readyset_error", error).into(),
         ]))
     }
 
@@ -2610,7 +2610,7 @@ where
             SqlQuery::DropRls(_drop_rls) => {
                 unsupported!("DROP RLS statement is not yet supported")
             }
-            _ => Err(internal_err!("Provided query is not a ReadySet extension")),
+            _ => Err(internal_err!("Provided query is not a Readyset extension")),
         };
 
         event.readyset_event = Some(ReadysetExecutionEvent::Other {

@@ -2,7 +2,7 @@
 name = "nom-sql"
 version = "0.0.11"
 publish = false
-authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 homepage = "https://github.com/readysettech/readyset/tree/master/nom-sql"
