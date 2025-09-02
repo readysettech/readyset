@@ -193,6 +193,7 @@ impl Collation {
             (SqlEngine::MySQL, "latin1_swedish_ci") => Some(Self::Latin1SwedishCi),
             (SqlEngine::MySQL, "utf8mb4_general_ci") => Some(Self::Utf8AiCiPad),
             (SqlEngine::MySQL, "utf8mb4_unicode_ci") => Some(Self::Utf8AiCiPad),
+            (SqlEngine::MySQL, "utf8mb3_unicode_ci") => Some(Self::Utf8AiCiPad),
             (_, _) => None,
         }
     }
