@@ -4,7 +4,7 @@ use std::hash::Hash;
 
 use icu::collator::options::{CollatorOptions, Strength};
 use icu::collator::{Collator, CollatorBorrowed};
-use log_once::error_once;
+use log_once::{error_once, warn_once};
 use serde::{Deserialize, Serialize};
 use strum::{EnumCount, FromRepr};
 use test_strategy::Arbitrary;
@@ -200,11 +200,39 @@ impl Collation {
 
     /// Attempt to map a collation name to our internal collation.  If no mapping exists,
     /// return a reasonable default for the dialect.
-    pub fn get_or_default(dialect: Dialect, collation: &str) -> Self {
-        Self::try_get(dialect, collation).unwrap_or_else(|| {
-            error_once!("Unknown {} collation {}", dialect.engine(), collation);
-            Self::default_for(dialect)
-        })
+    pub fn get_or_default(dialect: Dialect, name: &str) -> Self {
+        if let Some(coll) = Self::try_get(dialect, name) {
+            return coll;
+        }
+
+        let coll = if dialect.engine() == SqlEngine::MySQL {
+            if name.ends_with("_ai_ci") {
+                Some(Self::Utf8AiCi)
+            } else if name.ends_with("_ci") {
+                Some(Self::Utf8Ci)
+            } else if name.ends_with("_cs") {
+                Some(Self::Utf8)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(coll) = coll {
+            warn_once!(
+                "Unknown {} collation {name}, mapping to {coll}",
+                dialect.engine()
+            );
+            return coll;
+        }
+
+        let coll = Self::default_for(dialect);
+        error_once!(
+            "Unknown {} collation {name}, mapping to {coll}",
+            dialect.engine()
+        );
+        coll
     }
 
     /// Analogous to [`Option::unwrap_or_default`], but specific to the dialect.
