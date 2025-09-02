@@ -149,7 +149,6 @@ skip-tree = [
     { name = "hashbrown", version = "0.12.3" },
     { name = "itertools", version = "0.10.5" },
     { name = "itertools", version = "0.12.1" },
-    { name = "regex-automata", version = "0.1.10" },
     { name = "rusty-fork", version = "0.3.0" },
     { name = "unicode-width", version = "0.1.14" },
     { name = "tower", version = "0.4.13" },
