@@ -165,6 +165,14 @@ pub struct UpstreamConfig {
     )]
     #[serde(default = "default_status_update_interval_secs")]
     pub status_update_interval_secs: u16,
+
+    /// A string to be included as a comment in snapshot queries for MySQL.
+    /// The provided value is automatically enclosed within the delimiters
+    /// /* and */. The caller must supply only the raw comment text, without
+    /// any comment markers.
+    #[arg(long, env = "SNAPSHOT_QUERY_COMMENT", default_value = "")]
+    #[serde(default)]
+    pub snapshot_query_comment: Option<String>,
 }
 
 impl UpstreamConfig {
@@ -321,6 +329,7 @@ impl Default for UpstreamConfig {
             ignore_ulimit_check: false,
             status_update_interval_secs: 10,
             max_parallel_snapshot_tables: default_max_parallel_snapshot_tables(),
+            snapshot_query_comment: Default::default(),
         }
     }
 }

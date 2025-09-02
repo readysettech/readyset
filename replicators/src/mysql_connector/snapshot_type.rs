@@ -65,7 +65,11 @@ impl SnapshotType {
     /// Returns:
     /// * A tuple containing the count query, the initial query, the bound based query
     ///   and the collation query
-    pub fn get_queries(&self, table: &readyset_client::Table) -> (String, String, String, String) {
+    pub fn get_queries(
+        &self,
+        table: &readyset_client::Table,
+        snapshot_query_comment: Option<String>,
+    ) -> (String, String, String, String) {
         let force_index = match self {
             SnapshotType::KeyBased { name, .. } => {
                 if let Some(name) = name {
@@ -95,6 +99,13 @@ impl SnapshotType {
             table.table_name().name,
             schema
         );
+
+        let snapshot_query_comment = snapshot_query_comment
+            .map(|s| s.replace("/*", "").replace("*/", ""))
+            .filter(|s| !s.is_empty())
+            .map(|s| format!(" /* {s} */"))
+            .unwrap_or_default();
+
         let (initial_query, bound_based_query) = match self {
             SnapshotType::KeyBased { ref keys, .. } => {
                 let keys = keys
@@ -119,14 +130,14 @@ impl SnapshotType {
                 let next_bound = format!("({next_bound})");
 
                 let initial_query = format!(
-                    "SELECT * FROM {} {} ORDER BY {} LIMIT {}",
+                    "SELECT{snapshot_query_comment} * FROM {} {} ORDER BY {} LIMIT {}",
                     table.table_name().display(readyset_sql::Dialect::MySQL),
                     force_index,
                     order_by,
                     MYSQL_BATCH_SIZE
                 );
                 let bound_based_query = format!(
-                    "SELECT * FROM {} {} WHERE {} ORDER BY {} LIMIT {}",
+                    "SELECT{snapshot_query_comment} * FROM {} {} WHERE {} ORDER BY {} LIMIT {}",
                     table.table_name().display(readyset_sql::Dialect::MySQL),
                     force_index,
                     next_bound,
@@ -137,7 +148,7 @@ impl SnapshotType {
             }
             SnapshotType::FullTableScan => {
                 let initial_query = format!(
-                    "SELECT * FROM {}",
+                    "SELECT{snapshot_query_comment} * FROM {}",
                     table.table_name().display(readyset_sql::Dialect::MySQL)
                 );
                 (initial_query.clone(), initial_query)

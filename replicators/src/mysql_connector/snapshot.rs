@@ -63,6 +63,8 @@ pub(crate) struct MySqlReplicator<'a> {
     pub(crate) table_filter: &'a mut TableFilter,
     /// Base parsing config to use
     pub(crate) parsing_preset: ParsingPreset,
+    /// Whether to add a comment for snapshot queries
+    pub(crate) snapshot_query_comment: Option<String>,
 }
 
 /// Get the list of tables defined in the database
@@ -423,6 +425,7 @@ impl MySqlReplicator<'_> {
         mut trx: Transaction<'static>,
         mut table_mutator: readyset_client::Table,
         snapshot_report_interval_secs: u16,
+        snapshot_query_comment: Option<String>,
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
         let mut snapshot_type = SnapshotType::new(&table_mutator)?;
@@ -432,7 +435,7 @@ impl MySqlReplicator<'_> {
         // don't have support to lookup a collation from its name. Temporally get the
         // collation ID from querying IS. Later we can avoid the extra query.
         let (count_query, initial_query, bound_base_query, collation_query) =
-            snapshot_type.get_queries(&table_mutator);
+            snapshot_type.get_queries(&table_mutator, snapshot_query_comment);
 
         let collations = trx
             .query(collation_query)
@@ -661,14 +664,20 @@ impl MySqlReplicator<'_> {
         span.in_scope(|| info!("Read lock released"));
 
         let table_mutator = noria.table(table.clone()).instrument(span.clone()).await?;
+        let snapshot_query_comment = self.snapshot_query_comment.clone();
 
         Ok(tokio::spawn(async move {
             (
                 table,
                 repl_offset,
-                Self::snapshot_table(trx, table_mutator, snapshot_report_interval_secs)
-                    .instrument(span)
-                    .await,
+                Self::snapshot_table(
+                    trx,
+                    table_mutator,
+                    snapshot_report_interval_secs,
+                    snapshot_query_comment,
+                )
+                .instrument(span)
+                .await,
             )
         }))
     }
