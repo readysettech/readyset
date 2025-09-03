@@ -590,8 +590,7 @@ pub struct WorkerOptions {
         default_missing_value = "true",
         num_args = 0..=1,
         action = ArgAction::Set,
-        hide = true,
-        requires = "feature_full_materialization"
+        hide = true
     )]
     pub feature_materialization_persistence: bool,
 

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{self, Duration};
 
+use anyhow::bail;
 use database_utils::{ReplicationServerId, UpstreamConfig};
 use dataflow::PersistenceParameters;
 use readyset_client::consensus::{
@@ -64,7 +65,7 @@ impl Builder {
         opts: crate::WorkerOptions,
         deployment: &str,
         deployment_dir: PathBuf,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let mut builder = Self::default();
         if opts.memory_limit > 0 {
             builder.set_memory_limit(
@@ -83,9 +84,14 @@ impl Builder {
         if opts.no_partial {
             builder.disable_partial();
         }
+        if opts.feature_materialization_persistence && !opts.feature_full_materialization {
+            bail!(
+                "--feature-full-materialization must be enabled if using \
+                 --feature-materialization-persistence"
+            );
+        }
         if opts.feature_full_materialization {
             builder.set_full_materialization(true);
-
             builder.set_materialization_persistence(opts.feature_materialization_persistence);
         }
         if opts.enable_packet_filters {
@@ -130,7 +136,7 @@ impl Builder {
 
         builder.set_replicator_config(opts.replicator_config);
 
-        builder
+        Ok(builder)
     }
 
     /// Construct a new [`Builder`] with configuration setup for running tests

@@ -6,13 +6,13 @@ pub mod query_logger;
 use std::collections::{HashMap, HashSet};
 use std::fs::remove_dir_all;
 use std::future::Future;
-use std::io;
 use std::marker::Send;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
+use std::{io, process};
 
 use anyhow::{anyhow, bail};
 use clap::builder::NonEmptyStringValueParser;
@@ -1128,7 +1128,7 @@ where
 
                 migration_handler.run().await.map_err(move |e| {
                     error!(error = %e, "Migration Handler failed, aborting the process due to service entering a degraded state");
-                    std::process::abort()
+                    process::abort()
                 })
             };
 
@@ -1166,11 +1166,17 @@ where
             let authority = options.authority.clone();
             let deployment = options.deployment.clone();
 
-            let mut builder = readyset_server::Builder::from_worker_options(
+            let mut builder = match readyset_server::Builder::from_worker_options(
                 options.server_worker_options,
                 &options.deployment,
                 deployment_dir,
-            );
+            ) {
+                Ok(builder) => builder,
+                Err(error) => {
+                    error!(%error, "Failed to initialize server");
+                    process::exit(1);
+                }
+            };
             let persistence = builder.get_persistence();
             dataflow_state::clean_working_dir(persistence)?;
 

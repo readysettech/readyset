@@ -238,7 +238,13 @@ fn main() -> anyhow::Result<()> {
     };
 
     let mut builder =
-        Builder::from_worker_options(opts.worker_options, &opts.deployment, deployment_dir);
+        match Builder::from_worker_options(opts.worker_options, &opts.deployment, deployment_dir) {
+            Ok(builder) => builder,
+            Err(error) => {
+                error!(%error, "Failed to initialize server");
+                process::exit(1);
+            }
+        };
 
     let persistence = builder.get_persistence();
     dataflow_state::clean_working_dir(persistence)?;
