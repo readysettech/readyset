@@ -255,10 +255,13 @@ where
             .handle
             .raw_handle()
             .expect("WriteHandle has not been dropped");
-        // safety: the writer cannot publish until 'a ends, so we know that reading from the read
-        // map is safe for the duration of 'a.
+        // SAFETY: `inner` is convertible to a reference because we have the `WriteHandle`; see
+        // [`ReadHandle::raw_handle`].
+        let inner = unsafe { inner.as_ref() };
+        // SAFETY: The writer cannot publish until 'a ends, so we know that reading from the read
+        // map is safe for the duration of 'a; so we can extend its lifetime to 'a.
         let inner: &'a Inner<K, V, M, S, I> =
-            unsafe { std::mem::transmute::<&Inner<K, V, M, S, I>, _>(inner.as_ref()) };
+            unsafe { std::mem::transmute::<&Inner<K, V, M, S, I>, _>(inner) };
 
         let keys_to_evict = match request {
             EvictionQuantity::Ratio(ratio) => (inner.data.len() as f64 * ratio) as usize,
