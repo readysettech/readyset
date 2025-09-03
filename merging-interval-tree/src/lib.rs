@@ -91,9 +91,9 @@ where
 }
 
 /// [`OwnedOrPtr`] is the crux of the tree's ability to use borrowed representation for lookups.
-/// There are two layout equivalent structures [`OwnedOrPtr<T>`] and [`OwnedOrPtr<T,B>`] that are
-/// guaranteed to have the same size and layout by using `#[repr(u8)]` and variants that have the
-/// same size.
+/// There are two layout equivalent structures [`OwnedOrPtr<T>`] and [`OwnedOrBorrowed<T,B>`] that
+/// are guaranteed to have the same size and layout by using `#[repr(u8)]` and variants that have
+/// the same size.
 ///
 /// The [`OwnedOrPtr`] only ever uses the [`OwnedOrPtr::Owned`] variant and always contains owned
 /// data. It is crucial to never construct the [`OwnedOrPtr::Ptr`] variant or the safety breaks.
@@ -127,9 +127,9 @@ where
     Ref(&'a B),
 }
 
-/// SAFETY: Those are safe to implement for a given T, because the `Ptr` variant is never
-/// constructed
+/// SAFETY: Safe to implement for a given T, because the `Ptr` variant is never constructed
 unsafe impl<T> Send for OwnedOrPtr<T> where T: Send {}
+/// SAFETY: Safe to implement for a given T, because the `Ptr` variant is never constructed
 unsafe impl<T> Sync for OwnedOrPtr<T> where T: Sync {}
 
 impl<T> Deref for OwnedOrPtr<T> {
@@ -138,9 +138,9 @@ impl<T> Deref for OwnedOrPtr<T> {
     fn deref(&self) -> &Self::Target {
         match self {
             OwnedOrPtr::Owned(v) => v,
-            // SAFETY: This variant is never constructed
             OwnedOrPtr::Ptr(_) => {
                 debug_assert_eq!(0, 1);
+                // SAFETY: This variant is never constructed
                 unsafe { unreachable_unchecked() }
             }
         }
