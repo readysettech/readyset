@@ -2410,6 +2410,8 @@ where
             }
             SqlQuery::CreateCache(CreateCacheStatement {
                 name,
+                cache_type: _,
+                policy: _,
                 inner,
                 always,
                 concurrently,

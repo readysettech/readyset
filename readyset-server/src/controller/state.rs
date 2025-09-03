@@ -308,6 +308,8 @@ impl DfState {
                             name,
                             statement,
                             always,
+                            cache_type,
+                            policy,
                             query_id,
                         } if (search_query_id.is_none() && search_name.is_none())
                             || (Some(query_id) == search_query_id)
@@ -317,6 +319,8 @@ impl DfState {
                                 name,
                                 statement,
                                 always,
+                                cache_type,
+                                policy,
                                 query_id,
                             })
                         }

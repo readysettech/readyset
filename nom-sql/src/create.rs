@@ -895,6 +895,8 @@ pub fn create_cached_query(
             i,
             CreateCacheStatement {
                 name,
+                cache_type: None,
+                policy: None,
                 inner,
                 unparsed_create_cache_statement,
                 always: opts.always,

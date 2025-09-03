@@ -1,6 +1,7 @@
 use std::{
     fmt,
     hash::{Hash, Hasher},
+    time::Duration,
 };
 
 use derive_more::From;
@@ -682,6 +683,45 @@ impl DialectDisplay for CreateViewStatement {
     }
 }
 
+/// The type of cache to create
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum CacheType {
+    #[default]
+    Deep,
+    Shallow,
+}
+
+impl fmt::Display for CacheType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Deep => write!(f, "deep"),
+            Self::Shallow => write!(f, "shallow"),
+        }
+    }
+}
+
+impl DialectDisplay for CacheType {
+    fn display(&self, _dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::Deep => write!(f, "DEEP"),
+            Self::Shallow => write!(f, "SHALLOW"),
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum EvictionPolicy {
+    Ttl(Duration),
+}
+
+impl DialectDisplay for EvictionPolicy {
+    fn display(&self, _dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::Ttl(duration) => write!(f, "POLICY TTL {} SECONDS", duration.as_secs()),
+        })
+    }
+}
+
 /// The SelectStatement or query ID referenced in a [`CreateCacheStatement`]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, From, Arbitrary)]
 pub enum CacheInner {
@@ -703,15 +743,23 @@ impl DialectDisplay for CacheInner {
 pub struct CreateCacheOptions {
     pub always: bool,
     pub concurrently: bool,
+    pub cache_type: Option<CacheType>,
+    pub policy: Option<EvictionPolicy>,
 }
 
-/// `CREATE CACHE [CONCURRENTLY] [ALWAYS] [<name>] FROM ...`
+/// `CREATE [DEEP|SHALLOW] CACHE [POLICY TTL N SECONDS] [CONCURRENTLY] [ALWAYS] [<name>] FROM ...`
 ///
 /// This is a non-standard ReadySet specific extension to SQL
 #[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
 pub struct CreateCacheStatement {
     /// The name of the cache. If not provided, a name will be generated based on the statement
     pub name: Option<Relation>,
+    /// The type of cache to create
+    #[strategy(any::<Option<CacheType>>())]
+    pub cache_type: Option<CacheType>,
+    /// The eviction policy for the cache (only for shallow caches)
+    #[strategy(any::<Option<EvictionPolicy>>())]
+    pub policy: Option<EvictionPolicy>,
     /// The result of parsing the inner statement or query ID for the `CREATE CACHE` statement.
     ///
     /// If parsing succeeded, then this will be an `Ok` result with the definition of the
@@ -737,6 +785,8 @@ pub struct CreateCacheStatement {
 impl PartialEq for CreateCacheStatement {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
+            && self.cache_type == other.cache_type
+            && self.policy == other.policy
             && self.inner == other.inner
             && self.always == other.always
             && self.concurrently == other.concurrently
@@ -748,6 +798,8 @@ impl Eq for CreateCacheStatement {}
 impl Hash for CreateCacheStatement {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.name.hash(state);
+        self.cache_type.hash(state);
+        self.policy.hash(state);
         self.inner.hash(state);
         self.always.hash(state);
         self.concurrently.hash(state);
@@ -757,7 +809,15 @@ impl Hash for CreateCacheStatement {
 impl DialectDisplay for CreateCacheStatement {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
-            write!(f, "CREATE CACHE ")?;
+            write!(f, "CREATE ")?;
+            match &self.cache_type {
+                None => {}
+                Some(cache_type) => write!(f, "{} ", cache_type.display(dialect))?,
+            }
+            write!(f, "CACHE ")?;
+            if let Some(policy) = &self.policy {
+                write!(f, "{} ", policy.display(dialect))?;
+            }
             if self.concurrently {
                 write!(f, "CONCURRENTLY ")?;
             }

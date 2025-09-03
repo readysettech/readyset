@@ -427,6 +427,8 @@ fn parse_create_cache(
     Ok(SqlQuery::CreateCache(
         readyset_sql::ast::CreateCacheStatement {
             name,
+            cache_type: None,
+            policy: None,
             inner: query.map_err(|_| remaining_query),
             unparsed_create_cache_statement: Some(input.as_ref().trim().to_string()),
             always,

@@ -7,8 +7,8 @@ use readyset_client::PlaceholderIdx;
 use readyset_errors::{internal_err, unsupported_err, ReadySetError, ReadySetResult};
 use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::ast::{
-    CreateTableBody, CreateTableStatement, CreateViewStatement, ItemPlaceholder, Literal, Relation,
-    SelectSpecification, SelectStatement, SqlType,
+    CacheType, CreateTableBody, CreateTableStatement, CreateViewStatement, EvictionPolicy,
+    ItemPlaceholder, Literal, Relation, SelectSpecification, SelectStatement, SqlType,
 };
 use readyset_sql_passes::SelectStatementSkeleton;
 use readyset_util::redacted::Sensitive;
@@ -39,6 +39,8 @@ pub(crate) enum RecipeExpr {
         name: Relation,
         statement: SelectStatement,
         always: bool,
+        cache_type: Option<CacheType>,
+        policy: Option<EvictionPolicy>,
         query_id: QueryId,
     },
 }
@@ -724,6 +726,8 @@ mod tests {
         RecipeExpr::Cache {
             name: name.into(),
             always: false,
+            cache_type: Some(CacheType::Deep),
+            policy: None,
             query_id: QueryId::from_select(&statement, &[]),
             statement,
         }
@@ -1147,6 +1151,8 @@ mod tests {
                     query_id: QueryId::from_select(&statement, &[]),
                     statement: statement.clone(),
                     always: false,
+                    cache_type: Some(CacheType::Deep),
+                    policy: None,
                 })
                 .unwrap());
 

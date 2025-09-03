@@ -218,6 +218,8 @@ impl ArbitraryQueryParameters {
 
         let create_cache_query = CreateCacheStatement {
             name: Some("q".into()),
+            cache_type: None,
+            policy: None,
             inner: Ok(CacheInner::Statement(Box::new(stmt))),
             always: false,
             concurrently: false,

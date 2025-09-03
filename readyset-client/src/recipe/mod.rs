@@ -6,7 +6,9 @@ use std::borrow::Cow;
 use std::fmt::Display;
 
 use readyset_errors::ReadySetError;
-use readyset_sql::ast::{CacheInner, CreateCacheStatement, Relation, SelectStatement};
+use readyset_sql::ast::{
+    CacheInner, CacheType, CreateCacheStatement, EvictionPolicy, Relation, SelectStatement,
+};
 use readyset_sql::DialectDisplay;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
@@ -101,6 +103,8 @@ pub struct CacheExpr {
     pub name: Relation,
     pub statement: SelectStatement,
     pub always: bool,
+    pub cache_type: Option<CacheType>,
+    pub policy: Option<EvictionPolicy>,
     pub query_id: QueryId,
 }
 
@@ -108,6 +112,8 @@ impl From<CacheExpr> for CreateCacheStatement {
     fn from(value: CacheExpr) -> Self {
         CreateCacheStatement {
             name: Some(value.name),
+            cache_type: value.cache_type,
+            policy: value.policy,
             inner: Ok(CacheInner::Statement(Box::new(value.statement))),
             always: value.always,
             // CacheExpr represents a migrated query, and the below fields are not relevant for an

@@ -17,9 +17,9 @@ use readyset_errors::{
     ReadySetResult,
 };
 use readyset_sql::ast::{
-    self, AlterTableDefinition, CompoundSelectStatement, CreateTableBody, CreateTableOption,
-    FieldDefinitionExpr, NonReplicatedRelation, Relation, SelectSpecification, SelectStatement,
-    SqlIdentifier, SqlType, TableExpr, TableKey,
+    self, AlterTableDefinition, CacheType, CompoundSelectStatement, CreateTableBody,
+    CreateTableOption, FieldDefinitionExpr, NonReplicatedRelation, Relation, SelectSpecification,
+    SelectStatement, SqlIdentifier, SqlType, TableExpr, TableKey,
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
@@ -710,6 +710,8 @@ impl SqlIncorporator {
             name: name.clone(),
             statement: stmt,
             always,
+            cache_type: Some(CacheType::Deep),
+            policy: None,
             query_id,
         };
 
