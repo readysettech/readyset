@@ -88,6 +88,7 @@ mod tests {
     use std::sync::Arc;
 
     use readyset_client::query::{Query, QueryStatus};
+    use readyset_sql::ast::CacheType;
 
     use super::*;
     use crate::query_status_cache::MigrationStyle;
@@ -129,7 +130,7 @@ mod tests {
                 "Should fail".to_string(),
             ),
             status: QueryStatus {
-                migration_state: MigrationState::Successful,
+                migration_state: MigrationState::Successful(CacheType::Deep),
                 execution_info: None,
                 always: false,
             },
@@ -142,6 +143,6 @@ mod tests {
                 .expect("query should be mapped")
                 .clone()
         };
-        assert_eq!(MigrationState::Successful, status);
+        assert!(matches!(status, MigrationState::Successful(_)));
     }
 }

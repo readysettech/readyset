@@ -96,7 +96,7 @@ use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
 use readyset_sql::ast::{
-    self, AlterReadysetStatement, CacheInner, CreateCacheStatement, DeallocateStatement,
+    self, AlterReadysetStatement, CacheInner, CacheType, CreateCacheStatement, DeallocateStatement,
     DropCacheStatement, ExplainStatement, Relation, SelectStatement, SetStatement, ShowStatement,
     SqlIdentifier, SqlQuery, StatementIdentifier, UseStatement,
 };
@@ -1024,7 +1024,7 @@ where
                         select_meta.rewritten.clone(),
                         self.noria.schema_search_path().to_owned(),
                     ),
-                    MigrationState::Successful,
+                    MigrationState::Successful(CacheType::Deep),
                 );
             }
             Some(Err(e)) => {
@@ -1319,7 +1319,7 @@ where
             PrepareMeta::Write { stmt } | PrepareMeta::Transaction { stmt } => PreparedStatement {
                 query_id: None,
                 prep: PrepareResult::new(statement_id, prep),
-                migration_state: MigrationState::Successful,
+                migration_state: MigrationState::Successful(CacheType::Deep),
                 execution_info: None,
                 parsed_query: Some(Arc::new(stmt)),
                 view_request: None,
@@ -1328,7 +1328,7 @@ where
             PrepareMeta::Set { stmt } => PreparedStatement {
                 query_id: None,
                 prep: PrepareResult::new(statement_id, prep),
-                migration_state: MigrationState::Successful,
+                migration_state: MigrationState::Successful(CacheType::Deep),
                 execution_info: None,
                 parsed_query: Some(Arc::new(SqlQuery::Set(stmt))),
                 view_request: None,
@@ -1362,7 +1362,7 @@ where
             | PrepareMeta::Unimplemented(..) => PreparedStatement {
                 query_id: None,
                 prep: PrepareResult::new(statement_id, prep),
-                migration_state: MigrationState::Successful,
+                migration_state: MigrationState::Successful(CacheType::Deep),
                 execution_info: None,
                 parsed_query: None,
                 view_request: None,
@@ -1547,13 +1547,13 @@ where
     }
 
     /// Attempts to migrate a query on noria, after
-    /// - the query was marked as `MigrationState::Successful` in the cache -or-
+    /// - the query was marked as `MigrationState::Successful(_)` in the cache -or-
     /// - the epoch stored in `MigrationState::Inlined` advanced but the query is not yet prepared
     ///   on noria.
     ///
     /// If the migration is successful, the prepare result is updated with the noria result. If the
     /// state was previously `MigrationState::Pending`, it is updated to
-    /// `MigrationState::Successful`.
+    /// `MigrationState::Successful(CacheType::Deep)`.
     ///
     /// Returns an error if the statement is already prepared on noria.
     ///
@@ -1603,7 +1603,7 @@ where
         // If the query was previously `Pending`, update to `Successful`. If it was inlined, we do
         // not update the migration state.
         if cached_entry.migration_state == MigrationState::Pending {
-            cached_entry.migration_state = MigrationState::Successful;
+            cached_entry.migration_state = MigrationState::Successful(CacheType::Deep);
         }
 
         Ok(())
@@ -1626,7 +1626,7 @@ where
                         ..
                     },
                 )| {
-                    if *migration_state == MigrationState::Successful
+                    if matches!(*migration_state, MigrationState::Successful(_))
                         && view_request.as_ref() == Some(stmt)
                     {
                         *migration_state = MigrationState::Pending;
@@ -1679,7 +1679,7 @@ where
                 .query_migration_state(cached_statement.as_view_request()?)
                 .1;
 
-            if new_migration_state == MigrationState::Successful {
+            if matches!(new_migration_state, MigrationState::Successful(_)) {
                 // Attempt to prepare on ReadySet
                 let _ = Self::update_noria_prepare(noria, cached_statement).await;
             } else if let MigrationState::Inlined(new_state) = new_migration_state {
@@ -1986,7 +1986,7 @@ where
             )
             .await
         {
-            Ok(None) => MigrationState::Successful,
+            Ok(None) => MigrationState::Successful(CacheType::Deep),
             Ok(Some(id)) => {
                 return Ok(noria_connector::QueryResult::Meta(vec![(
                     "Migration Id".to_string(),
@@ -2087,7 +2087,8 @@ where
             Some(m @ MigrationState::Inlined(_)) | Some(m @ MigrationState::Pending) => {
                 ("pending", m)
             }
-            Some(m @ MigrationState::Successful) => ("cached", m),
+            Some(m @ MigrationState::Successful(CacheType::Deep)) => ("cached", m),
+            Some(m @ MigrationState::Successful(CacheType::Shallow)) => ("cached", m),
             Some(m @ MigrationState::DryRunSucceeded) => ("yes", m),
             // If we don't already have a migration state for the query, we do a dry run
             None => {
@@ -2161,7 +2162,7 @@ where
                     ..
                 },
             )| {
-                if *migration_state == MigrationState::Successful {
+                if matches!(*migration_state, MigrationState::Successful(_)) {
                     *migration_state = MigrationState::Pending;
                 }
                 prep.make_upstream_only();
@@ -2222,7 +2223,7 @@ where
             .into_iter()
             .map(|DeniedQuery { id, query, status }| {
                 let s = match status.migration_state {
-                    MigrationState::DryRunSucceeded | MigrationState::Successful => {
+                    MigrationState::DryRunSucceeded | MigrationState::Successful(_) => {
                         "yes".to_string()
                     }
                     MigrationState::Pending | MigrationState::Inlined(_) => "pending".to_string(),
@@ -2439,7 +2440,7 @@ where
                                 .await?
                                 .is_some()
                         {
-                            migration_state = Some(MigrationState::Successful);
+                            migration_state = Some(MigrationState::Successful(CacheType::Deep));
                         }
 
                         self.explain_create_cache(id, view_request, migration_state)
@@ -2678,7 +2679,7 @@ where
         // Test several conditions to see if we should proxy
         let upstream_exists = upstream.is_some();
         let proxy_out_of_band = settings.migration_mode != MigrationMode::InRequestPath
-            && status.migration_state != MigrationState::Successful;
+            && !matches!(status.migration_state, MigrationState::Successful(_));
         let unsupported = matches!(&status.migration_state, MigrationState::Unsupported(_));
         let exceeded_network_failure = status
             .execution_info
@@ -2715,7 +2716,7 @@ where
         match res {
             Ok(noria_ok) => {
                 // We managed to select on ReadySet, good for us
-                status.migration_state = MigrationState::Successful;
+                status.migration_state = MigrationState::Successful(CacheType::Deep);
                 if let Some(i) = status.execution_info.as_mut() {
                     i.execute_succeeded()
                 }

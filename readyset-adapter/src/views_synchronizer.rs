@@ -7,6 +7,7 @@ use metrics::{gauge, Gauge};
 use readyset_client::query::MigrationState;
 use readyset_client::{ReadySetHandle, ViewCreateRequest};
 use readyset_client_metrics::recorded;
+use readyset_sql::ast::CacheType;
 use readyset_sql::{ast::Relation, DialectDisplay};
 use readyset_util::shared_cache::LocalCache;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -175,8 +176,10 @@ impl ViewsSynchronizer {
                         );
                         if let Some(name) = name {
                             self.view_name_cache.insert(query.clone(), name).await;
-                            self.query_status_cache
-                                .update_query_migration_state(query, MigrationState::Successful);
+                            self.query_status_cache.update_query_migration_state(
+                                query,
+                                MigrationState::Successful(CacheType::Deep),
+                            );
                             self.views_checked.insert(*hash);
                         }
                     }

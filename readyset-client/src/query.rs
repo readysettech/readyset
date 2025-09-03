@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
-use readyset_sql::ast::{Relation, SelectStatement, SqlIdentifier};
+use readyset_sql::ast::{CacheType, Relation, SelectStatement, SqlIdentifier};
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_util::fmt::fmt_with;
@@ -237,7 +237,7 @@ impl QueryStatus {
     /// [successfully migrated]: MigrationState::Successful
     #[must_use]
     pub fn is_successful(&self) -> bool {
-        self.migration_state == MigrationState::Successful
+        matches!(self.migration_state, MigrationState::Successful(_))
     }
 
     /// Returns true if this query status represents an [unsupported][] query
@@ -335,7 +335,7 @@ pub enum MigrationState {
     /// on the adapters MigrationMode.
     Pending,
     /// This query has been migrated and a view exists.
-    Successful,
+    Successful(CacheType),
     /// This query cannot be cached by ReadySet, but we may be able to reuse an existing cache for
     /// some set of parameters passed on execution.
     Inlined(InlinedState),
@@ -375,7 +375,7 @@ impl MigrationState {
     pub fn is_supported(&self) -> bool {
         matches!(
             self,
-            MigrationState::DryRunSucceeded | MigrationState::Successful
+            MigrationState::DryRunSucceeded | MigrationState::Successful(_)
         )
     }
 }
@@ -384,7 +384,7 @@ impl Display for MigrationState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MigrationState::Pending => write!(f, "pending"),
-            MigrationState::Successful => write!(f, "successful"),
+            MigrationState::Successful(cache_type) => write!(f, "successful ({})", cache_type),
             MigrationState::Unsupported(reason) if reason.is_empty() => {
                 write!(f, "unsupported: reason unknown")
             }

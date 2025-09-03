@@ -884,7 +884,7 @@ impl FromStr for MigrationStyle {
 #[cfg(test)]
 mod tests {
     use readyset_client::ViewCreateRequest;
-    use readyset_sql::ast::{SelectStatement, SqlQuery};
+    use readyset_sql::ast::{CacheType, SelectStatement, SqlQuery};
     use readyset_util::hash::hash;
     use vec1::Vec1;
 
@@ -966,7 +966,7 @@ mod tests {
         let q2 = ViewCreateRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]);
 
         cache.update_query_migration_state(&q1, MigrationState::Pending);
-        cache.update_query_migration_state(&q2, MigrationState::Successful);
+        cache.update_query_migration_state(&q2, MigrationState::Successful(CacheType::Deep));
 
         let h1 = QueryId::from(&q1);
         let h2 = QueryId::from(&q2);
@@ -1001,7 +1001,7 @@ mod tests {
         assert_eq!(cache.allow_list().len(), 0);
         assert_eq!(cache.deny_list().len(), 0);
 
-        cache.update_query_migration_state(&query, MigrationState::Successful);
+        cache.update_query_migration_state(&query, MigrationState::Successful(CacheType::Deep));
         assert_eq!(cache.pending_migration().len(), 0);
         assert_eq!(cache.allow_list().len(), 1);
         assert_eq!(cache.deny_list().len(), 0);
@@ -1053,14 +1053,14 @@ mod tests {
 
         cache.update_query_migration_state(
             &ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]),
-            MigrationState::Successful,
+            MigrationState::Successful(CacheType::Deep),
         );
         cache.update_query_migration_state(
             &ViewCreateRequest::new(
                 select_statement("SELECT * FROM t1 WHERE id = ?").unwrap(),
                 vec![],
             ),
-            MigrationState::Successful,
+            MigrationState::Successful(CacheType::Deep),
         );
         assert_eq!(cache.allow_list().len(), 2);
 
@@ -1074,7 +1074,7 @@ mod tests {
         let q1 = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let q2 = ViewCreateRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]);
 
-        cache.update_query_migration_state(&q1, MigrationState::Successful);
+        cache.update_query_migration_state(&q1, MigrationState::Successful(CacheType::Deep));
         cache.update_query_migration_state(
             &q2,
             MigrationState::Inlined(InlinedState {
@@ -1120,7 +1120,7 @@ mod tests {
             cache.query_migration_state(&q).1,
             MigrationState::Unsupported("Failed".into())
         );
-        cache.update_query_migration_state(&q, MigrationState::Successful);
+        cache.update_query_migration_state(&q, MigrationState::Successful(CacheType::Deep));
         assert_eq!(
             cache.query_migration_state(&q).1,
             MigrationState::Unsupported("Failed".into())
@@ -1142,7 +1142,7 @@ mod tests {
         assert_eq!(cache.query_migration_state(&q).1, inlined_state);
         cache.update_query_migration_state(&q, MigrationState::Pending);
         assert_eq!(cache.query_migration_state(&q).1, inlined_state);
-        cache.update_query_migration_state(&q, MigrationState::Successful);
+        cache.update_query_migration_state(&q, MigrationState::Successful(CacheType::Deep));
         assert_eq!(cache.query_migration_state(&q).1, inlined_state);
         cache.update_query_migration_state(&q, MigrationState::Unsupported("Should fail".into()));
         assert_eq!(
@@ -1297,14 +1297,14 @@ mod tests {
 
         cache.update_query_migration_state(
             &ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]),
-            MigrationState::Successful,
+            MigrationState::Successful(CacheType::Deep),
         );
         cache.update_query_migration_state(
             &ViewCreateRequest::new(
                 select_statement("SELECT * FROM t1 WHERE id = ?").unwrap(),
                 vec![],
             ),
-            MigrationState::Successful,
+            MigrationState::Successful(CacheType::Deep),
         );
         cache.update_query_migration_state(
             &ViewCreateRequest::new(
@@ -1355,11 +1355,18 @@ mod tests {
             ViewCreateRequest::new(select_statement("SELECT * FROM t4").unwrap(), vec![]);
 
         // Add all queries to cache
-        cache.update_query_migration_state(&simple_t1, MigrationState::Successful);
-        cache.update_query_migration_state(&simple_t2, MigrationState::Successful);
-        cache.update_query_migration_state(&join_query, MigrationState::Successful);
-        cache.update_query_migration_state(&complex_query, MigrationState::Successful);
-        cache.update_query_migration_state(&unaffected_query, MigrationState::Successful);
+        cache.update_query_migration_state(&simple_t1, MigrationState::Successful(CacheType::Deep));
+        cache.update_query_migration_state(&simple_t2, MigrationState::Successful(CacheType::Deep));
+        cache
+            .update_query_migration_state(&join_query, MigrationState::Successful(CacheType::Deep));
+        cache.update_query_migration_state(
+            &complex_query,
+            MigrationState::Successful(CacheType::Deep),
+        );
+        cache.update_query_migration_state(
+            &unaffected_query,
+            MigrationState::Successful(CacheType::Deep),
+        );
 
         assert_eq!(cache.allow_list().len(), 5);
 
@@ -1386,7 +1393,10 @@ mod tests {
         assert!(remaining_table_names.contains(&"t4"));
 
         // Add back a query and test nested reference invalidation
-        cache.update_query_migration_state(&complex_query, MigrationState::Successful);
+        cache.update_query_migration_state(
+            &complex_query,
+            MigrationState::Successful(CacheType::Deep),
+        );
         assert_eq!(cache.allow_list().len(), 3);
 
         // should only invalidate the complex query (nested reference in EXISTS)

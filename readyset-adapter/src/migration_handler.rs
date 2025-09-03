@@ -16,6 +16,7 @@ use readyset_client::{PlaceholderIdx, ReadySetHandle, ViewCreateRequest};
 use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetResult};
+use readyset_sql::ast::CacheType;
 use readyset_sql::{ast::Literal, DialectDisplay};
 use readyset_sql_passes::InlineLiterals;
 use readyset_util::redacted::Sensitive;
@@ -234,8 +235,10 @@ impl MigrationHandler {
             Ok(_) => {
                 counter!(recorded::MIGRATION_HANDLER_ALLOWED).increment(1);
                 self.start_time.remove(view_request);
-                self.query_status_cache
-                    .update_query_migration_state(view_request, MigrationState::Successful);
+                self.query_status_cache.update_query_migration_state(
+                    view_request,
+                    MigrationState::Successful(CacheType::Deep),
+                );
             }
             Err(e) if e.caused_by_unsupported() => {
                 debug!(
