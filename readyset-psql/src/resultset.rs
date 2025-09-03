@@ -143,6 +143,8 @@ impl Stream for Resultset {
                             col_type,
                         })?);
                     }
+                    // SAFETY: capacity is already set to `len`, and `old_len..new_len` was just
+                    // initialized above via `spare`.
                     unsafe {
                         converted_values.set_len(len);
                     }
