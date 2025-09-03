@@ -46,16 +46,17 @@ impl<T: Copy> PeekableRemoteStat<T> {
 }
 
 impl PeekableRemoteStat<u64> {
-    /// Try access the underlying data. When the pointer is `nullptr`, returns
-    /// `None`.
+    /// Try to access the underlying data. When the pointer is `nullptr`, returns `None`.
     ///
     /// # Safety
     ///
-    /// The pointer should not be dangling. (i.e. the thread to be traced should
-    /// be accessible.)
+    /// The pointer should not be dangling. (i.e. the thread to be traced should be accessible.)
     unsafe fn peek(&self) -> Option<u64> {
-        self.0
-            .map(|nlp| unsafe { AtomicU64::from_ptr(nlp.as_ptr()).load(Ordering::SeqCst) })
+        self.0.map(|nlp| {
+            // SAFETY: the pointer is valid (non-null) and points to a thread local variable, which
+            // the caller guarantees is still alive.
+            unsafe { AtomicU64::from_ptr(nlp.as_ptr()).load(Ordering::SeqCst) }
+        })
     }
 
     fn allocated() -> Self {
@@ -139,6 +140,7 @@ pub fn dump_stats() -> Result<String, Error> {
     epoch::advance()?;
     let mut buf = Vec::with_capacity(1024);
 
+    // SAFETY: `write_cb` is a valid function pointer and `buf` is a valid mutable pointer.
     unsafe {
         malloc_stats_print(
             Some(write_cb),
@@ -243,15 +245,15 @@ pub fn print_memory_and_per_thread_stats() -> Result<String, Error> {
 
 #[allow(clippy::cast_ptr_alignment)]
 extern "C" fn write_cb(printer: *mut c_void, msg: *const c_char) {
-    unsafe {
-        // This cast from *c_void to *Vec<u8> looks like a bad
-        // cast to clippy due to pointer alignment, but we know
-        // what type the pointer is.
-        let buf = &mut *(printer as *mut Vec<u8>);
-        let len = libc::strlen(msg);
-        let bytes = slice::from_raw_parts(msg as *const u8, len);
-        buf.extend_from_slice(bytes);
-    }
+    // SAFETY: We know it's a `Vec<u8>` because we constructed it in [`dump_stats`] and
+    // [`malloc_stats_print`] passes it back to us unsullied.
+    let buf = unsafe { &mut *(printer as *mut Vec<u8>) };
+    // SAFETY: We are trusting [`malloc_stats_print`] to provide a valid null-terminated C string.
+    let len = unsafe { libc::strlen(msg) };
+    // SAFETY: We know it's a valid null-terminated C string and we know it's length, so we can make
+    // a slice from it.
+    let bytes = unsafe { slice::from_raw_parts(msg as *const u8, len) };
+    buf.extend_from_slice(bytes);
 }
 
 #[cfg(test)]
@@ -308,12 +310,14 @@ mod tests {
         let l = THREAD_MEMORY_MAP.lock().unwrap();
         for (i, tid, tx) in chs {
             let a = l.get(&tid).unwrap();
-            unsafe {
-                let alloc = a.allocated.peek().unwrap();
-                let dealloc = a.deallocated.peek().unwrap();
-                assert_delta(i, 0.05, alloc, (1024 + 512) * 1024 * i as u64);
-                assert_delta(i, 0.05, dealloc, (1024) * 1024 * i as u64);
-            }
+            // SAFETY: We have the lock on [`THREAD_MEMORY_MAP`], so the thread we are trying to
+            // peek is still alive and hasn't been removed from the map, so its TLS should still be
+            // alive.
+            let alloc = unsafe { a.allocated.peek().unwrap() };
+            // SAFETY: Ditto `alloc`
+            let dealloc = unsafe { a.deallocated.peek().unwrap() };
+            assert_delta(i, 0.05, alloc, (1024 + 512) * 1024 * i as u64);
+            assert_delta(i, 0.05, dealloc, (1024) * 1024 * i as u64);
             tx.send(()).unwrap();
         }
         drop(l);
@@ -336,23 +340,21 @@ mod profiling {
     const PROF_DUMP: &[u8] = b"prof.dump\0";
 
     pub fn activate_prof() -> ProfResult<()> {
-        unsafe {
-            if let Err(e) = tikv_jemalloc_ctl::raw::update(PROF_ACTIVE, true) {
-                return Err(ProfError::JemallocError(format!(
-                    "failed to activate profiling: {e}"
-                )));
-            }
+        // SAFETY: [`PROF_ACTIVE`] is a valid C null-terminated C string.
+        if let Err(e) = unsafe { tikv_jemalloc_ctl::raw::update(PROF_ACTIVE, true) } {
+            return Err(ProfError::JemallocError(format!(
+                "failed to activate profiling: {e}"
+            )));
         }
         Ok(())
     }
 
     pub fn deactivate_prof() -> ProfResult<()> {
-        unsafe {
-            if let Err(e) = tikv_jemalloc_ctl::raw::update(PROF_ACTIVE, false) {
-                return Err(ProfError::JemallocError(format!(
-                    "failed to deactivate profiling: {e}"
-                )));
-            }
+        // SAFETY: [`PROF_ACTIVE`] is a valid C null-terminated C string.
+        if let Err(e) = unsafe { tikv_jemalloc_ctl::raw::update(PROF_ACTIVE, false) } {
+            return Err(ProfError::JemallocError(format!(
+                "failed to deactivate profiling: {e}"
+            )));
         }
         Ok(())
     }
@@ -361,14 +363,13 @@ mod profiling {
     pub fn dump_prof(path: impl AsRef<Path>) -> ProfResult<()> {
         let mut bytes = CString::new(path.as_ref().as_os_str().as_bytes())?.into_bytes_with_nul();
         let ptr = bytes.as_mut_ptr() as *mut c_char;
-        unsafe {
-            if let Err(e) = tikv_jemalloc_ctl::raw::write(PROF_DUMP, ptr) {
-                return Err(ProfError::JemallocError(format!(
-                    "failed to dump the profile to {:?}: {}",
-                    path.as_ref(),
-                    e
-                )));
-            }
+        // SAFETY: [`PROF_DUMP`] is a valid C null-terminated C string.
+        if let Err(e) = unsafe { tikv_jemalloc_ctl::raw::write(PROF_DUMP, ptr) } {
+            return Err(ProfError::JemallocError(format!(
+                "failed to dump the profile to {:?}: {}",
+                path.as_ref(),
+                e
+            )));
         }
         Ok(())
     }
@@ -387,6 +388,7 @@ mod profiling {
         const OPT_PROF: &[u8] = b"opt.prof\0";
 
         fn is_profiling_on() -> bool {
+            // SAFETY: [`OPT_PROF`] is a valid C null-terminated C string.
             match unsafe { tikv_jemalloc_ctl::raw::read(OPT_PROF) } {
                 Err(e) => {
                     // Shouldn't be possible since mem-profiling is set
