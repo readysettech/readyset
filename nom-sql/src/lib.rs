@@ -170,6 +170,7 @@ mod tests {
         assert_eq!(
             err,
             Err::Error(NomSqlError {
+                // SAFETY: Just constructing some garbage to compare against, won't index into buf.
                 input: unsafe { LocatedSpan::new_from_raw_offset(1, 1, "b", ()) },
                 kind: ErrorKind::Tag
             })
@@ -186,6 +187,7 @@ mod tests {
         assert_eq!(
             err,
             Err::Error(NomSqlError {
+                // SAFETY: Just constructing some garbage to compare against, won't index into buf.
                 input: unsafe { LocatedSpan::new_from_raw_offset(0, 1, "b", ()) },
                 kind: ErrorKind::Not
             })
@@ -203,6 +205,7 @@ mod tests {
         assert_eq!(
             err,
             Err::Error(NomSqlError {
+                // SAFETY: Just constructing some garbage to compare against, won't index into buf.
                 input: unsafe { LocatedSpan::new_from_raw_offset(15, 5, "b", ()) },
                 kind: ErrorKind::Tag
             })
