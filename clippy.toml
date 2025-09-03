@@ -1,5 +1,4 @@
 allow-dbg-in-tests = true
 allow-panic-in-tests = true
-
-disallowed-methods = [
-]
+check-private-items = true
+disallowed-methods = []

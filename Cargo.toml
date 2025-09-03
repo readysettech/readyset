@@ -300,6 +300,12 @@ strip = "debuginfo"
 inherits = "release"
 lto = "off"
 
+[workspace.lints.rust]
+unused_unsafe = "deny"
+
 [workspace.lints.clippy]
 dbg_macro = "warn"
+missing_safety_doc = "deny"
+multiple_unsafe_ops_per_block = "deny"
 todo = "deny"
+undocumented_unsafe_blocks = "deny"
