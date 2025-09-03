@@ -573,13 +573,19 @@ pub struct Row(Rc<Vec<DfValue>>);
 
 pub type Rows = HashBag<Row, RandomState>;
 
+// SAFETY: All references to the same row always belong to the same `State`, so won't be cloned
+// across threads (which would be UB). See [`Row:clone`].
 unsafe impl Send for Row {}
 
 impl Row {
+    /// Clone a row with a `State` and its original thread.
+    ///
+    /// # Safety
+    ///
     /// This is very unsafe. Since `Row` unsafely implements `Send`, one can clone a row
     /// and have two `Row`s with an inner Rc being sent to two different threads leading
     /// to undefined behaviour. In the context of `State` it is only safe because all references
-    /// to the same row always belong to the same state.
+    /// to the same row always belong to the same state, which lives on a single thread.
     pub(crate) unsafe fn clone(&self) -> Self {
         Row(Rc::clone(&self.0))
     }
