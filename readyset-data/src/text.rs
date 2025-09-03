@@ -215,8 +215,7 @@ impl Text {
     /// `as_str` is called and it does not.
     #[inline]
     pub fn from_slice(v: &[u8], collation: Collation) -> Self {
-        // SAFETY: passing `false` to `valid`, which means we will validate later (eg during
-        // `as_str`)
+        // SAFETY: passing `false` to `valid`, which means we will validate later (i.e. in `as_str`)
         unsafe { Self::new(false, collation, v) }
     }
 
@@ -227,7 +226,13 @@ impl Text {
         unsafe { Self::new(true, collation, s.as_bytes()) }
     }
 
-    /// SAFETY: If `header.valid` is true, `v` must contain valid UTF-8
+    /// Construct a new possibly-valid `Text` value. If it has not been validated, it will be
+    /// validated on first use in [`Text::as_str`], which may panic if the text is not valid UTF-8
+    /// (regardless of whether it was initially marked as valid or not).
+    ///
+    /// # Safety
+    ///
+    /// If `valid` is true, `v` must contain valid UTF-8.
     unsafe fn new(valid: bool, collation: Collation, v: &[u8]) -> Self {
         Self {
             inner: triomphe::ThinArc::from_header_and_slice(
