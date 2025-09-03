@@ -2026,6 +2026,46 @@ where
         Ok(noria_connector::QueryResult::Empty)
     }
 
+    async fn create_deep_cache(
+        &mut self,
+        mut name: Option<Relation>,
+        stmt: SelectStatement,
+        search_path: Option<Vec<SqlIdentifier>>,
+        always: bool,
+        concurrently: bool,
+        ddl_req: Option<CacheDDLRequest>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let res = self
+            .create_cached_query(&mut name, stmt, search_path, always, concurrently)
+            .await;
+        // The extend_recipe may have failed, in which case we should remove our intention
+        // to create this cache. Extend recipe waits a bit and then returns an
+        // Ok(ExtendRecipeResult::Pending) if it is still creating a cache in the
+        // background, so we don't remove the ddl request for timeouts.
+        if let Err(e) = &res {
+            if let Some(ddl_req) = ddl_req {
+                let remove_res = retry_with_exponential_backoff!(
+                    || async {
+                        let ddl_req = ddl_req.clone();
+                        self.authority.remove_cache_ddl_request(ddl_req).await
+                    },
+                    retries: 5,
+                    delay: 1,
+                    backoff: 2,
+                );
+                if remove_res.is_err() {
+                    error!("Failed to remove stored 'create cache' request. It will be re-run if there is a backwards incompatible upgrade.");
+                }
+            }
+            error!(
+                name = %name.unwrap_or("".into()).display_unquoted(),
+                "Failed to create cache: {}",
+                e
+            );
+        }
+        res
+    }
+
     /// Forwards an `EXPLAIN CREATE CACHE` request to ReadySet. Where possible, this method performs
     /// the dry run in the request path so we can return a result to the client immediately. If we
     /// encounter an error we think might be transient or if the query is unsupported and we might
@@ -2465,36 +2505,15 @@ where
                     None
                 };
 
-                let mut name = name.clone();
-                let res = self
-                    .create_cached_query(&mut name, stmt, search_path, *always, *concurrently)
-                    .await;
-                // The extend_recipe may have failed, in which case we should remove our intention
-                // to create this cache. Extend recipe waits a bit and then returns an
-                // Ok(ExtendRecipeResult::Pending) if it is still creating a cache in the
-                // background, so we don't remove the ddl request for timeouts.
-                if let Err(e) = &res {
-                    if let Some(ddl_req) = ddl_req {
-                        let remove_res = retry_with_exponential_backoff!(
-                            || async {
-                                let ddl_req = ddl_req.clone();
-                                self.authority.remove_cache_ddl_request(ddl_req).await
-                            },
-                            retries: 5,
-                            delay: 1,
-                            backoff: 2,
-                        );
-                        if remove_res.is_err() {
-                            error!("Failed to remove stored 'create cache' request. It will be re-run if there is a backwards incompatible upgrade.");
-                        }
-                    }
-                    error!(
-                        name = %name.unwrap_or("".into()).display_unquoted(),
-                        "Failed to create cache: {}",
-                        e
-                    );
-                }
-                res
+                self.create_deep_cache(
+                    name.clone(),
+                    stmt,
+                    search_path,
+                    *always,
+                    *concurrently,
+                    ddl_req,
+                )
+                .await
             }
             SqlQuery::DropCache(drop_cache) => {
                 if !self.allow_cache_ddl {
