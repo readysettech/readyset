@@ -745,6 +745,27 @@ fn create_cache() {
 }
 
 #[test]
+fn create_deep_shallow_cache() {
+    check_parse_both!("CREATE DEEP CACHE FROM SELECT * FROM users WHERE id = $1");
+    check_parse_both!("CREATE SHALLOW CACHE FROM SELECT * FROM users WHERE id = $1");
+    check_parse_both!("CREATE CACHE FROM SELECT * FROM users WHERE id = $1");
+}
+
+#[test]
+fn create_deep_cache_policy_fails() {
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE DEEP CACHE POLICY TTL 10 SECONDS FROM SELECT * FROM arst",
+        "only shallow caches support caching policies"
+    );
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "CREATE DEEP CACHE POLICY TTL 10 SECONDS FROM SELECT * FROM arst",
+        "only shallow caches support caching policies"
+    );
+}
+
+#[test]
 fn explain_create_cache() {
     check_parse_mysql!("EXPLAIN CREATE CACHE FROM SELECT * FROM users WHERE id = ?");
     check_parse_mysql!("EXPLAIN\nCREATE CACHE FROM SELECT * FROM users WHERE id = ?");

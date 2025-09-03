@@ -1,5 +1,6 @@
 use std::str;
 use std::str::FromStr;
+use std::time::Duration;
 
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case};
@@ -820,7 +821,10 @@ pub fn view_creation(
 }
 
 /// Extract the [`CreateCacheOption`] from a `CREATE CACHE statement.
-fn cached_query_options(mut i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateCacheOptions> {
+fn cached_query_options(
+    mut i: LocatedSpan<&[u8]>,
+    cache_type: Option<CacheType>,
+) -> NomSqlResult<&[u8], CreateCacheOptions> {
     // Create an error given the position
     fn error(i: LocatedSpan<&[u8]>) -> nom::Err<NomSqlError<&[u8]>> {
         nom::Err::Failure(NomSqlError::from_error_kind(i, ErrorKind::Permutation))
@@ -830,6 +834,7 @@ fn cached_query_options(mut i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Create
     enum Option {
         Always,
         Concurrently,
+        Policy(EvictionPolicy),
     }
 
     let mut opts = CreateCacheOptions::default();
@@ -842,6 +847,24 @@ fn cached_query_options(mut i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Create
         map(tuple((tag_no_case("concurrently"), whitespace1)), |_| {
             Option::Concurrently
         }),
+        map(
+            tuple((
+                tag_no_case("policy"),
+                whitespace1,
+                tag_no_case("ttl"),
+                whitespace1,
+                map_res(
+                    map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
+                    u64::from_str,
+                ),
+                whitespace1,
+                tag_no_case("seconds"),
+                whitespace1,
+            )),
+            |(_, _, _, _, duration_secs, _, _, _)| {
+                Option::Policy(EvictionPolicy::Ttl(Duration::from_secs(duration_secs)))
+            },
+        ),
     ))(i)
     {
         // Error if the same option appears twice.
@@ -853,6 +876,14 @@ fn cached_query_options(mut i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Create
             }
             Option::Concurrently => {
                 if std::mem::replace(&mut opts.concurrently, true) {
+                    return Err(error(i));
+                }
+            }
+            Option::Policy(policy) => {
+                if opts.policy.replace(policy).is_some() {
+                    return Err(error(i));
+                }
+                if cache_type != Some(CacheType::Shallow) {
                     return Err(error(i));
                 }
             }
@@ -883,9 +914,19 @@ pub fn create_cached_query(
         let unparsed_create_cache_statement = Some(String::from_utf8_lossy(*i).into());
         let (i, _) = tag_no_case("create")(i)?;
         let (i, _) = whitespace1(i)?;
+
+        let (i, cache_type) = opt(alt((
+            map(terminated(tag_no_case("deep"), whitespace1), |_| {
+                CacheType::Deep
+            }),
+            map(terminated(tag_no_case("shallow"), whitespace1), |_| {
+                CacheType::Shallow
+            }),
+        )))(i)?;
+
         let (i, _) = tag_no_case("cache")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, opts) = cached_query_options(i)?;
+        let (i, opts) = cached_query_options(i, cache_type)?;
         let (i, name) = opt(terminated(relation(dialect), whitespace1))(i)?;
         let (i, _) = tag_no_case("from")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -895,8 +936,8 @@ pub fn create_cached_query(
             i,
             CreateCacheStatement {
                 name,
-                cache_type: None,
-                policy: None,
+                cache_type,
+                policy: opts.policy,
                 inner,
                 unparsed_create_cache_statement,
                 always: opts.always,
@@ -1733,6 +1774,26 @@ mod tests {
         }
 
         #[test]
+        fn create_cached_query_with_deep_shallow() {
+            let q1 = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE DEEP CACHE FROM SELECT id FROM users WHERE name = ?"
+            );
+            let q2 = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE SHALLOW CACHE FROM SELECT id FROM users WHERE name = ?"
+            );
+            let q3 = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE FROM SELECT id FROM users WHERE name = ?"
+            );
+
+            assert_eq!(q1.cache_type, Some(CacheType::Deep));
+            assert_eq!(q2.cache_type, Some(CacheType::Shallow));
+            assert_eq!(q3.cache_type, None);
+        }
+
+        #[test]
         fn display_create_query_cache() {
             let stmt = test_parse!(
                 create_cached_query(Dialect::MySQL),
@@ -1743,6 +1804,48 @@ mod tests {
                 res,
                 "CREATE CACHE CONCURRENTLY ALWAYS `foo` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
             );
+        }
+
+        #[test]
+        fn display_create_deep_shallow_cache() {
+            let deep_stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE DEEP CACHE foo FROM SELECT id FROM users WHERE name = ?"
+            );
+            let shallow_stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE SHALLOW CACHE bar FROM SELECT id FROM users WHERE name = ?"
+            );
+
+            let deep_res = deep_stmt.display(Dialect::MySQL).to_string();
+            let shallow_res = shallow_stmt.display(Dialect::MySQL).to_string();
+
+            assert_eq!(
+                deep_res,
+                "CREATE DEEP CACHE `foo` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
+            );
+            assert_eq!(
+                shallow_res,
+                "CREATE SHALLOW CACHE `bar` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
+            );
+        }
+
+        #[test]
+        fn create_deep_cache_policy_fails() {
+            let result = create_cached_query(Dialect::MySQL)(LocatedSpan::new(
+                b"CREATE DEEP CACHE POLICY TTL 10 SECONDS FROM SELECT * FROM arst",
+            ));
+            assert!(result.is_err());
+
+            let result = create_cached_query(Dialect::PostgreSQL)(LocatedSpan::new(
+                b"CREATE DEEP CACHE POLICY TTL 10 SECONDS FROM SELECT * FROM arst",
+            ));
+            assert!(result.is_err());
+
+            let result = create_cached_query(Dialect::MySQL)(LocatedSpan::new(
+                b"CREATE CACHE POLICY TTL 10 SECONDS FROM SELECT * FROM arst",
+            ));
+            assert!(result.is_err());
         }
 
         #[test]

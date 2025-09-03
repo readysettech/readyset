@@ -4,9 +4,9 @@ use std::num::ParseIntError;
 use clap::ValueEnum;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{
-    AddTablesStatement, AlterReadysetStatement, AlterTableStatement, CacheInner,
-    CreateTableStatement, CreateViewStatement, DropCacheStatement, Expr, ResnapshotTableStatement,
-    SelectStatement, SqlQuery, SqlType, TableKey,
+    AddTablesStatement, AlterReadysetStatement, AlterTableStatement, CacheInner, CacheType,
+    CreateCacheStatement, CreateTableStatement, CreateViewStatement, DropCacheStatement,
+    EvictionPolicy, Expr, ResnapshotTableStatement, SelectStatement, SqlQuery, SqlType, TableKey,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -199,18 +199,22 @@ fn sqlparser_dialect_from_readyset_dialect(
 enum ReadysetKeyword {
     CACHED,
     CACHES,
+    DEEP,
     DOMAINS,
     ENTER,
     EXIT,
     MAINTENANCE,
     MATERIALIZATIONS,
     MIGRATION,
+    POLICY,
     PROXIED,
     QUERIES,
     READYSET,
     RESNAPSHOT,
+    SHALLOW,
     SIMPLIFIED,
     SUPPORTED,
+    TTL,
     /// To match both Readyset and sqlparser keywords in one go, we want to be able to accept both
     /// in the same function. So here we just allow falling back to a sqlparser keyword.
     Standard(sqlparser::keywords::Keyword),
@@ -221,18 +225,22 @@ impl ReadysetKeyword {
         match self {
             Self::CACHED => "CACHED",
             Self::CACHES => "CACHES",
+            Self::DEEP => "DEEP",
             Self::DOMAINS => "DOMAINS",
             Self::ENTER => "ENTER",
             Self::EXIT => "EXIT",
             Self::MAINTENANCE => "MAINTENANCE",
             Self::MATERIALIZATIONS => "MATERIALIZATIONS",
             Self::MIGRATION => "MIGRATION",
+            Self::POLICY => "POLICY",
             Self::PROXIED => "PROXIED",
             Self::QUERIES => "QUERIES",
             Self::READYSET => "READYSET",
             Self::RESNAPSHOT => "RESNAPSHOT",
+            Self::SHALLOW => "SHALLOW",
             Self::SIMPLIFIED => "SIMPLIFIED",
             Self::SUPPORTED => "SUPPORTED",
+            Self::TTL => "TTL",
             Self::Standard(_) => panic!(
                 "Standard sqlparser keywords should only be used with `parse_keyword`, not string comparison"
             ),
@@ -366,11 +374,17 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
 /// Expects `CREATE CACHE` was already parsed. Attempts to parse a Readyset-specific create cache
 /// statement. Will simply error if it fails, since there's no relevant standard SQL to fall back to.
 ///
-/// CREATE CACHE
+/// CREATE [type] CACHE
+///     [POLICY TTL <num> SECONDS]
 ///     [cache_option [, cache_option] ...]
 ///     [<name>]
 ///     FROM
 ///     <SELECT statement>
+///
+/// type:
+///     | DEEP
+///     | SHALLOW
+///     | // empty -> DEEP
 ///
 /// cache_options:
 ///     | ALWAYS
@@ -382,6 +396,35 @@ fn parse_create_cache(
     dialect: Dialect,
     input: impl AsRef<str>,
 ) -> Result<SqlQuery, ReadysetParsingError> {
+    let cache_type = parse_create_cache_keywords(parser)?;
+
+    // Parse optional policy (POLICY TTL N SECONDS)
+    let policy = if parse_readyset_keyword(parser, ReadysetKeyword::POLICY) {
+        if cache_type != Some(CacheType::Shallow) {
+            return Err(ReadysetParsingError::ReadysetParsingError(
+                "only shallow caches support caching policies".into(),
+            ));
+        }
+        if !parse_readyset_keyword(parser, ReadysetKeyword::TTL) {
+            return Err(ReadysetParsingError::ReadysetParsingError(
+                "Expected TTL after POLICY".into(),
+            ));
+        }
+        let duration_secs = parser.parse_literal_uint().map_err(|_| {
+            ReadysetParsingError::ReadysetParsingError("couldn't parse TTL duration".into())
+        })?;
+        if !parser.parse_keyword(Keyword::SECONDS) {
+            return Err(ReadysetParsingError::ReadysetParsingError(
+                "Expected SECONDS after TTL duration".into(),
+            ));
+        }
+        Some(EvictionPolicy::Ttl(std::time::Duration::from_secs(
+            duration_secs,
+        )))
+    } else {
+        None
+    };
+
     let mut always = false;
     let mut concurrently = false;
     match parser.parse_one_of_keywords(&[Keyword::ALWAYS, Keyword::CONCURRENTLY]) {
@@ -424,17 +467,71 @@ fn parse_create_cache(
         .join(" ");
 
     let query = parse_query_for_create_cache(parser, dialect);
-    Ok(SqlQuery::CreateCache(
-        readyset_sql::ast::CreateCacheStatement {
-            name,
-            cache_type: None,
-            policy: None,
-            inner: query.map_err(|_| remaining_query),
-            unparsed_create_cache_statement: Some(input.as_ref().trim().to_string()),
-            always,
-            concurrently,
-        },
-    ))
+    Ok(SqlQuery::CreateCache(CreateCacheStatement {
+        name,
+        cache_type,
+        policy,
+        inner: query.map_err(|_| remaining_query),
+        unparsed_create_cache_statement: Some(input.as_ref().trim().to_string()),
+        always,
+        concurrently,
+    }))
+}
+
+fn peek_create_cache(parser: &mut Parser) -> bool {
+    let backup = |parser: &mut Parser<'_>, n| {
+        for _ in 0..n {
+            parser.prev_token();
+        }
+    };
+
+    if !parser.parse_keyword(Keyword::CREATE) {
+        return false;
+    }
+
+    if parser.parse_keyword(Keyword::CACHE) {
+        backup(parser, 2);
+        return true;
+    }
+
+    if parse_readyset_keyword(parser, ReadysetKeyword::DEEP)
+        || parse_readyset_keyword(parser, ReadysetKeyword::SHALLOW)
+    {
+        if parser.parse_keyword(Keyword::CACHE) {
+            backup(parser, 3);
+            return true;
+        }
+        backup(parser, 1);
+    }
+
+    backup(parser, 1);
+    false
+}
+
+fn parse_create_cache_keywords(
+    parser: &mut Parser,
+) -> Result<Option<CacheType>, ReadysetParsingError> {
+    if !parser.parse_keyword(Keyword::CREATE) {
+        return Err(ReadysetParsingError::ReadysetParsingError(
+            "Expected CREATE".into(),
+        ));
+    }
+
+    let cache_type = if parse_readyset_keyword(parser, ReadysetKeyword::DEEP) {
+        Some(CacheType::Deep)
+    } else if parse_readyset_keyword(parser, ReadysetKeyword::SHALLOW) {
+        Some(CacheType::Shallow)
+    } else {
+        None
+    };
+
+    if !parser.parse_keyword(Keyword::CACHE) {
+        return Err(ReadysetParsingError::ReadysetParsingError(
+            "Expected CACHE after CREATE [DEEP|SHALLOW]".into(),
+        ));
+    }
+
+    Ok(cache_type)
 }
 
 fn parse_query_for_create_cache(
@@ -491,7 +588,7 @@ fn parse_explain(
             "unexpected SIMPLIFIED without GRAPHVIZ".into(),
         ));
     }
-    if parser.parse_keywords(&[Keyword::CREATE, Keyword::CACHE]) {
+    if parser.peek_keyword(Keyword::CREATE) {
         return match parse_create_cache(parser, dialect, input)? {
             SqlQuery::CreateCache(inner) => {
                 return Ok(SqlQuery::Explain(
@@ -675,7 +772,7 @@ fn parse_readyset_query(
 ) -> Result<SqlQuery, ReadysetParsingError> {
     if parser.parse_keyword(Keyword::ALTER) {
         parse_alter(parser, dialect)
-    } else if parser.parse_keywords(&[Keyword::CREATE, Keyword::CACHE]) {
+    } else if peek_create_cache(parser) {
         parse_create_cache(parser, dialect, input)
     } else if parser.parse_keyword(Keyword::DROP) {
         parse_drop(parser, dialect)
