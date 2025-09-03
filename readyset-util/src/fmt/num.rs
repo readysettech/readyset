@@ -18,25 +18,46 @@ impl Digits {
         b"91", b"92", b"93", b"94", b"95", b"96", b"97", b"98", b"99",
     ];
 
-    fn get(n: u32) -> &'static [u8; 2] {
+    /// Returns a reference to the two-digit string representation of the given number.
+    ///
+    /// # Safety
+    ///
+    /// The caller must guarantee that `n` is less than 100, because (only) all 2-digit numbers are
+    /// in the lookup table.
+    unsafe fn get(n: u32) -> &'static [u8; 2] {
+        // SAFETY: Caller guarantees n < 100 and every 2-digit number is in the lookup table.
         unsafe { Self::DIGIT_TABLE.get_unchecked(n as usize) }
     }
 }
 
 trait PutU32Unchecked {
-    fn put_one_digit(&mut self, n: u32, pos: usize);
-    fn put_two_digits(&mut self, n: u32, pos: usize);
+    /// Puts a single digit into the given position.
+    ///
+    /// # Safety
+    ///
+    /// The caller must guarantee that `pos` is within bounds.
+    unsafe fn put_one_digit(&mut self, n: u32, pos: usize);
+
+    /// Puts the number `n` formatted as two digits into the given position.
+    ///
+    /// # Safety
+    ///
+    /// The caller must guarantee that `pos` and `pos + 1` are within bounds.
+    unsafe fn put_two_digits(&mut self, n: u32, pos: usize);
 }
 
 impl PutU32Unchecked for &mut [u8] {
-    fn put_one_digit(&mut self, n: u32, pos: usize) {
+    unsafe fn put_one_digit(&mut self, n: u32, pos: usize) {
+        // SAFETY: Caller guarantees `pos` is within bounds.
         let slice = unsafe { self.get_unchecked_mut(pos) };
         *slice = b'0' + n as u8;
     }
 
-    fn put_two_digits(&mut self, n: u32, pos: usize) {
+    unsafe fn put_two_digits(&mut self, n: u32, pos: usize) {
+        // SAFETY: Caller guarantees `pos` and `pos + 1` are within bounds.
         let slice = unsafe { self.get_unchecked_mut(pos..(pos + 2)) };
-        slice[0..2].copy_from_slice(Digits::get(n));
+        // SAFETY: Caller guarantees n < 100 and every 2-digit number is in the lookup table.
+        slice[0..2].copy_from_slice(unsafe { Digits::get(n) });
     }
 }
 
@@ -48,7 +69,8 @@ impl PutU32Unchecked for &mut [u8] {
 // https://github.com/postgres/postgres/blob/c6cf6d353c2865d82356ac86358622a101fde8ca/src/backend/utils/adt/numutils.c#L1270
 pub fn write_padded_u32(mut value: u32, width: u32, dst: &mut BytesMut) {
     if value < 100 && width == 2 {
-        dst.put_slice(Digits::get(value));
+        // SAFETY: `value` < 100, and every 2-digit number is in the lookup table.
+        dst.put_slice(unsafe { Digits::get(value) });
     } else {
         let num_digits = value.checked_ilog10().unwrap_or(0) + 1;
         let padding = width.saturating_sub(num_digits);
@@ -78,8 +100,10 @@ pub fn write_padded_u32(mut value: u32, width: u32, dst: &mut BytesMut) {
 
                 value /= 10000;
 
-                buf.put_two_digits(c0, pos - 2);
-                buf.put_two_digits(c1, pos - 4);
+                // SAFETY: `c0` < 100, and every 2-digit number is in the lookup table.
+                unsafe { buf.put_two_digits(c0, pos - 2) };
+                // SAFETY: `c1` < 100, and every 2-digit number is in the lookup table.
+                unsafe { buf.put_two_digits(c1, pos - 4) };
                 i += 4;
             }
 
@@ -89,16 +113,22 @@ pub fn write_padded_u32(mut value: u32, width: u32, dst: &mut BytesMut) {
 
                 value /= 100;
 
-                buf.put_two_digits(c, pos - 2);
+                // SAFETY: `c` < 100, and every 2-digit number is in the lookup table.
+                unsafe { buf.put_two_digits(c, pos - 2) };
                 i += 2;
             }
 
             if value >= 10 {
                 let pos = a + num_digits as usize - i;
 
-                buf.put_two_digits(value, pos - 2);
+                // SAFETY: `value` < 100 because by the previous `if` statement, `value` was between
+                // 100 and 9999 and was divided by 100, so it's now between 1 and 99, and every
+                // 2-digit number is in the lookup table. `pos - 2` through `pos` is in bounds.
+                unsafe { buf.put_two_digits(value, pos - 2) };
             } else {
-                buf.put_one_digit(value, a);
+                // SAFETY: `a` is the "start" (leftmost) of the number before we reserved
+                // `num_digits` more space, so it's in bounds.
+                unsafe { buf.put_one_digit(value, a) };
             }
         }
     }
