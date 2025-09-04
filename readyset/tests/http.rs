@@ -5,7 +5,7 @@ use std::time::Duration;
 use clap::Parser;
 use database_utils::{DatabaseType, TlsMode};
 use readyset::psql::PsqlHandler;
-use readyset::{NoriaAdapter, Options};
+use readyset::{init_adapter_runtime, init_adapter_tracing, NoriaAdapter, Options};
 use readyset_adapter::ReadySetStatus;
 use readyset_psql::AuthenticationMethod;
 use readyset_util::eventually;
@@ -49,7 +49,7 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
         TEST_METRICS_ADDRESS,
     ];
 
-    let adapter_options = Options::parse_from(options);
+    let options = Options::parse_from(options);
 
     let mut adapter = NoriaAdapter {
         description: "Readyset test adapter",
@@ -65,14 +65,19 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
         expr_dialect: readyset_data::Dialect::DEFAULT_POSTGRESQL,
     };
 
-    adapter.run(adapter_options).unwrap();
-    Ok(())
+    let rt = init_adapter_runtime()?;
+    let _tracing_guard = init_adapter_tracing(&rt, &options)?;
+    adapter.run(rt, options)
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, postgres_upstream)]
 async fn http_tests() {
-    let _jh = std::thread::spawn(|| start_adapter("http_tests"));
+    std::thread::spawn(|| {
+        if let Err(err) = start_adapter("http_tests") {
+            eprintln!("Failed to start adapter: {err}");
+        }
+    });
 
     eventually!(attempts: 5, sleep: Duration::from_millis(500), run_test: {
         if let Ok(response) = reqwest::get(format!("http://{TEST_METRICS_ADDRESS}/health")).await {

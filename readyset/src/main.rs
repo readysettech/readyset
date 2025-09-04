@@ -4,10 +4,13 @@ use clap::Parser;
 use database_utils::DatabaseType;
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
-use readyset::{NoriaAdapter, Options};
+use readyset::{init_adapter_runtime, init_adapter_tracing, NoriaAdapter, Options};
 
 fn main() -> anyhow::Result<()> {
     let options = Options::parse();
+    let rt = init_adapter_runtime()?;
+    let _tracing_guard = init_adapter_tracing(&rt, &options)?;
+
     match options.database_type()? {
         DatabaseType::MySQL => NoriaAdapter {
             description: "MySQL adapter for Readyset.",
@@ -21,7 +24,7 @@ fn main() -> anyhow::Result<()> {
             parse_dialect: readyset_sql::Dialect::MySQL,
             expr_dialect: readyset_data::Dialect::DEFAULT_MYSQL,
         }
-        .run(options),
+        .run(rt, options),
         DatabaseType::PostgreSQL => NoriaAdapter {
             description: "PostgreSQL adapter for Readyset.",
             default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5433),
@@ -35,6 +38,6 @@ fn main() -> anyhow::Result<()> {
             parse_dialect: readyset_sql::Dialect::PostgreSQL,
             expr_dialect: readyset_data::Dialect::DEFAULT_POSTGRESQL,
         }
-        .run(options),
+        .run(rt, options),
     }
 }

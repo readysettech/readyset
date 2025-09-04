@@ -50,6 +50,7 @@ use readyset_server::PrometheusBuilder;
 use readyset_sql::ast::Relation;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
+use readyset_tracing::TracingGuard;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use readyset_util::futures::abort_on_panic;
@@ -132,7 +133,7 @@ pub struct Options {
 
     /// ReadySet deployment ID. All nodes in a deployment must have the same deployment ID.
     #[arg(long, env = "DEPLOYMENT", default_value = "readyset.db", value_parser = NonEmptyStringValueParser::new(), hide = true)]
-    deployment: String,
+    pub deployment: String,
 
     /// Database engine protocol to emulate. If omitted, will be inferred from the
     /// `upstream-db-url`
@@ -738,19 +739,26 @@ where
     out
 }
 
+pub fn init_adapter_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
+    Ok(tokio::runtime::Builder::new_multi_thread()
+        .with_sys_hooks()
+        .enable_all()
+        .thread_name("Adapter Runtime")
+        .build()?)
+}
+
+pub fn init_adapter_tracing(
+    rt: &tokio::runtime::Runtime,
+    options: &Options,
+) -> anyhow::Result<TracingGuard> {
+    Ok(rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?)
+}
+
 impl<H> NoriaAdapter<H>
 where
     H: ConnectionHandler + Clone + Send + Sync + 'static,
 {
-    pub fn run(&mut self, options: Options) -> anyhow::Result<()> {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .with_sys_hooks()
-            .enable_all()
-            .thread_name("Adapter Runtime")
-            .build()?;
-
-        let _guard =
-            rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?;
+    pub fn run(&mut self, rt: tokio::runtime::Runtime, options: Options) -> anyhow::Result<()> {
         info!(?options, "Starting Readyset adapter");
 
         if options.deployment_mode.is_standalone() {

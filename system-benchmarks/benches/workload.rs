@@ -30,7 +30,7 @@ use database_utils::{
 };
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
-use readyset::{NoriaAdapter, Options};
+use readyset::{init_adapter_runtime, init_adapter_tracing, NoriaAdapter, Options};
 use readyset_client::get_metric;
 use readyset_client::metrics::{recorded, MetricsDump};
 use readyset_data::DfValue;
@@ -528,7 +528,11 @@ impl AdapterHandle {
                     match AdapterCommand::receive(&mut sock1)? {
                         AdapterCommand::StartReadyset => {
                             let args_clone = args.clone();
-                            std::thread::spawn(move || start_adapter(args_clone));
+                            std::thread::spawn(move || {
+                                if let Err(err) = start_adapter(args_clone) {
+                                    eprintln!("Failed to start adapter: {err}");
+                                }
+                            });
                         }
                         AdapterCommand::StopReadyset => {
                             std::process::exit(0);
@@ -704,51 +708,45 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
         options.push("--feature-materialization-persistence");
     }
 
-    let adapter_options = Options::parse_from(options);
+    let options = Options::parse_from(options);
+    let rt = init_adapter_runtime()?;
+    let _tracing_guard = init_adapter_tracing(&rt, &options)?;
 
     match database_type {
-        DatabaseType::MySQL => {
-            let mut adapter = NoriaAdapter {
-                description: "Readyset benchmark adapter",
-                default_address: SocketAddr::new(
-                    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                    BENCHMARK_PORT,
-                ),
-                connection_handler: MySqlHandler {
-                    enable_statement_logging: false,
-                    tls_acceptor: None,
-                    tls_mode: TlsMode::Optional,
-                },
-                database_type: DatabaseType::MySQL,
-                parse_dialect: readyset_sql::Dialect::MySQL,
-                expr_dialect: readyset_data::Dialect::DEFAULT_MYSQL,
-            };
-
-            adapter.run(adapter_options).unwrap();
+        DatabaseType::MySQL => NoriaAdapter {
+            description: "Readyset benchmark adapter",
+            default_address: SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                BENCHMARK_PORT,
+            ),
+            connection_handler: MySqlHandler {
+                enable_statement_logging: false,
+                tls_acceptor: None,
+                tls_mode: TlsMode::Optional,
+            },
+            database_type: DatabaseType::MySQL,
+            parse_dialect: readyset_sql::Dialect::MySQL,
+            expr_dialect: readyset_data::Dialect::DEFAULT_MYSQL,
         }
-        DatabaseType::PostgreSQL => {
-            let mut adapter = NoriaAdapter {
-                description: "Readyset benchmark adapter",
-                default_address: SocketAddr::new(
-                    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                    BENCHMARK_PORT,
-                ),
-                connection_handler: PsqlHandler {
-                    authentication_method: AuthenticationMethod::Cleartext,
-                    tls_acceptor: None,
-                    enable_statement_logging: false,
-                    tls_mode: TlsMode::Optional,
-                },
-                database_type: DatabaseType::PostgreSQL,
-                parse_dialect: readyset_sql::Dialect::PostgreSQL,
-                expr_dialect: readyset_data::Dialect::DEFAULT_POSTGRESQL,
-            };
-
-            adapter.run(adapter_options).unwrap();
+        .run(rt, options),
+        DatabaseType::PostgreSQL => NoriaAdapter {
+            description: "Readyset benchmark adapter",
+            default_address: SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                BENCHMARK_PORT,
+            ),
+            connection_handler: PsqlHandler {
+                authentication_method: AuthenticationMethod::Cleartext,
+                tls_acceptor: None,
+                enable_statement_logging: false,
+                tls_mode: TlsMode::Optional,
+            },
+            database_type: DatabaseType::PostgreSQL,
+            parse_dialect: readyset_sql::Dialect::PostgreSQL,
+            expr_dialect: readyset_data::Dialect::DEFAULT_POSTGRESQL,
         }
+        .run(rt, options),
     }
-
-    Ok(())
 }
 
 /// Drop all currently cached queries
