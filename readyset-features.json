@@ -5,6 +5,7 @@
         "command-line": "--feature-full-materialization",
         "environment-variable": "FEATURE_FULL_MATERIALIZATION",
         "description": "Allow the creation of fully materialized nodes.",
+        "dialect": ["mysql", "postgresql"],
         "default": true
     },
     {
@@ -13,6 +14,7 @@
         "command-line": "--feature-mixed-comparisons",
         "environment-variable": "FEATURE_MIXED_COMPARISONS",
         "description": "Enable support for mixing equality and range comparisons on query parameters.",
+        "dialect": ["mysql", "postgresql"],
         "default": false
     },
     {
@@ -21,6 +23,7 @@
         "command-line": "--feature-pagination",
         "environment-variable": "FEATURE_PAGINATION",
         "description": "Enable support for Pagination in dataflow.\n\nNOTE: If enabled, this must be set for all Readyset processes (both servers and adapters).",
+        "dialect": ["mysql", "postgresql"],
         "default": false
     },
     {
@@ -29,6 +32,7 @@
         "command-line": "--feature-post-lookup",
         "environment-variable": "FEATURE_POST_LOOKUP",
         "description": "Enable support for Post-Lookup (queries which do extra work after the lookup into the reader).\n\nIf the Top K feature is disabled, Post-Lookup can still provide support for some queries supported by Top K, albeit with lower performance.",
+        "dialect": ["mysql", "postgresql"],
         "default": false
     },
     {
@@ -37,6 +41,7 @@
         "command-line": "--feature-straddled-joins",
         "environment-variable": "FEATURE_STRADDLED_JOINS",
         "description": "Enable support for straddled joins (joins with partial keys traced to both parents).",
+        "dialect": ["mysql", "postgresql"],
         "default": false
     },
     {
@@ -45,6 +50,7 @@
         "command-line": "--feature-topk",
         "environment-variable": "FEATURE_TOPK",
         "description": "Enable support for Top K in dataflow.\n\nNOTE: If enabled, this must be set for all Readyset processes (both servers and adapters).",
+        "dialect": ["mysql", "postgresql"],
         "default": false
     },
     {
@@ -53,6 +59,7 @@
         "command-line": "--feature-placeholder-inlining",
         "environment-variable": "FEATURE_PLACEHOLDER_INLINING",
         "description": "Whether to allow Readyset to automatically create inlined caches when we receive a CREATE CACHE command for a query with unsupported placeholders.\n\nIf set, we will create a cache with literals inlined in the unsupported placeholder positions every time the statement is executed with a new set of parameters.",
+        "dialect": ["mysql", "postgresql"],
         "default": false
     },
     {
@@ -61,6 +68,7 @@
         "command-line": "--feature-materialization-persistence",
         "environment-variable": "FEATURE_MATERIALIZATION_PERSISTENCE",
         "description": "Allows fully materialized nodes to be persisted to disk.",
+        "dialect": ["mysql", "postgresql"],
         "default": false
     },
     {
@@ -68,13 +76,15 @@
         "name": "Disable automatic setup of DDL replication triggers (PostgreSQL)",
         "command-line": "--disable-setup-ddl-replication",
         "environment-variable": "DISABLE_SETUP_DDL_REPLICATION",
-        "description": "For PostgreSQL deployments, do not automatically set up DDL replication triggers. Useful for situations where triggers need to be set up separately due to permissions."
+        "description": "For PostgreSQL deployments, do not automatically set up DDL replication triggers. Useful for situations where triggers need to be set up separately due to permissions.",
+        "dialect": ["postgresql"]
     },
     {
         "feature_id": "10",
         "name": "Disable automatic setup of replication publication (PostgreSQL)",
         "command-line": "--disable-create-publication",
         "environment-variable": "DISABLE_CREATE_PUBLICATION",
-        "description": "For PostgreSQL deployments, do not automatically set up logical replication publication, i.e., CREATE PUBLICATION. Useful for situations where logical replication needs to be set up separately due to permissions."
+        "description": "For PostgreSQL deployments, do not automatically set up logical replication publication, i.e., CREATE PUBLICATION. Useful for situations where logical replication needs to be set up separately due to permissions.",
+        "dialect": ["postgresql"]
     }
 ]
