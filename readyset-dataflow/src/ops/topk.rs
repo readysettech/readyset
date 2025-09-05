@@ -68,7 +68,7 @@ impl PartialEq for CurrentRecord<'_, '_> {
 
 impl PartialOrd<[DfValue]> for CurrentRecord<'_, '_> {
     fn partial_cmp(&self, other: &[DfValue]) -> Option<Ordering> {
-        Some(self.order.cmp(self.row.as_ref(), other))
+        Some(self.order.cmp(self.row.as_ref(), other).reverse())
     }
 }
 
