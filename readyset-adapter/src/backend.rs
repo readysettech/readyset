@@ -1934,6 +1934,23 @@ where
         ]))
     }
 
+    fn make_name_and_id<'a>(
+        &self,
+        name: &'a mut Option<Relation>,
+        stmt: &SelectStatement,
+    ) -> (QueryId, &'a Relation, Option<Relation>) {
+        let query_id = QueryId::from_select(stmt, self.noria.schema_search_path());
+        let requested_name = name.clone();
+        let name = match name {
+            Some(name) => &*name,
+            None => {
+                *name = Some(query_id.into());
+                name.as_ref().unwrap()
+            }
+        };
+        (query_id, name, requested_name)
+    }
+
     /// Forwards a `CREATE CACHE` request to ReadySet
     async fn create_cached_query(
         &mut self,
@@ -1944,15 +1961,7 @@ where
         concurrently: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         adapter_rewrites::process_query(&mut stmt, self.noria.rewrite_params())?;
-        let query_id = QueryId::from_select(&stmt, self.noria.schema_search_path());
-        let requested_name = name.clone();
-        let name = match name {
-            Some(name) => &*name,
-            None => {
-                *name = Some(query_id.into());
-                name.as_ref().unwrap()
-            }
-        };
+        let (query_id, name, requested_name) = self.make_name_and_id(name, &stmt);
 
         // If we have existing caches with the same query_id or name, drop them first.
         for CacheExpr {
