@@ -3,6 +3,8 @@
 pub mod mysql;
 pub mod psql;
 pub mod query_logger;
+pub mod verify;
+
 use std::collections::{HashMap, HashSet};
 use std::fs::remove_dir_all;
 use std::future::Future;
@@ -441,6 +443,25 @@ pub struct Options {
     /// Specifies the maximum number of queries to sample per second.
     #[arg(long, env = "SAMPLER_MAX_QUERIES_PER_SECOND", default_value = "100")]
     sampler_max_queries_per_second: u64,
+
+    /// If set, Readyset will only verify if the current configuration is valid and then exit.
+    ///
+    /// On success, the exit code will be zero with a message printed to stdout.  On failure, the
+    /// exit code will be nonzero with a message printed to stderr.
+    ///
+    /// If this option is omitted, Readyset will still perform the verification steps, exiting if
+    /// there is a failure, while outputting a message to the log.  If you want to force Readyset to
+    /// continue to run even if there is a failure, pass --verify-skip.
+    #[arg(long, env = "VERIFY", conflicts_with = "verify_skip")]
+    pub verify: bool,
+
+    /// If set, Readyset will skip the startup verification checks.
+    #[arg(long, env = "VERIFY_SKIP", conflicts_with = "verify")]
+    pub verify_skip: bool,
+
+    /// If set, simulates a startup verification failure.
+    #[arg(long, env = "VERIFY_FAIL", hide = true)]
+    pub verify_fail: bool,
 }
 
 impl Options {
