@@ -8392,44 +8392,6 @@ async fn reroutes_count() {
     shutdown_tx.shutdown().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn forbid_full_materialization() {
-    let (mut g, shutdown_tx) = {
-        let mut builder = builder_for_tests();
-        builder.set_full_materialization(false);
-        builder.set_sharding(Some(DEFAULT_SHARDING));
-        builder.set_persistence(get_persistence_params("forbid_full_materialization"));
-        builder
-            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
-                Arc::new(LocalAuthorityStore::new()),
-            ))))
-            .await
-            .unwrap()
-    };
-    g.extend_recipe(
-        ChangeList::from_strings(vec!["CREATE TABLE t (col INT)"], Dialect::DEFAULT_MYSQL).unwrap(),
-    )
-    .await
-    .unwrap();
-    let res = g
-        .extend_recipe(
-            ChangeList::from_strings(
-                vec!["CREATE CACHE q FROM SELECT * FROM t"],
-                Dialect::DEFAULT_MYSQL,
-            )
-            .unwrap(),
-        )
-        .await;
-    assert!(res.is_err());
-    let err = res.err().unwrap();
-    assert!(err
-        .to_string()
-        .contains("Creation of fully materialized query is disabled"));
-    assert!(err.caused_by_unsupported());
-
-    shutdown_tx.shutdown().await;
-}
-
 // This test replicates the `extend_recipe` path used when we need to resnapshot. The
 // snapshotted DDL may vary slightly from the DDL propagated through the replicator but
 // should not cause the extend_recipe to fail.

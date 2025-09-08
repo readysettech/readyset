@@ -6,7 +6,8 @@
         "environment-variable": "FEATURE_FULL_MATERIALIZATION",
         "description": "Allow the creation of fully materialized nodes.",
         "dialect": ["mysql", "postgresql"],
-        "default": true
+        "default": true,
+        "display": false
     },
     {
         "feature_id": "2",
@@ -15,7 +16,8 @@
         "environment-variable": "FEATURE_MIXED_COMPARISONS",
         "description": "Enable support for mixing equality and range comparisons on query parameters.",
         "dialect": ["mysql", "postgresql"],
-        "default": false
+        "default": false,
+        "display": true
     },
     {
         "feature_id": "3",
@@ -24,7 +26,8 @@
         "environment-variable": "FEATURE_PAGINATION",
         "description": "Enable support for Pagination in dataflow.\n\nNOTE: If enabled, this must be set for all Readyset processes (both servers and adapters).",
         "dialect": ["mysql", "postgresql"],
-        "default": false
+        "default": false,
+        "display": true
     },
     {
         "feature_id": "4",
@@ -33,7 +36,8 @@
         "environment-variable": "FEATURE_POST_LOOKUP",
         "description": "Enable support for Post-Lookup (queries which do extra work after the lookup into the reader).\n\nIf the Top K feature is disabled, Post-Lookup can still provide support for some queries supported by Top K, albeit with lower performance.",
         "dialect": ["mysql", "postgresql"],
-        "default": false
+        "default": false,
+        "display": true
     },
     {
         "feature_id": "5",
@@ -42,7 +46,8 @@
         "environment-variable": "FEATURE_STRADDLED_JOINS",
         "description": "Enable support for straddled joins (joins with partial keys traced to both parents).",
         "dialect": ["mysql", "postgresql"],
-        "default": false
+        "default": false,
+        "display": true
     },
     {
         "feature_id": "6",
@@ -51,7 +56,8 @@
         "environment-variable": "FEATURE_TOPK",
         "description": "Enable support for Top K in dataflow.\n\nNOTE: If enabled, this must be set for all Readyset processes (both servers and adapters).",
         "dialect": ["mysql", "postgresql"],
-        "default": false
+        "default": false,
+        "display": true
     },
     {
         "feature_id": "7",
@@ -60,7 +66,8 @@
         "environment-variable": "FEATURE_PLACEHOLDER_INLINING",
         "description": "Whether to allow Readyset to automatically create inlined caches when we receive a CREATE CACHE command for a query with unsupported placeholders.\n\nIf set, we will create a cache with literals inlined in the unsupported placeholder positions every time the statement is executed with a new set of parameters.",
         "dialect": ["mysql", "postgresql"],
-        "default": false
+        "default": false,
+        "display": true
     },
     {
         "feature_id": "8",
@@ -69,7 +76,8 @@
         "environment-variable": "FEATURE_MATERIALIZATION_PERSISTENCE",
         "description": "Allows fully materialized nodes to be persisted to disk.",
         "dialect": ["mysql", "postgresql"],
-        "default": false
+        "default": false,
+        "display": true
     },
     {
         "feature_id": "9",
@@ -77,7 +85,9 @@
         "command-line": "--disable-setup-ddl-replication",
         "environment-variable": "DISABLE_SETUP_DDL_REPLICATION",
         "description": "For PostgreSQL deployments, do not automatically set up DDL replication triggers. Useful for situations where triggers need to be set up separately due to permissions.",
-        "dialect": ["postgresql"]
+        "dialect": ["postgresql"],
+        "default": false,
+        "display": true
     },
     {
         "feature_id": "10",
@@ -85,6 +95,8 @@
         "command-line": "--disable-create-publication",
         "environment-variable": "DISABLE_CREATE_PUBLICATION",
         "description": "For PostgreSQL deployments, do not automatically set up logical replication publication, i.e., CREATE PUBLICATION. Useful for situations where logical replication needs to be set up separately due to permissions.",
-        "dialect": ["postgresql"]
+        "dialect": ["postgresql"],
+        "default": false,
+        "display": true
     }
 ]

@@ -568,7 +568,7 @@ pub struct WorkerOptions {
     #[arg(long = "nopartial", hide = true)]
     pub no_partial: bool,
 
-    /// Allow the creation of fully materialized nodes.
+    /// DEPRECATED: Kept for backwards compatibility.
     // XXX JCD keep features synchronized with readyset-features.json
     #[arg(
         long,

@@ -81,14 +81,6 @@ pub struct Config {
     /// [`PacketFilter`]: readyset_dataflow::node::special::PacketFilter
     pub packet_filters_enabled: bool,
 
-    /// Whether queries that require full materialization are allowed.
-    ///
-    /// If this is set to false, migrations that add queries that require full materialization will
-    /// return [`ReadySetError::Unsupported`].
-    ///
-    /// Defaults to `false`
-    pub allow_full_materialization: bool,
-
     /// Whether queries that contain straddled joins (joins with partial keys traced to both
     /// parent) are allowed
     ///
@@ -115,7 +107,6 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             packet_filters_enabled: false,
-            allow_full_materialization: false,
             allow_straddled_joins: false,
             partial_enabled: true,
             frontier_strategy: FrontierStrategy::None,
@@ -633,14 +624,6 @@ impl Materializations {
                 for (mi, indices) in add {
                     replay_obligations.entry(mi).or_default().extend(indices);
                 }
-            } else if !graph[ni].is_base() && !self.config.allow_full_materialization {
-                unsupported!(
-                    "Creation of fully materialized query is disabled \
-                     (node {} / {} / {}  would be fully materialized)",
-                    ni.index(),
-                    graph[ni].name().display_unquoted(),
-                    graph[ni].description(),
-                );
             } else {
                 invariant!(
                     !graph[ni].purge,

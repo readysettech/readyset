@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{self, Duration};
 
-use anyhow::bail;
 use database_utils::{ReplicationServerId, UpstreamConfig};
 use dataflow::PersistenceParameters;
 use readyset_client::consensus::{
@@ -84,14 +83,7 @@ impl Builder {
         if opts.no_partial {
             builder.disable_partial();
         }
-        if opts.feature_materialization_persistence && !opts.feature_full_materialization {
-            bail!(
-                "--feature-full-materialization must be enabled if using \
-                 --feature-materialization-persistence"
-            );
-        }
-        if opts.feature_full_materialization {
-            builder.set_full_materialization(true);
+        if opts.feature_materialization_persistence {
             builder.set_materialization_persistence(opts.feature_materialization_persistence);
         }
         if opts.enable_packet_filters {
@@ -143,7 +135,6 @@ impl Builder {
     pub fn for_tests() -> Self {
         let mut builder = Self::default();
         builder.set_abort_on_task_failure(false);
-        builder.set_full_materialization(true);
         builder.set_post_lookup(true);
         builder.set_parsing_preset(ParsingPreset::BothPanicOnMismatch);
         builder
@@ -173,16 +164,6 @@ impl Builder {
     /// Which nodes should be placed beyond the materialization frontier?
     pub fn set_frontier_strategy(&mut self, f: FrontierStrategy) {
         self.config.materialization_config.frontier_strategy = f;
-    }
-
-    /// Allow the creation of all fully materialized nodes
-    ///
-    /// Unless this is called with `true`, any migrations that add fully
-    /// materialized nodes will return [`ReadySetError::Unsupported`]
-    pub fn set_full_materialization(&mut self, enabled: bool) {
-        self.config
-            .materialization_config
-            .allow_full_materialization = enabled;
     }
 
     /// Set sharding policy for all subsequent migrations; `None` or `Some(x)` where x <= 1 disables
