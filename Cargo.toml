@@ -77,7 +77,7 @@ resolver = "2"
 consulrs = { git = "https://github.com/readysettech/consulrs.git", branch = "allow-disabling-rustls-tls-2" }
 
 # overridden in the patch section above
-mysql_async = "0.36.1"
+mysql_async = { version = "0.36.1", features = ["native-tls-tls"] }
 
 # some of these are overridden in the patch section above
 postgres = "0.19.9"
