@@ -48,7 +48,7 @@ use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
-use readyset_server::PrometheusBuilder;
+use readyset_server::{PrometheusBuilder, WorkerOptions};
 use readyset_sql::ast::Relation;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
@@ -333,7 +333,7 @@ pub struct Options {
     non_blocking_reads: bool,
 
     #[command(flatten)]
-    server_worker_options: readyset_server::WorkerOptions,
+    pub server_worker_options: WorkerOptions,
 
     /// Whether to disable telemetry reporting. Defaults to false.
     #[arg(long, env = "DISABLE_TELEMETRY")]
