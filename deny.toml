@@ -137,6 +137,8 @@ skip = [
     # tokio-postgres uses 0.11, chrono-tz uses 0.12
     { name = "phf", version = "0.11.3" },
     { name = "phf_shared", version = "0.11.3" },
+    # bindgen (build-dep of librocksdb-sys) pulls rustc-hash 1.x; workspace uses 2.x
+    { name = "rustc-hash", version = "1.1.0" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive

@@ -18,14 +18,14 @@
 //! `MemoryTrace` trait. We can also define a specified tree node by
 //! implementing `MemoryTrace` trait.
 
+use rustc_hash::FxHashMap;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::num::NonZeroU64;
 use std::ops::{Add, Deref, DerefMut};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-type HashMap<K, V> =
-    std::collections::HashMap<K, V, std::hash::BuildHasherDefault<fxhash::FxHasher>>;
+type HashMap<K, V> = FxHashMap<K, V>;
 
 #[derive(Debug, PartialEq, Copy, Clone, Hash, Eq)]
 pub enum Id {

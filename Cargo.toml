@@ -143,7 +143,7 @@ fixedbitset = { version = "0.4.2", default-features = false }
 fork = "0.2"
 futures = "0.3.30"
 futures-util = "0.3.30"
-fxhash = "0.2.1"
+rustc-hash = { version = "2.1"}
 getrandom = "0.2.14"
 growable-bloom-filter = "2.1.0"
 hashbag = "0.1.12"

@@ -16,7 +16,7 @@ sys-malloc = []
 
 [dependencies]
 futures = { workspace = true, features = ["executor", "thread-pool"] }
-fxhash = { workspace = true }
+rustc-hash = { workspace = true }
 lazy_static = { workspace = true }
 libc = { workspace = true }
 tempfile = { workspace = true }
