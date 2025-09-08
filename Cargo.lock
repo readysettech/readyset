@@ -5133,6 +5133,7 @@ dependencies = [
  "async-trait",
  "bincode",
  "chrono",
+ "database-utils",
  "fail",
  "futures",
  "futures-util",

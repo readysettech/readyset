@@ -3,13 +3,14 @@ use std::mem;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use database_utils::tls::mysql_ssl_opts_from;
 use database_utils::{DatabaseURL, UpstreamConfig};
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
 use failpoint_macros::set_failpoint;
 use futures::FutureExt;
 use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
-use mysql::{OptsBuilder, PoolConstraints, PoolOpts, SslOpts};
+use mysql::{OptsBuilder, PoolConstraints, PoolOpts};
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
 use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
@@ -295,8 +296,8 @@ impl<'a> NoriaAdapter<'a> {
 
         let mut mysql_opts_builder = OptsBuilder::from_opts(mysql_options).prefer_socket(false);
 
-        if let Some(cert_path) = config.ssl_root_cert.clone() {
-            let ssl_opts = SslOpts::default().with_root_certs(vec![cert_path.into()]);
+        let ssl_opts = mysql_ssl_opts_from(config);
+        if let Some(ssl_opts) = ssl_opts {
             mysql_opts_builder = mysql_opts_builder.ssl_opts(ssl_opts);
         }
 

@@ -21,6 +21,7 @@ use crate::error::DatabaseURLParseError;
 
 mod connection;
 pub mod error;
+pub mod tls;
 
 pub use connection::{
     DatabaseConnection, DatabaseConnectionPool, DatabaseStatement, QueryResults,

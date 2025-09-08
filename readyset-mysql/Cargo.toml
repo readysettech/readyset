@@ -7,48 +7,50 @@ edition = "2021"
 
 [dependencies]
 async-trait = { workspace = true }
+bincode = { workspace = true }
 fail = { workspace = true }
+futures-util = { workspace = true }
+itertools = { workspace = true }
+lazy_static = { workspace = true }
 metrics = { workspace = true }
 mysql-srv = { path = "../mysql-srv" }
 mysql_async = { workspace = true }
-lazy_static = { workspace = true }
-streaming-iterator = { workspace = true }
-futures-util = { workspace = true }
+mysql_common = { workspace = true, features = ["bigdecimal", "binlog"] }
 pin-project = { workspace = true }
-bincode = { workspace = true }
-
-readyset-client = { path = "../readyset-client" }
-readyset-errors = { path = "../readyset-errors" }
-readyset-data = { path = "../readyset-data" }
-readyset-adapter = { path = "../readyset-adapter" }
-readyset-adapter-types = { path = "../readyset-adapter-types" }
-readyset-client-metrics = { path = "../readyset-client-metrics" }
+streaming-iterator = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
-thiserror = { workspace = true }
-mysql_common = { workspace = true, features = ["bigdecimal", "binlog"] }
-itertools = { workspace = true }
+
+database-utils = { path = "../database-utils" }
+readyset-adapter = { path = "../readyset-adapter" }
+readyset-adapter-types = { path = "../readyset-adapter-types" }
+readyset-client = { path = "../readyset-client" }
+readyset-client-metrics = { path = "../readyset-client-metrics" }
+readyset-data = { path = "../readyset-data" }
+readyset-errors = { path = "../readyset-errors" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
-readyset-client-test-helpers = { path = "../readyset-client-test-helpers" }
-readyset-client-metrics = { path = "../readyset-client-metrics" }
-readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = [
-    "test-util",
-] }
-readyset-server = { path = "../readyset-server" }
-test-utils = { path = "../test-utils" }
 chrono = { workspace = true }
 futures = { workspace = true }
 paste = { workspace = true }
 proptest = { workspace = true }
-proptest-stateful = { path = "../proptest-stateful" }
-test-strategy = { workspace = true }
-readyset-tracing = { path = "../readyset-tracing" }
-reqwest = { workspace = true }
 regex = { workspace = true }
+reqwest = { workspace = true }
+test-strategy = { workspace = true }
 yore = { workspace = true }
+
+proptest-stateful = { path = "../proptest-stateful" }
+readyset-client-metrics = { path = "../readyset-client-metrics" }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers" }
+readyset-server = { path = "../readyset-server" }
+readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = [
+    "test-util",
+] }
+readyset-tracing = { path = "../readyset-tracing" }
+test-utils = { path = "../test-utils" }
 
 [features]
 vertical_tests = []

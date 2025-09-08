@@ -7,9 +7,13 @@ use futures_util::Stream;
 use mysql_async::consts::{Command, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{
-    ChangeUserOpts, Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, SslOpts, UrlError,
+    ChangeUserOpts, Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, UrlError,
 };
 use pin_project::pin_project;
+use tokio::runtime::RuntimeFlavor;
+use tracing::{debug, error, info_span, Instrument};
+
+use database_utils::tls::mysql_ssl_opts_from;
 use readyset_adapter::upstream_database::{UpstreamDestination, UpstreamStatementId};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
@@ -19,8 +23,6 @@ use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_util::redacted::RedactedString;
-use tokio::runtime::RuntimeFlavor;
-use tracing::{debug, error, info_span, Instrument};
 
 use crate::Error;
 
@@ -180,10 +182,11 @@ impl MySqlUpstream {
                 .prefer_socket(false)
         };
 
-        if let Some(cert_path) = upstream_config.ssl_root_cert.clone() {
-            let ssl_opts = SslOpts::default().with_root_certs(vec![cert_path.into()]);
+        let ssl_opts = mysql_ssl_opts_from(&upstream_config);
+        if let Some(ssl_opts) = ssl_opts {
             builder = builder.ssl_opts(ssl_opts);
         }
+
         if let Some(username) = username {
             builder = builder.user(Some(username));
         }
