@@ -55,7 +55,7 @@ pub struct UpstreamConfig {
     /// trusted, any certificate for any site will be trusted for use, including expired
     /// certificates. This introduces significant vulnerabilities, and should only be used as a
     /// last resort.
-    #[arg(long, env = "DISABLE_UPSTREAM_SSL_VERIFICATION", hide = true)]
+    #[arg(long, env = "DISABLE_UPSTREAM_SSL_VERIFICATION")]
     #[serde(default)]
     pub disable_upstream_ssl_verification: bool,
 
@@ -67,14 +67,14 @@ pub struct UpstreamConfig {
     /// Disable running DDL Streaming Replication Setup for PostgreSQL. If this flag is set the DDL
     /// Streaming Replication Setup SQL queries will need to be manually run on the primary server
     /// before streaming replication will start.
-    #[arg(long, env = "DISABLE_SETUP_DDL_REPLICATION", hide = true)]
+    #[arg(long, env = "DISABLE_SETUP_DDL_REPLICATION")]
     #[serde(default)]
     pub disable_setup_ddl_replication: bool,
 
     /// Disable running CREATE PUBLICATION query for PostgreSQL. If this flag is set a publication
     /// named readyset should be added for all tables manually on the primary server before
     /// streaming replication will start.
-    #[arg(long, env = "DISABLE_CREATE_PUBLICATION", hide = true)]
+    #[arg(long, env = "DISABLE_CREATE_PUBLICATION")]
     #[serde(default)]
     pub disable_create_publication: bool,
 
@@ -89,7 +89,7 @@ pub struct UpstreamConfig {
     /// must be 43 bytes or fewer.
     ///
     /// For MySQL, this must be parseable as a u32 that is unique across the replication topology.
-    #[arg(long, env = "REPLICATION_SERVER_ID", hide = true, value_parser = parse_repl_server_id)]
+    #[arg(long, env = "REPLICATION_SERVER_ID", value_parser = parse_repl_server_id)]
     #[serde(default)]
     pub replication_server_id: Option<ReplicationServerId>,
 

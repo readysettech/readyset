@@ -568,32 +568,6 @@ pub struct WorkerOptions {
     #[arg(long = "nopartial", hide = true)]
     pub no_partial: bool,
 
-    /// DEPRECATED: Kept for backwards compatibility.
-    // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(
-        long,
-        env = "FEATURE_FULL_MATERIALIZATION",
-        default_value = "true",
-        default_missing_value = "true",
-        num_args = 0..=1,
-        action = ArgAction::Set,
-        hide = true
-    )]
-    feature_full_materialization: bool,
-
-    /// Allow fully materialized nodes to be persisted to disk.
-    // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(
-        long,
-        env = "FEATURE_MATERIALIZATION_PERSISTENCE",
-        default_value = "false",
-        default_missing_value = "true",
-        num_args = 0..=1,
-        action = ArgAction::Set,
-        hide = true
-    )]
-    pub feature_materialization_persistence: bool,
-
     /// The materialization frontier strategy to use. Defaults to `None`.
     #[arg(long, env = "MATERIALIZATION_FRONTIER", default_value_t = FrontierStrategy::None, hide = true)]
     pub materialization_frontier: FrontierStrategy,
@@ -613,80 +587,6 @@ pub struct WorkerOptions {
     /// Volume associated with the server.
     #[arg(long, env = "VOLUME_ID", hide = true)]
     pub volume_id: Option<VolumeId>,
-
-    /// Enable support for Top K in dataflow.
-    ///
-    /// NOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).
-    // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(
-        long,
-        env = "FEATURE_TOPK",
-        default_value = "false",
-        default_missing_value = "true",
-        num_args = 0..=1,
-        action = ArgAction::Set,
-        hide = true
-    )]
-    pub feature_topk: bool,
-
-    /// Enable support for Pagination in dataflow.
-    ///
-    /// NOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).
-    // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(
-        long,
-        env = "FEATURE_PAGINATION",
-        default_value = "false",
-        default_missing_value = "true",
-        num_args = 0..=1,
-        action = ArgAction::Set,
-        hide = true
-    )]
-    pub feature_pagination: bool,
-
-    /// Enable support for mixing equality and range comparisons on query parameters.
-    // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(
-        long,
-        env = "FEATURE_MIXED_COMPARISONS",
-        default_value = "false",
-        default_missing_value = "true",
-        num_args = 0..=1,
-        action = ArgAction::Set,
-        hide = true
-    )]
-    pub feature_mixed_comparisons: bool,
-
-    /// Enable support for straddled joins (joins with partial keys traced to both
-    /// parents).
-    // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(
-        long,
-        env = "FEATURE_STRADDLED_JOINS",
-        default_value = "false",
-        default_missing_value = "true",
-        num_args = 0..=1,
-        action = ArgAction::Set,
-        hide = true
-    )]
-    feature_straddled_joins: bool,
-
-    /// Enable support for Post-Lookup (queries which do extra work after the lookup
-    /// into the reader).
-    ///
-    /// If the Top K feature is disabled, Post-Lookup can still provide support for some queries
-    /// supported by Top K, albeit with lower performance.
-    // XXX JCD keep features synchronized with readyset-features.json
-    #[arg(
-        long,
-        env = "FEATURE_POST_LOOKUP",
-        default_value = "false",
-        default_missing_value = "true",
-        num_args = 0..=1,
-        action = ArgAction::Set,
-        hide = true
-    )]
-    feature_post_lookup: bool,
 
     /// Parsing mode that determines which parser(s) to use and how to handle conflicts.
     #[arg(
@@ -743,6 +643,106 @@ pub struct WorkerOptions {
         hide = true
     )]
     pub verbose_domain_metrics: bool,
+
+    /// DEPRECATED: Kept for backwards compatibility.
+    // XXX JCD keep features synchronized with readyset-features.json
+    #[arg(
+        long,
+        env = "FEATURE_FULL_MATERIALIZATION",
+        default_value = "true",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set,
+        hide = true
+    )]
+    feature_full_materialization: bool,
+
+    /// NOTE: This feature is experimental and should not be used in production -
+    /// Allow fully materialized nodes to be persisted to disk.
+    // XXX JCD keep features synchronized with readyset-features.json
+    #[arg(
+        long,
+        env = "FEATURE_MATERIALIZATION_PERSISTENCE",
+        default_value = "false",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set
+    )]
+    pub feature_materialization_persistence: bool,
+
+    /// NOTE: This feature is experimental and should not be used in production -
+    /// Enable support for mixing equality and range comparisons on query parameters.
+    // XXX JCD keep features synchronized with readyset-features.json
+    #[arg(
+        long,
+        env = "FEATURE_MIXED_COMPARISONS",
+        default_value = "false",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set
+    )]
+    pub feature_mixed_comparisons: bool,
+
+    /// NOTE: This feature is experimental and should not be used in production -
+    /// Enable support for Pagination in dataflow.
+    ///
+    /// NOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).
+    // XXX JCD keep features synchronized with readyset-features.json
+    #[arg(
+        long,
+        env = "FEATURE_PAGINATION",
+        default_value = "false",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set
+    )]
+    pub feature_pagination: bool,
+
+    /// NOTE: This feature is experimental and should not be used in production -
+    /// Enable support for Post-Lookup (queries which do extra work after the lookup
+    /// into the reader).
+    ///
+    /// If the Top K feature is disabled, Post-Lookup can still provide support for some queries
+    /// supported by Top K, albeit with lower performance.
+    // XXX JCD keep features synchronized with readyset-features.json
+    #[arg(
+        long,
+        env = "FEATURE_POST_LOOKUP",
+        default_value = "false",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set
+    )]
+    feature_post_lookup: bool,
+
+    /// NOTE: This feature is experimental and should not be used in production -
+    /// Enable support for straddled joins (joins with partial keys traced to both
+    /// parents).
+    // XXX JCD keep features synchronized with readyset-features.json
+    #[arg(
+        long,
+        env = "FEATURE_STRADDLED_JOINS",
+        default_value = "false",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set
+    )]
+    feature_straddled_joins: bool,
+
+    /// NOTE: This feature is experimental and should not be used in production -
+    /// Enable support for Top K in dataflow.
+    ///
+    /// NOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).
+    // XXX JCD keep features synchronized with readyset-features.json
+    #[arg(
+        long,
+        env = "FEATURE_TOPK",
+        default_value = "false",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set
+    )]
+    pub feature_topk: bool,
 }
 
 impl WorkerOptions {
