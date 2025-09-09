@@ -852,6 +852,10 @@ impl BuiltinFunction {
             BuiltinFunction::Addtime(arg1, arg2) => {
                 let param1 = arg1.eval(record)?;
                 let param2 = arg2.eval(record)?;
+                if param1.is_none() || param2.is_none() {
+                    return Ok(DfValue::None);
+                }
+
                 let time_param2 = get_time_or_default(&param2, arg2.ty());
                 if time_param2.is_datetime() {
                     return Ok(DfValue::None);
@@ -1891,6 +1895,23 @@ mod tests {
             DfValue::Time(MySqlTime::from_microseconds(
                 (param2 * 1_000_000_f64) as i64
             ))
+        );
+
+        // NULL checks
+        assert_eq!(
+            expr.eval::<DfValue>(&[DfValue::None, DfValue::try_from(param2).unwrap()])
+                .unwrap(),
+            DfValue::None
+        );
+        assert_eq!(
+            expr.eval::<DfValue>(&[param1.into(), DfValue::None])
+                .unwrap(),
+            DfValue::None
+        );
+        assert_eq!(
+            expr.eval::<DfValue>(&[DfValue::None, DfValue::None])
+                .unwrap(),
+            DfValue::None
         );
     }
 
