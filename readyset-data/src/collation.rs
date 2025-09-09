@@ -6,7 +6,9 @@ use icu::collator::options::{CollatorOptions, Strength};
 use icu::collator::{Collator, CollatorBorrowed};
 use log_once::{error_once, warn_once};
 use serde::{Deserialize, Serialize};
-use strum::{EnumCount, FromRepr};
+use std::collections::HashMap;
+use std::sync::LazyLock;
+use strum::{EnumCount, EnumIter, FromRepr, IntoEnumIterator};
 use test_strategy::Arbitrary;
 
 use crate::{Dialect, SqlEngine};
@@ -69,6 +71,95 @@ pub enum Collation {
 
     /// Like Utf8Ci, but trailing spaces are ignored (for a few legacy MySQL collations).
     Utf8AiCiPad,
+}
+
+/// External collation names supported per SQL engine.
+#[derive(Clone, Copy, Debug, EnumIter)]
+enum ExternalCollation {
+    // MySQL collations
+    MySqlUtf8mb40900AiCi,
+    MySqlUtf8mb40900AsCi,
+    MySqlUtf8mb40900AsCs,
+    MySqlUtf8mb40900Bin,
+    MySqlUtf8mb4Bin,
+    MySqlUtf8mb3Bin,
+    MySqlUtf8Bin,
+    MySqlBinary,
+    MySqlLatin1SwedishCi,
+    MySqlUtf8mb4GeneralCi,
+    MySqlUtf8mb4UnicodeCi,
+    MySqlUtf8mb3UnicodeCi,
+}
+
+// O(1) lookup for MySQL external collation names to internal Collation
+static MYSQL_COLLATION_LOOKUP: LazyLock<HashMap<&'static str, Collation>> = LazyLock::new(|| {
+    ExternalCollation::iter()
+        .filter(|e| e.engine() == SqlEngine::MySQL)
+        .map(|e| (e.name(), e.internal()))
+        .collect()
+});
+
+impl ExternalCollation {
+    /// Lookup an external collation name to our internal collation.
+    fn lookup(engine: SqlEngine, name: &str) -> Option<Collation> {
+        match engine {
+            SqlEngine::MySQL => MYSQL_COLLATION_LOOKUP.get(name).copied(),
+            SqlEngine::PostgreSQL => None,
+        }
+    }
+
+    /// Return the engine of the external collation.
+    fn engine(&self) -> SqlEngine {
+        match self {
+            Self::MySqlUtf8mb40900AiCi
+            | Self::MySqlUtf8mb40900AsCi
+            | Self::MySqlUtf8mb40900AsCs
+            | Self::MySqlUtf8mb40900Bin
+            | Self::MySqlUtf8mb4Bin
+            | Self::MySqlUtf8mb3Bin
+            | Self::MySqlUtf8Bin
+            | Self::MySqlBinary
+            | Self::MySqlLatin1SwedishCi
+            | Self::MySqlUtf8mb4GeneralCi
+            | Self::MySqlUtf8mb4UnicodeCi
+            | Self::MySqlUtf8mb3UnicodeCi => SqlEngine::MySQL,
+        }
+    }
+
+    /// Return the name of the external collation.
+    fn name(&self) -> &'static str {
+        match self {
+            Self::MySqlUtf8mb40900AiCi => "utf8mb4_0900_ai_ci",
+            Self::MySqlUtf8mb40900AsCi => "utf8mb4_0900_as_ci",
+            Self::MySqlUtf8mb40900AsCs => "utf8mb4_0900_as_cs",
+            Self::MySqlUtf8mb40900Bin => "utf8mb4_0900_bin",
+            Self::MySqlUtf8mb4Bin => "utf8mb4_bin",
+            Self::MySqlUtf8mb3Bin => "utf8mb3_bin",
+            Self::MySqlUtf8Bin => "utf8_bin",
+            Self::MySqlBinary => "binary",
+            Self::MySqlLatin1SwedishCi => "latin1_swedish_ci",
+            Self::MySqlUtf8mb4GeneralCi => "utf8mb4_general_ci",
+            Self::MySqlUtf8mb4UnicodeCi => "utf8mb4_unicode_ci",
+            Self::MySqlUtf8mb3UnicodeCi => "utf8mb3_unicode_ci",
+        }
+    }
+
+    fn internal(&self) -> Collation {
+        match self {
+            Self::MySqlUtf8mb40900AiCi => Collation::Utf8AiCi,
+            Self::MySqlUtf8mb40900AsCi => Collation::Utf8Ci,
+            Self::MySqlUtf8mb40900AsCs => Collation::Utf8,
+            Self::MySqlUtf8mb40900Bin
+            | Self::MySqlUtf8mb4Bin
+            | Self::MySqlUtf8mb3Bin
+            | Self::MySqlUtf8Bin => Collation::Utf8Binary,
+            Self::MySqlBinary => Collation::Binary,
+            Self::MySqlLatin1SwedishCi => Collation::Latin1SwedishCi,
+            Self::MySqlUtf8mb4GeneralCi
+            | Self::MySqlUtf8mb4UnicodeCi
+            | Self::MySqlUtf8mb3UnicodeCi => Collation::Utf8AiCiPad,
+        }
+    }
 }
 
 impl Display for Collation {
@@ -179,29 +270,10 @@ impl Collation {
         }
     }
 
-    /// Map a dialect's collation name to our internal collation if a mapping exists.
-    fn try_get(dialect: Dialect, collation: &str) -> Option<Self> {
-        match (dialect.engine(), collation) {
-            (SqlEngine::MySQL, "utf8mb4_0900_ai_ci") => Some(Self::Utf8AiCi),
-            (SqlEngine::MySQL, "utf8mb4_0900_as_ci") => Some(Self::Utf8Ci),
-            (SqlEngine::MySQL, "utf8mb4_0900_as_cs") => Some(Self::Utf8),
-            (SqlEngine::MySQL, "utf8mb4_0900_bin") => Some(Self::Utf8Binary),
-            (SqlEngine::MySQL, "utf8mb4_bin") => Some(Self::Utf8Binary),
-            (SqlEngine::MySQL, "utf8mb3_bin") => Some(Self::Utf8Binary),
-            (SqlEngine::MySQL, "utf8_bin") => Some(Self::Utf8Binary),
-            (SqlEngine::MySQL, "binary") => Some(Self::Binary),
-            (SqlEngine::MySQL, "latin1_swedish_ci") => Some(Self::Latin1SwedishCi),
-            (SqlEngine::MySQL, "utf8mb4_general_ci") => Some(Self::Utf8AiCiPad),
-            (SqlEngine::MySQL, "utf8mb4_unicode_ci") => Some(Self::Utf8AiCiPad),
-            (SqlEngine::MySQL, "utf8mb3_unicode_ci") => Some(Self::Utf8AiCiPad),
-            (_, _) => None,
-        }
-    }
-
     /// Attempt to map a collation name to our internal collation.  If no mapping exists,
     /// return a reasonable default for the dialect.
     pub fn get_or_default(dialect: Dialect, name: &str) -> Self {
-        if let Some(coll) = Self::try_get(dialect, name) {
+        if let Some(coll) = ExternalCollation::lookup(dialect.engine(), name) {
             return coll;
         }
 
@@ -324,5 +396,15 @@ mod tests {
         assert_eq!(col.key("A "), col.key("a"));
         assert_eq!(col.compare("a", "b "), Ordering::Less);
         assert_eq!(col.compare("b", "a "), Ordering::Greater);
+    }
+
+    #[test]
+    fn external_collation_file_is_up_to_date() {
+        // collation.txt file is used in our external documentation to inform the list of supported collations.
+        let file = std::fs::read_to_string("tests/collation.txt").unwrap();
+        // check that all the external collations are present in the file
+        for e in ExternalCollation::iter() {
+            assert!(file.contains(e.name()), "{} not found in file", e.name());
+        }
     }
 }

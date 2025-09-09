@@ -1,0 +1,12 @@
+MySQL=>utf8mb4_0900_ai_ci
+MySQL=>utf8mb4_0900_as_ci
+MySQL=>utf8mb4_0900_as_cs
+MySQL=>utf8mb4_0900_bin
+MySQL=>utf8mb4_bin
+MySQL=>utf8mb3_bin
+MySQL=>utf8_bin
+MySQL=>binary
+MySQL=>latin1_swedish_ci
+MySQL=>utf8mb4_general_ci
+MySQL=>utf8mb4_unicode_ci
+MySQL=>utf8mb3_unicode_ci
