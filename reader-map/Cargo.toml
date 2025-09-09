@@ -6,6 +6,7 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
+antithesis_sdk = { workspace = true }
 indexmap = { workspace = true }
 itertools = { workspace = true }
 iter-enum = { workspace = true }

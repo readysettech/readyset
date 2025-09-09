@@ -8,6 +8,7 @@ edition = "2021"
 description = "ReadySet dataflow crate"
 
 [dependencies]
+antithesis_sdk = { workspace = true }
 async-bincode = { workspace = true }
 exponential-backoff = { workspace = true }
 bincode = { workspace = true }

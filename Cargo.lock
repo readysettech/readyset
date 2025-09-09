@@ -4552,6 +4552,7 @@ dependencies = [
 name = "reader-map"
 version = "0.1.0"
 dependencies = [
+ "antithesis_sdk",
  "indexmap 2.10.0",
  "iter-enum",
  "itertools 0.14.0",
@@ -4927,6 +4928,7 @@ name = "readyset-dataflow"
 version = "0.7.0"
 dependencies = [
  "ahash",
+ "antithesis_sdk",
  "async-bincode",
  "bincode",
  "bufstream",

@@ -15,6 +15,7 @@ use std::time::Duration;
 use std::{cell, cmp, mem, process, time};
 
 use ahash::RandomState;
+use antithesis_sdk::assert_reachable;
 use common::{Len, LenMetric};
 use dataflow_state::{
     BaseTableState, EvictBytesResult, EvictKeysResult, EvictRandomResult, MaterializedNodeState,
@@ -2743,7 +2744,7 @@ impl Domain {
 
         match m {
             Packet::Update(_) | Packet::Input(_) => {
-                // WO for https://github.com/rust-lang/rfcs/issues/1403
+                assert_reachable!("domain receive Update or Input");
                 let start = time::Instant::now();
                 let d: PacketDiscriminants = (&m).into();
                 self.total_forward_time.start();
@@ -2757,6 +2758,7 @@ impl Domain {
                 }
             }
             Packet::ReplayPiece(x) => {
+                assert_reachable!("domain receive ReplayPiece");
                 let start = time::Instant::now();
                 let name = x.cache_name.clone();
                 self.total_replay_time.start();
@@ -2765,6 +2767,7 @@ impl Domain {
                 self.metrics.rec_replay_time(&name, start.elapsed());
             }
             Packet::Evict(e) => {
+                assert_reachable!("domain receive Evict");
                 debug!(
                     "{} evicting in barrier {:x}, credits: {:x}",
                     self.address(),
@@ -2779,6 +2782,7 @@ impl Domain {
                 node,
                 cache_name,
             }) => {
+                assert_reachable!("domain receive RequestReaderReplay");
                 let start = time::Instant::now();
                 self.total_replay_time.start();
                 set_failpoint!(failpoints::UPQUERY_START);
@@ -2840,6 +2844,7 @@ impl Domain {
                     .rec_reader_replay_time(&cache_name, start.elapsed());
             }
             Packet::RequestPartialReplay(pkt) => {
+                assert_reachable!("domain receive RequestPartialReplay");
                 trace!(%pkt.tag, ?pkt.keys, "got replay request");
                 let start = time::Instant::now();
                 let cache_name = pkt.cache_name.clone();
@@ -2850,6 +2855,7 @@ impl Domain {
                     .rec_seed_replay_time(&cache_name, start.elapsed());
             }
             Packet::Finish(pkt) => {
+                assert_reachable!("domain receive Finish");
                 let start = time::Instant::now();
                 self.total_replay_time.start();
                 self.finish_replay(pkt.tag, pkt.node, &pkt.cache_name, executor)?;

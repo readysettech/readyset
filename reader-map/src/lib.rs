@@ -228,6 +228,7 @@ use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
 
+use antithesis_sdk::assert_reachable;
 pub use eviction::EvictionStrategy;
 use partial_map::InsertionOrder;
 use petgraph::graph::NodeIndex;
@@ -394,6 +395,8 @@ impl<M, S, I> Options<M, S, I> {
         M: 'static + Clone,
         I: partial_map::InsertionOrder<V> + Clone,
     {
+        assert_reachable!("reader-map construct");
+
         let inner = Inner::with_index_type_and_hasher(
             self.index_type,
             self.meta,
