@@ -16,6 +16,7 @@ metrics = { workspace = true }
 mysql-srv = { path = "../mysql-srv" }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true, features = ["bigdecimal", "binlog"] }
+pem = { workspace = true }
 pin-project = { workspace = true }
 streaming-iterator = { workspace = true }
 thiserror = { workspace = true }

@@ -764,6 +764,10 @@ pub enum ReadySetError {
     /// Error converting to or from an AST node
     #[error("Error converting to or from an AST node: {0}")]
     AstConversionError(String),
+
+    /// Error dealing with PEM files
+    #[error("PEM error: {0}")]
+    PemError(String),
 }
 
 impl ReadySetError {
@@ -1242,6 +1246,7 @@ impl_from_to_string!(tokio_native_tls::native_tls::Error, NativeTlsError);
 impl_from_to_string!(hyper::Error, HttpError);
 impl_from_to_string!(readyset_decimal::ReadysetDecimalError, DecimalError);
 impl_from_to_string!(readyset_sql::AstConversionError, AstConversionError);
+impl_from_to_string!(pem::PemError, PemError);
 
 impl From<Size0Error> for ReadySetError {
     fn from(_: Size0Error) -> Self {

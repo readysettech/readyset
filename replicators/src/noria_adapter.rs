@@ -11,6 +11,7 @@ use futures::FutureExt;
 use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, PoolConstraints, PoolOpts};
+use native_tls::Certificate;
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
 use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
@@ -90,8 +91,10 @@ pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
             if config.disable_upstream_ssl_verification {
                 builder.danger_accept_invalid_certs(true);
             }
-            if let Some(root_cert) = config.get_root_cert().await {
-                builder.add_root_certificate(root_cert?);
+            if let Some(certs) = config.get_root_certs().await? {
+                for cert in &certs {
+                    builder.add_root_certificate(Certificate::from_der(cert.contents())?);
+                }
             }
             builder.build().unwrap() // Never returns an error
         };
@@ -203,8 +206,11 @@ impl<'a> NoriaAdapter<'a> {
                         if config.disable_upstream_ssl_verification {
                             builder.danger_accept_invalid_certs(true);
                         }
-                        if let Some(root_cert) = config.get_root_cert().await {
-                            builder.add_root_certificate(root_cert?);
+                        if let Some(certs) = config.get_root_certs().await? {
+                            for cert in &certs {
+                                builder
+                                    .add_root_certificate(Certificate::from_der(cert.contents())?);
+                            }
                         }
                         builder.build().unwrap() // Never returns an error
                     };
@@ -296,7 +302,7 @@ impl<'a> NoriaAdapter<'a> {
 
         let mut mysql_opts_builder = OptsBuilder::from_opts(mysql_options).prefer_socket(false);
 
-        let ssl_opts = mysql_ssl_opts_from(config);
+        let ssl_opts = mysql_ssl_opts_from(config).await?;
         if let Some(ssl_opts) = ssl_opts {
             mysql_opts_builder = mysql_opts_builder.ssl_opts(ssl_opts);
         }

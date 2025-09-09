@@ -182,7 +182,7 @@ impl MySqlUpstream {
                 .prefer_socket(false)
         };
 
-        let ssl_opts = mysql_ssl_opts_from(&upstream_config);
+        let ssl_opts = mysql_ssl_opts_from(&upstream_config).await?;
         if let Some(ssl_opts) = ssl_opts {
             builder = builder.ssl_opts(ssl_opts);
         }

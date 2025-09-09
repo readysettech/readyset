@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use native_tls::Certificate;
 use postgres_types::Kind;
 use psql_srv::{Column, TransferFormat};
 use readyset_adapter::upstream_database::{UpstreamDestination, UpstreamStatementId};
@@ -224,8 +225,10 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             if upstream_config.disable_upstream_ssl_verification {
                 builder.danger_accept_invalid_certs(true);
             }
-            if let Some(cert) = upstream_config.get_root_cert().await {
-                builder.add_root_certificate(cert?);
+            if let Some(certs) = upstream_config.get_root_certs().await? {
+                for cert in &certs {
+                    builder.add_root_certificate(Certificate::from_der(cert.contents())?);
+                }
             }
             builder.build().unwrap() // Never returns an error
         };

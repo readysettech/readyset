@@ -11,10 +11,12 @@ use derive_more::From;
 use error::DatabaseTypeParseError;
 use mysql_async::OptsBuilder;
 use native_tls::TlsConnectorBuilder;
+use pem::Pem;
+use serde::{Deserialize, Serialize};
+
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::{Dialect, ast::SqlIdentifier};
 use readyset_util::redacted::RedactedString;
-use serde::{Deserialize, Serialize};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::error::DatabaseURLParseError;
@@ -60,7 +62,7 @@ pub struct UpstreamConfig {
     #[serde(default)]
     pub disable_upstream_ssl_verification: bool,
 
-    /// A path to a pem or der certificate of the root that the upstream connection will trust.
+    /// A path to a pem root certificate file that the upstream connection will trust.
     #[arg(long, env = "SSL_ROOT_CERT")]
     #[serde(default)]
     pub ssl_root_cert: Option<PathBuf>,
@@ -201,22 +203,15 @@ pub struct UpstreamConfig {
 }
 
 impl UpstreamConfig {
-    /// Read the certificate at [`Self::ssl_root_cert`] path and try to parse it as either PEM or
-    /// DER encoded certificate
-    pub async fn get_root_cert(&self) -> Option<ReadySetResult<native_tls::Certificate>> {
-        match self.ssl_root_cert.as_ref() {
-            Some(path) => Some({
-                tokio::fs::read(path)
-                    .await
-                    .map_err(ReadySetError::from)
-                    .and_then(|cert| {
-                        native_tls::Certificate::from_pem(&cert)
-                            .or_else(|_| native_tls::Certificate::from_der(&cert))
-                            .map_err(|_| ReadySetError::InvalidRootCertificate)
-                    })
-            }),
-            None => None,
-        }
+    /// Read the root certificates.
+    pub async fn get_root_certs(&self) -> ReadySetResult<Option<Vec<Pem>>> {
+        let path = match &self.ssl_root_cert {
+            Some(path) => path,
+            None => return Ok(None),
+        };
+        let contents = tokio::fs::read(path).await?;
+        let certs = pem::parse_many(&contents)?;
+        Ok(Some(certs))
     }
 
     /// get the cdc db url if it is set, otherwise return the upstream db url

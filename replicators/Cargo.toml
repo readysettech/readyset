@@ -23,6 +23,7 @@ mysql_common = { workspace = true, features = ["binlog"] }
 native-tls = { workspace = true }
 nom_locate = { workspace = true }
 paste = { workspace = true }
+pem = { workspace = true }
 postgres-native-tls = { workspace = true }
 postgres-protocol = { workspace = true }
 postgres-types = { workspace = true, features = [

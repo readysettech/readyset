@@ -15,6 +15,9 @@ pub enum Error {
 
     #[error(transparent)]
     Io(#[from] io::Error),
+
+    #[error(transparent)]
+    Tls(#[from] native_tls::Error),
 }
 
 impl From<Error> for ps::Error {
@@ -29,6 +32,7 @@ impl From<Error> for ps::Error {
             ReadySet(ReadySetError::Unsupported(s)) => ps::Error::Unsupported(s),
             ReadySet(e) => ps::Error::Unknown(e.to_string()),
             PostgreSql(e) => e.into(),
+            Tls(e) => ps::Error::Unknown(e.to_string()),
         }
     }
 }
