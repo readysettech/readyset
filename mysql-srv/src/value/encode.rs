@@ -692,7 +692,7 @@ impl ToMySqlValue for Duration {
                 if us != 0 {
                     w.write_u8(12u8)?;
                 } else {
-                    w.write_u8(9u8)?;
+                    w.write_u8(8u8)?;
                 }
 
                 w.write_u8(0u8)?; // positive only (for now)
