@@ -443,7 +443,7 @@ impl Arbitrary for SqlType {
 
         let scale_range = move |precision: u16| match args.dialect {
             // Postgres actually supports -1000..=1000, but we can't even represent that
-            Some(Dialect::PostgreSQL) => 0..=u8::MAX,
+            Some(Dialect::PostgreSQL) => 0..=(precision.min(u8::MAX as u16) as u8),
             // Default to MySQL's more restricted range
             _ => 0..=(precision.min(30) as u8),
         };
