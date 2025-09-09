@@ -1138,6 +1138,7 @@ dependencies = [
 name = "dataflow-expression"
 version = "0.1.0"
 dependencies = [
+ "antithesis_sdk",
  "anyhow",
  "bitflags 2.9.2",
  "bytes",

@@ -6,6 +6,7 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
+antithesis_sdk = { workspace = true }
 bitflags = { workspace = true }
 cached = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
