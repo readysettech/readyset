@@ -8,6 +8,7 @@ mod query_handler;
 pub mod query_status_cache;
 pub mod sampler;
 mod status_reporter;
+pub mod table_extraction_visitor;
 pub mod upstream_database;
 mod utils;
 pub mod views_synchronizer;

@@ -3153,16 +3153,26 @@ where
                 Self::query_fallback(self.upstream.as_mut(), query, &mut event).await
             }
             Ok(parsed_query) => {
-                Self::query_adhoc_non_select(
+                let result = Self::query_adhoc_non_select(
                     &mut self.noria,
                     self.upstream.as_mut(),
                     query,
                     &mut event,
-                    parsed_query,
+                    parsed_query.clone(),
                     &self.settings,
                     &mut self.state,
                 )
-                .await
+                .await;
+
+                if let SqlQuery::DropTable(drop_stmt) = &parsed_query {
+                    if result.is_ok() {
+                        self.state
+                            .query_status_cache
+                            .invalidate_queries_referencing_tables(&drop_stmt.tables);
+                    }
+                }
+
+                result
             }
         };
 

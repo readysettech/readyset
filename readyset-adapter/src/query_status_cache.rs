@@ -7,6 +7,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::table_extraction_visitor::extract_referenced_tables;
 use anyhow::anyhow;
 use clap::ValueEnum;
 use dashmap::mapref::entry::Entry;
@@ -18,6 +19,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::query::*;
 use readyset_client::ViewCreateRequest;
 use readyset_data::DfValue;
+use readyset_sql::ast::Relation;
 use tracing::{error, warn};
 
 pub const DEFAULT_QUERY_STATUS_CAPACITY: usize = 100_000;
@@ -804,6 +806,45 @@ impl QueryStatusCache {
         statuses.peek(&id).map(|(query, _status)| query.clone())
     }
 
+    /// Removes cache entries for queries that reference any of the specified tables
+    pub fn invalidate_queries_referencing_tables(&self, dropped_tables: &[Relation]) {
+        if dropped_tables.is_empty() {
+            return;
+        }
+
+        let mut statuses = self.persistent_handle.statuses.write();
+        let mut to_remove = Vec::new();
+
+        for (query_id, (query, _status)) in statuses.iter() {
+            if let Some(referenced_tables) = extract_referenced_tables(query) {
+                if referenced_tables.iter().any(|table| {
+                    dropped_tables.iter().any(|dropped| {
+                        match (&table.schema, &dropped.schema) {
+                            (Some(t_schema), Some(d_schema)) => {
+                                t_schema == d_schema && table.name == dropped.name
+                            }
+                            (None, None) => table.name == dropped.name,
+                            // If one has schema and other doesn't, do nothing to avoid
+                            // deleting queries that we shouldn't
+                            //
+                            // TODO (REA-5970): ideally, the queries stored in the cache should have
+                            // the tables resolved. However, that is a bit difficult given
+                            // that the search path can be a list of schemas.
+                            _ => false,
+                        }
+                    })
+                }) {
+                    to_remove.push(*query_id);
+                }
+            }
+        }
+
+        for query_id in to_remove {
+            statuses.pop(&query_id);
+            self.id_to_status.remove(&query_id);
+        }
+    }
+
     pub fn reportable_metrics(&self) -> ReportableMetrics {
         ReportableMetrics {
             id_to_status_size: self.id_to_status.len() as u64,
@@ -1282,5 +1323,90 @@ mod tests {
         cache.clear_proxied_queries();
         assert_eq!(cache.allow_list().len(), 2);
         assert_eq!(cache.deny_list().len(), 0);
+    }
+
+    #[test]
+    fn invalidate_queries_referencing_dropped_tables() {
+        use readyset_sql::ast::*;
+
+        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
+
+        // Create test queries with varying complexity
+        let simple_t1 =
+            ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let simple_t2 =
+            ViewCreateRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]);
+        let join_query = ViewCreateRequest::new(
+            select_statement("SELECT * FROM t1 JOIN t2 ON t1.id = t2.id").unwrap(),
+            vec![],
+        );
+        // Complex query with CTEs, subqueries, and EXISTS - references t1, t2, t3
+        let complex_query = ViewCreateRequest::new(
+            select_statement(
+                "WITH cte1 AS (SELECT * FROM t1 WHERE id > 10) \
+                 SELECT c.*, u.name FROM cte1 c \
+                 JOIN (SELECT * FROM t2 WHERE active = 1) u ON c.id = u.id \
+                 WHERE EXISTS (SELECT 1 FROM t3 WHERE t3.ref_id = c.id)",
+            )
+            .unwrap(),
+            vec![],
+        );
+        let unaffected_query =
+            ViewCreateRequest::new(select_statement("SELECT * FROM t4").unwrap(), vec![]);
+
+        // Add all queries to cache
+        cache.update_query_migration_state(&simple_t1, MigrationState::Successful);
+        cache.update_query_migration_state(&simple_t2, MigrationState::Successful);
+        cache.update_query_migration_state(&join_query, MigrationState::Successful);
+        cache.update_query_migration_state(&complex_query, MigrationState::Successful);
+        cache.update_query_migration_state(&unaffected_query, MigrationState::Successful);
+
+        assert_eq!(cache.allow_list().len(), 5);
+
+        // Drop t1, should invalidate simple_t1, join_query, and complex_query
+        let dropped_tables = vec![Relation::from("t1")];
+        cache.invalidate_queries_referencing_tables(&dropped_tables);
+
+        let remaining_queries = cache.allow_list();
+
+        // simple_t2 (t2) and unaffected_query (t4) should remain
+        assert_eq!(remaining_queries.len(), 2);
+        let remaining_table_names: Vec<_> = remaining_queries
+            .iter()
+            .filter_map(|(_, vcr, _)| {
+                vcr.statement
+                    .tables
+                    .first()
+                    .and_then(|te| te.inner.as_table())
+                    .map(|t| t.name.as_str())
+            })
+            .collect();
+
+        assert!(remaining_table_names.contains(&"t2"));
+        assert!(remaining_table_names.contains(&"t4"));
+
+        // Add back a query and test nested reference invalidation
+        cache.update_query_migration_state(&complex_query, MigrationState::Successful);
+        assert_eq!(cache.allow_list().len(), 3);
+
+        // should only invalidate the complex query (nested reference in EXISTS)
+        let dropped_tables = vec![Relation::from("t3")];
+        cache.invalidate_queries_referencing_tables(&dropped_tables);
+
+        // Only simple_t2 and unaffected_query remain
+        let final_queries = cache.allow_list();
+        assert_eq!(final_queries.len(), 2);
+        let final_table_names: Vec<_> = final_queries
+            .iter()
+            .filter_map(|(_, vcr, _)| {
+                vcr.statement
+                    .tables
+                    .first()
+                    .and_then(|te| te.inner.as_table())
+                    .map(|t| t.name.as_str())
+            })
+            .collect();
+        assert!(final_table_names.contains(&"t2"));
+        assert!(final_table_names.contains(&"t4"));
     }
 }
