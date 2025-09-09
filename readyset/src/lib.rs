@@ -161,7 +161,7 @@ pub struct Options {
         long,
         env = "DEPLOYMENT_MODE",
         default_value = "standalone",
-        hide = false
+        hide = true
     )]
     deployment_mode: DeploymentMode,
 

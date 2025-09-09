@@ -658,7 +658,7 @@ pub struct WorkerOptions {
     feature_full_materialization: bool,
 
     /// NOTE: This feature is experimental and should not be used in production -
-    /// Allow fully materialized nodes to be persisted to disk.
+    /// Allow fully materialized nodes to be persisted to disk. Fully materialized nodes are populated during startup and stored in memory by default. They can use significant amount of memory and are not candidate for evictions. This feature stores them on disk instead. Full materialized nodes are removed during shutdown.
     // XXX JCD keep features synchronized with readyset-features.json
     #[arg(
         long,
