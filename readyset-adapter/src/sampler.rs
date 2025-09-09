@@ -69,7 +69,7 @@ use readyset_sql::{
     ast::{Relation, SqlIdentifier, SqlQuery},
     Dialect,
 };
-use readyset_sql_parsing::parse_query;
+use readyset_sql_parsing::{parse_query_with_config, ParsingPreset};
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_util::{
     logging::{rate_limit, SAMPLER_LOG_SAMPLER},
@@ -138,6 +138,7 @@ pub struct Sampler {
     upstream_conn: Option<DatabaseConnection>,
     upstream_config: UpstreamConfig,
     parse_dialect: Dialect,
+    parsing_preset: ParsingPreset,
     shutdown_recv: ShutdownReceiver,
     last_executed_at: Option<std::time::Instant>,
     retry_queue: VecDeque<(TokioInstant, Entry)>,
@@ -177,6 +178,7 @@ pub async fn sampler_builder(
     options: DeploymentMode,
     readers: Readers,
     parse_dialect: Dialect,
+    parsing_preset: ParsingPreset,
     expr_dialect: readyset_data::Dialect,
     shutdown_rx: ShutdownReceiver,
 ) -> (
@@ -232,6 +234,7 @@ pub async fn sampler_builder(
         upstream_conn,
         upstream_config,
         parse_dialect,
+        parsing_preset,
         shutdown_rx.clone(),
         global_sampler_rx,
     );
@@ -300,7 +303,11 @@ impl Sampler {
                 }) {
                     s
                 } else {
-                    match parse_query(self.parse_dialect, q) {
+                    match parse_query_with_config(
+                        self.parsing_preset.into_config(),
+                        self.parse_dialect,
+                        q,
+                    ) {
                         Ok(SqlQuery::Select(stmt)) => stmt,
                         _ => return Err(ReadySetError::UnparseableQuery(q.clone())),
                     }
@@ -540,12 +547,14 @@ impl Sampler {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: SamplerConfig,
         noria: NoriaConnector,
         upstream_conn: Option<DatabaseConnection>,
         upstream_config: UpstreamConfig,
         parse_dialect: Dialect,
+        parsing_preset: ParsingPreset,
         shutdown_recv: ShutdownReceiver,
         rx: Receiver<(QueryExecutionEvent, String)>,
     ) -> Self {
@@ -556,6 +565,7 @@ impl Sampler {
             upstream_conn,
             upstream_config,
             parse_dialect,
+            parsing_preset,
             shutdown_recv,
             last_executed_at: None,
             retry_queue: VecDeque::new(),

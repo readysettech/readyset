@@ -1270,6 +1270,7 @@ where
             options.deployment_mode,
             readers.clone(),
             parse_dialect,
+            parsing_preset,
             expr_dialect,
             shutdown_rx.clone(),
         ));
