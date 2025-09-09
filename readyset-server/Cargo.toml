@@ -27,48 +27,49 @@ redact_sensitive = ["readyset-util/redact_sensitive"]
 
 
 [dependencies]
-clap = { workspace = true, features = ["derive", "env"] }
 anyhow = { workspace = true }
+antithesis_sdk = { workspace = true }
+async-bincode = { workspace = true }
+base64 = { workspace = true }
 bimap = { workspace = true, features = ["serde"] }
+bincode = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+enum-kinds = { workspace = true }
+fail = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
-pin-project = { workspace = true }
 hyper = { workspace = true, features = ["stream", "server"] }
-querystring = { workspace = true }
+indexmap = { workspace = true }
 itertools = { workspace = true }
+lazy_static = { workspace = true }
 metrics = { workspace = true }
-metrics-util = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
+metrics-util = { workspace = true }
+parking_lot = { workspace = true }
 petgraph = { workspace = true, features = ["serde-1"] }
+pin-project = { workspace = true }
+quanta = { workspace = true }
+querystring = { workspace = true }
 rand = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true, features = ["rc", "derive"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
-bincode = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
-async-bincode = { workspace = true }
-tracing = { workspace = true, features = ["release_max_level_debug"] }
-vec1 = { workspace = true }
-reqwest = { workspace = true }
-url = { workspace = true, features = ["serde"] }
-tokio-stream = { workspace = true }
-tokio-retry = { workspace = true }
-lazy_static = { workspace = true }
-tracing-futures = { workspace = true }
-parking_lot = { workspace = true }
-fail = { workspace = true }
 sha1 = { workspace = true }
-streaming-iterator = { workspace = true }
-enum-kinds = { workspace = true }
 slotmap = { workspace = true }
+strawpoll = { workspace = true }
+streaming-iterator = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true }
-indexmap = { workspace = true }
-quanta = { workspace = true }
-base64 = { workspace = true }
 timekeeper = { workspace = true }
-serde = { workspace = true, features = ["rc", "derive"] }
+tokio = { workspace = true, features = ["full"] }
+tokio-retry = { workspace = true }
+tokio-stream = { workspace = true }
 tokio-tower = { workspace = true }
 tower = { workspace = true, features = ["util"] }
-strawpoll = { workspace = true }
+tracing = { workspace = true, features = ["release_max_level_debug"] }
+tracing-futures = { workspace = true }
+url = { workspace = true, features = ["serde"] }
+vec1 = { workspace = true }
 
 # local deps
 dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow" }

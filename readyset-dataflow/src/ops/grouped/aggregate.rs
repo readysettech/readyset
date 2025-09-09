@@ -47,38 +47,52 @@ impl Aggregation {
         dialect: &Dialect,
     ) -> ReadySetResult<GroupedOperator<Aggregator>> {
         let out_ty = match &self {
-            Aggregation::Count => DfType::BigInt,
-            Aggregation::Sum => match dialect.engine() {
-                SqlEngine::MySQL => {
-                    if over_col_ty.is_any_float() {
-                        DfType::Double
-                    } else {
-                        DfType::DEFAULT_NUMERIC
+            Aggregation::Count => {
+                antithesis_sdk::assert_reachable!("Aggregation::Count");
+                DfType::BigInt
+            }
+            Aggregation::Sum => {
+                antithesis_sdk::assert_reachable!("Aggregation::Sum");
+
+                match dialect.engine() {
+                    SqlEngine::MySQL => {
+                        if over_col_ty.is_any_float() {
+                            DfType::Double
+                        } else {
+                            DfType::DEFAULT_NUMERIC
+                        }
+                    }
+                    SqlEngine::PostgreSQL => {
+                        if over_col_ty.is_any_int() {
+                            DfType::BigInt
+                        } else if over_col_ty.is_any_bigint() || over_col_ty.is_numeric() {
+                            DfType::DEFAULT_NUMERIC
+                        } else if over_col_ty.is_float() {
+                            DfType::Float
+                        } else if over_col_ty.is_double() {
+                            DfType::Double
+                        } else {
+                            invalid_query!("Cannot sum over type {}", over_col_ty)
+                        }
                     }
                 }
-                SqlEngine::PostgreSQL => {
-                    if over_col_ty.is_any_int() {
-                        DfType::BigInt
-                    } else if over_col_ty.is_any_bigint() || over_col_ty.is_numeric() {
-                        DfType::DEFAULT_NUMERIC
-                    } else if over_col_ty.is_float() {
-                        DfType::Float
-                    } else if over_col_ty.is_double() {
-                        DfType::Double
-                    } else {
-                        invalid_query!("Cannot sum over type {}", over_col_ty)
-                    }
-                }
-            },
+            }
             Aggregation::Avg => {
+                antithesis_sdk::assert_reachable!("Aggregation::Avg");
                 if over_col_ty.is_any_float() {
                     DfType::Double
                 } else {
                     DfType::DEFAULT_NUMERIC
                 }
             }
-            Aggregation::GroupConcat { .. } => DfType::Text(/* TODO */ Collation::Utf8),
-            Aggregation::JsonObjectAgg { .. } => DfType::Text(Collation::Utf8),
+            Aggregation::GroupConcat { .. } => {
+                antithesis_sdk::assert_reachable!("Aggregation::GroupConcat");
+                DfType::Text(/* TODO */ Collation::Utf8)
+            }
+            Aggregation::JsonObjectAgg { .. } => {
+                antithesis_sdk::assert_reachable!("Aggregation::JsonObjectAgg");
+                DfType::Text(Collation::Utf8)
+            }
         };
 
         Ok(GroupedOperator::new(

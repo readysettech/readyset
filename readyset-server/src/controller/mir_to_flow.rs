@@ -94,6 +94,7 @@ pub(super) fn mir_node_to_flow_parts(
                     ..
                 } => {
                     invariant_eq!(ancestors.len(), 1);
+                    antithesis_sdk::assert_reachable!("Create dataflow node for aggregation");
                     let parent = ancestors[0];
                     Some(make_grouped_node(
                         graph,
@@ -111,14 +112,17 @@ pub(super) fn mir_node_to_flow_parts(
                     ref primary_key,
                     ref unique_keys,
                     ..
-                } => Some(make_base_node(
-                    name,
-                    column_specs.as_slice(),
-                    custom_types,
-                    primary_key.as_deref(),
-                    unique_keys,
-                    mig,
-                )?),
+                } => {
+                    antithesis_sdk::assert_reachable!("Create dataflow base node");
+                    Some(make_base_node(
+                        name,
+                        column_specs.as_slice(),
+                        custom_types,
+                        primary_key.as_deref(),
+                        unique_keys,
+                        mig,
+                    )?)
+                }
                 MirNodeInner::Extremum {
                     ref on,
                     ref group_by,
@@ -126,6 +130,7 @@ pub(super) fn mir_node_to_flow_parts(
                     ..
                 } => {
                     invariant_eq!(ancestors.len(), 1);
+                    antithesis_sdk::assert_reachable!("Create dataflow node for extremum");
                     let parent = ancestors[0];
                     Some(make_grouped_node(
                         graph,
@@ -147,6 +152,7 @@ pub(super) fn mir_node_to_flow_parts(
                     ref output_column,
                 } => {
                     invariant_eq!(ancestors.len(), 1);
+                    antithesis_sdk::assert_reachable!("Create dataflow node for window");
                     Some(make_window_node(
                         graph,
                         name,
@@ -162,6 +168,7 @@ pub(super) fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Filter { ref conditions } => {
                     invariant_eq!(ancestors.len(), 1);
+                    antithesis_sdk::assert_reachable!("Create dataflow node for filter");
                     let parent = ancestors[0];
                     Some(make_filter_node(
                         graph,
@@ -175,6 +182,7 @@ pub(super) fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Identity => {
                     invariant_eq!(ancestors.len(), 1);
+                    antithesis_sdk::assert_reachable!("Create dataflow node for identity");
                     let parent = ancestors[0];
                     Some(make_identity_node(
                         graph,
@@ -190,6 +198,7 @@ pub(super) fn mir_node_to_flow_parts(
                     ..
                 } => {
                     invariant_eq!(ancestors.len(), 2);
+                    antithesis_sdk::assert_reachable!("Create dataflow node for join");
                     let left = ancestors[0];
                     let right = ancestors[1];
                     Some(make_join_node(
@@ -206,6 +215,7 @@ pub(super) fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::JoinAggregates => {
                     invariant_eq!(ancestors.len(), 2);
+                    antithesis_sdk::assert_reachable!("Create dataflow node for join aggregate");
                     let left = ancestors[0];
                     let right = ancestors[1];
                     Some(make_join_aggregates_node(
@@ -243,6 +253,7 @@ pub(super) fn mir_node_to_flow_parts(
                 } => {
                     if !lowered_to_df {
                         invariant_eq!(ancestors.len(), 1);
+                        antithesis_sdk::assert_reachable!("Create dataflow leaf node");
                         let parent = ancestors[0];
                         let reader_processing = make_reader_processing(
                             graph,
@@ -271,6 +282,7 @@ pub(super) fn mir_node_to_flow_parts(
                     ..
                 } => {
                     invariant_eq!(ancestors.len(), 2);
+                    antithesis_sdk::assert_reachable!("Create dataflow node for left join");
                     let left = ancestors[0];
                     let right = ancestors[1];
                     Some(make_join_node(
@@ -287,6 +299,7 @@ pub(super) fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Project { ref emit } => {
                     invariant_eq!(ancestors.len(), 1);
+                    antithesis_sdk::assert_reachable!("Create dataflow project node");
                     let parent = ancestors[0];
                     Some(make_project_node(
                         graph,
@@ -302,6 +315,7 @@ pub(super) fn mir_node_to_flow_parts(
                     duplicate_mode,
                 } => {
                     invariant_eq!(ancestors.len(), emit.len());
+                    antithesis_sdk::assert_reachable!("Create dataflow node for union");
                     #[allow(clippy::unwrap_used)]
                     Some(make_union_node(
                         graph,
@@ -317,6 +331,7 @@ pub(super) fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Distinct { ref group_by } => {
                     invariant_eq!(ancestors.len(), 1);
+                    antithesis_sdk::assert_reachable!("Create dataflow distinct node");
                     let parent = ancestors[0];
                     Some(make_distinct_node(
                         graph,
@@ -339,6 +354,7 @@ pub(super) fn mir_node_to_flow_parts(
                     limit,
                 } => {
                     invariant_eq!(ancestors.len(), 1);
+                    antithesis_sdk::assert_reachable!("Create dataflow paginate/topk node");
                     let parent = ancestors[0];
                     Some(make_paginate_or_topk_node(
                         graph,

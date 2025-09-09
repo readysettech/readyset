@@ -355,12 +355,24 @@ pub(super) fn post_lookup_aggregates(
                 }
                 // Count and sum are handled the same way, as re-aggregating counts is
                 // done by just summing the numbers together
-                Count { .. } | CountStar | Sum { .. } => PostLookupAggregateFunction::Sum,
-                Max(_) => PostLookupAggregateFunction::Max,
-                Min(_) => PostLookupAggregateFunction::Min,
-                GroupConcat { separator, .. } => PostLookupAggregateFunction::GroupConcat {
-                    separator: separator.clone().unwrap_or_else(|| ",".to_owned()),
-                },
+                Count { .. } | CountStar | Sum { .. } => {
+                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::Sum");
+                    PostLookupAggregateFunction::Sum
+                }
+                Max(_) => {
+                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::Max");
+                    PostLookupAggregateFunction::Max
+                }
+                Min(_) => {
+                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::Min");
+                    PostLookupAggregateFunction::Min
+                }
+                GroupConcat { separator, .. } => {
+                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::GroupConcat");
+                    PostLookupAggregateFunction::GroupConcat {
+                        separator: separator.clone().unwrap_or_else(|| ",".to_owned()),
+                    }
+                }
                 Extract { .. } | Call { .. } | Substring { .. } | Lower { .. } | Upper { .. } => {
                     continue
                 }
@@ -368,9 +380,12 @@ pub(super) fn post_lookup_aggregates(
                 JsonObjectAgg {
                     allow_duplicate_keys,
                     ..
-                } => PostLookupAggregateFunction::JsonObjectAgg {
-                    allow_duplicate_keys: *allow_duplicate_keys,
-                },
+                } => {
+                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::JsonObjectAgg");
+                    PostLookupAggregateFunction::JsonObjectAgg {
+                        allow_duplicate_keys: *allow_duplicate_keys,
+                    }
+                }
             },
         });
     }

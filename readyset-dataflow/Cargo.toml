@@ -8,36 +8,36 @@ edition = "2021"
 description = "ReadySet dataflow crate"
 
 [dependencies]
+ahash = { workspace = true }
 antithesis_sdk = { workspace = true }
 async-bincode = { workspace = true }
-exponential-backoff = { workspace = true }
 bincode = { workspace = true }
 bufstream = { workspace = true }
 byteorder = { workspace = true }
-ahash = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+criterion = { workspace = true, features = ["async_tokio"], optional = true }
+derive_more = { workspace = true }
+enum-kinds = { workspace = true }
+exponential-backoff = { workspace = true }
+fail = { workspace = true }
 futures-util = { workspace = true }
+html-escape = { workspace = true }
 itertools = { workspace = true }
 metrics = { workspace = true }
 pin-project = { workspace = true }
+proptest = { workspace = true }
 rand = { workspace = true }
 serde_with = { workspace = true }
 socket2 = { workspace = true }
-tracing = { workspace = true, features = ["release_max_level_debug"] }
-tokio = { workspace = true, features = ["full"] }
-tokio-stream = { workspace = true, features = ["net"] }
-vec_map = { workspace = true, features = ["eders"] }
-derive_more = { workspace = true }
-vec1 = { workspace = true }
-criterion = { workspace = true, features = ["async_tokio"], optional = true }
+strum = { workspace = true }
 test-strategy = { workspace = true }
 thiserror = { workspace = true }
-proptest = { workspace = true }
-fail = { workspace = true }
-strum = { workspace = true }
-clap = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true, features = ["net"] }
+tracing = { workspace = true, features = ["release_max_level_debug"] }
 url = { workspace = true }
-html-escape = { workspace = true }
-enum-kinds = { workspace = true }
+vec1 = { workspace = true }
+vec_map = { workspace = true, features = ["eders"] }
 
 # need features
 petgraph = { workspace = true, features = ["serde-1"] }
