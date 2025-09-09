@@ -695,7 +695,7 @@ impl Fuzz {
                     .create(true)
                     .write(true)
                     .open(&path)?;
-                info!(?path, "writing out failing test script");
+                error!(%reason, ?path, "test failed, writing out failing test script");
                 script.write_to(&mut file)?;
                 file.flush()?;
                 let message = reason.message();
