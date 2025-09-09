@@ -229,7 +229,17 @@ impl BuiltinFunction {
             }
             "addtime" => {
                 let base_time = next_arg()?;
-                let ty = base_time.ty().clone();
+                let mut ty = base_time.ty().clone();
+
+                // promote the return type of mysql `date` to `datetime`. The mysql docs
+                // do not state this explicitly, but this is what happens in practice
+                // (it also makes sense, when you add "time" to a "date").
+                if matches!(ty, DfType::Date) {
+                    ty = DfType::DateTime {
+                        subsecond_digits: dialect.default_subsecond_digits(),
+                    }
+                }
+
                 (Self::Addtime(base_time, next_arg()?), ty)
             }
             "date_format" => (

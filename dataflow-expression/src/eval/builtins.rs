@@ -1897,9 +1897,24 @@ mod tests {
             ))
         );
 
+        // param1 as `date` - should be promoted to `datetime`
+        let param1 = NaiveDate::from_ymd_opt(2025, 9, 9).unwrap();
+        let param2 = NaiveTime::from_hms_opt(4, 13, 33).unwrap();
+        assert_eq!(
+            expr.eval::<DfValue>(&[param1.into(), param2.into()])
+                .unwrap(),
+            DfValue::TimestampTz(
+                NaiveDateTime::new(
+                    NaiveDate::from_ymd_opt(2025, 9, 9).unwrap(),
+                    NaiveTime::from_hms_opt(4, 13, 33).unwrap(),
+                )
+                .into()
+            )
+        );
+
         // NULL checks
         assert_eq!(
-            expr.eval::<DfValue>(&[DfValue::None, DfValue::try_from(param2).unwrap()])
+            expr.eval::<DfValue>(&[DfValue::None, DfValue::from(param2)])
                 .unwrap(),
             DfValue::None
         );
