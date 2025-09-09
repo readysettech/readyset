@@ -93,6 +93,30 @@ pub struct UpstreamConfig {
     #[serde(default)]
     pub replication_server_id: Option<ReplicationServerId>,
 
+    /// Hostname to report when registering as a replica with the upstream database (MySQL only).
+    /// If not set, no hostname will be reported.
+    #[arg(long = "report-host", env = "REPORT_HOST")]
+    #[serde(default)]
+    pub replica_report_host: Option<String>,
+
+    /// Port to report when registering as a replica with the upstream database (MySQL only).
+    /// If not set, no port will be reported.
+    #[arg(long = "report-port", env = "REPORT_PORT")]
+    #[serde(default)]
+    pub replica_report_port: Option<u16>,
+
+    /// Username to report when registering as a replica with the upstream database (MySQL only).
+    /// If not set, no username will be reported.
+    #[arg(long = "report-user", env = "REPORT_USER")]
+    #[serde(default)]
+    pub replica_report_user: Option<String>,
+
+    /// Password to report when registering as a replica with the upstream database (MySQL only).
+    /// If not set, no password will be reported.
+    #[arg(long = "report-password", env = "REPORT_PASSWORD")]
+    #[serde(default)]
+    pub replica_report_password: Option<RedactedString>,
+
     /// The time to wait before restarting the replicator in seconds.
     #[arg(long, hide = true, default_value = "1", value_parser = duration_from_seconds)]
     #[serde(default = "default_replicator_restart_timeout")]
@@ -320,6 +344,10 @@ impl Default for UpstreamConfig {
             disable_setup_ddl_replication: false,
             disable_create_publication: false,
             replication_server_id: Default::default(),
+            replica_report_host: Default::default(),
+            replica_report_port: Default::default(),
+            replica_report_user: Default::default(),
+            replica_report_password: Default::default(),
             replicator_restart_timeout: Duration::from_secs(1),
             replication_tables: Default::default(),
             replication_tables_ignore: Default::default(),

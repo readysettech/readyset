@@ -428,27 +428,15 @@ impl<'a> NoriaAdapter<'a> {
             (Some(pos), _) => pos.clone().try_into()?,
         };
 
-        let server_id = config
-            .replication_server_id
-            .as_ref()
-            .map(|id| id.0.parse::<u32>())
-            .transpose()
-            .map_err(|_| {
-                ReadySetError::ReplicationFailed(format!(
-                    "{} is an invalid server id--it must be a valid u32.",
-                    config.replication_server_id.clone().unwrap()
-                ))
-            })?;
-
         let connector = Box::new(
             MySqlBinlogConnector::connect(
                 noria.clone(),
                 mysql_opts_builder,
                 pos.clone(),
-                server_id,
                 enable_statement_logging,
                 table_filter.clone(),
                 parsing_preset,
+                config,
             )
             .await?,
         );

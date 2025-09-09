@@ -29,6 +29,7 @@ use serde_json::Map;
 use tokio::time::timeout;
 use tracing::{error, info, warn};
 
+use database_utils::UpstreamConfig;
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
@@ -174,7 +175,13 @@ impl MySqlBinlogConnector {
     /// In order to request a binlog, we must first register as a replica, and let the primary
     /// know what type of checksum we support (NONE and CRC32 are the options), NONE seems to work
     /// but others use CRC32 🤷‍♂️
-    async fn register_as_replica(&mut self) -> mysql::Result<()> {
+    async fn register_as_replica(
+        &mut self,
+        hostname: Option<String>,
+        port: Option<u16>,
+        username: Option<String>,
+        password: Option<String>,
+    ) -> mysql::Result<()> {
         let query = match get_mysql_version(&mut self.connection).await {
             Ok(version) => {
                 if version >= 80400 {
@@ -191,7 +198,24 @@ impl MySqlBinlogConnector {
         };
         self.connection.query_drop(query).await?;
 
-        let cmd = mysql_common::packets::ComRegisterSlave::new(self.server_id());
+        let mut cmd = mysql_common::packets::ComRegisterSlave::new(self.server_id());
+
+        if let Some(ref host) = hostname {
+            cmd = cmd.with_hostname(host.as_bytes());
+        }
+
+        if let Some(port) = port {
+            cmd = cmd.with_port(port);
+        }
+
+        if let Some(ref user) = username {
+            cmd = cmd.with_user(user.as_bytes());
+        }
+
+        if let Some(ref pass) = password {
+            cmd = cmd.with_password(pass.as_bytes());
+        }
+
         self.connection.write_command(&cmd).await?;
         // Server will respond with OK.
         self.connection.read_packet().await?;
@@ -243,11 +267,23 @@ impl MySqlBinlogConnector {
         noria: ReadySetHandle,
         mysql_opts: O,
         next_position: MySqlPosition,
-        server_id: Option<u32>,
         enable_statement_logging: bool,
         table_filter: TableFilter,
         parsing_preset: ParsingPreset,
+        config: &UpstreamConfig,
     ) -> ReadySetResult<Self> {
+        let server_id = config
+            .replication_server_id
+            .as_ref()
+            .map(|id| id.0.parse::<u32>())
+            .transpose()
+            .map_err(|_| {
+                ReadySetError::ReplicationFailed(format!(
+                    "{} is an invalid server id--it must be a valid u32.",
+                    config.replication_server_id.clone().unwrap()
+                ))
+            })?;
+
         let mut connector = MySqlBinlogConnector {
             noria,
             connection: mysql::Conn::new(mysql_opts).await?,
@@ -263,7 +299,18 @@ impl MySqlBinlogConnector {
         };
 
         connector.set_parameters().await?;
-        connector.register_as_replica().await?;
+
+        connector
+            .register_as_replica(
+                config.replica_report_host.clone(),
+                config.replica_report_port,
+                config.replica_report_user.clone(),
+                config
+                    .replica_report_password
+                    .as_ref()
+                    .map(|p| p.to_string()),
+            )
+            .await?;
         let binlog_request = connector.request_binlog().await;
         match binlog_request {
             Ok(()) => (),
