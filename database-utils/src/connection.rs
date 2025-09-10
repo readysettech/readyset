@@ -281,6 +281,25 @@ impl DatabaseConnection {
         }
     }
 
+    pub async fn drop_prepared(&mut self, stmt: DatabaseStatement) -> Result<(), DatabaseError> {
+        match (self, stmt) {
+            (DatabaseConnection::MySQL(conn), DatabaseStatement::MySql(stmt)) => {
+                conn.close(stmt).await?;
+            }
+            (DatabaseConnection::PostgreSQL(..), DatabaseStatement::Postgres(stmt, _))
+            | (DatabaseConnection::PostgreSQLPool(..), DatabaseStatement::Postgres(stmt, _)) => {
+                drop(stmt)
+            }
+            (_, DatabaseStatement::MySql(..)) => {
+                return Err(DatabaseError::WrongConnection(ConnectionType::MySQL));
+            }
+            (_, DatabaseStatement::Postgres(..)) => {
+                return Err(DatabaseError::WrongConnection(ConnectionType::PostgreSQL));
+            }
+        }
+        Ok(())
+    }
+
     /// Creates a new transaction using the underlying database connection.
     pub async fn transaction(&mut self) -> Result<Transaction<'_>, DatabaseError> {
         match self {

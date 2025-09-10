@@ -24,7 +24,7 @@ use readyset_client::ReadySetHandle;
 use readyset_data::upstream_system_props::{
     init_system_props, UpstreamSystemProperties, DEFAULT_TIMEZONE_NAME,
 };
-use readyset_data::DfValue;
+use readyset_data::{Collation, DfType, DfValue};
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_server::{Builder, LocalAuthority, ReuseConfigType};
@@ -386,7 +386,7 @@ impl TestScript {
                         {
                             {
                                 let query_result = self
-                                    .run_query(query, conn)
+                                    .run_query(query, conn, is_readyset)
                                     .await
                                     .with_context(|| format!("Running query {}", query.query));
 
@@ -455,11 +455,31 @@ impl TestScript {
         Ok(())
     }
 
-    async fn run_query(&self, query: &Query, conn: &mut DatabaseConnection) -> anyhow::Result<()> {
+    async fn run_query(
+        &self,
+        query: &Query,
+        conn: &mut DatabaseConnection,
+        is_readyset: bool,
+    ) -> anyhow::Result<()> {
+        // If this is readyset, drop proxied queries, so that if we are retrying a SELECT and it was
+        // previously unsupported (e.g. because a required table hadn't yet been replicated), we
+        // will retry caching it instead of assuming it still can't be cached and just proxying it.
+        //
+        // TODO(REA-4799): remove this once the server tells the adapter about DDL and it
+        // invalidates proxied queries
+        if is_readyset {
+            conn.query_drop("DROP ALL PROXIED QUERIES").await?;
+        }
+
         let results = if query.params.is_empty() {
             conn.query(&query.query).await?
         } else {
-            conn.execute(&query.query, query.params.clone()).await?
+            // We manually prepare and drop the statement, so that we can retry caching it if it was
+            // previously unsupported.
+            let stmt = conn.prepare(&query.query).await?;
+            let results = conn.execute(&stmt, query.params.clone()).await?;
+            conn.drop_prepared(stmt).await?;
+            results
         };
 
         let mut rows = <Vec<Vec<Value>>>::try_from(results)?.into_iter().map(
@@ -546,6 +566,23 @@ impl TestScript {
                 }
             }
         }
+
+        // If we are running against a remote readyset which could proxy, verify it didn't.
+        if is_readyset {
+            let explain_results = conn.simple_query("EXPLAIN LAST STATEMENT").await?;
+            let explain_values: Vec<Vec<DfValue>> = explain_results.try_into()?;
+            if let Some(explain) = explain_values.first() {
+                if let Some(destination) = explain.first() {
+                    let destination =
+                        destination.coerce_to(&DfType::Text(Collation::Utf8), &DfType::Unknown)?;
+                    let destination = destination.as_str().unwrap();
+                    if destination != "readyset" {
+                        bail!("Query destination should be readyset, was {destination}");
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
