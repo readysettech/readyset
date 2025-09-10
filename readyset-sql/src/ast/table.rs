@@ -236,6 +236,7 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
                     }
                 }
             }
+            sqlparser::ast::TableFactor::NestedJoin { .. } => unsupported!("Nested join"),
             _ => unsupported!("table expression {value:?}"),
         }
     }
