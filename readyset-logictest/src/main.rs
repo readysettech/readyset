@@ -681,7 +681,7 @@ impl Fuzz {
                 },
                 Default::default(),
             ))
-            .map_err(|err| TestCaseError::fail(format!("{:#}", err.root_cause())))
+            .map_err(|err| TestCaseError::fail(format!("{:#}\n{:?}", err.root_cause(), err)))
         });
 
         let (passed, details) = match result {
@@ -698,7 +698,7 @@ impl Fuzz {
                 error!(%reason, ?path, "test failed, writing out failing test script");
                 script.write_to(&mut file)?;
                 file.flush()?;
-                let message = reason.message();
+                let message = reason.message().lines().next().unwrap_or("unknown");
                 (
                     false,
                     json!({
