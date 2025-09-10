@@ -435,17 +435,23 @@ impl Arbitrary for SqlType {
         use proptest::option;
         use proptest::prelude::*;
 
-        let precision_range = match args.dialect {
+        let precision_range_u16 = match args.dialect {
             Some(Dialect::PostgreSQL) => 1..=1000u16,
             // Default to MySQL's more restricted range
             _ => 1..=65,
         };
 
-        let scale_range = move |precision: u16| match args.dialect {
-            // Postgres actually supports -1000..=1000, but we can't even represent that
-            Some(Dialect::PostgreSQL) => 0..=(precision.min(u8::MAX as u16) as u8),
+        let precision_range_u8 = match args.dialect {
+            Some(Dialect::PostgreSQL) => 1..=u8::MAX,
             // Default to MySQL's more restricted range
-            _ => 0..=(precision.min(30) as u8),
+            _ => 1..=65,
+        };
+
+        let scale_range = move |precision: u8| match args.dialect {
+            // Postgres actually supports -1000..=1000, but we can't even represent that
+            Some(Dialect::PostgreSQL) => 0..=precision,
+            // Default to MySQL's more restricted range
+            _ => 0..=precision.min(30),
         };
 
         let mut variants = vec![
@@ -462,14 +468,17 @@ impl Arbitrary for SqlType {
             Just(Date).boxed(),
             Just(Time).boxed(),
             Just(Timestamp).boxed(),
-            option::of(precision_range.clone().prop_flat_map(move |precision| {
-                (Just(precision), option::of(scale_range(precision)))
+            option::of(precision_range_u16.clone().prop_flat_map(move |precision| {
+                (
+                    Just(precision),
+                    option::of(scale_range(precision.min(u8::MAX as u16) as u8)),
+                )
             }))
             .prop_map(Numeric)
             .boxed(),
-            precision_range
+            precision_range_u8
                 .prop_flat_map(move |precision| (Just(precision), scale_range(precision)))
-                .prop_map(|(precision, scale)| Decimal(precision as u8, scale))
+                .prop_map(|(precision, scale)| Decimal(precision, scale))
                 .boxed(),
         ];
 
