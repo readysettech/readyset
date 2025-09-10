@@ -656,61 +656,6 @@ impl ToMySqlValue for NaiveDateTime {
     }
 }
 
-use std::time::Duration;
-
-impl ToMySqlValue for Duration {
-    fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        let s = self.as_secs();
-        //let d = s / (24 * 3600);
-        // assert!(d <= 34);
-        //let h = (s % (24 * 3600)) / 3600;
-        let h = s / 3600;
-        let m = (s % 3600) / 60;
-        let s = s % 60;
-        let us = self.subsec_micros();
-        if us != 0 {
-            w.write_lenenc_str(format!("{h:02}:{m:02}:{s:02}.{us:06}").as_bytes())
-                .map(|_| ())
-        } else {
-            w.write_lenenc_str(format!("{h:02}:{m:02}:{s:02}").as_bytes())
-                .map(|_| ())
-        }
-    }
-
-    #[allow(clippy::many_single_char_names)]
-    fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
-        let s = self.as_secs();
-        let d = s / (24 * 3600);
-        assert!(d <= 34);
-        let h = (s % (24 * 3600)) / 3600;
-        let m = (s % 3600) / 60;
-        let s = s % 60;
-        let us = self.subsec_micros();
-
-        match c.coltype {
-            ColumnType::MYSQL_TYPE_TIME => {
-                if us != 0 {
-                    w.write_u8(12u8)?;
-                } else {
-                    w.write_u8(8u8)?;
-                }
-
-                w.write_u8(0u8)?; // positive only (for now)
-                w.write_u32::<LittleEndian>(d as u32)?;
-                w.write_u8(h as u8)?;
-                w.write_u8(m as u8)?;
-                w.write_u8(s as u8)?;
-
-                if us != 0 {
-                    w.write_u32::<LittleEndian>(us)?;
-                }
-                Ok(())
-            }
-            _ => Err(bad(self, c)),
-        }
-    }
-}
-
 impl ToMySqlValue for myc::value::Value {
     #[allow(clippy::many_single_char_names)]
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
@@ -726,22 +671,14 @@ impl ToMySqlValue for myc::value::Value {
                     .to_mysql_text(w)
             }
             myc::value::Value::Time(neg, d, h, m, s, us) => {
-                if neg {
-                    return Err(other_error(OtherErrorKind::Unexpected {
-                        error: "negative times not yet supported".to_string(),
-                    }));
-                }
-                (chrono::Duration::days(i64::from(d))
-                    + chrono::Duration::hours(i64::from(h))
-                    + chrono::Duration::minutes(i64::from(m))
-                    + chrono::Duration::seconds(i64::from(s))
-                    + chrono::Duration::microseconds(i64::from(us)))
-                .to_std()
-                .map_err(|_| {
-                    other_error(OtherErrorKind::Unexpected {
-                        error: "negative times not yet supported".to_string(),
-                    })
-                })?
+                let hours = (d * 24) + h as u32;
+                MySqlTime::from_hmsus(
+                    !neg,
+                    hours.try_into().expect("Hours are too large for TIME"),
+                    m,
+                    s,
+                    us.into(),
+                )
                 .to_mysql_text(w)
             }
         }
@@ -797,22 +734,14 @@ impl ToMySqlValue for myc::value::Value {
                 w.write_all(buf.as_slice())
             }
             myc::value::Value::Time(neg, d, h, m, s, us) => {
-                if neg {
-                    return Err(other_error(OtherErrorKind::Unexpected {
-                        error: "negative times not yet supported".to_string(),
-                    }));
-                }
-                (chrono::Duration::days(i64::from(d))
-                    + chrono::Duration::hours(i64::from(h))
-                    + chrono::Duration::minutes(i64::from(m))
-                    + chrono::Duration::seconds(i64::from(s))
-                    + chrono::Duration::microseconds(i64::from(us)))
-                .to_std()
-                .map_err(|_| {
-                    other_error(OtherErrorKind::Unexpected {
-                        error: "negative times not yet supported".to_string(),
-                    })
-                })?
+                let hours = (d * 24) + h as u32;
+                MySqlTime::from_hmsus(
+                    !neg,
+                    hours.try_into().expect("Hours are too large for TIME"),
+                    m,
+                    s,
+                    us.into(),
+                )
                 .to_mysql_bin(w, c)
             }
         }
@@ -891,7 +820,6 @@ mod tests {
                 .unwrap()
                 .naive_utc()
         );
-        rt!(dur, time::Duration, time::Duration::from_secs(1893));
         rt!(bytes, Vec<u8>, vec![0x42, 0x00, 0x1a]);
         rt!(string, String, "foobar".to_owned());
     }
@@ -1048,6 +976,12 @@ mod tests {
             time,
             MySqlTime,
             MySqlTime::from_hmsus(true, 20, 15, 14, 123_456),
+            ColumnType::MYSQL_TYPE_TIME
+        );
+        rt!(
+            time_neg,
+            MySqlTime,
+            MySqlTime::from_hmsus(false, 142, 15, 14, 123_456),
             ColumnType::MYSQL_TYPE_TIME
         );
         rt!(
