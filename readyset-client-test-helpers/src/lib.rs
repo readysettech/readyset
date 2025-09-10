@@ -416,6 +416,7 @@ impl TestBuilder {
                         Some(rh),
                         Default::default(),
                         authority.clone(),
+                        Vec::new(),
                     );
                     let backend = backend_builder
                         .dialect(A::DIALECT)

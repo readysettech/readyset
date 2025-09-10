@@ -1911,7 +1911,7 @@ async fn show_readyset_status() {
 
     // NOTE: If this readyset extension has changed, verify the new behavior is correct then update
     // the expected values below
-    assert_eq!(ret.len(), 8);
+    assert_eq!(ret.len(), 9);
     let row = ret.remove(0);
     assert_eq!(row.get::<String, _>(0).unwrap(), "Database Connection");
     assert_eq!(row.get::<String, _>(1).unwrap(), "Connected");
@@ -1945,6 +1945,9 @@ async fn show_readyset_status() {
     let row = ret.remove(0);
     assert_eq!(row.get::<String, _>(0).unwrap(), "Last started replication");
     assert!(valid_timestamp(row.get::<String, _>(1).unwrap()));
+    let row = ret.remove(0);
+    assert_eq!(row.get::<String, _>(0).unwrap(), "Enabled Features");
+    assert_eq!(row.get::<String, _>(1).unwrap(), "None");
     readyset_maintenance_mode(&mut conn).await;
     shutdown_tx.shutdown().await;
 }
@@ -1955,7 +1958,7 @@ async fn readyset_maintenance_mode(conn: &mut Conn) {
         .unwrap();
     sleep().await;
     let ret: Vec<Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
-    assert_eq!(ret.len(), 8);
+    assert_eq!(ret.len(), 9);
     // find the row with "Status"
     let row = ret
         .iter()
@@ -1970,7 +1973,7 @@ async fn readyset_maintenance_mode(conn: &mut Conn) {
         .unwrap();
     sleep().await;
     let ret: Vec<Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
-    assert_eq!(ret.len(), 8);
+    assert_eq!(ret.len(), 9);
     let row = ret
         .iter()
         .find(|r| r.get::<String, _>(0).unwrap() == "Status")

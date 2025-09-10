@@ -702,6 +702,7 @@ impl TestScript {
                         Some(rh),
                         Default::default(),
                         authority.clone(),
+                        Vec::new(),
                     );
                     BackendBuilder::new()
                         .require_authentication(false)

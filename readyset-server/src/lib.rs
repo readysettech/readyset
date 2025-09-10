@@ -760,6 +760,32 @@ impl WorkerOptions {
 
         None
     }
+
+    /// Get a list of enabled feature flags for status display
+    pub fn enabled_features(&self) -> Vec<String> {
+        let mut enabled = Vec::new();
+
+        if self.feature_materialization_persistence {
+            enabled.push("Materialization Persistence".to_string());
+        }
+        if self.feature_mixed_comparisons {
+            enabled.push("Mixed Comparisons".to_string());
+        }
+        if self.feature_pagination {
+            enabled.push("Pagination".to_string());
+        }
+        if self.feature_post_lookup {
+            enabled.push("Post-Lookup".to_string());
+        }
+        if self.feature_straddled_joins {
+            enabled.push("Straddled Joins".to_string());
+        }
+        if self.feature_topk {
+            enabled.push("Top K".to_string());
+        }
+
+        enabled
+    }
 }
 
 // TODO(justin): Change VolumeId type when we know this fixed size.
@@ -819,5 +845,20 @@ mod tests {
         let storage_dir = "/tmp/cli-flag-storage";
         let worker_opts = Wrapper::parse_from(["test", "--storage-dir", storage_dir]).worker_opts;
         assert_eq!(Some(PathBuf::from(storage_dir)), worker_opts.storage_dir());
+    }
+
+    #[test]
+    fn enabled_features_default() {
+        let worker_opts = Wrapper::parse_from(["test"]).worker_opts;
+        let enabled = worker_opts.enabled_features();
+        assert!(enabled.is_empty());
+    }
+
+    #[test]
+    fn enabled_features_multiple() {
+        let worker_opts =
+            Wrapper::parse_from(["test", "--feature-pagination", "--feature-topk"]).worker_opts;
+        let enabled = worker_opts.enabled_features();
+        assert_eq!(enabled, vec!["Pagination", "Top K"]);
     }
 }

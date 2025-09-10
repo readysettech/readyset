@@ -22,6 +22,7 @@ pub struct ReadySetStatus {
     pub upstream_reachable: Option<bool>,
     pub connection_count: usize,
     pub persistent_stats: Option<PersistentStats>,
+    pub enabled_features: Vec<String>,
 }
 
 impl ReadySetStatus {
@@ -73,6 +74,15 @@ impl ReadySetStatus {
             }
         }
 
+        if self.enabled_features.is_empty() {
+            status.push(("Enabled Features".to_string(), "None".to_string()));
+        } else {
+            status.push((
+                "Enabled Features".to_string(),
+                self.enabled_features.join(", "),
+            ));
+        }
+
         QueryResult::MetaVariables(status.into_iter().map(MetaVariable::from).collect())
     }
 }
@@ -110,12 +120,14 @@ where
         rs_handle: Option<ReadySetHandle>,
         connections: Arc<SkipSet<SocketAddr>>,
         authority: Arc<Authority>,
+        enabled_features: Vec<String>,
     ) -> Self {
         let inner = Arc::new(Mutex::new(ReadySetStatusReporterInner {
             upstream: upstream_config.into(),
             rs_handle,
             connections,
             authority,
+            enabled_features,
         }));
         Self { inner }
     }
@@ -138,6 +150,8 @@ struct ReadySetStatusReporterInner<U> {
     pub(crate) connections: Arc<SkipSet<SocketAddr>>,
     /// A shared handle to the Authority, used for reading persistent_stats for /readyset_status
     pub(crate) authority: Arc<Authority>,
+    /// Enabled features to display in status
+    pub(crate) enabled_features: Vec<String>,
 }
 
 impl<U> ReadySetStatusReporterInner<U>
@@ -156,6 +170,7 @@ where
             upstream_reachable: self.upstream_reachable().await,
             connection_count: self.connections.len(),
             persistent_stats,
+            enabled_features: self.enabled_features.clone(),
         }
     }
 
