@@ -229,7 +229,7 @@ impl Parse {
                         println!("{records:#?}");
                     }
                 }
-                Err(err) => error!(?filename, %err, "Error parsing records"),
+                Err(err) => error!(?filename, ?err, "Error parsing records"),
             };
         }
         Ok(())
@@ -695,7 +695,7 @@ impl Fuzz {
                     .create(true)
                     .write(true)
                     .open(&path)?;
-                error!(%reason, ?path, "test failed, writing out failing test script");
+                error!(?path, %reason, "test failed, writing out failing test script");
                 script.write_to(&mut file)?;
                 file.flush()?;
                 let message = reason.message().lines().next().unwrap_or("unknown");
@@ -748,7 +748,7 @@ impl Fuzz {
                     match rt.block_on(seed.run(generate_opts, dialect)) {
                         Ok(script) => Some(script.clone()),
                         Err(err) => {
-                            error!(%err, "Error generating test script from seed");
+                            error!(?err, "Error generating test script from seed");
                             None
                         }
                     }
