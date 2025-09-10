@@ -703,12 +703,16 @@ impl DatabaseURL {
         }
     }
 
-    /// Returns `true` if this url is a [`MySQL`] URL.
-    ///
-    /// [`MySQL`]: DatabaseURL::MySQL
+    /// Returns `true` if this url is a [`DatabaseURL::MySQL`] URL.
     #[must_use]
     pub fn is_mysql(&self) -> bool {
         matches!(self, Self::MySQL(..))
+    }
+
+    /// Returns `true` if this url is a [`DatabaseURL::PostgreSQL`] URL.
+    #[must_use]
+    pub fn is_postgres(&self) -> bool {
+        matches!(self, Self::PostgreSQL(..))
     }
 
     /// Returns the SQL dialect for the URL.

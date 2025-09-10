@@ -227,8 +227,14 @@ impl Seed {
             .context("Connecting to comparison database")?;
 
         // Avoid any timeout issues
-        if matches!(opts.compare_to, DatabaseURL::MySQL(_)) {
+        if opts.compare_to.is_mysql() {
             conn.query_drop("SET SESSION MAX_EXECUTION_TIME=0").await?;
+        }
+
+        // We might generate a citext column, and that shouldn't fail the seed
+        if opts.compare_to.is_postgres() {
+            conn.query_drop("create extension if not exists citext")
+                .await?;
         }
 
         let tables_in_order = self

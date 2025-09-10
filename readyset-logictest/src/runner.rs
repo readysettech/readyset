@@ -225,6 +225,13 @@ impl TestScript {
                 .await
                 .with_context(|| "connecting to upstream database")?;
 
+            // We expect it's harmless to always enable the built-in citext extension, which fuzz
+            // tests might generate.
+            if upstream_url.is_postgres() {
+                conn.query_drop("create extension if not exists citext")
+                    .await?;
+            }
+
             self.run_on_database(&opts, &mut conn, None, opts.upstream_database_is_readyset)
                 .await?;
         } else {
