@@ -207,8 +207,19 @@ impl TestScript {
     pub async fn run(&mut self, opts: RunOptions, noria_opts: NoriaOptions) -> anyhow::Result<()> {
         info!(path = ?self.path, "Running test script");
 
+        // Recreate the test database, unless this is a long-lived remote readyset instance (e.g.
+        // running under Antithesis) in which case the state needs to be managed/reset externally;
+        // we currently won't do the right thing if we drop and recreate an database out from under
+        // the Readyset instance, and Postgres won't even let us do it. See REA-5958.
+        if !opts.upstream_database_is_readyset {
+            if let Some(upstream_url) = &opts.upstream_database_url {
+                recreate_test_database(upstream_url).await?;
+            } else if let Some(replication_url) = &opts.replication_url {
+                recreate_test_database(&replication_url.parse()?).await?;
+            }
+        }
+
         if let Some(upstream_url) = &opts.upstream_database_url {
-            recreate_test_database(upstream_url).await?;
             let mut conn = upstream_url
                 .connect(None)
                 .await
@@ -217,10 +228,6 @@ impl TestScript {
             self.run_on_database(&opts, &mut conn, None, opts.upstream_database_is_readyset)
                 .await?;
         } else {
-            if let Some(replication_url) = &opts.replication_url {
-                recreate_test_database(&replication_url.parse()?).await?;
-            }
-
             self.run_on_noria(&opts, &noria_opts).await?;
         };
 
