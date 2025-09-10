@@ -277,6 +277,13 @@ impl<'a> TryFrom<Value<'a>> for MySqlTime {
     type Error = MsqlSrvError;
     fn try_from(val: Value<'a>) -> Result<MySqlTime, Self::Error> {
         if let ValueInner::Time(mut v) = val.0 {
+            // if there's no bytes, it means the client sent an "optimized"
+            // time value of '00:00:00'.
+            // see https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_binary_resultset.html
+            if v.is_empty() {
+                return Ok(Default::default());
+            }
+
             let is_positive = v.read_u8()? == 0; // sign: 1 negative, 0 positive
             let d = v.read_u32::<LittleEndian>()? as u16;
             let h = v.read_u8()? as u16;
