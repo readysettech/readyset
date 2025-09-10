@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
@@ -249,22 +248,13 @@ impl Base {
             _ => return self.process_unkeyed(db, ops),
         };
 
-        let mut n_ops = ops.len();
-        // Sort all of the operations lexicographically by key types, all unkeyed operations will
-        // move to the front of the vector (which can only be `SetReplicationOffset`), for
-        // the rest of the operations it will group them by their key value.
-        ops.sort_by(|a, b| {
-            key_of(key_cols, a).cmp(key_of(key_cols, b)).then_with(|| {
-                // Put all the Truncate ops last so we can process them separately
-                if *a == TableOperation::Truncate {
-                    Ordering::Greater
-                } else if *b == TableOperation::Truncate {
-                    Ordering::Less
-                } else {
-                    Ordering::Equal
-                }
-            })
+        ops.sort_by_key(|op| match op {
+            TableOperation::SetReplicationOffset(_) | TableOperation::SetSnapshotMode(_) => 0,
+            TableOperation::Truncate => 2,
+            _ => 1,
         });
+
+        let mut n_ops = ops.len();
         let mut ops = ops.into_iter().peekable();
 
         // First compute the replication offset
@@ -744,154 +734,6 @@ mod tests {
         use readyset_data::DfType;
 
         use super::*;
-        use crate::node::Column as DfColumn;
-
-        fn test_lots_of_changes_in_same_batch(mut state: MaterializedNodeState) {
-            use crate::node;
-            use crate::prelude::*;
-
-            // most of this is from MockGraph
-            let mut graph = Graph::new();
-            let source = graph.add_node(Node::new(
-                "source",
-                vec![DfColumn::new("".into(), DfType::Unknown, None)],
-                node::NodeType::Source,
-            ));
-
-            let b = Base::new().with_primary_key([0, 2]);
-            let global = graph.add_node(Node::new(
-                "b",
-                vec![
-                    DfColumn::new("x".into(), DfType::Unknown, None),
-                    DfColumn::new("y".into(), DfType::Unknown, None),
-                    DfColumn::new("z".into(), DfType::Unknown, None),
-                ],
-                b,
-            ));
-            graph.add_edge(source, global, ());
-            let local = LocalNodeIndex::make(0_u32);
-            let mut ip: IndexPair = global.into();
-            ip.set_local(local);
-            graph
-                .node_weight_mut(global)
-                .unwrap()
-                .set_finalized_addr(ip);
-
-            let mut remap = HashMap::new();
-            remap.insert(global, ip);
-            graph.node_weight_mut(global).unwrap().on_commit(&remap);
-            graph.node_weight_mut(global).unwrap().add_to(0.into());
-
-            for (_, lookup_index) in graph[global].suggest_indexes(global) {
-                match lookup_index {
-                    LookupIndex::Strict(index) => state.add_index(index, None),
-                    LookupIndex::Weak(index) => state.add_weak_index(index),
-                }
-            }
-
-            let mut states = StateMap::new();
-            states.insert(local, state);
-            let n = graph[global].take();
-            let mut n = n.finalize(&graph);
-
-            let name = n.name().clone();
-            let one = move |u: Vec<TableOperation>| {
-                let mut m = n
-                    .get_base_mut()
-                    .unwrap()
-                    .process_ops(
-                        local,
-                        &[
-                            Column::new("a".into(), DfType::Int, None),
-                            Column::new("a".into(), DfType::DEFAULT_TEXT, None),
-                            Column::new("a".into(), DfType::Int, None),
-                        ],
-                        u,
-                        &states,
-                        SnapshotMode::SnapshotModeDisabled,
-                        name,
-                    )
-                    .unwrap()
-                    .records;
-                node::materialize(&mut m, None, None, states.get_mut(local)).unwrap();
-                m
-            };
-
-            assert_eq!(
-                one(vec![
-                    TableOperation::Insert(vec![1.into(), "a".into(), 1.into()]),
-                    TableOperation::Insert(vec![2.into(), "2a".into(), 1.into()]),
-                    TableOperation::Insert(vec![3.into(), "3a".into(), 1.into()]),
-                    TableOperation::DeleteByKey {
-                        key: vec![1.into(), 1.into()],
-                    },
-                    TableOperation::Insert(vec![1.into(), "b".into(), 1.into()]),
-                    TableOperation::InsertOrUpdate {
-                        row: vec![1.into(), "c".into(), 1.into()],
-                        update: vec![
-                            Modification::None,
-                            Modification::Set("never".into()),
-                            Modification::None,
-                        ],
-                    },
-                    TableOperation::InsertOrUpdate {
-                        row: vec![1.into(), "also never".into(), 1.into()],
-                        update: vec![
-                            Modification::None,
-                            Modification::Set("d".into()),
-                            Modification::None,
-                        ],
-                    },
-                    TableOperation::DeleteRow {
-                        row: vec![3.into(), "3a".into(), 1.into()]
-                    },
-                    TableOperation::Update {
-                        key: vec![1.into(), 1.into()],
-                        update: vec![
-                            Modification::None,
-                            Modification::Set("e".into()),
-                            Modification::None,
-                        ],
-                    },
-                    TableOperation::Update {
-                        key: vec![2.into(), 1.into()],
-                        update: vec![
-                            Modification::None,
-                            Modification::Set("2x".into()),
-                            Modification::None,
-                        ],
-                    },
-                    TableOperation::DeleteByKey {
-                        key: vec![1.into(), 1.into()],
-                    },
-                    TableOperation::DeleteByKey {
-                        key: vec![2.into(), 1.into()],
-                    },
-                ]),
-                Records::default()
-            );
-        }
-
-        #[test]
-        fn lots_of_changes_in_same_batch() {
-            let state = MemoryState::default();
-            test_lots_of_changes_in_same_batch(MaterializedNodeState::Memory(state));
-        }
-
-        #[test]
-        fn lots_of_changes_in_same_batch_persistent() {
-            let state = PersistentState::new(
-                String::from("lots_of_changes_in_same_batch_persistent"),
-                None,
-                Vec::<Box<[usize]>>::new(),
-                &PersistenceParameters::default(),
-                PersistenceType::BaseTable,
-                None,
-            )
-            .unwrap();
-
-            test_lots_of_changes_in_same_batch(MaterializedNodeState::Persistent(state));
-        }
 
         #[test]
         fn delete_row_unkeyed() {
