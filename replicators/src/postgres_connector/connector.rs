@@ -712,90 +712,90 @@ impl Connector for PostgresWalConnector {
                 self.had_table_error = true;
             }
 
-            let mut event = event?;
+            let event = event?;
 
-            // Check if next event is for another table, in which case we have to flush the events
-            // accumulated for this table and store the next event in `peek`.
-            match &mut event {
-                WalEvent::Truncate { tables, lsn } => {
-                    let (matching, mut other_tables) =
-                        tables.drain(..).partition::<Vec<_>, _>(|(schema, table)| {
-                            cur_table.schema.as_deref() == Some(schema.as_str())
-                                && cur_table.name == table.as_str()
-                        });
+            macro_rules! return_current_actions {
+                () => {
+                    return Ok((
+                        vec![ReplicationAction::TableAction {
+                            table: cur_table,
+                            actions,
+                        }],
+                        cur_pos.into(),
+                    ))
+                };
+            }
 
-                    if actions.is_empty() {
-                        invariant!(matching.is_empty());
-                        if let Some((schema, name)) = other_tables.pop() {
-                            if !other_tables.is_empty() {
-                                self.peek = Some(Ok(WalEvent::Truncate {
-                                    tables: other_tables,
-                                    lsn: *lsn,
-                                }));
-                            }
+            let set_current = |cur_table: &mut Relation, schema: String, name: String| {
+                *cur_table = Relation {
+                    schema: Some(schema.into()),
+                    name: name.into(),
+                };
+            };
 
-                            actions.push(TableOperation::Truncate);
-                            return Ok((
-                                vec![ReplicationAction::TableAction {
-                                    table: Relation {
-                                        schema: Some(schema.into()),
-                                        name: name.into(),
-                                    },
-                                    actions,
-                                }],
-                                cur_pos.with_lsn(*lsn).into(),
-                            ));
-                        } else {
-                            // Empty truncate op
-                            continue;
-                        }
-                    } else {
-                        if !other_tables.is_empty() {
-                            self.peek = Some(Ok(WalEvent::Truncate {
-                                tables: other_tables,
-                                lsn: *lsn,
-                            }));
-                        }
+            let event = match event {
+                WalEvent::Truncate { mut tables, lsn } => {
+                    let mut set_peek = |others| {
+                        self.peek = Some(Ok(WalEvent::Truncate {
+                            tables: others,
+                            lsn,
+                        }));
+                    };
 
-                        if !matching.is_empty() {
-                            actions.push(TableOperation::Truncate);
-                        }
-
-                        return Ok((
-                            vec![ReplicationAction::TableAction {
-                                table: cur_table,
-                                actions,
-                            }],
-                            cur_pos.into(),
-                        ));
+                    if !actions.is_empty() {
+                        // put each truncate in its own batch so the base node will be able to
+                        // see all rows when deleting them.
+                        set_peek(tables);
+                        return_current_actions!();
                     }
+
+                    let Some((schema, name)) = tables.pop() else {
+                        continue; // finished
+                    };
+                    set_current(&mut cur_table, schema, name);
+                    set_peek(tables);
+                    actions.push(TableOperation::Truncate);
+                    cur_pos = cur_pos.with_lsn(lsn);
+                    return_current_actions!();
                 }
-                WalEvent::Insert { schema, table, .. }
-                | WalEvent::DeleteRow { schema, table, .. }
-                | WalEvent::DeleteByKey { schema, table, .. }
-                | WalEvent::UpdateRow { schema, table, .. }
-                | WalEvent::UpdateByKey { schema, table, .. }
-                    if cur_table.schema.as_deref() != Some(schema.as_str())
-                        || cur_table.name != table.as_str() =>
+                WalEvent::Insert {
+                    ref schema,
+                    ref table,
+                    ..
+                }
+                | WalEvent::DeleteRow {
+                    ref schema,
+                    ref table,
+                    ..
+                }
+                | WalEvent::DeleteByKey {
+                    ref schema,
+                    ref table,
+                    ..
+                }
+                | WalEvent::UpdateRow {
+                    ref schema,
+                    ref table,
+                    ..
+                }
+                | WalEvent::UpdateByKey {
+                    ref schema,
+                    ref table,
+                    ..
+                } if cur_table.schema.as_deref() != Some(schema.as_str())
+                    || cur_table.name != table.as_str() =>
                 {
+                    // if next event is for another table, flush
                     if !actions.is_empty() {
                         self.peek = Some(Ok(event));
-                        return Ok((
-                            vec![ReplicationAction::TableAction {
-                                table: cur_table,
-                                actions,
-                            }],
-                            cur_pos.into(),
-                        ));
+                        return_current_actions!();
                     } else {
-                        cur_table = Relation {
-                            schema: Some((&*schema).into()),
-                            name: (&*table).into(),
-                        };
+                        set_current(&mut cur_table, schema.into(), table.into());
                     }
+                    event
                 }
-                _ => {}
-            }
+                _ => event,
+            };
 
             match event {
                 WalEvent::DdlEvent { ddl_event, lsn } => {
@@ -809,13 +809,7 @@ impl Connector for PostgresWalConnector {
                         ));
                     } else {
                         self.peek = Some(Ok(WalEvent::DdlEvent { ddl_event, lsn }));
-                        return Ok((
-                            vec![ReplicationAction::TableAction {
-                                table: cur_table,
-                                actions,
-                            }],
-                            cur_pos.into(),
-                        ));
+                        return_current_actions!();
                     }
                 }
                 WalEvent::WantsKeepaliveResponse { end } => {
@@ -861,18 +855,12 @@ impl Connector for PostgresWalConnector {
                     // If we crash after returning this position but before persisting this new
                     // position in the base tables, we will begin replicating from a COMMIT prior to
                     // this one, guaranteeing that we don't miss any events.
-                    let position = cur_pos.with_lsn(end_lsn);
+                    cur_pos = cur_pos.with_lsn(end_lsn);
 
                     if !actions.is_empty() {
-                        return Ok((
-                            vec![ReplicationAction::TableAction {
-                                table: cur_table,
-                                actions,
-                            }],
-                            position.into(),
-                        ));
+                        return_current_actions!();
                     } else {
-                        return Ok((vec![ReplicationAction::LogPosition], position.into()));
+                        return Ok((vec![ReplicationAction::LogPosition], cur_pos.into()));
                     }
                 }
                 WalEvent::Insert { tuple, lsn, .. } => {
@@ -901,9 +889,8 @@ impl Connector for PostgresWalConnector {
                     cur_pos = cur_pos.with_lsn(lsn);
                     actions.push(TableOperation::Update { key, update: set })
                 }
-                WalEvent::Truncate { lsn, .. } => {
-                    cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push(TableOperation::Truncate)
+                op @ WalEvent::Truncate { .. } => {
+                    unreachable!("unhandled WalEvent::Truncate: {op:?}");
                 }
             }
         }
