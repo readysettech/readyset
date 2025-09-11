@@ -94,7 +94,7 @@ impl fmt::Display for JoinOperator {
             JoinOperator::RightOuterJoin => write!(f, "RIGHT OUTER JOIN")?,
             JoinOperator::InnerJoin => write!(f, "INNER JOIN")?,
             JoinOperator::CrossJoin => write!(f, "CROSS JOIN")?,
-            JoinOperator::StraightJoin => write!(f, "STRAIGHT JOIN")?,
+            JoinOperator::StraightJoin => write!(f, "STRAIGHT_JOIN")?,
         }
         Ok(())
     }
