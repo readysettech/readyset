@@ -296,8 +296,6 @@ impl Base {
             }
         }
 
-        // Group the operations by their key, so we can process each group independently
-        let ops = ops.chunk_by(|op| key_of(key_cols, op).cloned().collect::<Vec<_>>());
         results.reserve(n_ops);
 
         /// [`TouchedKey`] indicates if the given key was previously deleted or inserted as part of
@@ -309,19 +307,18 @@ impl Base {
         let mut touched_keys: HashMap<Vec<DfValue>, TouchedKey> = HashMap::new();
         let mut failed_log = FailedOpLogger::new(name, &replication_offset);
 
-        for (key, ops) in &ops {
-            // It is not enough to check the persisted value for the key, as it may have been
-            // changed in previous iteration, therefore we have to check it was not
-            // changed in one of the outstanding records
+        for op in ops {
+            let key = key_of(key_cols, &op).cloned().collect::<Vec<_>>();
+
+            // The row may have outstanding changes in this batch.
             let stored_value = if snapshot_mode.is_enabled() {
                 // In snapshot mode don't check the currently store values as it doesn't matter for
                 // correctness but imposes a heavy toll on batched writes
                 None
             } else {
                 match touched_keys.get(&key) {
-                    Some(TouchedKey::Inserted(row)) => Some(row.clone()), /* Row was added in previous iteration */
-                    Some(TouchedKey::Deleted) => None,                    /* Row was deleted */
-                    // previously
+                    Some(TouchedKey::Inserted(row)) => Some(row.clone()),
+                    Some(TouchedKey::Deleted) => None,
                     None => match db.lookup(key_cols, &PointKey::from(key.clone())) {
                         LookupResult::Missing => internal!(),
                         LookupResult::Some(rows) if rows.is_empty() => None,
@@ -337,59 +334,56 @@ impl Base {
                 }
             };
 
-            // Current value for the given key following the operations that were already applied to
-            // it
+            // Current value for the given key including outstanding changes
             let mut value = stored_value.clone();
 
-            for op in ops {
-                match op {
-                    TableOperation::Insert(row) if value.is_none() => value = Some(Cow::Owned(row)),
-                    TableOperation::Insert(row) => {
-                        failed_log.failed_insert(&row, value.as_deref());
-                    }
-                    TableOperation::DeleteRow { row } if value == Some(Cow::Borrowed(&row)) => {
-                        // Delete the row, but only if it fully matches the current row
-                        value = None;
-                    }
-                    TableOperation::DeleteRow { row } => {
-                        failed_log.failed_delete(&row, value.as_deref());
-                    }
-                    TableOperation::DeleteByKey { .. } => value = None,
+            match op {
+                TableOperation::Insert(row) if value.is_none() => value = Some(Cow::Owned(row)),
+                TableOperation::Insert(row) => {
+                    failed_log.failed_insert(&row, value.as_deref());
+                }
+                TableOperation::DeleteRow { row } if value == Some(Cow::Borrowed(&row)) => {
+                    // Delete the row, but only if it fully matches the current row
+                    value = None;
+                }
+                TableOperation::DeleteRow { row } => {
+                    failed_log.failed_delete(&row, value.as_deref());
+                }
+                TableOperation::DeleteByKey { .. } => value = None,
 
-                    TableOperation::InsertOrUpdate { row, .. } if value.is_none() => {
-                        value = Some(Cow::Owned(row))
-                    }
-                    TableOperation::InsertOrUpdate { update, .. }
-                    | TableOperation::Update { update, .. }
-                        if value.is_some() =>
-                    {
-                        if let Some(updated) = value.as_mut().map(Cow::to_mut) {
-                            for (col, op) in update.into_iter().enumerate() {
-                                // XXX: make sure user doesn't update primary key?
-                                match op {
-                                    Modification::Set(v) => updated[col] = v,
-                                    Modification::Apply(op, v) => {
-                                        let old: i128 = <i128>::try_from(updated[col].clone())?;
-                                        let delta: i128 = <i128>::try_from(v)?;
-                                        updated[col] = match op {
-                                            Operation::Add => DfValue::try_from(old + delta)?,
-                                            Operation::Sub => DfValue::try_from(old - delta)?,
-                                        };
-                                    }
-                                    Modification::None => {}
+                TableOperation::InsertOrUpdate { row, .. } if value.is_none() => {
+                    value = Some(Cow::Owned(row))
+                }
+                TableOperation::InsertOrUpdate { update, .. }
+                | TableOperation::Update { update, .. }
+                    if value.is_some() =>
+                {
+                    if let Some(updated) = value.as_mut().map(Cow::to_mut) {
+                        for (col, op) in update.into_iter().enumerate() {
+                            // XXX: make sure user doesn't update primary key?
+                            match op {
+                                Modification::Set(v) => updated[col] = v,
+                                Modification::Apply(op, v) => {
+                                    let old: i128 = <i128>::try_from(updated[col].clone())?;
+                                    let delta: i128 = <i128>::try_from(v)?;
+                                    updated[col] = match op {
+                                        Operation::Add => DfValue::try_from(old + delta)?,
+                                        Operation::Sub => DfValue::try_from(old - delta)?,
+                                    };
                                 }
+                                Modification::None => {}
                             }
                         }
                     }
-                    TableOperation::Update { update, key } => {
-                        failed_log.failed_update(&update, &key, value.as_deref());
-                    }
-                    op @ TableOperation::SetSnapshotMode(_)
-                    | op @ TableOperation::SetReplicationOffset(_)
-                    | op @ TableOperation::InsertOrUpdate { .. }
-                    | op @ TableOperation::Truncate => {
-                        internal!("unhandled TableOperation: {op:?}");
-                    }
+                }
+                TableOperation::Update { update, key } => {
+                    failed_log.failed_update(&update, &key, value.as_deref());
+                }
+                op @ TableOperation::SetSnapshotMode(_)
+                | op @ TableOperation::SetReplicationOffset(_)
+                | op @ TableOperation::InsertOrUpdate { .. }
+                | op @ TableOperation::Truncate => {
+                    internal!("unhandled TableOperation: {op:?}");
                 }
             }
 
