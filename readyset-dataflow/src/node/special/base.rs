@@ -254,7 +254,6 @@ impl Base {
             _ => 1,
         });
 
-        let mut n_ops = ops.len();
         let mut ops = ops.into_iter().peekable();
 
         // First compute the replication offset
@@ -268,7 +267,6 @@ impl Base {
                 TableOperation::SetReplicationOffset(offset) => {
                     offset.try_max_into(&mut replication_offset)?;
                     ops.next();
-                    n_ops -= 1;
                 }
                 TableOperation::SetSnapshotMode(s) => {
                     set_snapshot_mode = Some(if *s {
@@ -277,26 +275,23 @@ impl Base {
                         SetSnapshotMode::FinishSnapshotMode
                     });
                     ops.next();
-                    n_ops -= 1;
                 }
                 _ => break,
             }
         }
 
-        let mut results = vec![];
+        let mut results = Vec::with_capacity(ops.len());
 
         if let Some(TableOperation::Truncate) = ops.peek() {
-            n_ops -= 1;
-            ops.next();
             // XXX this is obviously a suboptimal implementation.
             let mut all_records = db.all_records();
             results.extend(all_records.read().iter().map(|r| Record::Negative(r)));
+
+            ops.next();
             if let Some(op) = ops.peek() {
                 internal!("operation incorrectly batched with truncate: {op:?}");
             }
         }
-
-        results.reserve(n_ops);
 
         /// [`TouchedKey`] indicates if the given key was previously deleted or inserted as part of
         /// the current batch that was not yet persisted to the base node.
