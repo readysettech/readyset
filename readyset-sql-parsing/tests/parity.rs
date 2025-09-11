@@ -1018,3 +1018,10 @@ fn alter_table_lock_algorithm() {
     check_parse_mysql!("ALTER TABLE t1 ALGORITHM DEFAULT, LOCK=EXCLUSIVE");
     check_parse_mysql!("ALTER TABLE t1 ALGORITHM DEFAULT, DROP COLUMN foo, LOCK EXCLUSIVE");
 }
+
+#[test]
+fn create_view() {
+    check_parse_postgres!(
+        r#"CREATE VIEW "v1" AS SELECT t1.i FROM (t1 JOIN t2 ON ((t1.i = t2.j)))"#
+    );
+}

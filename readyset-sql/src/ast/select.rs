@@ -86,6 +86,81 @@ impl DialectDisplay for JoinClause {
     }
 }
 
+/// The semantics of SQL natively represent the FROM clause of a query as a fully nested AST of join
+/// clauses, but our AST has distinct fields for the tables and a list of joins. To be able to parse
+/// parenthesized join clauses with explicit precedence such as `FROM ((t1 JOIN t2) JOIN t3)`, we
+/// first parse to a tree then convert to the latter representation afterwards.
+#[derive(Debug)]
+pub enum FromClause {
+    Tables(Vec<TableExpr>),
+    Join {
+        lhs: Box<FromClause>,
+        join_clause: JoinClause,
+    },
+}
+
+impl FromClause {
+    pub fn into_tables_and_joins(self) -> Result<(Vec<TableExpr>, Vec<JoinClause>), String> {
+        use FromClause::*;
+
+        match self {
+            Tables(tables) => Ok((tables, vec![])),
+            Join {
+                mut lhs,
+                join_clause,
+            } => {
+                let mut joins = vec![join_clause];
+                let tables = loop {
+                    match *lhs {
+                        Tables(tables) => break tables,
+                        Join {
+                            lhs: new_lhs,
+                            join_clause,
+                        } => {
+                            joins.push(join_clause);
+                            lhs = new_lhs;
+                        }
+                    }
+                };
+                joins.reverse();
+                Ok((tables, joins))
+            }
+        }
+    }
+}
+
+impl TryFromDialect<sqlparser::ast::TableWithJoins> for FromClause {
+    fn try_from_dialect(
+        value: sqlparser::ast::TableWithJoins,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        let sqlparser::ast::TableWithJoins { relation, joins } = value;
+        let mut from_clause: FromClause = match relation {
+            sqlparser::ast::TableFactor::NestedJoin {
+                table_with_joins,
+                alias,
+            } => {
+                if alias.is_some() {
+                    // TODO: Our entire AST needs to be rewritten to really support nested joins,
+                    // and the very first issue (of many) is it doesn't support aliases on nested
+                    // join clauses, only on tables.
+                    return unsupported!("nested join with alias");
+                }
+                (*table_with_joins).try_into_dialect(dialect)?
+            }
+            _ => FromClause::Tables(vec![relation.try_into_dialect(dialect)?]),
+        };
+        for join in joins {
+            let join_clause = join.try_into_dialect(dialect)?;
+            from_clause = FromClause::Join {
+                lhs: Box::new(from_clause),
+                join_clause,
+            };
+        }
+        Ok(from_clause)
+    }
+}
+
 #[derive(
     Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary,
 )]
@@ -417,20 +492,16 @@ impl TryFromDialect<sqlparser::ast::Select> for SelectStatement {
         value: sqlparser::ast::Select,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        let (tables, join_clauses): (Vec<crate::ast::TableExpr>, Vec<Vec<crate::ast::JoinClause>>) =
-            value
-                .from
-                .into_iter()
-                .map(|table_with_joins| {
-                    Ok((
-                        table_with_joins.relation.try_into_dialect(dialect)?,
-                        table_with_joins.joins.try_into_dialect(dialect)?,
-                    ))
-                })
-                .collect::<Result<Vec<(TableExpr, Vec<JoinClause>)>, _>>()?
-                .into_iter()
-                .unzip();
-        let join = join_clauses.into_iter().flatten().collect();
+        let mut tables: Vec<TableExpr> = Vec::new();
+        let mut join: Vec<JoinClause> = Vec::new();
+        for table_with_joins in value.from {
+            let from_clause: FromClause = table_with_joins.try_into_dialect(dialect)?;
+            let (new_tables, new_joins) = from_clause
+                .into_tables_and_joins()
+                .map_err(|e| failed_err!("couldn't convert FROM clause: {e}"))?;
+            tables.extend(new_tables);
+            join.extend(new_joins);
+        }
         Ok(SelectStatement {
             distinct: matches!(value.distinct, Some(sqlparser::ast::Distinct::Distinct)),
             lateral: false,

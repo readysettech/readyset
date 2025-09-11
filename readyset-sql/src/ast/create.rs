@@ -647,7 +647,6 @@ impl TryFromDialect<sqlparser::ast::Statement> for CreateViewStatement {
                 name: name.try_into_dialect(dialect)?,
                 or_replace,
                 fields: columns.into_dialect(dialect),
-                // TODO: handle compound selects, not sure how sqlparser represents them
                 definition: (*query)
                     .try_into_dialect(dialect)
                     .map(Box::new)

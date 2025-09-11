@@ -142,49 +142,6 @@ pub fn selection(
     move |i| terminated_with_statement_terminator(nested_selection(dialect, false))(i)
 }
 
-/// The semantics of SQL natively represent the FROM clause of a query as a fully nested AST of join
-/// clauses, but our AST has distinct fields for the tables and a list of joins. To be able to parse
-/// parenthesized join clauses with explicit precedence such as `FROM ((t1 JOIN t2) JOIN t3)`, we
-/// first parse to a tree then convert to the latter representation afterwards.
-#[derive(Debug)]
-enum FromClause {
-    Tables(Vec<TableExpr>),
-    Join {
-        lhs: Box<FromClause>,
-        join_clause: JoinClause,
-    },
-}
-
-impl FromClause {
-    fn into_tables_and_joins(self) -> Result<(Vec<TableExpr>, Vec<JoinClause>), String> {
-        use FromClause::*;
-
-        match self {
-            Tables(tables) => Ok((tables, vec![])),
-            Join {
-                mut lhs,
-                join_clause,
-            } => {
-                let mut joins = vec![join_clause];
-                let tables = loop {
-                    match *lhs {
-                        Tables(tables) => break tables,
-                        Join {
-                            lhs: new_lhs,
-                            join_clause,
-                        } => {
-                            joins.push(join_clause);
-                            lhs = new_lhs;
-                        }
-                    }
-                };
-                joins.reverse();
-                Ok((tables, joins))
-            }
-        }
-    }
-}
-
 fn from_clause_join(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FromClause> {
