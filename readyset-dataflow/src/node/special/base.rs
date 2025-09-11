@@ -12,7 +12,7 @@ use readyset_util::redacted::Sensitive;
 use readyset_util::Indices;
 use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, trace};
+use tracing::{error, trace};
 use vec_map::VecMap;
 
 use crate::node::Column;
@@ -169,8 +169,9 @@ impl Base {
         }
     }
 
-    /// Process table operations for a base table that doesn't have a key, such tables can
-    /// have multiple copies of the same row, and delete operations are free to remove any of them
+    /// Process table operations for a base table that doesn't have a key.  Such tables can
+    /// have multiple copies of the same row, and delete operations are free to remove any of
+    /// them.
     fn process_unkeyed(
         &mut self,
         db: &MaterializedNodeState,
@@ -250,7 +251,6 @@ impl Base {
 
         ops.sort_by_key(|op| match op {
             TableOperation::SetReplicationOffset(_) | TableOperation::SetSnapshotMode(_) => 0,
-            TableOperation::Truncate => 2,
             _ => 1,
         });
 
@@ -258,8 +258,8 @@ impl Base {
         let mut ops = ops.into_iter().peekable();
 
         // First compute the replication offset
-        let mut replication_offset: Option<ReplicationOffset> = None;
-        let mut set_snapshot_mode: Option<SetSnapshotMode> = None;
+        let mut replication_offset = None;
+        let mut set_snapshot_mode = None;
 
         while let Some(op) = ops.peek() {
             // Process all of the `SetReplicationOffset` and `SetSnapshotMode` ops, then proceed to
@@ -285,15 +285,14 @@ impl Base {
 
         let mut results = vec![];
 
-        let mut truncated = false;
-        while let Some(TableOperation::Truncate) = ops.peek() {
+        if let Some(TableOperation::Truncate) = ops.peek() {
             n_ops -= 1;
             ops.next();
-            if !truncated {
-                debug!("Truncating base");
-                truncated = true;
-                let mut all_records = db.all_records();
-                results.extend(all_records.read().iter().map(|r| Record::Negative(r)));
+            // XXX this is obviously a suboptimal implementation.
+            let mut all_records = db.all_records();
+            results.extend(all_records.read().iter().map(|r| Record::Negative(r)));
+            if let Some(op) = ops.peek() {
+                internal!("operation incorrectly batched with truncate: {op:?}");
             }
         }
 
@@ -385,11 +384,11 @@ impl Base {
                     TableOperation::Update { update, key } => {
                         failed_log.failed_update(&update, &key, value.as_deref());
                     }
-                    TableOperation::SetSnapshotMode(_)
-                    | TableOperation::SetReplicationOffset(_)
-                    | TableOperation::InsertOrUpdate { .. }
-                    | TableOperation::Truncate => {
-                        // This is unreachable, because all of those cases are handled above
+                    op @ TableOperation::SetSnapshotMode(_)
+                    | op @ TableOperation::SetReplicationOffset(_)
+                    | op @ TableOperation::InsertOrUpdate { .. }
+                    | op @ TableOperation::Truncate => {
+                        internal!("unhandled TableOperation: {op:?}");
                     }
                 }
             }
