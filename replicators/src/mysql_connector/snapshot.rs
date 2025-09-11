@@ -262,7 +262,7 @@ impl MySqlReplicator<'_> {
                                     schema: Some(db.into()),
                                     name: table.into(),
                                 },
-                                reason: NotReplicatedReason::Configuration,
+                                reason: NotReplicatedReason::from_string(&error.to_string()),
                             }),
                             Dialect::DEFAULT_MYSQL,
                         ))
@@ -314,7 +314,7 @@ impl MySqlReplicator<'_> {
                                     schema: Some(db.into()),
                                     name: view.into(),
                                 },
-                                reason: NotReplicatedReason::Configuration,
+                                reason: NotReplicatedReason::from_string(&error.to_string()),
                             }),
                             Dialect::DEFAULT_MYSQL,
                         ))
