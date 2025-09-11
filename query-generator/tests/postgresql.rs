@@ -50,9 +50,10 @@ fn queries_work_in_postgresql(#[any(dialect = QueryDialect(Dialect::PostgreSQL))
         let (client, conn) = config.connect(NoTls).await.unwrap();
         tokio::spawn(conn);
 
-        let mut gen = GeneratorState::default();
+        let dialect = Dialect::PostgreSQL;
+        let mut gen = GeneratorState::with_dialect(dialect);
         let query = gen.generate_query(seed);
-        let statement = query.statement.display(Dialect::PostgreSQL).to_string();
+        let statement = query.statement.display(dialect).to_string();
         let params = query.state.key();
 
         eprintln!("==========");
@@ -61,7 +62,7 @@ fn queries_work_in_postgresql(#[any(dialect = QueryDialect(Dialect::PostgreSQL))
                 continue;
             }
             let create_table = CreateTableStatement::from(table.clone())
-                .display(Dialect::PostgreSQL)
+                .display(dialect)
                 .to_string();
             eprintln!("Table: {create_table}");
             client.simple_query(&create_table).await.unwrap();

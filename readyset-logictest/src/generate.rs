@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::mem;
@@ -8,7 +8,7 @@ use anyhow::{anyhow, bail, Context};
 use clap::Parser;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
-use query_generator::{GeneratorState, ParameterMode, QuerySeed};
+use query_generator::{GeneratorState, QuerySeed};
 use readyset_sql::ast::{
     BinaryOperator, CreateTableStatement, DeleteStatement, Expr, InsertStatement, Relation,
     SqlQuery, SqlType,
@@ -33,54 +33,6 @@ pub(crate) struct Seed {
     generator: GeneratorState,
     hash_threshold: usize,
     script: TestScript,
-}
-
-impl TryFrom<PathBuf> for Seed {
-    type Error = anyhow::Error;
-
-    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        let mut file = File::open(&path)?;
-        let script = TestScript::read(path, &mut file)?;
-
-        let mut tables = vec![];
-        let mut queries = vec![];
-        let mut hash_threshold = DEFAULT_HASH_THRESHOLD;
-
-        for record in script.records() {
-            match record {
-                Record::Statement(Statement { command, .. }) => {
-                    // TODO(aspen): Make dialect configurable
-                    if let SqlQuery::CreateTable(tbl) =
-                        parse_query(Dialect::MySQL, command).map_err(|s| anyhow!("{}", s))?
-                    {
-                        tables.push(tbl)
-                    }
-                }
-                Record::Query(query) => {
-                    if !query.params.is_empty() {
-                        bail!("Queries with params aren't supported yet");
-                    }
-                    queries.push(query.clone());
-                }
-                Record::HashThreshold(ht) => {
-                    hash_threshold = *ht;
-                }
-                Record::Halt { .. } => break,
-                Record::Graphviz | Record::Sleep(_) => {}
-            }
-        }
-
-        let generator = GeneratorState::from(tables.clone());
-
-        file.seek(SeekFrom::Start(0))?;
-        Ok(Seed {
-            tables,
-            queries,
-            generator,
-            hash_threshold,
-            script,
-        })
-    }
 }
 
 async fn run_queries(
@@ -127,14 +79,54 @@ async fn run_queries(
 }
 
 impl Seed {
+    fn try_from_file(dialect: Dialect, path: PathBuf) -> Result<Self, anyhow::Error> {
+        let mut file = File::open(&path)?;
+        let script = TestScript::read(path, &mut file)?;
+
+        let mut tables = vec![];
+        let mut queries = vec![];
+        let mut hash_threshold = DEFAULT_HASH_THRESHOLD;
+
+        for record in script.records() {
+            match record {
+                Record::Statement(Statement { command, .. }) => {
+                    if let SqlQuery::CreateTable(tbl) =
+                        parse_query(dialect, command).map_err(|s| anyhow!("{}", s))?
+                    {
+                        tables.push(tbl)
+                    }
+                }
+                Record::Query(query) => {
+                    if !query.params.is_empty() {
+                        bail!("Queries with params aren't supported yet");
+                    }
+                    queries.push(query.clone());
+                }
+                Record::HashThreshold(ht) => {
+                    hash_threshold = *ht;
+                }
+                Record::Halt { .. } => break,
+                Record::Graphviz | Record::Sleep(_) => {}
+            }
+        }
+
+        let generator = GeneratorState::with_tables(dialect, tables.clone());
+
+        file.seek(SeekFrom::Start(0))?;
+        Ok(Seed {
+            tables,
+            queries,
+            generator,
+            hash_threshold,
+            script,
+        })
+    }
+
     pub fn from_seeds<I>(seeds: I, dialect: readyset_sql::Dialect) -> anyhow::Result<Self>
     where
         I: IntoIterator<Item = QuerySeed>,
     {
-        let mut generator = query_generator::GeneratorState::with_parameter_mode(match dialect {
-            Dialect::MySQL => ParameterMode::Positional,
-            Dialect::PostgreSQL => ParameterMode::Numbered,
-        });
+        let mut generator = query_generator::GeneratorState::with_dialect(dialect);
         let queries = seeds
             .into_iter()
             .map(|seed| -> anyhow::Result<Query> {
@@ -389,8 +381,7 @@ impl Seed {
 #[derive(Parser, Debug, Clone)]
 #[group(id = "ScriptOpts")]
 pub struct GenerateOpts {
-    /// URL of a reference database to compare to. Currently supports `mysql://` URLs, but may be
-    /// expanded in the future
+    /// URL of a reference database to compare to.
     #[arg(long)]
     pub compare_to: DatabaseURL,
 
@@ -466,7 +457,7 @@ impl Generate {
     pub async fn run(mut self) -> anyhow::Result<()> {
         let dialect = self.script_options.dialect();
         let mut seed = match self.from.take() {
-            Some(path) => Seed::try_from(path)?,
+            Some(path) => Seed::try_from_file(dialect, path)?,
             None => Seed::from_generate_opts(self.query_options.clone(), dialect)?,
         };
 

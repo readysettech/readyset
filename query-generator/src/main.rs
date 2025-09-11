@@ -26,7 +26,7 @@ impl Opts {
         if self.ddl_only && self.queries_only {
             bail!("Cannot specify both --ddl-only and --queries-only")
         }
-        let mut gen = query_generator::GeneratorState::default();
+        let mut gen = query_generator::GeneratorState::with_dialect(self.dialect);
         let queries = self
             .options
             .into_query_seeds()

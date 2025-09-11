@@ -53,9 +53,10 @@ fn queries_work_in_mysql(seed: QuerySeed) {
         .unwrap();
     rt.block_on(async move {
         let mut conn = mysql_connection().await;
-        let mut gen = GeneratorState::default();
+        let dialect = Dialect::MySQL;
+        let mut gen = GeneratorState::with_dialect(dialect);
         let query = gen.generate_query(seed);
-        let statement = query.statement.display(Dialect::MySQL).to_string();
+        let statement = query.statement.display(dialect).to_string();
         let params = query
             .state
             .key()
@@ -74,7 +75,7 @@ fn queries_work_in_mysql(seed: QuerySeed) {
                 continue;
             }
             let create_table = CreateTableStatement::from(table.clone())
-                .display(Dialect::MySQL)
+                .display(dialect)
                 .to_string();
             eprintln!("Table: {create_table}");
             conn.query_drop(create_table).await.unwrap()

@@ -21,7 +21,7 @@
 //! use readyset_sql::{ast::JoinOperator, Dialect, DialectDisplay};
 //! use query_generator::{GeneratorState, QueryOperation, QuerySeed};
 //!
-//! let mut gen = GeneratorState::default();
+//! let mut gen = GeneratorState::with_dialect(Dialect::MySQL);
 //! let query = gen.generate_query(QuerySeed::new(
 //!     vec![
 //!         QueryOperation::SingleParameter,
@@ -632,19 +632,20 @@ pub enum ParameterMode {
     Numbered,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct GeneratorState {
+    dialect: ParseDialect,
     tables: HashMap<TableName, TableSpec>,
     table_name_counter: u32,
-    parameter_mode: ParameterMode,
 }
 
 impl GeneratorState {
     /// Create a new [`GeneratorState`] with the given mode for adding new parameters
-    pub fn with_parameter_mode(parameter_mode: ParameterMode) -> Self {
+    pub fn with_dialect(dialect: ParseDialect) -> Self {
         Self {
-            parameter_mode,
-            ..Default::default()
+            dialect,
+            tables: Default::default(),
+            table_name_counter: 0,
         }
     }
 
@@ -740,16 +741,15 @@ impl GeneratorState {
     pub fn tables_mut(&mut self) -> &mut HashMap<TableName, TableSpec> {
         &mut self.tables
     }
-}
 
-impl From<Vec<CreateTableStatement>> for GeneratorState {
-    fn from(stmts: Vec<CreateTableStatement>) -> Self {
+    pub fn with_tables(dialect: ParseDialect, stmts: Vec<CreateTableStatement>) -> Self {
         GeneratorState {
+            dialect,
             tables: stmts
                 .into_iter()
                 .map(|stmt| (stmt.table.name.clone().into(), stmt.into()))
                 .collect(),
-            ..Default::default()
+            table_name_counter: 0,
         }
     }
 }
@@ -787,9 +787,9 @@ impl<'a> QueryState<'a> {
 
     /// Returns the next placeholder that will be used according to the configured parameter mode
     pub fn next_placeholder(&self) -> ItemPlaceholder {
-        match self.gen.parameter_mode {
-            ParameterMode::Positional => ItemPlaceholder::QuestionMark,
-            ParameterMode::Numbered => {
+        match self.gen.dialect {
+            ParseDialect::MySQL => ItemPlaceholder::QuestionMark,
+            ParseDialect::PostgreSQL => {
                 ItemPlaceholder::DollarNumber((self.parameters.len() + 1).try_into().unwrap())
             }
         }
@@ -3081,8 +3081,8 @@ mod tests {
 
     use super::*;
 
-    fn generate_query(operations: Vec<QueryOperation>) -> SelectStatement {
-        let mut gen = GeneratorState::default();
+    fn generate_query(dialect: ParseDialect, operations: Vec<QueryOperation>) -> SelectStatement {
+        let mut gen = GeneratorState::with_dialect(dialect);
         let seed = QuerySeed {
             operations,
             subqueries: vec![],
@@ -3147,8 +3147,9 @@ mod tests {
 
     #[test]
     fn single_join() {
-        let query = generate_query(vec![QueryOperation::Join(JoinOperator::LeftJoin)]);
-        eprintln!("query: {}", query.display(ParseDialect::MySQL));
+        let dialect = ParseDialect::MySQL;
+        let query = generate_query(dialect, vec![QueryOperation::Join(JoinOperator::LeftJoin)]);
+        eprintln!("query: {}", query.display(dialect));
         assert_eq!(query.tables.len(), 1);
         assert_eq!(query.join.len(), 1);
         let join = query.join.first().unwrap();
@@ -3214,16 +3215,14 @@ mod tests {
 
     #[test]
     fn in_params() {
-        let mut gen = GeneratorState::default();
+        let dialect = ParseDialect::MySQL;
+        let mut gen = GeneratorState::with_dialect(dialect);
         let seed = QuerySeed {
             operations: vec![QueryOperation::InParameter { num_values: 3 }],
             subqueries: vec![],
         };
         let query = gen.generate_query(seed);
-        eprintln!(
-            "query: {}",
-            query.statement.display(readyset_sql::Dialect::MySQL)
-        );
+        eprintln!("query: {}", query.statement.display(dialect));
         match query.statement.where_clause {
             Some(Expr::In {
                 lhs: _,
@@ -3273,11 +3272,15 @@ mod tests {
 
     #[test]
     fn double_param_uses_different_col() {
-        let query = generate_query(vec![
-            QueryOperation::SingleParameter,
-            QueryOperation::RangeParameter,
-        ]);
-        eprintln!("query: {}", query.display(ParseDialect::MySQL));
+        let dialect = ParseDialect::MySQL;
+        let query = generate_query(
+            dialect,
+            vec![
+                QueryOperation::SingleParameter,
+                QueryOperation::RangeParameter,
+            ],
+        );
+        eprintln!("query: {}", query.display(dialect));
         match &query.where_clause {
             Some(
                 expr @ Expr::BinaryOp {
