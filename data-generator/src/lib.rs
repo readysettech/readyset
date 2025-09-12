@@ -12,6 +12,7 @@ use rand::prelude::Distribution;
 use rand::seq::SliceRandom;
 use rand::{Rng, RngCore};
 use rand_distr::Zipf;
+use readyset_data::Array;
 use readyset_data::{encoding::Encoding, DfType, DfValue, Dialect};
 use readyset_decimal::Decimal;
 use readyset_sql::ast::SqlType;
@@ -378,7 +379,7 @@ impl From<SqlType> for RandomGenerator {
 
 impl RandomGenerator {
     pub fn gen(&self) -> DfValue {
-        random_value_of_type(&self.sql_type, rand::rng())
+        random_value_of_type(&self.sql_type, &mut rand::rng())
     }
 }
 
@@ -543,7 +544,10 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
         }
         SqlType::VarBit(_) => DfValue::from(BitVec::new()),
         SqlType::Interval { .. } => unimplemented!(),
-        SqlType::Array(_) => unimplemented!(),
+        SqlType::Array(t) => {
+            let arr: Vec<_> = (0..3).map(|_| value_of_type(t)).collect();
+            DfValue::Array(Arc::new(Array::from(arr)))
+        }
         SqlType::Other(_) => unimplemented!(),
         SqlType::Point => unimplemented!(),
         SqlType::PostgisPoint => unimplemented!(),
@@ -553,7 +557,7 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
 
 /// Generate a random value with the given [`SqlType`]. The length of the value
 /// is pulled from a uniform distribution over the set of possible ranges.
-pub fn random_value_of_type<R>(typ: &SqlType, mut rng: R) -> DfValue
+pub fn random_value_of_type<R>(typ: &SqlType, rng: &mut R) -> DfValue
 where
     R: RngCore,
 {
@@ -698,7 +702,11 @@ where
         SqlType::Serial => ((rng.random::<u32>() + 1) as i32).into(),
         SqlType::BigSerial => ((rng.random::<u64>() + 1) as i64).into(),
         SqlType::Interval { .. } => unimplemented!(),
-        SqlType::Array(_) => unimplemented!(),
+        SqlType::Array(t) => {
+            let length: usize = rng.random_range(1..5);
+            let arr: Vec<_> = (0..length).map(|_| random_value_of_type(t, rng)).collect();
+            DfValue::Array(Arc::new(Array::from(arr)))
+        }
         SqlType::Other(_) => unimplemented!(),
         SqlType::Point => unimplemented!(),
         SqlType::PostgisPoint => unimplemented!(),
@@ -847,7 +855,10 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         SqlType::Serial => ((idx + 1) as i32).into(),
         SqlType::BigSerial => ((idx + 1) as i64).into(),
         SqlType::Interval { .. } => unimplemented!(),
-        SqlType::Array(_) => unimplemented!(),
+        SqlType::Array(t) => {
+            let arr: Vec<_> = (0..4).map(|_| unique_value_of_type(t, idx)).collect();
+            DfValue::Array(Arc::new(Array::from(arr)))
+        }
         SqlType::Other(_) => unimplemented!(),
         SqlType::Point => unimplemented!(),
         SqlType::PostgisPoint => unimplemented!(),

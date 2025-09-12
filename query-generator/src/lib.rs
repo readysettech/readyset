@@ -567,7 +567,7 @@ impl TableSpec {
                                 .unwrap()
                                 .clone()
                         }
-                        _ if random => random_value_of_type(col_type, rand::rng()),
+                        _ if random => random_value_of_type(col_type, &mut rand::rng()),
                         ColumnGenerator::Constant(c) => c.gen(),
                         ColumnGenerator::Uniform(u) => u.gen(),
                         ColumnGenerator::Random(r) => r.gen(),

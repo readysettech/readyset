@@ -98,7 +98,7 @@ fn random_value_of_type_always_valid(
 ) {
     prop_assume!(!matches!(ty, SqlType::Bool));
 
-    let val = random_value_of_type(&ty, SmallRng::seed_from_u64(seed));
+    let val = random_value_of_type(&ty, &mut SmallRng::seed_from_u64(seed));
     eprintln!("type = {ty:?}, value = {val:?}");
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
