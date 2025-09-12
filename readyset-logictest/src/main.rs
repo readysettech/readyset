@@ -34,6 +34,9 @@ pub mod parser;
 pub mod permute;
 pub mod runner;
 
+#[cfg(feature = "in-process-readyset")]
+pub mod in_process_readyset;
+
 // readyset_alloc initializes the global allocator
 extern crate readyset_alloc;
 

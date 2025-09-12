@@ -35,23 +35,35 @@ tracing = { workspace = true }
 walkdir = { workspace = true }
 
 database-utils = { path = "../database-utils" }
-mysql-srv = { path = "../mysql-srv" }
+mysql-srv = { path = "../mysql-srv", optional = true }
 mysql-time = { path = "../mysql-time" }
 nom-sql = { path = "../nom-sql" }
-psql-srv = { path = "../psql-srv" }
+psql-srv = { path = "../psql-srv", optional = true }
 query-generator = { path = "../query-generator" }
-readyset-adapter = { path = "../readyset-adapter/" }
+readyset-adapter = { path = "../readyset-adapter/", optional = true }
 readyset-alloc = { path = "../readyset-alloc/" }
-readyset-client = { path = "../readyset-client/" }
+readyset-client = { path = "../readyset-client/", optional = true }
 readyset-data = { path = "../readyset-data" }
 readyset-decimal = { path = "../readyset-decimal" }
-readyset-mysql = { path = "../readyset-mysql" }
-readyset-psql = { path = "../readyset-psql" }
-readyset-server = { path = "../readyset-server/" }
+readyset-mysql = { path = "../readyset-mysql", optional = true }
+readyset-psql = { path = "../readyset-psql", optional = true }
+readyset-server = { path = "../readyset-server/", optional = true }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-util = { path = "../readyset-util" }
+
+[features]
+default = ["in-process-readyset"]
+in-process-readyset = [
+    "mysql-srv",
+    "psql-srv",
+    "readyset-adapter",
+    "readyset-client",
+    "readyset-mysql",
+    "readyset-psql",
+    "readyset-server",
+]
 
 [lints.clippy]
 dbg_macro = "warn"
