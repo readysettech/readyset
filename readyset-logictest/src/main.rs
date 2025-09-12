@@ -680,7 +680,7 @@ impl Fuzz {
                 .open(&path)?;
             test_script.write_to(&mut file)?;
             file.flush()?;
-            debug!(?path, ?test_script, "running test");
+            debug!(?path, %test_script, "running test");
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             let _guard = rt.enter();
@@ -700,7 +700,7 @@ impl Fuzz {
 
         let (passed, details) = match result {
             Err(TestError::Fail(reason, script)) => {
-                error!(%reason, ?script, "test failed");
+                error!(%reason, %script, "test failed");
                 let message = reason.message().lines().next().unwrap_or("unknown");
                 (
                     false,
