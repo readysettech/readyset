@@ -25,7 +25,7 @@ use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
 use serde_json::json;
 use tokio::sync::Mutex;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use walkdir::WalkDir;
 
 pub mod ast;
@@ -667,7 +667,21 @@ impl Fuzz {
             .as_ref()
             .map(|url| DatabaseURL::from_str(url).unwrap());
 
+        let path_name = "/tmp/readyset-logictest-fuzz.test";
+        let path = self
+            .output
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(path_name));
         let result = runner.run(&self.test_script_strategy(), move |mut test_script| {
+            let mut file = OpenOptions::new()
+                .truncate(true)
+                .create(true)
+                .write(true)
+                .open(&path)?;
+            test_script.write_to(&mut file)?;
+            file.flush()?;
+            debug!(?path, ?test_script, "running test");
+
             let rt = tokio::runtime::Runtime::new().unwrap();
             let _guard = rt.enter();
             rt.block_on(test_script.run(
@@ -686,37 +700,30 @@ impl Fuzz {
 
         let (passed, details) = match result {
             Err(TestError::Fail(reason, script)) => {
-                let path = self
-                    .output
-                    .clone()
-                    .unwrap_or_else(|| PathBuf::from("/tmp/readyset-logictest-fuzz.test"));
-                let mut file = OpenOptions::new()
-                    .truncate(true)
-                    .create(true)
-                    .write(true)
-                    .open(&path)?;
-                error!(?path, %reason, "test failed, writing out failing test script");
-                script.write_to(&mut file)?;
-                file.flush()?;
+                error!(%reason, ?script, "test failed");
                 let message = reason.message().lines().next().unwrap_or("unknown");
                 (
                     false,
                     json!({
                         "failure_kind": "failing_query",
-                        "extract_file": path.to_string_lossy(),
-                        // Truncate reason (which includes the query) because especially large
+                        "extract_file": path_name,
+                        // Truncate reason (which may include the query) because especially large
                         // queries are useless to log here. The query will be in the file.
                         "reason": message[..256.min(message.len())],
                     }),
                 )
             }
-            Err(TestError::Abort(reason)) => (
-                false,
-                json!({
-                    "failure_kind": "abort",
-                    "reason": reason.message(),
-                }),
-            ),
+            Err(TestError::Abort(reason)) => {
+                error!(%reason, "test aborted");
+                (
+                    false,
+                    json!({
+                        "failure_kind": "abort",
+                        "extract_file": path_name,
+                        "reason": reason.message(),
+                    }),
+                )
+            }
             Ok(()) => {
                 info!("No failing queries found");
                 (true, json!({}))
