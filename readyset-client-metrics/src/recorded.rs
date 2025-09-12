@@ -136,3 +136,7 @@ pub const QUERY_STATUS_CACHE_PENDING_INLINE_MIGRATIONS: &str =
 ///     - Connection handshake and `COM_CHANGE_USER` map to `protocol`
 /// - charset: The lowercased name of the character set/collation, or the u16 numeric id
 pub const CHARACTER_SET_USAGE: &str = "readyset_mysql_character_set_usage";
+
+/// Counter: The number of queries upstreamed during transaction
+pub const CACHED_TRANSACTION_UPSTREAMED_QUERIES: &str =
+    "readyset_cached_transaction_upstreamed_queries";

@@ -2748,11 +2748,20 @@ where
         match adapter_rewrites::process_query(&mut q.statement, self.noria.rewrite_params()) {
             Ok(processed_query_params) => {
                 let s = self.state.query_status_cache.query_status(q);
+                let migration_state = self.state.query_status_cache.query_migration_state(q).1;
+                let is_cached = matches!(
+                    migration_state,
+                    MigrationState::Successful | MigrationState::Inlined(_)
+                );
                 let should_try = if self.state.proxy_state.should_proxy() {
                     s.always
                 } else {
                     true
                 };
+                // we check again if the cached query is proxied, specifically due to a transaction
+                if self.in_transaction() && is_cached {
+                    metrics::counter!(recorded::CACHED_TRANSACTION_UPSTREAMED_QUERIES).increment(1);
+                }
                 (should_try, Some(s), Some(processed_query_params))
             }
             Err(e) => {
