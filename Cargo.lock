@@ -5347,6 +5347,7 @@ name = "readyset-sql-parsing"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "criterion",
  "nom-sql",
  "paste",
  "pretty_assertions",
