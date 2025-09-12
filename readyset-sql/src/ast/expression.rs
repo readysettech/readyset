@@ -172,13 +172,20 @@ impl FunctionExpr {
                 value,
                 allow_duplicate_keys,
             } => {
+                let fname = match dialect {
+                    Dialect::MySQL => "json_objectagg",
+                    Dialect::PostgreSQL => {
+                        if *allow_duplicate_keys {
+                            "json_object_agg"
+                        } else {
+                            "jsonb_object_agg"
+                        }
+                    }
+                };
+
                 format!(
                     "{}({}, {})",
-                    if *allow_duplicate_keys {
-                        "json_object_agg"
-                    } else {
-                        "jsonb_object_agg"
-                    },
+                    fname,
                     key.alias(dialect)?,
                     value.alias(dialect)?
                 )
@@ -314,14 +321,21 @@ impl DialectDisplay for FunctionExpr {
                 value,
                 allow_duplicate_keys,
             } => {
+                let fname = match dialect {
+                    Dialect::MySQL => "json_objectagg",
+                    Dialect::PostgreSQL => {
+                        if *allow_duplicate_keys {
+                            "json_object_agg"
+                        } else {
+                            "jsonb_object_agg"
+                        }
+                    }
+                };
+
                 write!(
                     f,
                     "{}({}, {})",
-                    if *allow_duplicate_keys {
-                        "json_object_agg"
-                    } else {
-                        "jsonb_object_agg"
-                    },
+                    fname,
                     key.display(dialect),
                     value.display(dialect)
                 )
