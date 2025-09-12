@@ -19,7 +19,6 @@ use readyset_adapter::backend::{BackendBuilder, NoriaConnector};
 use readyset_adapter::query_status_cache::QueryStatusCache;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter::{ReadySetStatusReporter, UpstreamConfig, UpstreamDatabase};
-use readyset_client::consensus::{Authority, LocalAuthorityStore};
 use readyset_client::ReadySetHandle;
 use readyset_data::upstream_system_props::{
     init_system_props, UpstreamSystemProperties, DEFAULT_TIMEZONE_NAME,
@@ -27,7 +26,7 @@ use readyset_data::upstream_system_props::{
 use readyset_data::{Collation, DfType, DfValue};
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
-use readyset_server::{Builder, LocalAuthority, ReuseConfigType};
+use readyset_server::{Builder, ReuseConfigType};
 use readyset_sql::ast::Relation;
 use readyset_sql::Dialect;
 use readyset_sql_parsing::ParsingPreset;
@@ -116,21 +115,6 @@ impl RunOptions {
     }
 }
 
-pub struct NoriaOptions {
-    pub authority: Arc<Authority>,
-}
-
-impl Default for NoriaOptions {
-    fn default() -> Self {
-        let authority_store = Arc::new(LocalAuthorityStore::new());
-        Self {
-            authority: Arc::new(Authority::from(LocalAuthority::new_with_store(
-                authority_store,
-            ))),
-        }
-    }
-}
-
 fn compare_results(results: &[Value], expected: &[Value], type_sensitive: bool) -> bool {
     if type_sensitive {
         return results == expected;
@@ -204,7 +188,7 @@ impl TestScript {
         &self.path
     }
 
-    pub async fn run(&mut self, opts: RunOptions, noria_opts: NoriaOptions) -> anyhow::Result<()> {
+    pub async fn run(&mut self, opts: RunOptions) -> anyhow::Result<()> {
         info!(path = ?self.path, "Running test script");
 
         // Recreate the test database, unless this is a long-lived remote readyset instance (e.g.
@@ -235,22 +219,20 @@ impl TestScript {
             self.run_on_database(&opts, &mut conn, None, opts.upstream_database_is_readyset)
                 .await?;
         } else {
-            self.run_on_noria(&opts, &noria_opts).await?;
+            self.run_on_noria(&opts).await?;
         };
 
         Ok(())
     }
 
     /// Run the test script on ReadySet server
-    pub async fn run_on_noria(
-        &self,
-        opts: &RunOptions,
-        noria_opts: &NoriaOptions,
-    ) -> anyhow::Result<()> {
-        let (noria_handle, shutdown_tx) = self
-            .start_noria_server(opts, noria_opts.authority.clone())
-            .await;
-        let (adapter_task, db_url) = self.setup_adapter(opts, noria_opts.authority.clone()).await;
+    pub async fn run_on_noria(&self, opts: &RunOptions) -> anyhow::Result<()> {
+        let authority = Arc::new(
+            readyset_client::consensus::AuthorityType::Local.to_authority("", "logictest"),
+        );
+
+        let (noria_handle, shutdown_tx) = self.start_noria_server(opts, authority.clone()).await;
+        let (adapter_task, db_url) = self.setup_adapter(opts, authority).await;
 
         let mut conn = match db_url
             .connect(None)
@@ -589,7 +571,7 @@ impl TestScript {
     async fn start_noria_server(
         &self,
         run_opts: &RunOptions,
-        authority: Arc<Authority>,
+        authority: Arc<readyset_server::Authority>,
     ) -> (readyset_server::Handle, ShutdownSender) {
         let mut retry: usize = 0;
         loop {
@@ -639,7 +621,7 @@ impl TestScript {
     async fn setup_adapter(
         &self,
         run_opts: &RunOptions,
-        authority: Arc<Authority>,
+        authority: Arc<readyset_server::Authority>,
     ) -> (tokio::task::JoinHandle<()>, DatabaseURL) {
         let database_type = run_opts.database_type;
         let replication_url = run_opts.replication_url.clone();

@@ -20,7 +20,6 @@ use proptest::prelude::any_with;
 use proptest::strategy::Strategy;
 use proptest::test_runner::{self, TestCaseError, TestError, TestRng, TestRunner};
 use query_generator::{QueryOperationArgs, QuerySeed};
-use readyset_client::consensus::AuthorityType;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
 use serde_json::json;
@@ -41,7 +40,7 @@ extern crate readyset_alloc;
 use crate::from_query_log::FromQueryLog;
 use crate::generate::Generate;
 use crate::permute::Permute;
-use crate::runner::{NoriaOptions, RunOptions, TestScript};
+use crate::runner::{RunOptions, TestScript};
 
 const REPORT_HANG: Duration = Duration::from_secs(20 * 60);
 
@@ -322,31 +321,6 @@ struct Verify {
     /// Logging/tracing options
     #[command(flatten)]
     tracing: readyset_tracing::Options,
-
-    /// Authority connection string. This parameter is ignored if
-    /// authority is "local".
-    // TODO(justin): The default address should depend on the authority
-    // value.
-    ///
-    /// Only relevant for in-process Readyset instance.
-    #[arg(
-        long,
-        short = 'z',
-        env = "AUTHORITY_ADDRESS",
-        default_value = "",
-        conflicts_with_all = ["database_url", "readyset_url", "mysql", "postgresql"],
-    )]
-    authority_address: String,
-
-    /// The authority to use. Possible values: consul, local.
-    #[arg(
-        long,
-        env = "AUTHORITY",
-        default_value = "local",
-        value_enum,
-        conflicts_with_all = ["database_url", "readyset_url", "mysql", "postgresql"],
-    )]
-    authority: AuthorityType,
 }
 
 #[derive(Default)]
@@ -459,13 +433,6 @@ impl Verify {
             let result = Arc::clone(&result);
             let rename_passing = self.rename_passing;
             let rename_failing = self.rename_failing;
-            let deployment_name = script.name();
-            let authority = Arc::new(
-                self.authority
-                    .to_authority(&self.authority_address, &deployment_name),
-            );
-
-            let noria_opts = NoriaOptions { authority };
 
             tasks.push(tokio::spawn(async move {
                 let test_started = Instant::now();
@@ -480,7 +447,7 @@ impl Verify {
                 });
 
                 let script_result = script
-                    .run(run_opts, noria_opts)
+                    .run(run_opts)
                     .await
                     .with_context(|| format!("Running test script {}", script.name()));
 
@@ -684,17 +651,14 @@ impl Fuzz {
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             let _guard = rt.enter();
-            rt.block_on(test_script.run(
-                RunOptions {
-                    database_type: DatabaseURL::from_str(&self.compare_to)?.database_type(),
-                    upstream_database_url: readyset_url.clone(),
-                    upstream_database_is_readyset: readyset_url.is_some(),
-                    replication_url: Some(self.compare_to.clone()),
-                    parsing_preset: self.parsing_preset,
-                    ..RunOptions::default_for_database(self.dialect().into())
-                },
-                Default::default(),
-            ))
+            rt.block_on(test_script.run(RunOptions {
+                database_type: DatabaseURL::from_str(&self.compare_to)?.database_type(),
+                upstream_database_url: readyset_url.clone(),
+                upstream_database_is_readyset: readyset_url.is_some(),
+                replication_url: Some(self.compare_to.clone()),
+                parsing_preset: self.parsing_preset,
+                ..RunOptions::default_for_database(self.dialect().into())
+            }))
             .map_err(|err| TestCaseError::fail(format!("{:#}\n{:?}", err.root_cause(), err)))
         });
 
