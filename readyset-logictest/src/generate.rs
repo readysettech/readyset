@@ -278,7 +278,6 @@ impl Seed {
             .run_on_database(
                 &RunOptions::default_for_database(dialect.into()),
                 &mut conn,
-                None,
                 false,
             )
             .await?;

@@ -216,7 +216,7 @@ impl TestScript {
                     .await?;
             }
 
-            self.run_on_database(&opts, &mut conn, None, opts.upstream_database_is_readyset)
+            self.run_on_database(&opts, &mut conn, opts.upstream_database_is_readyset)
                 .await?;
         } else {
             self.run_on_noria(&opts).await?;
@@ -231,7 +231,7 @@ impl TestScript {
             readyset_client::consensus::AuthorityType::Local.to_authority("", "logictest"),
         );
 
-        let (noria_handle, shutdown_tx) = self.start_noria_server(opts, authority.clone()).await;
+        let (_noria_handle, shutdown_tx) = self.start_noria_server(opts, authority.clone()).await;
         let (adapter_task, db_url) = self.setup_adapter(opts, authority).await;
 
         let mut conn = match db_url
@@ -246,10 +246,7 @@ impl TestScript {
             }
         };
 
-        if let Err(e) = self
-            .run_on_database(opts, &mut conn, noria_handle.c.clone(), true)
-            .await
-        {
+        if let Err(e) = self.run_on_database(opts, &mut conn, true).await {
             shutdown_tx.shutdown().await;
             return Err(e);
         }
@@ -302,7 +299,6 @@ impl TestScript {
         &self,
         opts: &RunOptions,
         conn: &mut DatabaseConnection,
-        mut noria: Option<ReadySetHandle>,
         is_readyset: bool,
     ) -> anyhow::Result<()> {
         let conditional_skip = |conditionals: &[Conditional]| {
@@ -402,8 +398,12 @@ impl TestScript {
                     sleep(Duration::from_millis(*msecs)).await
                 }
                 Record::Graphviz => {
-                    if let Some(noria) = &mut noria {
-                        info!(graphviz = noria.graphviz(Default::default()).await?);
+                    if is_readyset {
+                        let graphviz: Vec<Vec<DfValue>> =
+                            conn.simple_query("EXPLAIN GRAPHVIZ").await?.try_into()?;
+                        let graphviz = graphviz[0][0]
+                            .coerce_to(&DfType::Text(Collation::Utf8), &DfType::Unknown)?;
+                        info!(graphviz = %graphviz.as_str().unwrap());
                     }
                 }
             }
