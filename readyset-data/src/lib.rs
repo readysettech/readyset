@@ -1413,7 +1413,9 @@ impl TryFrom<DfValue> for Literal {
             )?)),
             DfValue::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
             DfValue::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().clone())),
-            DfValue::Array(_) => unsupported!("Arrays not implemented yet"),
+            DfValue::Array(_) => Ok(Literal::String(String::try_from(
+                value.coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)?,
+            )?)),
             DfValue::PassThrough(_) => internal!("PassThrough has no representation as a literal"),
             DfValue::Default => internal!("Default has no representation as a literal"),
             DfValue::Max => internal!("MAX has no representation as a literal"),
@@ -3935,6 +3937,38 @@ mod tests {
                     DfValue::from("c"),
                 ])
             )
+        }
+
+        #[test]
+        fn string_array_to_string() {
+            let input = DfValue::from(vec![
+                DfValue::from("a"),
+                DfValue::from("b"),
+                DfValue::from("c"),
+                DfValue::from("d"),
+                DfValue::from("e"),
+                DfValue::from("f"),
+            ]);
+            let res = input
+                .coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
+                .unwrap();
+            assert_eq!(res, DfValue::from(r#"{"a","b","c","d","e","f"}"#),)
+        }
+
+        #[test]
+        fn int_array_to_string() {
+            let input = DfValue::from(vec![
+                DfValue::from(1),
+                DfValue::from(2),
+                DfValue::from(3),
+                DfValue::from(4),
+                DfValue::from(5),
+                DfValue::from(6),
+            ]);
+            let res = input
+                .coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
+                .unwrap();
+            assert_eq!(res, DfValue::from(r#"{1,2,3,4,5,6}"#),)
         }
 
         #[test]
