@@ -1111,8 +1111,8 @@ where
                     };
 
                     tokio::select! {
-                            v = retry_loop => v,
-                            _ = shutdown_rx.recv() => return Ok(()),
+                        v = retry_loop => v,
+                        _ = shutdown_rx.recv() => return Ok(()),
                     }
                 };
 

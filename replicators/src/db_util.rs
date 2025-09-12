@@ -167,7 +167,7 @@ impl CreateSchema {
     pub async fn send_schemas(mut self, telemetry_sender: &TelemetrySender) {
         self.anonymize();
 
-        // Sengment has a 32KB max payload, so send the schemas 1 at a time.
+        // Segment has a 32KB max payload, so send the schemas 1 at a time.
         for (_, table) in self.table_creates.into_iter() {
             Self::send_create(table, telemetry_sender).await;
         }

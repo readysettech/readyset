@@ -1002,6 +1002,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
     assert_eq!(last_status.destination, QueryDestination::Readyset);
     assert_eq!(row[0].1, key_upper);
 }
+
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, mysql8_upstream)]
 async fn test_sensitiveness_lookup() {

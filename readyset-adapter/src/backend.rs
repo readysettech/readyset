@@ -2967,9 +2967,9 @@ where
                     | SqlQuery::Commit(_)
                     | SqlQuery::Use(_)
                     | SqlQuery::Comment(_) => Ok(noria_connector::QueryResult::Empty),
-                    _ => {
-                        error!("unsupported query");
-                        unsupported!("query type unsupported");
+                    q => {
+                        error!(query = ?q, "unsupported query");
+                        unsupported!("query type unsupported: {q:?}");
                     }
                 };
 

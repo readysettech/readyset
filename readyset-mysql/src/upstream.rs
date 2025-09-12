@@ -121,7 +121,7 @@ impl ReadResultStream<'_> {
 }
 
 macro_rules! handle_query_result {
-    ($result: expr) => {{
+    ($result:expr) => {{
         let columns = ($result).columns().ok_or_else(|| {
             ReadySetError::Internal("The mysql_async result was already consumed".to_string())
         })?;
