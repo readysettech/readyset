@@ -15,6 +15,7 @@ pub use readyset_data::{dialect::SqlEngine, Dialect};
 use readyset_data::{Collation, DfType, DfValue};
 use readyset_sql::ast::TimestampField;
 use serde::{Deserialize, Serialize};
+use strum::{EnumDiscriminants, EnumIter};
 use vec1::Vec1;
 
 pub use crate::binary_operator::*;
@@ -24,7 +25,8 @@ pub use crate::reader_processing::{
     PreInsertion, ReaderProcessing,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, EnumDiscriminants)]
+#[strum_discriminants(derive(Serialize, Deserialize, EnumIter))]
 pub enum BuiltinFunction {
     /// [`convert_tz`](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-functions.html#function_convert-tz)
     ConvertTZ([Expr; 3]),

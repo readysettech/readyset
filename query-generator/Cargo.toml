@@ -19,6 +19,7 @@ test-strategy = { workspace = true }
 parking_lot = { workspace = true }
 
 data-generator = { path = "../data-generator" }
+dataflow-expression = { path = "../dataflow-expression" }
 readyset-data = { path = "../readyset-data/" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }

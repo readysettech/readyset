@@ -66,7 +66,7 @@ use std::convert::TryInto;
 use std::error::Error;
 use std::hash::Hash;
 use std::iter::{self, FromIterator};
-use std::ops::{Bound, DerefMut};
+use std::ops::{Bound, Deref, DerefMut};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -76,13 +76,13 @@ use data_generator::{
     random_value_of_type, unique_value_of_type, ColumnGenerationSpec, ColumnGenerator,
     DistributionAnnotation,
 };
+use dataflow_expression::BuiltinFunctionDiscriminants as DfBuiltinFunction;
 use derive_more::{Deref, Display, From, Into};
 use itertools::{Either, Itertools};
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::prelude::Just;
-use proptest::sample::Select;
 use proptest::strategy::{BoxedStrategy, Strategy};
 use readyset_data::{Collation, DfType, DfValue, Dialect};
 use readyset_sql::analysis::{contains_aggregate, ReferredColumns};
@@ -1318,33 +1318,186 @@ impl Filter {
     }
 }
 
-// The names of the built-in functions we can generate for use in a project expression
-#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize)]
-pub enum BuiltinFunction {
-    ConvertTZ,
-    DayOfWeek,
-    IfNull,
-    Month,
-    Timediff,
-    Addtime,
-    Round,
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize)]
+pub struct BuiltinFunction(DfBuiltinFunction);
+
+impl BuiltinFunction {
+    /// Get the dialect-specific name of a builtin function.
+    ///
+    /// This is more-or-less the same as `dataflow_expression::BuiltinFunction::name()`,
+    /// but we can't use that directly as in this module we only have access to the
+    /// enum dervided via `strum`.
+    fn name(&self, dialect: ParseDialect) -> &'static str {
+        use DfBuiltinFunction::*;
+        match self.0 {
+            ConvertTZ => "convert_tz",
+            DayOfWeek => "dayofweek",
+            IfNull => "ifnull",
+            Month => "month",
+            Timediff => "timediff",
+            Addtime => "addtime",
+            DateFormat => "date_format",
+            Round => "round",
+            JsonDepth => "json_depth",
+            JsonValid => "json_valid",
+            JsonQuote => "json_quote",
+            JsonOverlaps => "json_overlaps",
+            JsonTypeof => "json_typeof",
+            JsonObject => "json_object",
+            JsonArrayLength => "json_array_length",
+            JsonStripNulls => "json_strip_nulls",
+            JsonExtractPath => "json_extract_path",
+            JsonbInsert => "jsonb_insert",
+            JsonbSet => "jsonb_set",
+            JsonbPretty => "jsonb_pretty",
+            Coalesce => "coalesce",
+            Concat => "concat",
+            ConcatWs => "concat_ws",
+            Substring => "substring",
+            SplitPart => "split_part",
+            Greatest => "greatest",
+            Least => "least",
+            ArrayToString => "array_to_string",
+            DateTrunc => "date_trunc",
+            Extract => "extract",
+            Length => "length",
+            Ascii => "ascii",
+            Lower => "lower",
+            Upper => "upper",
+            Hex => "hex",
+            JsonBuildObject => match dialect {
+                ParseDialect::MySQL => "json_object",
+                ParseDialect::PostgreSQL => "json_build_object",
+            },
+            SpatialAsText => "st_astext",
+            SpatialAsEWKT => "st_asewkt",
+        }
+    }
+
+    fn mysql_supported_bifs() -> Vec<BuiltinFunction> {
+        use DfBuiltinFunction::*;
+        DfBuiltinFunction::iter()
+            .filter(|f| match f {
+                ConvertTZ => true,
+                DayOfWeek => true,
+                IfNull => true,
+                Month => true,
+                Timediff => true,
+                Addtime => true,
+                DateFormat => true,
+                Round => true,
+                JsonDepth => true,
+                JsonValid => true,
+                JsonQuote => true,
+                JsonOverlaps => true,
+                JsonTypeof => false,
+                // json_object() is a mysql function, but during lowering we map it to JsonBuildObject
+                JsonObject => false,
+                JsonBuildObject => true,
+                JsonArrayLength => false,
+                JsonStripNulls => false,
+                JsonExtractPath => false,
+                JsonbInsert => false,
+                JsonbSet => false,
+                JsonbPretty => false,
+                Coalesce => true,
+                Concat => true,
+                ConcatWs => true,
+                Substring => true,
+                SplitPart => false,
+                Greatest => true,
+                Least => true,
+                ArrayToString => false,
+                DateTrunc => false,
+                Extract => true,
+                Length => true,
+                Ascii => true,
+                Lower => true,
+                Upper => true,
+                Hex => false,
+                SpatialAsText => true,
+                SpatialAsEWKT => false,
+            })
+            .map(BuiltinFunction)
+            .collect()
+    }
+
+    fn postgres_supported_bifs() -> Vec<BuiltinFunction> {
+        use DfBuiltinFunction::*;
+        DfBuiltinFunction::iter()
+            .filter(|f| match f {
+                ConvertTZ => false,
+                DayOfWeek => false,
+                IfNull => false,
+                Month => false,
+                Timediff => false,
+                Addtime => false,
+                DateFormat => false,
+                Round => false,
+                JsonDepth => false,
+                JsonValid => false,
+                JsonQuote => false,
+                JsonOverlaps => false,
+                JsonTypeof => true,
+                JsonObject => true,
+                JsonBuildObject => true,
+                JsonArrayLength => true,
+                JsonStripNulls => true,
+                JsonExtractPath => true,
+                JsonbInsert => true,
+                JsonbSet => true,
+                JsonbPretty => true,
+                Coalesce => true,
+                Concat => false,
+                ConcatWs => false,
+                Substring => true,
+                SplitPart => true,
+                Greatest => true,
+                Least => true,
+                ArrayToString => true,
+                DateTrunc => true,
+                Extract => true,
+                Length => true,
+                Ascii => true,
+                Lower => true,
+                Upper => true,
+                Hex => false,
+                SpatialAsText => true,
+                SpatialAsEWKT => true,
+            })
+            .map(BuiltinFunction)
+            .collect()
+    }
+
+    pub fn iter() -> impl Iterator<Item = BuiltinFunction> {
+        DfBuiltinFunction::iter().map(BuiltinFunction)
+    }
+}
+
+impl Deref for BuiltinFunction {
+    type Target = DfBuiltinFunction;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl Arbitrary for BuiltinFunction {
     type Parameters = QueryDialect;
-    type Strategy = Select<BuiltinFunction>;
+    type Strategy = proptest::strategy::Union<proptest::strategy::Just<Self>>;
 
-    fn arbitrary_with(dialect: Self::Parameters) -> Self::Strategy {
-        use BuiltinFunction::*;
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        let dialect = args.0;
+        let available_functions = match dialect {
+            ParseDialect::MySQL => Self::mysql_supported_bifs(),
+            ParseDialect::PostgreSQL => Self::postgres_supported_bifs(),
+        };
 
-        let mut variants = vec![Round];
-        if dialect == ParseDialect::MySQL {
-            variants.extend([
-                ConvertTZ, DayOfWeek, IfNull, Month, Timediff, Addtime, Round,
-            ])
-        }
-
-        proptest::sample::select(variants)
+        proptest::strategy::Union::new(
+            available_functions
+                .into_iter()
+                .map(proptest::strategy::Just),
+        )
     }
 }
 
@@ -2015,27 +2168,9 @@ impl QueryOperation {
                 );
             }
             QueryOperation::ProjectBuiltinFunction(bif) => {
+                let fn_name = bif.name(state.gen.dialect);
+
                 macro_rules! add_builtin {
-                    ($fname:ident($($arg:tt)*)) => {{
-                        let table = state.some_table_in_query_mut(query);
-
-                        if query.tables.is_empty() {
-                            query.tables.push(TableExpr::from(Relation::from(table.name.clone())));
-                        }
-
-                        let mut arguments = Vec::new();
-                        add_builtin!(@args_to_expr, table, arguments, $($arg)*);
-                        let expr = Expr::Call(FunctionExpr::Call {
-                            name: stringify!($fname).into(),
-                            arguments: Some(arguments),
-                        });
-                        let alias = state.fresh_alias();
-                        query.fields.push(FieldDefinitionExpr::Expr {
-                            alias: Some(alias.clone()),
-                            expr,
-                        });
-                    }};
-
                     (@args_to_expr, $table: ident, $out: ident, $(,)?) => {};
 
                     (@args_to_expr, $table: ident, $out:ident, $arg:literal, $($args: tt)*) => {{
@@ -2058,20 +2193,91 @@ impl QueryOperation {
                     (@args_to_expr, $table: ident, $out:ident, $arg:expr) => {{
                         add_builtin!(@args_to_expr, $table, $out, $arg,);
                     }};
+
+                    ($($arg:tt)*) => {{
+                        let table = state.some_table_in_query_mut(query);
+
+                        if query.tables.is_empty() {
+                            query.tables.push(TableExpr::from(Relation::from(table.name.clone())));
+                        }
+
+                        let mut arguments = Vec::new();
+                        add_builtin!(@args_to_expr, table, arguments, $($arg)*);
+                        let expr = Expr::Call(FunctionExpr::Call {
+                            name: fn_name.into(),
+                            arguments: Some(arguments),
+                        });
+                        let alias = state.fresh_alias();
+                        query.fields.push(FieldDefinitionExpr::Expr {
+                            alias: Some(alias.clone()),
+                            expr,
+                        });
+                    }};
                 }
 
-                match bif {
-                    BuiltinFunction::ConvertTZ => {
-                        add_builtin!(convert_tz(SqlType::Timestamp, "America/New_York", "UTC"))
+                use DfBuiltinFunction::*;
+                match &**bif {
+                    ConvertTZ => {
+                        add_builtin!(SqlType::Timestamp, "America/New_York", "UTC")
                     }
-                    BuiltinFunction::DayOfWeek => add_builtin!(dayofweek(SqlType::Date)),
-                    BuiltinFunction::IfNull => add_builtin!(ifnull(SqlType::Text, SqlType::Text)),
-                    BuiltinFunction::Month => add_builtin!(month(SqlType::Date)),
-                    BuiltinFunction::Timediff => {
-                        add_builtin!(timediff(SqlType::Time, SqlType::Time))
+                    DayOfWeek => add_builtin!(SqlType::Date),
+                    IfNull => add_builtin!(SqlType::Text, SqlType::Text),
+                    Month => add_builtin!(SqlType::Date),
+                    Timediff => {
+                        add_builtin!(SqlType::Time, SqlType::Time)
                     }
-                    BuiltinFunction::Addtime => add_builtin!(addtime(SqlType::Time, SqlType::Time)),
-                    BuiltinFunction::Round => add_builtin!(round(SqlType::Real)),
+                    Addtime => add_builtin!(SqlType::Time, SqlType::Time),
+                    DateFormat => {
+                        add_builtin!(SqlType::Timestamp, "%Y-%M-%d $H:%i:%S")
+                    }
+                    Round => add_builtin!(SqlType::Real),
+
+                    JsonDepth => add_builtin!(SqlType::Json),
+                    JsonValid => add_builtin!(SqlType::Text),
+                    JsonQuote => add_builtin!(SqlType::Text),
+                    JsonOverlaps => add_builtin!(SqlType::Json, SqlType::Json),
+                    JsonTypeof => add_builtin!(SqlType::Json),
+                    JsonObject => {
+                        add_builtin!(SqlType::Array(Box::new(SqlType::Text)))
+                    }
+                    JsonBuildObject => {
+                        add_builtin!(SqlType::Text, SqlType::Text, SqlType::Text, SqlType::Text)
+                    }
+                    JsonArrayLength => add_builtin!(SqlType::Json),
+                    JsonStripNulls => add_builtin!(SqlType::Json),
+                    JsonExtractPath => add_builtin!(SqlType::Json, SqlType::Text, SqlType::Text),
+                    JsonbInsert => add_builtin!(
+                        SqlType::Jsonb,
+                        SqlType::Array(Box::new(SqlType::Text)),
+                        SqlType::Jsonb
+                    ),
+                    JsonbSet => add_builtin!(
+                        SqlType::Jsonb,
+                        SqlType::Array(Box::new(SqlType::Text)),
+                        SqlType::Jsonb
+                    ),
+                    JsonbPretty => add_builtin!(SqlType::Jsonb),
+
+                    Coalesce => add_builtin!(SqlType::Text, SqlType::Text),
+                    Concat => add_builtin!(SqlType::Text, SqlType::Text),
+                    ConcatWs => add_builtin!(",", SqlType::Text, SqlType::Text),
+                    Substring => add_builtin!(SqlType::Text, 0, 1),
+                    SplitPart => add_builtin!(SqlType::Text, ",", 1),
+                    Greatest => add_builtin!(SqlType::Int4, SqlType::Int4, SqlType::Int4),
+                    Least => add_builtin!(SqlType::Int4, SqlType::Int4, SqlType::Int4),
+                    ArrayToString => add_builtin!(SqlType::Array(Box::new(SqlType::Text)), ","),
+                    DateTrunc => add_builtin!("hour", SqlType::TimestampTz),
+
+                    // TODO: fix the Extract() call. this is hard to plug in an arbitrary value for,
+                    // i think, because of the format of the arg: extract(month from '2024-10-09')
+                    Extract => (), //add_builtin!("MONTH FROM '2024-09-10'"),
+                    Length => add_builtin!(SqlType::Text),
+                    Ascii => add_builtin!(SqlType::Text),
+                    Lower => add_builtin!(SqlType::Text),
+                    Upper => add_builtin!(SqlType::Text),
+                    Hex => add_builtin!(SqlType::Text),
+                    SpatialAsText => add_builtin!(SqlType::Text),
+                    SpatialAsEWKT => add_builtin!(SqlType::Text),
                 }
             }
             QueryOperation::TopK { order_type, limit } => {
