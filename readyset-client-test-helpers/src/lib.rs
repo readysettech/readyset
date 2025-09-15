@@ -29,9 +29,7 @@ use readyset_util::shutdown::ShutdownSender;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 
-#[cfg(feature = "mysql")]
 pub mod mysql_helpers;
-#[cfg(feature = "postgres")]
 pub mod psql_helpers;
 
 pub use readyset_server::sleep;

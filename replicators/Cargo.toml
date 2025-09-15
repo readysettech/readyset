@@ -61,10 +61,7 @@ pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 proptest-stateful = { path = "../proptest-stateful" }
 rand = { workspace = true }
-readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = [
-    "mysql",
-    "postgres",
-] }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers" }
 readyset-server = { path = "../readyset-server" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = [
     "test-util",

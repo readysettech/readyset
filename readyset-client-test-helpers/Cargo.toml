@@ -8,14 +8,14 @@ edition = "2021"
 [dependencies]
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-mysql_async = { workspace = true, optional = true }
+mysql_async = { workspace = true }
 tokio-postgres = { workspace = true, features = [
     "with-chrono-0_4",
     "with-eui48-1",
     "with-uuid-0_8",
     "with-serde_json-1",
     "with-bit-vec-0_6",
-], optional = true }
+]}
 tracing = { workspace = true }
 
 readyset-client = { path = "../readyset-client/" }
@@ -24,17 +24,12 @@ readyset-server = { path = "../readyset-server/" }
 readyset-data = { path = "../readyset-data" }
 readyset-tracing = { path = "../readyset-tracing" }
 database-utils = { path = "../database-utils" }
-readyset-mysql = { path = "../readyset-mysql", optional = true }
-readyset-psql = { path = "../readyset-psql", optional = true }
+readyset-mysql = { path = "../readyset-mysql" }
+readyset-psql = { path = "../readyset-psql" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
-mysql-srv = { path = "../mysql-srv", optional = true }
-psql-srv = { path = "../psql-srv", optional = true }
-
-[features]
-default = []
-mysql = ["mysql_async", "readyset-mysql", "mysql-srv"]
-postgres = ["tokio-postgres", "readyset-psql", "psql-srv"]
+mysql-srv = { path = "../mysql-srv" }
+psql-srv = { path = "../psql-srv" }
 
 [lints]
 workspace = true

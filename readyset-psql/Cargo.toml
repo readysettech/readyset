@@ -53,9 +53,7 @@ pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 test-strategy = { workspace = true }
 readyset-util = { path = "../readyset-util" }
-readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = [
-    "postgres",
-] }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers" }
 criterion = { workspace = true, features = ["async_tokio"] }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-tracing = { path = "../readyset-tracing" }

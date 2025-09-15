@@ -32,9 +32,7 @@ readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
-readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = [
-    "mysql",
-] }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = [
     "test-util",

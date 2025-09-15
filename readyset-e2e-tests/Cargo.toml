@@ -16,10 +16,7 @@ paste = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 readyset-adapter = { path = "../readyset-adapter" }
-readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = [
-    "mysql",
-    "postgres",
-] }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
