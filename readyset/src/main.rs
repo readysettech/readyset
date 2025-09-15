@@ -8,7 +8,6 @@ use readyset::{NoriaAdapter, Options};
 
 fn main() -> anyhow::Result<()> {
     let options = Options::parse();
-    println!("EE1000 eep");
     match options.database_type()? {
         DatabaseType::MySQL => NoriaAdapter {
             description: "MySQL adapter for Readyset.",
