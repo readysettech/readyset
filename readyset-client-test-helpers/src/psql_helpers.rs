@@ -33,6 +33,7 @@ pub fn upstream_config() -> tokio_postgres::Config {
 }
 
 pub struct PostgreSQLAdapter;
+
 #[async_trait]
 impl Adapter for PostgreSQLAdapter {
     type ConnectionOpts = tokio_postgres::Config;

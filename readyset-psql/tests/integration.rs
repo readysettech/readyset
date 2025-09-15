@@ -1,16 +1,19 @@
 use chrono::{NaiveDate, NaiveDateTime};
+use database_utils::{DatabaseURL, QueryableConnection};
+use readyset_adapter::backend::QueryDestination;
 use readyset_client::consensus::AuthorityControl;
+use readyset_client::consensus::CacheDDLRequest;
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::{self, sleep, TestBuilder};
+use readyset_client_test_helpers::{explain_create_cache, explain_last_statement};
+use readyset_data::Dialect;
 use readyset_server::Handle;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
-use tokio_postgres::{Client, CommandCompleteContents, SimpleQueryMessage};
+use tokio_postgres::{CommandCompleteContents, SimpleQueryMessage};
 
 mod common;
 use common::connect;
-use readyset_client::consensus::CacheDDLRequest;
-use readyset_data::Dialect;
 
 use crate::common::setup_standalone_with_authority;
 
@@ -1915,40 +1918,15 @@ async fn drop_all_caches_clears_authority_list() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn explain_create_cache() {
+async fn test_explain_create_cache() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = setup().await;
-    let conn = connect(opts).await;
+    let mut conn = DatabaseURL::from(opts).connect(None).await.unwrap();
 
     conn.simple_query("DROP TABLE IF EXISTS t").await.unwrap();
     conn.simple_query("CREATE TABLE t (x int, y int)")
         .await
         .unwrap();
-
-    #[derive(Debug)]
-    struct ExplainCreateCacheResult {
-        rewritten_query: String,
-        supported: String,
-    }
-
-    async fn explain_create_cache(query: &'static str, conn: &Client) -> ExplainCreateCacheResult {
-        let row = match conn
-            .simple_query(&format!("EXPLAIN CREATE CACHE FROM {query}"))
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap()
-        {
-            SimpleQueryMessage::Row(row) => row,
-            _ => panic!(),
-        };
-
-        ExplainCreateCacheResult {
-            rewritten_query: row.get(1).unwrap().into(),
-            supported: row.get(2).unwrap().into(),
-        }
-    }
 
     // Wait for t to be replicated
     eventually!(conn
@@ -1957,13 +1935,13 @@ async fn explain_create_cache() {
         .is_ok());
 
     eventually! {
-        let res = explain_create_cache("SELECT * FROM t WHERE x = 5", &conn).await;
+        let res = explain_create_cache("SELECT * FROM t WHERE x = 5", &mut conn).await;
 
         res.supported == "yes" && res.rewritten_query == r#"SELECT * FROM "t" WHERE ("x" = $1)"#
     }
 
     eventually! {
-        let res = explain_create_cache("SELECT * FROM t WHERE t.x = RANDOM()", &conn).await;
+        let res = explain_create_cache("SELECT * FROM t WHERE t.x = RANDOM()", &mut conn).await;
 
         res.supported == "no" && res.rewritten_query == r#"SELECT * FROM "t" WHERE ("t"."x" = random())"#
     }
@@ -1972,7 +1950,7 @@ async fn explain_create_cache() {
         .await
         .unwrap();
 
-    let res = explain_create_cache("SELECT * FROM t WHERE x = 1", &conn).await;
+    let res = explain_create_cache("SELECT * FROM t WHERE x = 1", &mut conn).await;
     assert_eq!(res.supported, "cached");
     assert_eq!(res.rewritten_query, r#"SELECT * FROM "t" WHERE ("x" = $1)"#);
 
@@ -2075,6 +2053,60 @@ WHERE
 
     assert_eq!(destination, "readyset");
     assert_eq!(status, "ok");
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn trunc_in_trx() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .replicate(true)
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let mut conn = DatabaseURL::from(opts).connect(None).await.unwrap();
+
+    conn.simple_query("drop table if exists trunc_in_trx")
+        .await
+        .unwrap();
+    conn.simple_query("create table trunc_in_trx (a int primary key, b int)")
+        .await
+        .unwrap();
+    conn.simple_query("begin").await.unwrap();
+    conn.simple_query("insert into trunc_in_trx values (1, 1), (2, 2), (3, 3)")
+        .await
+        .unwrap();
+    conn.simple_query("truncate trunc_in_trx").await.unwrap();
+    conn.simple_query("insert into trunc_in_trx values (4, 4)")
+        .await
+        .unwrap();
+    conn.simple_query("end").await.unwrap();
+    sleep().await;
+
+    eventually! {
+        let res = conn
+        .simple_query("create cache from select * from trunc_in_trx")
+        .await;
+        res.is_ok()
+    }
+
+    eventually! {
+        let res = explain_create_cache("select * from trunc_in_trx", &mut conn).await;
+        res.supported == "cached"
+    }
+
+    let res = conn
+        .query("select * from trunc_in_trx")
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| vec![row.get::<i32>(0), row.get::<i32>(1)])
+        .collect::<Vec<Vec<_>>>();
+    assert!(res.iter().eq([vec![4, 4]].iter()), "result {res:?}");
+
+    let last = explain_last_statement(&mut conn).await;
+    assert_eq!(last.destination, QueryDestination::Readyset);
 
     shutdown_tx.shutdown().await;
 }
