@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use async_trait::async_trait;
-use database_utils::{DatabaseURL, ReplicationServerId};
+use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection, ReplicationServerId};
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
-use readyset_adapter::backend::{BackendBuilder, MigrationMode};
+use readyset_adapter::backend::{BackendBuilder, MigrationMode, QueryDestination, QueryInfo};
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::{
     Backend, QueryHandler, ReadySetStatusReporter, UpstreamConfig, UpstreamDatabase,
@@ -454,5 +454,45 @@ impl TestBuilder {
             handle,
             shutdown_tx,
         )
+    }
+}
+
+#[derive(Debug)]
+pub struct ExplainCreateCacheResult {
+    pub rewritten_query: String,
+    pub supported: String,
+}
+
+pub async fn explain_create_cache(
+    query: &str,
+    conn: &mut DatabaseConnection,
+) -> ExplainCreateCacheResult {
+    let row = conn
+        .simple_query(&format!("EXPLAIN CREATE CACHE FROM {query}"))
+        .await
+        .unwrap()
+        .into_iter()
+        .get_single_row();
+
+    ExplainCreateCacheResult {
+        rewritten_query: row.get(1),
+        supported: row.get(2),
+    }
+}
+
+/// Retrieves where the query executed by parsing the row returned by EXPLAIN LAST STATEMENT.
+pub async fn explain_last_statement(conn: &mut DatabaseConnection) -> QueryInfo {
+    let row = conn
+        .simple_query("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .into_iter()
+        .get_single_row();
+
+    let destination = QueryDestination::try_from(row.get(0).as_str()).unwrap();
+
+    QueryInfo {
+        destination,
+        noria_error: row.get(1),
     }
 }
