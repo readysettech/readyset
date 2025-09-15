@@ -1121,6 +1121,7 @@ dependencies = [
  "futures",
  "icu",
  "mysql_async",
+ "mysql_common",
  "native-tls",
  "num_cpus",
  "postgres-native-tls",

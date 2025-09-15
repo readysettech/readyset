@@ -9,6 +9,7 @@ edition = "2024"
 derive_more = { workspace = true }
 futures = { workspace = true }
 mysql_async = { workspace = true }
+mysql_common = { workspace = true }
 native-tls = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

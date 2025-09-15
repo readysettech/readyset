@@ -709,6 +709,67 @@ where
     }
 }
 
+impl IntoIterator for QueryResults {
+    type Item = QueryResultsRow;
+    type IntoIter = QueryResultsIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        QueryResultsIterator::new(self)
+    }
+}
+
+pub struct QueryResultsIterator {
+    results: QueryResults,
+    index: usize,
+}
+
+impl QueryResultsIterator {
+    fn new(results: QueryResults) -> Self {
+        Self {
+            results,
+            index: Default::default(),
+        }
+    }
+
+    pub fn get_single_row(mut self) -> QueryResultsRow {
+        let row = Iterator::next(&mut self).expect("no row!");
+        assert!(Iterator::next(&mut self).is_none());
+        row
+    }
+}
+
+impl Iterator for QueryResultsIterator {
+    type Item = QueryResultsRow;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let row = match &self.results {
+            QueryResults::MySql(rows) => rows.get(self.index).cloned().map(QueryResultsRow::MySql),
+            QueryResults::Postgres(rows) => {
+                rows.get(self.index).cloned().map(QueryResultsRow::Postgres)
+            }
+        };
+        self.index += 1;
+        row
+    }
+}
+
+pub enum QueryResultsRow {
+    MySql(mysql_async::Row),
+    Postgres(pgsql::Row),
+}
+
+impl QueryResultsRow {
+    pub fn get<'a, T>(&'a self, col: usize) -> T
+    where
+        T: mysql_common::value::convert::FromValue + tokio_postgres::types::FromSql<'a>,
+    {
+        match self {
+            Self::MySql(row) => row.get(col).unwrap(),
+            Self::Postgres(row) => row.get(col),
+        }
+    }
+}
+
 /// An enum wrapper around the native Postgres and MySQL simple query result types.
 pub enum SimpleQueryResults {
     MySql(Vec<mysql_async::Row>),
@@ -753,6 +814,73 @@ where
                         .collect::<Result<Vec<V>, _>>()
                 })
                 .collect::<Result<Vec<Vec<V>>, _>>(),
+        }
+    }
+}
+
+impl IntoIterator for SimpleQueryResults {
+    type Item = SimpleQueryResultsRow;
+    type IntoIter = SimpleQueryResultsIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        SimpleQueryResultsIterator::new(self)
+    }
+}
+
+pub struct SimpleQueryResultsIterator {
+    results: SimpleQueryResults,
+    index: usize,
+}
+
+impl SimpleQueryResultsIterator {
+    fn new(results: SimpleQueryResults) -> Self {
+        Self {
+            results,
+            index: Default::default(),
+        }
+    }
+
+    pub fn get_single_row(mut self) -> SimpleQueryResultsRow {
+        let row = Iterator::next(&mut self).expect("no row!");
+        assert!(Iterator::next(&mut self).is_none());
+        row
+    }
+}
+
+impl Iterator for SimpleQueryResultsIterator {
+    type Item = SimpleQueryResultsRow;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let row = match &self.results {
+            SimpleQueryResults::MySql(rows) => rows
+                .get(self.index)
+                .cloned()
+                .map(SimpleQueryResultsRow::MySql),
+            SimpleQueryResults::Postgres(rows) => rows.get(self.index).map(|row| {
+                SimpleQueryResultsRow::Postgres({
+                    let mut vals = Vec::new();
+                    for i in 0..row.len() {
+                        vals.push(row.get(i).unwrap().to_owned());
+                    }
+                    vals
+                })
+            }),
+        };
+        self.index += 1;
+        row
+    }
+}
+
+pub enum SimpleQueryResultsRow {
+    MySql(mysql_async::Row),
+    Postgres(Vec<String>),
+}
+
+impl SimpleQueryResultsRow {
+    pub fn get(&self, col: usize) -> String {
+        match self {
+            Self::MySql(row) => row.get(col).unwrap(),
+            Self::Postgres(row) => row.get(col).unwrap().to_owned(),
         }
     }
 }
