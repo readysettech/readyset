@@ -39,17 +39,19 @@ impl Accumulator {
         src: NodeIndex,
         over: usize,
         group_by: &[usize],
-        _over_col_ty: &DfType,
+        over_col_ty: &DfType,
         _dialect: &Dialect,
     ) -> ReadySetResult<GroupedOperator<Accumulator>> {
+        let collation = over_col_ty.collation().unwrap_or(Collation::Utf8);
+
         let out_ty = match &op {
             AccumulationOp::GroupConcat { .. } => {
                 antithesis_sdk::assert_reachable!("Accumulation::GroupConcat");
-                DfType::Text(/* TODO */ Collation::Utf8)
+                DfType::Text(collation)
             }
             AccumulationOp::JsonObjectAgg { .. } => {
                 antithesis_sdk::assert_reachable!("Accumulation::JsonObjectAgg");
-                DfType::Text(Collation::Utf8)
+                DfType::Text(collation)
             }
         };
 
