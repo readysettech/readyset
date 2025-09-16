@@ -28,9 +28,10 @@ pub struct ReplicationOptions {
 ///
 /// This configuration is specified for an entire cluster, and can be built from command-line
 /// options by converting from [`ReplicationOptions`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReplicationStrategy {
     /// Never replicate domains
+    #[default]
     Never,
     /// Replicate domains that contain reader nodes this many times.
     ///
@@ -39,12 +40,6 @@ pub enum ReplicationStrategy {
     ReaderDomains(usize),
     /// Replicate domains that don't contain base nodes this many times
     NonBaseDomains(usize),
-}
-
-impl Default for ReplicationStrategy {
-    fn default() -> Self {
-        Self::Never
-    }
 }
 
 impl From<ReplicationOptions> for ReplicationStrategy {

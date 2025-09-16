@@ -68,21 +68,16 @@ pub enum GetLeaderResult {
 
 /// Restriction for how domains containing a particular kind of node can be scheduled onto a
 /// particular worker.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub enum NodeTypeSchedulingRestriction {
     /// No restrictions: all domains with or without this node type may be scheduled onto this
     /// worker
+    #[default]
     None,
     /// Only domains containing this node type may be scheduled onto this worker
     OnlyWithNodeType,
     /// Domains containing this node type may never be scheduled onto this worker
     NeverWithNodeType,
-}
-
-impl Default for NodeTypeSchedulingRestriction {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// Configuration for how domains should be scheduled onto a particular worker.
