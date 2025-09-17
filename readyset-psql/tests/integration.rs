@@ -2058,6 +2058,7 @@ WHERE
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "can't connect in buildkite"]
 async fn trunc_in_trx() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
