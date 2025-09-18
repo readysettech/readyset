@@ -153,6 +153,7 @@
 //! is done with [`DeploymentBuilder::start`].
 //!
 //! ```rust
+//! use database_utils::DatabaseType;
 //! use readyset_clustertest::*;
 //! // Deploy a three server deployment with different volume IDs for each server, a readyset adapter,
 //! // and upstream database.
@@ -214,26 +215,27 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
-use ::readyset_client::consensus::AuthorityType;
-use ::readyset_client::metrics::client::MetricsClient;
-use ::readyset_client::ReadySetHandle;
 use anyhow::{anyhow, Result};
-pub use database_utils::DatabaseType;
-use database_utils::{DatabaseConnection, DatabaseURL};
 use futures::executor;
 use hyper::Client;
 use mysql_async::prelude::Queryable;
 use rand::Rng;
-use readyset_adapter::DeploymentMode;
-#[cfg(test)]
-use readyset_clustertest_macros::clustertest;
-use readyset_errors::ReadySetResult;
 use serde::Deserialize;
 use server::{AdapterBuilder, ProcessHandle, ReadysetServerBuilder};
 use tokio::time::sleep;
 use tokio_postgres::NoTls;
 use tracing::{debug, warn};
 use url::Url;
+
+use database_utils::tls::ServerCertVerification;
+use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
+use readyset_adapter::DeploymentMode;
+use readyset_client::consensus::AuthorityType;
+use readyset_client::metrics::client::MetricsClient;
+use readyset_client::ReadySetHandle;
+#[cfg(test)]
+use readyset_clustertest_macros::clustertest;
+use readyset_errors::ReadySetResult;
 
 /// The set of environment variables that need to be set for the
 /// tests to run. Each variable is the upper case of their respective,
@@ -1217,7 +1219,7 @@ impl DeploymentHandle {
 
         DatabaseURL::from_str(addr)
             .unwrap()
-            .connect(None)
+            .connect(ServerCertVerification::Default)
             .await
             .unwrap()
     }
@@ -1229,7 +1231,7 @@ impl DeploymentHandle {
         let addr = self.upstream_addr.as_ref().unwrap();
         DatabaseURL::from_str(addr)
             .unwrap()
-            .connect(None)
+            .connect(ServerCertVerification::Default)
             .await
             .unwrap()
     }

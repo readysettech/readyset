@@ -28,9 +28,6 @@ pub enum DatabaseError {
     #[error("DatabaseConnection is not a {0} connection variant")]
     WrongConnection(ConnectionType),
 
-    #[error("TLS not supported for MySQL")]
-    TlsUnsupported,
-
     #[error("Error interpolating parameters into query: {0}")]
     Interpolation(Box<dyn std::error::Error + Send + Sync>),
 

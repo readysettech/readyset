@@ -8,13 +8,15 @@ use std::time::{Duration, Instant};
 use std::{io, mem};
 
 use anyhow::{anyhow, bail, Context};
-use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
+use tokio::time::sleep;
+use tracing::{debug, error, info};
+
+use database_utils::tls::ServerCertVerification;
+use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection};
 use readyset_data::{Collation, DfType, DfValue};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_util::retry_with_exponential_backoff;
-use tokio::time::sleep;
-use tracing::{debug, error, info};
 
 use crate::ast::{
     Conditional, Query, QueryResults, Record, SortMode, Statement, StatementResult, Value,
@@ -115,7 +117,7 @@ pub(crate) async fn recreate_test_database(url: &DatabaseURL) -> anyhow::Result<
         DatabaseType::MySQL => "mysql".to_owned(),
     });
     let mut admin_conn = admin_url
-        .connect(None)
+        .connect(ServerCertVerification::Default)
         .await
         .with_context(|| "connecting to upstream")?;
 
@@ -183,7 +185,7 @@ impl TestScript {
 
         if let Some(upstream_url) = &opts.upstream_database_url {
             let mut conn = upstream_url
-                .connect(None)
+                .connect(ServerCertVerification::Default)
                 .await
                 .with_context(|| "connecting to upstream database")?;
 
@@ -215,7 +217,7 @@ impl TestScript {
         let (_noria_handle, shutdown_tx, adapter_task, db_url) =
             crate::in_process_readyset::start_readyset(opts).await;
         let mut conn = match db_url
-            .connect(None)
+            .connect(ServerCertVerification::Default)
             .await
             .with_context(|| "connecting to adapter")
         {

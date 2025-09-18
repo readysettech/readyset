@@ -1,21 +1,23 @@
 use chrono::{NaiveDate, NaiveDateTime};
+use tokio_postgres::{CommandCompleteContents, SimpleQueryMessage};
+
+use database_utils::tls::ServerCertVerification;
 use database_utils::{DatabaseURL, QueryableConnection};
 use readyset_adapter::backend::QueryDestination;
-use readyset_client::consensus::AuthorityControl;
-use readyset_client::consensus::CacheDDLRequest;
+use readyset_client::consensus::{AuthorityControl, CacheDDLRequest};
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
-use readyset_client_test_helpers::{self, sleep, TestBuilder};
-use readyset_client_test_helpers::{explain_create_cache, explain_last_statement};
+use readyset_client_test_helpers::{
+    explain_create_cache, explain_last_statement, sleep, TestBuilder,
+};
 use readyset_data::Dialect;
 use readyset_server::Handle;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
-use tokio_postgres::{CommandCompleteContents, SimpleQueryMessage};
+
+use crate::common::setup_standalone_with_authority;
 
 mod common;
 use common::connect;
-
-use crate::common::setup_standalone_with_authority;
 
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
     readyset_tracing::init_test_logging();
@@ -1921,7 +1923,10 @@ async fn drop_all_caches_clears_authority_list() {
 async fn test_explain_create_cache() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = DatabaseURL::from(opts).connect(None).await.unwrap();
+    let mut conn = DatabaseURL::from(opts)
+        .connect(ServerCertVerification::Default)
+        .await
+        .unwrap();
 
     conn.simple_query("DROP TABLE IF EXISTS t").await.unwrap();
     conn.simple_query("CREATE TABLE t (x int, y int)")
@@ -2066,7 +2071,10 @@ async fn trunc_in_trx() {
         .fallback(true)
         .build::<PostgreSQLAdapter>()
         .await;
-    let mut conn = DatabaseURL::from(opts).connect(None).await.unwrap();
+    let mut conn = DatabaseURL::from(opts)
+        .connect(ServerCertVerification::Default)
+        .await
+        .unwrap();
 
     conn.simple_query("drop table if exists trunc_in_trx")
         .await

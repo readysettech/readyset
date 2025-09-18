@@ -13,7 +13,7 @@ use pin_project::pin_project;
 use tokio::runtime::RuntimeFlavor;
 use tracing::{debug, error, info_span, Instrument};
 
-use database_utils::tls::mysql_ssl_opts_from;
+use database_utils::tls::{get_mysql_tls_config, ServerCertVerification};
 use readyset_adapter::upstream_database::{UpstreamDestination, UpstreamStatementId};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
@@ -182,7 +182,7 @@ impl MySqlUpstream {
                 .prefer_socket(false)
         };
 
-        let ssl_opts = mysql_ssl_opts_from(&upstream_config).await?;
+        let ssl_opts = get_mysql_tls_config(ServerCertVerification::from(&upstream_config).await?);
         if let Some(ssl_opts) = ssl_opts {
             builder = builder.ssl_opts(ssl_opts);
         }

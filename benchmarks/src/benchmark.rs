@@ -15,10 +15,12 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use clap::Parser;
-use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
 use enum_dispatch::enum_dispatch;
 use hdrhistogram::Histogram;
 use serde::{Deserialize, Serialize};
+
+use database_utils::tls::ServerCertVerification;
+use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
 
 use crate::utils::generate::DataGenerator;
 use crate::workload_emulator::WorkloadEmulator;
@@ -68,13 +70,13 @@ pub struct DeploymentParameters {
 impl DeploymentParameters {
     pub async fn connect_to_target(&self) -> Result<DatabaseConnection> {
         Ok(DatabaseURL::from_str(&self.target_conn_str)?
-            .connect(None)
+            .connect(ServerCertVerification::Default)
             .await?)
     }
 
     pub async fn connect_to_setup(&self) -> Result<DatabaseConnection> {
         Ok(DatabaseURL::from_str(&self.setup_conn_str)?
-            .connect(None)
+            .connect(ServerCertVerification::Default)
             .await?)
     }
 }

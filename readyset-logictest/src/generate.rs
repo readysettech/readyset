@@ -6,8 +6,10 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context};
 use clap::Parser;
-use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
+
+use database_utils::tls::ServerCertVerification;
+use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use query_generator::{GeneratorState, QuerySeed};
 use readyset_sql::ast::{
     BinaryOperator, CreateTableStatement, DeleteStatement, Expr, InsertStatement, Relation,
@@ -214,7 +216,7 @@ impl Seed {
         recreate_test_database(&opts.compare_to).await?;
         let mut conn = opts
             .compare_to
-            .connect(None)
+            .connect(ServerCertVerification::Default)
             .await
             .context("Connecting to comparison database")?;
 

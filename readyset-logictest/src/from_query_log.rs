@@ -3,14 +3,16 @@ use std::path::PathBuf;
 
 use anyhow::anyhow;
 use clap::Parser;
-use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
-use readyset_sql::ast::{Expr, FieldDefinitionExpr, FunctionExpr, SqlQuery};
-use readyset_sql::{Dialect, DialectDisplay};
-use readyset_sql_parsing::parse_query;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncWriteExt, BufReader};
 use tracing::error;
+
+use database_utils::tls::ServerCertVerification;
+use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
+use readyset_sql::ast::{Expr, FieldDefinitionExpr, FunctionExpr, SqlQuery};
+use readyset_sql::{Dialect, DialectDisplay};
+use readyset_sql_parsing::parse_query;
 
 use crate::ast::{Record, Statement, StatementResult, Value};
 
@@ -247,7 +249,11 @@ impl FromQueryLog {
         while let Some((session_number, mut session)) = input.next().await {
             // It is intentional to spin up a new connection for each session, so that we match the
             // logged behavior as closely as possible.
-            let mut conn = self.database.connect(None).await.unwrap();
+            let mut conn = self
+                .database
+                .connect(ServerCertVerification::Default)
+                .await
+                .unwrap();
             let mut output = OpenOptions::new()
                 .read(false)
                 .write(true)

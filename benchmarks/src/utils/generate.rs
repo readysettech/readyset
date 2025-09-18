@@ -9,12 +9,17 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, ValueHint};
-use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use futures::StreamExt;
 use itertools::Itertools;
 use nom::multi::many1;
 use nom::sequence::delimited;
 use nom_locate::LocatedSpan;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use tracing::warn;
+
+use database_utils::tls::ServerCertVerification;
+use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use nom_sql::parser::sql_query;
 use nom_sql::whitespace::whitespace0;
 use nom_sql::NomSqlResult;
@@ -22,9 +27,6 @@ use query_generator::{ColumnName, TableName, TableSpec};
 use readyset_data::DfValue;
 use readyset_sql::ast::{Column, Expr, InsertStatement, ItemPlaceholder, Relation, SqlQuery};
 use readyset_sql::{Dialect, DialectDisplay};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use tracing::warn;
 
 use super::spec::{DatabaseGenerationSpec, DatabaseSchema, SchemaKind, TableGenerationSpec};
 use crate::utils::path::benchmark_path;
@@ -72,7 +74,9 @@ impl DataGenerator {
     }
 
     pub async fn install(&self, conn_str: &str) -> anyhow::Result<()> {
-        let mut conn = DatabaseURL::from_str(conn_str)?.connect(None).await?;
+        let mut conn = DatabaseURL::from_str(conn_str)?
+            .connect(ServerCertVerification::Default)
+            .await?;
         let ddl = std::fs::read_to_string(benchmark_path(&self.schema)?)?;
 
         let parsed = multi_ddl(LocatedSpan::new(ddl.as_bytes()), conn.dialect())
@@ -86,7 +90,7 @@ impl DataGenerator {
     }
 
     async fn adjust_upstream_vars(db_url: &DatabaseURL) -> Option<usize> {
-        let mut conn = db_url.connect(None).await.ok()?;
+        let mut conn = db_url.connect(ServerCertVerification::Default).await.ok()?;
 
         match conn {
             DatabaseConnection::MySQL(_) => {
@@ -127,7 +131,7 @@ impl DataGenerator {
     }
 
     async fn revert_upstream_vars(db_url: &DatabaseURL, old_size: Option<usize>) {
-        let conn = db_url.connect(None).await;
+        let conn = db_url.connect(ServerCertVerification::Default).await;
 
         match (conn, old_size) {
             (Ok(mut conn @ DatabaseConnection::MySQL(_)), Some(old_size)) => {
@@ -256,7 +260,7 @@ pub async fn load_table_part(
     partition: TablePartition,
     progress_bar: indicatif::ProgressBar,
 ) -> Result<()> {
-    let mut conn = db_url.connect(None).await?;
+    let mut conn = db_url.connect(ServerCertVerification::Default).await?;
 
     let columns = spec.columns.keys().cloned().collect::<Vec<_>>();
     let insert_stmt =

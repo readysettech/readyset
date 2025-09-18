@@ -11,18 +11,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use clap::Parser;
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
+use fork::{fork, Fork};
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
+
 use benchmarks::spec::WorkloadSpec;
 use benchmarks::utils::generate::DataGenerator;
 use benchmarks::utils::path::benchmark_path;
 use benchmarks::QuerySet;
-use clap::Parser;
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
+use database_utils::tls::ServerCertVerification;
 use database_utils::{
     DatabaseConnection, DatabaseStatement, DatabaseType, DatabaseURL, QueryableConnection, TlsMode,
 };
-use fork::{fork, Fork};
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
 use readyset::{NoriaAdapter, Options};
@@ -33,9 +38,6 @@ use readyset_psql::AuthenticationMethod;
 use readyset_server::FrontierStrategy;
 use readyset_sql::ast::DropAllCachesStatement;
 use readyset_util::graphviz::FileFormat;
-use regex::Regex;
-use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 
 /// Subdirectory where the benchmarks are kept
 const BENCHMARK_DATA_PATH: &str = "./bench_data";
@@ -79,7 +81,9 @@ impl PreparedPool {
     async fn try_new(num: usize, url: &str) -> anyhow::Result<Self> {
         let mut conns = Vec::with_capacity(num);
         for _ in 0..num {
-            let conn = DatabaseURL::from_str(url)?.connect(None).await?;
+            let conn = DatabaseURL::from_str(url)?
+                .connect(ServerCertVerification::None)
+                .await?;
             let statements = Vec::new();
             conns.push(PreparedConn { conn, statements })
         }
@@ -112,11 +116,11 @@ impl PreparedPool {
     ) -> anyhow::Result<QuerySet> {
         let url = DatabaseURL::from_str(upstream_url)?;
         let distributions = workload
-            .load_distributions(&mut url.connect(None).await?)
+            .load_distributions(&mut url.connect(ServerCertVerification::None).await?)
             .await?;
 
         let mut conn = DatabaseURL::from_str(&readyset_url(url.db_name().unwrap(), database_type))?
-            .connect(None)
+            .connect(ServerCertVerification::None)
             .await?;
 
         for query in &workload.setup {
@@ -401,7 +405,7 @@ async fn dump_graphviz(
     database_type: DatabaseType,
 ) -> anyhow::Result<()> {
     let mut conn = DatabaseURL::from_str(&readyset_url(database_name, database_type))?
-        .connect(None)
+        .connect(ServerCertVerification::None)
         .await?;
     match conn.query("explain graphviz").await {
         Ok(r) => {
@@ -638,7 +642,9 @@ async fn prepare_db<P: Into<PathBuf>>(path: P, args: &SystemBenchArgs) -> anyhow
         anyhow::bail!("Upstream URL must start with either \"postgres\" or \"mysql\"");
     };
 
-    let mut conn = DatabaseURL::from_str(&url)?.connect(None).await?;
+    let mut conn = DatabaseURL::from_str(&url)?
+        .connect(ServerCertVerification::None)
+        .await?;
     if args.skip_prepare_db {
         // Will error if the DB doesn't actually exist
         conn.query_drop(format!("USE {}", args.database_name))
@@ -751,7 +757,7 @@ async fn drop_cached_queries(
     database_type: DatabaseType,
 ) -> anyhow::Result<()> {
     let mut conn = DatabaseURL::from_str(&readyset_url(database_name, database_type))?
-        .connect(None)
+        .connect(ServerCertVerification::None)
         .await?;
     conn.query_drop(DropAllCachesStatement {}.to_string())
         .await?;

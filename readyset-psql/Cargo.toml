@@ -5,22 +5,23 @@ publish = false
 authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
-
 [dependencies]
-clap = { workspace = true, features = ["derive", "env"] }
 async-trait = { workspace = true }
-lazy_static = { workspace = true }
-readyset-client = { path = "../readyset-client" }
-readyset-errors = { path = "../readyset-errors" }
-readyset-data = { path = "../readyset-data" }
-readyset-decimal = { path = "../readyset-decimal" }
-readyset-adapter = { path = "../readyset-adapter" }
-readyset-adapter-types = { path = "../readyset-adapter-types" }
-readyset-client-metrics = { path = "../readyset-client-metrics" }
-readyset-util = { path = "../readyset-util" }
-readyset-sql = { path = "../readyset-sql" }
-psql-srv = { path = "../psql-srv" }
+bit-vec = { workspace = true, features = ["serde"] }
+cidr = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+eui48 = { workspace = true }
 fail = { workspace = true }
+futures = { workspace = true }
+itertools = { workspace = true }
+lazy_static = { workspace = true }
+metrics = { workspace = true }
+native-tls = { workspace = true }
+postgres-native-tls = { workspace = true }
+postgres-types = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["arbitrary_precision"] }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = [
     "with-chrono-0_4",
@@ -29,32 +30,31 @@ tokio-postgres = { workspace = true, features = [
     "with-serde_json-1",
     "with-bit-vec-0_6",
 ] }
-postgres-types = { workspace = true, features = ["derive"] }
-postgres-native-tls = { workspace = true }
-native-tls = { workspace = true }
-futures = { workspace = true }
-itertools = { workspace = true }
-thiserror = { workspace = true }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 tracing-futures = { workspace = true }
-eui48 = { workspace = true }
 uuid = { workspace = true }
-serde_json = { workspace = true, features = ["arbitrary_precision"] }
-bit-vec = { workspace = true, features = ["serde"] }
-cidr = { workspace = true }
-metrics = { workspace = true }
-tempfile = { workspace = true }
+
+database-utils = { path = "../database-utils" }
+psql-srv = { path = "../psql-srv" }
+readyset-adapter = { path = "../readyset-adapter" }
+readyset-adapter-types = { path = "../readyset-adapter-types" }
+readyset-client = { path = "../readyset-client" }
+readyset-client-metrics = { path = "../readyset-client-metrics" }
+readyset-data = { path = "../readyset-data" }
+readyset-decimal = { path = "../readyset-decimal" }
+readyset-errors = { path = "../readyset-errors" }
+readyset-sql = { path = "../readyset-sql" }
+readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
 chrono = { workspace = true }
-database-utils = { path = "../database-utils" }
-readyset-server = { path = "../readyset-server/" }
+criterion = { workspace = true, features = ["async_tokio"] }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 test-strategy = { workspace = true }
-readyset-util = { path = "../readyset-util" }
+
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers" }
-criterion = { workspace = true, features = ["async_tokio"] }
+readyset-server = { path = "../readyset-server/" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-tracing = { path = "../readyset-tracing" }
 test-utils = { path = "../test-utils" }

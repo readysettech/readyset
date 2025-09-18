@@ -5,8 +5,18 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use native_tls::Certificate;
+use postgres_native_tls::MakeTlsConnector;
 use postgres_types::Kind;
+use tokio::task::JoinHandle;
+use tokio_postgres::types::Type;
+use tokio_postgres::{
+    Client, Config, GenericResult, ResultStream, Row, RowStream, SimpleQueryMessage,
+    SimpleQueryStream, Statement,
+};
+use tracing::{debug, info_span};
+use tracing_futures::Instrument;
+
+use database_utils::tls::{get_tls_connector, ServerCertVerification};
 use psql_srv::{Column, TransferFormat};
 use readyset_adapter::upstream_database::{UpstreamDestination, UpstreamStatementId};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
@@ -16,14 +26,6 @@ use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_util::redacted::RedactedString;
-use tokio::task::JoinHandle;
-use tokio_postgres::types::Type;
-use tokio_postgres::{
-    Client, Config, GenericResult, ResultStream, Row, RowStream, SimpleQueryMessage,
-    SimpleQueryStream, Statement,
-};
-use tracing::{debug, info_span};
-use tracing_futures::Instrument;
 
 use crate::Error;
 
@@ -220,19 +222,11 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             pg_config.password(password);
         }
         let user = pg_config.get_user().map(|s| s.to_owned());
-        let connector = {
-            let mut builder = native_tls::TlsConnector::builder();
-            if upstream_config.disable_upstream_ssl_verification {
-                builder.danger_accept_invalid_certs(true);
-            }
-            if let Some(certs) = upstream_config.get_root_certs().await? {
-                for cert in &certs {
-                    builder.add_root_certificate(Certificate::from_der(cert.contents())?);
-                }
-            }
-            builder.build().unwrap() // Never returns an error
-        };
-        let tls = postgres_native_tls::MakeTlsConnector::new(connector);
+
+        let verification = ServerCertVerification::from(&upstream_config).await?;
+        let connector = get_tls_connector(verification)?;
+        let tls = MakeTlsConnector::new(connector);
+
         let span = info_span!(
             "Connecting to PostgreSQL upstream",
             host = ?pg_config.get_hosts(),

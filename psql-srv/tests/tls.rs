@@ -2,20 +2,22 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::vec;
 
-use database_utils::{DatabaseURL, QueryableConnection, TlsMode};
 use futures::stream;
 use postgres_protocol::Oid;
 use postgres_types::Type;
-use psql_srv::{
-    run_backend, Credentials, CredentialsNeeded, Error, PsqlBackend, PsqlSrvRow, TransferFormat,
-};
-use readyset_adapter_types::{DeallocateId, PreparedStatementType};
-use readyset_util::redacted::RedactedString;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_native_tls::{native_tls, TlsAcceptor};
 use tokio_postgres::config::SslMode;
 use tokio_postgres::Config;
+
+use database_utils::tls::ServerCertVerification;
+use database_utils::{DatabaseURL, QueryableConnection, TlsMode};
+use psql_srv::{
+    run_backend, Credentials, CredentialsNeeded, Error, PsqlBackend, PsqlSrvRow, TransferFormat,
+};
+use readyset_adapter_types::{DeallocateId, PreparedStatementType};
+use readyset_util::redacted::RedactedString;
 
 struct TestBackend;
 struct TestValue;
@@ -99,9 +101,7 @@ async fn connect() {
 
     let (send_port, recv_port) = oneshot::channel();
 
-    let mut tls_connector_builder = native_tls::TlsConnector::builder();
     // The test certificate is self signed, which by default the TlsConnector rejects
-    tls_connector_builder.danger_accept_invalid_certs(true);
     tokio::spawn(async move {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         send_port
@@ -121,7 +121,7 @@ async fn connect() {
 
     // With SslMode::Require, connect() errors if the server does not support TLS.
     let mut conn = DatabaseURL::PostgreSQL(config)
-        .connect(Some(tls_connector_builder))
+        .connect(ServerCertVerification::None)
         .await
         .unwrap();
     // The Runner should then accept queries.

@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use console::style;
+use database_utils::tls::ServerCertVerification;
 use database_utils::{
     DatabaseConnection, DatabaseStatement, DatabaseType, DatabaseURL, QueryableConnection,
 };
@@ -121,7 +122,7 @@ impl ReplContext {
     async fn new(options: Options) -> Result<Self> {
         let connection = options
             .database_url
-            .connect(None)
+            .connect(ServerCertVerification::Default)
             .await
             .context("Connecting to database")?;
 

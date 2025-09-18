@@ -2,11 +2,12 @@ use std::num::ParseIntError;
 use std::str::FromStr;
 use std::time::Duration;
 
-use database_utils::{DatabaseURL, QueryableConnection};
+use tracing::info;
+
+use database_utils::{tls::ServerCertVerification, DatabaseURL, QueryableConnection};
 use readyset_client::status::CurrentStatus;
 use readyset_data::{Collation, DfValue, Dialect};
 use readyset_sql::{ast::ShowStatement, DialectDisplay};
-use tracing::info;
 
 pub mod generate;
 pub mod multi_thread;
@@ -27,7 +28,10 @@ pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
     info!("Waiting for the target database to be ready...");
     // First attempt to connect to the readyset adapter at all
     let mut conn = loop {
-        match DatabaseURL::from_str(target)?.connect(None).await {
+        match DatabaseURL::from_str(target)?
+            .connect(ServerCertVerification::Default)
+            .await
+        {
             Ok(conn) => break conn,
             _ => tokio::time::sleep(Duration::from_secs(1)).await,
         }

@@ -44,15 +44,31 @@
 //!   shared state must be adapted accordingly.
 //!
 
-use crate::{
-    backend::noria_connector::{ExecuteSelectContext, NoriaConnector, QueryResult, ReadBehavior},
-    DeploymentMode,
+use metrics::{counter, gauge, Label};
+use std::hash::{Hash, Hasher};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, VecDeque},
+    sync::{atomic::AtomicUsize, Arc},
+    time::Duration,
 };
+use tokio::time::Instant as TokioInstant;
+use tokio::{
+    select,
+    sync::{
+        mpsc::{Receiver, Sender},
+        RwLock,
+    },
+};
+use tracing::{debug, info, trace, warn};
+use xxhash_rust::xxh3::Xxh3;
+
+use database_utils::tls::ServerCertVerification;
 use database_utils::{
     DatabaseConnection, DatabaseError, DatabaseURL, QueryResults, QueryableConnection,
     UpstreamConfig,
 };
-use metrics::{counter, gauge, Label};
+use readyset_client::metrics::recorded::QUERY_SAMPLER_QUEUE_LEN;
 use readyset_client::{
     metrics::recorded::{
         QUERY_SAMPLER_MAX_QPS_HIT, QUERY_SAMPLER_QUERIES_MISMATCHED, QUERY_SAMPLER_QUERIES_SAMPLED,
@@ -76,25 +92,11 @@ use readyset_util::{
     shared_cache::LocalCache,
     shutdown::ShutdownReceiver,
 };
-use std::hash::{Hash, Hasher};
-use std::{
-    cmp::Ordering,
-    collections::{HashMap, VecDeque},
-    sync::{atomic::AtomicUsize, Arc},
-    time::Duration,
-};
-use tokio::time::Instant as TokioInstant;
-use tokio::{
-    select,
-    sync::{
-        mpsc::{Receiver, Sender},
-        RwLock,
-    },
-};
-use tracing::{debug, info, trace, warn};
-use xxhash_rust::xxh3::Xxh3;
 
-use readyset_client::metrics::recorded::QUERY_SAMPLER_QUEUE_LEN;
+use crate::{
+    backend::noria_connector::{ExecuteSelectContext, NoriaConnector, QueryResult, ReadBehavior},
+    DeploymentMode,
+};
 
 /// Tag byte used when hashing a value that normalizes to UTF-8 text
 const TAG_NORMALIZED_TEXT: u8 = 0x01;
@@ -164,6 +166,38 @@ fn build_channel(config: &SamplerConfig) -> (SamplerTx, SamplerRx) {
     tokio::sync::mpsc::channel(config.queue_capacity)
 }
 
+async fn connect(config: &UpstreamConfig) -> Option<DatabaseConnection> {
+    let url: DatabaseURL = if let Some(url) = &config.upstream_db_url {
+        match url.parse() {
+            Ok(url) => url,
+            Err(error) => {
+                warn!(%error, "Failed to parse sampler upstream URL");
+                return None;
+            }
+        }
+    } else {
+        return None;
+    };
+
+    let verification = match ServerCertVerification::from(config).await {
+        Ok(verification) => verification,
+        Err(error) => {
+            warn!(%error, "Failed to initialize TLS");
+            return None;
+        }
+    };
+
+    debug!("Establishing sampler upstream connection");
+    let conn = match url.connect(verification).await {
+        Ok(conn) => conn,
+        Err(error) => {
+            warn!(%error, "Failed to establish sampler upstream connection");
+            return None;
+        }
+    };
+    Some(conn)
+}
+
 /// Builder responsible for creating a sampler, a channel, a connection to upstream and a handler to Readyset
 #[allow(clippy::too_many_arguments)]
 pub async fn sampler_builder(
@@ -220,14 +254,7 @@ pub async fn sampler_builder(
     .await;
 
     // Connect to upstream once if configured
-    let upstream_conn = match upstream_config
-        .upstream_db_url
-        .as_ref()
-        .and_then(|u| u.parse::<DatabaseURL>().ok())
-    {
-        Some(db) => db.connect(None).await.ok(),
-        None => None,
-    };
+    let upstream_conn = connect(&upstream_config).await;
     let sampler = Sampler::new(
         sampler_cfg,
         rs_connector,
@@ -531,19 +558,7 @@ impl Sampler {
         {
             debug!("Sampler upstream connection is closed, creating a new connection");
             counter!(QUERY_SAMPLER_RECONNECTS).increment(1);
-            self.upstream_conn = None;
-            self.upstream_conn = match self
-                .upstream_config
-                .upstream_db_url
-                .as_ref()
-                .and_then(|u| u.parse::<DatabaseURL>().ok())
-            {
-                Some(db) => {
-                    debug!("Sampler upstream connection established");
-                    db.connect(None).await.ok()
-                }
-                None => None,
-            };
+            self.upstream_conn = connect(&self.upstream_config).await;
         }
     }
 

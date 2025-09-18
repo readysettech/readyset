@@ -5,9 +5,11 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::str::FromStr;
 
 use clap::Parser;
+use serde::{Deserialize, Serialize};
+
+use database_utils::tls::ServerCertVerification;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection};
 use readyset_data::DfValue;
-use serde::{Deserialize, Serialize};
 
 // How many build at most to check
 const MAX_BUILDS_TO_CHECK: usize = 150;
@@ -343,7 +345,7 @@ async fn main() -> anyhow::Result<()> {
 
     if let Some(res) = db_url {
         let url = res?;
-        let mut conn = url.connect(None).await?;
+        let mut conn = url.connect(ServerCertVerification::Default).await?;
         upload_results_to_database(&mut conn, &commit, &datasets).await?;
     }
 

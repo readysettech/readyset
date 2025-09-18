@@ -10,7 +10,6 @@ use connection::DatabaseConnectionPoolBuilder;
 use derive_more::From;
 use error::DatabaseTypeParseError;
 use mysql_async::OptsBuilder;
-use native_tls::TlsConnectorBuilder;
 use pem::Pem;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +19,7 @@ use readyset_util::redacted::RedactedString;
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::error::DatabaseURLParseError;
+use crate::tls::{ServerCertVerification, get_mysql_tls_config, get_tls_connector};
 
 mod connection;
 pub mod error;
@@ -495,26 +495,24 @@ impl From<mysql_async::OptsBuilder> for DatabaseURL {
 }
 
 impl DatabaseURL {
-    /// Create a new [`DatabaseConnection`] by connecting to the database at this database URL. For
-    /// postgres connections, optionally provide the `TlsConnectorBuilder` for Postgres.
+    /// Create a new [`DatabaseConnection`] by connecting to the database at this database URL.
     pub async fn connect(
         &self,
-        tls_connector_builder: Option<TlsConnectorBuilder>,
+        verification: ServerCertVerification,
     ) -> Result<DatabaseConnection, DatabaseError> {
         match self {
             DatabaseURL::MySQL(opts) => {
-                if tls_connector_builder.is_some() {
-                    Err(DatabaseError::TlsUnsupported)
+                let opts = if let Some(ssl_opts) = get_mysql_tls_config(verification) {
+                    OptsBuilder::from_opts(opts.clone())
+                        .ssl_opts(ssl_opts)
+                        .into()
                 } else {
-                    Ok(DatabaseConnection::MySQL(
-                        mysql::Conn::new(opts.clone()).await?,
-                    ))
-                }
+                    opts.clone()
+                };
+                Ok(DatabaseConnection::MySQL(mysql::Conn::new(opts).await?))
             }
             DatabaseURL::PostgreSQL(config) => {
-                let connector = tls_connector_builder
-                    .unwrap_or_else(native_tls::TlsConnector::builder)
-                    .build()?;
+                let connector = get_tls_connector(verification)?;
                 let tls = postgres_native_tls::MakeTlsConnector::new(connector);
                 let (client, connection) = config.connect(tls).await?;
                 let connection_handle =
@@ -530,12 +528,13 @@ impl DatabaseURL {
     /// # Examples
     ///
     /// ```no_run
+    /// # use database_utils::tls::ServerCertVerification;
     /// # use database_utils::{DatabaseURL, DatabaseError, QueryableConnection};
     /// # use std::str::FromStr;
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), DatabaseError> {
     /// let mut url = DatabaseURL::from_str("mysql://root:noria@localhost/test").unwrap();
-    /// let pool = url.pool_builder(None)?.max_connections(16).build()?;
+    /// let pool = url.pool_builder(ServerCertVerification::Default)?.max_connections(16).build()?;
     /// let mut conn = pool.get_conn().await?;
     /// conn.query_drop("SHOW TABLES").await?;
     /// # Ok(())
@@ -543,21 +542,23 @@ impl DatabaseURL {
     /// ```
     pub fn pool_builder(
         self,
-        tls_connector_builder: Option<TlsConnectorBuilder>,
+        verification: ServerCertVerification,
     ) -> Result<DatabaseConnectionPoolBuilder, DatabaseError> {
         match self {
-            DatabaseURL::MySQL(opts) => Ok(DatabaseConnectionPoolBuilder::MySQL(
-                mysql_async::OptsBuilder::from_opts(opts),
-                mysql_async::PoolOpts::default(),
-            )),
+            DatabaseURL::MySQL(opts) => {
+                let mut builder = mysql_async::OptsBuilder::from_opts(opts);
+                if let Some(ssl_opts) = get_mysql_tls_config(verification) {
+                    builder = builder.ssl_opts(ssl_opts);
+                }
+                Ok(DatabaseConnectionPoolBuilder::MySQL(
+                    builder,
+                    mysql_async::PoolOpts::default(),
+                ))
+            }
             DatabaseURL::PostgreSQL(opts) => Ok(DatabaseConnectionPoolBuilder::PostgreSQL(
                 deadpool_postgres::Pool::builder(deadpool_postgres::Manager::from_config(
                     opts,
-                    postgres_native_tls::MakeTlsConnector::new(
-                        tls_connector_builder
-                            .unwrap_or_else(native_tls::TlsConnector::builder)
-                            .build()?,
-                    ),
+                    postgres_native_tls::MakeTlsConnector::new(get_tls_connector(verification)?),
                     deadpool_postgres::ManagerConfig {
                         recycling_method: deadpool_postgres::RecyclingMethod::Fast,
                     },

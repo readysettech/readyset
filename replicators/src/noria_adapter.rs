@@ -3,10 +3,7 @@ use std::mem;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use database_utils::tls::mysql_ssl_opts_from;
-use database_utils::{DatabaseURL, UpstreamConfig};
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
-use failpoint_macros::set_failpoint;
 use futures::FutureExt;
 use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
@@ -14,6 +11,14 @@ use mysql::{OptsBuilder, PoolConstraints, PoolOpts};
 use native_tls::Certificate;
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::time::sleep;
+use tracing::{debug, error, info, info_span, trace, warn, Instrument};
+use {mysql_async as mysql, tokio_postgres as pgsql};
+
+use database_utils::tls::{get_mysql_tls_config, get_tls_connector, ServerCertVerification};
+use database_utils::{DatabaseURL, UpstreamConfig};
+use failpoint_macros::set_failpoint;
 use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{ReadySetHandle, Table, TableOperation, TableStatus};
@@ -25,13 +30,8 @@ use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
-use readyset_util::retry_with_exponential_backoff;
-use readyset_util::select;
+use readyset_util::{retry_with_exponential_backoff, select};
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::time::sleep;
-use tracing::{debug, error, info, info_span, trace, warn, Instrument};
-use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::db_util::{CreateSchema, DatabaseSchemas};
 use crate::mysql_connector::{MySqlBinlogConnector, MySqlReplicator};
@@ -85,21 +85,7 @@ pub(crate) trait Connector {
 /// Cleans up replication related assets on the upstream database as supplied by the
 /// UpstreamConfig.
 pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
-    if let DatabaseURL::PostgreSQL(options) = config.get_cdc_db_url()? {
-        let connector = {
-            let mut builder = native_tls::TlsConnector::builder();
-            if config.disable_upstream_ssl_verification {
-                builder.danger_accept_invalid_certs(true);
-            }
-            if let Some(certs) = config.get_root_certs().await? {
-                for cert in &certs {
-                    builder.add_root_certificate(Certificate::from_der(cert.contents())?);
-                }
-            }
-            builder.build().unwrap() // Never returns an error
-        };
-        let tls_connector = postgres_native_tls::MakeTlsConnector::new(connector);
-
+    if let DatabaseURL::PostgreSQL(mut options) = config.get_cdc_db_url()? {
         let repl_slot_name = match &config.replication_server_id {
             Some(server_id) => {
                 format!("{REPLICATION_SLOT}_{server_id}")
@@ -108,14 +94,21 @@ pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
         };
         let resnapshot_slot_name = resnapshot_slot_name(&repl_slot_name);
 
-        let dbname = options.get_dbname().ok_or_else(|| {
-            ReadySetError::ReplicationFailed("No database specified for replication".to_string())
-        })?;
+        let dbname = options
+            .get_dbname()
+            .ok_or_else(|| {
+                ReadySetError::ReplicationFailed(
+                    "No database specified for replication".to_string(),
+                )
+            })?
+            .to_owned();
+        options.dbname(dbname).set_replication_database();
 
-        let mut cleanup_opts = options.clone();
+        let verification = ServerCertVerification::from(&config).await?;
+        let connector = get_tls_connector(verification)?;
+        let tls = MakeTlsConnector::new(connector);
 
-        cleanup_opts.dbname(dbname).set_replication_database();
-        let (mut client, connection) = cleanup_opts.connect(tls_connector).await?;
+        let (mut client, connection) = options.connect(tls).await?;
         let _connection_handle = tokio::spawn(connection);
 
         drop_publication(&mut client, &repl_slot_name).await?;
@@ -302,7 +295,7 @@ impl<'a> NoriaAdapter<'a> {
 
         let mut mysql_opts_builder = OptsBuilder::from_opts(mysql_options).prefer_socket(false);
 
-        let ssl_opts = mysql_ssl_opts_from(config).await?;
+        let ssl_opts = get_mysql_tls_config(ServerCertVerification::from(config).await?);
         if let Some(ssl_opts) = ssl_opts {
             mysql_opts_builder = mysql_opts_builder.ssl_opts(ssl_opts);
         }
