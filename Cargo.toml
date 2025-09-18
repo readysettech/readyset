@@ -49,6 +49,7 @@ members = [
     "readyset-psql",
     "readyset-repl",
     "readyset-server",
+    "readyset-shallow",
     "readyset-sql",
     "readyset-sql-parsing",
     "readyset-sql-passes",

@@ -5326,6 +5326,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "readyset-shallow"
+version = "0.0.1"
+dependencies = [
+ "dashmap",
+ "mysql_async",
+ "readyset-client",
+ "readyset-data",
+ "readyset-errors",
+ "readyset-sql",
+ "tracing",
+]
+
+[[package]]
 name = "readyset-sql"
 version = "0.1.0"
 dependencies = [

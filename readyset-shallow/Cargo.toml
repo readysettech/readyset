@@ -1,0 +1,16 @@
+[package]
+name = "readyset-shallow"
+version = "0.0.1"
+publish = false
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
+edition = "2024"
+
+[dependencies]
+dashmap = { workspace = true }
+tracing = { workspace = true }
+mysql_async = { workspace = true }
+
+readyset-client = { path = "../readyset-client" }
+readyset-data = { path = "../readyset-data" }
+readyset-errors = { path = "../readyset-errors" }
+readyset-sql = { path = "../readyset-sql" }
