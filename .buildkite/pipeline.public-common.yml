@@ -146,7 +146,7 @@ steps:
             arch: "x86"
           skip: true
 
-  - label: ':rust: Run tests (nextest, mysql80 upstream, MRBR on)'
+  - label: ':rust: Run tests (upstream: mysql80, MRBR on, not including slow tests)'
     key: rust-tests-mrbr
     command: |
       [ -d public ] && cd public
