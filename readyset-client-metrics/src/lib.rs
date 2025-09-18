@@ -123,6 +123,7 @@ impl ReadysetExecutionEvent {
 pub enum QueryDestination {
     #[default]
     Readyset,
+    ReadysetShallow,
     ReadysetThenUpstream,
     Upstream,
     Both,
@@ -133,6 +134,7 @@ impl TryFrom<&str> for QueryDestination {
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
             "readyset" => Ok(QueryDestination::Readyset),
+            "readyset_shallow" => Ok(QueryDestination::ReadysetShallow),
             "readyset_then_upstream" => Ok(QueryDestination::ReadysetThenUpstream),
             "upstream" => Ok(QueryDestination::Upstream),
             "both" => Ok(QueryDestination::Both),
@@ -147,6 +149,7 @@ impl fmt::Display for QueryDestination {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             QueryDestination::Readyset => "readyset",
+            QueryDestination::ReadysetShallow => "readyset_shallow",
             QueryDestination::ReadysetThenUpstream => "readyset_then_upstream",
             QueryDestination::Upstream => "upstream",
             QueryDestination::Both => "both",
