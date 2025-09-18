@@ -566,64 +566,6 @@ impl DatabaseURL {
         }
     }
 
-    /// Does test initialization by dropping the schema/database and recreating it before connecting
-    #[cfg(test)]
-    pub async fn init_and_connect(&self) -> Result<DatabaseConnection, DatabaseError> {
-        use mysql_async::prelude::Queryable;
-
-        match self {
-            DatabaseURL::MySQL(opts) => {
-                {
-                    let test_db_name = opts.db_name().unwrap();
-                    let no_db_opts =
-                        mysql_async::OptsBuilder::from_opts(opts.clone()).db_name::<String>(None);
-                    // First, connect without a db to do setup
-                    let mut client = mysql_async::Conn::new(no_db_opts).await?;
-
-                    // Then drop and recreate the test db
-                    client
-                        .query_drop(format!("DROP SCHEMA IF EXISTS {test_db_name};"))
-                        .await?;
-                    client
-                        .query_drop(format!("CREATE SCHEMA {test_db_name};"))
-                        .await?;
-
-                    // Then switch to the test db
-                    client.query_drop(format!("USE {test_db_name};")).await?;
-                }
-
-                Ok(DatabaseConnection::MySQL(
-                    mysql::Conn::new(opts.clone()).await?,
-                ))
-            }
-            DatabaseURL::PostgreSQL(config) => {
-                let connector = native_tls::TlsConnector::builder().build()?;
-                let tls = postgres_native_tls::MakeTlsConnector::new(connector);
-                // Drop and recreate the test db
-                {
-                    let test_db_name = config.get_dbname().unwrap();
-                    let mut no_db_config = config.clone();
-                    no_db_config.dbname("postgres");
-                    let (no_db_client, conn) = no_db_config.connect(tokio_postgres::NoTls).await?;
-                    let jh = tokio::spawn(conn);
-                    no_db_client
-                        .simple_query(&format!("DROP SCHEMA IF EXISTS {test_db_name} CASCADE"))
-                        .await?;
-                    no_db_client
-                        .simple_query(&format!("CREATE SCHEMA {test_db_name}"))
-                        .await?;
-                    jh.abort();
-                    let _ = jh.await;
-                }
-
-                let (client, connection) = config.connect(tls).await?;
-                let connection_handle =
-                    tokio::spawn(async move { connection.await.map_err(Into::into) });
-                Ok(DatabaseConnection::PostgreSQL(client, connection_handle))
-            }
-        }
-    }
-
     /// Returns the underlying database type, either [`DatabaseType::MySQL`] or
     /// [`DatabaseType::PostgreSQL].
     pub fn database_type(&self) -> DatabaseType {
