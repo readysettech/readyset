@@ -1,4 +1,5 @@
 use chrono::{NaiveDate, NaiveDateTime};
+use test_utils::tags;
 use tokio_postgres::{CommandCompleteContents, SimpleQueryMessage};
 
 use database_utils::tls::ServerCertVerification;
@@ -2063,7 +2064,7 @@ WHERE
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "can't connect in buildkite"]
+#[tags(serial, slow, postgres_upstream)]
 async fn trunc_in_trx() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
