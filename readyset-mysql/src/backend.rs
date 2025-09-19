@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Formatter;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use futures_util::StreamExt;
 use itertools::{izip, Itertools};
@@ -23,7 +24,10 @@ use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::encoding::Encoding;
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
+use readyset_shallow::{CacheInsertGuard, MySqlMetadata, QueryMetadata};
+use readyset_sql_passes::adapter_rewrites::ProcessedQueryParams;
 use readyset_util::redacted::{RedactedString, Sensitive};
+use std::io::ErrorKind;
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncRead, AsyncWrite};
 use tracing::{error, info, trace};
@@ -451,9 +455,43 @@ where
     }
 }
 
+async fn handle_shallow_result<S>(
+    result: readyset_shallow::QueryResult,
+    writer: QueryResultWriter<'_, S>,
+) -> io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let QueryMetadata::MySql(metadata) = result.metadata.as_ref() else {
+        unreachable!("wrong metadata type: {:?}", result.metadata);
+    };
+
+    let formatted_cols = metadata
+        .columns
+        .iter()
+        .map(|c| c.into())
+        .collect::<Vec<_>>();
+    let mut rw = writer.start(&formatted_cols).await?;
+
+    for row in result.values.iter() {
+        for val in row.iter() {
+            let val: mysql_async::Value = val.try_into().map_err(|e| {
+                io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Failed to convert DfValue to mysql::Value: {val:?}, error: {e}"),
+                )
+            })?;
+            rw.write_col(val)?;
+        }
+        rw.end_row().await?;
+    }
+    rw.finish().await
+}
+
 async fn handle_upstream_result<S>(
     result: upstream::QueryResult<'_>,
     writer: QueryResultWriter<'_, S>,
+    mut cache: Option<CacheInsertGuard<ProcessedQueryParams>>,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -487,16 +525,35 @@ where
                     Err(err) => return handle_error!(Error::MySql(err), rw),
                 };
 
-                for (i, _) in row.columns_ref().iter().enumerate() {
-                    rw.write_col(row.as_ref(i).expect("Must match column number"))?;
+                let mut copy = cache.as_ref().map(|_| Vec::new());
+                for i in 0..row.columns_ref().len() {
+                    let col = row.as_ref(i).expect("Must match column number");
+                    if let Some(ref mut copy) = copy {
+                        copy.push(col.try_into().map_err(|_| {
+                            io::Error::new(
+                                ErrorKind::InvalidData,
+                                format!("failed converting {col:?} to DfValue"),
+                            )
+                        })?);
+                    }
+                    rw.write_col(col)?;
                 }
                 rw.end_row().await?;
+                if let (Some(cache), Some(copy)) = (cache.as_mut(), copy) {
+                    cache.push(copy);
+                }
             }
 
             if let Some(status_flags) = stream.status_flags() {
                 rw = rw.set_status_flags(status_flags)
             }
 
+            if let Some(ref mut cache) = cache {
+                cache.set_metadata(QueryMetadata::MySql(MySqlMetadata {
+                    columns: Arc::clone(&columns),
+                }));
+                cache.filled();
+            }
             rw.finish().await
         }
     }
@@ -514,7 +571,10 @@ where
         Ok(QueryResult::Noria(result)) => {
             handle_readyset_result(result, writer, results_encoding).await
         }
-        Ok(QueryResult::Upstream(result)) => handle_upstream_result(result, writer).await,
+        Ok(QueryResult::Shallow(result)) => handle_shallow_result(result, writer).await,
+        Ok(QueryResult::Upstream(result, cache)) => {
+            handle_upstream_result(result, writer, cache).await
+        }
         Ok(QueryResult::UpstreamBufferedInMemory(..)) => handle_error!(
             Error::ReadySet(readyset_errors::unsupported_err!(
                 "Execute should not use simple query protocol"

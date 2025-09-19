@@ -205,11 +205,13 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     resultset,
                 })
             }
-            Upstream(upstream::QueryResult::EmptyRead) => Ok(ps::QueryResponse::Select {
+            #[allow(clippy::todo)]
+            Shallow(_) => todo!(),
+            Upstream(upstream::QueryResult::EmptyRead, _) => Ok(ps::QueryResponse::Select {
                 schema: vec![],
                 resultset: Resultset::empty(),
             }),
-            Upstream(upstream::QueryResult::Stream { first_row, stream }) => {
+            Upstream(upstream::QueryResult::Stream { first_row, stream }, _) => {
                 let field_types = first_row
                     .columns()
                     .iter()
@@ -221,7 +223,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     resultset: Resultset::from_stream(stream, first_row, field_types),
                 })
             }
-            Upstream(upstream::QueryResult::RowStream { first_row, stream }) => {
+            Upstream(upstream::QueryResult::RowStream { first_row, stream }, _) => {
                 let field_types = first_row
                     .columns()
                     .iter()
@@ -233,19 +235,19 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     resultset: Resultset::from_row_stream(stream, first_row, field_types),
                 })
             }
-            Upstream(upstream::QueryResult::Write { num_rows_affected }) => {
+            Upstream(upstream::QueryResult::Write { num_rows_affected }, _) => {
                 Ok(Insert(num_rows_affected))
             }
-            Upstream(upstream::QueryResult::Command { tag }) => Ok(Command(tag)),
+            Upstream(upstream::QueryResult::Command { tag }, _) => Ok(Command(tag)),
             Upstream(upstream::QueryResult::SimpleQueryStream {
                 first_message,
                 stream,
-            }) => Ok(ps::QueryResponse::Stream {
+            }, _) => Ok(ps::QueryResponse::Stream {
                 resultset: Resultset::from_simple_query_stream(stream, first_message),
             }),
             // We still use the SimpleQuery response for some upstream responses that are not
             // Selects
-            Upstream(upstream::QueryResult::SimpleQuery(resp)) => Ok(SimpleQuery(resp)),
+            Upstream(upstream::QueryResult::SimpleQuery(resp), _) => Ok(SimpleQuery(resp)),
             UpstreamBufferedInMemory(upstream::QueryResult::SimpleQuery(resp)) => Ok(SimpleQuery(resp)),
             UpstreamBufferedInMemory(..) => Err(ps::Error::InternalError(
                 "Mismatched QueryResult for UpstreamBufferedInMemory response type: Expected SimpleQuery".to_string(),

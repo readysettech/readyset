@@ -95,7 +95,7 @@ use readyset_client_metrics::{
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
-use readyset_shallow::CacheManager;
+use readyset_shallow::{CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
     self, AlterReadysetStatement, CacheInner, CacheType, CreateCacheStatement, DeallocateStatement,
     DropCacheStatement, ExplainStatement, Relation, SelectStatement, SetStatement, ShowStatement,
@@ -103,7 +103,8 @@ use readyset_sql::ast::{
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
-use readyset_sql_passes::adapter_rewrites::{self, ProcessedQueryParams};
+use readyset_sql_passes::adapter_rewrites;
+use readyset_sql_passes::adapter_rewrites::ProcessedQueryParams;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::{RedactedString, Sensitive};
 use readyset_util::retry_with_exponential_backoff;
@@ -817,8 +818,13 @@ where
 {
     /// Results from noria
     Noria(noria_connector::QueryResult<'a>),
-    /// Results from upstream
-    Upstream(DB::QueryResult<'a>),
+    /// Results from a Readyset shallow cache
+    Shallow(readyset_shallow::QueryResult),
+    /// Results from upstream with optional pending shallow cache insert
+    Upstream(
+        DB::QueryResult<'a>,
+        Option<CacheInsertGuard<ProcessedQueryParams>>,
+    ),
     /// Results from upstream that are explicitly buffered in a Vec (from postgres' Simple Query
     /// Protocol)
     UpstreamBufferedInMemory(DB::QueryResult<'a>),
@@ -840,11 +846,12 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Noria(r) => f.debug_tuple("Noria").field(r).finish(),
-            Self::Upstream(r) => f.debug_tuple("Upstream").field(r).finish(),
+            Self::Upstream(r, _) => f.debug_tuple("Upstream").field(r).finish(),
             Self::UpstreamBufferedInMemory(r) => {
                 f.debug_tuple("UpstreamBufferedInMemory").field(r).finish()
             }
             Self::Parser(r) => f.debug_tuple("Parser").field(r).finish(),
+            Self::Shallow(r) => f.debug_tuple("Shallow").field(r).finish(),
         }
     }
 }
@@ -937,6 +944,7 @@ where
         upstream: Option<&'a mut DB>,
         query: &'a str,
         event: &mut QueryExecutionEvent,
+        cache: Option<CacheInsertGuard<ProcessedQueryParams>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let upstream = upstream.ok_or_else(|| {
             ReadySetError::Internal("This case requires an upstream connector".to_string())
@@ -948,7 +956,7 @@ where
             Ok(qr) => qr.destination(),
             Err(_) => QueryDestination::Upstream,
         });
-        result.map(QueryResult::Upstream)
+        result.map(|r| QueryResult::Upstream(r, cache))
     }
 
     /// Executes query on the upstream database using the "simple query" protocol, which buffers
@@ -1499,7 +1507,7 @@ where
         upstream
             .execute(&prep.statement_id, params, exec_meta)
             .await
-            .map(|r| QueryResult::Upstream(r))
+            .map(|r| QueryResult::Upstream(r, None))
     }
 
     /// Execute on ReadySet, and if fails execute on upstream
@@ -1890,17 +1898,17 @@ where
 
         match query {
             SqlQuery::StartTransaction(inner) => {
-                let result = QueryResult::Upstream(upstream.start_tx(inner).await?);
+                let result = QueryResult::Upstream(upstream.start_tx(inner).await?, None);
                 proxy_state.start_transaction();
                 Ok(result)
             }
             SqlQuery::Commit(_) => {
-                let result = QueryResult::Upstream(upstream.commit().await?);
+                let result = QueryResult::Upstream(upstream.commit().await?, None);
                 proxy_state.end_transaction();
                 Ok(result)
             }
             SqlQuery::Rollback(_) => {
-                let result = QueryResult::Upstream(upstream.rollback().await?);
+                let result = QueryResult::Upstream(upstream.rollback().await?, None);
                 proxy_state.end_transaction();
                 Ok(result)
             }
@@ -2707,10 +2715,30 @@ where
         res
     }
 
+    async fn query_shallow<'a>(
+        noria: &'a mut NoriaConnector,
+        upstream: Option<&'a mut DB>,
+        shallow: &CacheManager<ProcessedQueryParams>,
+        view_request: &ViewCreateRequest,
+        query: &'a str,
+        event: &mut QueryExecutionEvent,
+        processed_query_params: Option<ProcessedQueryParams>,
+    ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        let query_id = QueryId::from_select(&view_request.statement, noria.schema_search_path());
+        let res = processed_query_params.map(|p| shallow.get_or_start_insert(&query_id, p));
+        let cache = match res {
+            Some(CacheResult::Hit(values)) => return Ok(QueryResult::Shallow(values)),
+            Some(CacheResult::Miss(cache)) => Some(cache),
+            None | Some(CacheResult::NotCached) => None,
+        };
+        Self::query_fallback(upstream, query, event, cache).await
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn query_adhoc_select<'a>(
         noria: &'a mut NoriaConnector,
         upstream: Option<&'a mut DB>,
+        shallow: &CacheManager<ProcessedQueryParams>,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         original_query: &'a str,
@@ -2752,7 +2780,16 @@ where
                     &status.execution_info.unwrap().last_transition_time,
                 );
             }
-            return Self::query_fallback(upstream, original_query, event).await;
+            return Self::query_shallow(
+                noria,
+                upstream,
+                shallow,
+                view_request,
+                original_query,
+                event,
+                Some(processed_query_params),
+            )
+            .await;
         }
 
         event.destination = Some(QueryDestination::Readyset);
@@ -2840,7 +2877,7 @@ where
                         fallback
                             .query(original_query)
                             .await
-                            .map(QueryResult::Upstream)
+                            .map(|r| QueryResult::Upstream(r, None))
                     }
                 }
             }
@@ -3004,7 +3041,7 @@ where
                         let _t = event.start_upstream_timer();
 
                         let query_result = upstream.query(raw_query).await;
-                        query_result.map(QueryResult::Upstream)
+                        query_result.map(|r| QueryResult::Upstream(r, None))
                     }
 
                     SqlQuery::CreateDatabase(_)
@@ -3017,7 +3054,10 @@ where
                     | SqlQuery::Use(_)
                     | SqlQuery::CreateIndex(_) => {
                         event.sql_type = SqlQueryType::Other;
-                        upstream.query(raw_query).await.map(QueryResult::Upstream)
+                        upstream
+                            .query(raw_query)
+                            .await
+                            .map(|r| QueryResult::Upstream(r, None))
                     }
                     SqlQuery::RenameTable(_) => {
                         unsupported!("{} not yet supported", query.query_type());
@@ -3027,7 +3067,10 @@ where
                     | SqlQuery::Show(_)
                     | SqlQuery::Comment(_) => {
                         event.sql_type = SqlQueryType::Other;
-                        upstream.query(raw_query).await.map(QueryResult::Upstream)
+                        upstream
+                            .query(raw_query)
+                            .await
+                            .map(|r| QueryResult::Upstream(r, None))
                     }
 
                     SqlQuery::StartTransaction(_) | SqlQuery::Commit(_) | SqlQuery::Rollback(_) => {
@@ -3133,7 +3176,7 @@ where
                     event.set_noria_error(&e);
                 }
                 let fallback_res =
-                    Self::query_fallback(self.upstream.as_mut(), query, &mut event).await;
+                    Self::query_fallback(self.upstream.as_mut(), query, &mut event, None).await;
                 if fallback_res.is_ok() {
                     let (id, _) = self
                         .state
@@ -3204,7 +3247,7 @@ where
                     }
 
                     // Query requires a fallback and we can send it to fallback
-                    Self::query_fallback(self.upstream.as_mut(), query, &mut event).await
+                    Self::query_fallback(self.upstream.as_mut(), query, &mut event, None).await
                 } else {
                     // Query should return a default response or requires a fallback, but none is
                     // available
@@ -3240,6 +3283,7 @@ where
                     Self::query_adhoc_select(
                         &mut self.noria,
                         self.upstream.as_mut(),
+                        &self.shallow,
                         &self.settings,
                         &mut self.state,
                         query,
@@ -3251,12 +3295,21 @@ where
                     )
                     .await
                 } else {
-                    Self::query_fallback(self.upstream.as_mut(), query, &mut event).await
+                    Self::query_shallow(
+                        &mut self.noria,
+                        self.upstream.as_mut(),
+                        &self.shallow,
+                        &view_request,
+                        query,
+                        &mut event,
+                        processed_query_params,
+                    )
+                    .await
                 }
             }
             Ok(SqlQuery::Deallocate(stmt)) => Ok(Self::handle_deallocate_statement(stmt)),
             Ok(_) if self.state.proxy_state.should_proxy() => {
-                Self::query_fallback(self.upstream.as_mut(), query, &mut event).await
+                Self::query_fallback(self.upstream.as_mut(), query, &mut event, None).await
             }
             Ok(parsed_query) => {
                 let result = Self::query_adhoc_non_select(
