@@ -153,11 +153,7 @@ impl ViewsSynchronizer {
                     if self.views_checked.contains(&hash) {
                         None
                     } else {
-                        // once arc_unwrap_or_clone is stabilized, we can use that cleaner syntax
-                        Some((
-                            Arc::try_unwrap(p).unwrap_or_else(|arc| (*arc).clone()),
-                            hash,
-                        ))
+                        Some((Arc::unwrap_or_clone(p), hash))
                     }
                 })
             })
