@@ -27,7 +27,7 @@ use tracing::trace;
 /// Construct a [`ProcessedQueryParams`] by calling [`process_query`], then pass the list of
 /// user-provided parameters to [`ProcessedQueryParams::make_keys`] to make a list of lookup keys to
 /// pass to noria.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct ProcessedQueryParams {
     dialect: Dialect,
     reordered_placeholders: Option<Vec<usize>>,
@@ -36,7 +36,7 @@ pub struct ProcessedQueryParams {
     pagination_parameters: AdapterPaginationParams,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct AdapterPaginationParams {
     /// The values of `LIMIT` and `OFFSET` in the original query
     limit_clause: LimitClause,
@@ -266,7 +266,7 @@ impl ProcessedQueryParams {
 
 /// Information about a single parameterized IN condition that has been rewritten to an equality
 /// condition
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 struct RewrittenIn {
     /// The index in the parameters of the query of the first rewritten parameter for this
     /// condition
@@ -572,8 +572,7 @@ fn reorder_numbered_placeholders(query: &mut SelectStatement) -> Option<Vec<usiz
         out: vec![],
     };
 
-    #[allow(clippy::unwrap_used)] // Error is !, so can't be returned
-    visitor.visit_select_statement(query).unwrap();
+    let Ok(()) = visitor.visit_select_statement(query);
 
     // As an optimization, check if the placeholders were *already* ordered and contiguous, and
     // return None if so. This allows us to save some clones on the actual read-path.

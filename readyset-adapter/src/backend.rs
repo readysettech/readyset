@@ -95,6 +95,7 @@ use readyset_client_metrics::{
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
+use readyset_shallow::CacheManager;
 use readyset_sql::ast::{
     self, AlterReadysetStatement, CacheInner, CacheType, CreateCacheStatement, DeallocateStatement,
     DropCacheStatement, ExplainStatement, Relation, SelectStatement, SetStatement, ShowStatement,
@@ -388,6 +389,7 @@ impl BackendBuilder {
             adapter_start_time,
             sampler_tx: self.sampler_tx,
             is_internal_connection: false,
+            shallow: CacheManager::new(),
             _query_handler: PhantomData,
         }
     }
@@ -609,8 +611,11 @@ where
     sampler_tx:
         Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
 
-    /// Boolean to indicate if the backend connection is an internal connection (eg.: From Query Sampler)
+    /// true if the backend connection is an internal connection (eg. from Query Sampler)
     is_internal_connection: bool,
+
+    /// The adapter's shallow cache manager.
+    shallow: CacheManager<ProcessedQueryParams>,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -672,7 +677,7 @@ impl FromRow for QueryInfo {
     fn from_row_opt(row: mysql_common::row::Row) -> Result<Self, FromRowError> {
         let mut res = QueryInfo::default();
 
-        // Parse each column into it's respective QueryInfo field.
+        // Parse each column into its respective QueryInfo field.
         for (i, c) in row.columns_ref().iter().enumerate() {
             if let mysql_common::value::Value::Bytes(d) = row.as_ref(i).unwrap() {
                 let dest = std::str::from_utf8(d).map_err(|_| FromRowError(row.clone()))?;
@@ -2075,6 +2080,34 @@ where
         res
     }
 
+    fn convert_eviction_policy(policy: ast::EvictionPolicy) -> readyset_shallow::EvictionPolicy {
+        match policy {
+            ast::EvictionPolicy::Ttl(duration) => readyset_shallow::EvictionPolicy::Ttl(duration),
+        }
+    }
+
+    async fn create_shallow_cache(
+        &mut self,
+        mut name: Option<Relation>,
+        stmt: SelectStatement,
+        policy: Option<ast::EvictionPolicy>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let (query_id, name, _requested_name) = self.make_name_and_id(&mut name, &stmt);
+
+        let policy = policy.ok_or_else(|| internal_err!("Policy required for shallow cache"))?;
+        let policy = Self::convert_eviction_policy(policy);
+
+        self.shallow
+            .create(Some(name.clone()), Some(query_id), policy)?;
+
+        self.state.query_status_cache.update_query_migration_state(
+            &ViewCreateRequest::new(stmt.clone(), Vec::new()),
+            MigrationState::Successful(CacheType::Shallow),
+        );
+
+        Ok(noria_connector::QueryResult::Empty)
+    }
+
     /// Forwards an `EXPLAIN CREATE CACHE` request to ReadySet. Where possible, this method performs
     /// the dry run in the request path so we can return a result to the client immediately. If we
     /// encounter an error we think might be transient or if the query is unsupported and we might
@@ -2460,8 +2493,8 @@ where
             }
             SqlQuery::CreateCache(CreateCacheStatement {
                 name,
-                cache_type: _,
-                policy: _,
+                cache_type,
+                policy,
                 inner,
                 always,
                 concurrently,
@@ -2515,15 +2548,22 @@ where
                     None
                 };
 
-                self.create_deep_cache(
-                    name.clone(),
-                    stmt,
-                    search_path,
-                    *always,
-                    *concurrently,
-                    ddl_req,
-                )
-                .await
+                match cache_type.unwrap_or_default() {
+                    CacheType::Deep => {
+                        self.create_deep_cache(
+                            name.clone(),
+                            stmt,
+                            search_path,
+                            *always,
+                            *concurrently,
+                            ddl_req,
+                        )
+                        .await
+                    }
+                    CacheType::Shallow => {
+                        self.create_shallow_cache(name.clone(), stmt, *policy).await
+                    }
+                }
             }
             SqlQuery::DropCache(drop_cache) => {
                 if !self.allow_cache_ddl {
@@ -2540,30 +2580,37 @@ where
                     .add_cache_ddl_request(ddl_req.clone())
                     .await?;
                 let DropCacheStatement { name } = drop_cache;
-                let res = self.drop_cached_query(name).await;
-                // `drop_cached_query` may return an Err, but if the cache fails to be dropped for
-                // certain reasons, we can also see an Ok(Delete) here with num_rows_deleted set to
-                // 0.
-                if res.is_err()
-                    || matches!(
-                        res,
-                        Ok(noria_connector::QueryResult::Delete { num_rows_deleted }) if num_rows_deleted < 1
-                    )
-                {
-                    let remove_res = retry_with_exponential_backoff!(
-                        || async {
-                            let ddl_req = ddl_req.clone();
-                            self.authority.remove_cache_ddl_request(ddl_req).await
-                        },
-                        retries: 5,
-                        delay: 1,
-                        backoff: 2,
-                    );
-                    if remove_res.is_err() {
-                        error!("Failed to remove stored 'drop cache' request. It will be re-run if there is a backwards incompatible upgrade");
+
+                if self.shallow.drop(Some(name), None).is_ok() {
+                    Ok(noria_connector::QueryResult::Delete {
+                        num_rows_deleted: 1,
+                    })
+                } else {
+                    let res = self.drop_cached_query(name).await;
+                    // `drop_cached_query` may return an Err, but if the cache fails to be
+                    // dropped for certain reasons, we can also see an Ok(Delete) here with
+                    // num_rows_deleted set to 0.
+                    if res.is_err()
+                        || matches!(
+                            res,
+                            Ok(noria_connector::QueryResult::Delete { num_rows_deleted }) if num_rows_deleted < 1
+                        )
+                    {
+                        let remove_res = retry_with_exponential_backoff!(
+                            || async {
+                                let ddl_req = ddl_req.clone();
+                                self.authority.remove_cache_ddl_request(ddl_req).await
+                            },
+                            retries: 5,
+                            delay: 1,
+                            backoff: 2,
+                        );
+                        if remove_res.is_err() {
+                            error!("Failed to remove stored 'drop cache' request. It will be re-run if there is a backwards incompatible upgrade");
+                        }
                     }
+                    res
                 }
-                res
             }
             SqlQuery::DropAllCaches(_) => {
                 if !self.allow_cache_ddl {

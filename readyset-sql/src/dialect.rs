@@ -8,7 +8,7 @@ use thiserror::Error;
 ///
 /// Currently, Dialect controls the escape characters used for identifiers, and the quotes used to
 /// surround string literals, but may be extended to cover more dialect differences in the future
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, ValueEnum)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, Serialize, Deserialize, ValueEnum)]
 #[value(rename_all = "lower")]
 pub enum Dialect {
     /// The SQL dialect used by PostgreSQL.

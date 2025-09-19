@@ -46,6 +46,7 @@ readyset-client = { path = "../readyset-client/" }
 readyset-errors = { path = "../readyset-errors/" }
 readyset-data = { path = "../readyset-data/" }
 readyset-server = { path = "../readyset-server" }
+readyset-shallow = { path = "../readyset-shallow" }
 dataflow-expression = { path = "../dataflow-expression" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-dataflow = { path = "../readyset-dataflow" }
