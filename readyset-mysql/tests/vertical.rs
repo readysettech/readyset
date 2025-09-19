@@ -837,7 +837,7 @@ vertical_tests! {
         "SELECT id, name FROM users WHERE id = ?";
         "users" => (
             "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
-            schema: [id: i32, name: String],
+            schema: [id: i32, name: string()],
             primary_key: 0,
             key_columns: [0],
         )
@@ -866,13 +866,13 @@ vertical_tests! {
          WHERE users.id = ?";
         "posts" => (
             "CREATE TABLE posts (id INT, title TEXT, author_id INT, PRIMARY KEY (id))",
-            schema: [id: i32, title: String, author_id: foreign_key("users", 0)],
+            schema: [id: i32, title: string(), author_id: foreign_key("users", 0)],
             primary_key: 0,
             key_columns: [],
         ),
         "users" => (
             "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
-            schema: [id: i32, name: String],
+            schema: [id: i32, name: string()],
             primary_key: 0,
             key_columns: [0],
         )
@@ -902,13 +902,13 @@ vertical_tests! {
         "SELECT id, title FROM posts WHERE author_id = ? ORDER BY score DESC LIMIT 3";
         "posts" => (
             "CREATE TABLE posts (id INT, title TEXT, score INT, author_id INT, PRIMARY KEY (id))",
-            schema: [id: i32, title: String, score: i32, author_id: foreign_key("users", 0)],
+            schema: [id: i32, title: string(), score: i32, author_id: foreign_key("users", 0)],
             primary_key: 0,
             key_columns: []
         ),
         "users" => (
             "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
-            schema: [id: i32, name: String],
+            schema: [id: i32, name: string()],
             primary_key: 0,
             key_columns: [0],
         )
@@ -918,7 +918,7 @@ vertical_tests! {
         "SELECT id, name, score FROM posts WHERE score > ?";
         "posts" => (
             "CREATE TABLE posts (id INT, name TEXT, score INT, PRIMARY KEY (id))",
-            schema: [id: i32, name: String, score: i32],
+            schema: [id: i32, name: string(), score: i32],
             primary_key: 0,
             key_columns: [2],
         )
@@ -941,7 +941,7 @@ vertical_tests! {
         "SELECT id, name, score, age FROM posts WHERE score > ? and age > ?";
         "posts" => (
             "CREATE TABLE posts (id INT, name TEXT, score INT, age INT, PRIMARY KEY (id))",
-            schema: [id: i32, name: String, score: i32, age: i32],
+            schema: [id: i32, name: string(), score: i32, age: i32],
             primary_key: 0,
             key_columns: [2, 3],
         )
@@ -962,7 +962,7 @@ vertical_tests! {
         "SELECT id, name, score FROM posts WHERE score BETWEEN ? AND ?";
         "posts" => (
             "CREATE TABLE posts (id INT, name TEXT, score INT, PRIMARY KEY (id))",
-            schema: [id: i32, name: String, score: i32],
+            schema: [id: i32, name: string(), score: i32],
             primary_key: 0,
             key_columns: [2, 2],
         )
@@ -1003,13 +1003,13 @@ vertical_tests! {
          WHERE posts.id = ?";
         "posts" => (
             "CREATE TABLE posts (id INT, title TEXT, author_id INT, PRIMARY KEY (id))",
-            schema: [id: i32, title: String, author_id: foreign_key("users", 0)],
+            schema: [id: i32, title: string(), author_id: foreign_key("users", 0)],
             primary_key: 0,
             key_columns: [],
         ),
         "users" => (
             "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
-            schema: [id: i32, name: String],
+            schema: [id: i32, name: string()],
             primary_key: 0,
             key_columns: [0],
         )
@@ -1022,13 +1022,13 @@ vertical_tests! {
          WHERE users.id = ?";
         "posts" => (
             "CREATE TABLE posts (id INT, title TEXT, author_id INT, PRIMARY KEY (id))",
-            schema: [id: i32, title: String, author_id: foreign_key("users", 0)],
+            schema: [id: i32, title: string(), author_id: foreign_key("users", 0)],
             primary_key: 0,
             key_columns: [],
         ),
         "users" => (
             "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
-            schema: [id: i32, name: String],
+            schema: [id: i32, name: string()],
             primary_key: 0,
             key_columns: [0],
         )
@@ -1040,7 +1040,7 @@ vertical_tests! {
          WHERE category = ?";
         "posts" => (
             "CREATE TABLE posts (id INT, name TEXT, score INT, category TEXT, PRIMARY KEY (id))",
-            schema: [id: i32, name: String, score: i32, category: String],
+            schema: [id: i32, name: string(), score: i32, category: string()],
             primary_key: 0,
             key_columns: [3],
         )
