@@ -19,8 +19,6 @@ pub enum PostLookupAggregateFunction {
     /// Note that this encapsulates both `SUM` *and* `COUNT` in base SQL, as re-aggregating counts
     /// is done by just summing numbers together
     Sum,
-    /// Multiply together all the input numbers
-    Product,
     /// Concatenate together all the input strings with the given separator
     GroupConcat {
         separator: String,
@@ -55,7 +53,6 @@ impl PostLookupAggregateFunction {
                 _ => internal!("trying to using `array_agg()` for non-array types"),
             },
             PostLookupAggregateFunction::Sum => val1 + val2,
-            PostLookupAggregateFunction::Product => val1 * val2,
             PostLookupAggregateFunction::GroupConcat { separator } => Ok(format!(
                 "{}{}{}",
                 String::try_from(val1)?,

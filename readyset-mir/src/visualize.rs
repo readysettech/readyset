@@ -314,7 +314,6 @@ impl GraphViz for MirNodeInner {
                                 match aggregate.function {
                                     PostLookupAggregateFunction::ArrayAgg => "ArrayAgg",
                                     PostLookupAggregateFunction::Sum => "Σ",
-                                    PostLookupAggregateFunction::Product => "Π",
                                     PostLookupAggregateFunction::GroupConcat { .. } => "GC",
                                     PostLookupAggregateFunction::Max => "Max",
                                     PostLookupAggregateFunction::Min => "Min",
