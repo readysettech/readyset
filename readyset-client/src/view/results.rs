@@ -2,7 +2,9 @@ use std::cmp;
 use std::cmp::Ordering;
 use std::sync::Arc;
 
-use dataflow_expression::{Expr, PostLookup, PostLookupAggregates};
+use dataflow_expression::{
+    grouped::accumulator::AccumulatorData, Expr, PostLookup, PostLookupAggregates,
+};
 use readyset_data::DfValue;
 use readyset_sql::ast::{NullOrder, OrderType};
 use smallvec::SmallVec;
@@ -518,6 +520,23 @@ impl AggregateIterator {
     }
 }
 
+#[derive(Debug)]
+enum AggregateHolder {
+    Simple(DfValue),
+    Accumulated(AccumulatorData),
+}
+
+impl AggregateHolder {
+    fn finish(self, function: &dataflow_expression::PostLookupAggregateFunction) -> DfValue {
+        match self {
+            AggregateHolder::Simple(v) => v,
+            AggregateHolder::Accumulated(data) => {
+                function.finish(&data).expect("Accumulated data expected")
+            }
+        }
+    }
+}
+
 impl StreamingIterator for AggregateIterator {
     type Item = [DfValue];
 
@@ -538,6 +557,7 @@ impl StreamingIterator for AggregateIterator {
         };
 
         self.advance_filtered();
+        let mut aggs: Option<Vec<AggregateHolder>> = None;
         while let Some(row) = self.inner.get() {
             if self
                 .aggregate
@@ -548,15 +568,58 @@ impl StreamingIterator for AggregateIterator {
                 break;
             }
 
-            for agg in &self.aggregate.aggregates {
-                let col = agg.column;
-                aggregate_row[col] = agg
-                    .function
-                    .apply(&aggregate_row[col], &row[col])
-                    .expect("no fail");
+            // Initialize aggregates on first row
+            if aggs.is_none() {
+                let mut holders = Vec::new();
+                for agg in &self.aggregate.aggregates {
+                    let col = agg.column;
+                    let holder = if agg.function.is_accumulation() {
+                        let mut acc_data: AccumulatorData = agg
+                            .function
+                            .create_accumulator_data()
+                            .expect("AccumulatorData");
+
+                        agg.function
+                            .apply_accumulated(&mut acc_data, &aggregate_row[col])
+                            .expect("Accumulate failed");
+                        AggregateHolder::Accumulated(acc_data)
+                    } else {
+                        AggregateHolder::Simple(aggregate_row[col].clone())
+                    };
+                    holders.push(holder);
+                }
+                aggs = Some(holders);
+            }
+
+            // Apply/accumulate for this row
+            if let Some(ref mut holders) = aggs {
+                for (holder, agg) in holders.iter_mut().zip(&self.aggregate.aggregates) {
+                    let col = agg.column;
+                    match holder {
+                        AggregateHolder::Simple(ref mut current) => {
+                            *current = agg
+                                .function
+                                .apply(current, &row[col])
+                                .expect("Apply failed");
+                        }
+                        AggregateHolder::Accumulated(ref mut data) => {
+                            agg.function
+                                .apply_accumulated(data, &row[col])
+                                .expect("Accumulate failed");
+                        }
+                    }
+                }
             }
 
             self.advance_filtered();
+        }
+
+        // Finish aggregates and write back to aggregate_row
+        if let Some(holders) = aggs {
+            for (holder, agg) in holders.into_iter().zip(&self.aggregate.aggregates) {
+                let col = agg.column;
+                aggregate_row[col] = holder.finish(&agg.function);
+            }
         }
 
         self.out_row = Some(aggregate_row)

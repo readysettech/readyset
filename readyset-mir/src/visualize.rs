@@ -3,7 +3,6 @@ use std::fmt::{self, Display, Formatter};
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use dataflow::ops::union;
-use dataflow::PostLookupAggregateFunction;
 use dataflow_expression::grouped::accumulator::AccumulationOp as AccumulationKind;
 use itertools::Itertools;
 use lazy_static::lazy_static;
@@ -309,24 +308,7 @@ impl GraphViz for MirNodeInner {
                         aggregates
                             .aggregates
                             .iter()
-                            .map(|aggregate| format!(
-                                "{}({})",
-                                match aggregate.function {
-                                    PostLookupAggregateFunction::ArrayAgg => "ArrayAgg",
-                                    PostLookupAggregateFunction::Sum => "Σ",
-                                    PostLookupAggregateFunction::GroupConcat { .. } => "GC",
-                                    PostLookupAggregateFunction::Max => "Max",
-                                    PostLookupAggregateFunction::Min => "Min",
-                                    PostLookupAggregateFunction::JsonObjectAgg {
-                                        allow_duplicate_keys: false,
-                                    } => "JsonObjectAgg",
-                                    PostLookupAggregateFunction::JsonObjectAgg {
-                                        allow_duplicate_keys: true,
-                                    } => "JsonbObjectAgg",
-                                    PostLookupAggregateFunction::StringAgg { .. } => "StringAgg",
-                                },
-                                &aggregate.column
-                            ))
+                            .map(|aggregate| aggregate.description())
                             .join(", "),
                         aggregates.group_by.iter().join(", ")
                     )?;

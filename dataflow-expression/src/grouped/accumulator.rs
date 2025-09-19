@@ -185,6 +185,42 @@ impl AccumulationOp {
             }
         }
     }
+
+    // Split an assumedly already accumulated `DfValue` into consitutent parts.
+    // The intended use for this is in post-lookup aggregations where we need
+    // to apply `DISTINCT` and `ORDER BY` operations across mutliple rows that
+    // are to be grouped together.
+    fn split(&self, value: &DfValue) -> ReadySetResult<Vec<DfValue>> {
+        if value.is_none() {
+            return Ok(vec![]);
+        }
+
+        let res = match self {
+            AccumulationOp::ArrayAgg { .. } => match value {
+                DfValue::Array(arr) => arr.values().cloned().collect(),
+                _ => vec![value.clone()],
+            },
+            AccumulationOp::GroupConcat { separator, .. } => match value.as_str() {
+                Some(t) => t.split(separator).map(DfValue::from).collect(),
+                None => internal!("Must be a text type: {:?}", value),
+            },
+            AccumulationOp::JsonObjectAgg { .. } => {
+                unsupported!("Post-lookup json_object_agg not supoorted yet")
+            }
+            AccumulationOp::StringAgg { separator, .. } => {
+                let sep = match separator {
+                    Some(s) => s,
+                    None => unsupported!("Separator cannot be None when splitting a prior value"),
+                };
+
+                match value.as_str() {
+                    Some(t) => t.split(sep).map(DfValue::from).collect(),
+                    None => internal!("Must be a text type: {:?}", value),
+                }
+            }
+        };
+        Ok(res)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -250,6 +286,11 @@ impl Display for OrderableDfValue {
 }
 
 impl AccumulatorData {
+    pub fn add_accummulated(&mut self, op: &AccumulationOp, value: DfValue) -> ReadySetResult<()> {
+        op.split(&value)?.into_iter().for_each(|v| self.add(op, v));
+        Ok(())
+    }
+
     pub fn add(&mut self, op: &AccumulationOp, value: DfValue) {
         match self {
             AccumulatorData::Simple(v) => {
@@ -367,6 +408,7 @@ fn validate_accumulator_order_by(
         None => Ok(None),
     }
 }
+
 impl TryFrom<&FunctionExpr> for AccumulationOp {
     type Error = ReadySetError;
 

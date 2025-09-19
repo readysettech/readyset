@@ -196,3 +196,54 @@ query T
 select array_agg(t.tag) from tags t where d_id in (1, 2);
 ----
 {bbb,aaa,ccc,bbb,NULL,aaa,NULL,yyy,zzz}
+
+# distinct, but add in a value for id 2 that overlaps with id 1'd values
+statement ok
+insert into tags values (2, 'AAA');
+
+query T
+select array_agg(distinct t.tag) from tags t where d_id in (1, 2);
+----
+{NULL,aaa,AAA,bbb,ccc,yyy,zzz}
+
+# order by
+query T
+select array_agg(t.tag order by tag desc) from tags t where d_id in (1, 2);
+----
+{NULL,NULL,zzz,yyy,ccc,bbb,bbb,AAA,aaa,aaa}
+
+query T
+select array_agg(t.tag order by tag desc nulls first) from tags t where d_id in (1, 2);
+----
+{NULL,NULL,zzz,yyy,ccc,bbb,bbb,AAA,aaa,aaa}
+
+query T
+select array_agg(t.tag order by tag asc nulls last) from tags t where d_id in (1, 2);
+----
+{aaa,aaa,AAA,bbb,bbb,ccc,yyy,zzz,NULL,NULL}
+
+# empty results
+query
+select array_agg(tag) from tags where d_id in (12345, 23456);
+----
+NULL
+
+statement ok
+insert into tags values
+  (12345, NULL);
+
+# only NULL rows
+query
+select array_agg(tag) from tags where d_id in (12345, 23456);
+----
+{NULL}
+
+statement ok
+insert into tags values
+  (23456, NULL);
+
+# only NULL rows
+query
+select array_agg(tag) from tags where d_id in (12345, 23456);
+----
+{NULL,NULL}

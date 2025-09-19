@@ -118,7 +118,51 @@ NULL
 ######
 ## post-lookup aggregations
 
+# simple lookup
 query T
 select group_concat(t.tag separator '::') from tags t where d_id in (1, 2);
 ----
 bbb::aaa::ccc::bbb::aaa::yyy::zzz
+
+
+# distinct, but add in a value for id 2 that overlaps with id 1'd values
+statement ok
+insert into tags values (2, 'AAA');
+
+query T
+select group_concat(distinct t.tag separator '::') from tags t where d_id in (1, 2);
+----
+aaa::AAA::bbb::ccc::yyy::zzz
+
+# order by
+query T
+select group_concat(t.tag order by tag desc separator '::') from tags t where d_id in (1, 2);
+----
+zzz::yyy::ccc::bbb::bbb::AAA::aaa::aaa
+
+# test only empty/NULL inputs
+# empty results
+query
+select group_concat(tag) from tags where d_id in (12345, 23456);
+----
+NULL
+
+statement ok
+insert into tags values
+  (12345, NULL);
+
+# only NULL rows
+query
+select group_concat(tag) from tags where d_id in (12345, 23456);
+----
+NULL
+
+statement ok
+insert into tags values
+  (23456, NULL);
+
+# only NULL rows
+query
+select group_concat(tag) from tags where d_id in (12345, 23456);
+----
+NULL

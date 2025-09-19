@@ -1,5 +1,4 @@
 use std::cmp::{self, Ordering};
-use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -9,11 +8,14 @@ use readyset_errors::{internal, unsupported, ReadySetResult};
 use readyset_sql::ast::{NullOrder, OrderType};
 use serde::{Deserialize, Serialize};
 
+use crate::grouped::accumulator::{AccumulationOp, AccumulatorData};
+
 /// Representation of an aggregate function
-// TODO(aspen): It would be really nice to deduplicate this somehow with the grouped operator itself
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub enum PostLookupAggregateFunction {
-    ArrayAgg,
+    ArrayAgg {
+        op: AccumulationOp,
+    },
     /// Add together all the input numbers
     ///
     /// Note that this encapsulates both `SUM` *and* `COUNT` in base SQL, as re-aggregating counts
@@ -21,7 +23,7 @@ pub enum PostLookupAggregateFunction {
     Sum,
     /// Concatenate together all the input strings with the given separator
     GroupConcat {
-        separator: String,
+        op: AccumulationOp,
     },
     /// Take the maximum input value
     Max,
@@ -29,49 +31,90 @@ pub enum PostLookupAggregateFunction {
     Min,
     /// Use specified Key-value pair to build a JSON Object
     JsonObjectAgg {
-        allow_duplicate_keys: bool,
+        op: AccumulationOp,
     },
     /// Concatenate together all the input strings with the given separator
     StringAgg {
-        separator: String,
+        op: AccumulationOp,
     },
 }
 
 impl PostLookupAggregateFunction {
+    pub fn is_accumulation(&self) -> bool {
+        match self {
+            PostLookupAggregateFunction::ArrayAgg { .. }
+            | PostLookupAggregateFunction::GroupConcat { .. }
+            | PostLookupAggregateFunction::JsonObjectAgg { .. }
+            | PostLookupAggregateFunction::StringAgg { .. } => true,
+            PostLookupAggregateFunction::Max
+            | PostLookupAggregateFunction::Min
+            | PostLookupAggregateFunction::Sum => false,
+        }
+    }
+
     /// Apply this aggregate function to the two input values
     ///
     /// This forms a semigroup.
     pub fn apply(&self, val1: &DfValue, val2: &DfValue) -> ReadySetResult<DfValue> {
         match self {
-            PostLookupAggregateFunction::ArrayAgg => match (val1, val2) {
-                (DfValue::Array(a1), DfValue::Array(a2)) => {
-                    let result: Vec<_> = a1.values().chain(a2.values()).cloned().collect();
-                    Ok(DfValue::Array(std::sync::Arc::new(
-                        readyset_data::Array::from(result),
-                    )))
-                }
-                _ => internal!("trying to using `array_agg()` for non-array types"),
-            },
             PostLookupAggregateFunction::Sum => val1 + val2,
-            PostLookupAggregateFunction::GroupConcat { separator } => Ok(format!(
-                "{}{}{}",
-                String::try_from(val1)?,
-                separator,
-                String::try_from(val2)?
-            )
-            .into()),
             PostLookupAggregateFunction::Max => Ok(cmp::max(val1, val2).clone()),
             PostLookupAggregateFunction::Min => Ok(cmp::min(val1, val2).clone()),
+            PostLookupAggregateFunction::ArrayAgg { .. }
+            | PostLookupAggregateFunction::GroupConcat { .. }
+            | PostLookupAggregateFunction::JsonObjectAgg { .. }
+            | PostLookupAggregateFunction::StringAgg { .. } => {
+                internal!("Calling non-accumlate operation on a accumulating function")
+            }
+        }
+    }
+
+    /// Accumulate values.
+    pub fn apply_accumulated(
+        &self,
+        data: &mut AccumulatorData,
+        value: &DfValue,
+    ) -> ReadySetResult<()> {
+        match self {
+            PostLookupAggregateFunction::ArrayAgg { op }
+            | PostLookupAggregateFunction::GroupConcat { op }
+            | PostLookupAggregateFunction::StringAgg { op } => {
+                data.add_accummulated(op, value.clone())
+            }
             PostLookupAggregateFunction::JsonObjectAgg { .. } => {
                 unsupported!("JsonObjectAgg is not supported as a post-lookup aggregate")
             }
-            PostLookupAggregateFunction::StringAgg { separator } => Ok(format!(
-                "{}{}{}",
-                String::try_from(val1)?,
-                separator,
-                String::try_from(val2)?
-            )
-            .into()),
+            PostLookupAggregateFunction::Max
+            | PostLookupAggregateFunction::Min
+            | PostLookupAggregateFunction::Sum => {
+                internal!("Calling accumlate operation on a non-accumulating function")
+            }
+        }
+    }
+
+    pub fn finish(&self, data: &AccumulatorData) -> ReadySetResult<DfValue> {
+        match self {
+            PostLookupAggregateFunction::ArrayAgg { op }
+            | PostLookupAggregateFunction::GroupConcat { op }
+            | PostLookupAggregateFunction::JsonObjectAgg { op }
+            | PostLookupAggregateFunction::StringAgg { op } => op.apply(data),
+            PostLookupAggregateFunction::Max
+            | PostLookupAggregateFunction::Min
+            | PostLookupAggregateFunction::Sum => {
+                internal!("Non-accumulating function with accumulated data")
+            }
+        }
+    }
+
+    pub fn create_accumulator_data(&self) -> Option<AccumulatorData> {
+        match self {
+            PostLookupAggregateFunction::ArrayAgg { op }
+            | PostLookupAggregateFunction::GroupConcat { op }
+            | PostLookupAggregateFunction::JsonObjectAgg { op }
+            | PostLookupAggregateFunction::StringAgg { op } => Some(op.into()),
+            PostLookupAggregateFunction::Max
+            | PostLookupAggregateFunction::Min
+            | PostLookupAggregateFunction::Sum => None,
         }
     }
 }
@@ -95,6 +138,38 @@ impl<Column> PostLookupAggregate<Column> {
             column: f(self.column)?,
             function: self.function,
         })
+    }
+
+    pub fn description(&self) -> String
+    where
+        Column: std::fmt::Display,
+    {
+        format!(
+            "{}({})",
+            match &self.function {
+                PostLookupAggregateFunction::ArrayAgg { .. } => "ArrayAgg",
+                PostLookupAggregateFunction::GroupConcat { .. } => "GC",
+                PostLookupAggregateFunction::JsonObjectAgg { op } => {
+                    let AccumulationOp::JsonObjectAgg {
+                        allow_duplicate_keys,
+                    } = op
+                    else {
+                        panic!("Should only contain JsonObjectAgg AccumulationOp");
+                    };
+
+                    if *allow_duplicate_keys {
+                        "JsonbObjectAgg"
+                    } else {
+                        "JsonObjectAgg"
+                    }
+                }
+                PostLookupAggregateFunction::Max => "Max",
+                PostLookupAggregateFunction::Min => "Min",
+                PostLookupAggregateFunction::Sum => "Σ",
+                PostLookupAggregateFunction::StringAgg { .. } => "StringAgg",
+            },
+            &self.column
+        )
     }
 }
 

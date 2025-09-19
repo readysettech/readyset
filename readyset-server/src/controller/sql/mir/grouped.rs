@@ -342,7 +342,9 @@ pub(super) fn post_lookup_aggregates(
             function: match function {
                 ArrayAgg { .. } => {
                     antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::ArrayAgg");
-                    PostLookupAggregateFunction::ArrayAgg
+                    PostLookupAggregateFunction::ArrayAgg {
+                        op: function.try_into()?,
+                    }
                 }
                 Avg { .. } => {
                     unsupported!("Average is not supported as a post-lookup aggregate")
@@ -372,29 +374,26 @@ pub(super) fn post_lookup_aggregates(
                     antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::Min");
                     PostLookupAggregateFunction::Min
                 }
-                GroupConcat { separator, .. } => {
+                GroupConcat { .. } => {
                     antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::GroupConcat");
                     PostLookupAggregateFunction::GroupConcat {
-                        separator: separator.clone().unwrap_or_else(|| ",".to_owned()),
+                        op: function.try_into()?,
                     }
                 }
                 Extract { .. } | Call { .. } | Substring { .. } | Lower { .. } | Upper { .. } => {
                     continue
                 }
                 // TODO: should this be supported given the projection workaround we have?
-                JsonObjectAgg {
-                    allow_duplicate_keys,
-                    ..
-                } => {
+                JsonObjectAgg { .. } => {
                     antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::JsonObjectAgg");
                     PostLookupAggregateFunction::JsonObjectAgg {
-                        allow_duplicate_keys: *allow_duplicate_keys,
+                        op: function.try_into()?,
                     }
                 }
-                StringAgg { separator, .. } => {
+                StringAgg { .. } => {
                     antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::StringAgg");
                     PostLookupAggregateFunction::StringAgg {
-                        separator: separator.clone().unwrap_or_else(|| ",".to_owned()),
+                        op: function.try_into()?,
                     }
                 }
             },
