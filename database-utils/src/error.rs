@@ -36,6 +36,15 @@ pub enum DatabaseError {
 
     #[error("Upstream query timeout")]
     UpstreamQueryTimeout,
+
+    #[error("Row missing from result set")]
+    RowMissing,
+
+    #[error("Unexpected row in result set")]
+    UnexpectedRow,
+
+    #[error("Column missing from result set at index: {0}")]
+    ColumnMissing(usize),
 }
 
 impl DatabaseError {

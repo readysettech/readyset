@@ -731,10 +731,12 @@ impl QueryResultsIterator {
         }
     }
 
-    pub fn get_single_row(mut self) -> QueryResultsRow {
-        let row = Iterator::next(&mut self).expect("no row!");
-        assert!(Iterator::next(&mut self).is_none());
-        row
+    pub fn get_single_row(mut self) -> Result<QueryResultsRow, DatabaseError> {
+        let row = Iterator::next(&mut self).ok_or_else(|| DatabaseError::RowMissing)?;
+        if Iterator::next(&mut self).is_some() {
+            return Err(DatabaseError::UnexpectedRow);
+        }
+        Ok(row)
     }
 }
 
@@ -759,14 +761,15 @@ pub enum QueryResultsRow {
 }
 
 impl QueryResultsRow {
-    pub fn get<'a, T>(&'a self, col: usize) -> T
+    pub fn get<'a, T>(&'a self, col: usize) -> Result<T, DatabaseError>
     where
         T: mysql_common::value::convert::FromValue + tokio_postgres::types::FromSql<'a>,
     {
         match self {
-            Self::MySql(row) => row.get(col).unwrap(),
-            Self::Postgres(row) => row.get(col),
+            Self::MySql(row) => row.get(col),
+            Self::Postgres(row) => row.try_get(col).ok(),
         }
+        .ok_or_else(|| DatabaseError::ColumnMissing(col))
     }
 }
 
@@ -840,10 +843,12 @@ impl SimpleQueryResultsIterator {
         }
     }
 
-    pub fn get_single_row(mut self) -> SimpleQueryResultsRow {
-        let row = Iterator::next(&mut self).expect("no row!");
-        assert!(Iterator::next(&mut self).is_none());
-        row
+    pub fn get_single_row(mut self) -> Result<SimpleQueryResultsRow, DatabaseError> {
+        let row = Iterator::next(&mut self).ok_or_else(|| DatabaseError::RowMissing)?;
+        if Iterator::next(&mut self).is_some() {
+            return Err(DatabaseError::UnexpectedRow);
+        }
+        Ok(row)
     }
 }
 
@@ -877,11 +882,12 @@ pub enum SimpleQueryResultsRow {
 }
 
 impl SimpleQueryResultsRow {
-    pub fn get(&self, col: usize) -> String {
+    pub fn get(&self, col: usize) -> Result<String, DatabaseError> {
         match self {
-            Self::MySql(row) => row.get(col).unwrap(),
-            Self::Postgres(row) => row.get(col).unwrap().to_owned(),
+            Self::MySql(row) => row.get(col),
+            Self::Postgres(row) => row.get(col).map(|col| col.to_owned()),
         }
+        .ok_or_else(|| DatabaseError::ColumnMissing(col))
     }
 }
 

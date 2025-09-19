@@ -472,11 +472,12 @@ pub async fn explain_create_cache(
         .await
         .unwrap()
         .into_iter()
-        .get_single_row();
+        .get_single_row()
+        .unwrap();
 
     ExplainCreateCacheResult {
-        rewritten_query: row.get(1),
-        supported: row.get(2),
+        rewritten_query: row.get(1).unwrap(),
+        supported: row.get(2).unwrap(),
     }
 }
 
@@ -487,12 +488,13 @@ pub async fn explain_last_statement(conn: &mut DatabaseConnection) -> QueryInfo 
         .await
         .unwrap()
         .into_iter()
-        .get_single_row();
+        .get_single_row()
+        .unwrap();
 
-    let destination = QueryDestination::try_from(row.get(0).as_str()).unwrap();
+    let destination = QueryDestination::try_from(row.get(0).unwrap().as_str()).unwrap();
 
     QueryInfo {
         destination,
-        noria_error: row.get(1),
+        noria_error: row.get(1).unwrap(),
     }
 }

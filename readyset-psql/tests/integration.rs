@@ -2105,14 +2105,14 @@ async fn trunc_in_trx() {
         res.supported == "cached"
     }
 
-    let res = conn
+    let res: Vec<(i32, i32)> = conn
         .query("select * from trunc_in_trx")
         .await
         .unwrap()
         .into_iter()
-        .map(|row| vec![row.get::<i32>(0), row.get::<i32>(1)])
-        .collect::<Vec<Vec<_>>>();
-    assert!(res.iter().eq([vec![4, 4]].iter()), "result {res:?}");
+        .map(|row| (row.get(0).unwrap(), row.get(1).unwrap()))
+        .collect();
+    assert_eq!(res, vec![(4, 4)]);
 
     let last = explain_last_statement(&mut conn).await;
     assert_eq!(last.destination, QueryDestination::Readyset);
