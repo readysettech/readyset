@@ -9622,3 +9622,48 @@ async fn create_type_requires_schema() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn schema_catalog() {
+    let (mut g, shutdown_tx) = start_simple_unsharded("schema_catalog").await;
+
+    let initial_catalog = g
+        .schema_catalog()
+        .await
+        .expect("Should be able to get initial empty schema catalog");
+    assert_eq!(initial_catalog.base_schemas.len(), 0);
+    assert_eq!(initial_catalog.uncompiled_views.len(), 0);
+    assert_eq!(initial_catalog.custom_types.len(), 0);
+
+    g.extend_recipe(
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE users (id int PRIMARY KEY, name varchar(255));",
+                "CREATE TABLE posts (id int PRIMARY KEY, user_id int, title varchar(255));",
+                "CREATE CACHE FROM SELECT * FROM users;",
+            ],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap()
+        .with_schema_search_path(vec!["public".into()]),
+    )
+    .await
+    .expect("Should be able to extend recipe with supported tables");
+
+    // Check the schema catalog now contains the tables
+    let catalog = g
+        .schema_catalog()
+        .await
+        .expect("Should be able to get updated schema catalog");
+    assert_eq!(catalog.base_schemas.len(), 2);
+    assert!(catalog.base_schemas.contains_key(&Relation {
+        schema: Some("public".into()),
+        name: "users".into(),
+    }));
+    assert!(catalog.base_schemas.contains_key(&Relation {
+        schema: Some("public".into()),
+        name: "posts".into(),
+    }));
+
+    shutdown_tx.shutdown().await;
+}

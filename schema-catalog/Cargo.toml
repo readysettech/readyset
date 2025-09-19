@@ -1,0 +1,13 @@
+[package]
+name = "schema-catalog"
+version = "0.1.0"
+publish = false
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
+edition = "2024"
+
+[dependencies]
+readyset-sql = { path = "../readyset-sql" }
+serde = { workspace = true }
+
+[lints]
+workspace = true

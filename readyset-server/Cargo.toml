@@ -73,30 +73,31 @@ url = { workspace = true, features = ["serde"] }
 vec1 = { workspace = true }
 
 # local deps
+array2 = { path = "../array2" }
+catalog-tables = { path = "../catalog-tables" }
+common = { path = "../readyset-common", package = "readyset-common" }
+database-utils = { path = "../database-utils" }
 dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow" }
 dataflow-expression = { path = "../dataflow-expression" }
 dataflow-state = { path = "../dataflow-state" }
+failpoint-macros = { path = "../failpoint-macros" }
+health-reporter = { path = "../health-reporter" }
 mir = { path = "../readyset-mir", package = "readyset-mir" }
-common = { path = "../readyset-common", package = "readyset-common" }
 readyset-alloc = { path = "../readyset-alloc" }
 readyset-alloc-metrics = { path = "../readyset-alloc-metrics" }
 readyset-client = { path = "../readyset-client" }
-failpoint-macros = { path = "../failpoint-macros" }
-readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
+readyset-errors = { path = "../readyset-errors" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
-readyset-util = { path = "../readyset-util" }
-replicators = { path = "../replicators" }
-readyset-tracing = { path = "../readyset-tracing" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
-array2 = { path = "../array2" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
+readyset-tracing = { path = "../readyset-tracing" }
+readyset-util = { path = "../readyset-util" }
 readyset-version = { path = "../readyset-version" }
-health-reporter = { path = "../health-reporter" }
-database-utils = { path = "../database-utils" }
-catalog-tables = { path = "../catalog-tables" }
 replication-offset = { path = "../replication-offset" }
+replicators = { path = "../replicators" }
+schema-catalog = { path = "../schema-catalog" }
 
 [dev-dependencies]
 assert_approx_eq = { workspace = true }

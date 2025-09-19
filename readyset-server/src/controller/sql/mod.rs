@@ -30,6 +30,7 @@ use readyset_sql_passes::{
     RewriteContext, RewriteDialectContext, StarExpansionContext,
 };
 use readyset_util::redacted::Sensitive;
+use schema_catalog::SchemaCatalog;
 use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
 
@@ -1478,6 +1479,40 @@ impl SqlIncorporator {
     fn register_query(&mut self, query_name: Relation, fields: Vec<SqlIdentifier>) {
         debug!(query_name = %query_name.display_unquoted(), "registering query");
         self.view_schemas.insert(query_name, fields);
+    }
+
+    /// Extracts the current schema state as a serializable `SchemaCatalog`.
+    ///
+    /// XXX(mvzink): We might wish to deduplicate with [`SqlIncorporatorRewriteContext`], but at the
+    /// moment that doesn't seem worth the lift. That context implementation uses borrows and
+    /// minimizes cloning (but there's still some), whereas the [`SchemaCatalog`] is aimed at easy
+    /// serialization/synchronization with the adapter and doesn't need (and likely can't safely
+    /// duplicate) the complete picture that `SqlIncorporator` has.
+    pub(crate) fn schema_catalog(&self) -> SchemaCatalog {
+        let base_schemas = self
+            .base_schemas
+            .iter()
+            .map(|(relation, base_schema)| (relation.clone(), base_schema.statement.clone()))
+            .collect();
+
+        let uncompiled_views = self.uncompiled_views.keys().cloned().collect();
+
+        let custom_types: HashMap<SqlIdentifier, HashSet<SqlIdentifier>> = self
+            .custom_types
+            .keys()
+            .filter_map(|t| Some((t.schema.as_ref()?, &t.name)))
+            .fold(HashMap::new(), |mut acc, (schema, name)| {
+                acc.entry(schema.clone()).or_default().insert(name.clone());
+                acc
+            });
+
+        SchemaCatalog {
+            base_schemas,
+            uncompiled_views,
+            custom_types,
+            view_schemas: self.view_schemas.clone(),
+            non_replicated_relations: self.non_replicated_relations().clone(),
+        }
     }
 }
 

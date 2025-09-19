@@ -60,6 +60,7 @@ members = [
     "readyset-version",
     "replication-offset",
     "replicators",
+    "schema-catalog",
     "support",
     "system-benchmarks",
     "test-utils",

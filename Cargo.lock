@@ -4760,6 +4760,7 @@ dependencies = [
  "reqwest 0.13.1",
  "rmp-serde",
  "rocksdb",
+ "schema-catalog",
  "serde",
  "serde_json",
  "slab",
@@ -5287,6 +5288,7 @@ dependencies = [
  "replicators",
  "reqwest 0.13.1",
  "rusty-fork",
+ "schema-catalog",
  "serde",
  "serde_json",
  "serde_with",
@@ -6004,6 +6006,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "891d81b926048e76efe18581bf793546b4c0eaf8448d72be8de2bbee5fd166e1"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "schema-catalog"
+version = "0.1.0"
+dependencies = [
+ "readyset-sql",
+ "serde",
 ]
 
 [[package]]

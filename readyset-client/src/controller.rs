@@ -17,6 +17,7 @@ use readyset_errors::{
 use readyset_sql::ast::{NonReplicatedRelation, Relation};
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use replication_offset::ReplicationOffsets;
+use schema_catalog::SchemaCatalog;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
@@ -896,6 +897,16 @@ impl ReadySetHandle {
         set_schema_replication_offset(
             replication_offset: Option<&ReplicationOffset>,
         ) -> ()
+    );
+
+    simple_request!(
+        /// Extract the current schema state as a serializable `SchemaCatalog`.
+        ///
+        /// This returns a snapshot of the schema information that includes base table schemas,
+        /// uncompiled views, custom types, etc. (schema info will be added as needed).
+        ///
+        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+        schema_catalog() -> SchemaCatalog
     );
 
     simple_request!(

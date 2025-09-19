@@ -10,6 +10,7 @@ use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{Relation, SelectStatement};
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_util::hash::hash;
+use schema_catalog::SchemaCatalog;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use tracing::warn;
@@ -240,5 +241,13 @@ impl Recipe {
     /// The dialect used for converting SQL and making semantic decisions
     pub(crate) fn dialect(&self) -> Dialect {
         self.inc.dialect
+    }
+
+    /// Extracts the current schema state as a serializable `SchemaCatalog`.
+    ///
+    /// This creates a snapshot of the schema information that can be shared
+    /// between Readyset components.
+    pub(crate) fn schema_catalog(&self) -> SchemaCatalog {
+        self.inc.schema_catalog()
     }
 }

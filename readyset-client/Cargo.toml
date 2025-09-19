@@ -65,18 +65,19 @@ async-trait = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 
 # Local dependencies
-failpoint-macros = { path = "../failpoint-macros" }
-readyset-sql = { path = "../readyset-sql" }
-readyset-util = { path = "../readyset-util" }
-readyset-errors = { path = "../readyset-errors" }
-readyset-data = { path = "../readyset-data" }
-dataflow-expression = { path = "../dataflow-expression" }
-readyset-tracing = { path = "../readyset-tracing" }
 array2 = { path = "../array2" }
-tournament-kway = { path = "../tournament-kway" }
+dataflow-expression = { path = "../dataflow-expression" }
+failpoint-macros = { path = "../failpoint-macros" }
+readyset-data = { path = "../readyset-data" }
+readyset-errors = { path = "../readyset-errors" }
+readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
+readyset-tracing = { path = "../readyset-tracing" }
+readyset-util = { path = "../readyset-util" }
 replication-offset = { path = "../replication-offset" }
+schema-catalog = { path = "../schema-catalog" }
+tournament-kway = { path = "../tournament-kway" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
