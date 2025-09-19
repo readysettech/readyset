@@ -4618,6 +4618,7 @@ dependencies = [
  "regex",
  "replicators",
  "reqwest 0.13.1",
+ "schema-catalog",
  "serde_json",
  "sysinfo",
  "temp-dir",
@@ -4677,6 +4678,7 @@ dependencies = [
  "readyset-tracing",
  "readyset-util",
  "readyset-version",
+ "schema-catalog",
  "serde",
  "serde_json",
  "slab",
@@ -4817,6 +4819,7 @@ dependencies = [
  "readyset-sql-passes",
  "readyset-tracing",
  "readyset-util",
+ "schema-catalog",
  "tokio",
  "tokio-postgres",
  "tracing",
@@ -5073,6 +5076,7 @@ dependencies = [
  "readyset-tracing",
  "readyset-util",
  "regex",
+ "schema-catalog",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
@@ -6012,8 +6016,13 @@ dependencies = [
 name = "schema-catalog"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "readyset-errors",
  "readyset-sql",
+ "readyset-util",
  "serde",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

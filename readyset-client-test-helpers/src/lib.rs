@@ -33,6 +33,7 @@ use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
+use schema_catalog::SchemaCatalogSynchronizer;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 
@@ -186,6 +187,7 @@ pub struct TestBuilder {
     topk: bool,
     straddled_joins: bool,
     parsing_preset: ParsingPreset,
+    schema_catalog_polling_interval: Duration,
 }
 
 impl Default for TestBuilder {
@@ -224,6 +226,12 @@ impl TestBuilder {
             topk: false,
             straddled_joins: false,
             parsing_preset: ParsingPreset::for_tests(),
+            schema_catalog_polling_interval: Duration::from_millis(
+                env::var("SCHEMA_CATALOG_POLLING_INTERVAL_MS")
+                    .unwrap_or_else(|_| "100".to_string())
+                    .parse()
+                    .unwrap(),
+            ),
         }
     }
 
@@ -401,6 +409,9 @@ impl TestBuilder {
             handle.backend_ready().await;
         }
 
+        let (schema_catalog_synchronizer, schema_catalog) =
+            SchemaCatalogSynchronizer::new(handle.clone(), self.schema_catalog_polling_interval);
+
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let view_name_cache = SharedCache::new();
         let view_cache = SharedCache::new();
@@ -451,6 +462,8 @@ impl TestBuilder {
         } else {
             None
         };
+        let schema_catalog_clone = schema_catalog.clone();
+
         tokio::spawn(async move {
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();
             let connection_fut = async move {
@@ -525,8 +538,9 @@ impl TestBuilder {
                         .build(
                             noria,
                             fallback_upstream,
-                            query_status_cache,
                             authority.clone(),
+                            query_status_cache,
+                            schema_catalog_clone.clone(),
                             status_reporter,
                             adapter_start_time,
                             shallow.clone(),
@@ -550,6 +564,12 @@ impl TestBuilder {
                 _ = connection_fut => {},
             }
         });
+
+        // TODO(mvzink): Move this spawn earlier after REA-6107.
+        tokio::spawn(schema_catalog_synchronizer.run(shutdown_tx.subscribe()));
+        // Give the synchronizer a chance to subscribe to controller events before tests start
+        // issuing DDL/DML against the upstream, otherwise early schema updates can be missed.
+        tokio::task::yield_now().await;
 
         (
             A::connection_opts_with_port(

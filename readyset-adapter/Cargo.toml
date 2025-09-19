@@ -61,6 +61,7 @@ readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-version = { path = "../readyset-version" }
 health-reporter = { path = "../health-reporter" }
 database-utils = { path = "../database-utils" }
+schema-catalog = { path = "../schema-catalog" }
 
 [dev-dependencies]
 criterion = { workspace = true }

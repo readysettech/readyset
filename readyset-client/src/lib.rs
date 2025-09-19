@@ -239,13 +239,6 @@ pub const CONNECTION_FROM_BASE: u8 = 1;
 /// connection is *not* originating from a base table domain.
 pub const CONNECTION_FROM_DOMAIN: u8 = 2;
 
-use clap::ValueEnum;
-use tokio_tower::multiplex;
-
-use readyset_sql::ast::Relation;
-use readyset_tracing::propagation::Instrumented;
-use replication_offset::ReplicationOffset;
-
 mod controller;
 pub mod metrics;
 pub mod query;
@@ -262,14 +255,23 @@ pub mod replay_path;
 
 use std::convert::TryFrom;
 use std::default::Default;
+use std::error::Error;
 use std::fmt::Display;
 use std::future::Future;
 use std::hash::Hash;
 use std::pin::Pin;
 
+use async_trait::async_trait;
+use clap::ValueEnum;
 use readyset_data::{DfType, DfValue};
+use readyset_sql::ast::Relation;
+use readyset_tracing::propagation::Instrumented;
+use replication_offset::ReplicationOffset;
+use schema_catalog::{SchemaCatalog, SchemaCatalogProvider};
 use serde::{Deserialize, Serialize};
 use tokio::task_local;
+use tokio_tower::multiplex;
+
 pub use view::{
     ColumnBase, ColumnSchema, KeyColumnIdx, PlaceholderIdx, ReaderHandle, ViewPlaceholder,
     ViewSchema,
@@ -492,5 +494,14 @@ impl CacheMode {
 
     pub fn is_shallow(&self) -> bool {
         *self == Self::Shallow
+    }
+}
+
+#[async_trait]
+impl SchemaCatalogProvider for ReadySetHandle {
+    async fn fetch_schema_catalog(
+        &mut self,
+    ) -> Result<SchemaCatalog, Box<dyn Error + Send + Sync>> {
+        self.schema_catalog().await.map_err(|e| e.into())
     }
 }

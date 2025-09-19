@@ -55,6 +55,7 @@ readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-util = { path = "../readyset-util" }
+schema-catalog = { path = "../schema-catalog" }
 
 [features]
 default = ["in-process-readyset"]

@@ -19,21 +19,22 @@ tokio-postgres = { workspace = true, features = [
 ]}
 tracing = { workspace = true }
 
-readyset-client = { path = "../readyset-client/" }
+database-utils = { path = "../database-utils" }
+mysql-srv = { path = "../mysql-srv" }
+psql-srv = { path = "../psql-srv" }
 readyset-adapter = { path = "../readyset-adapter" }
-readyset-server = { path = "../readyset-server/" }
+readyset-client = { path = "../readyset-client/" }
 readyset-data = { path = "../readyset-data" }
+readyset-mysql = { path = "../readyset-mysql" }
+readyset-psql = { path = "../readyset-psql" }
+readyset-server = { path = "../readyset-server/" }
 readyset-shallow = { path = "../readyset-shallow" }
+readyset-sql = { path = "../readyset-sql" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-tracing = { path = "../readyset-tracing" }
-database-utils = { path = "../database-utils" }
-readyset-mysql = { path = "../readyset-mysql" }
-readyset-psql = { path = "../readyset-psql" }
-readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
-mysql-srv = { path = "../mysql-srv" }
-psql-srv = { path = "../psql-srv" }
+schema-catalog = { path = "../schema-catalog" }
 
 [lints]
 workspace = true

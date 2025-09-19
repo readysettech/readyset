@@ -131,6 +131,7 @@ use crate::status_reporter::ReadySetStatusReporter;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::utils::{create_dummy_column, time_or_null};
 use crate::{QueryHandler, UpstreamDatabase, UpstreamDestination, create_dummy_schema};
+use schema_catalog::SchemaCatalogHandle;
 
 pub mod noria_connector;
 
@@ -368,8 +369,9 @@ impl BackendBuilder {
         self,
         noria: NoriaConnector,
         upstream: Option<DB>,
-        query_status_cache: &'static QueryStatusCache,
         authority: Arc<Authority>,
+        query_status_cache: &'static QueryStatusCache,
+        schema_handle: SchemaCatalogHandle,
         status_reporter: ReadySetStatusReporter<DB>,
         adapter_start_time: SystemTime,
         shallow: Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
@@ -402,6 +404,7 @@ impl BackendBuilder {
                 prepared_statements: Default::default(),
                 unnamed_prepared_statements: Default::default(),
                 query_status_cache,
+                schema_handle,
             },
             settings: BackendSettings {
                 slowlog: self.slowlog,
@@ -715,6 +718,9 @@ where
     /// any metadata we've previously prepared and cached. Thus this map is a link from the query
     /// to the index of the prepared statement in `prepared_statements`.
     unnamed_prepared_statements: HashMap<String, usize>,
+    /// Handle to access the cached schema catalog
+    #[expect(unused)]
+    schema_handle: SchemaCatalogHandle,
 }
 
 /// Settings that have no state and are constant for a given [`Backend`]

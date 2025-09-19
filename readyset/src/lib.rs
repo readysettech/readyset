@@ -64,6 +64,7 @@ use readyset_util::retry_with_exponential_backoff;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown;
 use readyset_version::*;
+use schema_catalog::SchemaCatalogSynchronizer;
 use tokio::net;
 use tokio::sync::RwLock;
 use tokio::time::{sleep, timeout};
@@ -300,6 +301,15 @@ pub struct Options {
     /// Specifies the polling interval in seconds for requesting views from the Leader.
     #[arg(long, env = "VIEWS_POLLING_INTERVAL", default_value = "5", hide = true)]
     views_polling_interval: u64,
+
+    /// Specifies the polling interval in milliseconds for schema catalog synchronization.
+    #[arg(
+        long,
+        env = "SCHEMA_CATALOG_POLLING_INTERVAL_MS",
+        default_value = "100",
+        hide = true
+    )]
+    schema_catalog_polling_interval_ms: u64,
 
     /// The time to wait before canceling a migration request. Defaults to 0 (unlimited).
     #[arg(
@@ -1001,6 +1011,23 @@ where
         ));
         rs_connect.in_scope(|| info!("Now capturing ctrl-c and SIGTERM events"));
 
+        let (shutdown_tx, shutdown_rx) = shutdown::channel();
+
+        // Spawn schema catalog synchronizer to periodically fetch schema information from the server
+        rs_connect.in_scope(|| info!("Spawning schema catalog synchronizer task"));
+        let schema_polling_interval = options.schema_catalog_polling_interval_ms;
+        // TODO(mvzink): Start the synchronizer task immediately after REA-6107 is implemented. We
+        // initialize the schema catalog handle here so we can pass it to the out of band migration
+        // task and the query logger, but we don't actually kick off the synchronizer polling task
+        // until after we've started the server, so that the initial poll request is more likely to
+        // succeed. This mitigates the risk of having adapter rewrites fail due to the catalog not
+        // being initialized yet for the initial 100 ms (default) polling period, which is probably
+        // only a problem it tests.
+        let (schema_catalog_synchronizer, schema_catalog) = SchemaCatalogSynchronizer::new(
+            rh.clone(),
+            std::time::Duration::from_millis(schema_polling_interval),
+        );
+
         let mut recorders = Vec::new();
         let prometheus_handle = if options.prometheus_metrics {
             let _guard = rt.enter();
@@ -1050,8 +1077,6 @@ where
         .set(1.0);
         metrics::counter!(recorded::READYSET_ADAPTER_STARTUPS).increment(1);
         let adapter_start_time = SystemTime::now();
-
-        let (shutdown_tx, shutdown_rx) = shutdown::channel();
 
         // if we're running in standalone mode, server will already
         // spawn it's own allocator metrics reporter.
@@ -1340,6 +1365,10 @@ where
             None
         };
 
+        // TODO(mvzink): After REA-6107, move this to when we create the handle. See comment there.
+        rt.handle()
+            .spawn(schema_catalog_synchronizer.run(shutdown_rx.clone()));
+
         health_reporter.set_state(AdapterState::Healthy);
 
         rs_connect
@@ -1468,6 +1497,7 @@ where
             let upstream_config = upstream_config.clone();
             let sys_props = Arc::clone(&sys_props);
             let status_reporter_clone = status_reporter.clone();
+            let schema_catalog_clone = schema_catalog.clone();
             let fut = async move {
                 let upstream_res = connect_upstream::<H::UpstreamDatabase>(
                     upstream_config.clone(),
@@ -1511,8 +1541,9 @@ where
                                     .build(
                                         noria,
                                         upstream,
-                                        query_status_cache,
                                         adapter_authority.clone(),
+                                        query_status_cache,
+                                        schema_catalog_clone,
                                         status_reporter_clone,
                                         adapter_start_time,
                                         shallow,

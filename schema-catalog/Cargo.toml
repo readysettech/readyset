@@ -6,8 +6,13 @@ authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2024"
 
 [dependencies]
+async-trait = { workspace = true }
+readyset-errors = { path = "../readyset-errors" }
 readyset-sql = { path = "../readyset-sql" }
+readyset-util = { path = "../readyset-util" }
 serde = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
 
 [lints]
 workspace = true

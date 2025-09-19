@@ -230,7 +230,7 @@ impl TestScript {
         opts: &RunOptions,
         out_of_band_migration: bool,
     ) -> anyhow::Result<()> {
-        let (_noria_handle, shutdown_tx, adapter_task, db_url) =
+        let (_noria_handle, server_shutdown_tx, adapter_shutdown_tx, adapter_task, db_url) =
             crate::in_process_readyset::start_readyset(opts, out_of_band_migration).await;
         let mut conn = match db_url
             .connect(&ServerCertVerification::Default)
@@ -239,13 +239,15 @@ impl TestScript {
         {
             Ok(conn) => conn,
             Err(e) => {
-                shutdown_tx.shutdown().await;
+                adapter_shutdown_tx.shutdown().await;
+                server_shutdown_tx.shutdown().await;
                 return Err(e);
             }
         };
 
         if let Err(e) = self.run_on_database(opts, &mut conn, true).await {
-            shutdown_tx.shutdown().await;
+            adapter_shutdown_tx.shutdown().await;
+            server_shutdown_tx.shutdown().await;
             return Err(e);
         }
 
@@ -254,7 +256,8 @@ impl TestScript {
         let _ = adapter_task.await;
 
         // Stop ReadySet
-        shutdown_tx.shutdown().await;
+        adapter_shutdown_tx.shutdown().await;
+        server_shutdown_tx.shutdown().await;
 
         Ok(())
     }

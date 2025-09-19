@@ -2,6 +2,11 @@ use readyset_sql::ast::{CreateTableBody, NonReplicatedRelation, Relation, SqlIde
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+// Only the synchronizer in the `handle` module can update the catalog (through the handle); we
+// reexport the public types here so that the `handle` module can be private.
+mod handle;
+pub use handle::{SchemaCatalogHandle, SchemaCatalogProvider, SchemaCatalogSynchronizer};
+
 /// A serializable catalog of schema information that can be shared between the Readyset adapter and
 /// server. This contains the core schema state needed for query rewriting and schema resolution.
 ///

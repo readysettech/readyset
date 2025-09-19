@@ -28,7 +28,11 @@ use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_server::{Builder, ReuseConfigType};
 use readyset_shallow::CacheManager;
 use readyset_sql::{ast::Relation, Dialect};
-use readyset_util::{shared_cache::SharedCache, shutdown::ShutdownSender};
+use readyset_util::{
+    shared_cache::SharedCache,
+    shutdown::{self, ShutdownSender},
+};
+use schema_catalog::SchemaCatalogSynchronizer;
 use tokio::sync::RwLock;
 
 use crate::runner::RunOptions;
@@ -86,7 +90,7 @@ async fn setup_adapter(
     run_opts: &RunOptions,
     authority: Arc<readyset_server::Authority>,
     migration_mode: MigrationMode,
-) -> (tokio::task::JoinHandle<()>, DatabaseURL) {
+) -> (tokio::task::JoinHandle<()>, ShutdownSender, DatabaseURL) {
     let database_type = run_opts.database_type;
     let replication_url = run_opts.replication_url.clone();
     let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
@@ -108,6 +112,11 @@ async fn setup_adapter(
     let addr = listener.local_addr().unwrap();
 
     let mut rh = ReadySetHandle::new(authority.clone()).await;
+
+    let (schema_catalog_synchronizer, schema_catalog) =
+        SchemaCatalogSynchronizer::new(rh.clone(), Duration::from_millis(100));
+    let (shutdown_tx, shutdown_rx) = shutdown::channel();
+    tokio::spawn(schema_catalog_synchronizer.run(shutdown_rx));
 
     let adapter_rewrite_params = rh.adapter_rewrite_params().await.unwrap();
     let adapter_start_time = SystemTime::now();
@@ -171,7 +180,7 @@ async fn setup_adapter(
                 );
                 let shallow = Arc::new(CacheManager::new(None));
                 let shallow_refresh_pool =
-                    if let Some(config) = replication_url.map(UpstreamConfig::from_url) {
+                    if let Some(config) = replication_url.as_ref().map(UpstreamConfig::from_url) {
                         Some(ShallowRefreshPool::<LazyUpstream<$upstream>>::new(
                             &tokio::runtime::Handle::current(),
                             &config,
@@ -188,8 +197,9 @@ async fn setup_adapter(
                     .build::<_, $handler>(
                         noria,
                         upstream,
-                        query_status_cache,
                         authority,
+                        query_status_cache,
+                        schema_catalog,
                         status_reporter,
                         adapter_start_time,
                         shallow,
@@ -230,6 +240,7 @@ async fn setup_adapter(
 
     (
         task,
+        shutdown_tx,
         match database_type {
             DatabaseType::MySQL => mysql_async::OptsBuilder::default()
                 .tcp_port(addr.port())
@@ -252,6 +263,7 @@ pub(crate) async fn start_readyset(
 ) -> (
     readyset_server::Handle,
     ShutdownSender,
+    ShutdownSender,
     tokio::task::JoinHandle<()>,
     DatabaseURL,
 ) {
@@ -261,14 +273,21 @@ pub(crate) async fn start_readyset(
             .to_authority("", "logictest")
             .expect("LocalAuthority creation cannot fail"),
     );
-    let (noria_handle, shutdown_tx) = start_noria_server(run_opts, authority.clone()).await;
+    let (noria_handle, server_shutdown_tx) = start_noria_server(run_opts, authority.clone()).await;
     let migration_mode = if out_of_band_migration {
         MigrationMode::OutOfBand
     } else {
         MigrationMode::InRequestPath
     };
-    let (adapter_task, db_url) = setup_adapter(run_opts, authority, migration_mode).await;
-    (noria_handle, shutdown_tx, adapter_task, db_url)
+    let (adapter_task, adapter_shutdown_tx, db_url) =
+        setup_adapter(run_opts, authority, migration_mode).await;
+    (
+        noria_handle,
+        server_shutdown_tx,
+        adapter_shutdown_tx,
+        adapter_task,
+        db_url,
+    )
 }
 
 pub(crate) async fn update_system_timezone(conn: &mut DatabaseConnection) -> anyhow::Result<()> {
