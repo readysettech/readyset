@@ -486,7 +486,6 @@ struct DDLModelState {
 impl ModelState for DDLModelState {
     type Operation = Operation;
     type RunContext = DDLTestRunContext;
-    type OperationStrategy = BoxedStrategy<Operation>;
 
     /// Each invocation of this function returns a [`Vec`] of [`Strategy`]s for generating
     /// [`Operation`]s *given the current state of the test model*. With a brand new model, the only
@@ -499,7 +498,7 @@ impl ModelState for DDLModelState {
     /// during shrinking. (Technically, we do also check and filter on preconditions at the start
     /// of each test, but it's best to depend on that check as little as possible since test
     /// filters like that can lead to slow and lopsided test generation.)
-    fn op_generators(&self) -> Vec<Self::OperationStrategy> {
+    fn op_generators<'a>(&self) -> Vec<impl Strategy<Value = Self::Operation> + use<'a>> {
         // We can always create more tables or enum types, so start with those two generators:
         let create_table_strat = gen_create_table(self.enum_types.clone()).boxed();
         let create_enum_strat = gen_create_enum().boxed();

@@ -52,9 +52,8 @@ impl Default for TestState {
 impl ModelState for TestState {
     type Operation = CounterOp;
     type RunContext = TestContext;
-    type OperationStrategy = BoxedStrategy<Self::Operation>;
 
-    fn op_generators(&self) -> Vec<Self::OperationStrategy> {
+    fn op_generators<'a>(&self) -> Vec<impl Strategy<Value = Self::Operation> + use<'a>> {
         let mut ops = vec![Just(CounterOp::Inc).boxed()];
         // There's a known issue with `Counter`, which is that it will panic and underflow if you
         // decrement below 0, so don't generate a decrement operation if we expect the counter

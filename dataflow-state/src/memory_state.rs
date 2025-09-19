@@ -1174,9 +1174,8 @@ mod tests {
         impl ModelState for IndexModelState {
             type Operation = Operation;
             type RunContext = MemoryState;
-            type OperationStrategy = BoxedStrategy<Operation>;
 
-            fn op_generators(&self) -> Vec<Self::OperationStrategy> {
+            fn op_generators<'a>(&self) -> Vec<impl Strategy<Value = Self::Operation> + use<'a>> {
                 // We can always perform any op except DeleteRow (since that one requires we have
                 // at least one row to delete), and ReplayKey (since we need to have created a tag
                 // to replay to), so most of the ops just get unconditionally thrown into a vec

@@ -66,21 +66,12 @@ pub trait ModelState: Clone + Debug + Default {
     /// opposed to the state held directly in an implementor of [`ModelState`], which is used for
     /// generation and shrinking).
     type RunContext;
-    /// The type for proptest strategies used to generate [`Self::Operation`] values.
-    ///
-    /// Note that this type should no longer need to be explicitly named in this way once
-    /// return_position_impl_trait_in_trait is stable.
-    type OperationStrategy: Strategy<Value = Self::Operation>;
-
-    // TODO once return_position_impl_trait_in_trait is stabilized, uncomment this and get rid of
-    // the OperationStrategy type:
-    // fn op_generators(&self) -> Vec<impl Strategy<Value = Self::Operation>>;
     /// Returns a [`Vec`] of [`Strategy`]s for generating [`Self::Operation`] values.
     ///
     /// The proptest-stateful code will pseudo-randomly pick a strategy based off of the random
     /// seed from the proptest [`TestRunner`], and generate a single [`Self::Operation`] value from
     /// the selected [`Strategy`].
-    fn op_generators(&self) -> Vec<Self::OperationStrategy>;
+    fn op_generators<'a>(&self) -> Vec<impl Strategy<Value = Self::Operation> + use<'a, Self>>;
     /// Determines whether preconditions have been met for an operation, based on the current model
     /// state.
     fn preconditions_met(&self, op: &Self::Operation) -> bool;

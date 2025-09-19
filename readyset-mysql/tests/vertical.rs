@@ -216,9 +216,8 @@ where
 {
     type Operation = Operation;
     type RunContext = RunContext;
-    type OperationStrategy = BoxedStrategy<Operation>;
 
-    fn op_generators(&self) -> Vec<Self::OperationStrategy> {
+    fn op_generators<'a>(&self) -> Vec<impl Strategy<Value = Self::Operation> + use<'a, T>> {
         let mut res = vec![];
 
         // We can always insert a row into a table or query a randomly generated key, so include

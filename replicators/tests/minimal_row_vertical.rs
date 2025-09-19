@@ -446,13 +446,12 @@ struct DDLTestRunContext {
 impl ModelState for DDLModelState {
     type Operation = Operation;
     type RunContext = DDLTestRunContext;
-    type OperationStrategy = BoxedStrategy<Operation>;
 
     /// Each invocation of this function returns a [`Vec`] of [`Strategy`]s for generating
     /// [`Operation`]s *given the current state of the test model*. With a brand new model, the only
     /// possible operation is [`Operation::CreateTable`], but as
     /// tables/types are created and rows are written, other operations become possible.
-    fn op_generators(&self) -> Vec<Self::OperationStrategy> {
+    fn op_generators<'a>(&self) -> Vec<impl Strategy<Value = Self::Operation> + use<'a>> {
         println!(
             "op_generators called with table_exists: {}",
             self.table_exists
