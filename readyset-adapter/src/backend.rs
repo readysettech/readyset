@@ -2631,6 +2631,7 @@ where
         mut status: QueryStatus,
         event: &mut QueryExecutionEvent,
         processed_query_params: ProcessedQueryParams,
+        sampler_tx: Option<&tokio::sync::mpsc::Sender<(QueryExecutionEvent, String)>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let original_status = status.clone();
         let did_work = if let Some(ref mut i) = status.execution_info {
@@ -2691,6 +2692,10 @@ where
                         .query_status_cache
                         .update_query_status(view_request, status);
                 }
+                // Enqueue the original query for background sampling if enabled.
+                if let Some(tx) = sampler_tx {
+                    let _ = tx.try_send((event.clone(), original_query.to_string()));
+                }
                 Ok(noria_ok.into())
             }
             Err(noria_err) => {
@@ -2723,7 +2728,13 @@ where
                 // Try to execute on fallback if present, as long as query is not an `always`
                 // query.
                 match (always, upstream) {
-                    (true, _) | (_, None) => Err(noria_err.into()),
+                    (true, _) | (_, None) => {
+                        // Enqueue the original query for background sampling if enabled.
+                        if let Some(tx) = sampler_tx {
+                            let _ = tx.try_send((event.clone(), original_query.to_string()));
+                        }
+                        Err(noria_err.into())
+                    }
                     (false, Some(fallback)) => {
                         event.destination = Some(QueryDestination::ReadysetThenUpstream);
                         let _t = event.start_upstream_timer();
@@ -3123,7 +3134,7 @@ where
                     self.noria_should_try_select(&mut view_request);
 
                 if noria_should_try {
-                    let result = Self::query_adhoc_select(
+                    Self::query_adhoc_select(
                         &mut self.noria,
                         self.upstream.as_mut(),
                         &self.settings,
@@ -3133,17 +3144,9 @@ where
                         status.unwrap(),
                         &mut event,
                         processed_query_params.unwrap(),
+                        self.sampler_tx.as_ref(),
                     )
-                    .await;
-
-                    // Enqueue the original query for background sampling if enabled. We clone here
-                    // for simplicity and to avoid borrow issues in the hot path; bounded channel
-                    // will drop on overflow.
-                    if let Some(tx) = &self.sampler_tx {
-                        let _ = tx.try_send((event.clone(), query.to_string()));
-                    }
-
-                    result
+                    .await
                 } else {
                     Self::query_fallback(self.upstream.as_mut(), query, &mut event).await
                 }
