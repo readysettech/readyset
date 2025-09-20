@@ -9,7 +9,7 @@ use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::query_status_cache::MigrationStyle;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::psql_helpers::{PostgreSQLAdapter, connect, upstream_config};
-use readyset_client_test_helpers::{Adapter, TestBuilder, sleep};
+use readyset_client_test_helpers::{TestBuilder, sleep};
 use readyset_data::DfValue;
 use readyset_server::Handle;
 use readyset_util::eventually;
@@ -425,7 +425,6 @@ async fn generated_columns() {
 
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .replicate_url(PostgreSQLAdapter::upstream_url("noria"))
         .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .build::<PostgreSQLAdapter>()
@@ -978,7 +977,6 @@ async fn replication_failure_ignores_table(failpoint: &str) {
     use readyset_sql::ast::Relation;
 
     let (config, mut handle, shutdown_tx) = TestBuilder::default()
-        .recreate_database(false)
         .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .build::<PostgreSQLAdapter>()
@@ -1070,7 +1068,6 @@ async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
     use tracing::info;
 
     let (config, mut handle, shutdown_tx) = TestBuilder::default()
-        .recreate_database(false)
         .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .build::<PostgreSQLAdapter>()
@@ -1173,8 +1170,6 @@ async fn replication_of_other_tables_succeeds_even_after_error() {
     readyset_tracing::init_test_logging();
 
     let (config, _handle, shutdown_tx) = TestBuilder::default()
-        .recreate_database(false)
-        .replicate_url(PostgreSQLAdapter::upstream_url("noria"))
         .fallback(true)
         .migration_mode(MigrationMode::InRequestPath)
         .build::<PostgreSQLAdapter>()
@@ -1225,6 +1220,23 @@ async fn replication_of_other_tables_succeeds_even_after_error() {
         then_assert: |result| {
             assert_eq!(result, [1]);
         }
+    );
+
+    let destination = match client
+        .simple_query("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+    {
+        SimpleQueryMessage::Row(row) => row.get(0).unwrap().to_owned(),
+        _ => panic!(),
+    };
+
+    assert_matches!(
+        destination.as_str().try_into(),
+        Ok(QueryDestination::Readyset(Some(_)))
     );
 
     shutdown_tx.shutdown().await;
@@ -2476,8 +2488,6 @@ async fn drop_and_recreate_demo_cache() {
 async fn drop_all_proxied_queries() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
-        .recreate_database(false)
-        .replicate_url(PostgreSQLAdapter::upstream_url("noria"))
         .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .migration_style(MigrationStyle::Explicit)
