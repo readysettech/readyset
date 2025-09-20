@@ -26,7 +26,7 @@ use readyset_sql::ast::{
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{
-    DetectUnsupportedPlaceholders, ImpliedTablesContext, ResolveSchemasContext, Rewrite,
+    CanQuery, DetectUnsupportedPlaceholders, ImpliedTablesContext, ResolveSchemasContext, Rewrite,
     RewriteContext, RewriteDialectContext, StarExpansionContext,
 };
 use readyset_util::redacted::Sensitive;
@@ -1514,14 +1514,24 @@ impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
         }
     }
 
-    fn can_query_table(
-        &self,
-        schema: &SqlIdentifier,
-        table: &SqlIdentifier,
-    ) -> Option<readyset_sql_passes::CanQuery> {
-        self.tables()
-            .get(schema)
-            .and_then(|tables| tables.get(table).copied())
+    fn can_query_table(&self, schema: &SqlIdentifier, table: &SqlIdentifier) -> Option<CanQuery> {
+        let relation = Relation {
+            schema: Some(schema.clone()),
+            name: table.clone(),
+        };
+
+        if self.view_schemas().contains_key(&relation)
+            || self.uncompiled_views().contains(&&relation)
+        {
+            Some(CanQuery::Yes)
+        } else if self
+            .non_replicated_relations()
+            .contains(&NonReplicatedRelation::new(relation))
+        {
+            Some(CanQuery::No)
+        } else {
+            None
+        }
     }
 
     fn search_path(&self) -> &[SqlIdentifier] {

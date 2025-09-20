@@ -129,33 +129,6 @@ pub trait RewriteContext:
 
     /// The name of the cache for a migrated query.
     fn query_name(&self) -> Option<&str>;
-
-    /// All tables, views, uncompiled views, and non-replicated relations indexable by schema and
-    /// tagged with whether they can be queried.
-    //
-    // TODO(mvzink): Don't recalculate this on the fly, nor require `view_schemas`; this may mean
-    // not providing it as a default implementation for implementors and making them do it on
-    // construction.
-    fn tables(&self) -> HashMap<&SqlIdentifier, HashMap<&SqlIdentifier, CanQuery>> {
-        self.view_schemas()
-            .keys()
-            .chain(self.uncompiled_views().iter().copied())
-            .map(|t| (t, CanQuery::Yes))
-            .chain(
-                self.non_replicated_relations()
-                    .iter()
-                    .map(|t| (&(t.name), CanQuery::No)),
-            )
-            .fold(
-                HashMap::<&SqlIdentifier, HashMap<&SqlIdentifier, CanQuery>>::new(),
-                |mut acc, (tbl, replicated)| {
-                    if let Some(schema) = &tbl.schema {
-                        acc.entry(schema).or_default().insert(&tbl.name, replicated);
-                    }
-                    acc
-                },
-            )
-    }
 }
 
 impl<C: RewriteContext> RewriteContext for &C {
