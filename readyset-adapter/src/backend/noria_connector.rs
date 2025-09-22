@@ -42,24 +42,7 @@ pub struct PreparedSelectStatement {
     processed_query_params: ProcessedQueryParams,
 }
 
-/// Wrapper around a NoriaBackendInner which may not have been successfully
-/// created. When this is the case, this wrapper allows returning an error
-/// from any call that requires NoriaBackendInner through an error
-/// returned by `get_mut`.
 pub struct NoriaBackend {
-    inner: Option<NoriaBackendInner>,
-}
-
-impl NoriaBackend {
-    fn get_mut(&mut self) -> ReadySetResult<&mut NoriaBackendInner> {
-        // TODO(ENG-707): Support retrying to create a backend in the future.
-        self.inner
-            .as_mut()
-            .ok_or_else(|| internal_err!("Failed to create a Noria backend."))
-    }
-}
-
-pub struct NoriaBackendInner {
     noria: ReadySetHandle,
     tables: BTreeMap<Relation, Table>,
     views: LocalCache<Relation, View>,
@@ -75,13 +58,13 @@ macro_rules! noria_await {
     }};
 }
 
-impl NoriaBackendInner {
+impl NoriaBackend {
     async fn new(
         ch: ReadySetHandle,
         views: LocalCache<Relation, View>,
         rewrite_params: AdapterRewriteParams,
     ) -> Self {
-        NoriaBackendInner {
+        NoriaBackend {
             tables: BTreeMap::new(),
             views,
             noria: ch,
@@ -407,12 +390,10 @@ impl NoriaConnector {
         schema_search_path: Vec<SqlIdentifier>,
         rewrite_params: AdapterRewriteParams,
     ) -> Self {
-        let backend = NoriaBackendInner::new(ch, view_cache, rewrite_params).await;
+        let inner = NoriaBackend::new(ch, view_cache, rewrite_params).await;
 
         NoriaConnector {
-            inner: NoriaBackend {
-                inner: Some(backend),
-            },
+            inner,
             auto_increments,
             view_name_cache,
             failed_views: HashSet::new(),
@@ -433,7 +414,6 @@ impl NoriaConnector {
 
         let graphviz = self
             .inner
-            .get_mut()?
             .noria
             .graphviz(GraphvizOptions { for_query })
             .await?;
@@ -442,7 +422,7 @@ impl NoriaConnector {
     }
 
     pub(crate) async fn explain_domains(&mut self) -> ReadySetResult<QueryResult<'static>> {
-        let domains = self.inner.get_mut()?.noria.domains().await?;
+        let domains = self.inner.noria.domains().await?;
         let schema = SelectSchema {
             schema: Cow::Owned(vec![
                 ColumnSchema {
@@ -495,7 +475,7 @@ impl NoriaConnector {
     pub(crate) async fn explain_materializations(
         &mut self,
     ) -> ReadySetResult<QueryResult<'static>> {
-        let mut materializations = self.inner.get_mut()?.noria.materialization_info().await?;
+        let mut materializations = self.inner.noria.materialization_info().await?;
         materializations.sort_unstable_by_key(|mi| Reverse(mi.size.bytes));
         let cols = [
             ("domain_index", DfType::DEFAULT_TEXT),
@@ -552,11 +532,7 @@ impl NoriaConnector {
         query_id: Option<QueryId>,
         name: Option<&Relation>,
     ) -> ReadySetResult<Vec<CacheExpr>> {
-        self.inner
-            .get_mut()?
-            .noria
-            .verbose_views(query_id, name)
-            .await
+        self.inner.noria.verbose_views(query_id, name).await
     }
 
     pub(crate) async fn list_create_cache_stmts(&mut self) -> ReadySetResult<Vec<String>> {
@@ -569,17 +545,13 @@ impl NoriaConnector {
     }
 
     pub(crate) fn rewrite_params(&self) -> AdapterRewriteParams {
-        self.inner
-            .inner
-            .as_ref()
-            .map(|v| v.rewrite_params)
-            .unwrap_or_else(|| AdapterRewriteParams::new(self.dialect.into()))
+        self.inner.rewrite_params
     }
 
     // TODO(andrew): Allow client to map table names to NodeIndexes without having to query ReadySet
     // repeatedly. Eventually, this will be responsibility of the TimestampService.
     pub async fn node_index_of(&mut self, table_name: &str) -> ReadySetResult<LocalNodeIndex> {
-        let table_handle = self.inner.get_mut()?.noria.table(table_name).await?;
+        let table_handle = self.inner.noria.table(table_name).await?;
         Ok(table_handle.node)
     }
 
@@ -588,7 +560,7 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(table = %table.display_unquoted(), "query::insert::access mutator");
-        let putter = self.inner.get_mut()?.get_noria_table(table).await?;
+        let putter = self.inner.get_noria_table(table).await?;
         trace!("query::insert::extract schema");
         let schema = putter
             .schema()
@@ -639,11 +611,7 @@ impl NoriaConnector {
         mut statement: InsertStatement,
     ) -> ReadySetResult<PrepareResult> {
         trace!(table = %statement.table.name, "insert::access mutator");
-        let mutator = self
-            .inner
-            .get_mut()?
-            .get_noria_table(&statement.table)
-            .await?;
+        let mutator = self.inner.get_noria_table(&statement.table).await?;
         trace!("insert::extract schema");
         let schema = mutator
             .schema()
@@ -697,7 +665,7 @@ impl NoriaConnector {
         params: &[DfValue],
     ) -> ReadySetResult<QueryResult<'_>> {
         let table = &q.table;
-        let putter = self.inner.get_mut()?.get_noria_table(table).await?;
+        let putter = self.inner.get_noria_table(table).await?;
         trace!("insert::extract schema");
         let schema = putter
             .schema()
@@ -717,7 +685,7 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(table = %q.table.name, "delete::access mutator");
-        let mutator = self.inner.get_mut()?.get_noria_table(&q.table).await?;
+        let mutator = self.inner.get_noria_table(&q.table).await?;
 
         trace!("delete::extract schema");
         let pkey = if let Some(cts) = mutator.schema() {
@@ -767,11 +735,7 @@ impl NoriaConnector {
     ) -> ReadySetResult<PrepareResult> {
         // ensure that we have schemas and endpoints for the query
         trace!(table = %statement.table.name, "update::access mutator");
-        let mutator = self
-            .inner
-            .get_mut()?
-            .get_noria_table(&statement.table)
-            .await?;
+        let mutator = self.inner.get_noria_table(&statement.table).await?;
         trace!("update::extract schema");
         let table_schema = mutator.schema().ok_or_else(|| {
             internal_err!("Could not find schema for table {}", statement.table.name)
@@ -811,11 +775,7 @@ impl NoriaConnector {
     ) -> ReadySetResult<PrepareResult> {
         // ensure that we have schemas and endpoints for the query
         trace!(table = %statement.table.name, "delete::access mutator");
-        let mutator = self
-            .inner
-            .get_mut()?
-            .get_noria_table(&statement.table)
-            .await?;
+        let mutator = self.inner.get_noria_table(&statement.table).await?;
         trace!("delete::extract schema");
         let table_schema = mutator.schema().ok_or_else(|| {
             internal_err!("Could not find schema for table {}", statement.table.name)
@@ -860,8 +820,8 @@ impl NoriaConnector {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on ReadySet ever time. On the other hand, CREATE TABLE is rare...
         noria_await!(
-            self.inner.get_mut()?,
-            self.inner.get_mut()?.noria.extend_recipe(
+            self.inner,
+            self.inner.noria.extend_recipe(
                 ChangeList::from_changes(changes, self.dialect)
                     .with_schema_search_path(self.schema_search_path.clone())
             )
@@ -875,11 +835,7 @@ impl NoriaConnector {
     ) -> ReadySetResult<QueryResult<'_>> {
         for table in &q.tables {
             trace!(table = %table.relation.name, "truncate::access mutator");
-            let mutator = self
-                .inner
-                .get_mut()?
-                .get_noria_table(&table.relation)
-                .await?;
+            let mutator = self.inner.get_noria_table(&table.relation).await?;
             trace!("truncate::perform truncate");
             mutator.truncate().await?;
             trace!("truncate::done");
@@ -894,11 +850,7 @@ impl NoriaConnector {
         &mut self,
         id: u64,
     ) -> ReadySetResult<QueryResult<'static>> {
-        let status = noria_await!(
-            self.inner.get_mut()?,
-            self.inner.get_mut()?.noria.migration_status(id)
-        )?
-        .to_string();
+        let status = noria_await!(self.inner, self.inner.noria.migration_status(id))?.to_string();
         Ok(QueryResult::Meta(vec![(
             "Migration Status".to_string(),
             status,
@@ -910,10 +862,7 @@ impl NoriaConnector {
         &mut self,
         all: bool,
     ) -> ReadySetResult<QueryResult<'static>> {
-        let statuses = noria_await!(
-            self.inner.get_mut()?,
-            self.inner.get_mut()?.noria.table_statuses(all)
-        )?;
+        let statuses = noria_await!(self.inner, self.inner.noria.table_statuses(all))?;
 
         let schema = SelectSchema {
             schema: Cow::Owned(
@@ -978,14 +927,14 @@ impl NoriaConnector {
             table.schema = schema.first().cloned();
         }
         // check if table exists in ReadySet
-        if (self.inner.get_mut()?.get_noria_table(table).await).is_err() {
+        if (self.inner.get_noria_table(table).await).is_err() {
             return Err(ReadySetError::TableNotFound {
                 name: table.name.to_string(),
                 schema: table.schema.clone().map(Into::into),
             });
         }
 
-        self.inner.get_mut()?.noria.resnapshot_table(table).await?;
+        self.inner.noria.resnapshot_table(table).await?;
         Ok(QueryResult::Empty)
     }
 
@@ -999,7 +948,7 @@ impl NoriaConnector {
                 table.schema = schema.first().cloned();
             }
             // check if table exists in ReadySet
-            if (self.inner.get_mut()?.get_noria_table(table).await).is_ok() {
+            if (self.inner.get_noria_table(table).await).is_ok() {
                 return Err(ReadySetError::TableAlreadyExists {
                     name: table.name.to_string(),
                     schema: table.schema.clone().map(Into::into),
@@ -1007,7 +956,6 @@ impl NoriaConnector {
             }
         }
         self.inner
-            .get_mut()?
             .noria
             .add_filter_tables(tables.iter().collect::<Vec<_>>())
             .await?;
@@ -1015,12 +963,12 @@ impl NoriaConnector {
     }
 
     pub(crate) async fn enter_maintenance_mode(&mut self) -> ReadySetResult<QueryResult<'static>> {
-        self.inner.get_mut()?.noria.enter_maintenance_mode().await?;
+        self.inner.noria.enter_maintenance_mode().await?;
         Ok(QueryResult::Empty)
     }
 
     pub(crate) async fn exit_maintenance_mode(&mut self) -> ReadySetResult<QueryResult<'static>> {
-        self.inner.get_mut()?.noria.exit_maintenance_mode().await?;
+        self.inner.noria.exit_maintenance_mode().await?;
         Ok(QueryResult::Empty)
     }
 }
@@ -1053,16 +1001,10 @@ impl NoriaConnector {
         .with_schema_search_path(schema_search_path.clone());
 
         if concurrently {
-            let id = noria_await!(
-                self.inner.get_mut()?,
-                self.inner.get_mut()?.noria.extend_recipe_async(changelist)
-            )?;
+            let id = noria_await!(self.inner, self.inner.noria.extend_recipe_async(changelist))?;
             Ok(Some(id))
         } else {
-            noria_await!(
-                self.inner.get_mut()?,
-                self.inner.get_mut()?.noria.extend_recipe(changelist)
-            )?;
+            noria_await!(self.inner, self.inner.noria.extend_recipe(changelist))?;
 
             // If the query is already in there with a different name, we don't need to make a new
             // name for it, as *lookups* only need one of the names for the query, and
@@ -1092,11 +1034,7 @@ impl NoriaConnector {
         )
         .with_schema_search_path(req.schema_search_path.clone());
 
-        noria_await!(
-            self.inner.get_mut()?,
-            self.inner.get_mut()?.noria.dry_run(changelist)
-        )
-        .map(|_| ())
+        noria_await!(self.inner, self.inner.noria.dry_run(changelist)).map(|_| ())
     }
 
     /// Gets the view name for the given statement from the view name cache, querying the server
@@ -1143,10 +1081,9 @@ impl NoriaConnector {
                     )
                     .with_schema_search_path(search_path);
 
-                    if let Err(error) = noria_await!(
-                        self.inner.get_mut()?,
-                        self.inner.get_mut()?.noria.extend_recipe(changelist)
-                    ) {
+                    if let Err(error) =
+                        noria_await!(self.inner, self.inner.noria.extend_recipe(changelist))
+                    {
                         if error.caused_by_table_not_replicated() {
                             warn!(%error, "add query failed");
                         } else {
@@ -1161,9 +1098,8 @@ impl NoriaConnector {
                     // `create_if_not_exist` is false, we check to see if the server has a view for
                     // the given query
                     let qname = noria_await!(
-                        self.inner.get_mut()?,
+                        self.inner,
                         self.inner
-                            .get_mut()?
                             .noria
                             .view_names(vec![view_request.clone()], self.dialect)
                     )?
@@ -1174,16 +1110,9 @@ impl NoriaConnector {
                     if let Some(qname) = qname {
                         // The server has the view, so we retrieve it and insert it into the view
                         // name cache
-                        let view = noria_await!(
-                            self.inner.get_mut()?,
-                            self.inner.get_mut()?.noria.view(qname.clone())
-                        )?;
+                        let view = noria_await!(self.inner, self.inner.noria.view(qname.clone()))?;
 
-                        self.inner
-                            .get_mut()?
-                            .views
-                            .insert(qname.clone(), view)
-                            .await;
+                        self.inner.views.insert(qname.clone(), view).await;
 
                         Ok(qname)
                     } else {
@@ -1201,22 +1130,16 @@ impl NoriaConnector {
     /// Make a request to ReadySet to drop the query with the given name, and remove it from all
     /// internal state.
     pub async fn drop_view(&mut self, name: &Relation) -> ReadySetResult<u64> {
-        let result = noria_await!(
-            self.inner.get_mut()?,
-            self.inner.get_mut()?.noria.remove_query(name)
-        )?;
-        self.inner.get_mut()?.invalidate_cache(name).await;
+        let result = noria_await!(self.inner, self.inner.noria.remove_query(name))?;
+        self.inner.invalidate_cache(name).await;
         self.view_name_cache.remove_val(name).await;
         Ok(result)
     }
 
     /// Make a request to ReadySet to drop all cached queries, and empty all internal state
     pub async fn drop_all_caches(&mut self) -> ReadySetResult<()> {
-        noria_await!(
-            self.inner.get_mut()?,
-            self.inner.get_mut()?.noria.remove_all_queries()
-        )?;
-        self.inner.get_mut()?.invalidate_all_caches().await;
+        noria_await!(self.inner, self.inner.noria.remove_all_queries())?;
+        self.inner.invalidate_all_caches().await;
         self.view_name_cache.clear().await;
         Ok(())
     }
@@ -1237,7 +1160,7 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(table = %table.display_unquoted(), "insert::access mutator");
-        let putter = self.inner.get_mut()?.get_noria_table(table).await?;
+        let putter = self.inner.get_noria_table(table).await?;
         trace!("insert::extract schema");
         let schema = putter
             .schema()
@@ -1413,7 +1336,7 @@ impl NoriaConnector {
         params: Option<&[DfValue]>,
     ) -> ReadySetResult<QueryResult<'_>> {
         trace!(table = %q.table.name, "update::access mutator");
-        let mutator = self.inner.get_mut()?.get_noria_table(&q.table).await?;
+        let mutator = self.inner.get_noria_table(&q.table).await?;
 
         let q = q.into_owned();
         let (key, updates) = {
@@ -1451,7 +1374,7 @@ impl NoriaConnector {
         params: Option<&[DfValue]>,
     ) -> ReadySetResult<QueryResult<'a>> {
         trace!(table = %q.table.name, "delete::access mutator");
-        let mutator = self.inner.get_mut()?.get_noria_table(&q.table).await?;
+        let mutator = self.inner.get_noria_table(&q.table).await?;
 
         let q = q.into_owned();
         let key = {
@@ -1522,11 +1445,7 @@ impl NoriaConnector {
             .await?;
 
         let view_failed = self.failed_views.take(&qname).is_some();
-        let getter = self
-            .inner
-            .get_mut()?
-            .get_noria_view(&qname, view_failed)
-            .await?;
+        let getter = self.inner.get_noria_view(&qname, view_failed).await?;
 
         // extract result schema
         let getter_schema = match getter {
@@ -1605,11 +1524,7 @@ impl NoriaConnector {
         };
 
         let view_failed = self.failed_views.take(qname.as_ref()).is_some();
-        let getter = self
-            .inner
-            .get_mut()?
-            .get_noria_view(&qname, view_failed)
-            .await?;
+        let getter = self.inner.get_noria_view(&qname, view_failed).await?;
 
         let res = do_read(
             getter,
@@ -1649,10 +1564,7 @@ impl NoriaConnector {
         let changelist = ChangeList::from_change(Change::CreateView(q.clone()), self.dialect)
             .with_schema_search_path(self.schema_search_path.clone());
 
-        noria_await!(
-            self.inner.get_mut()?,
-            self.inner.get_mut()?.noria.extend_recipe(changelist)
-        )?;
+        noria_await!(self.inner, self.inner.noria.extend_recipe(changelist))?;
         Ok(QueryResult::Empty)
     }
 
@@ -1677,12 +1589,8 @@ impl NoriaConnector {
 
         // Remove the view from failed_views if present, and request the view from the controller.
         self.failed_views.remove(&qname);
-        self.inner.get_mut()?.get_noria_view(&qname, true).await?;
+        self.inner.get_noria_view(&qname, true).await?;
         Ok(())
-    }
-
-    pub fn handle(&self) -> Option<ReadySetHandle> {
-        self.inner.inner.as_ref().map(|i| i.noria.clone())
     }
 
     /// Queries the server for the view name if a view exists for the given query and `None`
@@ -1692,7 +1600,6 @@ impl NoriaConnector {
         query: ViewCreateRequest,
     ) -> ReadySetResult<Option<Relation>> {
         self.inner
-            .get_mut()?
             .noria
             .view_names(vec![query], self.dialect)
             .await
