@@ -1,4 +1,5 @@
 use std::cmp::max;
+use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::num::ParseIntError;
 use std::path::PathBuf;
@@ -684,6 +685,47 @@ impl DatabaseURL {
 
     pub fn default_timezone_name(&self) -> SqlIdentifier {
         DEFAULT_TIMEZONE_NAME.into()
+    }
+
+    pub fn set_port(&mut self, port: u16) {
+        match self {
+            Self::MySQL(opts) => {
+                *opts = OptsBuilder::from_opts(opts.clone()).tcp_port(port).into();
+            }
+            Self::PostgreSQL(config) => {
+                config.port(port);
+            }
+        }
+    }
+
+    pub fn set_host(&mut self, host: String) {
+        match self {
+            Self::MySQL(opts) => {
+                *opts = OptsBuilder::from_opts(opts.clone())
+                    .ip_or_hostname(host.as_str())
+                    .into();
+            }
+            Self::PostgreSQL(config) => {
+                config.host(host);
+            }
+        }
+    }
+
+    pub fn set_program_or_application_name(&mut self, program_name: String) {
+        match self {
+            Self::MySQL(opts) => {
+                let attrs: HashMap<String, String> =
+                    vec![("_program_name".to_string(), program_name.clone())]
+                        .into_iter()
+                        .collect();
+                *opts = OptsBuilder::from_opts(opts.clone())
+                    .connect_attributes(attrs)
+                    .into();
+            }
+            Self::PostgreSQL(config) => {
+                config.application_name(program_name);
+            }
+        }
     }
 }
 
