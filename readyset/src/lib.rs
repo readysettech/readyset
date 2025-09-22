@@ -1245,12 +1245,6 @@ where
 
         let expr_dialect = self.expr_dialect;
         let parse_dialect = self.parse_dialect;
-        let schema_search_path = rt.block_on(async {
-            match &*sys_props.read().await {
-                Ok(sp) => sp.search_path.clone(),
-                Err(_) => vec![],
-            }
-        });
 
         let (sampler, global_sampler_tx) = rt.block_on(readyset_adapter::sampler::sampler_builder(
             readyset_adapter::sampler::SamplerConfig {
@@ -1261,19 +1255,9 @@ where
                 retry_delay: Duration::from_millis(options.sampler_retry_delay_ms),
                 max_qps: options.sampler_max_queries_per_second,
             },
-            rh.clone(),
-            auto_increments.clone(),
-            view_name_cache.clone().new_local(),
-            view_cache.clone().new_local(),
-            adapter_rewrite_params,
-            schema_search_path,
             upstream_config.clone(),
-            options.deployment_mode,
-            readers.clone(),
-            parse_dialect,
-            parsing_preset,
-            expr_dialect,
             shutdown_rx.clone(),
+            listen_address,
         ));
 
         if let Some(mut sampler) = sampler {

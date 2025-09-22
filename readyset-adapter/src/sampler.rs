@@ -46,21 +46,14 @@
 
 use metrics::{counter, gauge, Label};
 use std::hash::{Hash, Hasher};
-use std::{
-    cmp::Ordering,
-    collections::{HashMap, VecDeque},
-    sync::{atomic::AtomicUsize, Arc},
-    time::Duration,
-};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::{collections::VecDeque, time::Duration};
 use tokio::time::Instant as TokioInstant;
 use tokio::{
     select,
-    sync::{
-        mpsc::{Receiver, Sender},
-        RwLock,
-    },
+    sync::mpsc::{Receiver, Sender},
 };
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, warn};
 use xxhash_rust::xxh3::Xxh3;
 
 use database_utils::tls::ServerCertVerification;
@@ -69,39 +62,19 @@ use database_utils::{
     UpstreamConfig,
 };
 use readyset_client::metrics::recorded::QUERY_SAMPLER_QUEUE_LEN;
-use readyset_client::{
-    metrics::recorded::{
-        QUERY_SAMPLER_MAX_QPS_HIT, QUERY_SAMPLER_QUERIES_MISMATCHED, QUERY_SAMPLER_QUERIES_SAMPLED,
-        QUERY_SAMPLER_RECONNECTS, QUERY_SAMPLER_RETRY_QUEUE_FULL, QUERY_SAMPLER_RETRY_QUEUE_LEN,
-    },
-    ReadySetHandle, View, ViewCreateRequest,
+use readyset_client::metrics::recorded::{
+    QUERY_SAMPLER_MAX_QPS_HIT, QUERY_SAMPLER_QUERIES_MISMATCHED, QUERY_SAMPLER_QUERIES_SAMPLED,
+    QUERY_SAMPLER_RECONNECTS, QUERY_SAMPLER_RETRY_QUEUE_FULL, QUERY_SAMPLER_RETRY_QUEUE_LEN,
 };
-use readyset_client_metrics::{QueryExecutionEvent, SqlQueryType};
+use readyset_client_metrics::QueryExecutionEvent;
 use readyset_data::DfValue;
-use readyset_dataflow::Readers;
-use readyset_errors::ReadySetError;
-use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
-use readyset_sql::{
-    ast::{Relation, SqlIdentifier, SqlQuery},
-    Dialect,
-};
-use readyset_sql_parsing::{parse_query_with_config, ParsingPreset};
-use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
+use readyset_sql::ast::SqlQuery;
 use readyset_util::{
     logging::{rate_limit, SAMPLER_LOG_SAMPLER},
-    shared_cache::LocalCache,
     shutdown::ShutdownReceiver,
 };
 
-use crate::{
-    backend::noria_connector::{ExecuteSelectContext, NoriaConnector, QueryResult, ReadBehavior},
-    DeploymentMode,
-};
-
-/// Tag byte used when hashing a value that normalizes to UTF-8 text
-const TAG_NORMALIZED_TEXT: u8 = 0x01;
-/// Tag byte used when hashing any other value via its `Hash` implementation
-const TAG_FALLBACK: u8 = 0xff;
+use crate::backend::READYSET_QUERY_SAMPLER;
 
 /// Configuration for the background query sampler
 #[derive(Debug)]
@@ -136,14 +109,13 @@ impl Default for SamplerConfig {
 pub struct Sampler {
     config: SamplerConfig,
     rx: Receiver<(QueryExecutionEvent, String)>,
-    noria: NoriaConnector,
     upstream_conn: Option<DatabaseConnection>,
+    rs_conn: Option<DatabaseConnection>,
     upstream_config: UpstreamConfig,
-    parse_dialect: Dialect,
-    parsing_preset: ParsingPreset,
     shutdown_recv: ShutdownReceiver,
     last_executed_at: Option<std::time::Instant>,
     retry_queue: VecDeque<(TokioInstant, Entry)>,
+    rs_addr: SocketAddr,
 }
 
 #[derive(Clone)]
@@ -166,8 +138,8 @@ fn build_channel(config: &SamplerConfig) -> (SamplerTx, SamplerRx) {
     tokio::sync::mpsc::channel(config.queue_capacity)
 }
 
-async fn connect(config: &UpstreamConfig) -> Option<DatabaseConnection> {
-    let url: DatabaseURL = if let Some(url) = &config.upstream_db_url {
+async fn connect_rs(config: &UpstreamConfig, rs_addr: SocketAddr) -> Option<DatabaseConnection> {
+    let mut url: DatabaseURL = if let Some(url) = &config.upstream_db_url {
         match url.parse() {
             Ok(url) => url,
             Err(error) => {
@@ -179,6 +151,20 @@ async fn connect(config: &UpstreamConfig) -> Option<DatabaseConnection> {
         return None;
     };
 
+    // extract port and host from rs_addr
+    let port = rs_addr.port();
+    // if we are binding on 0.0.0.0 or ::/0, use 127.0.0.1 / ::1 respectively
+    let host = if rs_addr.ip() == IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)) {
+        "127.0.0.1".to_string()
+    } else if rs_addr.ip() == IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)) {
+        "::1".to_string()
+    } else {
+        rs_addr.ip().to_string()
+    };
+    debug!("Connecting to Readyset at {}:{}", host, port);
+    url.set_port(port);
+    url.set_host(host.to_string());
+    url.set_program_or_application_name(READYSET_QUERY_SAMPLER.to_string());
     let verification = match ServerCertVerification::from(config).await {
         Ok(verification) => verification,
         Err(error) => {
@@ -186,8 +172,35 @@ async fn connect(config: &UpstreamConfig) -> Option<DatabaseConnection> {
             return None;
         }
     };
+    connect(url, verification).await
+}
 
-    debug!("Establishing sampler upstream connection");
+async fn connect_upstream(config: &UpstreamConfig) -> Option<DatabaseConnection> {
+    debug!("Connecting to upstream");
+    let url: DatabaseURL = if let Some(url) = &config.upstream_db_url {
+        match url.parse() {
+            Ok(url) => url,
+            Err(error) => {
+                warn!(%error, "Failed to parse sampler upstream URL");
+                return None;
+            }
+        }
+    } else {
+        return None;
+    };
+    let verification = match ServerCertVerification::from(config).await {
+        Ok(verification) => verification,
+        Err(error) => {
+            warn!(%error, "Failed to initialize TLS");
+            return None;
+        }
+    };
+    connect(url, verification).await
+}
+async fn connect(
+    url: DatabaseURL,
+    verification: ServerCertVerification,
+) -> Option<DatabaseConnection> {
     let conn = match url.connect(verification).await {
         Ok(conn) => conn,
         Err(error) => {
@@ -199,22 +212,11 @@ async fn connect(config: &UpstreamConfig) -> Option<DatabaseConnection> {
 }
 
 /// Builder responsible for creating a sampler, a channel, a connection to upstream and a handler to Readyset
-#[allow(clippy::too_many_arguments)]
 pub async fn sampler_builder(
     sampler_cfg: SamplerConfig,
-    rs_handle: ReadySetHandle,
-    auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>>,
-    view_name_cache: LocalCache<ViewCreateRequest, Relation>,
-    view_cache: LocalCache<Relation, View>,
-    adapter_rewrite_params: AdapterRewriteParams,
-    schema_search_path: Vec<SqlIdentifier>,
     upstream_config: UpstreamConfig,
-    options: DeploymentMode,
-    readers: Readers,
-    parse_dialect: Dialect,
-    parsing_preset: ParsingPreset,
-    expr_dialect: readyset_data::Dialect,
     shutdown_rx: ShutdownReceiver,
+    rs_addr: SocketAddr,
 ) -> (
     Option<Sampler>,
     Option<Sender<(QueryExecutionEvent, String)>>,
@@ -225,45 +227,15 @@ pub async fn sampler_builder(
 
     let (global_sampler_tx, global_sampler_rx) = build_channel(&sampler_cfg);
 
-    // Build a local read handler for the sampler connector if embedded readers enabled
-    let read_handler = if options.has_reader_nodes() {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
-        tokio::spawn(retry_misses(rx));
-        Some(ReadRequestHandler::new(
-            readers.clone(),
-            tx,
-            Duration::from_secs(sampler_cfg.upstream_timeout.as_secs()),
-        ))
-    } else {
-        None
-    };
-
-    // Build sampler connector
-    let rs_connector = NoriaConnector::new_with_local_reads(
-        rs_handle,
-        auto_increments,
-        view_name_cache,
-        view_cache,
-        ReadBehavior::NonBlocking,
-        read_handler,
-        expr_dialect,
-        parse_dialect,
-        schema_search_path,
-        adapter_rewrite_params,
-    )
-    .await;
-
     // Connect to upstream once if configured
-    let upstream_conn = connect(&upstream_config).await;
+    let upstream_conn = connect_upstream(&upstream_config).await;
     let sampler = Sampler::new(
         sampler_cfg,
-        rs_connector,
         upstream_conn,
         upstream_config,
-        parse_dialect,
-        parsing_preset,
         shutdown_rx.clone(),
         global_sampler_rx,
+        rs_addr,
     );
     (Some(sampler), Some(global_sampler_tx))
 }
@@ -317,74 +289,18 @@ impl Sampler {
         self.last_executed_at = Some(std::time::Instant::now());
     }
 
-    async fn query_readyset(
-        &mut self,
-        q: &String,
-        event: &mut QueryExecutionEvent,
-    ) -> Result<QueryResult<'_>, ReadySetError> {
-        let res = match event.sql_type {
-            SqlQueryType::Read => {
-                let mut stmt = if let Some(s) = event.query.as_deref().and_then(|q| match q {
-                    SqlQuery::Select(stmt) => Some(stmt.clone()),
-                    _ => None,
-                }) {
-                    s
-                } else {
-                    match parse_query_with_config(
-                        self.parsing_preset.into_config(),
-                        self.parse_dialect,
-                        q,
-                    ) {
-                        Ok(SqlQuery::Select(stmt)) => stmt,
-                        _ => return Err(ReadySetError::UnparseableQuery(q.clone())),
-                    }
-                };
-
-                let res = match readyset_sql_passes::adapter_rewrites::process_query(
-                    &mut stmt,
-                    self.noria.rewrite_params(),
-                ) {
-                    Ok(processed) => {
-                        let ctx = ExecuteSelectContext::AdHoc {
-                            statement: &stmt,
-                            create_if_missing: false,
-                            processed_query_params: processed,
-                        };
-                        match tokio::time::timeout(
-                            std::time::Duration::from_millis(1000),
-                            self.noria.execute_select(ctx, event),
-                        )
-                        .await
-                        {
-                            Ok(res) => res,
-                            Err(e) => {
-                                rate_limit(true, SAMPLER_LOG_SAMPLER, || {
-                                    warn!("Sampler Readyset read timeout: {:?}", e);
-                                });
-                                Err(readyset_errors::rpc_err_no_downcast(
-                                    "Sampler Readyset read",
-                                    ReadySetError::Internal("timeout".into()),
-                                ))
-                            }
-                        }
-                    }
-                    Err(e) => Err(e),
-                };
-                res
-            }
-            _ => Err(ReadySetError::InvalidQuery(q.clone())),
-        };
-        res
-    }
-
-    async fn query_upstream(&mut self, q: &str) -> Result<QueryResults, DatabaseError> {
+    async fn query_with_timeout(
+        timeout: Duration,
+        conn: &mut Option<DatabaseConnection>,
+        q: &str,
+    ) -> Result<QueryResults, DatabaseError> {
         let fut = async {
-            match self.upstream_conn.as_mut() {
+            match conn.as_mut() {
                 Some(conn) => conn.query(q).await,
                 None => Err(DatabaseError::UpstreamConnectionNone),
             }
         };
-        match tokio::time::timeout(self.config.upstream_timeout, fut).await {
+        match tokio::time::timeout(timeout, fut).await {
             Ok(res) => res,
             Err(_) => {
                 rate_limit(true, SAMPLER_LOG_SAMPLER, || {
@@ -407,7 +323,7 @@ impl Sampler {
 
     /// Process a query entry: execute on Readyset, execute on upstream, compare normalized
     /// results, and handle initial attempt vs retries uniformly.
-    async fn process_entry(&mut self, mut entry: Entry) {
+    async fn process_entry(&mut self, entry: Entry) {
         // Check if the query has an ORDER BY clause. If it doesn't,
         // we can sort the rows to make the hash more stable.
         let has_order_by = matches!(
@@ -416,22 +332,24 @@ impl Sampler {
         );
 
         // Readyset execution (materialize rows for optional tracing on mismatch)
-        let rs_res = self.query_readyset(&entry.q, &mut entry.event).await;
+        let rs_res =
+            Self::query_with_timeout(self.config.upstream_timeout, &mut self.rs_conn, &entry.q)
+                .await;
         let (rs_hash_opt, rs_rows_opt) = match rs_res {
-            Ok(rs_result) => match rs_result {
-                crate::backend::noria_connector::QueryResult::Select { rows, .. } => {
-                    let mut it = rows;
-                    let mut rows_vec = Vec::new();
-                    while let Some(r) = streaming_iterator::StreamingIterator::next(&mut it) {
-                        rows_vec.push(r.to_vec());
+            Ok(rs_rows) => {
+                let mut rows_vec: Vec<Vec<DfValue>> = match <Vec<Vec<DfValue>>>::try_from(rs_rows) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        debug!(error = %e, "Sampler readyset row conversion error");
+                        Vec::new()
                     }
-                    let hash = Some(normalize_and_hash(&mut rows_vec, has_order_by));
-                    (hash, Some(rows_vec))
-                }
-                _ => (None, None),
-            },
+                };
+                let hash = Some(normalize_and_hash(&mut rows_vec, has_order_by));
+                (hash, Some(rows_vec))
+            }
             Err(e) => {
-                debug!(error = %e, "Sampler Readyset execution error");
+                debug!(error = %e, "Sampler readyset error");
+                self.reconnect_rs_if_closed().await;
                 (None, None)
             }
         };
@@ -446,7 +364,12 @@ impl Sampler {
         }
 
         // Upstream execution (materialize rows for optional tracing on mismatch)
-        let up_res = self.query_upstream(&entry.q).await;
+        let up_res = Self::query_with_timeout(
+            self.config.upstream_timeout,
+            &mut self.upstream_conn,
+            &entry.q,
+        )
+        .await;
         let (up_hash_opt, up_rows_opt) = match up_res {
             Ok(up_rows) => {
                 let mut rows_vec: Vec<Vec<DfValue>> = match <Vec<Vec<DfValue>>>::try_from(up_rows) {
@@ -461,7 +384,7 @@ impl Sampler {
             }
             Err(e) => {
                 debug!(error = %e, "Sampler upstream error");
-                self.reconnect_if_closed().await;
+                self.reconnect_upstream_if_closed().await;
                 (None, None)
             }
         };
@@ -537,19 +460,19 @@ impl Sampler {
             .increment(1);
             rate_limit(true, SAMPLER_LOG_SAMPLER, || {
                 warn!(
-                    query = %entry.q,
+                    cache = get_cache_name(&entry.event),
                     rs_hash,
                     up_hash,
                     "Sampler mismatch after retries: normalized result hash differs between Readyset and upstream"
                 );
             });
-            trace!(query = %entry.q, rs_rows = ?rs_rows_opt, up_rows = ?up_rows_opt, "Sampler mismatch after retries: normalized result hash differs between Readyset and upstream");
+            debug!(query = %entry.q, rs_rows = ?rs_rows_opt, up_rows = ?up_rows_opt, "Sampler mismatch after retries: normalized result hash differs between Readyset and upstream");
         } else {
             self.schedule_retry(entry);
         }
     }
     /// Check if upstream connection is closed and create a new one if necessary.
-    async fn reconnect_if_closed(&mut self) {
+    async fn reconnect_upstream_if_closed(&mut self) {
         if self
             .upstream_conn
             .as_ref()
@@ -558,32 +481,42 @@ impl Sampler {
         {
             debug!("Sampler upstream connection is closed, creating a new connection");
             counter!(QUERY_SAMPLER_RECONNECTS).increment(1);
-            self.upstream_conn = connect(&self.upstream_config).await;
+            self.upstream_conn = connect_upstream(&self.upstream_config).await;
+        }
+    }
+
+    /// Check if Readyset connection is closed and create a new one if necessary.
+    async fn reconnect_rs_if_closed(&mut self) {
+        if self
+            .rs_conn
+            .as_ref()
+            .map(|c| c.is_closed())
+            .unwrap_or(false)
+        {
+            debug!("Sampler Readyset connection is closed, creating a new connection");
+            self.rs_conn = connect_rs(&self.upstream_config, self.rs_addr).await;
         }
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: SamplerConfig,
-        noria: NoriaConnector,
         upstream_conn: Option<DatabaseConnection>,
         upstream_config: UpstreamConfig,
-        parse_dialect: Dialect,
-        parsing_preset: ParsingPreset,
         shutdown_recv: ShutdownReceiver,
         rx: Receiver<(QueryExecutionEvent, String)>,
+        rs_addr: SocketAddr,
     ) -> Self {
         Self {
             config,
             rx,
-            noria,
+            rs_conn: None,
             upstream_conn,
             upstream_config,
-            parse_dialect,
-            parsing_preset,
             shutdown_recv,
             last_executed_at: None,
             retry_queue: VecDeque::new(),
+            rs_addr,
         }
     }
 
@@ -591,6 +524,8 @@ impl Sampler {
     /// Differences are logged as warnings.
     pub async fn run_sampler(&mut self) {
         info!("Starting query sampler with config: {:?}", self.config);
+        // Change upstream port and host to readyset and connect to it
+        self.rs_conn = connect_rs(&self.upstream_config, self.rs_addr).await;
         loop {
             select! {
                 biased;
@@ -630,7 +565,7 @@ impl Sampler {
 /// disambiguate between types that could otherwise collide (e.g., text vs bytes).
 fn normalize_and_hash(rows: &mut [Vec<DfValue>], has_order_by: bool) -> u64 {
     if !has_order_by {
-        rows.sort_unstable_by(|a, b| cmp_rows(a, b));
+        rows.sort_unstable();
     }
 
     let mut hasher = Xxh3::new();
@@ -638,58 +573,8 @@ fn normalize_and_hash(rows: &mut [Vec<DfValue>], has_order_by: bool) -> u64 {
     for row in rows.iter() {
         hasher.write_u64(row.len() as u64);
         for v in row.iter() {
-            hash_dfvalue_normalized(&mut hasher, v);
+            v.hash(&mut hasher);
         }
     }
     hasher.finish()
-}
-
-/// Compare two rows using normalized `DfValue` comparison semantics.
-fn cmp_rows(a: &[DfValue], b: &[DfValue]) -> Ordering {
-    for (x, y) in a.iter().zip(b.iter()) {
-        let o = cmp_dfvalue_normalized(x, y);
-        if o != Ordering::Equal {
-            return o;
-        }
-    }
-    a.len().cmp(&b.len())
-}
-
-/// Return a `&str` view for `DfValue` if the value is textual or UTF-8 decodable bytes.
-/// Trailing spaces are trimmed to align with SQL text comparison semantics.
-fn as_text_if_utf8(v: &DfValue) -> Option<&str> {
-    match v {
-        DfValue::Text(t) => Some(t.as_str().trim_end_matches(' ')),
-        DfValue::TinyText(tt) => Some(tt.as_str().trim_end_matches(' ')),
-        DfValue::ByteArray(bytes) => std::str::from_utf8(bytes.as_ref())
-            .ok()
-            .map(|s| s.trim_end_matches(' ')),
-        _ => None,
-    }
-}
-
-/// Compare two `DfValue`s with normalization:
-/// - If both are text or UTF-8 bytes, compare as strings with trailing spaces trimmed.
-/// - Otherwise, fall back to the standard `DfValue` ordering.
-fn cmp_dfvalue_normalized(a: &DfValue, b: &DfValue) -> Ordering {
-    if let (Some(sa), Some(sb)) = (as_text_if_utf8(a), as_text_if_utf8(b)) {
-        return sa.cmp(sb);
-    }
-    a.cmp(b)
-}
-
-/// Hash a single `DfValue` using a tagged representation to avoid cross-type collisions.
-/// The encoding is `[tag][len][bytes]` for variable-length representations:
-/// - `TAG_NORMALIZED_TEXT` for normalized UTF-8 text (trims trailing spaces)
-/// - `TAG_BYTE_ARRAY` for raw byte arrays
-/// - `TAG_FALLBACK` followed by the value's `Hash` otherwise
-fn hash_dfvalue_normalized<H: Hasher>(h: &mut H, v: &DfValue) {
-    if let Some(s) = as_text_if_utf8(v) {
-        h.write_u8(TAG_NORMALIZED_TEXT);
-        h.write_u64(s.len() as u64);
-        h.write(s.as_bytes());
-        return;
-    }
-    h.write_u8(TAG_FALLBACK);
-    v.hash(h);
 }
