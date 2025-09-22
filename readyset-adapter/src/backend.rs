@@ -126,6 +126,9 @@ pub mod noria_connector;
 pub use self::noria_connector::NoriaConnector;
 use self::noria_connector::{MetaVariable, PreparedSelectTypes};
 
+/// Reserved program/application name used by ReadySet components to identify internal connections
+pub const READYSET_QUERY_SAMPLER: &str = "READYSET_QUERY_SAMPLER";
+
 const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned through Readyset Cloud. Please use the Readyset Cloud UI to manage caches. You may continue to use the SQL interface to run other 'read' commands.";
 
 /// Unique identifier for a prepared statement, local to a single [`Backend`].
@@ -383,6 +386,7 @@ impl BackendBuilder {
             allow_cache_ddl: self.allow_cache_ddl,
             adapter_start_time,
             sampler_tx: self.sampler_tx,
+            is_internal_connection: false,
             _query_handler: PhantomData,
         }
     }
@@ -602,6 +606,9 @@ where
 
     /// Optional sender to enqueue original queries for background sampling/verification
     sampler_tx: Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String)>>,
+
+    /// Boolean to indicate if the backend connection is an internal connection (eg.: From Query Sampler)
+    is_internal_connection: bool,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -3201,6 +3208,11 @@ where
     /// Whether or not we have fallback enabled.
     pub fn has_fallback(&self) -> bool {
         self.upstream.is_some()
+    }
+
+    /// Mark or unmark this backend connection as an internal ReadySet connection
+    pub fn set_internal_connection(&mut self, is_internal: bool) {
+        self.is_internal_connection = is_internal;
     }
 
     /// If we are using fallback, this will return the database that was in the original connection
