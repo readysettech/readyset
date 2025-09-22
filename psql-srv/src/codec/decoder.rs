@@ -45,6 +45,7 @@ const SSL_REQUEST_CODE: i32 = 80877103;
 const STARTUP_MESSAGE_DATABASE_PARAMETER: &str = "database";
 const STARTUP_MESSAGE_TERMINATOR: &str = "";
 const STARTUP_MESSAGE_USER_PARAMETER: &str = "user";
+const STARTUP_MESSAGE_APPLICATION_NAME_PARAMETER: &str = "application_name";
 
 const HEADER_LENGTH: usize = 5;
 const LENGTH_NULL_SENTINEL: i32 = -1;
@@ -96,6 +97,7 @@ impl Decoder for Codec {
                 protocol_version => {
                     let mut user: Option<BytesStr> = None;
                     let mut database: Option<BytesStr> = None;
+                    let mut application_name: Option<BytesStr> = None;
                     loop {
                         let key = get_str(msg)?;
                         if key.borrow() as &str == STARTUP_MESSAGE_TERMINATOR {
@@ -106,12 +108,16 @@ impl Decoder for Codec {
                             user = Some(val);
                         } else if key.borrow() as &str == STARTUP_MESSAGE_DATABASE_PARAMETER {
                             database = Some(val);
+                        } else if key.borrow() as &str == STARTUP_MESSAGE_APPLICATION_NAME_PARAMETER
+                        {
+                            application_name = Some(val);
                         }
                     }
                     Ok(Some(StartupMessage {
                         protocol_version,
                         user,
                         database,
+                        application_name,
                     }))
                 }
             };
@@ -582,6 +588,28 @@ mod tests {
     fn test_decode_startup_message() {
         let mut codec = Codec::new();
         let mut buf = BytesMut::new();
+        buf.put_i32(4 + 4 + 5 + 10 + 9 + 14 + 17 + 23 + 1); // size
+        buf.put_i32(196608); // standard protocol version
+        buf.extend_from_slice(b"user\0");
+        buf.extend_from_slice(b"user_name\0");
+        buf.extend_from_slice(b"database\0");
+        buf.extend_from_slice(b"database_name\0");
+        buf.extend_from_slice(b"application_name\0");
+        buf.extend_from_slice(b"application_name_value\0");
+        buf.put_u8(b'\0');
+        let expected = Some(StartupMessage {
+            protocol_version: 196608,
+            user: Some(bytes_str("user_name")),
+            database: Some(bytes_str("database_name")),
+            application_name: Some(bytes_str("application_name_value")),
+        });
+        assert_eq!(codec.decode(&mut buf).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_decode_startup_message_missing_application_name() {
+        let mut codec = Codec::new();
+        let mut buf = BytesMut::new();
         buf.put_i32(4 + 4 + 5 + 10 + 9 + 14 + 1); // size
         buf.put_i32(196608); // standard protocol version
         buf.extend_from_slice(b"user\0");
@@ -593,6 +621,7 @@ mod tests {
             protocol_version: 196608,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         });
         assert_eq!(codec.decode(&mut buf).unwrap(), expected);
     }

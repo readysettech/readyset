@@ -56,6 +56,7 @@ pub enum FrontendMessage {
         protocol_version: i32,
         user: Option<BytesStr>,
         database: Option<BytesStr>,
+        application_name: Option<BytesStr>,
     },
     SaslResponse {
         scram_data: Bytes,

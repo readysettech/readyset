@@ -1493,6 +1493,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(expected_username.clone()),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         let mut backend = Backend::new();
         backend.needed_credentials = Some(Credentials::CleartextPassword(expected_password));
@@ -1546,6 +1547,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(expected_username.clone()),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         let mut backend = Backend::new();
         backend.needed_credentials = Some(Credentials::CleartextPassword(expected_password));
@@ -1587,6 +1589,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: None,
+            application_name: None,
         };
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
@@ -1614,6 +1617,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -1622,6 +1626,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
@@ -1636,6 +1641,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -1662,6 +1668,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -1683,6 +1690,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         protocol
             .on_request(startup_request, &mut backend, &mut channel)
@@ -1760,6 +1768,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -1792,6 +1801,7 @@ mod tests {
 
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -1829,6 +1839,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -1881,6 +1892,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -1903,6 +1915,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -1949,6 +1962,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -1993,6 +2007,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -2040,6 +2055,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -2074,6 +2090,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -2104,6 +2121,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -2138,6 +2156,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -2160,6 +2179,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -2203,6 +2223,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -2226,6 +2247,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -2286,6 +2308,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -2306,6 +2329,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -2372,6 +2396,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -2392,6 +2417,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         protocol
             .on_request(startup_request, &mut backend, &mut channel)
@@ -2478,6 +2504,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
@@ -2519,6 +2546,7 @@ mod tests {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
+            application_name: None,
         };
         block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
 
