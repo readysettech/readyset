@@ -551,6 +551,15 @@ impl<S> MySqlShim<S> for Backend
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    fn on_connect_attrs(&mut self, attrs: &HashMap<&str, &str>) {
+        if attrs
+            .get("_program_name")
+            .is_some_and(|v| *v == readyset_adapter::backend::READYSET_QUERY_SAMPLER)
+        {
+            self.noria.set_internal_connection(true);
+        }
+    }
+
     async fn on_prepare(
         &mut self,
         query: &str,

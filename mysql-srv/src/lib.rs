@@ -365,6 +365,10 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
     /// Called when default character set changes after handshake or client switches user.
     async fn set_charset(&mut self, _: u16) -> io::Result<()>;
 
+    /// Optional hook invoked once after parsing client handshake to pass MySQL connect attributes
+    /// Default implementation is a no-op.
+    fn on_connect_attrs(&mut self, _attrs: &HashMap<&str, &str>) {}
+
     /// Retrieve the password for the user with the given username, if any.
     ///
     /// If the user doesn't exist, return [`None`].
@@ -624,6 +628,11 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 }
             })?
             .1;
+
+        // Pass MySQL connect attributes to backend shim, if any
+        if !handshake.connect_attrs.is_empty() {
+            self.shim.on_connect_attrs(&handshake.connect_attrs);
+        }
 
         self.conn.set_seq(packet.seq + 1);
 
