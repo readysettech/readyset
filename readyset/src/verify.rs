@@ -5,7 +5,9 @@ use regex::{Captures, Regex};
 use tracing::info;
 
 use database_utils::tls::ServerCertVerification;
-use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection};
+use database_utils::{
+    DatabaseConnection, DatabaseError, DatabaseType, DatabaseURL, QueryableConnection,
+};
 use readyset_sql::Dialect;
 
 use crate::Options;
@@ -81,17 +83,26 @@ async fn verify_connection(
     Ok(conn)
 }
 
-async fn get_version(conn: &mut DatabaseConnection) -> Result<(String, i32, i32)> {
-    let version: String = async {
-        conn.query(match conn.dialect() {
-            Dialect::MySQL => "SELECT @@version",
-            Dialect::PostgreSQL => "SHOW server_version",
-        })
+async fn query_one_value<T>(conn: &mut DatabaseConnection, query: &str) -> Result<T>
+where
+    T: mysql_common::value::convert::FromValue + tokio_postgres::types::FromSqlOwned,
+{
+    Ok(conn
+        .query(query)
         .await?
         .into_iter()
         .get_single_row()?
-        .get(0)
-    }
+        .get(0)?)
+}
+
+async fn get_version(conn: &mut DatabaseConnection) -> Result<(String, i32, i32)> {
+    let version: String = query_one_value(
+        conn,
+        match conn.dialect() {
+            Dialect::MySQL => "SELECT @@version",
+            Dialect::PostgreSQL => "SHOW server_version",
+        },
+    )
     .await
     .map_err(|e| anyhow!("Failed to query upstream database version: {e}"))?;
 
@@ -136,6 +147,55 @@ async fn verify_version(conn: &mut DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
+async fn verify_replication(conn: &mut DatabaseConnection) -> Result<()> {
+    match conn.dialect() {
+        Dialect::MySQL => {
+            let (enabled, format, image, encryption): (bool, String, String, bool) = async {
+                let row = conn
+                    .query(
+                        "SELECT @@log_bin, @@binlog_format, @@binlog_row_image, \
+                                @@binlog_encryption",
+                    )
+                    .await?
+                    .into_iter()
+                    .get_single_row()?;
+                Ok::<_, DatabaseError>((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            }
+            .await
+            .map_err(|e| anyhow!("Failed to retrieve binlog settings: {e}"))?;
+            ensure!(enabled, "Upstream does not have binlogs enabled");
+            ensure!(
+                format == "ROW",
+                "Upstream binlog_format needs to be ROW, but was: {format}"
+            );
+            ensure!(
+                image == "FULL" || image == "MINIMAL",
+                "Upstream binlog_row_image needs to be FULL or MINIMAL, but was: {image}"
+            );
+            ensure!(!encryption, "Upstream binlog_encryption is not supported");
+        }
+        Dialect::PostgreSQL => {
+            if let Ok(rds_logical) =
+                query_one_value::<String>(conn, "SHOW rds.logical_replication").await
+            {
+                ensure!(
+                    rds_logical == "on",
+                    "Upstream rds.logical_replication needs to be on, but was off"
+                );
+            }
+            let wal: String = query_one_value(conn, "SHOW wal_level")
+                .await
+                .map_err(|e| anyhow!("Failed to query wal_level: {e}"))?;
+            ensure!(
+                wal == "logical",
+                "Upstream wal_level needs to be logical, but was: {wal}"
+            );
+        }
+    }
+    info!("Verified replication configuration");
+    Ok(())
+}
+
 /// Run through a list of checks to make sure we're good to go before attempting to snapshot.
 pub async fn verify(options: &Options) -> Result<()> {
     let mut errors = Vec::new();
@@ -173,6 +233,7 @@ pub async fn verify(options: &Options) -> Result<()> {
 
     if let Some(conn) = &mut conn {
         add_err!(verify_version(conn).await);
+        add_err!(verify_replication(conn).await);
     }
 
     if errors.is_empty() {

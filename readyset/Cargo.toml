@@ -18,11 +18,13 @@ futures-util = { workspace = true }
 fail = { workspace = true }
 failpoint-macros = { path = "../failpoint-macros" }
 metrics = { workspace = true }
+mysql_common = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-native-tls = { workspace = true }
+tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
 tokio-stream = { workspace = true, features = ["net"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 tracing-futures = { workspace = true }
