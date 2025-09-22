@@ -1,9 +1,13 @@
+use std::collections::HashMap;
+
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take, take_until};
 use nom::combinator::{map, map_res, opt, rest};
 use nom::error::FromExternalError;
+use nom::multi::fold_many0;
 use nom::number::complete::{le_i16, le_i24, le_i64, le_u16, le_u32, le_u8};
 use nom::sequence::preceded;
+use nom::sequence::tuple;
 use nom::IResult;
 
 use crate::myc::constants::{CapabilityFlags, Command as CommandByte, UTF8MB4_GENERAL_CI};
@@ -19,6 +23,8 @@ pub struct ClientHandshake<'a> {
     pub password: &'a [u8],
     pub database: Option<&'a str>,
     pub auth_plugin_name: Option<&'a str>,
+    #[allow(dead_code)]
+    pub connect_attrs: HashMap<&'a str, &'a str>,
 }
 
 #[derive(Debug)]
@@ -46,6 +52,15 @@ fn lenenc_int(i: &[u8]) -> IResult<&[u8], i64> {
             nom::error::ErrorKind::Tag,
         ))),
     }
+}
+
+/// Parse a length-encoded string as specified by the [mysql binary protocol documentation][docs]
+///
+/// [docs]: https://dev.mysql.com/doc/internals/en/string.html#length-encoded-string
+fn lenenc_string(i: &[u8]) -> IResult<&[u8], &str> {
+    let (i, length) = lenenc_int(i)?;
+    let (i, string) = take(length as usize)(i)?;
+    Ok((i, parse_bytes_to_string(string)?))
 }
 
 fn parse_bytes_to_string(i: &[u8]) -> Result<&str, nom::Err<nom::error::Error<&[u8]>>> {
@@ -146,6 +161,27 @@ pub fn client_handshake(i: &[u8]) -> IResult<&[u8], ClientHandshake<'_>> {
         (i, None)
     };
 
+    let (i, connect_attrs) = if capabilities.contains(CapabilityFlags::CLIENT_CONNECT_ATTRS) {
+        // If the flag is set, we should receive a length-encoded integer followed by a block of
+        // key-value pairs. Adding a fallback for safety.
+        let (i, length) = lenenc_int(i).unwrap_or((i, 0));
+        let (i, attrs_block) = take(length as usize)(i)?;
+
+        // Parse and accumulate directly into a HashMap without separate iteration
+        let (remaining, connect_attrs) = fold_many0(
+            map(tuple((lenenc_string, lenenc_string)), |(k, v)| (k, v)),
+            HashMap::new,
+            |mut acc: HashMap<&str, &str>, (k, v)| {
+                acc.insert(k, v);
+                acc
+            },
+        )(attrs_block)?;
+        debug_assert!(remaining.is_empty());
+        (i, connect_attrs)
+    } else {
+        (i, HashMap::new())
+    };
+
     Ok((
         i,
         ClientHandshake {
@@ -156,6 +192,7 @@ pub fn client_handshake(i: &[u8]) -> IResult<&[u8], ClientHandshake<'_>> {
             password,
             database,
             auth_plugin_name,
+            connect_attrs,
         },
     ))
 }
@@ -275,21 +312,30 @@ mod tests {
     #[tokio::test]
     async fn it_parses_handshake() {
         let mut data = [
-            0x25, 0x00, 0x00, 0x01, 0x85, 0xa6, 0x3f, 0x20, 0x00, 0x00, 0x00, 0x01, 0x21, 0x00,
+            0x39, 0x00, 0x00, 0x01, 0x85, 0xa6, 0x3f, 0x20, 0x00, 0x00, 0x00, 0x01, 0x21, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6a, 0x6f, 0x6e, 0x00, 0x00,
+            // connection attributes length (lenenc int) + key/value pairs
+            0x13, // total length = 19 bytes
+            0x0d, // key length = 13
+            0x5f, 0x70, 0x72, 0x6f, 0x67, 0x72, 0x61, 0x6d, 0x5f, 0x6e, 0x61, 0x6d,
+            0x65, // "_program_name"
+            0x04, // value length = 4
+            0x74, 0x65, 0x73, 0x74, // "test"
         ];
         let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
         let mut pr = PacketConn::new(r);
         let packet = pr.next().await.unwrap().unwrap();
         let (_, handshake) = client_handshake(&packet.data).unwrap();
-        println!("{handshake:?}");
         assert!(handshake
             .capabilities
             .contains(CapabilityFlags::CLIENT_LONG_PASSWORD));
         assert!(handshake
             .capabilities
             .contains(CapabilityFlags::CLIENT_MULTI_RESULTS));
+        assert!(handshake
+            .capabilities
+            .contains(CapabilityFlags::CLIENT_CONNECT_ATTRS));
         assert!(!handshake
             .capabilities
             .contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB));
@@ -299,6 +345,7 @@ mod tests {
         assert_eq!(handshake.charset, UTF8_GENERAL_CI);
         assert_eq!(handshake.username, "jon");
         assert_eq!(handshake.maxps, 16777216);
+        assert_eq!(handshake.connect_attrs.get("_program_name"), Some(&"test"));
     }
 
     #[tokio::test]

@@ -206,6 +206,7 @@ use writers::write_err;
 
 use crate::authentication::{generate_auth_data, hash_password, AUTH_PLUGIN_NAME};
 use crate::commands::change_user;
+use crate::constants::CONNECT_ATTRS;
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 pub use crate::writers::prepare_column_definitions;
 
@@ -468,7 +469,8 @@ const CAPABILITIES: u32 = PROTOCOL_41
     | SECURE_CONNECTION
     | RESERVED
     | CLIENT_PLUGIN_AUTH
-    | CONNECT_WITH_DB;
+    | CONNECT_WITH_DB
+    | CONNECT_ATTRS;
 
 impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlIntermediary<B, S> {
     /// Create a new server over a channel and process client commands until the client
