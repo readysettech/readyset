@@ -104,7 +104,7 @@ pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
         options.dbname(dbname).set_replication_database();
 
         let verification = ServerCertVerification::from(&config).await?;
-        let connector = get_tls_connector(verification)?;
+        let connector = get_tls_connector(&verification)?;
         let tls = MakeTlsConnector::new(connector);
 
         let (mut client, connection) = options.connect(tls).await?;
@@ -304,7 +304,7 @@ impl<'a> NoriaAdapter<'a> {
 
         let mut mysql_opts_builder = OptsBuilder::from_opts(mysql_options).prefer_socket(false);
 
-        let ssl_opts = get_mysql_tls_config(ServerCertVerification::from(config).await?);
+        let ssl_opts = get_mysql_tls_config(&ServerCertVerification::from(config).await?);
         if let Some(ssl_opts) = ssl_opts {
             mysql_opts_builder = mysql_opts_builder.ssl_opts(ssl_opts);
         }

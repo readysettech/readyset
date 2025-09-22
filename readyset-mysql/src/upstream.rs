@@ -182,7 +182,7 @@ impl MySqlUpstream {
                 .prefer_socket(false)
         };
 
-        let ssl_opts = get_mysql_tls_config(ServerCertVerification::from(&upstream_config).await?);
+        let ssl_opts = get_mysql_tls_config(&ServerCertVerification::from(&upstream_config).await?);
         if let Some(ssl_opts) = ssl_opts {
             builder = builder.ssl_opts(ssl_opts);
         }

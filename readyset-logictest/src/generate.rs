@@ -216,7 +216,7 @@ impl Seed {
         recreate_test_database(&opts.compare_to).await?;
         let mut conn = opts
             .compare_to
-            .connect(ServerCertVerification::Default)
+            .connect(&ServerCertVerification::Default)
             .await
             .context("Connecting to comparison database")?;
 

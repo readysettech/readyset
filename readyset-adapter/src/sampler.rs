@@ -204,7 +204,7 @@ async fn connect(
     url: DatabaseURL,
     verification: ServerCertVerification,
 ) -> Option<DatabaseConnection> {
-    let conn = match url.connect(verification).await {
+    let conn = match url.connect(&verification).await {
         Ok(conn) => conn,
         Err(error) => {
             warn!(%error, "Failed to establish sampler upstream connection");

@@ -121,7 +121,7 @@ async fn connect() {
 
     // With SslMode::Require, connect() errors if the server does not support TLS.
     let mut conn = DatabaseURL::PostgreSQL(config)
-        .connect(ServerCertVerification::None)
+        .connect(&ServerCertVerification::None)
         .await
         .unwrap();
     // The Runner should then accept queries.

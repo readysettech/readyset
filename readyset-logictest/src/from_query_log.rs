@@ -251,7 +251,7 @@ impl FromQueryLog {
             // logged behavior as closely as possible.
             let mut conn = self
                 .database
-                .connect(ServerCertVerification::Default)
+                .connect(&ServerCertVerification::Default)
                 .await
                 .unwrap();
             let mut output = OpenOptions::new()

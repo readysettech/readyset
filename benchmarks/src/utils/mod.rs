@@ -29,7 +29,7 @@ pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
     // First attempt to connect to the readyset adapter at all
     let mut conn = loop {
         match DatabaseURL::from_str(target)?
-            .connect(ServerCertVerification::Default)
+            .connect(&ServerCertVerification::Default)
             .await
         {
             Ok(conn) => break conn,

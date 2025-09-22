@@ -29,7 +29,9 @@ impl ServerCertVerification {
 }
 
 /// Return a connector suitable for establishing a TLS connection.
-pub fn get_tls_connector(verification: ServerCertVerification) -> native_tls::Result<TlsConnector> {
+pub fn get_tls_connector(
+    verification: &ServerCertVerification,
+) -> native_tls::Result<TlsConnector> {
     let mut builder = TlsConnector::builder();
 
     match verification {
@@ -49,7 +51,7 @@ pub fn get_tls_connector(verification: ServerCertVerification) -> native_tls::Re
 }
 
 /// Return MySQL options suitable for establishing a TLS connection.
-pub fn get_mysql_tls_config(verification: ServerCertVerification) -> Option<SslOpts> {
+pub fn get_mysql_tls_config(verification: &ServerCertVerification) -> Option<SslOpts> {
     match verification {
         ServerCertVerification::Default => None,
         ServerCertVerification::CustomCertificate(certs) => Some(

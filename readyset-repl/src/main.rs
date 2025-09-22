@@ -122,7 +122,7 @@ impl ReplContext {
     async fn new(options: Options) -> Result<Self> {
         let connection = options
             .database_url
-            .connect(ServerCertVerification::Default)
+            .connect(&ServerCertVerification::Default)
             .await
             .context("Connecting to database")?;
 

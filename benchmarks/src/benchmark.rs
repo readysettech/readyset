@@ -70,13 +70,13 @@ pub struct DeploymentParameters {
 impl DeploymentParameters {
     pub async fn connect_to_target(&self) -> Result<DatabaseConnection> {
         Ok(DatabaseURL::from_str(&self.target_conn_str)?
-            .connect(ServerCertVerification::Default)
+            .connect(&ServerCertVerification::Default)
             .await?)
     }
 
     pub async fn connect_to_setup(&self) -> Result<DatabaseConnection> {
         Ok(DatabaseURL::from_str(&self.setup_conn_str)?
-            .connect(ServerCertVerification::Default)
+            .connect(&ServerCertVerification::Default)
             .await?)
     }
 }

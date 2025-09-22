@@ -499,7 +499,7 @@ impl DatabaseURL {
     /// Create a new [`DatabaseConnection`] by connecting to the database at this database URL.
     pub async fn connect(
         &self,
-        verification: ServerCertVerification,
+        verification: &ServerCertVerification,
     ) -> Result<DatabaseConnection, DatabaseError> {
         match self {
             DatabaseURL::MySQL(opts) => {
@@ -535,7 +535,7 @@ impl DatabaseURL {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), DatabaseError> {
     /// let mut url = DatabaseURL::from_str("mysql://root:noria@localhost/test").unwrap();
-    /// let pool = url.pool_builder(ServerCertVerification::Default)?.max_connections(16).build()?;
+    /// let pool = url.pool_builder(&ServerCertVerification::Default)?.max_connections(16).build()?;
     /// let mut conn = pool.get_conn().await?;
     /// conn.query_drop("SHOW TABLES").await?;
     /// # Ok(())
@@ -543,7 +543,7 @@ impl DatabaseURL {
     /// ```
     pub fn pool_builder(
         self,
-        verification: ServerCertVerification,
+        verification: &ServerCertVerification,
     ) -> Result<DatabaseConnectionPoolBuilder, DatabaseError> {
         match self {
             DatabaseURL::MySQL(opts) => {

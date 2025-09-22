@@ -75,7 +75,7 @@ impl DataGenerator {
 
     pub async fn install(&self, conn_str: &str) -> anyhow::Result<()> {
         let mut conn = DatabaseURL::from_str(conn_str)?
-            .connect(ServerCertVerification::Default)
+            .connect(&ServerCertVerification::Default)
             .await?;
         let ddl = std::fs::read_to_string(benchmark_path(&self.schema)?)?;
 
@@ -90,7 +90,10 @@ impl DataGenerator {
     }
 
     async fn adjust_upstream_vars(db_url: &DatabaseURL) -> Option<usize> {
-        let mut conn = db_url.connect(ServerCertVerification::Default).await.ok()?;
+        let mut conn = db_url
+            .connect(&ServerCertVerification::Default)
+            .await
+            .ok()?;
 
         match conn {
             DatabaseConnection::MySQL(_) => {
@@ -131,7 +134,7 @@ impl DataGenerator {
     }
 
     async fn revert_upstream_vars(db_url: &DatabaseURL, old_size: Option<usize>) {
-        let conn = db_url.connect(ServerCertVerification::Default).await;
+        let conn = db_url.connect(&ServerCertVerification::Default).await;
 
         match (conn, old_size) {
             (Ok(mut conn @ DatabaseConnection::MySQL(_)), Some(old_size)) => {
@@ -260,7 +263,7 @@ pub async fn load_table_part(
     partition: TablePartition,
     progress_bar: indicatif::ProgressBar,
 ) -> Result<()> {
-    let mut conn = db_url.connect(ServerCertVerification::Default).await?;
+    let mut conn = db_url.connect(&ServerCertVerification::Default).await?;
 
     let columns = spec.columns.keys().cloned().collect::<Vec<_>>();
     let insert_stmt =

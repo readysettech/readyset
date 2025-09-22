@@ -82,7 +82,7 @@ impl PreparedPool {
         let mut conns = Vec::with_capacity(num);
         for _ in 0..num {
             let conn = DatabaseURL::from_str(url)?
-                .connect(ServerCertVerification::None)
+                .connect(&ServerCertVerification::None)
                 .await?;
             let statements = Vec::new();
             conns.push(PreparedConn { conn, statements })
@@ -116,11 +116,11 @@ impl PreparedPool {
     ) -> anyhow::Result<QuerySet> {
         let url = DatabaseURL::from_str(upstream_url)?;
         let distributions = workload
-            .load_distributions(&mut url.connect(ServerCertVerification::None).await?)
+            .load_distributions(&mut url.connect(&ServerCertVerification::None).await?)
             .await?;
 
         let mut conn = DatabaseURL::from_str(&readyset_url(url.db_name().unwrap(), database_type))?
-            .connect(ServerCertVerification::None)
+            .connect(&ServerCertVerification::None)
             .await?;
 
         for query in &workload.setup {
@@ -405,7 +405,7 @@ async fn dump_graphviz(
     database_type: DatabaseType,
 ) -> anyhow::Result<()> {
     let mut conn = DatabaseURL::from_str(&readyset_url(database_name, database_type))?
-        .connect(ServerCertVerification::None)
+        .connect(&ServerCertVerification::None)
         .await?;
     match conn.query("explain graphviz").await {
         Ok(r) => {
@@ -647,7 +647,7 @@ async fn prepare_db<P: Into<PathBuf>>(path: P, args: &SystemBenchArgs) -> anyhow
     };
 
     let mut conn = DatabaseURL::from_str(&url)?
-        .connect(ServerCertVerification::None)
+        .connect(&ServerCertVerification::None)
         .await?;
     if args.skip_prepare_db {
         // Will error if the DB doesn't actually exist
@@ -755,7 +755,7 @@ async fn drop_cached_queries(
     database_type: DatabaseType,
 ) -> anyhow::Result<()> {
     let mut conn = DatabaseURL::from_str(&readyset_url(database_name, database_type))?
-        .connect(ServerCertVerification::None)
+        .connect(&ServerCertVerification::None)
         .await?;
     conn.query_drop(DropAllCachesStatement {}.to_string())
         .await?;

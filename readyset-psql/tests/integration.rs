@@ -1924,7 +1924,7 @@ async fn test_explain_create_cache() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = DatabaseURL::from(opts)
-        .connect(ServerCertVerification::Default)
+        .connect(&ServerCertVerification::Default)
         .await
         .unwrap();
 
@@ -2072,7 +2072,7 @@ async fn trunc_in_trx() {
         .build::<PostgreSQLAdapter>()
         .await;
     let mut conn = DatabaseURL::from(opts)
-        .connect(ServerCertVerification::Default)
+        .connect(&ServerCertVerification::Default)
         .await
         .unwrap();
 

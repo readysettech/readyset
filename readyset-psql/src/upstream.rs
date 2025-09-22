@@ -224,7 +224,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         let user = pg_config.get_user().map(|s| s.to_owned());
 
         let verification = ServerCertVerification::from(&upstream_config).await?;
-        let connector = get_tls_connector(verification)?;
+        let connector = get_tls_connector(&verification)?;
         let tls = MakeTlsConnector::new(connector);
 
         let span = info_span!(

@@ -1219,7 +1219,7 @@ impl DeploymentHandle {
 
         DatabaseURL::from_str(addr)
             .unwrap()
-            .connect(ServerCertVerification::Default)
+            .connect(&ServerCertVerification::Default)
             .await
             .unwrap()
     }
@@ -1231,7 +1231,7 @@ impl DeploymentHandle {
         let addr = self.upstream_addr.as_ref().unwrap();
         DatabaseURL::from_str(addr)
             .unwrap()
-            .connect(ServerCertVerification::Default)
+            .connect(&ServerCertVerification::Default)
             .await
             .unwrap()
     }

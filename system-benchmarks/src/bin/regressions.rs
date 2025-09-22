@@ -345,7 +345,7 @@ async fn main() -> anyhow::Result<()> {
 
     if let Some(res) = db_url {
         let url = res?;
-        let mut conn = url.connect(ServerCertVerification::Default).await?;
+        let mut conn = url.connect(&ServerCertVerification::Default).await?;
         upload_results_to_database(&mut conn, &commit, &datasets).await?;
     }
 

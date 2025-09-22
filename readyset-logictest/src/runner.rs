@@ -117,7 +117,7 @@ pub(crate) async fn recreate_test_database(url: &DatabaseURL) -> anyhow::Result<
         DatabaseType::MySQL => "mysql".to_owned(),
     });
     let mut admin_conn = admin_url
-        .connect(ServerCertVerification::Default)
+        .connect(&ServerCertVerification::Default)
         .await
         .with_context(|| "connecting to upstream")?;
 
@@ -185,7 +185,7 @@ impl TestScript {
 
         if let Some(upstream_url) = &opts.upstream_database_url {
             let mut conn = upstream_url
-                .connect(ServerCertVerification::Default)
+                .connect(&ServerCertVerification::Default)
                 .await
                 .with_context(|| "connecting to upstream database")?;
 
@@ -217,7 +217,7 @@ impl TestScript {
         let (_noria_handle, shutdown_tx, adapter_task, db_url) =
             crate::in_process_readyset::start_readyset(opts).await;
         let mut conn = match db_url
-            .connect(ServerCertVerification::Default)
+            .connect(&ServerCertVerification::Default)
             .await
             .with_context(|| "connecting to adapter")
         {
