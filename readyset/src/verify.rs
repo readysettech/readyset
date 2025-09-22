@@ -1,10 +1,12 @@
 use std::fmt::{Display, Formatter};
 
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, bail, ensure, Error, Result};
+use regex::{Captures, Regex};
 use tracing::info;
 
 use database_utils::tls::ServerCertVerification;
-use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
+use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection};
+use readyset_sql::Dialect;
 
 use crate::Options;
 
@@ -79,6 +81,61 @@ async fn verify_connection(
     Ok(conn)
 }
 
+async fn get_version(conn: &mut DatabaseConnection) -> Result<(String, i32, i32)> {
+    let version: String = async {
+        conn.query(match conn.dialect() {
+            Dialect::MySQL => "SELECT @@version",
+            Dialect::PostgreSQL => "SHOW server_version",
+        })
+        .await?
+        .into_iter()
+        .get_single_row()?
+        .get(0)
+    }
+    .await
+    .map_err(|e| anyhow!("Failed to query upstream database version: {e}"))?;
+
+    let captures = match Regex::new(r"^(?P<major>\d+)\.(?P<minor>\d+).*$")
+        .unwrap()
+        .captures(&version)
+    {
+        Some(captures) => captures,
+        None => bail!(r#"Failed to parse upstream database version from "{version}""#),
+    };
+
+    fn extract(captures: &Captures, name: &str) -> Result<i32> {
+        let Some(m) = captures.name(name) else {
+            bail!("Couldn't find number");
+        };
+        Ok(m.as_str().parse()?)
+    }
+
+    let major = extract(&captures, "major").map_err(|e| {
+        anyhow!(r#"Failed to fetch upstream database major version from "{version}": {e}"#)
+    })?;
+    let minor = extract(&captures, "minor").map_err(|e| {
+        anyhow!(r#"Failed to fetch upstream database minor version from "{version}": {e}"#)
+    })?;
+
+    Ok((version, major, minor))
+}
+
+async fn verify_version(conn: &mut DatabaseConnection) -> Result<()> {
+    let (version, major, minor) = get_version(conn).await?;
+    match conn.dialect() {
+        Dialect::MySQL => ensure!(
+            major >= 8 || (major, minor) == (5, 7),
+            "Upstream MySQL version too old: {version}"
+        ),
+        Dialect::PostgreSQL => ensure!(
+            major >= 13,
+            "Upstream PostgreSQL version too old: {version}"
+        ),
+    };
+    info!("Verified upstream version: {version}");
+    Ok(())
+}
+
 /// Run through a list of checks to make sure we're good to go before attempting to snapshot.
 pub async fn verify(options: &Options) -> Result<()> {
     let mut errors = Vec::new();
@@ -104,13 +161,18 @@ pub async fn verify(options: &Options) -> Result<()> {
     let cdc_url = add_err!(verify_cdc_url(options));
     let upstream_url = add_err!(verify_upstream_url(options));
 
+    let mut conn = None;
     if let (Some(verification), Some(cdc_url)) = (&verification, &cdc_url) {
-        add_err!(verify_connection(cdc_url, verification, "CDC").await);
+        conn = add_err!(verify_connection(cdc_url, verification, "CDC").await);
         if let Some(upstream_url) = &upstream_url {
             if cdc_url != upstream_url {
-                add_err!(verify_connection(upstream_url, verification, "upstream").await);
+                conn = add_err!(verify_connection(upstream_url, verification, "upstream").await);
             }
         }
+    }
+
+    if let Some(conn) = &mut conn {
+        add_err!(verify_version(conn).await);
     }
 
     if errors.is_empty() {

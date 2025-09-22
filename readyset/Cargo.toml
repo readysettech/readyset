@@ -18,6 +18,7 @@ futures-util = { workspace = true }
 fail = { workspace = true }
 failpoint-macros = { path = "../failpoint-macros" }
 metrics = { workspace = true }
+regex = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
