@@ -81,6 +81,10 @@ pub trait PsqlBackend {
     /// Called when client authenticates to inform which users we should use.
     async fn set_auth_info(&mut self, user: &str, password: Option<RedactedString>);
 
+    /// Optional hook invoked once at startup if the client provided application_name.
+    /// Default implementation is a no-op.
+    fn on_application_name(&mut self, _application_name: &str) {}
+
     /// Initializes the backend.
     ///
     /// * `database` - The name of the database that will be used for queries to this `Backend`

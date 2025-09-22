@@ -244,7 +244,15 @@ impl Protocol {
         match self.state {
             State::StartingUp => match message {
                 SSLRequest => Ok(Response::Message(self.on_ssl_request())),
-                StartupMessage { database, user, .. } => {
+                StartupMessage {
+                    database,
+                    user,
+                    application_name,
+                    ..
+                } => {
+                    if let Some(app) = application_name.as_ref() {
+                        backend.on_application_name(app.borrow());
+                    }
                     self.on_startup_message(backend, database, user, channel)
                         .await
                 }

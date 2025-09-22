@@ -158,6 +158,12 @@ impl ps::PsqlBackend for Backend {
         self.query(query).await?.try_into()
     }
 
+    fn on_application_name(&mut self, application_name: &str) {
+        if application_name == readyset_adapter::backend::READYSET_QUERY_SAMPLER {
+            self.inner.set_internal_connection(true);
+        }
+    }
+
     async fn on_prepare(
         &mut self,
         query: &str,
