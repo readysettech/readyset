@@ -221,7 +221,7 @@ pub async fn sampler_builder(
     Option<Sampler>,
     Option<Sender<(QueryExecutionEvent, String)>>,
 ) {
-    if sampler_cfg.max_qps == 0 {
+    if sampler_cfg.max_qps == 0 || sampler_cfg.sample_rate == 0.0 {
         return (None, None);
     }
 

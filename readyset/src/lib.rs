@@ -420,8 +420,8 @@ pub struct Options {
     #[arg(long, env = "TLS_MODE", default_value = "optional")]
     pub tls_mode: TlsMode,
 
-    /// Specifies the sample rate for the background query sampler.
-    #[arg(long, env = "SAMPLER_SAMPLE_RATE", default_value = "0.001")]
+    /// Specifies the sample rate for the background query sampler. 0 means no sampling.
+    #[arg(long, env = "SAMPLER_SAMPLE_RATE", default_value = "0")]
     sampler_sample_rate: f64,
 
     /// Specifies the maximum queue size for the background query sampler.
