@@ -68,7 +68,7 @@ use readyset_client::metrics::recorded::{
 };
 use readyset_client_metrics::QueryExecutionEvent;
 use readyset_data::DfValue;
-use readyset_sql::ast::SqlQuery;
+use readyset_sql::ast::{SqlIdentifier, SqlQuery};
 use readyset_util::{
     logging::{rate_limit, SAMPLER_LOG_SAMPLER},
     shutdown::ShutdownReceiver,
@@ -108,7 +108,7 @@ impl Default for SamplerConfig {
 
 pub struct Sampler {
     config: SamplerConfig,
-    rx: Receiver<(QueryExecutionEvent, String)>,
+    rx: Receiver<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
     upstream_conn: Option<DatabaseConnection>,
     rs_conn: Option<DatabaseConnection>,
     upstream_config: UpstreamConfig,
@@ -116,6 +116,7 @@ pub struct Sampler {
     last_executed_at: Option<std::time::Instant>,
     retry_queue: VecDeque<(TokioInstant, Entry)>,
     rs_addr: SocketAddr,
+    schema_search_path: Vec<SqlIdentifier>,
 }
 
 #[derive(Clone)]
@@ -128,11 +129,13 @@ struct Entry {
     attempts: u8,
     /// The hash of the last upstream result
     last_up_hash: Option<u64>,
+    /// The schema search path when executing the query
+    schema_search_path: Vec<SqlIdentifier>,
 }
 
 /// Build a bounded channel for sampler input
-type SamplerTx = Sender<(QueryExecutionEvent, String)>;
-type SamplerRx = Receiver<(QueryExecutionEvent, String)>;
+type SamplerTx = Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>;
+type SamplerRx = Receiver<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>;
 
 fn build_channel(config: &SamplerConfig) -> (SamplerTx, SamplerRx) {
     tokio::sync::mpsc::channel(config.queue_capacity)
@@ -219,11 +222,13 @@ pub async fn sampler_builder(
     rs_addr: SocketAddr,
 ) -> (
     Option<Sampler>,
-    Option<Sender<(QueryExecutionEvent, String)>>,
+    Option<Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
 ) {
     if sampler_cfg.max_qps == 0 || sampler_cfg.sample_rate == 0.0 {
         return (None, None);
     }
+
+    let schema_search_path = upstream_config.default_schema_search_path();
 
     let (global_sampler_tx, global_sampler_rx) = build_channel(&sampler_cfg);
 
@@ -236,6 +241,7 @@ pub async fn sampler_builder(
         shutdown_rx.clone(),
         global_sampler_rx,
         rs_addr,
+        schema_search_path,
     );
     (Some(sampler), Some(global_sampler_tx))
 }
@@ -324,6 +330,16 @@ impl Sampler {
     /// Process a query entry: execute on Readyset, execute on upstream, compare normalized
     /// results, and handle initial attempt vs retries uniformly.
     async fn process_entry(&mut self, entry: Entry) {
+        // check if we need to set the schema search path
+        if !entry.schema_search_path.is_empty()
+            && self.schema_search_path != entry.schema_search_path
+        {
+            let new_schema_search_path = entry.schema_search_path.clone();
+            let _ = set_schema_search_path(&mut self.rs_conn, &new_schema_search_path).await;
+            let _ = set_schema_search_path(&mut self.upstream_conn, &new_schema_search_path).await;
+            self.schema_search_path = new_schema_search_path;
+        }
+
         // Check if the query has an ORDER BY clause. If it doesn't,
         // we can sort the rows to make the hash more stable.
         let has_order_by = matches!(
@@ -466,7 +482,7 @@ impl Sampler {
                     "Sampler mismatch after retries: normalized result hash differs between Readyset and upstream"
                 );
             });
-            debug!(query = %entry.q, rs_rows = ?rs_rows_opt, up_rows = ?up_rows_opt, "Sampler mismatch after retries: normalized result hash differs between Readyset and upstream");
+            debug!(query = %entry.q, entry_search_path = ?entry.schema_search_path, current_search_path = ?self.schema_search_path, rs_rows = ?rs_rows_opt, up_rows = ?up_rows_opt, "Sampler mismatch after retries: normalized result hash differs between Readyset and upstream");
         } else {
             self.schedule_retry(entry);
         }
@@ -504,8 +520,9 @@ impl Sampler {
         upstream_conn: Option<DatabaseConnection>,
         upstream_config: UpstreamConfig,
         shutdown_recv: ShutdownReceiver,
-        rx: Receiver<(QueryExecutionEvent, String)>,
+        rx: Receiver<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
         rs_addr: SocketAddr,
+        schema_search_path: Vec<SqlIdentifier>,
     ) -> Self {
         Self {
             config,
@@ -517,6 +534,7 @@ impl Sampler {
             last_executed_at: None,
             retry_queue: VecDeque::new(),
             rs_addr,
+            schema_search_path,
         }
     }
 
@@ -540,7 +558,7 @@ impl Sampler {
                 }
                 q = self.rx.recv() => {
                     gauge!(QUERY_SAMPLER_QUEUE_LEN).set(self.rx.len() as f64);
-                    if let Some((event, q)) = q {
+                    if let Some((event, q, schema_search_path)) = q {
                         if rand::random::<f64>() > self.config.sample_rate {
                             continue;
                         }
@@ -551,6 +569,7 @@ impl Sampler {
                             event,
                             attempts: 0,
                             last_up_hash: None,
+                            schema_search_path,
                         };
                         self.process_entry(entry).await;
                     }
@@ -577,4 +596,31 @@ fn normalize_and_hash(rows: &mut [Vec<DfValue>], has_order_by: bool) -> u64 {
         }
     }
     hasher.finish()
+}
+
+async fn set_schema_search_path(
+    conn: &mut Option<DatabaseConnection>,
+    schema_search_path: &[SqlIdentifier],
+) -> Result<(), DatabaseError> {
+    match conn.as_mut() {
+        Some(conn) => {
+            let query = match conn {
+                DatabaseConnection::MySQL(..) => {
+                    if schema_search_path.is_empty() {
+                        return Ok(());
+                    }
+                    format!("USE {}", schema_search_path[0])
+                }
+                DatabaseConnection::PostgreSQL(..) => {
+                    format!("SET search_path TO {}", schema_search_path.join(","))
+                }
+                DatabaseConnection::PostgreSQLPool(..) => {
+                    format!("SET search_path TO {}", schema_search_path.join(","))
+                }
+            };
+            let _ = conn.query(query).await?;
+        }
+        None => return Err(DatabaseError::UpstreamConnectionNone),
+    }
+    Ok(())
 }

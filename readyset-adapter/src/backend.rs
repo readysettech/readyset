@@ -297,7 +297,8 @@ pub struct BackendBuilder {
     metrics_handle: Option<MetricsHandle>,
     connections: Option<Arc<SkipSet<SocketAddr>>>,
     allow_cache_ddl: bool,
-    sampler_tx: Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String)>>,
+    sampler_tx:
+        Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
 }
 
 impl Default for BackendBuilder {
@@ -485,7 +486,7 @@ impl BackendBuilder {
     /// Set the sender used to enqueue original queries for background sampling/verification
     pub fn sampler_tx(
         mut self,
-        tx: Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String)>>,
+        tx: Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
     ) -> Self {
         self.sampler_tx = tx;
         self
@@ -605,7 +606,8 @@ where
     adapter_start_time: SystemTime,
 
     /// Optional sender to enqueue original queries for background sampling/verification
-    sampler_tx: Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String)>>,
+    sampler_tx:
+        Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
 
     /// Boolean to indicate if the backend connection is an internal connection (eg.: From Query Sampler)
     is_internal_connection: bool,
@@ -2638,7 +2640,9 @@ where
         mut status: QueryStatus,
         event: &mut QueryExecutionEvent,
         processed_query_params: ProcessedQueryParams,
-        sampler_tx: Option<&tokio::sync::mpsc::Sender<(QueryExecutionEvent, String)>>,
+        sampler_tx: Option<
+            &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
+        >,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let original_status = status.clone();
         let did_work = if let Some(ref mut i) = status.execution_info {
@@ -2701,7 +2705,12 @@ where
                 }
                 // Enqueue the original query for background sampling if enabled.
                 if let Some(tx) = sampler_tx {
-                    let _ = tx.try_send((event.clone(), original_query.to_string()));
+                    let schema_search_path = view_request.schema_search_path.clone();
+                    let _ = tx.try_send((
+                        event.clone(),
+                        original_query.to_string(),
+                        schema_search_path,
+                    ));
                 }
                 Ok(noria_ok.into())
             }
@@ -2738,7 +2747,12 @@ where
                     (true, _) | (_, None) => {
                         // Enqueue the original query for background sampling if enabled.
                         if let Some(tx) = sampler_tx {
-                            let _ = tx.try_send((event.clone(), original_query.to_string()));
+                            let schema_search_path = view_request.schema_search_path.clone();
+                            let _ = tx.try_send((
+                                event.clone(),
+                                original_query.to_string(),
+                                schema_search_path,
+                            ));
                         }
                         Err(noria_err.into())
                     }
