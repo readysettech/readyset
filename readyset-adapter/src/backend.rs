@@ -3139,7 +3139,11 @@ where
                 // if should_try is true then status and params MUST be Some
                 let (noria_should_try, status, processed_query_params) =
                     self.noria_should_try_select(&mut view_request);
-
+                let sampler_tx = if !self.is_internal_connection {
+                    self.sampler_tx.as_ref()
+                } else {
+                    None
+                };
                 if noria_should_try {
                     Self::query_adhoc_select(
                         &mut self.noria,
@@ -3151,7 +3155,7 @@ where
                         status.unwrap(),
                         &mut event,
                         processed_query_params.unwrap(),
-                        self.sampler_tx.as_ref(),
+                        sampler_tx,
                     )
                     .await
                 } else {
