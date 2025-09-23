@@ -62,7 +62,7 @@ check_docker_dependencies() {
     echo -e "${RED}Docker is installed but not running. Please start Docker to continue.${NOCOLOR}"
     exit 1
   fi
-  if ! command -v docker-compose &>/dev/null; then
+  if ! command -v docker-compose &>/dev/null && ! docker compose version &>/dev/null; then
     echo -e "${RED}Docker Compose is not installed. Please install Docker Compose to continue.${NOCOLOR}"
     exit 1
   fi
