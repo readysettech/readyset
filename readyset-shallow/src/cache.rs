@@ -108,3 +108,31 @@ where
         &self.query_id
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use readyset_data::DfValue;
+
+    use crate::{EvictionPolicy, QueryMetadata};
+
+    use super::Cache;
+
+    #[test]
+    fn test_ttl_expiration() {
+        let cache = Cache::new(EvictionPolicy::Ttl(Duration::from_secs(1)), None, None);
+
+        let key = vec![DfValue::from("test_key")];
+        let values = vec![vec![DfValue::from("test_value")]];
+        let metadata = QueryMetadata::empty();
+
+        cache.insert(key.clone(), values.clone(), metadata);
+        let result = cache.get(&key).unwrap();
+        assert_eq!(result.values.as_ref(), &values);
+
+        std::thread::sleep(Duration::from_secs(2));
+
+        assert!(cache.get(&key).is_none());
+    }
+}

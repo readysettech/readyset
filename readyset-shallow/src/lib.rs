@@ -17,6 +17,15 @@ pub enum QueryMetadata {
     PostgreSql(()),
 }
 
+impl QueryMetadata {
+    #[cfg(test)]
+    pub fn empty() -> Self {
+        QueryMetadata::MySql(MySqlMetadata {
+            columns: Arc::new([]),
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct QueryResult {
     pub values: Arc<Values>,
