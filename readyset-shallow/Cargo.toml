@@ -7,6 +7,7 @@ edition = "2024"
 
 [dependencies]
 dashmap = { workspace = true }
+moka = { workspace = true }
 tracing = { workspace = true }
 mysql_async = { workspace = true }
 

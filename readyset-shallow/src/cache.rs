@@ -2,7 +2,7 @@ use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::sync::{Arc, OnceLock};
 
-use dashmap::DashMap;
+use moka::sync::Cache as MokaCache;
 
 use readyset_client::query::QueryId;
 use readyset_sql::ast::Relation;
@@ -10,9 +10,15 @@ use readyset_sql::ast::Relation;
 use crate::manager::*;
 use crate::{EvictionPolicy, QueryMetadata, QueryResult};
 
+#[derive(Debug, Clone)]
+pub struct CacheEntry {
+    pub values: Arc<Values>,
+    pub metadata: Option<Arc<QueryMetadata>>,
+}
+
 pub struct Cache<K> {
     _policy: EvictionPolicy,
-    results: DashMap<K, (Arc<Values>, Option<Arc<QueryMetadata>>)>,
+    results: MokaCache<K, Arc<CacheEntry>>,
     cache_metadata: OnceLock<Arc<QueryMetadata>>,
     relation: Option<Relation>,
     query_id: Option<QueryId>,
@@ -20,7 +26,7 @@ pub struct Cache<K> {
 
 impl<K> Debug for Cache<K>
 where
-    K: Eq + Hash,
+    K: Eq + Hash + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Cache")
@@ -32,7 +38,7 @@ where
 
 impl<K> Cache<K>
 where
-    K: Eq + Hash,
+    K: Eq + Hash + Send + Sync + 'static,
 {
     pub(crate) fn new(
         policy: EvictionPolicy,
@@ -41,7 +47,7 @@ where
     ) -> Self {
         Self {
             _policy: policy,
-            results: Default::default(),
+            results: MokaCache::new(10_000),
             cache_metadata: Default::default(),
             relation,
             query_id,
@@ -68,19 +74,23 @@ where
             }
         };
 
-        self.results.insert(k, (Arc::new(v), metadata));
+        let entry = Arc::new(CacheEntry {
+            values: Arc::new(v),
+            metadata,
+        });
+        self.results.insert(k, entry);
     }
 
     pub fn get(&self, k: &K) -> Option<QueryResult> {
         self.results.get(k).map(|entry| {
-            let (values, metadata) = entry.value();
-            let metadata = metadata
+            let metadata = entry
+                .metadata
                 .as_ref()
                 .or_else(|| self.cache_metadata.get())
                 .expect("No metadata available for cached result");
 
             QueryResult {
-                values: Arc::clone(values),
+                values: Arc::clone(&entry.values),
                 metadata: Arc::clone(metadata),
             }
         })

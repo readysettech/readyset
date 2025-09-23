@@ -27,7 +27,7 @@ pub struct CacheManager<K> {
 // #[derive(Default)] adds a K: Default bound, which we don't want.
 impl<K> Default for CacheManager<K>
 where
-    K: Hash + Eq,
+    K: Hash + Eq + Send + Sync + 'static,
 {
     fn default() -> Self {
         Self {
@@ -41,7 +41,7 @@ where
 
 impl<K> CacheManager<K>
 where
-    K: Hash + Eq,
+    K: Hash + Eq + Send + Sync + 'static,
 {
     pub fn new() -> Self {
         Self::default()
@@ -180,7 +180,7 @@ where
 
 pub enum CacheResult<K>
 where
-    K: Hash + Eq,
+    K: Hash + Eq + Send + Sync + 'static,
 {
     NotCached,
     Miss(CacheInsertGuard<K>),
@@ -189,7 +189,7 @@ where
 
 impl<K> Debug for CacheResult<K>
 where
-    K: Hash + Eq,
+    K: Hash + Eq + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -202,7 +202,7 @@ where
 
 pub struct CacheInsertGuard<K>
 where
-    K: Hash + Eq,
+    K: Hash + Eq + Send + Sync + 'static,
 {
     cache: Arc<Cache<K>>,
     key: Option<K>,
@@ -213,7 +213,7 @@ where
 
 impl<K> Debug for CacheInsertGuard<K>
 where
-    K: Hash + Eq,
+    K: Hash + Eq + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CacheInsertGuard")
@@ -225,7 +225,7 @@ where
 
 impl<K> CacheInsertGuard<K>
 where
-    K: Hash + Eq,
+    K: Hash + Eq + Send + Sync + 'static,
 {
     pub fn filled(&mut self) {
         self.filled = true;
@@ -242,7 +242,7 @@ where
 
 impl<K> Drop for CacheInsertGuard<K>
 where
-    K: Hash + Eq,
+    K: Hash + Eq + Send + Sync + 'static,
 {
     fn drop(&mut self) {
         if self.filled {
