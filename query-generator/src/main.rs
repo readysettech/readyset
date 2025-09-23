@@ -29,7 +29,7 @@ impl Opts {
         let mut gen = query_generator::GeneratorState::with_dialect(self.dialect);
         let queries = self
             .options
-            .into_query_seeds()
+            .into_query_seeds(self.dialect)?
             .map(|seed| gen.generate_query(seed).statement);
 
         if self.queries_only {

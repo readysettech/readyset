@@ -1126,47 +1126,48 @@ impl Arbitrary for WindowFunctionConfig {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
-#[arbitrary(args = QueryDialect)]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub enum AggregateType {
-    #[weight(u32::from(*args_shared == ParseDialect::PostgreSQL))]
     ArrayAgg {
         distinct: bool,
     },
     Count {
-        #[any(generate_arrays = false, dialect = Some(args_shared.0))]
         column_type: SqlType,
         distinct: bool,
     },
     Sum {
-        #[strategy(arbitrary_numeric_type(Some(args.0)))]
         column_type: SqlType,
         distinct: bool,
     },
     Avg {
-        #[strategy(arbitrary_numeric_type(Some(args.0)))]
         column_type: SqlType,
         distinct: bool,
     },
-    #[weight(u32::from(*args_shared == ParseDialect::MySQL))]
     GroupConcat {
         distinct: bool,
     },
     Max {
-        #[strategy(min_max_arg_type(args.0))]
         column_type: SqlType,
     },
     Min {
-        #[strategy(min_max_arg_type(args.0))]
         column_type: SqlType,
     },
     JsonObjectAgg {
         allow_duplicate_keys: bool,
     },
-    #[weight(u32::from(*args_shared == ParseDialect::PostgreSQL))]
     StringAgg {
         distinct: bool,
     },
+}
+
+// Manual Arbitrary implementation that uses dialect-aware generation
+impl proptest::prelude::Arbitrary for AggregateType {
+    type Parameters = QueryDialect;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        Self::arbitrary_for_dialect(args.0).boxed()
+    }
 }
 
 impl AggregateType {
@@ -1195,6 +1196,113 @@ impl AggregateType {
             AggregateType::JsonObjectAgg { .. }
             | AggregateType::Max { .. }
             | AggregateType::Min { .. } => false,
+        }
+    }
+
+    /// Check if this aggregate function is supported by the given SQL dialect
+    pub fn is_supported_by(&self, dialect: ParseDialect) -> bool {
+        match (self, dialect) {
+            // PostgreSQL-only functions
+            (Self::ArrayAgg { .. }, ParseDialect::PostgreSQL) => true,
+            (Self::StringAgg { .. }, ParseDialect::PostgreSQL) => true,
+
+            // MySQL-only functions
+            (Self::GroupConcat { .. }, ParseDialect::MySQL) => true,
+
+            // Functions not supported by certain dialects
+            (Self::ArrayAgg { .. }, ParseDialect::MySQL) => false,
+            (Self::StringAgg { .. }, ParseDialect::MySQL) => false,
+            (Self::GroupConcat { .. }, ParseDialect::PostgreSQL) => false,
+
+            // Common functions supported by both
+            (Self::Count { .. }, _) => true,
+            (Self::Sum { .. }, _) => true,
+            (Self::Avg { .. }, _) => true,
+            (Self::Max { .. }, _) => true,
+            (Self::Min { .. }, _) => true,
+            (Self::JsonObjectAgg { .. }, _) => true,
+        }
+    }
+
+    /// Get all aggregate types supported by the given dialect
+    pub fn all_for_dialect(dialect: ParseDialect) -> impl Iterator<Item = &'static AggregateType> {
+        ALL_AGGREGATE_TYPES
+            .iter()
+            .filter(move |agg| agg.is_supported_by(dialect))
+    }
+
+    /// Generate a proptest Strategy for AggregateType values that are valid for the given dialect
+    pub fn arbitrary_for_dialect(
+        dialect: ParseDialect,
+    ) -> impl proptest::strategy::Strategy<Value = Self> {
+        use proptest::prelude::*;
+
+        match dialect {
+            ParseDialect::PostgreSQL => prop_oneof![
+                // PostgreSQL-specific aggregates
+                any::<bool>().prop_map(|distinct| Self::ArrayAgg { distinct }),
+                any::<bool>().prop_map(|distinct| Self::StringAgg { distinct }),
+                // Common aggregates
+                (arbitrary_numeric_type(Some(dialect)), any::<bool>()).prop_map(
+                    |(column_type, distinct)| Self::Count {
+                        column_type,
+                        distinct
+                    }
+                ),
+                (arbitrary_numeric_type(Some(dialect)), any::<bool>()).prop_map(
+                    |(column_type, distinct)| Self::Sum {
+                        column_type,
+                        distinct
+                    }
+                ),
+                (arbitrary_numeric_type(Some(dialect)), any::<bool>()).prop_map(
+                    |(column_type, distinct)| Self::Avg {
+                        column_type,
+                        distinct
+                    }
+                ),
+                min_max_arg_type(dialect).prop_map(|column_type| Self::Max { column_type }),
+                min_max_arg_type(dialect).prop_map(|column_type| Self::Min { column_type }),
+                any::<bool>().prop_map(|allow_duplicate_keys| Self::JsonObjectAgg {
+                    allow_duplicate_keys
+                }),
+            ]
+            .boxed(),
+            ParseDialect::MySQL => prop_oneof![
+                // MySQL-specific aggregates
+                any::<bool>().prop_map(|distinct| Self::GroupConcat { distinct }),
+                // Common aggregates
+                (
+                    any_with::<SqlType>(SqlTypeArbitraryOptions {
+                        generate_arrays: false,
+                        dialect: Some(dialect),
+                        ..Default::default()
+                    }),
+                    any::<bool>()
+                )
+                    .prop_map(|(column_type, distinct)| Self::Count {
+                        column_type,
+                        distinct
+                    }),
+                (arbitrary_numeric_type(Some(dialect)), any::<bool>()).prop_map(
+                    |(column_type, distinct)| Self::Sum {
+                        column_type,
+                        distinct
+                    }
+                ),
+                (arbitrary_numeric_type(Some(dialect)), any::<bool>()).prop_map(
+                    |(column_type, distinct)| Self::Avg {
+                        column_type,
+                        distinct
+                    }
+                ),
+                min_max_arg_type(dialect).prop_map(|column_type| Self::Max { column_type }),
+                min_max_arg_type(dialect).prop_map(|column_type| Self::Min { column_type }),
+                any::<bool>().prop_map(|allow_duplicate_keys| Self::JsonObjectAgg {
+                    allow_duplicate_keys
+                }),
+            ]
+            .boxed(),
         }
     }
 }
@@ -1705,32 +1813,48 @@ const ALL_SUBQUERY_POSITIONS: &[SubqueryPosition] = &[
     SubqueryPosition::Cte(JoinOperator::InnerJoin),
 ];
 
+/// Generate all possible QueryOperations for the given dialect
+pub fn all_operations_for_dialect(dialect: ParseDialect) -> Vec<QueryOperation> {
+    let aggregate_types: Vec<AggregateType> =
+        AggregateType::all_for_dialect(dialect).cloned().collect();
+
+    aggregate_types
+        .into_iter()
+        .map(QueryOperation::ColumnAggregate)
+        .chain(iter::once(QueryOperation::Distinct))
+        .chain(JOIN_OPERATORS.iter().cloned().map(QueryOperation::Join))
+        .chain(iter::once(QueryOperation::ProjectLiteral))
+        .chain(iter::once(QueryOperation::SingleParameter))
+        .chain(iter::once(QueryOperation::InParameter { num_values: 3 }))
+        .chain(BuiltinFunction::iter().map(QueryOperation::ProjectBuiltinFunction))
+        .chain(ALL_TOPK.iter().cloned())
+        .chain(
+            ALL_SUBQUERY_POSITIONS
+                .iter()
+                .cloned()
+                .map(QueryOperation::Subquery),
+        )
+        .collect()
+}
+
 lazy_static! {
     static ref ALL_COMPARISON_FILTER_OPS: Vec<FilterOp> = {
         COMPARISON_OPS
             .iter()
             .cartesian_product(ALL_FILTER_RHS.iter().cloned())
-            .map(|(operator, rhs)| FilterOp::Comparison {
-                    op: *operator,
-                    rhs,
-                },
-            )
+            .map(|(operator, rhs)| FilterOp::Comparison { op: *operator, rhs })
             .collect()
     };
-
     static ref ALL_BETWEEN_OPS: Vec<FilterOp> = {
         [true, false]
             .into_iter()
-            .map(|negated| {
-                FilterOp::Between {
-                    negated,
-                    min: FilterRHS::Constant(Literal::Integer(1)),
-                    max: FilterRHS::Constant(Literal::Integer(5))
-                }
+            .map(|negated| FilterOp::Between {
+                negated,
+                min: FilterRHS::Constant(Literal::Integer(1)),
+                max: FilterRHS::Constant(Literal::Integer(5)),
             })
             .collect()
     };
-
     static ref ALL_FILTER_OPS: Vec<FilterOp> = {
         ALL_COMPARISON_FILTER_OPS
             .iter()
@@ -1740,7 +1864,6 @@ lazy_static! {
             .chain(iter::once(FilterOp::IsNull { negated: false }))
             .collect()
     };
-
     static ref ALL_FILTERS: Vec<Filter> = {
         ALL_FILTER_OPS
             .iter()
@@ -1749,25 +1872,8 @@ lazy_static! {
             .map(|(operation, extend_where_with)| Filter {
                 extend_where_with,
                 operation,
-                column_type: SqlType::Int(None)
+                column_type: SqlType::Int(None),
             })
-            .collect()
-    };
-
-    /// A list of all possible [`QueryOperation`]s
-    pub static ref ALL_OPERATIONS: Vec<QueryOperation> = {
-        ALL_AGGREGATE_TYPES
-            .iter()
-            .cloned()
-            .map(QueryOperation::ColumnAggregate)
-            .chain(iter::once(QueryOperation::Distinct))
-            .chain(JOIN_OPERATORS.iter().cloned().map(QueryOperation::Join))
-            .chain(iter::once(QueryOperation::ProjectLiteral))
-            .chain(iter::once(QueryOperation::SingleParameter))
-            .chain(iter::once(QueryOperation::InParameter { num_values: 3 }))
-            .chain(BuiltinFunction::iter().map(QueryOperation::ProjectBuiltinFunction))
-            .chain(ALL_TOPK.iter().cloned())
-            .chain(ALL_SUBQUERY_POSITIONS.iter().cloned().map(QueryOperation::Subquery))
             .collect()
     };
 }
@@ -2499,9 +2605,13 @@ impl QueryOperation {
         }
     }
 
-    /// Returns an iterator over all permutations of length 1..`max_depth` [`QueryOperation`]s.
-    pub fn permute(max_depth: usize) -> impl Iterator<Item = Vec<&'static QueryOperation>> {
-        (1..=max_depth).flat_map(|depth| ALL_OPERATIONS.iter().combinations(depth))
+    /// Returns an iterator over all permutations of length 1..`max_depth` [`QueryOperation`]s for the given dialect.
+    pub fn permute(
+        max_depth: usize,
+        dialect: ParseDialect,
+    ) -> impl Iterator<Item = Vec<QueryOperation>> {
+        let all_ops = all_operations_for_dialect(dialect);
+        (1..=max_depth).flat_map(move |depth| all_ops.clone().into_iter().combinations(depth))
     }
 }
 
@@ -3234,10 +3344,32 @@ impl GenerateOpts {
     ///
     /// This involves permuting [`Self::operations`] up to [`Self::num_operations`] times, and
     /// recursively generating subqueries up to a depth of [`Self::subquery_depth`]
-    pub fn into_query_seeds(self) -> impl Iterator<Item = QuerySeed> {
+    ///
+    /// Returns an error if any manually specified operations are not supported by the given dialect.
+    pub fn into_query_seeds(
+        self,
+        dialect: ParseDialect,
+    ) -> anyhow::Result<impl Iterator<Item = QuerySeed>> {
         let operations: Vec<_> = match self.operations {
-            Some(OperationList(ops)) => ops.into_iter().flat_map(|ops| ops.into_iter()).collect(),
-            None => ALL_OPERATIONS.clone(),
+            Some(OperationList(ops)) => {
+                let ops: Vec<_> = ops.into_iter().flat_map(|ops| ops.into_iter()).collect();
+
+                // Validate that all manually specified operations are compatible with the dialect
+                for op in &ops {
+                    if let QueryOperation::ColumnAggregate(agg) = op {
+                        if !agg.is_supported_by(dialect) {
+                            return Err(anyhow::anyhow!(
+                                "Aggregate operation {:?} is not supported by {:?} dialect",
+                                agg,
+                                dialect
+                            ));
+                        }
+                    }
+                }
+
+                ops
+            }
+            None => all_operations_for_dialect(dialect),
         };
 
         let (subqueries, operations): (Vec<SubqueryPosition>, Vec<QueryOperation>) =
@@ -3318,7 +3450,7 @@ impl GenerateOpts {
 
         let subquery_depth = self.subquery_depth;
 
-        if operations.is_empty() {
+        Ok(if operations.is_empty() {
             Either::Left(make_seeds(
                 subquery_depth,
                 operations,
@@ -3334,7 +3466,7 @@ impl GenerateOpts {
                     available_ops.clone(),
                 )
             }))
-        }
+        })
     }
 }
 
@@ -3522,7 +3654,10 @@ mod tests {
             num_operations: None,
         };
 
-        let seeds = opts.into_query_seeds().collect::<Vec<_>>();
+        let seeds = opts
+            .into_query_seeds(ParseDialect::PostgreSQL)
+            .unwrap()
+            .collect::<Vec<_>>();
         assert_eq!(seeds.len(), 1);
         assert_eq!(
             seeds.first().unwrap(),
@@ -3537,6 +3672,73 @@ mod tests {
                 }]
             }
         )
+    }
+
+    #[test]
+    fn dialect_validation_catches_incompatible_operations() {
+        // Test that trying to use PostgreSQL-only ArrayAgg with MySQL fails
+        let opts = GenerateOpts {
+            operations: Some(
+                vec![vec![QueryOperation::ColumnAggregate(
+                    AggregateType::ArrayAgg { distinct: false },
+                )]]
+                .into(),
+            ),
+            subquery_depth: 0,
+            num_operations: None,
+        };
+
+        let result = opts.into_query_seeds(ParseDialect::MySQL);
+        assert!(result.is_err());
+        let error = result.err().unwrap();
+        let error_msg = error.to_string();
+        assert!(error_msg.contains("ArrayAgg"));
+        assert!(error_msg.contains("MySQL"));
+
+        // Test that using MySQL-only GroupConcat with PostgreSQL fails
+        let opts = GenerateOpts {
+            operations: Some(
+                vec![vec![QueryOperation::ColumnAggregate(
+                    AggregateType::GroupConcat { distinct: false },
+                )]]
+                .into(),
+            ),
+            subquery_depth: 0,
+            num_operations: None,
+        };
+
+        let result = opts.into_query_seeds(ParseDialect::PostgreSQL);
+        assert!(result.is_err());
+        let error = result.err().unwrap();
+        let error_msg = error.to_string();
+        assert!(error_msg.contains("GroupConcat"));
+        assert!(error_msg.contains("PostgreSQL"));
+    }
+
+    #[test]
+    fn compatible_operations_succeed() {
+        // Test that common operations work with both dialects
+        let opts = GenerateOpts {
+            operations: Some(
+                vec![vec![QueryOperation::ColumnAggregate(
+                    AggregateType::Count {
+                        column_type: SqlType::Int(None),
+                        distinct: false,
+                    },
+                )]]
+                .into(),
+            ),
+            subquery_depth: 0,
+            num_operations: None,
+        };
+
+        // Should work with MySQL
+        let result = opts.clone().into_query_seeds(ParseDialect::MySQL);
+        assert!(result.is_ok());
+
+        // Should work with PostgreSQL
+        let result = opts.into_query_seeds(ParseDialect::PostgreSQL);
+        assert!(result.is_ok());
     }
 
     #[test]

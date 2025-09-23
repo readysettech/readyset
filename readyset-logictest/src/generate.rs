@@ -205,7 +205,7 @@ impl Seed {
         opts: query_generator::GenerateOpts,
         dialect: readyset_sql::Dialect,
     ) -> anyhow::Result<Self> {
-        Self::from_seeds(opts.into_query_seeds(), dialect)
+        Self::from_seeds(opts.into_query_seeds(dialect)?, dialect)
     }
 
     pub async fn run(
