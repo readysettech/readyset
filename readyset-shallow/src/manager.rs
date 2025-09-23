@@ -1,9 +1,9 @@
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
-use dashmap::DashMap;
+use papaya::HashMap;
 use tracing::info;
 
 use readyset_client::query::QueryId;
@@ -18,10 +18,11 @@ pub type Row = Vec<DfValue>;
 pub type Values = Vec<Vec<DfValue>>;
 
 pub struct CacheManager<K> {
-    caches: Arc<DashMap<u64, Arc<Cache<K>>>>,
-    names: Arc<DashMap<Relation, u64>>,
-    query_ids: Arc<DashMap<QueryId, u64>>,
-    next_id: AtomicU64,
+    caches: HashMap<u64, Arc<Cache<K>>>,
+    names: HashMap<Relation, u64>,
+    query_ids: HashMap<QueryId, u64>,
+    // This lock also synchronizes inserts into the three HashMaps.
+    next_id: Mutex<u64>,
 }
 
 // #[derive(Default)] adds a K: Default bound, which we don't want.
@@ -47,10 +48,6 @@ where
         Self::default()
     }
 
-    fn allocate_id(&self) -> u64 {
-        self.next_id.fetch_add(1, Ordering::Relaxed)
-    }
-
     fn check_identifiers(
         relation: Option<&Relation>,
         query_id: Option<&QueryId>,
@@ -70,16 +67,18 @@ where
     }
 
     fn get_cache_id(&self, relation: Option<&Relation>, query_id: Option<&QueryId>) -> Option<u64> {
-        if let Some(relation) = relation
-            && let Some(id) = self.names.get(relation)
-        {
-            return Some(*id);
+        if let Some(relation) = relation {
+            let guard = self.names.pin();
+            if let Some(id) = guard.get(relation) {
+                return Some(*id);
+            }
         }
 
-        if let Some(query_id) = query_id
-            && let Some(id) = self.query_ids.get(query_id)
-        {
-            return Some(*id);
+        if let Some(query_id) = query_id {
+            let guard = self.query_ids.pin();
+            if let Some(id) = guard.get(query_id) {
+                return Some(*id);
+            }
         }
 
         None
@@ -94,6 +93,13 @@ where
         Self::check_identifiers(relation.as_ref(), query_id.as_ref())?;
         let name = Self::format_name(relation.as_ref(), query_id.as_ref());
 
+        let mut next_id = self
+            .next_id
+            .lock()
+            .expect("couldn't lock next_id to create");
+        let id = *next_id;
+        *next_id += 1;
+
         if self
             .get_cache_id(relation.as_ref(), query_id.as_ref())
             .is_some()
@@ -101,17 +107,18 @@ where
             return Err(ReadySetError::ViewAlreadyExists(name));
         }
 
-        let id = self.allocate_id();
         let cache = Arc::new(Cache::new(policy, relation.clone(), query_id));
 
-        self.caches.insert(id, cache);
-
         if let Some(relation) = relation {
-            self.names.insert(relation, id);
+            let guard = self.names.pin();
+            guard.insert(relation, id);
         }
         if let Some(query_id) = query_id {
-            self.query_ids.insert(query_id, id);
+            let guard = self.query_ids.pin();
+            guard.insert(query_id, id);
         }
+
+        self.caches.pin().insert(id, cache);
 
         info!("created shallow cache {name}");
         Ok(())
@@ -125,24 +132,28 @@ where
         Self::check_identifiers(relation, query_id)?;
         let name = Self::format_name(relation, query_id);
 
+        let _lock = self.next_id.lock().expect("couldn't lock next_id to drop");
+
         let Some(id) = self.get_cache_id(relation, query_id) else {
             return Err(ReadySetError::ViewNotFound(name));
         };
 
-        let cache = self.caches.get(&id).ok_or_else(|| {
+        let guard = self.caches.pin();
+        let cache = guard.get(&id).ok_or_else(|| {
             let name = Self::format_name(relation, query_id);
             ReadySetError::ViewNotFound(name)
         })?;
 
         if let Some(relation) = cache.relation() {
-            self.names.remove(relation);
+            let relations_guard = self.names.pin();
+            relations_guard.remove(relation);
         }
         if let Some(query_id) = cache.query_id() {
-            self.query_ids.remove(query_id);
+            let queries_guard = self.query_ids.pin();
+            queries_guard.remove(query_id);
         }
 
-        drop(cache);
-        self.caches.remove(&id);
+        guard.remove(&id);
 
         info!("dropped shallow cache {name}");
         Ok(())
@@ -157,7 +168,7 @@ where
             return None;
         };
         let id = self.get_cache_id(relation, query_id)?;
-        self.caches.get(&id).map(|c| Arc::clone(&*c))
+        self.caches.pin().get(&id).cloned()
     }
 
     pub fn get_or_start_insert(&self, query_id: &QueryId, key: K) -> CacheResult<K> {
