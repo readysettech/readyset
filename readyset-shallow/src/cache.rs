@@ -17,7 +17,6 @@ pub struct CacheEntry {
 }
 
 pub struct Cache<K> {
-    _policy: EvictionPolicy,
     results: MokaCache<K, Arc<CacheEntry>>,
     cache_metadata: OnceLock<Arc<QueryMetadata>>,
     relation: Option<Relation>,
@@ -45,9 +44,14 @@ where
         relation: Option<Relation>,
         query_id: Option<QueryId>,
     ) -> Self {
+        let builder = MokaCache::builder();
+
+        let builder = match policy {
+            EvictionPolicy::Ttl(ttl) => builder.time_to_live(ttl),
+        };
+
         Self {
-            _policy: policy,
-            results: MokaCache::new(10_000),
+            results: builder.build(),
             cache_metadata: Default::default(),
             relation,
             query_id,
