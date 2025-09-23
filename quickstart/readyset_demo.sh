@@ -117,7 +117,7 @@ check_sample_data() {
 
     dots+="."
     echo -ne "$dots"
-    ((retry_count++))
+    retry_count=$((retry_count + 1))
     sleep $sleep_interval_secs
   done
 
