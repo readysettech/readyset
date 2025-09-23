@@ -72,6 +72,7 @@ run_script() {
     # use return code 42 to signal success and manually translate that to 0 afterwards.
     expect -c "
         set env(RS_API_KEY) readyset-internal
+        set env(DISABLE_TELEMETRY) true
         spawn bash $DEMO_SCRIPT_TMP
 
         set timeout 8

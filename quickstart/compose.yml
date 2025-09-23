@@ -11,6 +11,7 @@ services:
       - "6034:6034"
     environment:
       RS_API_KEY: ${RS_API_KEY-""}
+      DISABLE_TELEMETRY: ${DISABLE_TELEMETRY-false}
       DEPLOYMENT_ENV: quickstart_docker
       STORAGE_DIR: /state
       PROMETHEUS_METRICS: true
