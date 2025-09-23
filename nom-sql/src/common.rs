@@ -230,6 +230,30 @@ fn timestamp_field() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Times
     }
 }
 
+fn bucket(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
+    move |i| {
+        let (i, _) = tag_no_case("BUCKET")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = char('(')(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, expr) = expression(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = ws_sep_comma(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, interval) = expression(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = char(')')(i)?;
+
+        Ok((
+            i,
+            FunctionExpr::Bucket {
+                expr: Box::new(expr),
+                interval: Box::new(interval),
+            },
+        ))
+    }
+}
+
 fn extract(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
     move |i| {
         let (i, _) = tag_no_case("EXTRACT")(i)?;
@@ -438,6 +462,7 @@ pub fn function_expr(
                     allow_duplicate_keys: is_json,
                 },
             ),
+            bucket(dialect),
             extract(dialect),
             lower(dialect),
             upper(dialect),

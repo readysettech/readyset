@@ -1279,6 +1279,17 @@ impl Expr {
 
                 Ok(Self::Call { func, ty })
             }
+            AstExpr::Call(FunctionExpr::Bucket { expr, interval }) => {
+                let expr = Self::lower(*expr, dialect, context)?;
+                // Return type should be the same as the input timestamp/datetime type
+                let ty = expr.ty().clone();
+                let func = Box::new(BuiltinFunction::Bucket {
+                    expr,
+                    interval: interval.try_into()?,
+                });
+
+                Ok(Self::Call { func, ty })
+            }
             AstExpr::Call(call) => internal!(
                 "Unexpected (aggregate?) call node in project expression: {:?}",
                 Sensitive(&call)

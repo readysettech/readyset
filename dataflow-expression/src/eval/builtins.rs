@@ -16,7 +16,7 @@ use readyset_data::dialect::SqlEngine;
 use readyset_data::{Array, Collation, DfType, DfValue, TimestampTz};
 use readyset_decimal::{Decimal, RoundingMode};
 use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
-use readyset_sql::ast::TimestampField;
+use readyset_sql::ast::{TimeInterval, TimestampField};
 use readyset_util::math::integer_rnd;
 use serde_json::Value as JsonValue;
 use test_strategy::Arbitrary;
@@ -1480,6 +1480,98 @@ impl BuiltinFunction {
                     _ => Err(invalid_query_err!(
                         "SpatialAsEWKT requires a point argument (in the form of a byte array)"
                     )),
+                }
+            }
+            BuiltinFunction::Bucket { expr, interval } => {
+                let datetime_val = non_null!(expr.eval(record)?);
+
+                let (datetime, tz) = match datetime_val {
+                    DfValue::TimestampTz(ts) if ts.has_timezone() => {
+                        (ts.to_chrono(), Some(ts.to_chrono().timezone()))
+                    }
+                    DfValue::TimestampTz(ts) => (ts.to_chrono(), None),
+                    _ => {
+                        return Err(invalid_query_err!(
+                            "Bucket function requires a timestamp or timestamptz argument"
+                        ))
+                    }
+                };
+
+                let bucket = match interval {
+                    TimeInterval::Year(n) => {
+                        let year = datetime.year();
+                        let floored_year = (year / (*n as i32)) * (*n as i32);
+                        NaiveDate::from_ymd_opt(floored_year, 1, 1)
+                            .and_then(|d| d.and_hms_opt(0, 0, 0))
+                            .ok_or_else(|| {
+                                invalid_query_err!("Invalid year calculation in bucket function")
+                            })?
+                    }
+                    TimeInterval::Month(n) => {
+                        let year = datetime.year();
+                        let month = datetime.month() as usize;
+                        let floored_month = (month / n) * n;
+                        NaiveDate::from_ymd_opt(year, floored_month as u32, 1)
+                            .and_then(|d| d.and_hms_opt(0, 0, 0))
+                            .ok_or_else(|| {
+                                invalid_query_err!("Invalid month calculation in bucket function")
+                            })?
+                    }
+                    TimeInterval::Day(n) => {
+                        let unix_days = datetime.date_naive().num_days_from_ce();
+                        let floored_days = (unix_days / (*n as i32)) * (*n as i32);
+                        NaiveDate::from_num_days_from_ce_opt(floored_days)
+                            .and_then(|d| d.and_hms_opt(0, 0, 0))
+                            .ok_or_else(|| {
+                                invalid_query_err!("Invalid day calculation in bucket function")
+                            })?
+                    }
+                    TimeInterval::Hour(n) => {
+                        let total_hours =
+                            datetime.num_days_from_ce() as i64 * 24 + datetime.hour() as i64;
+                        let floored_hours = (total_hours / (*n as i64)) * (*n as i64);
+                        let days = floored_hours / 24;
+                        let hours = floored_hours % 24;
+                        NaiveDate::from_num_days_from_ce_opt(days as i32)
+                            .and_then(|d| d.and_hms_opt(hours as u32, 0, 0))
+                            .ok_or_else(|| {
+                                invalid_query_err!("Invalid hour calculation in bucket function")
+                            })?
+                    }
+                    TimeInterval::Minute(n) => {
+                        let total_minutes = datetime.num_days_from_ce() as i64 * 24 * 60
+                            + datetime.hour() as i64 * 60
+                            + datetime.minute() as i64;
+                        let floored_minutes = (total_minutes / (*n as i64)) * (*n as i64);
+                        let days = floored_minutes / (24 * 60);
+                        let remaining_minutes = floored_minutes % (24 * 60);
+                        let hours = remaining_minutes / 60;
+                        let minutes = remaining_minutes % 60;
+                        NaiveDate::from_num_days_from_ce_opt(days as i32)
+                            .and_then(|d| d.and_hms_opt(hours as u32, minutes as u32, 0))
+                            .ok_or_else(|| {
+                                invalid_query_err!("Invalid minute calculation in bucket function")
+                            })?
+                    }
+                    TimeInterval::Second(n) => {
+                        let total_seconds = datetime.timestamp();
+                        let floored_seconds = (total_seconds / (*n as i64)) * (*n as i64);
+                        chrono::DateTime::from_timestamp(floored_seconds, 0)
+                            .map(|dt| dt.naive_utc())
+                            .ok_or_else(|| {
+                                invalid_query_err!("Invalid second calculation in bucket function")
+                            })?
+                    }
+                };
+
+                if let Some(tz) = tz {
+                    let bucket_tz = bucket.and_local_timezone(tz).single().ok_or_else(|| {
+                        invalid_query_err!("Ambiguous timezone in bucket function")
+                    })?;
+
+                    Ok(DfValue::TimestampTz(bucket_tz.into()))
+                } else {
+                    Ok(DfValue::TimestampTz(bucket.into()))
                 }
             }
         }
@@ -3735,5 +3827,60 @@ mod tests {
             eval_expr(expr, PostgreSQL),
             char_to_code_point!('こ').into()
         );
+    }
+
+    #[test]
+    fn eval_bucket_function_preserves_timezone() {
+        use chrono::{FixedOffset, TimeZone};
+
+        // Create bucket expression directly without SQL parsing
+        let column_expr = Expr::Column {
+            index: 0,
+            ty: DfType::TimestampTz {
+                subsecond_digits: 6,
+            },
+        };
+        let bucket_expr = Expr::Call {
+            func: Box::new(BuiltinFunction::Bucket {
+                expr: column_expr,
+                interval: TimeInterval::Hour(1),
+            }),
+            ty: DfType::TimestampTz {
+                subsecond_digits: 6,
+            },
+        };
+
+        // Test with Eastern Time (UTC-4)
+        let eastern_tz = FixedOffset::west_opt(4 * 3600).unwrap();
+        let eastern_time = eastern_tz
+            .with_ymd_and_hms(2023, 7, 15, 14, 32, 15)
+            .unwrap();
+        let expected_eastern = eastern_tz.with_ymd_and_hms(2023, 7, 15, 14, 0, 0).unwrap();
+
+        let result = bucket_expr
+            .eval(&[DfValue::TimestampTz(eastern_time.into())])
+            .unwrap();
+        assert_eq!(result, DfValue::TimestampTz(expected_eastern.into()));
+
+        // Test with Pacific Time (UTC-7)
+        let pacific_tz = FixedOffset::west_opt(7 * 3600).unwrap();
+        let pacific_time = pacific_tz
+            .with_ymd_and_hms(2023, 7, 15, 14, 32, 15)
+            .unwrap();
+        let expected_pacific = pacific_tz.with_ymd_and_hms(2023, 7, 15, 14, 0, 0).unwrap();
+
+        let result = bucket_expr
+            .eval(&[DfValue::TimestampTz(pacific_time.into())])
+            .unwrap();
+        assert_eq!(result, DfValue::TimestampTz(expected_pacific.into()));
+
+        let utc_tz = FixedOffset::east_opt(0).unwrap();
+        let utc_time = utc_tz.with_ymd_and_hms(2023, 7, 15, 14, 32, 15).unwrap();
+        let expected_utc = utc_tz.with_ymd_and_hms(2023, 7, 15, 14, 0, 0).unwrap();
+
+        let result = bucket_expr
+            .eval(&[DfValue::TimestampTz(utc_time.into())])
+            .unwrap();
+        assert_eq!(result, DfValue::TimestampTz(expected_utc.into()));
     }
 }

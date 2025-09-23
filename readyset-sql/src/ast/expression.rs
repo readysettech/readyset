@@ -11,9 +11,9 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
+use crate::ast::*;
 use crate::{
     AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, TryIntoDialect,
-    ast::*,
 };
 
 /// Function call expressions
@@ -106,6 +106,15 @@ pub enum FunctionExpr {
         separator: Option<String>,
         distinct: DistinctOption,
         order_by: Option<OrderClause>,
+    },
+
+    /// A Readyset-specific function that places datetime/timestamps into buckets
+    /// based on the interval.
+    /// Not supported by upstream DBs.
+    /// Mainly used in GROUP BY clauses to provide timeseries-like functionality
+    Bucket {
+        expr: Box<Expr>,
+        interval: Box<Expr>,
     },
 
     /// The SQL `SUBSTRING`/`SUBSTR` function.
@@ -271,6 +280,11 @@ impl FunctionExpr {
             FunctionExpr::RowNumber => "row_number()".to_string(),
             FunctionExpr::Rank => "rank()".to_string(),
             FunctionExpr::DenseRank => "dense_rank()".to_string(),
+            FunctionExpr::Bucket { expr, interval } => format!(
+                "bucket({}, {})",
+                expr.alias(dialect)?,
+                interval.alias(dialect)?,
+            ),
         })
     }
 }
@@ -290,6 +304,7 @@ impl FunctionExpr {
             | FunctionExpr::GroupConcat { expr: arg, .. }
             | FunctionExpr::StringAgg { expr: arg, .. }
             | FunctionExpr::Extract { expr: arg, .. }
+            | FunctionExpr::Bucket { expr: arg, .. }
             | FunctionExpr::Lower { expr: arg, .. }
             | FunctionExpr::Upper { expr: arg, .. } => {
                 concrete_iter!(iter::once(arg.as_ref()))
@@ -350,6 +365,12 @@ impl DialectDisplay for FunctionExpr {
             FunctionExpr::Avg { expr, .. } => write!(f, "avg({})", expr.display(dialect)),
             FunctionExpr::Count { expr, .. } => write!(f, "count({})", expr.display(dialect)),
             FunctionExpr::CountStar => write!(f, "count(*)"),
+            FunctionExpr::Bucket { expr, interval } => write!(
+                f,
+                "bucket({}, {})",
+                interval.display(dialect),
+                expr.display(dialect)
+            ),
             FunctionExpr::Sum { expr, .. } => write!(f, "sum({})", expr.display(dialect)),
             FunctionExpr::Max(col) => write!(f, "max({})", col.display(dialect)),
             FunctionExpr::Min(col) => write!(f, "min({})", col.display(dialect)),
@@ -1801,6 +1822,11 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 key: next_expr()?,
                 value: next_expr()?,
                 allow_duplicate_keys: true,
+            })
+        } else if ident.value.eq_ignore_ascii_case("BUCKET") {
+            Self::Call(FunctionExpr::Bucket {
+                expr: next_expr()?,
+                interval: next_expr()?,
             })
         } else if ident.value.eq_ignore_ascii_case("ROW_NUMBER") {
             Self::Call(FunctionExpr::RowNumber)

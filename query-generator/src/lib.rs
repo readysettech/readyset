@@ -1493,6 +1493,7 @@ impl BuiltinFunction {
             },
             SpatialAsText => "st_astext",
             SpatialAsEWKT => "st_asewkt",
+            Bucket => "bucket",
         }
     }
 
@@ -1539,6 +1540,7 @@ impl BuiltinFunction {
                 Hex => false,
                 SpatialAsText => true,
                 SpatialAsEWKT => false,
+                Bucket => false,
             })
             .map(BuiltinFunction)
             .collect()
@@ -1586,6 +1588,7 @@ impl BuiltinFunction {
                 Hex => false,
                 SpatialAsText => true,
                 SpatialAsEWKT => true,
+                Bucket => false,
             })
             .map(BuiltinFunction)
             .collect()
@@ -2416,6 +2419,7 @@ impl QueryOperation {
                     Hex => add_builtin!(SqlType::Text),
                     SpatialAsText => add_builtin!(SqlType::Text),
                     SpatialAsEWKT => add_builtin!(SqlType::Text),
+                    Bucket => add_builtin!(SqlType::TimestampTz),
                 }
             }
             QueryOperation::TopK { order_type, limit } => {

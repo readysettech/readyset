@@ -380,9 +380,12 @@ pub(super) fn post_lookup_aggregates(
                         op: function.try_into()?,
                     }
                 }
-                Extract { .. } | Call { .. } | Substring { .. } | Lower { .. } | Upper { .. } => {
-                    continue
-                }
+                Extract { .. }
+                | Call { .. }
+                | Substring { .. }
+                | Lower { .. }
+                | Upper { .. }
+                | Bucket { .. } => continue,
                 // TODO: should this be supported given the projection workaround we have?
                 JsonObjectAgg { .. } => {
                     antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::JsonObjectAgg");

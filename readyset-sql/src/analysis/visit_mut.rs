@@ -590,14 +590,6 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
             }
             Ok(())
         }
-        FunctionExpr::Avg { expr, .. } => visitor.visit_expr(expr.as_mut()),
-        FunctionExpr::Count { expr, .. } => visitor.visit_expr(expr.as_mut()),
-        FunctionExpr::Extract { expr, .. } => visitor.visit_expr(expr.as_mut()),
-        FunctionExpr::Lower { expr, .. } => visitor.visit_expr(expr.as_mut()),
-        FunctionExpr::Upper { expr, .. } => visitor.visit_expr(expr.as_mut()),
-        FunctionExpr::Sum { expr, .. } => visitor.visit_expr(expr.as_mut()),
-        FunctionExpr::Max(expr) => visitor.visit_expr(expr.as_mut()),
-        FunctionExpr::Min(expr) => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::GroupConcat { expr, order_by, .. } => {
             visitor.visit_expr(expr.as_mut())?;
             if let Some(order_by) = order_by {
@@ -612,6 +604,15 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
             }
             Ok(())
         }
+        FunctionExpr::Bucket { expr, .. }
+        | FunctionExpr::Avg { expr, .. }
+        | FunctionExpr::Count { expr, .. }
+        | FunctionExpr::Extract { expr, .. }
+        | FunctionExpr::Lower { expr, .. }
+        | FunctionExpr::Upper { expr, .. }
+        | FunctionExpr::Sum { expr, .. }
+        | FunctionExpr::Max(expr)
+        | FunctionExpr::Min(expr) => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::CountStar
         | FunctionExpr::RowNumber
         | FunctionExpr::Rank

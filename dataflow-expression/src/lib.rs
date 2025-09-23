@@ -14,7 +14,7 @@ pub use eval::builtins::DateTruncPrecision;
 use itertools::Itertools;
 pub use readyset_data::{dialect::SqlEngine, Dialect};
 use readyset_data::{Collation, DfType, DfValue};
-use readyset_sql::ast::TimestampField;
+use readyset_sql::ast::{TimeInterval, TimestampField};
 use serde::{Deserialize, Serialize};
 use strum::{EnumDiscriminants, EnumIter};
 use vec1::Vec1;
@@ -185,6 +185,13 @@ pub enum BuiltinFunction {
     SpatialAsEWKT {
         expr: Expr,
     },
+
+    /// Bucket function that floors datetime values to the specified interval
+    /// Used mainly in GROUP BY clauses to provide timeseries-like functionality
+    Bucket {
+        expr: Expr,
+        interval: TimeInterval,
+    },
 }
 
 impl BuiltinFunction {
@@ -230,6 +237,7 @@ impl BuiltinFunction {
             JsonBuildObject { .. } => "json_build_object",
             SpatialAsText { .. } => "st_astext",
             SpatialAsEWKT { .. } => "st_asewkt",
+            Bucket { .. } => "bucket",
         }
     }
 }
@@ -368,6 +376,9 @@ impl Display for BuiltinFunction {
             JsonBuildObject { args, .. } => write!(f, "({})", args.iter().join(", ")),
             SpatialAsText { .. } => write!(f, "st_astext"),
             SpatialAsEWKT { .. } => write!(f, "st_asewkt"),
+            Bucket { expr, interval } => {
+                write!(f, "({}, {})", expr, interval)
+            }
         }
     }
 }

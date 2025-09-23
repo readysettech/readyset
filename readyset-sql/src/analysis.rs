@@ -103,22 +103,23 @@ impl<'a> ReferredColumnsIter<'a> {
         use FunctionExpr::*;
 
         match fexpr {
-            ArrayAgg { expr, .. } => self.visit_expr(expr),
-            Avg { expr, .. } => self.visit_expr(expr),
-            Count { expr, .. } => self.visit_expr(expr),
             JsonObjectAgg { key, value, .. } => {
                 self.exprs_to_visit.push(key);
                 self.visit_expr(value)
             }
             CountStar | RowNumber | DenseRank | Rank => None,
-            Extract { expr, .. } => self.visit_expr(expr),
-            Lower { expr, .. } => self.visit_expr(expr),
-            Upper { expr, .. } => self.visit_expr(expr),
-            Sum { expr, .. } => self.visit_expr(expr),
-            Max(arg) => self.visit_expr(arg),
-            Min(arg) => self.visit_expr(arg),
-            GroupConcat { expr, .. } => self.visit_expr(expr),
-            StringAgg { expr, .. } => self.visit_expr(expr),
+            Bucket { expr, .. }
+            | ArrayAgg { expr, .. }
+            | Avg { expr, .. }
+            | Count { expr, .. }
+            | Extract { expr, .. }
+            | Lower { expr, .. }
+            | Upper { expr, .. }
+            | Sum { expr, .. }
+            | Max(expr)
+            | Min(expr)
+            | StringAgg { expr, .. }
+            | GroupConcat { expr, .. } => self.visit_expr(expr),
             Call {
                 arguments: None, ..
             } => None,
@@ -244,18 +245,19 @@ impl<'a> ReferredColumnsMut<'a> {
         use FunctionExpr::*;
 
         match fexpr {
-            ArrayAgg { expr, .. } => self.visit_expr(expr),
-            Avg { expr, .. } => self.visit_expr(expr),
-            Count { expr, .. } => self.visit_expr(expr),
             CountStar | RowNumber | Rank | DenseRank => None,
-            Extract { expr, .. } => self.visit_expr(expr),
-            Lower { expr, .. } => self.visit_expr(expr),
-            Upper { expr, .. } => self.visit_expr(expr),
-            Sum { expr, .. } => self.visit_expr(expr),
-            Max(arg) => self.visit_expr(arg),
-            Min(arg) => self.visit_expr(arg),
-            GroupConcat { expr, .. } => self.visit_expr(expr),
-            StringAgg { expr, .. } => self.visit_expr(expr),
+            Bucket { expr, .. }
+            | Avg { expr, .. }
+            | ArrayAgg { expr, .. }
+            | Count { expr, .. }
+            | Extract { expr, .. }
+            | Lower { expr, .. }
+            | Upper { expr, .. }
+            | Sum { expr, .. }
+            | Max(expr)
+            | Min(expr)
+            | StringAgg { expr, .. }
+            | GroupConcat { expr, .. } => self.visit_expr(expr),
             Call {
                 arguments: None, ..
             } => None,
@@ -408,6 +410,7 @@ pub fn is_aggregate(function: &FunctionExpr) -> bool {
         | FunctionExpr::Substring { .. }
         | FunctionExpr::Lower { .. }
         | FunctionExpr::Upper { .. }
+        | FunctionExpr::Bucket { .. }
         // Window Functions are aggregates in a sense, but they
         // are handled separately in the graph
         | FunctionExpr::RowNumber

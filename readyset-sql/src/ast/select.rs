@@ -484,6 +484,7 @@ impl SelectStatement {
                     | FunctionExpr::Lower { .. }
                     | FunctionExpr::DenseRank
                     | FunctionExpr::Rank
+                    | FunctionExpr::Bucket { .. }
                     | FunctionExpr::RowNumber
                     | FunctionExpr::Substring { .. }
                     | FunctionExpr::Upper { .. } => false,

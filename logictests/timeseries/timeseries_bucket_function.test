@@ -1,0 +1,249 @@
+# mysql doesn't like the timestamptz type for some reason
+# so we run this test on postgres
+
+statement ok
+create table events (
+  id int,
+  event_time timestamp,
+  event_timestamptz timestamptz,
+  value int
+);
+
+statement ok
+insert into events (id, event_time, event_timestamptz, value)
+values
+(1, '2023-09-01 14:32:15', '2023-09-01 14:32:15', 100),
+(2, '2023-09-01 14:45:30', '2023-09-01 14:45:30', 200),
+(3, '2023-09-01 15:22:45', '2023-09-01 15:22:45', 150),
+(4, '2023-09-02 09:15:00', '2023-09-02 09:15:00', 300),
+(5, '2023-09-03 16:42:30', '2023-09-03 16:42:30', 250),
+(6, '2023-10-15 11:22:00', '2023-10-15 11:22:00', 400),
+(7, '2023-11-05 08:10:00', '2023-11-05 08:10:00', 500),
+(8, '2023-11-20 22:45:00', '2023-11-20 22:45:00', 600),
+(9, '2023-12-31 23:59:59', '2023-12-31 23:59:59', 700),
+(10, '2024-01-01 00:00:00', '2024-01-01 00:00:00', 800),
+(11, '2025-06-15 12:30:00', '2025-06-15 12:30:00', 900);
+
+onlyif readyset
+query ZI rowsort
+select bucket(event_time, '1 hour') as bucket_hour, sum(value)
+from events
+group by bucket_hour
+----
+2023-09-01 14:00:00
+300
+2023-09-01 15:00:00
+150
+2023-09-02 09:00:00
+300
+2023-09-03 16:00:00
+250
+2023-10-15 11:00:00
+400
+2023-11-05 08:00:00
+500
+2023-11-20 22:00:00
+600
+2023-12-31 23:00:00
+700
+2024-01-01 00:00:00
+800
+2025-06-15 12:00:00
+900
+
+onlyif readyset
+query ZI rowsort
+select bucket(event_time, '1 day') as bucket_day, count(*)
+from events
+group by bucket_day
+----
+2023-09-01 00:00:00
+3
+2023-09-02 00:00:00
+1
+2023-09-03 00:00:00
+1
+2023-10-15 00:00:00
+1
+2023-11-05 00:00:00
+1
+2023-11-20 00:00:00
+1
+2023-12-31 00:00:00
+1
+2024-01-01 00:00:00
+1
+2025-06-15 00:00:00
+1
+
+onlyif readyset
+query ZI rowsort
+select bucket(event_time, '1 month') as bucket_month, avg(value)
+from events
+group by bucket_month
+----
+2023-09-01 00:00:00
+200
+2023-10-01 00:00:00
+400
+2023-11-01 00:00:00
+550
+2023-12-01 00:00:00
+700
+2024-01-01 00:00:00
+800
+2025-06-01 00:00:00
+900
+
+onlyif readyset
+query ZI rowsort
+select bucket(event_time, '2 hours') as bucket_2hour, max(value)
+from events
+group by bucket_2hour
+----
+2023-09-01 14:00:00
+200
+2023-09-02 08:00:00
+300
+2023-09-03 16:00:00
+250
+2023-10-15 10:00:00
+400
+2023-11-05 08:00:00
+500
+2023-11-20 22:00:00
+600
+2023-12-31 22:00:00
+700
+2024-01-01 00:00:00
+800
+2025-06-15 12:00:00
+900
+
+onlyif readyset
+query ZI rowsort
+select bucket(event_time, '30 minutes') as bucket_30min, min(id)
+from events
+where event_time >= '2023-09-01 14:00:00' and event_time < '2023-09-02 00:00:00'
+group by bucket_30min
+----
+2023-09-01 14:30:00
+1
+2023-09-01 15:00:00
+3
+
+onlyif readyset
+query ZI rowsort
+select bucket(event_timestamptz, '1 day') as bucket_day_tz, count(*)
+from events
+group by bucket_day_tz
+----
+2023-09-01 00:00:00
+3
+2023-09-02 00:00:00
+1
+2023-09-03 00:00:00
+1
+2023-10-15 00:00:00
+1
+2023-11-05 00:00:00
+1
+2023-11-20 00:00:00
+1
+2023-12-31 00:00:00
+1
+2024-01-01 00:00:00
+1
+2025-06-15 00:00:00
+1
+
+onlyif readyset
+query ZI rowsort
+select bucket(event_time, '1 year') as bucket_year, sum(value)
+from events
+group by bucket_year
+----
+2023-01-01 00:00:00
+3200
+2024-01-01 00:00:00
+800
+2025-01-01 00:00:00
+900
+
+onlyif readyset
+query ZI rowsort
+select bucket(event_time, '100 years') as bucket_100years, sum(value)
+from events
+where id <= 5
+group by bucket_100years
+----
+2000-01-01 00:00:00
+1000
+
+onlyif readyset
+query ZI rowsort
+select bucket(event_time, '1000 hours') as bucket_1000h, count(*)
+from events
+where id <= 3
+group by bucket_1000h
+----
+2023-08-18 00:00:00
+3
+
+onlyif readyset
+query ZI rowsort
+select bucket(event_time, '10000 minutes') as bucket_10000min, count(*)
+from events
+where id <= 2
+group by bucket_10000min
+----
+2023-08-31 21:20:00
+2
+
+onlyif readyset
+query ZI rowsort
+select bucket(event_time, '3600 seconds') as bucket_3600sec, count(*)
+from events
+where id <= 2
+group by bucket_3600sec
+----
+2023-09-01 14:00:00
+2
+
+onlyif readyset
+query ZI rowsort
+select bucket(event_time, '24 hours') as bucket_24h, count(*)
+from events
+where id <= 3
+group by bucket_24h
+----
+2023-09-01 00:00:00
+3
+
+onlyif readyset
+query ZI rowsort
+select bucket(event_time, '3 months') as bucket_3months, sum(value)
+from events
+where id <= 3
+group by bucket_3months
+----
+2023-09-01 00:00:00
+450
+
+statement error
+select bucket(event_time, '0 seconds') from events;
+
+statement error
+select bucket(event_time, '0 hours') from events;
+
+statement error
+select bucket(event_time, '0 years') from events;
+
+statement error
+select bucket(event_time, '-1 hour') from events;
+
+statement error
+select bucket(event_time, 'not_a_number hours') from events;
+
+statement error
+select bucket(event_time, '1 invalid_unit') from events;
