@@ -884,6 +884,12 @@ impl ModelState for DDLModelState {
     ///  * Wiping and recreating a fresh copy of the oracle database directly in Postgres, and
     ///    setting up a connection
     async fn init_test_run(&self) -> Self::RunContext {
+        // REA-5986: set LOG_LEVEL so we get information about what is happening in the server.
+        std::env::set_var(
+            "LOG_LEVEL",
+            std::env::var("LOG_LEVEL").unwrap_or_else(|_| "info".into()),
+        );
+
         readyset_tracing::init_test_logging();
 
         let (opts, handle, shutdown_tx) = TestBuilder::default()
