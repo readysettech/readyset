@@ -456,14 +456,20 @@ mod types {
             .await
             .unwrap();
 
-        let post_update_res = client
-            .query("SELECT x FROM enumt ORDER BY x ASC", &[])
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.get(0))
-            .collect::<Vec<Abc>>();
-        assert_eq!(post_update_res, vec![A, A, C, C]);
+        eventually!(
+            run_test: {
+                client
+                    .query("SELECT x FROM enumt ORDER BY x ASC", &[])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.get(0))
+                    .collect::<Vec<Abc>>()
+            },
+            then_assert: |post_update_res| {
+                assert_eq!(post_update_res, vec![A, A, C, C]);
+            }
+        );
 
         client
             .simple_query("UPDATE enumt SET x = 'b' WHERE id = 1")
@@ -603,9 +609,6 @@ mod types {
             .query("SELECT x FROM enumt2 ORDER BY x ASC", &[])
             .await;
 
-        // wrapping this test in an eventually! macro as it frequently fails in CI.
-        // the most likely culprit is eventual consistency on small CI instances,
-        // and this check happens after a drop table/type and recreate.
         eventually!(
             run_test: {
                 client
@@ -804,12 +807,18 @@ mod types {
 
         sleep().await;
 
-        let res = client
-            .query_one("SELECT id, x FROM t WHERE id = $1", &[&B])
-            .await
-            .unwrap();
-        assert_eq!(res.get::<_, Abc>(0), B);
-        assert_eq!(res.get::<_, Abc>(1), B);
+        eventually!(
+            run_test: {
+                let res = client
+                    .query_one("SELECT id, x FROM t WHERE id = $1", &[&B])
+                    .await
+                    .unwrap();
+                (res.get::<_, Abc>(0), res.get::<_, Abc>(1))
+            },
+            then_assert: |res| {
+                assert_eq!(res, (B, B))
+            }
+        );
 
         client
             .simple_query("DELETE FROM t WHERE id = 'b'")
@@ -818,11 +827,20 @@ mod types {
 
         sleep().await;
 
-        let res = client
-            .query("SELECT id, x FROM t WHERE id = $1", &[&B])
-            .await
-            .unwrap();
-        assert!(res.is_empty());
+        eventually!(
+            run_test: {
+                client
+                    .query("SELECT id, x FROM t WHERE id = $1", &[&B])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|row| (row.get::<_, Abc>(0), row.get::<_, Abc>(1)))
+                    .collect::<Vec<_>>()
+            },
+            then_assert: |res| {
+                assert_eq!(res, vec![]);
+            }
+        );
 
         shutdown_tx.shutdown().await;
     }
@@ -889,22 +907,25 @@ mod types {
 
         tokio::time::sleep(Duration::from_secs(5)).await;
 
-        let post_insert_value_res = client
-            .query("SELECT x FROM t ORDER BY x ASC", &[])
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.get(0))
-            .collect::<Vec<Abc>>();
-
-        assert_eq!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset
-        );
-
-        assert_eq!(
-            post_insert_value_res,
-            vec![Abc::A, Abc::A, Abc::AB, Abc::B, Abc::C]
+        eventually!(
+            run_test: {
+                let post_insert_value_res = client
+                    .query("SELECT x FROM t ORDER BY x ASC", &[])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.get(0))
+                    .collect::<Vec<Abc>>();
+                let dest = last_query_info(&client).await.destination;
+                (post_insert_value_res, dest)
+            },
+            then_assert: |(post_insert_value_res, dest)| {
+                assert_eq!(dest, QueryDestination::Readyset);
+                assert_eq!(
+                    post_insert_value_res,
+                    vec![Abc::A, Abc::A, Abc::AB, Abc::B, Abc::C]
+                );
+            }
         );
 
         shutdown_tx.shutdown().await;
