@@ -19,5 +19,3 @@ docker-compose.override.yml
 .readyset-history
 readyset-compose.yml
 readyset.tmp/
-logictests/
-quickstart/
