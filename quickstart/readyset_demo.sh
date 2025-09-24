@@ -181,11 +181,11 @@ UPDATE title_ratings
 DROP CACHE q_bccd97aea07c545f;
 \o
 \timing
-\! echo -e "${BLUE}Let's cache a query with Readyset!${NOCOLOR}"
+\! printf "%b\n" "${BLUE}Let's cache a query with Readyset!${NOCOLOR}"
 \set QUIET 1
 \! echo 'Press enter to continue.'
 \prompt c
-\! echo -e "${BLUE}Here's the query we want to cache:${NOCOLOR}"
+\! printf "%b\n" "${BLUE}Here's the query we want to cache:${NOCOLOR}"
 \echo ''
 \echo '    SELECT count(*)'
 \echo '      FROM title_ratings'
@@ -194,17 +194,17 @@ DROP CACHE q_bccd97aea07c545f;
 \echo '     WHERE title_basics.startyear = 2000'
 \echo '       AND title_ratings.averagerating > 5;'
 \echo ''
-\! echo -e "${BLUE}Let's run it once before caching.${NOCOLOR}"
+\! printf "%b\n" "${BLUE}Let's run it once before caching.${NOCOLOR}"
 \echo 'Press enter to run query.'
 \prompt c
 
-\! echo -e '${YELLOW}Query Results:'
+\! printf "%b\n" '${YELLOW}Query Results:'
 SELECT count(*) FROM title_ratings
 JOIN title_basics ON title_ratings.tconst = title_basics.tconst
 WHERE title_basics.startyear = 2000
 AND title_ratings.averagerating > 5;
-\! echo -e '${NOCOLOR}'
-\! echo -e "${RED}${ROTATING_LIGHT}Too slow! ${BLUE}Let's cache it.${SUNGLASSES}${NOCOLOR}"
+\! printf "%b\n" '${NOCOLOR}'
+\! printf "%b\n" "${RED}${ROTATING_LIGHT}Too slow! ${BLUE}Let's cache it.${SUNGLASSES}${NOCOLOR}"
 \echo ''
 \echo 'Press enter to continue.'
 \prompt c
@@ -218,7 +218,7 @@ AND title_ratings.averagerating > 5;
 \echo ''
 \echo 'Press enter to create the cache.'
 \prompt c
-\! echo -e '${GREEN}Query Results:'
+\! printf "%b\n" '${GREEN}Query Results:'
 CREATE CACHE FROM
     SELECT count(*)
       FROM title_ratings
@@ -226,15 +226,15 @@ CREATE CACHE FROM
         ON title_ratings.tconst = title_basics.tconst
      WHERE title_basics.startyear = 2000
        AND title_ratings.averagerating > 5;
-\! echo -e "${NOCOLOR}"
-\! echo -e "${GREEN}${GREEN_CHECK}Cache created${NOCOLOR}"
-\! echo -e '${BLUE}Lets take a look at the cache we created.${NOCOLOR}'
+\! printf "%b\n" "${NOCOLOR}"
+\! printf "%b\n" "${GREEN}${GREEN_CHECK}Cache created${NOCOLOR}"
+\! printf "%b\n" '${BLUE}Lets take a look at the cache we created.${NOCOLOR}'
 \echo ''
 \echo 'Press enter to run SHOW CACHES.'
 \prompt c
 SHOW CACHES;
 \! echo ''
-\! echo -e "${BLUE}It worked!${NOCOLOR}"
+\! printf "%b\n" "${BLUE}It worked!${NOCOLOR}"
 \! echo "Press enter to continue."
 \prompt c
 \! echo "Let's re-run the query twice."
@@ -243,12 +243,12 @@ SHOW CACHES;
 \! echo ''
 \echo 'Press enter to re-run query.'
 \prompt c
-\! echo -e '${BLUE}Cache Miss Results:'
+\! printf "%b\n" '${BLUE}Cache Miss Results:'
 SELECT count(*) FROM title_ratings
 JOIN title_basics ON title_ratings.tconst = title_basics.tconst
 WHERE title_basics.startyear = 2000
 AND title_ratings.averagerating > 5;
-\! echo -e "${NOCOLOR}"
+\! printf "%b\n" "${NOCOLOR}"
 \set QUIET 1
 \timing
 \o /dev/null
@@ -264,17 +264,17 @@ AND title_ratings.averagerating > 5;
 \unset QUIET
 \! echo "Press enter to re-run the query again."
 \prompt c
-\! echo -e '${GREEN}Cache Hit Results:'
+\! printf "%b\n" '${GREEN}Cache Hit Results:'
 SELECT count(*) FROM title_ratings
 JOIN title_basics ON title_ratings.tconst = title_basics.tconst
 WHERE title_basics.startyear = 2000
 AND title_ratings.averagerating > 5;
-\! echo -e "${NOCOLOR}"
-\! echo -e "${GREEN}${TADA}Yay, it's faster!${NOCOLOR}"
-\! echo -e "To see the difference in our our ${BLUE}Grafana dashboard${NOCOLOR}, open up http://127.0.0.1:4000"
+\! printf "%b\n" "${NOCOLOR}"
+\! printf "%b\n" "${GREEN}${TADA}Yay, it's faster!${NOCOLOR}"
+\! printf "%b\n" "To see the difference in our our ${BLUE}Grafana dashboard${NOCOLOR}, open up http://127.0.0.1:4000"
 \! echo "Press enter to continue."
 \prompt c
-\! echo -e "${BLUE}Next, let's see how Readyset updates the cache automatically when we change it.${NOCOLOR}"
+\! printf "%b\n" "${BLUE}Next, let's see how Readyset updates the cache automatically when we change it.${NOCOLOR}"
 \echo 'Press enter to continue.'
 \prompt c
 \! echo "The query we have been running returns the count of movies in the year"
@@ -300,7 +300,7 @@ AND title_ratings.averagerating > 5;
 \echo '    WHERE'
 \echo '      title_basics.primarytitle = 'Battlefield Earth';'
 \echo ''
-\! echo -e "${YELLOW}"
+\! printf "%b\n" "${YELLOW}"
 SELECT
  title_basics.tconst,
  title_basics.primarytitle,
@@ -314,7 +314,7 @@ ON
  title_ratings.tconst = title_basics.tconst
 WHERE
  title_basics.primarytitle = 'Battlefield Earth';
-\! echo -e "${NOCOLOR}"
+\! printf "%b\n" "${NOCOLOR}"
 \echo 'Press enter to continue.'
 \prompt c
 \! echo "Looks like it scored an average rating of 2.5. Yikes."
@@ -323,7 +323,7 @@ WHERE
 \echo ''
 \echo 'Press enter to continue.'
 \prompt c
-\! echo -e "${BLUE}Let's grab the id for 'Battlefield Earth' (tt0185183) and update its average rating accordingly:${NOCOLOR}"
+\! printf "%b\n" "${BLUE}Let's grab the id for 'Battlefield Earth' (tt0185183) and update its average rating accordingly:${NOCOLOR}"
 \echo 'Press enter to change the course of cinematic history.'
 \prompt c
 \! echo "    UPDATE title_ratings"
@@ -333,37 +333,37 @@ WHERE
 UPDATE title_ratings
    SET averagerating = 5.1
  WHERE tconst = 'tt0185183';
-\! echo -e "${BLUE}Let's re-run the previously cached query that returns the count of movies:${NOCOLOR}"
+\! printf "%b\n" "${BLUE}Let's re-run the previously cached query that returns the count of movies:${NOCOLOR}"
 \echo 'Press enter to re-run query.'
 \prompt c
-\! echo -e '${GREEN}New Results:'
+\! printf "%b\n" '${GREEN}New Results:'
 SELECT count(*) FROM title_ratings
 JOIN title_basics ON title_ratings.tconst = title_basics.tconst
 WHERE title_basics.startyear = 2000
 AND title_ratings.averagerating > 5;
 
 \! echo "And bingo! The count has been increased by one (i.e 2,419 vs 2,418)."
-\! echo -e "${GREEN}${TADA}The cache is auto-updated!${NOCOLOR}"
+\! printf "%b\n" "${GREEN}${TADA}The cache is auto-updated!${NOCOLOR}"
 \! echo "And this time was still a cache hit. Not too shabby."
 \echo ''
 \echo 'Press enter to continue.'
 \prompt c
 \echo ''
-\! echo -e '${BLUE}This concludes our guided exploration.${NOCOLOR}'
+\! printf "%b\n" '${BLUE}This concludes our guided exploration.${NOCOLOR}'
 \echo ''
 \echo 'Press enter continue.'
 \prompt c
-\! echo -e '${BLUE}Give these commands a try next!${NOCOLOR}'
+\! printf "%b\n" '${BLUE}Give these commands a try next!${NOCOLOR}'
 \! echo ''
-\! echo -e ' ${BLUE}Show status info. about Readyset.${NOCOLOR}'
+\! printf "%b\n" ' ${BLUE}Show status info. about Readyset.${NOCOLOR}'
 \! echo '    SHOW READYSET STATUS;'
-\! echo -e ' ${BLUE}List information about current caches${NOCOLOR}'
+\! printf "%b\n" ' ${BLUE}List information about current caches${NOCOLOR}'
 \! echo '    SHOW CACHES;'
-\! echo -e ' ${BLUE}List tables that Readyset has snapshotted${NOCOLOR}'
+\! printf "%b\n" ' ${BLUE}List tables that Readyset has snapshotted${NOCOLOR}'
 \! echo '    SHOW READYSET TABLES;'
-\! echo -e ' ${BLUE}Show queries that havent been cached and if they are supported or not.${NOCOLOR}'
+\! printf "%b\n" ' ${BLUE}Show queries that havent been cached and if they are supported or not.${NOCOLOR}'
 \! echo '    SHOW PROXIED QUERIES;'
-\! echo -e " ${BLUE}Drop an existing cache.${NOCOLOR}"
+\! printf "%b\n" " ${BLUE}Drop an existing cache.${NOCOLOR}"
 \! echo "    DROP CACHE [query_id];"
 \echo ''
 \echo 'Press enter to conclude and connect to readyset via psql.'
