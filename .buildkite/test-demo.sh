@@ -121,6 +121,7 @@ run_script() {
                       exit 2
                     }
                   }
+                  sleep 3
                 }
               }
             }
