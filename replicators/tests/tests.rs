@@ -20,8 +20,8 @@ use readyset_server::NodeIndex;
 use readyset_sql::ast::{NonReplicatedRelation, Relation};
 use readyset_sql_parsing::{parse_select, ParsingPreset};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
-use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
+use readyset_util::{eventually, retry_with_exponential_backoff};
 use replicators::db_util::error_is_slot_not_found;
 use replicators::table_filter::TableFilter;
 use replicators::{ControllerMessage, NoriaAdapter, ReplicatorMessage};
@@ -209,7 +209,13 @@ impl DbConnection {
                 .prefer_socket(false);
 
             // First, connect without a db
-            let mut client = mysql_async::Conn::new(no_db_opts).await?;
+            let mut client = retry_with_exponential_backoff!(
+                { mysql_async::Conn::new(no_db_opts.clone()).await },
+                retries: 10,
+                delay: 100,
+                backoff: 2,
+            )
+            .unwrap();
 
             // Then drop and recreate the test db
             client

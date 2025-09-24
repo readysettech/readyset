@@ -5,6 +5,7 @@ use mysql_async::{Conn, Opts, OptsBuilder, Row};
 use pretty_assertions::assert_eq;
 use readyset_data::{DfType, DfValue};
 use readyset_sql_parsing::parse_sql_type;
+use readyset_util::retry_with_exponential_backoff;
 use test_utils::tags;
 
 use self::common::parse_lower_eval;
@@ -31,6 +32,16 @@ fn opts() -> Opts {
         ))
         .prefer_socket(false)
         .into()
+}
+
+async fn connect() -> Conn {
+    retry_with_exponential_backoff!(
+        { Conn::new(opts()).await },
+        retries: 10,
+        delay: 100,
+        backoff: 2,
+    )
+    .unwrap()
 }
 
 async fn mysql_eval(expr: &str, conn: &mut Conn) -> DfValue {
@@ -94,7 +105,7 @@ async fn compare_eval(expr: &str, conn: &mut Conn) {
 #[tokio::test]
 #[tags(serial, mysql_upstream)]
 async fn example_exprs_eval_same_as_mysql() {
-    let mut conn = Conn::new(opts()).await.unwrap();
+    let mut conn = connect().await;
 
     for expr in [
         "1 != 2",
@@ -195,7 +206,7 @@ async fn example_exprs_eval_same_as_mysql() {
 #[tokio::test]
 #[tags(serial, mysql8_upstream)]
 async fn example_exprs_eval_same_as_mysql8() {
-    let mut conn = Conn::new(opts()).await.unwrap();
+    let mut conn = connect().await;
 
     for expr in [
         "json_overlaps(null, null)",

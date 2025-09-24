@@ -12,7 +12,6 @@ use native_tls::Certificate;
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::time::sleep;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 

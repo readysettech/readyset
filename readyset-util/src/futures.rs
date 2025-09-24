@@ -78,6 +78,8 @@ macro_rules! retry_with_exponential_backoff {
         delay: $base_delay:expr,
         backoff: $backoff:expr $(,)?
     ) => {{
+        use tokio::time::{sleep, Duration};
+
         let mut attempts_completed: u32 = 0;
 
         let base_delay = $base_delay as f64;
@@ -387,7 +389,7 @@ mod tests {
     use std::sync::atomic::{AtomicI32, Ordering};
     use std::sync::Arc;
     use std::time::Instant;
-    use tokio::time::{sleep, Duration};
+    use tokio::time::Duration;
 
     use crate::retry_with_exponential_backoff;
 

@@ -8,6 +8,7 @@ use mysql_srv::MySqlIntermediary;
 use readyset_adapter::backend::QueryInfo;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
+use readyset_util::retry_with_exponential_backoff;
 use tokio::net::TcpStream;
 
 use crate::Adapter;
@@ -42,7 +43,14 @@ pub async fn recreate_database<N>(dbname: N)
 where
     N: Display,
 {
-    let mut management_db = mysql_async::Conn::new(upstream_config()).await.unwrap();
+    let mut management_db = retry_with_exponential_backoff!(
+        { mysql_async::Conn::new(upstream_config()).await },
+        retries: 10,
+        delay: 100,
+        backoff: 2,
+    )
+    .unwrap();
+
     management_db
         .query_drop(format!("DROP DATABASE IF EXISTS {dbname}"))
         .await

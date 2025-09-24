@@ -18,8 +18,8 @@ use readyset_client_test_helpers::{sleep, TestBuilder};
 use readyset_errors::ReadySetError;
 use readyset_server::Handle;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetryReporter};
-use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
+use readyset_util::{eventually, retry_with_exponential_backoff};
 use regex::Regex;
 use test_utils::{skip_flaky_finder, tags};
 
@@ -73,6 +73,16 @@ fn mysql_url() -> String {
         env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
         env::var("MYSQL_TCP_PORT").unwrap_or_else(|_| "3306".into()),
     )
+}
+
+async fn connect() -> Conn {
+    retry_with_exponential_backoff!(
+        {  Conn::from_url(mysql_url()).await },
+        retries: 10,
+        delay: 100,
+        backoff: 2,
+    )
+    .unwrap()
 }
 
 async fn query_one(conn: &mut Conn, query: &str) -> Vec<Vec<Value>> {
@@ -2196,7 +2206,7 @@ async fn test_proxied_queries_telemetry() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, mysql_upstream)]
 async fn datetime_nanosecond_precision_text_protocol() {
-    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = connect().await;
     direct_mysql.query_drop("SET sql_mode='';
              DROP TABLE IF EXISTS dt_nano_text_protocol CASCADE;
              CREATE TABLE dt_nano_text_protocol (col1 DATETIME, col2 DATETIME(2), col3 DATETIME(4), col4 DATETIME(6));
@@ -2256,7 +2266,7 @@ async fn datetime_nanosecond_precision_text_protocol() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, mysql_upstream)]
 async fn datetime_nanosecond_precision_binary_protocol() {
-    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = connect().await;
     direct_mysql.query_drop("SET sql_mode='';
              DROP TABLE IF EXISTS dt_nano_bin_protocol CASCADE;
              CREATE TABLE dt_nano_bin_protocol (ID INT PRIMARY KEY, col1 DATETIME, col2 DATETIME(2), col3 DATETIME(4), col4 DATETIME(6));
@@ -2319,7 +2329,7 @@ async fn datetime_nanosecond_precision_binary_protocol() {
 async fn datetime_binary_protocol() {
     let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
-    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = connect().await;
     direct_mysql.query_drop("SET sql_mode='';").await.unwrap();
     direct_mysql
         .query_drop("DROP TABLE IF EXISTS dt_bin_protocol CASCADE;")
@@ -2356,7 +2366,7 @@ async fn datetime_binary_protocol() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, mysql8_upstream)]
 async fn timestamp_binary_protocol() {
-    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = connect().await;
     direct_mysql.query_drop("
              SET SESSION time_zone = '+05:00';
              DROP TABLE IF EXISTS ts_bin_protocol CASCADE;
@@ -2405,7 +2415,7 @@ async fn timestamp_binary_protocol() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, mysql8_upstream)]
 async fn timestamp_text_protocol() {
-    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = connect().await;
     direct_mysql.query_drop("
              SET SESSION time_zone = '+05:00';
              DROP TABLE IF EXISTS ts_text_protocol CASCADE;
@@ -2454,7 +2464,7 @@ async fn timestamp_text_protocol() {
 #[tags(serial, mysql_upstream)]
 async fn date_only_text_protocol() {
     readyset_tracing::init_test_logging();
-    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = connect().await;
     direct_mysql
         .query_drop(
             "DROP TABLE IF EXISTS date_text_protocol CASCADE;
@@ -2520,7 +2530,7 @@ async fn date_only_text_protocol() {
 #[tags(serial, mysql_upstream)]
 async fn test_char_column_padding_binary_collation() {
     readyset_tracing::init_test_logging();
-    let mut my_conn = Conn::from_url(mysql_url()).await.unwrap();
+    let mut my_conn = connect().await;
     my_conn
         .query_drop(
             "DROP TABLE IF EXISTS char_binary_padding CASCADE;
@@ -2588,7 +2598,7 @@ async fn test_char_column_padding_binary_collation() {
 #[tags(serial, mysql_upstream)]
 async fn test_binary_column_padding() {
     readyset_tracing::init_test_logging();
-    let mut my_conn = Conn::from_url(mysql_url()).await.unwrap();
+    let mut my_conn = connect().await;
     my_conn
         .query_drop(
             "DROP TABLE IF EXISTS binary_padding CASCADE;
@@ -2655,7 +2665,7 @@ async fn test_binary_column_padding() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, mysql_upstream)]
 async fn test_case_expr_then_expr() {
-    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = connect().await;
     let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
@@ -2878,7 +2888,7 @@ async fn test_column_definition_verify(
 #[tags(serial, mysql8_upstream)]
 async fn test_column_definition_upstream_readyset_snapshot() {
     readyset_tracing::init_test_logging();
-    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = connect().await;
     populate_all_data_types(&mut direct_mysql, "all_data_types", true).await;
 
     // Setup ReadySet connection after table creation
@@ -2896,7 +2906,7 @@ async fn test_column_definition_upstream_readyset_snapshot() {
 #[tags(serial, mysql8_upstream)]
 async fn test_column_definition_upstream_readyset_replication() {
     readyset_tracing::init_test_logging();
-    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = connect().await;
 
     // Setup ReadySet connection before table creation
     let (rs_opts, _rs_handle, tx) = TestBuilder::default()
@@ -2914,7 +2924,7 @@ async fn test_column_definition_upstream_readyset_replication() {
 #[tags(serial, mysql_upstream)]
 async fn text_citext_default_coercion_minimal_row_base_replication() {
     readyset_tracing::init_test_logging();
-    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = connect().await;
 
     direct_mysql
         .query_drop("DROP TABLE IF EXISTS text_citext_default_coercion CASCADE;")
@@ -2969,7 +2979,7 @@ async fn test_default_value_not_null_for_replication() {
         .build::<MySQLAdapter>()
         .await;
     sleep().await;
-    let mut direct_mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut direct_mysql = connect().await;
     direct_mysql
         .query_drop("SET SESSION binlog_row_image = MINIMAL; SET SESSION sql_mode = '';")
         .await
@@ -3093,7 +3103,7 @@ async fn test_utf8(coll: &str) {
     readyset_tracing::init_test_logging();
     let (rs_opts, _rs_handle, tx) = setup_with_mysql().await;
     sleep().await;
-    let mut mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut mysql = connect().await;
     let mut rs = Conn::new(rs_opts).await.unwrap();
 
     mysql
@@ -3166,7 +3176,7 @@ async fn test_latin1_swedish_ci() {
     readyset_tracing::init_test_logging();
     let (rs_opts, _rs_handle, tx) = setup_with_mysql().await;
     sleep().await;
-    let mut mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut mysql = connect().await;
     let mut rs = Conn::new(rs_opts).await.unwrap();
 
     mysql
@@ -3229,7 +3239,7 @@ async fn test_utf8mb4_bin() {
     readyset_tracing::init_test_logging();
     let (rs_opts, _rs_handle, tx) = setup_with_mysql().await;
     sleep().await;
-    let mut mysql = Conn::from_url(mysql_url()).await.unwrap();
+    let mut mysql = connect().await;
     let mut rs = Conn::new(rs_opts).await.unwrap();
 
     fn utf8_str_for(i: u32) -> String {
