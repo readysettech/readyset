@@ -54,23 +54,63 @@ print_banner() {
   echo -e "${NOCOLOR}"
 }
 
-check_docker_dependencies() {
-  if ! command -v docker &>/dev/null; then
-    echo -e "${RED}Docker is not installed. Please install Docker to continue.${NOCOLOR}"
-    exit 1
-  elif ! docker ps &>/dev/null; then
-    echo -e "${RED}Docker is installed but not running. Please start Docker to continue.${NOCOLOR}"
-    exit 1
-  fi
-  if ! command -v docker-compose &>/dev/null && ! docker compose version &>/dev/null; then
-    echo -e "${RED}Docker Compose is not installed. Please install Docker Compose to continue.${NOCOLOR}"
-    exit 1
-  fi
-}
+check_all_dependencies() {
+  local errors=()
+  local warnings=()
 
-check_dependencies() {
+  # Required: Docker
+  if ! command -v docker &>/dev/null; then
+    errors+=("docker must be installed.")
+  elif ! docker ps &>/dev/null; then
+    errors+=("docker daemon must be started and docker must be runnable by this userid without sudo.")
+  fi
+
+  # Required: Docker Compose (plugin or standalone)
+  if ! command -v docker-compose &>/dev/null && ! docker compose version &>/dev/null; then
+    errors+=("docker compose must be installed.")
+  fi
+
+  # Required: curl
   if ! command -v curl &>/dev/null; then
-    echo -e "${RED}curl is not installed. How did you even get this script?! Please install curl to continue.${NOCOLOR}"
+    errors+=("curl must be installed.")
+  fi
+
+  # Optional: psql
+  if ! command -v psql &>/dev/null; then
+    warnings+=("psql (PostgreSQL client) is required for the built-in demo or if you wish to connect to your own PostgreSQL database")
+  fi
+
+  # Optional: mysql
+  if ! command -v mysql &>/dev/null; then
+    warnings+=("mysql (MySQL client) is required if you wish to connect to your own MySQL database.")
+  fi
+
+  # Print results
+  echo ""
+  if [ ${#errors[@]} -eq 0 ] && [ ${#warnings[@]} -eq 0 ]; then
+    echo -e "${GREEN}All dependencies are satisfied.${NOCOLOR}"
+  else
+    # Print errors
+    if [ ${#errors[@]} -gt 0 ]; then
+      echo -e "${RED}Missing required dependencies:${NOCOLOR}"
+      for err in "${errors[@]}"; do
+        echo -e "  - ${RED}${err}${NOCOLOR}"
+      done
+      echo ""
+    fi
+
+    # Print warnings
+    if [ ${#warnings[@]} -gt 0 ]; then
+      echo -e "${YELLOW}Optional dependencies missing:${NOCOLOR}"
+      for warn in "${warnings[@]}"; do
+        echo -e "  - ${YELLOW}${warn}${NOCOLOR}"
+      done
+      echo ""
+    fi
+  fi
+
+  # Exit only if errors exist
+  if [ ${#errors[@]} -gt 0 ]; then
     exit 1
   fi
 }
@@ -92,12 +132,12 @@ run_docker_compose() {
     exit 1
   fi
   if ! docker compose -f readyset.compose.yml up -d --wait; then
-    echo -e "${RED}${ROTATING_LIGHT}Docker-compose setup failed.${NOCOLOR}"
+    echo -e "${RED}${ROTATING_LIGHT}Docker compose setup failed.${NOCOLOR}"
     exit 1
   fi
 
   echo -e "${GREEN}${GREEN_CHECK}Readyset Docker Compose setup complete! ${NOCOLOR}"
-  echo -e "${INFO}To clean up, run \`docker-compose -f readyset.compose.yml down\`"
+  echo -e "${INFO}To clean up, run \`docker compose -f readyset.compose.yml down\`"
 }
 
 check_sample_data() {
@@ -394,6 +434,8 @@ print_exit_message() {
   echo -e "${BLUE}Join us on slack:${NOCOLOR}"
   echo "https://join.slack.com/t/readysetcommunity/shared_invite/zt-2272gtiz4-0024xeRJUPGWlRETQrGkFw"
   print_dashboard_link
+  echo ""
+  echo -e "${INFO}To clean up, run \`docker compose -f readyset.compose.yml down\`"
 
   if [[ $1 == "psql" ]]; then
     echo -e "${BLUE}To connect to Readyset again, run:${NOCOLOR}"
@@ -630,7 +672,6 @@ run_demo() {
 # Main
 setup_colors
 print_banner
-check_docker_dependencies
-check_dependencies
+check_all_dependencies
 # run either demo or bring-your-own mode
 switch_on_mode
