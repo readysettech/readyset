@@ -61,16 +61,16 @@ export CARGO_TERM_PROGRESS_WHEN=never
 # here use the ':serial:` tag, even though it's used in the groups.
 case "$UPSTREAM_CONFIG" in
   "none")
-    NEXTEST_ARGS=(--ignore-default-filter -E "not test(/:(\w+)_upstream:/)") ;;
+    NEXTEST_ARGS=(-E "not test(/:(\w+)_upstream:/)") ;;
   mysql8*)
     # If we ever add a `mysql57_upstream` test, this will filter it out, and it can be added in the next case.
-    NEXTEST_ARGS=(--ignore-default-filter -E "test(/:mysql8\d*_upstream:/) or test(/:mysql_upstream:/)") ;;
+    NEXTEST_ARGS=(-E "test(/:mysql8\d*_upstream:/) or test(/:mysql_upstream:/)") ;;
   "mysql57")
-    NEXTEST_ARGS=(--ignore-default-filter -E "test(/:mysql_upstream:/)") ;;
+    NEXTEST_ARGS=(-E "test(/:mysql_upstream:/)") ;;
   "postgres15")
-    NEXTEST_ARGS=(--ignore-default-filter -E "test(/:postgres\d*_upstream:/)") ;;
+    NEXTEST_ARGS=(-E "test(/:postgres\d*_upstream:/)") ;;
   "postgres13")
-    NEXTEST_ARGS=(--ignore-default-filter -E "test(/:postgres_upstream:/)") ;;
+    NEXTEST_ARGS=(-E "test(/:postgres_upstream:/)") ;;
   *)
     NEXTEST_ARGS=() ;;
 esac
@@ -89,7 +89,7 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
 
     cargo --locked nextest run --profile ci --hide-progress-bar \
         --workspace --features failure_injection \
-        --exclude readyset-clustertest --exclude benchmarks \
+        --exclude benchmarks \
         "${NEXTEST_ARGS[@]}" \
         || upload_artifacts
 elif [[ "$TEST_CATEGORY" == "doctest" ]]; then

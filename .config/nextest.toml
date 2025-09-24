@@ -1,10 +1,15 @@
 [profile.default]
-# This one test is absurdly long locally even compared to other tests marked slow, and not very
-# valuable unless you're working on related code. In which case, run with --ignore-default-filter.
-default-filter = 'not test(test_large_packet_write)'
+# Some default exclusions for devs who just want to run `cargo nextest run`. If you want to run all
+# tests including these, either use the `ci` profile (--profile ci), or remove the default filter
+# (`--ignore-default-filter`).
+#
+# - `test_large_packet_write` is absurdly long locally even compared to other tests marked slow, and
+#   not very valuable unless you're working on related code.
+# - `clustertests` are slow, unreliable, and require building their own copy of readyset.
+default-filter = 'not test(test_large_packet_write) and not package(readyset-clustertest)'
 
 [profile.ci]
-default-filter = 'all()'
+default-filter = 'not package(readyset-clustertest)'
 fail-fast = false
 retries = 1
 failure-output = "immediate-final"
