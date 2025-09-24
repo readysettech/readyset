@@ -947,7 +947,7 @@ where
         cache: Option<CacheInsertGuard<ProcessedQueryParams>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let upstream = upstream.ok_or_else(|| {
-            ReadySetError::Internal("This case requires an upstream connector".to_string())
+            ReadySetError::Internal("Un-prepared fallback requires an upstream".to_string())
         })?;
         let _t = event.start_upstream_timer();
         let result = upstream.query(query).await;
@@ -967,7 +967,7 @@ where
         query: &'a str,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let upstream = self.upstream.as_mut().ok_or_else(|| {
-            ReadySetError::Internal("This case requires an upstream connector".to_string())
+            ReadySetError::Internal("Simple query requires an upstream".to_string())
         })?;
         let result = upstream.simple_query(query).await;
         result.map(QueryResult::UpstreamBufferedInMemory)
@@ -982,7 +982,7 @@ where
         statement_type: PreparedStatementType,
     ) -> Result<UpstreamPrepare<DB>, DB::Error> {
         let upstream = self.upstream.as_mut().ok_or_else(|| {
-            ReadySetError::Internal("This case requires an upstream connector".to_string())
+            ReadySetError::Internal("Prepare fallback requires an upstream".to_string())
         })?;
         upstream.prepare(query, data, statement_type).await
     }
@@ -1893,7 +1893,9 @@ where
         query: &SqlQuery,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let upstream = upstream.ok_or_else(|| {
-            ReadySetError::Internal("This case requires an upstream connector".to_string())
+            ReadySetError::Internal(
+                "Transaction boundary fallback requires an upstream".to_string(),
+            )
         })?;
 
         match query {
