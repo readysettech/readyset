@@ -29,8 +29,3 @@ test-group = 'serial-mysql'
 [[profile.default.overrides]]
 filter = 'test(/:proptest:/)'
 retries = 0
-
-# To try to get info next time we repro REA-5786
-[[profile.default.overrides]]
-filter = 'test(~json_string) or test(~jsonb_string)'
-slow-timeout = { period = "60s", terminate-after = 5 }
