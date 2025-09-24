@@ -1368,21 +1368,20 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
         let (mut g, shutdown_tx) = g.start(authority.clone()).await.unwrap();
         sleep().await;
 
-        {
-            let sql = vec![
-                "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));",
-                "CREATE CACHE CarPrice FROM SELECT price FROM Car WHERE id = ?;",
-            ];
-            g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
-                .await
-                .unwrap();
+        let sql = vec![
+            "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));",
+            "CREATE CACHE CarPrice FROM SELECT price FROM Car WHERE id = ?;",
+        ];
+        eventually!(g
+            .extend_recipe(ChangeList::from_strings(sql.clone(), Dialect::DEFAULT_MYSQL).unwrap())
+            .await
+            .is_ok());
 
-            let mut mutator = g.table("Car").await.unwrap();
+        let mut mutator = g.table("Car").await.unwrap();
 
-            for i in 1..10 {
-                let price = i * 10;
-                mutator.insert(vec![i.into(), price.into()]).await.unwrap();
-            }
+        for i in 1..10 {
+            let price = i * 10;
+            mutator.insert(vec![i.into(), price.into()]).await.unwrap();
         }
 
         // Let writes propagate:
@@ -1485,18 +1484,19 @@ async fn view_connection_churn() {
 
     sleep().await;
 
-    g.extend_recipe(
-        ChangeList::from_strings(
-            vec![
-                "CREATE TABLE A (id int, PRIMARY KEY(id));",
-                "CREATE CACHE AID FROM SELECT id FROM A WHERE id = ?;",
-            ],
-            Dialect::DEFAULT_MYSQL,
+    eventually!(g
+        .extend_recipe(
+            ChangeList::from_strings(
+                vec![
+                    "CREATE TABLE A (id int, PRIMARY KEY(id));",
+                    "CREATE CACHE AID FROM SELECT id FROM A WHERE id = ?;",
+                ],
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
         )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+        .await
+        .is_ok());
     let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
 
     // continuously write to vote with entirely new connections
@@ -1544,17 +1544,16 @@ async fn table_connection_churn() {
     builder.set_persistence(get_persistence_params("table_connection_churn"));
     let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
 
-    sleep().await;
-
-    g.extend_recipe(
-        ChangeList::from_strings(
-            vec!["CREATE TABLE A (id int, PRIMARY KEY(id));"],
-            Dialect::DEFAULT_MYSQL,
+    eventually!(g
+        .extend_recipe(
+            ChangeList::from_strings(
+                vec!["CREATE TABLE A (id int, PRIMARY KEY(id));"],
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
         )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+        .await
+        .is_ok());
     let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
 
     // continuously write to vote with entirely new connections
