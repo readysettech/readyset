@@ -21,6 +21,7 @@ async-trait = "0.1"
 proptest = "1.7.0"
 rand = "0.9.1"
 tokio = { version = "1.37", features = ["full"] }
+tracing = { workspace = true, features = ["release_max_level_debug"] }
 
 [lints]
 workspace = true

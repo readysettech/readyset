@@ -26,6 +26,7 @@ use proptest::prelude::*;
 use proptest::strategy::{NewTree, ValueTree};
 use proptest::test_runner::TestRunner;
 use rand::distr::{Distribution, Uniform};
+use tracing::info;
 
 /// Used by the caller of [`test()`] for providing config options.
 pub struct ProptestStatefulConfig {
@@ -334,7 +335,7 @@ where
     let mut ctxt = runtime_state.init_test_run().await;
 
     for (idx, op) in steps.iter().enumerate() {
-        println!("Running op {idx}: {op:?}");
+        info!("Running op {idx}: {op:?}");
         runtime_state.run_op(op, &mut ctxt).await;
 
         // Note that if we were verifying results of any operations directly, it would be better to
