@@ -4,6 +4,7 @@ use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::process;
 
+use chrono::{SecondsFormat, Utc};
 use futures::{FutureExt, TryFutureExt};
 use tracing::error;
 
@@ -153,6 +154,12 @@ where
         })
 }
 
+#[doc(hidden)]
+pub fn __eventually_warn(message: &str) {
+    let ts = Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true);
+    println!("{} {}", ts, message);
+}
+
 /// Assert that the given async expression eventually succeeds after a configurable number of
 /// tries and sleeping a configurable amount between tries. Useful for testing eventually
 /// consistent parts of the system.
@@ -289,7 +296,7 @@ where
 /// ```
 #[macro_export]
 macro_rules! eventually {
-    ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? run_test: { $($test_body: tt)* },
+    ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? $(token: $token: expr,)? run_test: { $($test_body: tt)* },
             then_assert: |$test_res: pat_param| $($assert_body: tt)+) => {{
         let attempts = 40;
         let sleep = std::time::Duration::from_millis(500);
@@ -299,11 +306,21 @@ macro_rules! eventually {
 
 
         let mut res = None;
+        let token_opt: Option<&str> = None; $(let token_opt = Some($token);)?
         for attempt in 1..=(attempts - 1) {
             let $test_res = async { $($test_body)* }.await;
             match ::futures::FutureExt::catch_unwind(async { $($assert_body)* }).await {
                 Err(_) => {
-                    println!("Assertion failed on attempt {attempt}, retrying after delay...");
+                    if let Some(token) = token_opt {
+                        $crate::futures::__eventually_warn(&format!(
+                            "Assertion failed on attempt {attempt} (token: {}), retrying after delay...",
+                            token
+                        ));
+                    } else {
+                        $crate::futures::__eventually_warn(&format!(
+                            "Assertion failed on attempt {attempt}, retrying after delay..."
+                        ));
+                    }
                     tokio::time::sleep(sleep).await;
                 }
                 Ok(r) => {
@@ -323,7 +340,7 @@ macro_rules! eventually {
             }
         }
     }};
-    ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? run_test: { $($test_body: tt)* },
+    ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? $(token: $token: expr,)? run_test: { $($test_body: tt)* },
             then_assert: $($assert_body: tt)+) => {
         compile_error!(concat!("`then_assert` must be specified using closure syntax",
                                "(see `eventually` docs for detail)"))

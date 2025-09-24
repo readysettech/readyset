@@ -942,7 +942,7 @@ impl ModelState for DDLModelState {
 
                 let create_cache =
                     format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{table_name}\"");
-                eventually!(run_test: {
+                eventually!(token: "failed to create cache after creating table", run_test: {
                     let result = rs_conn.simple_query(&create_cache).await;
                     AssertUnwindSafe(move || result)
                 }, then_assert: |result| {
@@ -1004,7 +1004,7 @@ impl ModelState for DDLModelState {
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
                 let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
-                eventually!(run_test: {
+                eventually!(token: "failed to create cache after creating simple view", run_test: {
                     let result = rs_conn.simple_query(&create_cache).await;
                     AssertUnwindSafe(move || result)
                 }, then_assert: |result| {
@@ -1033,7 +1033,7 @@ impl ModelState for DDLModelState {
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
                 let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
-                eventually!(run_test: {
+                eventually!(token: "failed to create cache after creating join view", run_test: {
                     let result = rs_conn.simple_query(&create_cache).await;
                     AssertUnwindSafe(move || result)
                 }, then_assert: |result| {
@@ -1131,7 +1131,8 @@ impl ModelState for DDLModelState {
 
         // After each op, check that all table and view contents match
         for relation in self.tables.keys().chain(self.views.keys()) {
-            eventually!(run_test: {
+            eventually!(token: "results mismatch",
+            run_test: {
                 let rs_rows = rs_conn
                     .query(&format!("SELECT * FROM \"{relation}\""), &[])
                     .await
@@ -1153,6 +1154,10 @@ impl ModelState for DDLModelState {
 
                 rs_results.sort_unstable();
                 pg_results.sort_unstable();
+
+                if pg_results != rs_results {
+                    println!("results mismatch\nrs={:?}\npg={:?}", rs_results, pg_results);
+                }
 
                 assert_eq!(pg_results, rs_results);
             });
@@ -1244,7 +1249,7 @@ async fn recreate_caches_using_type(
     for table in tables_using_type(tables, type_name) {
         let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{table}\"");
 
-        eventually!(run_test: {
+        eventually!(token: "failed to recreate cache using type", run_test: {
             let result = rs_conn.simple_query(&create_cache).await;
             AssertUnwindSafe(move || result)
         }, then_assert: |result| {
