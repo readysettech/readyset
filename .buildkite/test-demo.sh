@@ -195,7 +195,7 @@ test_combination() {
 show_docker_info() {
   echo '🚢 Docker status:'
   set -x
-  docker ps
+  docker ps -a
   docker volume ls
   docker network ls
   set +x
