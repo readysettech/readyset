@@ -1,3 +1,4 @@
+use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
@@ -12,9 +13,20 @@ use test_utils::tags;
 
 const TEST_METRICS_ADDRESS: &str = "127.0.0.1:6035";
 
+fn upstream_db_url() -> String {
+    format!(
+        "postgresql://{user}:{password}@{host}:{port}/noria",
+        host = env::var("PGHOST").as_deref().unwrap_or("localhost"),
+        port = env::var("PGPORT").as_deref().unwrap_or("5432"),
+        user = env::var("PGUSER").as_deref().unwrap_or("postgres"),
+        password = env::var("PGPASSWORD").as_deref().unwrap_or("noria"),
+    )
+}
+
 /// Start a test instance of the ReadySet adapter in standalone mode
 fn start_adapter(test_db: &str) -> anyhow::Result<()> {
     let temp_dir = temp_dir::TempDir::new().unwrap();
+    let upstream_db_url = upstream_db_url();
     let options = vec![
         "adapter_test", // This is equivalent to the program name in argv, ignored
         "--deployment",
@@ -29,7 +41,7 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
         temp_dir.path().to_str().unwrap(),
         "--allow-unauthenticated-connections",
         "--upstream-db-url",
-        "postgresql://postgres:noria@postgres:5432/noria",
+        &upstream_db_url,
         "--eviction-policy",
         "lru",
         "--noria-metrics",
