@@ -96,9 +96,20 @@ fn raw_string_quoted(
 
 /// Unescaped string literal value (single-quotes only as this is Postgres-only)
 pub fn raw_string_single_quoted_unescaped(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
-    map(
-        delimited(tag(b"\'"), opt(is_not(b"\'" as &'static [u8])), tag(b"\'")),
-        |i: Option<LocatedSpan<&[u8]>>| i.map(|i| i.to_vec()).unwrap_or_default(),
+    delimited(
+        tag(b"\'"),
+        fold_many0(
+            alt((
+                map(is_not(b"\'" as &'static [u8]), |i: LocatedSpan<&[u8]>| *i),
+                map(pair(tag(b"\'"), tag(b"\'")), |_| &b"\'"[..]),
+            )),
+            Vec::new,
+            |mut acc: Vec<u8>, bytes: &[u8]| {
+                acc.extend(bytes);
+                acc
+            },
+        ),
+        tag(b"\'"),
     )(i)
 }
 
@@ -376,6 +387,14 @@ mod tests {
         test_format_parse_round_trip!(
             rt_literal(literal, Literal, Dialect::PostgreSQL);
         );
+
+        #[test]
+        fn postgres_unescaped_string_with_doubled_quote_characters() {
+            // Test that unescaped PostgreSQL strings handle doubled single quotes correctly
+            let input = "'a''b'";
+            let parsed = test_parse!(literal(Dialect::PostgreSQL), input.as_bytes());
+            assert_eq!(parsed, Literal::String("a'b".to_string()));
+        }
 
         #[test]
         fn regression_large_numeric_rt() {
