@@ -144,20 +144,30 @@ impl TestChannel {
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(120000);
 
-        tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), self.0.recv())
-            .await
-            .map_err(|_| {
-                internal_err!(
+        loop {
+            let msg =
+                tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), self.0.recv())
+                    .await
+                    .map_err(|_| {
+                        internal_err!(
                     "Exceeded timeout of SNAPSHOT_TIMEOUT_MS={} waiting for snapshot to complete",
                     timeout_ms
                 )
-            })?
-            .ok_or_else(|| internal_err!("Did not receive snapshot controller message"))
-            .map(|msg| match msg {
-                ControllerMessage::SnapshotDone => Ok(()),
-                ControllerMessage::UnrecoverableError(e) => Err(e),
-                _ => internal!("Unexpected controller message while waiting for snapshot: {msg:?}"),
-            })?
+                    })?
+                    .ok_or_else(|| internal_err!("Did not receive snapshot controller message"))?;
+
+            match msg {
+                ControllerMessage::SnapshotDone => return Ok(()),
+                ControllerMessage::UnrecoverableError(e) => return Err(e),
+                ControllerMessage::SnapshotStarting => continue,
+                ControllerMessage::ReplicationStarted
+                | ControllerMessage::RecoverableError(_)
+                | ControllerMessage::EnterMaintenanceMode
+                | ControllerMessage::ExitMaintenanceMode => {
+                    internal!("Unexpected controller message while waiting for snapshot: {msg:?}")
+                }
+            }
+        }
     }
 }
 

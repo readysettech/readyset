@@ -176,6 +176,11 @@ impl<'a> NoriaAdapter<'a> {
             let Err(err) = match url.clone() {
                 DatabaseURL::MySQL(options) => {
                     let noria = noria.clone();
+                    // Notify controller that we are about to start a snapshot if we are
+                    // restarting to resnapshot.
+                    if resnapshot {
+                        let _ = controller_tx.send(ControllerMessage::SnapshotStarting);
+                    }
                     NoriaAdapter::start_inner_mysql(
                         options,
                         noria,
@@ -222,6 +227,11 @@ impl<'a> NoriaAdapter<'a> {
                         _ => REPLICATION_SLOT.to_string(),
                     };
 
+                    // Notify controller that we are about to start a snapshot if we are
+                    // restarting to resnapshot.
+                    if resnapshot || full_snapshot {
+                        let _ = controller_tx.send(ControllerMessage::SnapshotStarting);
+                    }
                     NoriaAdapter::start_inner_postgres(
                         options,
                         noria,

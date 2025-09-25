@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 6913f27fb5b59f05dc22644661f126a41239340921c4e08032390bc38c874e05 # shrinks to [ CreateTable( "_cp16iZN7y6_GvriF_kSuw22bu", [ ColumnSpec { name: "_Ou_npIN09Fp", sql_type: Real, }, ColumnSpec { name: "h6SCoveUfU_h_79tm23_Ky2Wll3", sql_type: Real, }, ColumnSpec { name: "TeuU", sql_type: Int( None, ), }, ], ), WriteRow { table: "_cp16iZN7y6_GvriF_kSuw22bu", pkey: 0, col_vals: [ Float( 0.0, ), Float( -1.0316592e32, ), Int( 1465483411, ), ], col_types: [ Real, Real, Int( None, ), ], }, AlterColumnName { table: "_cp16iZN7y6_GvriF_kSuw22bu", col_name: "h6SCoveUfU_h_79tm23_Ky2Wll3", new_name: "evZ8__E9COpL9F__dTgRIxt6__", }, Evict { inner: RefCell { value: None, }, }, CreateSimpleView { name: "f_IjGHg_XSc4IGb5sB_wQ___UyqhC", table_source: "_cp16iZN7y6_GvriF_kSuw22bu", }, ]

@@ -729,6 +729,9 @@ impl Controller {
                             ControllerMessage::ExitMaintenanceMode => {
                                 self.maintenance_mode.store(false, Ordering::Release);
                             }
+                            ControllerMessage::SnapshotStarting => {
+                                self.leader_ready.store(false, Ordering::Release);
+                            },
                             ControllerMessage::SnapshotDone => {
                                 self.leader_ready.store(true, Ordering::Release);
 

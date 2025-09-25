@@ -20,6 +20,8 @@ use tracing::{debug, info};
 /// Event notification sent to the controller.
 #[derive(Debug)]
 pub enum ControllerMessage {
+    /// The replicator is about to begin a snapshot (initial or re-snapshot)
+    SnapshotStarting,
     /// The replicator finished an initial base table snapshot
     SnapshotDone,
     /// The replicator finished startup and entered the main replication loop
