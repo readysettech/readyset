@@ -126,6 +126,15 @@ impl TableFilter {
                 }
             }
         }
+
+        if let Some(default_schema) = default_schema.map(SqlIdentifier::from) {
+            // If none of the tables above are part of the default schema, also allow all tables in
+            // the default schema by creating an empty denylist for it.
+            strategy_by_schema
+                .entry(default_schema)
+                .or_insert(ReplicationStrategy::new(false));
+        }
+
         Ok(Self {
             strategy_by_schema,
             allow_unregistered_schemas,
@@ -181,12 +190,12 @@ impl TableFilter {
                     ))
                 }
             };
-            Self::allow_tables(default_schema, tables, allow_unregistered_schemas, true)
-        } else {
-            match default_schema {
-                Some(schema) => Ok(Self::allow_one_schema(schema, allow_unregistered_schemas)),
-                None => Ok(Self::allow_all()),
-            }
+            return Self::allow_tables(default_schema, tables, allow_unregistered_schemas, true);
+        }
+
+        match default_schema {
+            Some(schema) => Ok(Self::allow_one_schema(schema, allow_unregistered_schemas)),
+            None => Ok(Self::allow_all()),
         }
     }
 
@@ -394,5 +403,33 @@ mod tests {
         )
         .unwrap();
         assert!(!filter.should_be_processed("noria", "t1"));
+    }
+
+    #[test]
+    fn default_schema_not_affected_by_irrelevant_ignore() {
+        let filter = TableFilter::try_new(
+            readyset_sql::Dialect::MySQL,
+            None,
+            Some("other_db.*"),
+            Some("noria"),
+        )
+        .unwrap();
+        assert!(filter.should_be_processed("noria", "t1"));
+        assert!(!filter.should_be_processed("other_db", "t2"));
+        assert!(!filter.should_be_processed("other_other_db", "t3"));
+    }
+
+    #[test]
+    fn default_schema_not_affected_by_irrelevant_include() {
+        let filter = TableFilter::try_new(
+            readyset_sql::Dialect::MySQL,
+            Some("other_db.*"),
+            None,
+            Some("noria"),
+        )
+        .unwrap();
+        assert!(filter.should_be_processed("noria", "t1"));
+        assert!(filter.should_be_processed("other_db", "t2"));
+        assert!(!filter.should_be_processed("other_other_db", "t3"));
     }
 }
