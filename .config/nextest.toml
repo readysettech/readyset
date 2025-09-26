@@ -8,6 +8,7 @@ default-filter = 'all()'
 fail-fast = false
 retries = 1
 failure-output = "immediate-final"
+slow-timeout = { period = "60s", terminate-after = 5, grace-period = "20s" }
 
 [test-groups]
 serial = { max-threads = 1 }
