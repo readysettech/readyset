@@ -89,7 +89,6 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
 
     cargo --locked nextest run --profile ci --hide-progress-bar \
         --workspace --features failure_injection \
-        --exclude benchmarks \
         "${NEXTEST_ARGS[@]}" \
         || upload_artifacts
 elif [[ "$TEST_CATEGORY" == "doctest" ]]; then
