@@ -11,10 +11,10 @@ common_values:
         limit: 3
 
 env:
-  ECR_PLUGIN_VERSION: "v2.9.0"
-  DOCKER_PLUGIN_VERSION: "v5.12.0"
-  DOCKER_LOGIN_PLUGIN_VERSION: "v2.1.0"
-  DOCKER_COMPOSE_PLUGIN_VERSION: "v5.5.0"
+  ECR_PLUGIN_VERSION: "v2.10.0"
+  DOCKER_PLUGIN_VERSION: "v5.13.0"
+  DOCKER_LOGIN_PLUGIN_VERSION: "v3.0.0"
+  DOCKER_COMPOSE_PLUGIN_VERSION: "v5.10.0"
   BUILDKIT_PROGRESS: "plain"
 
 steps:
@@ -270,14 +270,15 @@ steps:
             - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-postgis-15.yml"
           quiet-pull: true    # don't log all the image pulls
           pull-retries: 3
-      - ecr#${ECR_PLUGIN_VERSION}:
-          login: true
-          retries: 3
       - docker-login#${DOCKER_LOGIN_PLUGIN_VERSION}:
-          # Need to log in to avoid rate-limit while pulling postgis image.
+          # Need to log in to avoid rate-limit while pulling postgis image. IMPORTANT: must run this
+          # docker-login plugin *before* the ECR plugin!  Otherwise, pulls from ECR fail.
           server: "docker.io"
           username: readysetservices
           password-env: DOCKER_HUB_TOKEN
+      - ecr#${ECR_PLUGIN_VERSION}:
+          login: true
+          retries: 3
     agents:
       queue: "c6a-4xlarge"
     retry: *retry_on_agent_kill

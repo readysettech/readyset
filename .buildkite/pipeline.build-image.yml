@@ -9,7 +9,7 @@ pipeline_build_image_values:
         limit: 3
 
 env:
-  ECR_PLUGIN_VERSION: "v2.9.0"
+  ECR_PLUGIN_VERSION: "v2.10.0"
   BUILDKIT_PROGRESS: "plain"
 
 steps:
