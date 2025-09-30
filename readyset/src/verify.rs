@@ -196,6 +196,49 @@ async fn verify_replication(conn: &mut DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
+async fn verify_permissions(conn: &mut DatabaseConnection, options: &Options) -> Result<()> {
+    match conn.dialect() {
+        Dialect::MySQL => {
+            let grants: Vec<Vec<String>> = conn.query("SHOW GRANTS").await?.try_into()?;
+            let grants: Vec<String> = grants.into_iter().flatten().collect();
+            macro_rules! ensure_permission {
+                ($permission:literal) => {
+                    ensure!(
+                        grants.iter().any(|grant| grant.contains($permission)),
+                        concat!("Readyset user missing ", $permission, " permissions")
+                    );
+                };
+            }
+            ensure_permission!("REPLICATION CLIENT");
+            ensure_permission!("REPLICATION SLAVE");
+        }
+        Dialect::PostgreSQL => {
+            let config = &options.server_worker_options.replicator_config;
+            if !config.disable_setup_ddl_replication && !config.disable_create_publication {
+                let has_super: bool = query_one_value(
+                    conn,
+                    "SELECT usesuper FROM pg_user where usename = CURRENT_USER",
+                )
+                .await?;
+                let has_super = has_super || {
+                    // RDS has its own representation of super.
+                    let has_super: Result<String> = query_one_value(
+                        conn,
+                        "SELECT rolname FROM pg_roles WHERE \
+                           pg_has_role(CURRENT_USER, rolname, 'member') AND \
+                           rolname = 'rds_superuser'",
+                    )
+                    .await;
+                    has_super.is_ok()
+                };
+                ensure!(has_super, "Readyset user missing SUPERUSER permissions");
+            }
+        }
+    }
+    info!("Verified upstream permissions");
+    Ok(())
+}
+
 /// Run through a list of checks to make sure we're good to go before attempting to snapshot.
 pub async fn verify(options: &Options) -> Result<()> {
     let mut errors = Vec::new();
@@ -234,6 +277,7 @@ pub async fn verify(options: &Options) -> Result<()> {
     if let Some(conn) = &mut conn {
         add_err!(verify_version(conn).await);
         add_err!(verify_replication(conn).await);
+        add_err!(verify_permissions(conn, options).await);
     }
 
     if errors.is_empty() {
