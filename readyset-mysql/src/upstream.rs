@@ -1,30 +1,36 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::io::{self, ErrorKind};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_util::Stream;
+use futures_util::{Stream, StreamExt};
 use mysql_async::consts::{Command, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{
     ChangeUserOpts, Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, UrlError,
 };
+use mysql_srv::{MsqlSrvError, QueryResultWriter};
 use pin_project::pin_project;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::runtime::RuntimeFlavor;
 use tracing::{debug, error, info_span, Instrument};
 
 use database_utils::tls::{get_mysql_tls_config, ServerCertVerification};
-use readyset_adapter::upstream_database::{UpstreamDestination, UpstreamStatementId};
+use readyset_adapter::upstream_database::{Refresh, UpstreamDestination, UpstreamStatementId};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::{recorded, QueryDestination};
 use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
+use readyset_shallow::{CacheInsertGuard, MySqlMetadata, QueryMetadata};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
+use readyset_sql_passes::adapter_rewrites::ProcessedQueryParams;
 use readyset_util::redacted::RedactedString;
 
-use crate::Error;
+use crate::backend::write_query_results;
+use crate::{handle_error, Error};
 
 type StatementID = u32;
 
@@ -82,6 +88,119 @@ pub enum QueryResult<'a> {
 impl UpstreamDestination for QueryResult<'_> {
     fn destination(&self) -> QueryDestination {
         QueryDestination::Upstream
+    }
+}
+
+impl<'a> QueryResult<'a> {
+    pub async fn process<S>(
+        self,
+        writer: Option<QueryResultWriter<'_, S>>,
+        mut cache: Option<CacheInsertGuard<ProcessedQueryParams>>,
+    ) -> io::Result<()>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        match self {
+            QueryResult::Command { status_flags } => {
+                let Some(writer) = writer else {
+                    return Ok(());
+                };
+                let rw = writer.start(&[]).await?;
+                rw.set_status_flags(status_flags).finish().await
+            }
+            QueryResult::WriteResult {
+                num_rows_affected,
+                last_inserted_id,
+                status_flags,
+            } => {
+                let Some(writer) = writer else {
+                    return Ok(());
+                };
+                write_query_results(
+                    Ok((num_rows_affected, last_inserted_id)),
+                    writer,
+                    Some(status_flags),
+                )
+                .await
+            }
+            QueryResult::ReadResult {
+                mut stream,
+                columns,
+            } => {
+                let formatted_cols = columns.iter().map(|c| c.into()).collect::<Vec<_>>();
+                let mut rw = if let Some(writer) = writer {
+                    Some(writer.start(&formatted_cols).await?)
+                } else {
+                    None
+                };
+
+                while let Some(row) = stream.next().await {
+                    let row = match row {
+                        Ok(row) => row,
+                        Err(err) => {
+                            if let Some(rw) = rw {
+                                return handle_error!(Error::MySql(err), rw);
+                            } else {
+                                return Err(io::Error::other(format!("MySQL error: {err:?}")));
+                            }
+                        }
+                    };
+
+                    let mut copy = cache.as_ref().map(|_| Vec::new());
+                    for i in 0..row.columns_ref().len() {
+                        let col = row.as_ref(i).expect("Must match column number");
+
+                        if let Some(ref mut copy) = copy {
+                            copy.push(col.try_into().map_err(|_| {
+                                io::Error::new(
+                                    ErrorKind::InvalidData,
+                                    format!("failed converting {col:?} to DfValue"),
+                                )
+                            })?);
+                        }
+
+                        if let Some(ref mut rw) = rw {
+                            rw.write_col(col)?;
+                        }
+                    }
+
+                    if let Some(ref mut rw) = rw {
+                        rw.end_row().await?;
+                    }
+
+                    if let (Some(cache), Some(copy)) = (cache.as_mut(), copy) {
+                        cache.push(copy);
+                    }
+                }
+
+                if let Some(mut rw) = rw {
+                    if let Some(status_flags) = stream.status_flags() {
+                        rw = rw.set_status_flags(status_flags);
+                    }
+                    rw.finish().await?;
+                }
+
+                if let Some(ref mut cache) = cache {
+                    cache.set_metadata(QueryMetadata::MySql(MySqlMetadata {
+                        columns: Arc::clone(&columns),
+                    }));
+                    cache.filled();
+                }
+
+                Ok(())
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl Refresh for QueryResult<'_> {
+    async fn refresh(self, cache: CacheInsertGuard<ProcessedQueryParams>) -> io::Result<()> {
+        self.process(
+            None::<QueryResultWriter<'_, tokio::net::TcpStream>>,
+            Some(cache),
+        )
+        .await
     }
 }
 

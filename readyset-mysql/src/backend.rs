@@ -4,9 +4,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Formatter;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
-use futures_util::StreamExt;
 use itertools::{izip, Itertools};
 use mysql_async::consts::StatusFlags;
 use mysql_srv::{
@@ -24,7 +22,7 @@ use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::encoding::Encoding;
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
-use readyset_shallow::{CacheInsertGuard, MySqlMetadata, QueryMetadata};
+use readyset_shallow::{CacheInsertGuard, QueryMetadata};
 use readyset_sql_passes::adapter_rewrites::ProcessedQueryParams;
 use readyset_util::redacted::{RedactedString, Sensitive};
 use std::io::ErrorKind;
@@ -185,7 +183,7 @@ async fn write_column<S: AsyncRead + AsyncWrite + Unpin>(
     Ok(written?)
 }
 
-async fn write_query_results<S: AsyncRead + AsyncWrite + Unpin>(
+pub(crate) async fn write_query_results<S: AsyncRead + AsyncWrite + Unpin>(
     r: Result<(u64, u64), Error>,
     results: QueryResultWriter<'_, S>,
     status_flags: Option<StatusFlags>,
@@ -347,6 +345,7 @@ macro_rules! convert_columns {
     }};
 }
 
+#[macro_export]
 macro_rules! handle_error {
     ($error: expr, $writer: expr) => {
         match $error {
@@ -491,72 +490,12 @@ where
 async fn handle_upstream_result<S>(
     result: upstream::QueryResult<'_>,
     writer: QueryResultWriter<'_, S>,
-    mut cache: Option<CacheInsertGuard<ProcessedQueryParams>>,
+    cache: Option<CacheInsertGuard<ProcessedQueryParams>>,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    match result {
-        upstream::QueryResult::Command { status_flags } => {
-            let rw = writer.start(&[]).await?;
-            rw.set_status_flags(status_flags).finish().await
-        }
-        upstream::QueryResult::WriteResult {
-            num_rows_affected,
-            last_inserted_id,
-            status_flags,
-        } => {
-            write_query_results(
-                Ok((num_rows_affected, last_inserted_id)),
-                writer,
-                Some(status_flags),
-            )
-            .await
-        }
-        upstream::QueryResult::ReadResult {
-            mut stream,
-            columns,
-        } => {
-            let formatted_cols = columns.iter().map(|c| c.into()).collect::<Vec<_>>();
-            let mut rw = writer.start(&formatted_cols).await?;
-            while let Some(row) = stream.next().await {
-                let row = match row {
-                    Ok(row) => row,
-                    Err(err) => return handle_error!(Error::MySql(err), rw),
-                };
-
-                let mut copy = cache.as_ref().map(|_| Vec::new());
-                for i in 0..row.columns_ref().len() {
-                    let col = row.as_ref(i).expect("Must match column number");
-                    if let Some(ref mut copy) = copy {
-                        copy.push(col.try_into().map_err(|_| {
-                            io::Error::new(
-                                ErrorKind::InvalidData,
-                                format!("failed converting {col:?} to DfValue"),
-                            )
-                        })?);
-                    }
-                    rw.write_col(col)?;
-                }
-                rw.end_row().await?;
-                if let (Some(cache), Some(copy)) = (cache.as_mut(), copy) {
-                    cache.push(copy);
-                }
-            }
-
-            if let Some(status_flags) = stream.status_flags() {
-                rw = rw.set_status_flags(status_flags)
-            }
-
-            if let Some(ref mut cache) = cache {
-                cache.set_metadata(QueryMetadata::MySql(MySqlMetadata {
-                    columns: Arc::clone(&columns),
-                }));
-                cache.filled();
-            }
-            rw.finish().await
-        }
-    }
+    result.process(Some(writer), cache).await
 }
 
 async fn handle_execute_result<S>(

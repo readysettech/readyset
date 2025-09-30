@@ -43,7 +43,9 @@ readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-data = { path = "../readyset-data" }
 readyset-decimal = { path = "../readyset-decimal" }
 readyset-errors = { path = "../readyset-errors" }
+readyset-shallow = { path = "../readyset-shallow" }
 readyset-sql = { path = "../readyset-sql" }
+readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]

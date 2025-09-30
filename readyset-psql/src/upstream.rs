@@ -18,13 +18,15 @@ use tracing_futures::Instrument;
 
 use database_utils::tls::{get_tls_connector, ServerCertVerification};
 use psql_srv::{Column, TransferFormat};
-use readyset_adapter::upstream_database::{UpstreamDestination, UpstreamStatementId};
+use readyset_adapter::upstream_database::{Refresh, UpstreamDestination, UpstreamStatementId};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
+use readyset_shallow::CacheInsertGuard;
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
+use readyset_sql_passes::adapter_rewrites::ProcessedQueryParams;
 use readyset_util::redacted::RedactedString;
 
 use crate::Error;
@@ -127,6 +129,16 @@ impl Debug for QueryResult {
 }
 
 impl UpstreamDestination for QueryResult {}
+
+#[async_trait]
+impl Refresh for QueryResult {
+    async fn refresh(self, _cache: CacheInsertGuard<ProcessedQueryParams>) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "PostgreSQL shallow cache refresh not yet implemented",
+        ))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct StatementMeta {

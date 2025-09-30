@@ -7,11 +7,20 @@ use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
+use readyset_shallow::CacheInsertGuard;
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
+use readyset_sql_passes::adapter_rewrites::ProcessedQueryParams;
 use readyset_util::redacted::RedactedString;
 use tracing::debug;
 
 pub type UpstreamStatementId = u32;
+
+/// Trait for refreshing a shallow cache from an upstream query result
+#[async_trait]
+pub trait Refresh {
+    /// Populate the cache with data from this query result
+    async fn refresh(self, cache: CacheInsertGuard<ProcessedQueryParams>) -> std::io::Result<()>;
+}
 
 /// Information about a statement that has been prepared in an [`UpstreamDatabase`]
 pub struct UpstreamPrepare<DB: UpstreamDatabase> {
@@ -63,7 +72,7 @@ pub trait UpstreamDatabase: Sized + Send {
     /// This type is used as the value inside of [`QueryResult::Upstream`][]
     ///
     /// [`QueryResult::Upstream`]: crate::backend::QueryResult::Upstream
-    type QueryResult<'a>: Debug + UpstreamDestination
+    type QueryResult<'a>: Debug + Send + UpstreamDestination + Refresh
     where
         Self: 'a;
 
