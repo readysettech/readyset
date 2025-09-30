@@ -49,6 +49,8 @@ export CARGO_TERM_PROGRESS_WHEN=never
 : "${UPSTREAM_CONFIG:=default}"
 : "${MYSQL_MRBR:=off}"
 
+NEXTEST_FILTER=()
+
 # We use $UPSTREAM_CONFIG to determine which tests to run; the appropriate docker containers and
 # images should already have been set up by the pipeline step. The `default` config has mysql8,
 # postgres15, postgres13, as well as consul and redis which are used for some non-upstream tests. We
@@ -61,20 +63,26 @@ export CARGO_TERM_PROGRESS_WHEN=never
 # here use the ':serial:` tag, even though it's used in the groups.
 case "$UPSTREAM_CONFIG" in
   "none")
-    NEXTEST_ARGS=(-E "not test(/:(\w+)_upstream:/)") ;;
+    NEXTEST_FILTER+=("not test(/:(\w+)_upstream:/)") ;;
   mysql8*)
     # If we ever add a `mysql57_upstream` test, this will filter it out, and it can be added in the next case.
-    NEXTEST_ARGS=(-E "test(/:mysql8\d*_upstream:/) or test(/:mysql_upstream:/)") ;;
+    NEXTEST_FILTER+=("(test(/:mysql8\d*_upstream:/) or test(/:mysql_upstream:/))") ;;
   "mysql57")
-    NEXTEST_ARGS=(-E "test(/:mysql_upstream:/)") ;;
+    NEXTEST_FILTER+=("test(/:mysql_upstream:/)") ;;
   "postgres15")
-    NEXTEST_ARGS=(-E "test(/:postgres\d*_upstream:/)") ;;
+    NEXTEST_FILTER+=("test(/:postgres\d*_upstream:/)") ;;
   "postgres13")
-    NEXTEST_ARGS=(-E "test(/:postgres_upstream:/)") ;;
+    NEXTEST_FILTER+=("test(/:postgres_upstream:/)") ;;
   *)
-    NEXTEST_ARGS=() ;;
+    ;;
 esac
 
+if [[ "${RUN_SLOW_TESTS:-false}" != "true" ]]; then
+    if [[ ${#NEXTEST_FILTER[@]} -gt 0 ]]; then
+        NEXTEST_FILTER+=("and")
+    fi
+    NEXTEST_FILTER+=("(not test(/:slow:/))")
+fi
 
 if [[ "$TEST_CATEGORY" == "nextest" ]]; then
     if [[ "$MYSQL_MRBR" == "on" ]]; then
@@ -89,7 +97,7 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
 
     cargo --locked nextest run --profile ci --hide-progress-bar \
         --workspace --features failure_injection \
-        "${NEXTEST_ARGS[@]}" \
+        --filterset "${NEXTEST_FILTER[@]}" \
         || upload_artifacts
 elif [[ "$TEST_CATEGORY" == "doctest" ]]; then
     # Run doctests, because at this time nextest does not support doctests
