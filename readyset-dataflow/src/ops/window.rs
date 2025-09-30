@@ -721,6 +721,21 @@ impl Ingredient for Window {
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
+        // This actually doesn't do what you think it's doing.
+        //
+        // In theory, this should allow us to lookup a partition without having to
+        // fetch and iterate over the entire window.
+        // However, this index is actually never populated.
+        //
+        // It's actually used to trigger the fallback behavior of [`MemoryState::lookup`]
+        // that does the iteration over the entire window. In short, this removes the iteration
+        // logic from this file and instead uses the existing logic in the lookup function.
+        //
+        // Hopefully, in the future, we will implement secondary (non-clustered) indexes
+        // and then this will be used to lookup the partition without having to iterate over
+        // the window.
+        //
+        // Refer to REA-5866
         HashMap::from([(
             this,
             LookupIndex::Strict(internal::Index::hash_map(self.lookup_key.clone())),
