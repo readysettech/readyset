@@ -134,8 +134,7 @@ dependencies = [
 [[package]]
 name = "antithesis_sdk"
 version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dafc0460f582169b1414074fd82bedbda60456fb4df0a78dc7fef1306e732ea3"
+source = "git+https://github.com/antithesishq/antithesis-sdk-rust?branch=spot-artificer#1a03fa454d0f502eeb5c2003db9056a02c1052c9"
 dependencies = [
  "rand 0.8.5",
  "serde",

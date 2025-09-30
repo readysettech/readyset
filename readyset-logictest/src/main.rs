@@ -678,7 +678,7 @@ impl Fuzz {
                     false,
                     json!({
                         "failure_kind": "failing_query",
-                        "extract_file": path_name,
+                        "artifact_path": path_name,
                         "reason": message,
                     }),
                 )
@@ -695,7 +695,7 @@ impl Fuzz {
                     false,
                     json!({
                         "failure_kind": "abort",
-                        "extract_file": path_name,
+                        "artifact_path": path_name,
                         "reason": message,
                     }),
                 )
