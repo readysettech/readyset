@@ -373,7 +373,8 @@ impl SingleState {
 
     /// Evicts a specified key from this state, returning the removed rows
     pub(super) fn evict_keys(&mut self, keys: &[KeyComparison]) -> Rows {
-        keys.iter()
+        let evicted = keys
+            .iter()
             .flat_map(|k| match k {
                 KeyComparison::Equal(equal) => Either::Left(
                     self.state
@@ -385,7 +386,20 @@ impl SingleState {
                     Either::Right(self.state.evict_range(range).into_iter().map(|(r, _)| r))
                 }
             })
-            .collect()
+            .collect::<Rows>();
+
+        // Decrement row_count for evicted rows
+        let num_evicted = evicted.len();
+        self.row_count = self.row_count.saturating_sub(num_evicted);
+
+        tracing::trace!(
+            index = ?self.index,
+            num_evicted,
+            row_count = self.row_count,
+            "evicted rows from index"
+        );
+
+        evicted
     }
 
     pub(super) fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Rows> + 'a> {
@@ -520,6 +534,123 @@ mod tests {
             let mut rng = rand::rng();
             state.evict_random(&mut rng);
             assert!(state.is_empty());
+        }
+
+        /// Test that evict_keys properly decrements row_count and is_empty works correctly
+        /// This is a regression test for the bug where evict_keys didn't decrement row_count,
+        /// causing is_empty() to return false even when all keys were evicted.
+        /// This bug was particularly problematic for straddled joins with multiple indexes.
+        #[test]
+        fn evict_keys_decrements_row_count_and_is_empty_works() {
+            let mut state = SingleState::new(Index::new(IndexType::HashMap, vec![0]), true);
+
+            // Insert multiple keys with rows
+            let key1 = KeyComparison::Equal(vec1![1.into()]);
+
+            state.mark_filled(key1.clone());
+
+            state.insert_row(vec![1.into(), 100.into()].into());
+            state.insert_row(vec![1.into(), 101.into()].into());
+
+            // Should have 2 rows total
+            assert_eq!(state.row_count, 2);
+            assert!(!state.is_empty());
+
+            // Evict key1 (2 rows)
+            let evicted = state.evict_keys(&[key1]);
+            assert_eq!(evicted.len(), 2);
+            assert_eq!(state.row_count, 0);
+            assert!(state.is_empty());
+        }
+
+        /// Test evict_keys with multiple keys in a single call
+        #[test]
+        fn evict_multiple_keys_at_once() {
+            let mut state = SingleState::new(Index::new(IndexType::HashMap, vec![0]), true);
+
+            let key1 = KeyComparison::Equal(vec1![1.into()]);
+            let key2 = KeyComparison::Equal(vec1![2.into()]);
+            let key3 = KeyComparison::Equal(vec1![3.into()]);
+
+            state.mark_filled(key1.clone());
+            state.mark_filled(key2.clone());
+            state.mark_filled(key3.clone());
+
+            state.insert_row(vec![1.into(), 100.into()].into());
+            state.insert_row(vec![2.into(), 200.into()].into());
+            state.insert_row(vec![3.into(), 300.into()].into());
+
+            assert_eq!(state.row_count, 3);
+
+            // Evict all keys at once
+            let evicted = state.evict_keys(&[key1, key2, key3]);
+            assert_eq!(evicted.len(), 3);
+            assert_eq!(state.row_count, 0);
+            assert!(
+                state.is_empty(),
+                "is_empty() should return true after evicting all keys at once"
+            );
+        }
+
+        /// Test with BTreeMap (range eviction support)
+        #[test]
+        fn evict_keys_btree_decrements_row_count() {
+            let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
+
+            // Fill a range
+            let range = KeyComparison::from_range(&(vec1![1.into()]..vec1![10.into()]));
+            state.mark_filled(range.clone());
+
+            // Insert rows in the range
+            state.insert_row(vec![1.into(), 100.into()].into());
+            state.insert_row(vec![5.into(), 500.into()].into());
+            state.insert_row(vec![9.into(), 900.into()].into());
+
+            assert_eq!(state.row_count, 3);
+            assert!(!state.is_empty());
+
+            // Evict the entire range
+            let evicted = state.evict_keys(&[range]);
+            assert_eq!(evicted.len(), 3);
+            assert_eq!(state.row_count, 0);
+            assert!(
+                state.is_empty(),
+                "is_empty() should return true after range eviction"
+            );
+        }
+
+        /// Test partial eviction doesn't incorrectly report empty
+        #[test]
+        fn evict_keys_partial_not_empty() {
+            let mut state = SingleState::new(Index::new(IndexType::HashMap, vec![0]), true);
+
+            let key1 = KeyComparison::Equal(vec1![1.into()]);
+            let key2 = KeyComparison::Equal(vec1![2.into()]);
+
+            state.mark_filled(key1.clone());
+            state.mark_filled(key2.clone());
+
+            state.insert_row(vec![1.into(), 100.into()].into());
+            state.insert_row(vec![2.into(), 200.into()].into());
+
+            assert_eq!(state.row_count, 2);
+            assert!(!state.is_empty());
+
+            // Evict only one key
+            state.evict_keys(&[key1]);
+            assert_eq!(state.row_count, 1);
+            assert!(
+                !state.is_empty(),
+                "State should not be empty with one key remaining"
+            );
+
+            // Evict the last key
+            state.evict_keys(&[key2]);
+            assert_eq!(state.row_count, 0);
+            assert!(
+                state.is_empty(),
+                "State should be empty after all keys evicted"
+            );
         }
     }
 }
