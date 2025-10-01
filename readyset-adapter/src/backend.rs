@@ -2952,33 +2952,113 @@ where
         }
     }
 
+    /// Helper function to check if a query has literal LIMIT values that could be TopK candidates
+    fn has_topk_literal_limit(statement: &SelectStatement) -> bool {
+        statement.order.is_some()
+            && statement.limit_clause.is_topk()
+            && matches!(
+                statement.limit_clause.limit(),
+                Some(
+                    readyset_sql::ast::Literal::Integer(_)
+                        | readyset_sql::ast::Literal::UnsignedInteger(_)
+                )
+            )
+    }
+
+    /// Helper function to process a query and determine if Readyset should handle it.
+    /// Returns (should_try, query_status, processed_params).
+    fn process_and_check_query(
+        &self,
+        q: &mut ViewCreateRequest,
+        params: adapter_rewrites::AdapterRewriteParams,
+    ) -> (bool, Option<QueryStatus>, Option<ProcessedQueryParams>) {
+        match adapter_rewrites::process_query(&mut q.statement, params) {
+            Ok(processed_query_params) => {
+                let status = self.state.query_status_cache.query_status(q);
+                let should_try = if self.state.proxy_state.should_proxy() {
+                    status.always
+                } else {
+                    true
+                };
+                (should_try, Some(status), Some(processed_query_params))
+            }
+            Err(e) => {
+                warn!(
+                    statement = %Sensitive(&q.statement.display(self.settings.dialect)),
+                    error = e.to_string(),
+                    "Query could not be rewritten by Readyset",
+                );
+                (false, None, None)
+            }
+        }
+    }
+
+    /// For TopK-eligible queries, attempts to use a cache that preserves the literal LIMIT.
+    ///
+    /// Returns Some(result) if a cache exists that can handle the query with TopK processing,
+    /// None if no such cache exists and normal processing should be attempted.
+    fn lookup_topk_cache(
+        &self,
+        q: &mut ViewCreateRequest,
+        rewrite_params: adapter_rewrites::AdapterRewriteParams,
+    ) -> Option<(bool, Option<QueryStatus>, Option<ProcessedQueryParams>)> {
+        // if the cache is not yet created, it's probably better
+        // to let the adapter try the other path.
+        let (_should_try, status, params) = self.process_and_check_query(q, rewrite_params);
+
+        let should_try = matches!(
+            status.as_ref().map(|s| s.migration_state.clone()),
+            Some(MigrationState::Successful(_)) | Some(MigrationState::Inlined(_))
+        );
+
+        if should_try {
+            Some((should_try, status, params))
+        } else {
+            None
+        }
+    }
+
     /// Checks if noria should try to execute a given select and in the process mutates the
     /// supplied select statement by rewriting it.
+    ///
+    /// For TopK-eligible queries (ORDER BY + literal LIMIT), this function implements dual cache
+    /// lookup based on which cache was actually created:
+    /// 1. First checks if a TopK cache exists (created with literal LIMIT, e.g., CREATE CACHE ... LIMIT 10)
+    /// 2. If TopK cache exists, uses it (preferred as it's more efficient than letting the adapter
+    ///    fetch all records then apply the limit)
+    /// 3. Otherwise checks if parameterized cache exists (parameterized LIMITs are removed by the
+    ///    adapter, since the server can't handle parameterized LIMITs).
+    /// 4. If parameterized cache exists, uses it/
+    /// 5. If neither cache exists, processes normally (go upstream if possible, else fail).
+    ///
+    /// All other query rewrites (autoparameterization, IN conditions, etc.) are applied consistently
+    /// regardless of which path is taken.
+    ///
     /// Returns whether noria should try the select, along with the query status if it was obtained
     /// during processing.
     fn noria_should_try_select(
         &self,
         q: &mut ViewCreateRequest,
     ) -> (bool, Option<QueryStatus>, Option<ProcessedQueryParams>) {
-        match adapter_rewrites::process_query(&mut q.statement, self.noria.rewrite_params()) {
-            Ok(processed_query_params) => {
-                let s = self.state.query_status_cache.query_status(q);
-                let should_try = if self.state.proxy_state.should_proxy() {
-                    s.always
-                } else {
-                    true
-                };
-                (should_try, Some(s), Some(processed_query_params))
-            }
-            Err(e) => {
-                warn!(
-                    statement = %Sensitive(&q.statement.display(self.settings.dialect)),
-                    error = e.to_string(),
-                    "This statement could not be rewritten by Readyset",
-                );
-                (false, None, None)
+        let mut rewrite_params = self.noria.rewrite_params();
+
+        let is_topk_candidate =
+            rewrite_params.server_supports_topk && Self::has_topk_literal_limit(&q.statement);
+
+        if is_topk_candidate {
+            if let Some((should_try, status, params)) =
+                self.lookup_topk_cache(&mut q.clone(), rewrite_params)
+            {
+                return (should_try, status, params);
+            } else {
+                trace!("No TopK cache for query, trying parameterized cache");
+                // we will try the query again, but this time without the LIMIT
+                // to try and hit a cache that was created with a paramterized LIMIT (LIMIT ?)
+                rewrite_params.server_supports_topk = false;
             }
         }
+
+        self.process_and_check_query(q, rewrite_params)
     }
 
     /// Handles a parsed set statement by deferring to `Handler::handle_set_statement` and

@@ -128,6 +128,7 @@ pub struct TestBuilder {
     authority: Option<Arc<Authority>>,
     replication_server_id: Option<ReplicationServerId>,
     mixed_comparisons: bool,
+    topk: bool,
 }
 
 impl Default for TestBuilder {
@@ -154,6 +155,7 @@ impl TestBuilder {
             authority: None,
             replication_server_id: None,
             mixed_comparisons: true,
+            topk: false,
         }
     }
 
@@ -240,6 +242,11 @@ impl TestBuilder {
         self
     }
 
+    pub fn set_topk(mut self, topk: bool) -> Self {
+        self.topk = topk;
+        self
+    }
+
     pub async fn build<A>(self) -> (A::ConnectionOpts, Handle, ShutdownSender)
     where
         A: Adapter + 'static,
@@ -285,8 +292,8 @@ impl TestBuilder {
             ..Default::default()
         };
         builder.set_persistence(persistence);
-        builder.set_topk(true);
-        builder.set_pagination(true);
+        builder.set_topk(self.topk);
+        builder.set_pagination(false);
         builder.set_mixed_comparisons(self.mixed_comparisons);
         builder.set_dialect(A::DIALECT);
 

@@ -5143,6 +5143,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "readyset-adapter",
+ "readyset-client-metrics",
  "readyset-client-test-helpers",
  "readyset-sql",
  "readyset-tracing",
