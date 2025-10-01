@@ -668,12 +668,12 @@ impl Fuzz {
         let (passed, details) = match result {
             Err(TestError::Fail(reason, script)) => {
                 debug!(%reason, %script, "test failed");
+                error!(%reason, "test failed");
                 // Truncate reason (which may include the query) because especially large queries
                 // are useless to log here. The query will be in the file, which is written out even
                 // before the test runs.
                 let message = reason.message().lines().next().unwrap_or("unknown");
                 let message = &message[..256.min(message.len())];
-                error!(reason = message, "test failed");
                 (
                     false,
                     json!({
@@ -684,19 +684,13 @@ impl Fuzz {
                 )
             }
             Err(TestError::Abort(reason)) => {
-                debug!(%reason, "test aborted");
-                // Truncate reason (which may include the query) because especially large queries
-                // are useless to log here. The query will be in the file, which is written out even
-                // before the test runs.
-                let message = reason.message().lines().next().unwrap_or("unknown");
-                let message = &message[..256.min(message.len())];
-                error!(reason = message, "test aborted");
+                error!(%reason, "test aborted");
                 (
                     false,
                     json!({
                         "failure_kind": "abort",
                         "artifact_path": path_name,
-                        "reason": message,
+                        "reason": reason.message(),
                     }),
                 )
             }
