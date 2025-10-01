@@ -1,11 +1,11 @@
 pub(crate) mod channel;
 mod domain_metrics;
-mod replay_paths;
+pub mod replay_paths;
 
 use std::borrow::Cow;
 use std::cell::RefMut;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Debug;
 use std::ops::Bound;
@@ -121,6 +121,7 @@ impl PartialEq for DomainMode {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 enum TriggerEndpoint {
     None,
     Start(Index),
@@ -152,10 +153,18 @@ impl Debug for TriggerEndpoint {
         match self {
             Self::None => write!(f, "None"),
             Self::Start(index) => f.debug_tuple("Start").field(index).finish(),
-            Self::End { source, .. } => f
+
+            Self::End { source, options } => f
                 .debug_struct("End")
                 .field("source", source)
-                .finish_non_exhaustive(),
+                .field(
+                    "options",
+                    &options
+                        .iter()
+                        .map(|o| format!("Domain {}", o.domain_index.index()))
+                        .collect::<Vec<_>>(),
+                )
+                .finish(),
             Self::Local(index) => f.debug_tuple("Local").field(index).finish(),
         }
     }
@@ -2592,6 +2601,25 @@ impl Domain {
                 Ok(Some(bincode::serialize(&self.snapshotting_base_nodes())?))
             }
             DomainRequest::RequestNodeSizes => self.handle_request_node_sizes(),
+            DomainRequest::RequestReplayPaths => {
+                let paths: BTreeMap<Tag, ReplayPath> = (&self.replay_paths)
+                    .into_iter()
+                    .map(|(tag, path)| {
+                        (
+                            *tag,
+                            ReplayPath {
+                                source: path.source,
+                                target_index: path.target_index.clone(),
+                                path: path.path.clone(),
+                                notify_done: path.notify_done,
+                                partial_unicast_sharder: path.partial_unicast_sharder,
+                                trigger: path.trigger.clone(),
+                            },
+                        )
+                    })
+                    .collect();
+                Ok(Some(bincode::serialize(&paths)?))
+            }
             DomainRequest::Packet(pkt) => {
                 self.handle_packet(pkt, executor)?;
                 Ok(None)

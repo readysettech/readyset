@@ -625,7 +625,22 @@ impl Leader {
             }
             (&Method::GET | &Method::POST, "/replay_paths") => {
                 let ds = self.dataflow_state_handle.read().await;
-                return_serialized!(ds.replay_paths_as_string())
+                let result = ds
+                    .replay_paths()
+                    .await?
+                    .into_iter()
+                    .map(|(di, arr)| {
+                        arr.into_cells()
+                            .into_iter()
+                            .flatten()
+                            .flatten()
+                            .map(|(tag, path)| format!("Domain {}: Tag {}: {}", di, tag, path))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                return_serialized!(result)
             }
             (&Method::POST, "/evict_single") => {
                 let body = if body.is_empty() || body.as_ref() == [0] {

@@ -14,7 +14,6 @@
 
 use std::cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt::{self, Write};
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -22,6 +21,7 @@ use std::time::Instant;
 
 use array2::Array2;
 use common::{IndexPair, Tag};
+use dataflow::domain::replay_paths::ReplayPath;
 use dataflow::payload::{packets::Evict, Eviction};
 use dataflow::prelude::{ChannelCoordinator, DomainIndex, DomainNodes, Graph, NodeIndex};
 use dataflow::{
@@ -80,7 +80,6 @@ use crate::controller::{
 use crate::coordination::{DomainDescriptor, RunDomainResponse};
 use crate::internal::LocalNodeIndex;
 use crate::worker::WorkerRequestKind;
-
 mod graphviz;
 
 pub(in crate::controller) use self::graphviz::Graphviz;
@@ -89,23 +88,6 @@ pub(in crate::controller) use self::graphviz::Graphviz;
 /// for replication offsets)
 const CONCURRENT_REQUESTS: usize = 16;
 
-/// Simple representation of a replay path
-pub struct SimpleReplayPath {
-    pub src: NodeIndex,
-    pub tag: Tag,
-    pub cols: Vec<usize>,
-    pub dst: NodeIndex,
-}
-
-impl fmt::Display for SimpleReplayPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "src: {:?}, tag: {}, cols: {:?}, dst: {:?}",
-            self.src, self.tag, self.cols, self.dst
-        )
-    }
-}
 /// This structure holds all the dataflow state.
 /// It's meant to be handled exclusively by the [`DfStateHandle`], which is the structure
 /// that guarantees thread-safe access to it.
@@ -1467,39 +1449,22 @@ impl DfState {
     }
 
     /// List all replay paths from all domains
-    pub(super) fn replay_paths(&self) -> Vec<SimpleReplayPath> {
-        let mut output = vec![];
-        for (src, paths) in &self.materializations.paths {
-            for (tag, (index, dsts)) in paths {
-                let dst = dsts[0];
-                output.push(SimpleReplayPath {
-                    src: *src,
-                    tag: *tag,
-                    cols: index.columns.clone(),
-                    dst,
-                });
-            }
+    pub(super) async fn replay_paths(
+        &self,
+    ) -> ReadySetResult<Vec<(DomainIndex, Array2<Option<BTreeMap<Tag, ReplayPath>>>)>> {
+        let mut per_domain: Vec<(DomainIndex, Array2<Option<BTreeMap<Tag, ReplayPath>>>)> =
+            Vec::new();
+        for domain in self.domains.keys() {
+            let res = self.domains[domain]
+                .send_to_healthy::<BTreeMap<Tag, ReplayPath>>(
+                    DomainRequest::RequestReplayPaths,
+                    &self.workers,
+                )
+                .await?;
+            per_domain.push((*domain, res));
         }
-        output
-    }
 
-    /// get all replay paths as string
-    pub(super) fn replay_paths_as_string(&self) -> String {
-        let output: BTreeMap<Tag, SimpleReplayPath> = self
-            .replay_paths()
-            .into_iter()
-            .map(|p| (p.tag, p))
-            .collect();
-
-        let mut result = String::new();
-        let mut iter = output.into_values();
-        if let Some(first) = iter.next() {
-            write!(result, "{first}").unwrap();
-            for path in iter {
-                write!(result, "\n{path}").unwrap();
-            }
-        }
-        result
+        Ok(per_domain)
     }
 
     /// *Test only API*

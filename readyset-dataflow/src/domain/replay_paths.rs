@@ -1,11 +1,12 @@
 use std::borrow::{Borrow, Cow};
 use std::collections::{btree_map, BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
-use std::{iter, ops};
+use std::{fmt, iter, ops};
 
 use itertools::Either;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::KeyComparison;
+use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
 use super::{RemappedKeys, TriggerEndpoint};
@@ -17,8 +18,8 @@ use crate::NodeMap;
 /// For more information about replay paths, see the [docs page][]
 ///
 /// [docs page]: http://docs/dataflow/replay_paths.html
-#[derive(Debug)]
-pub(crate) struct ReplayPath {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReplayPath {
     pub(super) source: Option<LocalNodeIndex>,
     /// Partial index (if any) at the *target* of this replay path.
     pub(super) target_index: Option<Index>,
@@ -27,6 +28,12 @@ pub(crate) struct ReplayPath {
     pub(super) notify_done: bool,
     pub(crate) partial_unicast_sharder: Option<NodeIndex>,
     pub(super) trigger: TriggerEndpoint,
+}
+
+impl fmt::Display for ReplayPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ReplayPath {{ source: {:?}, target_index: {:?}, path: {:?}, notify_done: {:?}, partial_unicast_sharder: {:?}, trigger: {:?} }}", self.source, self.target_index, self.path, self.notify_done, self.partial_unicast_sharder, self.trigger)
+    }
 }
 
 impl ReplayPath {

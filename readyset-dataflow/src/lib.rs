@@ -11,7 +11,7 @@ pub mod payload; // it makes me _really_ sad that this has to be pub
 pub mod prelude;
 pub mod utils;
 
-mod domain;
+pub mod domain;
 mod node_map;
 
 use std::collections::{HashMap, VecDeque};

@@ -418,6 +418,9 @@ pub enum DomainRequest {
     /// bytes
     RequestNodeSizes,
 
+    /// Request all replay paths known to this domain
+    RequestReplayPaths,
+
     /// Process the packet, as per usual
     Packet(Packet),
 
