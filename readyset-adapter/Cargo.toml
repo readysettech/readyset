@@ -10,6 +10,7 @@ edition = "2021"
 [dependencies]
 ahash = { workspace = true }
 anyhow = { workspace = true }
+async-channel = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 fail = { workspace = true }
 futures-util = { workspace = true }
@@ -21,6 +22,7 @@ async-trait = { workspace = true }
 readyset-util = { path = "../readyset-util" }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
+num_cpus = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -1356,7 +1356,7 @@ where
             let status_reporter_clone = status_reporter.clone();
             let fut = async move {
                 let upstream_res = connect_upstream::<H::UpstreamDatabase>(
-                    upstream_config,
+                    upstream_config.clone(),
                     no_upstream_connections,
                 )
                 .await
@@ -1394,6 +1394,7 @@ where
                                 let backend = backend_builder.clone().build(
                                     noria,
                                     upstream,
+                                    Some(upstream_config.clone()),
                                     query_status_cache,
                                     adapter_authority.clone(),
                                     status_reporter_clone,

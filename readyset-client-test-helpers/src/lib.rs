@@ -410,7 +410,7 @@ impl TestBuilder {
                     .await;
 
                     let status_reporter = ReadySetStatusReporter::new(
-                        cdc_upstream_config,
+                        cdc_upstream_config.clone(),
                         Some(rh),
                         Default::default(),
                         authority.clone(),
@@ -422,6 +422,7 @@ impl TestBuilder {
                         .build(
                             noria,
                             fallback_upstream,
+                            Some(cdc_upstream_config),
                             query_status_cache,
                             authority.clone(),
                             status_reporter,

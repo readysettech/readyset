@@ -158,7 +158,8 @@ async fn setup_adapter(
 
                 let status_reporter = ReadySetStatusReporter::new(
                     replication_url
-                        .map(UpstreamConfig::from_url)
+                        .as_ref()
+                        .map(|url| UpstreamConfig::from_url(url))
                         .unwrap_or_default(),
                     Some(rh),
                     Default::default(),
@@ -172,6 +173,7 @@ async fn setup_adapter(
                     .build::<_, $handler>(
                         noria,
                         upstream,
+                        replication_url.clone().map(UpstreamConfig::from_url),
                         query_status_cache,
                         authority,
                         status_reporter,

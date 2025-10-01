@@ -78,6 +78,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::ValueEnum;
 use crossbeam_skiplist::SkipSet;
+use database_utils::UpstreamConfig;
 use futures::future::{self, OptionFuture};
 use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
@@ -119,6 +120,7 @@ use crate::metrics_handle::{MetricsHandle, MetricsSummary};
 use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 use crate::status_reporter::ReadySetStatusReporter;
+use crate::upstream_database::Refresh;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::utils::{create_dummy_column, time_or_null};
 use crate::{create_dummy_schema, QueryHandler, UpstreamDatabase, UpstreamDestination};
@@ -135,6 +137,15 @@ const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned thro
 
 /// Unique identifier for a prepared statement, local to a single [`Backend`].
 pub type StatementId = u32;
+
+/// Request to refresh a shallow cached query
+#[derive(Debug)]
+struct ShallowRefreshRequest {
+    query_id: QueryId,
+    path: Vec<SqlIdentifier>,
+    query: String,
+    cache: CacheInsertGuard<ProcessedQueryParams>,
+}
 
 /// Query metadata used to plan query prepare
 #[allow(clippy::large_enum_variant)]
@@ -333,10 +344,12 @@ impl BackendBuilder {
         Self::default()
     }
 
-    pub fn build<DB: UpstreamDatabase, Handler>(
+    #[allow(clippy::too_many_arguments)]
+    pub fn build<DB: UpstreamDatabase + 'static, Handler: 'static>(
         self,
         noria: NoriaConnector,
         upstream: Option<DB>,
+        upstream_config: Option<UpstreamConfig>,
         query_status_cache: &'static QueryStatusCache,
         authority: Arc<Authority>,
         status_reporter: ReadySetStatusReporter<DB>,
@@ -354,6 +367,20 @@ impl BackendBuilder {
         if let Some(connections) = &self.connections {
             connections.insert(self.client_addr);
         }
+
+        let shallow_refresh_sender = upstream_config.as_ref().map(|config| {
+            let cpus = num_cpus::get();
+            let (sender, receiver) = async_channel::bounded::<ShallowRefreshRequest>(5 * cpus);
+
+            for _ in 0..cpus {
+                tokio::spawn(Backend::<DB, Handler>::shallow_refresh_worker(
+                    receiver.clone(),
+                    config.clone(),
+                ));
+            }
+
+            sender
+        });
 
         Backend {
             client_addr: self.client_addr,
@@ -391,6 +418,7 @@ impl BackendBuilder {
             sampler_tx: self.sampler_tx,
             is_internal_connection: false,
             shallow: CacheManager::new(),
+            shallow_refresh_sender,
             _query_handler: PhantomData,
         }
     }
@@ -617,6 +645,9 @@ where
 
     /// The adapter's shallow cache manager.
     shallow: CacheManager<ProcessedQueryParams>,
+
+    /// Sender for shallow refresh requests to worker pool
+    shallow_refresh_sender: Option<async_channel::Sender<ShallowRefreshRequest>>,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -2721,6 +2752,7 @@ where
         res
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn query_shallow<'a>(
         noria: &'a mut NoriaConnector,
         upstream: Option<&'a mut DB>,
@@ -2729,17 +2761,36 @@ where
         query: &'a str,
         event: &mut QueryExecutionEvent,
         processed_query_params: Option<ProcessedQueryParams>,
+        refresh: Option<&async_channel::Sender<ShallowRefreshRequest>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let query_id = QueryId::from_select(&view_request.statement, noria.schema_search_path());
         let res = processed_query_params.map(|p| shallow.get_or_start_insert(&query_id, p));
+
         let cache = match res {
-            Some(CacheResult::Hit(values) | CacheResult::HitAndRefresh(values, _)) => {
+            Some(CacheResult::Hit(values)) => {
+                event.destination = Some(QueryDestination::ReadysetShallow);
+                return Ok(QueryResult::Shallow(values));
+            }
+            Some(CacheResult::HitAndRefresh(values, cache)) => {
+                if let Some(refresh) = refresh {
+                    let request = ShallowRefreshRequest {
+                        query_id,
+                        path: noria.schema_search_path().to_vec(),
+                        query: query.to_string(),
+                        cache,
+                    };
+                    if let Err(e) = refresh.try_send(request) {
+                        warn!("Failed to send shallow refresh request: {}", e);
+                    }
+                }
+
                 event.destination = Some(QueryDestination::ReadysetShallow);
                 return Ok(QueryResult::Shallow(values));
             }
             Some(CacheResult::Miss(cache)) => Some(cache),
             None | Some(CacheResult::NotCached) => None,
         };
+
         Self::query_fallback(upstream, query, event, cache).await
     }
 
@@ -2758,6 +2809,7 @@ where
         sampler_tx: Option<
             &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
         >,
+        refresh: Option<&async_channel::Sender<ShallowRefreshRequest>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let original_status = status.clone();
         let did_work = if let Some(ref mut i) = status.execution_info {
@@ -2797,6 +2849,7 @@ where
                 original_query,
                 event,
                 Some(processed_query_params),
+                refresh,
             )
             .await;
         }
@@ -3301,6 +3354,7 @@ where
                         &mut event,
                         processed_query_params.unwrap(),
                         sampler_tx,
+                        self.shallow_refresh_sender.as_ref(),
                     )
                     .await
                 } else {
@@ -3312,6 +3366,7 @@ where
                         query,
                         &mut event,
                         processed_query_params,
+                        self.shallow_refresh_sender.as_ref(),
                     )
                     .await
                 }
@@ -3371,16 +3426,6 @@ where
     /// Mark or unmark this backend connection as an internal ReadySet connection
     pub fn set_internal_connection(&mut self, is_internal: bool) {
         self.is_internal_connection = is_internal;
-    }
-
-    /// If we are using fallback, this will return the database that was in the original connection
-    /// string, if it exists, otherwise it will return None. If we are not using fallback this will
-    /// always return None.
-    pub fn database(&self) -> Option<&str> {
-        match &self.upstream {
-            Some(db) => db.database(),
-            None => None,
-        }
     }
 
     fn parse_query(&mut self, query: &str) -> ReadySetResult<SqlQuery> {
@@ -3459,6 +3504,87 @@ where
     }
 }
 
+impl<DB, Handler> Backend<DB, Handler>
+where
+    DB: UpstreamDatabase,
+{
+    async fn shallow_refresh_result(
+        result: DB::QueryResult<'_>,
+        cache: CacheInsertGuard<ProcessedQueryParams>,
+    ) -> std::io::Result<()> {
+        result.refresh(cache).await
+    }
+
+    async fn shallow_refresh_worker(
+        receiver: async_channel::Receiver<ShallowRefreshRequest>,
+        upstream_config: UpstreamConfig,
+    ) {
+        let mut upstream: Option<DB> = None;
+        let mut reset = false;
+
+        while let Ok(request) = receiver.recv().await {
+            if upstream.is_none() || reset {
+                match DB::connect(upstream_config.clone(), None, None).await {
+                    Ok(conn) => upstream = Some(conn),
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            "Failed to create upstream connection for shallow refresh",
+                        );
+                        continue;
+                    }
+                }
+            }
+
+            let Some(ref mut conn) = upstream else {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            };
+
+            let ShallowRefreshRequest {
+                query_id,
+                path,
+                query,
+                cache,
+            } = request;
+
+            match conn.set_schema_search_path(&path).await {
+                Ok(()) => {}
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        path = ?path,
+                        "Failed to set schema path for refresh",
+                    );
+                    reset = true; // starting over resets all borrowing, vs setting None here
+                    continue;
+                }
+            }
+
+            let result = match conn.query(&query).await {
+                Ok(result) => result,
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        cache = %query_id,
+                        "Failed to refresh cached query",
+                    );
+                    reset = true;
+                    continue;
+                }
+            };
+
+            if let Err(e) = Self::shallow_refresh_result(result, cache).await {
+                warn!(
+                    error = %e,
+                    cache = %query_id,
+                    "Failed to read results for cached query",
+                );
+            }
+        }
+    }
+}
+
 impl<DB, Handler> Drop for Backend<DB, Handler>
 where
     DB: UpstreamDatabase,
@@ -3480,7 +3606,7 @@ fn log_query(
     slowlog: bool,
     dialect: Dialect,
 ) {
-    const SLOW_DURATION: std::time::Duration = std::time::Duration::from_millis(5);
+    const SLOW_DURATION: Duration = Duration::from_millis(5);
 
     let readyset_duration = event
         .readyset_event
