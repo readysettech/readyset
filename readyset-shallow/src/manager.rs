@@ -171,20 +171,24 @@ where
         self.caches.pin().get(&id).cloned()
     }
 
+    fn make_guard(cache: Arc<Cache<K>>, key: K) -> CacheInsertGuard<K> {
+        CacheInsertGuard {
+            cache,
+            key: Some(key),
+            results: Some(Vec::new()),
+            metadata: None,
+            filled: false,
+        }
+    }
+
     pub fn get_or_start_insert(&self, query_id: &QueryId, key: K) -> CacheResult<K> {
         let Some(cache) = self.get(None, Some(query_id)) else {
             return CacheResult::NotCached;
         };
-        if let Some(result) = cache.get(&key) {
-            CacheResult::Hit(result)
-        } else {
-            CacheResult::Miss(CacheInsertGuard {
-                cache,
-                key: Some(key),
-                results: Some(Vec::new()),
-                metadata: None,
-                filled: false,
-            })
+        match cache.get(&key) {
+            Some((res, false)) => CacheResult::Hit(res),
+            Some((res, true)) => CacheResult::HitAndRefresh(res, Self::make_guard(cache, key)),
+            None => CacheResult::Miss(Self::make_guard(cache, key)),
         }
     }
 }
@@ -196,6 +200,7 @@ where
     NotCached,
     Miss(CacheInsertGuard<K>),
     Hit(crate::QueryResult),
+    HitAndRefresh(crate::QueryResult, CacheInsertGuard<K>),
 }
 
 impl<K> Debug for CacheResult<K>
@@ -207,6 +212,7 @@ where
             Self::NotCached => f.debug_struct("NotCached").finish_non_exhaustive(),
             Self::Miss(..) => f.debug_struct("Miss").finish_non_exhaustive(),
             Self::Hit(..) => f.debug_struct("Hit").finish_non_exhaustive(),
+            Self::HitAndRefresh(..) => f.debug_struct("HitAndRefresh").finish_non_exhaustive(),
         }
     }
 }

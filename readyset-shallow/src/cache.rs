@@ -1,6 +1,8 @@
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use moka::sync::Cache as MokaCache;
 
@@ -10,10 +12,20 @@ use readyset_sql::ast::Relation;
 use crate::manager::*;
 use crate::{EvictionPolicy, QueryMetadata, QueryResult};
 
-#[derive(Debug, Clone)]
-pub struct CacheEntry {
-    pub values: Arc<Values>,
-    pub metadata: Option<Arc<QueryMetadata>>,
+fn current_timestamp_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+#[derive(Debug)]
+struct CacheEntry {
+    values: Arc<Values>,
+    metadata: Option<Arc<QueryMetadata>>,
+    accessed_ms: AtomicU64,
+    refreshed_ms: AtomicU64,
+    refreshing: AtomicBool,
 }
 
 pub struct Cache<K> {
@@ -21,6 +33,7 @@ pub struct Cache<K> {
     cache_metadata: OnceLock<Arc<QueryMetadata>>,
     relation: Option<Relation>,
     query_id: Option<QueryId>,
+    ttl_ms: Option<u64>,
 }
 
 impl<K> Debug for Cache<K>
@@ -46,8 +59,8 @@ where
     ) -> Self {
         let builder = MokaCache::builder();
 
-        let builder = match policy {
-            EvictionPolicy::Ttl(ttl) => builder.time_to_live(ttl),
+        let (builder, ttl_ms) = match policy {
+            EvictionPolicy::Ttl(ttl) => (builder.time_to_live(ttl), Some(ttl.as_millis() as _)),
         };
 
         Self {
@@ -55,10 +68,11 @@ where
             cache_metadata: Default::default(),
             relation,
             query_id,
+            ttl_ms,
         }
     }
 
-    pub fn insert(&self, k: K, v: Values, metadata: QueryMetadata) {
+    pub(crate) fn insert(&self, k: K, v: Values, metadata: QueryMetadata) {
         let metadata = if let Some(existing) = self.cache_metadata.get() {
             if existing.as_ref() == &metadata {
                 None
@@ -78,25 +92,46 @@ where
             }
         };
 
+        let now = current_timestamp_ms();
         let entry = Arc::new(CacheEntry {
             values: Arc::new(v),
             metadata,
+            accessed_ms: now.into(),
+            refreshed_ms: now.into(),
+            refreshing: false.into(),
         });
         self.results.insert(k, entry);
     }
 
-    pub fn get(&self, k: &K) -> Option<QueryResult> {
+    pub fn get(&self, k: &K) -> Option<(QueryResult, bool)> {
         self.results.get(k).map(|entry| {
+            let now = current_timestamp_ms();
+            entry.accessed_ms.store(now, Ordering::Relaxed);
+            let refresh = if let Some(ttl_ms) = self.ttl_ms
+                && now.saturating_sub(entry.refreshed_ms.load(Ordering::Relaxed)) >= ttl_ms / 2
+                && entry
+                    .refreshing
+                    .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                    .is_ok()
+            {
+                true
+            } else {
+                false
+            };
+
             let metadata = entry
                 .metadata
                 .as_ref()
                 .or_else(|| self.cache_metadata.get())
                 .expect("No metadata available for cached result");
 
-            QueryResult {
-                values: Arc::clone(&entry.values),
-                metadata: Arc::clone(metadata),
-            }
+            (
+                QueryResult {
+                    values: Arc::clone(&entry.values),
+                    metadata: Arc::clone(metadata),
+                },
+                refresh,
+            )
         })
     }
 
@@ -129,7 +164,7 @@ mod tests {
 
         cache.insert(key.clone(), values.clone(), metadata);
         let result = cache.get(&key).unwrap();
-        assert_eq!(result.values.as_ref(), &values);
+        assert_eq!(result.0.values.as_ref(), &values);
 
         std::thread::sleep(Duration::from_secs(2));
 

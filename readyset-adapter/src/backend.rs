@@ -2733,7 +2733,7 @@ where
         let query_id = QueryId::from_select(&view_request.statement, noria.schema_search_path());
         let res = processed_query_params.map(|p| shallow.get_or_start_insert(&query_id, p));
         let cache = match res {
-            Some(CacheResult::Hit(values)) => {
+            Some(CacheResult::Hit(values) | CacheResult::HitAndRefresh(values, _)) => {
                 event.destination = Some(QueryDestination::ReadysetShallow);
                 return Ok(QueryResult::Shallow(values));
             }
