@@ -1534,6 +1534,10 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
         unsupported!("Mixing window functions and aggregates is not yet supported");
     }
 
+    if !group_by.is_empty() && aggregates.is_empty() {
+        unsupported!("Using group by without aggregates is not yet supported");
+    }
+
     Ok(QueryGraph {
         distinct: stmt.distinct,
         relations,
