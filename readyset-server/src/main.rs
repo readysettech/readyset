@@ -1,5 +1,4 @@
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
 use std::time::Duration;
@@ -221,12 +220,7 @@ fn main() -> anyhow::Result<()> {
         info!(%volume_id);
     }
 
-    let deployment_dir = opts
-        .worker_options
-        .storage_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(&opts.deployment);
-
+    let deployment_dir = opts.worker_options.storage_dir(&opts.deployment);
     let authority = opts.authority.clone();
     let authority_addr = match authority {
         AuthorityType::Standalone => deployment_dir

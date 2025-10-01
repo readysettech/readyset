@@ -14,6 +14,7 @@ antithesis_sdk = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 crossbeam-skiplist = { workspace = true }
+dir-size = { workspace = true }
 futures-util = { workspace = true }
 fail = { workspace = true }
 failpoint-macros = { path = "../failpoint-macros" }
@@ -21,6 +22,7 @@ metrics = { workspace = true }
 mysql_common = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
+sysinfo = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-native-tls = { workspace = true }

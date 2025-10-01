@@ -1,7 +1,11 @@
+use std::env::current_dir;
 use std::fmt::{Display, Formatter};
+use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, ensure, Error, Result};
+use dir_size::get_size_in_bytes;
 use regex::{Captures, Regex};
+use sysinfo::Disks;
 use tracing::info;
 
 use database_utils::tls::ServerCertVerification;
@@ -9,8 +13,13 @@ use database_utils::{
     DatabaseConnection, DatabaseError, DatabaseType, DatabaseURL, QueryableConnection,
 };
 use readyset_sql::Dialect;
+use replicators::MYSQL_INTERNAL_DBS;
 
 use crate::Options;
+
+/// When estimating how much space we need to snapshot, multiply the estimated requirement by this
+/// amount to err on the side of being too cautious.
+const DISK_SPACE_REQUIREMENT_FACTOR: u64 = 2;
 
 /// A collection of all the verification failures we see.
 #[derive(Debug, thiserror::Error)]
@@ -239,6 +248,83 @@ async fn verify_permissions(conn: &mut DatabaseConnection, options: &Options) ->
     Ok(())
 }
 
+async fn verify_disk_space(conn: &mut DatabaseConnection, options: &Options) -> Result<()> {
+    let config = &options.server_worker_options.replicator_config;
+    if config.replication_tables.is_some() || config.replication_tables_ignore.is_some() {
+        // Don't try to figure out required space if specific tables are asked for.
+        return Ok(());
+    }
+
+    let deployment_dir = options
+        .server_worker_options
+        .storage_dir(&options.deployment);
+    let display = deployment_dir.display().to_string();
+    let mut dir = deployment_dir.clone();
+    // Remove deployment directory from path, as it likely doesn't exist for new deployments.
+    dir.pop();
+    let dir = if dir.is_absolute() {
+        dir
+    } else if dir == PathBuf::from(".") {
+        // Storage directory is default relative path.  Use current, absolute directory.
+        current_dir().map_err(|e| anyhow!("Could not determine current directory: {e}"))?
+    } else if dir.exists() {
+        // Path is some other relative directory that exists.  Try to canonicalize it.
+        dir.canonicalize()
+            .map_err(|e| anyhow!("Failed to canonicalize storage directory {display}: {e}"))?
+    } else {
+        // Path is some relative path that does not exist.  Skip verification because canonicalize
+        // requires the path to exist, and let's not modify the filesystem during verification.
+        return Ok(());
+    };
+
+    // Find the most-specific (longest) mountpoint holding us.
+    let disks = Disks::new_with_refreshed_list();
+    let disk = disks
+        .iter()
+        .filter(|disk| dir.starts_with(disk.mount_point()))
+        .max_by_key(|disk| disk.mount_point().as_os_str().len())
+        .ok_or_else(|| {
+            anyhow!("Could not find mountpoint containing storage directory {display}")
+        })?;
+
+    let free_bytes = disk.available_space();
+    let used_bytes = if deployment_dir.exists() {
+        // A preexisting deployment exists, get its size to discount it from the estimate.
+        get_size_in_bytes(&deployment_dir).map_err(|e| {
+            anyhow!("Failed to determine consumed space in directory {display}: {e}")
+        })?
+    } else {
+        0
+    };
+
+    let query = match conn.dialect() {
+        Dialect::MySQL => &format!(
+            "SELECT COALESCE(SUM(data_length), 0) FROM information_schema.tables \
+               WHERE table_schema NOT IN ({})",
+            MYSQL_INTERNAL_DBS
+                .iter()
+                .map(|db| format!("'{db}'"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Dialect::PostgreSQL => "SELECT pg_database_size(current_database())",
+    };
+    let estimated_total_bytes: i64 = query_one_value(conn, query)
+        .await
+        .map_err(|e| anyhow!("Failed to query estimated snapshot size: {e}"))?;
+    let estimated_total_bytes = estimated_total_bytes as u64 * DISK_SPACE_REQUIREMENT_FACTOR;
+    let estimated_required_bytes = estimated_total_bytes.saturating_sub(used_bytes);
+
+    ensure!(
+        free_bytes > estimated_required_bytes,
+        "Estimated space required for snapshot is {estimated_required_bytes} bytes, but only have \
+         {free_bytes} free bytes in storage directory {display}"
+    );
+
+    info!("Verified disk space for snapshot");
+    Ok(())
+}
+
 /// Run through a list of checks to make sure we're good to go before attempting to snapshot.
 pub async fn verify(options: &Options) -> Result<()> {
     let mut errors = Vec::new();
@@ -278,6 +364,7 @@ pub async fn verify(options: &Options) -> Result<()> {
         add_err!(verify_version(conn).await);
         add_err!(verify_replication(conn).await);
         add_err!(verify_permissions(conn, options).await);
+        add_err!(verify_disk_space(conn, options).await);
     }
 
     if errors.is_empty() {

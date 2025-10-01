@@ -132,6 +132,7 @@ derive_more = { version = "2.0.1", features = [
     "display",
 ] }
 diff = "0.1.13"
+dir-size = "0.1"
 enum-display-derive = "0.1.1"
 enum-kinds = "0.5.1"
 enum_dispatch = "0.3.13"
@@ -241,6 +242,7 @@ streaming-iterator = "0.1"
 stringprep = "0.1.4"
 strum = { version = "0.27", features = ["derive"] }
 syn = { version = "2.0.87", default-features = false }
+sysinfo = "0.37"
 temp-dir = "0.1"
 tempfile = "3.10.1"
 test-strategy = "0.4.3"

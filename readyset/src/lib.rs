@@ -793,10 +793,7 @@ where
 
         let deployment_dir = options
             .server_worker_options
-            .storage_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(&options.deployment);
-
+            .storage_dir(&options.deployment);
         let upstream_config = options.server_worker_options.replicator_config.clone();
 
         if options.cleanup {

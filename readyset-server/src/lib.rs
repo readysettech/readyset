@@ -746,11 +746,11 @@ pub struct WorkerOptions {
 }
 
 impl WorkerOptions {
-    pub fn storage_dir(&self) -> Option<PathBuf> {
-        if let Some(s) = &self.storage_dir {
-            return Some(s.to_path_buf());
-        }
-        None
+    pub fn storage_dir(&self, deployment: &str) -> PathBuf {
+        self.storage_dir
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(deployment)
     }
 
     pub fn working_dir(&self) -> Option<PathBuf> {
@@ -837,14 +837,22 @@ mod tests {
     /// Test setting the storage directory
     #[test]
     fn storage_and_db_dirs() {
+        let deployment = "readyset.db";
+
         // test the unset variant
         let worker_opts = Wrapper::parse_from(["test"]).worker_opts;
-        assert_eq!(None, worker_opts.storage_dir());
+        assert_eq!(
+            PathBuf::from(".").join(deployment),
+            worker_opts.storage_dir(deployment)
+        );
 
         // the test the --storage-dir cli flag
         let storage_dir = "/tmp/cli-flag-storage";
         let worker_opts = Wrapper::parse_from(["test", "--storage-dir", storage_dir]).worker_opts;
-        assert_eq!(Some(PathBuf::from(storage_dir)), worker_opts.storage_dir());
+        assert_eq!(
+            PathBuf::from(storage_dir).join(deployment),
+            worker_opts.storage_dir(deployment)
+        );
     }
 
     #[test]

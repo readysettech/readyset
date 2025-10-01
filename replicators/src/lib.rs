@@ -7,6 +7,7 @@ pub mod table_filter;
 use std::time::{Duration, Instant};
 
 use metrics::{gauge, Gauge};
+pub use mysql_connector::MYSQL_INTERNAL_DBS;
 pub use noria_adapter::{cleanup, NoriaAdapter};
 use readyset_client::metrics::recorded;
 use readyset_client::{TableStatus, TABLE_STATUS_REPORT_INTERVAL};
