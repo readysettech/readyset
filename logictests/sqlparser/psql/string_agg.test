@@ -175,3 +175,57 @@ query
 select string_agg(tag, '::') from tags where d_id in (12345, 23456);
 ----
 NULL
+
+
+#####
+# test expressions in aggregate arguments
+
+# test with function expression (upper)
+query T
+select string_agg(upper(t.tag), '::') from tags t where d_id = 1;
+----
+BBB::AAA::CCC::BBB::AAA
+
+# test with function expression (upper) - post-lookup aggregation
+query T
+select string_agg(upper(t.tag), '::') from tags t where d_id in (1, 2);
+----
+BBB::AAA::CCC::BBB::AAA::YYY::ZZZ::AAA
+
+# test with binary operation (arithmetic)
+statement ok
+create table nums (id int, val int);
+
+statement ok
+insert into nums values (1, 10), (1, 20), (1, 30);
+
+query T
+select string_agg((val + 5)::text, ',') from nums where id = 1;
+----
+15,25,35
+
+query T
+select string_agg((val * 2)::text, ',') from nums where id = 1;
+----
+20,40,60
+
+# test with binary operation (arithmetic) - post-lookup aggregation
+statement ok
+insert into nums values (2, 100), (2, 200);
+
+query T
+select string_agg((val + 5)::text, ',') from nums where id in (1, 2);
+----
+15,25,35,105,205
+
+# test with string concatenation function
+query T
+select string_agg(concat(t.tag, '-suffix'), '::') from tags t where d_id = 2;
+----
+yyy-suffix::zzz-suffix::AAA-suffix
+
+# test with string concatenation function - post-lookup aggregation
+query T
+select string_agg(concat(t.tag, '-suffix'), '::') from tags t where d_id in (1, 2);
+----
+bbb-suffix::aaa-suffix::ccc-suffix::bbb-suffix::aaa-suffix::yyy-suffix::zzz-suffix::AAA-suffix

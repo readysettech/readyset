@@ -17,8 +17,10 @@ use std::fmt::{Display, Formatter, Result};
 use crate::eval::json;
 use readyset_data::DfValue;
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_sql::analysis::is_aggregate;
+use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::ast::{
-    Column, DistinctOption, Expr, FieldReference, FunctionExpr, NullOrder, OrderClause, OrderType,
+    DistinctOption, Expr, FieldReference, FunctionExpr, NullOrder, OrderClause, OrderType,
 };
 use serde::{Deserialize, Serialize};
 
@@ -370,8 +372,51 @@ impl From<&AccumulationOp> for AccumulatorData {
     }
 }
 
+/// Visitor that validates an aggregation expression doesn't contain aggregate expressions
+/// or window function calls.
+///
+/// As per PostgreSQL documentation [0]:
+/// "expression is any value expression that does not itself contain an aggregate expression
+/// or a window function call."
+///
+/// [0] https://www.postgresql.org/docs/current/sql-expressions.html#SYNTAX-AGGREGATES
+struct AggregateValidator;
+
+impl<'ast> Visitor<'ast> for AggregateValidator {
+    type Error = ReadySetError;
+
+    fn visit_expr(&mut self, expr: &'ast Expr) -> ReadySetResult<()> {
+        match expr {
+            // Window functions are not allowed
+            Expr::WindowFunction { .. } => {
+                // this is the error message from postgres
+                unsupported!("aggregate function calls cannot contain window function calls")
+            }
+            // Scalar subqueries in aggregates are not yet supported in ReadySet.
+            Expr::NestedSelect(_) | Expr::Exists(_) => {
+                unsupported!("Subqueries in aggregate function arguments are not yet supported")
+            }
+            // For all other expressions, continue walking the tree
+            _ => visit::walk_expr(self, expr),
+        }
+    }
+
+    fn visit_function_expr(&mut self, func: &'ast FunctionExpr) -> ReadySetResult<()> {
+        if is_aggregate(func) {
+            // this is the error message from postgres
+            unsupported!("aggregate function calls cannot be nested")
+        }
+        visit::walk_function_expr(self, func)
+    }
+}
+
+/// Validates that an expression doesn't contain nested aggregate expressions or window function calls.
+fn validate_no_nested_aggregates(expr: &Expr) -> ReadySetResult<()> {
+    AggregateValidator.visit_expr(expr)
+}
+
 fn validate_accumulator_order_by(
-    over_col: &Column,
+    expr: &Expr,
     order_by: &Option<OrderClause>,
 ) -> ReadySetResult<Option<(OrderType, NullOrder)>> {
     match order_by {
@@ -392,6 +437,11 @@ fn validate_accumulator_order_by(
                     }
                 }
                 FieldReference::Expr(e) => {
+                    // Enforce only column references, not any random expr (yet)
+                    let over_col = match expr {
+                        Expr::Column(ref c) => c,
+                        _ => unsupported!("expr must be a column"),
+                    };
                     let order_by_col = match e {
                         Expr::Column(c) => c,
                         _ => unsupported!("ORDER BY expr must be a column"),
@@ -413,51 +463,254 @@ impl TryFrom<&FunctionExpr> for AccumulationOp {
     type Error = ReadySetError;
 
     fn try_from(fn_expr: &FunctionExpr) -> ReadySetResult<AccumulationOp> {
-        // Enforce only column references, not any random expr
-        let over_col = |expr: &Expr| -> ReadySetResult<Column> {
-            match *expr {
-                Expr::Column(ref c) => Ok(c.clone()),
-                _ => unsupported!("expr must be a column"),
-            }
-        };
-
         let op = match fn_expr {
             FunctionExpr::ArrayAgg {
                 expr,
                 distinct,
                 order_by,
-            } => AccumulationOp::ArrayAgg {
-                distinct: *distinct,
-                order_by: validate_accumulator_order_by(&over_col(expr)?, order_by)?,
-            },
+            } => {
+                validate_no_nested_aggregates(expr)?;
+                AccumulationOp::ArrayAgg {
+                    distinct: *distinct,
+                    order_by: validate_accumulator_order_by(expr, order_by)?,
+                }
+            }
             FunctionExpr::GroupConcat {
                 expr,
                 separator,
                 distinct,
                 order_by,
-            } => AccumulationOp::GroupConcat {
-                separator: separator.clone().unwrap_or_else(|| ",".to_owned()),
-                distinct: *distinct,
-                order_by: validate_accumulator_order_by(&over_col(expr)?, order_by)?,
-            },
+            } => {
+                validate_no_nested_aggregates(expr)?;
+                AccumulationOp::GroupConcat {
+                    separator: separator.clone().unwrap_or_else(|| ",".to_owned()),
+                    distinct: *distinct,
+                    order_by: validate_accumulator_order_by(expr, order_by)?,
+                }
+            }
             FunctionExpr::JsonObjectAgg {
+                key,
+                value,
                 allow_duplicate_keys,
-                ..
-            } => AccumulationOp::JsonObjectAgg {
-                allow_duplicate_keys: *allow_duplicate_keys,
-            },
+            } => {
+                validate_no_nested_aggregates(key)?;
+                validate_no_nested_aggregates(value)?;
+                AccumulationOp::JsonObjectAgg {
+                    allow_duplicate_keys: *allow_duplicate_keys,
+                }
+            }
             FunctionExpr::StringAgg {
                 expr,
                 separator,
                 distinct,
                 order_by,
-            } => AccumulationOp::StringAgg {
-                separator: separator.clone(),
-                distinct: *distinct,
-                order_by: validate_accumulator_order_by(&over_col(expr)?, order_by)?,
-            },
+            } => {
+                validate_no_nested_aggregates(expr)?;
+                AccumulationOp::StringAgg {
+                    separator: separator.clone(),
+                    distinct: *distinct,
+                    order_by: validate_accumulator_order_by(expr, order_by)?,
+                }
+            }
             _ => internal!("Unsupported accumulation for function expr: {:?}", fn_expr),
         };
         Ok(op)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use readyset_sql::ast::{Column, LimitClause, OrderBy, SelectStatement, SqlIdentifier};
+
+    fn make_column(name: &str) -> Column {
+        Column {
+            name: SqlIdentifier::from(name),
+            table: None,
+        }
+    }
+
+    fn make_column_expr(name: &str) -> Expr {
+        Expr::Column(make_column(name))
+    }
+
+    fn make_order_clause(fields: Vec<FieldReference>, order_type: OrderType) -> OrderClause {
+        OrderClause {
+            order_by: fields
+                .into_iter()
+                .map(|field| OrderBy {
+                    field,
+                    order_type: Some(order_type),
+                    null_order: NullOrder::NullsFirst,
+                })
+                .collect(),
+        }
+    }
+
+    mod validate_accumulator_order_by_tests {
+        use super::*;
+
+        #[test]
+        fn test_multiple_order_by_expressions() {
+            let expr = make_column_expr("col1");
+            let order_clause = Some(make_order_clause(
+                vec![
+                    FieldReference::Expr(make_column_expr("col1")),
+                    FieldReference::Expr(make_column_expr("col2")),
+                ],
+                OrderType::OrderAscending,
+            ));
+
+            let result = validate_accumulator_order_by(&expr, &order_clause);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_numeric_position_not_one() {
+            let expr = make_column_expr("col1");
+            let order_clause = Some(make_order_clause(
+                vec![FieldReference::Numeric(2)],
+                OrderType::OrderAscending,
+            ));
+
+            let result = validate_accumulator_order_by(&expr, &order_clause);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_expr_not_a_column() {
+            // Create a literal expression instead of a column
+            let expr = Expr::Literal(readyset_sql::ast::Literal::Integer(42));
+            let order_clause = Some(make_order_clause(
+                vec![FieldReference::Expr(make_column_expr("col1"))],
+                OrderType::OrderAscending,
+            ));
+
+            let result = validate_accumulator_order_by(&expr, &order_clause);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_order_by_expr_not_a_column() {
+            let expr = make_column_expr("col1");
+            // Use a literal in ORDER BY instead of a column
+            let order_clause = Some(make_order_clause(
+                vec![FieldReference::Expr(Expr::Literal(
+                    readyset_sql::ast::Literal::Integer(1),
+                ))],
+                OrderType::OrderAscending,
+            ));
+
+            let result = validate_accumulator_order_by(&expr, &order_clause);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_columns_dont_match() {
+            let expr = make_column_expr("col1");
+            let order_clause = Some(make_order_clause(
+                vec![FieldReference::Expr(make_column_expr("col2"))],
+                OrderType::OrderAscending,
+            ));
+
+            let result = validate_accumulator_order_by(&expr, &order_clause);
+            assert!(result.is_err());
+        }
+    }
+
+    mod validate_no_nested_aggregates_tests {
+        use super::*;
+
+        #[test]
+        fn test_window_function_rejected() {
+            let expr = Expr::WindowFunction {
+                function: FunctionExpr::Call {
+                    name: SqlIdentifier::from("row_number"),
+                    arguments: Some(vec![]),
+                },
+                partition_by: vec![],
+                order_by: vec![],
+            };
+
+            let result = validate_no_nested_aggregates(&expr);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_nested_select_rejected() {
+            let expr = Expr::NestedSelect(Box::new(SelectStatement {
+                ctes: vec![],
+                distinct: false,
+                lateral: false,
+                fields: vec![],
+                tables: vec![],
+                join: vec![],
+                where_clause: None,
+                group_by: None,
+                having: None,
+                order: None,
+                limit_clause: LimitClause::default(),
+                metadata: Default::default(),
+            }));
+
+            let result = validate_no_nested_aggregates(&expr);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_exists_subquery_rejected() {
+            let expr = Expr::Exists(Box::new(SelectStatement {
+                ctes: vec![],
+                distinct: false,
+                lateral: false,
+                fields: vec![],
+                tables: vec![],
+                join: vec![],
+                where_clause: None,
+                group_by: None,
+                having: None,
+                order: None,
+                limit_clause: LimitClause::default(),
+                metadata: Default::default(),
+            }));
+
+            let result = validate_no_nested_aggregates(&expr);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_nested_aggregate_rejected() {
+            // Create SUM(COUNT(*)) - nested aggregate
+            let inner_agg = FunctionExpr::Count {
+                expr: Box::new(Expr::Column(make_column("col1"))),
+                distinct: false,
+            };
+
+            let expr = Expr::Call(FunctionExpr::Sum {
+                expr: Box::new(Expr::Call(inner_agg)),
+                distinct: false,
+            });
+
+            let result = validate_no_nested_aggregates(&expr);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_nested_aggregate_in_arithmetic() {
+            // Create 1 + COUNT(*) - aggregate in arithmetic expression
+            let count_expr = Expr::Call(FunctionExpr::Count {
+                expr: Box::new(Expr::Column(make_column("col1"))),
+                distinct: false,
+            });
+
+            let expr = Expr::BinaryOp {
+                lhs: Box::new(Expr::Literal(readyset_sql::ast::Literal::Integer(1))),
+                op: readyset_sql::ast::BinaryOperator::Add,
+                rhs: Box::new(count_expr),
+            };
+
+            let result = validate_no_nested_aggregates(&expr);
+            assert!(result.is_err());
+        }
     }
 }

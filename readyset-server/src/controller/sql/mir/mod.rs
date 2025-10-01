@@ -870,101 +870,56 @@ impl SqlToMirConverter {
             out_nodes
         };
 
-        fn is_column(expr: &Expr) -> bool {
-            matches!(expr, Expr::Column(_))
-        }
-
-        fn get_column(expr: &Expr) -> &ast::Column {
+        fn get_or_resolve_column(
+            expr: &Expr,
+            projected_exprs: &HashMap<Expr, SqlIdentifier>,
+        ) -> ReadySetResult<Column> {
             match expr {
-                Expr::Column(ref col) => col,
-                _ => unreachable!(),
+                Expr::Column(col) => Ok(Column::from(col)),
+                _ => {
+                    let name = projected_exprs
+                        .get(expr)
+                        .cloned()
+                        .ok_or_else(|| mk_error!(expr))?;
+                    Ok(Column::named(name))
+                }
             }
         }
 
         Ok(match function {
             ArrayAgg { ref expr, .. } => mknode(
-                Column::from(get_column(expr)),
+                get_or_resolve_column(expr, projected_exprs)?,
                 GroupedNodeType::Accumulation(AccumulationOp::try_from(&function)?),
                 false,
             ),
-            Sum { ref expr, distinct } if is_column(expr) => mknode(
-                Column::from(get_column(expr)),
-                GroupedNodeType::Aggregation(Aggregation::Sum),
-                distinct,
-            ),
-            Sum { expr, distinct } => mknode(
-                Column::named(
-                    projected_exprs
-                        .get(&expr)
-                        .cloned()
-                        .ok_or_else(|| mk_error!(&*expr))?,
-                ),
+            Sum { ref expr, distinct } => mknode(
+                get_or_resolve_column(expr, projected_exprs)?,
                 GroupedNodeType::Aggregation(Aggregation::Sum),
                 distinct,
             ),
             CountStar => internal!("Handled earlier"),
-            Count { ref expr, distinct } if is_column(expr) => mknode(
-                Column::from(get_column(expr)),
-                GroupedNodeType::Aggregation(Aggregation::Count),
-                distinct,
-            ),
             Count { ref expr, distinct } => mknode(
-                Column::named(
-                    projected_exprs
-                        .get(expr)
-                        .cloned()
-                        .ok_or_else(|| mk_error!(expr))?,
-                ),
+                get_or_resolve_column(expr, projected_exprs)?,
                 GroupedNodeType::Aggregation(Aggregation::Count),
-                distinct,
-            ),
-            Avg { ref expr, distinct } if is_column(expr) => mknode(
-                Column::from(get_column(expr)),
-                GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
             ),
             Avg { ref expr, distinct } => mknode(
-                Column::named(
-                    projected_exprs
-                        .get(expr)
-                        .cloned()
-                        .ok_or_else(|| mk_error!(expr))?,
-                ),
+                get_or_resolve_column(expr, projected_exprs)?,
                 GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
             ),
-            Max(ref expr) if is_column(expr) => mknode(
-                Column::from(get_column(expr)),
-                GroupedNodeType::Extremum(Extremum::Max),
-                false,
-            ),
             Max(ref expr) => mknode(
-                Column::named(
-                    projected_exprs
-                        .get(expr)
-                        .cloned()
-                        .ok_or_else(|| mk_error!(expr))?,
-                ),
+                get_or_resolve_column(expr, projected_exprs)?,
                 GroupedNodeType::Extremum(Extremum::Max),
-                false,
-            ),
-            Min(ref expr) if is_column(expr) => mknode(
-                Column::from(get_column(expr)),
-                GroupedNodeType::Extremum(Extremum::Min),
                 false,
             ),
             Min(ref expr) => mknode(
-                Column::named(
-                    projected_exprs
-                        .get(expr)
-                        .cloned()
-                        .ok_or_else(|| mk_error!(expr))?,
-                ),
+                get_or_resolve_column(expr, projected_exprs)?,
                 GroupedNodeType::Extremum(Extremum::Min),
                 false,
             ),
-            GroupConcat { ref expr, .. } if is_column(expr) => mknode(
-                Column::from(get_column(expr)),
+            GroupConcat { ref expr, .. } => mknode(
+                get_or_resolve_column(expr, projected_exprs)?,
                 GroupedNodeType::Accumulation(AccumulationOp::try_from(&function)?),
                 false,
             ),
@@ -973,8 +928,8 @@ impl SqlToMirConverter {
                 GroupedNodeType::Accumulation(AccumulationOp::try_from(&function)?),
                 false,
             ),
-            StringAgg { ref expr, .. } if is_column(expr) => mknode(
-                Column::from(get_column(expr)),
+            StringAgg { ref expr, .. } => mknode(
+                get_or_resolve_column(expr, projected_exprs)?,
                 GroupedNodeType::Accumulation(AccumulationOp::try_from(&function)?),
                 false,
             ),
