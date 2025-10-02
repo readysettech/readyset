@@ -1500,7 +1500,7 @@ impl BuiltinFunction {
                 let bucket = match interval {
                     TimeInterval::Year(n) => {
                         let year = datetime.year();
-                        let floored_year = (year / (*n as i32)) * (*n as i32);
+                        let floored_year = (year / (n.get() as i32)) * (n.get() as i32);
                         NaiveDate::from_ymd_opt(floored_year, 1, 1)
                             .and_then(|d| d.and_hms_opt(0, 0, 0))
                             .ok_or_else(|| {
@@ -1510,7 +1510,7 @@ impl BuiltinFunction {
                     TimeInterval::Month(n) => {
                         let month = datetime.year() as usize * 12 + datetime.month0() as usize;
 
-                        let floored_month = (month / n) * n;
+                        let floored_month = (month / n.get()) * n.get();
                         let year = floored_month / 12;
                         let month = floored_month % 12;
 
@@ -1522,7 +1522,7 @@ impl BuiltinFunction {
                     }
                     TimeInterval::Day(n) => {
                         let unix_days = datetime.date_naive().num_days_from_ce();
-                        let floored_days = (unix_days / (*n as i32)) * (*n as i32);
+                        let floored_days = (unix_days / (n.get() as i32)) * (n.get() as i32);
                         NaiveDate::from_num_days_from_ce_opt(floored_days)
                             .and_then(|d| d.and_hms_opt(0, 0, 0))
                             .ok_or_else(|| {
@@ -1532,7 +1532,7 @@ impl BuiltinFunction {
                     TimeInterval::Hour(n) => {
                         let total_hours =
                             datetime.num_days_from_ce() as i64 * 24 + datetime.hour() as i64;
-                        let floored_hours = (total_hours / (*n as i64)) * (*n as i64);
+                        let floored_hours = (total_hours / (n.get() as i64)) * (n.get() as i64);
                         let days = floored_hours / 24;
                         let hours = floored_hours % 24;
                         NaiveDate::from_num_days_from_ce_opt(days as i32)
@@ -1545,7 +1545,7 @@ impl BuiltinFunction {
                         let total_minutes = datetime.num_days_from_ce() as i64 * 24 * 60
                             + datetime.hour() as i64 * 60
                             + datetime.minute() as i64;
-                        let floored_minutes = (total_minutes / (*n as i64)) * (*n as i64);
+                        let floored_minutes = (total_minutes / (n.get() as i64)) * (n.get() as i64);
                         let days = floored_minutes / (24 * 60);
                         let remaining_minutes = floored_minutes % (24 * 60);
                         let hours = remaining_minutes / 60;
@@ -1558,7 +1558,7 @@ impl BuiltinFunction {
                     }
                     TimeInterval::Second(n) => {
                         let total_seconds = datetime.timestamp();
-                        let floored_seconds = (total_seconds / (*n as i64)) * (*n as i64);
+                        let floored_seconds = (total_seconds / (n.get() as i64)) * (n.get() as i64);
                         chrono::DateTime::from_timestamp(floored_seconds, 0)
                             .map(|dt| dt.naive_utc())
                             .ok_or_else(|| {
@@ -3846,7 +3846,7 @@ mod tests {
         let bucket_expr = Expr::Call {
             func: Box::new(BuiltinFunction::Bucket {
                 expr: column_expr,
-                interval: TimeInterval::Hour(1),
+                interval: TimeInterval::Hour(1.try_into().unwrap()),
             }),
             ty: DfType::TimestampTz {
                 subsecond_digits: 6,
