@@ -2002,12 +2002,11 @@ where
     async fn create_cached_query(
         &mut self,
         name: &mut Option<Relation>,
-        mut stmt: SelectStatement,
+        stmt: SelectStatement,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
         concurrently: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        adapter_rewrites::process_query(&mut stmt, self.noria.rewrite_params())?;
         let (query_id, name, requested_name) = self.make_name_and_id(name, &stmt);
 
         // If we have existing caches with the same query_id or name, drop them first.
@@ -2536,7 +2535,7 @@ where
             SqlQuery::CreateCache(create_cache_stmt) => {
                 if !self.allow_cache_ddl {
                     unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
-                };
+                }
 
                 create_cache_stmt.detect_and_validate_bucket_always()?;
 
@@ -2549,7 +2548,7 @@ where
                     concurrently,
                     unparsed_create_cache_statement,
                 } = create_cache_stmt;
-                let (stmt, search_path) = match inner {
+                let (mut stmt, search_path) = match inner {
                     Ok(CacheInner::Statement(st)) => Ok((*st.clone(), None)),
                     Ok(CacheInner::Id(id)) => {
                         match self.state.query_status_cache.query(id.as_str()) {
@@ -2567,6 +2566,8 @@ where
                     }
                     Err(err) => Err(ReadySetError::UnparseableQuery(err.clone())),
                 }?;
+
+                adapter_rewrites::process_query(&mut stmt, self.noria.rewrite_params())?;
 
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
