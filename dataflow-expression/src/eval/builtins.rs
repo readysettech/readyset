@@ -1508,10 +1508,13 @@ impl BuiltinFunction {
                             })?
                     }
                     TimeInterval::Month(n) => {
-                        let year = datetime.year();
-                        let month = datetime.month() as usize;
+                        let month = datetime.year() as usize * 12 + datetime.month0() as usize;
+
                         let floored_month = (month / n) * n;
-                        NaiveDate::from_ymd_opt(year, floored_month as u32, 1)
+                        let year = floored_month / 12;
+                        let month = floored_month % 12;
+
+                        NaiveDate::from_ymd_opt(year as i32, (month as u32) + 1, 1)
                             .and_then(|d| d.and_hms_opt(0, 0, 0))
                             .ok_or_else(|| {
                                 invalid_query_err!("Invalid month calculation in bucket function")

@@ -227,7 +227,7 @@ from events
 where id <= 3
 group by bucket_3months
 ----
-2023-09-01 00:00:00
+2023-07-01 00:00:00
 450
 
 statement error
