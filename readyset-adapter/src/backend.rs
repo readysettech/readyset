@@ -103,8 +103,8 @@ use readyset_sql::ast::{
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
-use readyset_sql_passes::adapter_rewrites;
 use readyset_sql_passes::adapter_rewrites::ProcessedQueryParams;
+use readyset_sql_passes::{adapter_rewrites, DetectBucketFunctions};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::{RedactedString, Sensitive};
 use readyset_util::retry_with_exponential_backoff;
@@ -2501,18 +2501,22 @@ where
                     Err(err) => Err(ReadySetError::UnparseableQuery(err.clone())),
                 }
             }
-            SqlQuery::CreateCache(CreateCacheStatement {
-                name,
-                cache_type,
-                policy,
-                inner,
-                always,
-                concurrently,
-                unparsed_create_cache_statement,
-            }) => {
+            SqlQuery::CreateCache(create_cache_stmt) => {
                 if !self.allow_cache_ddl {
                     unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
-                }
+                };
+
+                create_cache_stmt.detect_and_validate_bucket_always()?;
+
+                let CreateCacheStatement {
+                    name,
+                    cache_type,
+                    policy,
+                    inner,
+                    always,
+                    concurrently,
+                    unparsed_create_cache_statement,
+                } = create_cache_stmt;
                 let (stmt, search_path) = match inner {
                     Ok(CacheInner::Statement(st)) => Ok((*st.clone(), None)),
                     Ok(CacheInner::Id(id)) => {

@@ -2,6 +2,7 @@ pub mod adapter_rewrites;
 pub mod alias_removal;
 pub mod anonymize;
 mod create_table_columns;
+mod detect_bucket_functions;
 mod detect_problematic_self_joins;
 pub mod detect_unsupported_placeholders;
 mod disallow_row;
@@ -28,12 +29,14 @@ use dataflow_expression::Dialect;
 use disallow_row::DisallowRow;
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{
-    CompoundSelectStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
-    NonReplicatedRelation, Relation, SelectSpecification, SelectStatement, SqlIdentifier,
+    CompoundSelectStatement, CreateCacheStatement, CreateTableBody, CreateTableStatement,
+    CreateViewStatement, NonReplicatedRelation, Relation, SelectSpecification, SelectStatement,
+    SqlIdentifier,
 };
 
 pub use crate::alias_removal::AliasRemoval;
 pub use crate::create_table_columns::CreateTableColumns;
+pub use crate::detect_bucket_functions::DetectBucketFunctions;
 pub use crate::detect_problematic_self_joins::DetectProblematicSelfJoins;
 pub use crate::detect_unsupported_placeholders::DetectUnsupportedPlaceholders;
 pub use crate::expr::ScalarOptimizeExpressions;
@@ -233,5 +236,12 @@ impl Rewrite for CreateViewStatement {
             },
             ..self
         })
+    }
+}
+
+impl Rewrite for CreateCacheStatement {
+    fn rewrite(self, _context: &mut RewriteContext) -> ReadySetResult<Self> {
+        self.detect_and_validate_bucket_always()?;
+        Ok(self)
     }
 }

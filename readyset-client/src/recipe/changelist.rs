@@ -169,6 +169,9 @@ impl ChangeList {
                     always,
                     ..
                 }) => {
+                    // We don't call the rewrite on the CreateCache like we do in the adapte
+                    // because currently the rewrite only validates the stmt. If the validation
+                    // fails, we should not persist the cache in the changelist.
                     let statement = match inner {
                         Ok(CacheInner::Statement(stmt)) => stmt,
                         Ok(CacheInner::Id(id)) => {
