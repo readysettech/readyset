@@ -23,6 +23,7 @@ use readyset_data::upstream_system_props::{
 };
 use readyset_data::Dialect;
 use readyset_server::{Builder, DurabilityMode, Handle, LocalAuthority, ReadySetHandle};
+use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
@@ -416,6 +417,7 @@ impl TestBuilder {
                         authority.clone(),
                         Vec::new(),
                     );
+                    let shallow = Arc::new(CacheManager::new());
                     let backend = backend_builder
                         .dialect(A::DIALECT)
                         .migration_mode(self.migration_mode)
@@ -427,6 +429,7 @@ impl TestBuilder {
                             authority.clone(),
                             status_reporter,
                             adapter_start_time,
+                            shallow,
                         );
 
                     let mut backend_shutdown_rx_clone = backend_shutdown_rx_connection.clone();

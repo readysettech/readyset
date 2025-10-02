@@ -49,8 +49,9 @@ use readyset_errors::{internal_err, ReadySetError};
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use readyset_server::{PrometheusBuilder, WorkerOptions};
+use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
-use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
+use readyset_sql_passes::adapter_rewrites::{AdapterRewriteParams, ProcessedQueryParams};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_tracing::TracingGuard;
 #[cfg(feature = "failure_injection")]
@@ -1301,6 +1302,8 @@ where
                 })?;
         }
 
+        let shallow = Arc::new(CacheManager::<ProcessedQueryParams>::new());
+
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let client_addr = s.peer_addr()?;
             let connection = info_span!("connection", addr = %client_addr);
@@ -1314,6 +1317,7 @@ where
             let view_name_cache = view_name_cache.clone();
             let view_cache = view_cache.clone();
             let mut connection_handler = self.connection_handler.clone();
+            let shallow = shallow.clone();
             // If cache_ddl_address is not set, allow cache ddl from all addresses.
             let local_addr = s.local_addr()?;
             let allow_cache_ddl = options
@@ -1399,6 +1403,7 @@ where
                                     adapter_authority.clone(),
                                     status_reporter_clone,
                                     adapter_start_time,
+                                    shallow,
                                 );
                                 connection_handler.process_connection(s, backend).await;
                             }

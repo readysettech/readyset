@@ -25,6 +25,7 @@ use readyset_data::{
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_server::{Builder, ReuseConfigType};
+use readyset_shallow::CacheManager;
 use readyset_sql::{ast::Relation, Dialect};
 use readyset_util::{shared_cache::SharedCache, shutdown::ShutdownSender};
 use tokio::sync::RwLock;
@@ -166,6 +167,7 @@ async fn setup_adapter(
                     authority.clone(),
                     Vec::new(),
                 );
+                let shallow = Arc::new(CacheManager::new());
                 BackendBuilder::new()
                     .require_authentication(false)
                     .dialect($dialect)
@@ -178,6 +180,7 @@ async fn setup_adapter(
                         authority,
                         status_reporter,
                         adapter_start_time,
+                        shallow,
                     )
             }};
         }

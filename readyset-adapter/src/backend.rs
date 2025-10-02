@@ -354,6 +354,7 @@ impl BackendBuilder {
         authority: Arc<Authority>,
         status_reporter: ReadySetStatusReporter<DB>,
         adapter_start_time: SystemTime,
+        shallow: Arc<CacheManager<ProcessedQueryParams>>,
     ) -> Backend<DB, Handler> {
         metrics::gauge!(recorded::CONNECTED_CLIENTS).increment(1.0);
         metrics::counter!(recorded::CLIENT_CONNECTIONS_OPENED).increment(1);
@@ -417,7 +418,7 @@ impl BackendBuilder {
             adapter_start_time,
             sampler_tx: self.sampler_tx,
             is_internal_connection: false,
-            shallow: CacheManager::new(),
+            shallow,
             shallow_refresh_sender,
             _query_handler: PhantomData,
         }
@@ -644,7 +645,7 @@ where
     is_internal_connection: bool,
 
     /// The adapter's shallow cache manager.
-    shallow: CacheManager<ProcessedQueryParams>,
+    shallow: Arc<CacheManager<ProcessedQueryParams>>,
 
     /// Sender for shallow refresh requests to worker pool
     shallow_refresh_sender: Option<async_channel::Sender<ShallowRefreshRequest>>,
@@ -2756,7 +2757,7 @@ where
     async fn query_shallow<'a>(
         noria: &'a mut NoriaConnector,
         upstream: Option<&'a mut DB>,
-        shallow: &CacheManager<ProcessedQueryParams>,
+        shallow: &Arc<CacheManager<ProcessedQueryParams>>,
         view_request: &ViewCreateRequest,
         query: &'a str,
         event: &mut QueryExecutionEvent,
@@ -2798,7 +2799,7 @@ where
     async fn query_adhoc_select<'a>(
         noria: &'a mut NoriaConnector,
         upstream: Option<&'a mut DB>,
-        shallow: &CacheManager<ProcessedQueryParams>,
+        shallow: &Arc<CacheManager<ProcessedQueryParams>>,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         original_query: &'a str,

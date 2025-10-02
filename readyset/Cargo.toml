@@ -43,6 +43,7 @@ readyset-alloc-metrics = { path = "../readyset-alloc-metrics" }
 readyset-client = { path = "../readyset-client/" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-common = { path = "../readyset-common" }
+readyset-shallow = { path = "../readyset-shallow" }
 readyset-data = { path = "../readyset-data" }
 readyset-dataflow = { path = "../readyset-dataflow" }
 readyset-errors = { path = "../readyset-errors" }

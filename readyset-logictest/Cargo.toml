@@ -48,6 +48,7 @@ readyset-decimal = { path = "../readyset-decimal" }
 readyset-mysql = { path = "../readyset-mysql", optional = true }
 readyset-psql = { path = "../readyset-psql", optional = true }
 readyset-server = { path = "../readyset-server/", optional = true }
+readyset-shallow = { path = "../readyset-shallow", optional = true }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-tracing = { path = "../readyset-tracing" }
@@ -63,6 +64,7 @@ in-process-readyset = [
     "readyset-mysql",
     "readyset-psql",
     "readyset-server",
+    "readyset-shallow",
 ]
 
 [lints.clippy]

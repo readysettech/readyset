@@ -22,6 +22,8 @@ readyset-client = { path = "../readyset-client/" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-server = { path = "../readyset-server/" }
 readyset-data = { path = "../readyset-data" }
+readyset-shallow = { path = "../readyset-shallow" }
+readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-tracing = { path = "../readyset-tracing" }
 database-utils = { path = "../database-utils" }
 readyset-mysql = { path = "../readyset-mysql" }
