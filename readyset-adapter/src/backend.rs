@@ -2139,7 +2139,7 @@ where
         let policy = Self::convert_eviction_policy(policy);
 
         self.shallow
-            .create(Some(name.clone()), Some(query_id), policy)?;
+            .create_cache(Some(name.clone()), Some(query_id), policy)?;
 
         self.state.query_status_cache.update_query_migration_state(
             &ViewCreateRequest::new(stmt.clone(), Vec::new()),
@@ -2626,7 +2626,7 @@ where
                     .await?;
                 let DropCacheStatement { name } = drop_cache;
 
-                if self.shallow.drop(Some(name), None).is_ok() {
+                if self.shallow.drop_cache(Some(name), None).is_ok() {
                     Ok(noria_connector::QueryResult::Delete {
                         num_rows_deleted: 1,
                     })

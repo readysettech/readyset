@@ -84,7 +84,7 @@ where
         None
     }
 
-    pub fn create(
+    pub fn create_cache(
         &self,
         relation: Option<Relation>,
         query_id: Option<QueryId>,
@@ -124,7 +124,7 @@ where
         Ok(())
     }
 
-    pub fn drop(
+    pub fn drop_cache(
         &self,
         relation: Option<&Relation>,
         query_id: Option<&QueryId>,
