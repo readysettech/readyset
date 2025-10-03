@@ -18,11 +18,11 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::{io, vec};
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use database_utils::TlsMode;
-use futures::future::{try_select, Either};
+use futures::future::{Either, try_select};
 use futures::stream::Peekable;
-use futures::{ready, Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt, ready};
 use postgres_types::{Oid, Type};
 use psql_srv::{
     Credentials, CredentialsNeeded, PrepareResponse, PsqlBackend, PsqlSrvRow, QueryResponse,

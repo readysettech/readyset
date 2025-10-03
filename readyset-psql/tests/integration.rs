@@ -7,9 +7,9 @@ use database_utils::tls::ServerCertVerification;
 use database_utils::{DatabaseURL, QueryableConnection};
 use readyset_adapter::backend::QueryDestination;
 use readyset_client::consensus::{AuthorityControl, CacheDDLRequest};
-use readyset_client_test_helpers::psql_helpers::{connect, PostgreSQLAdapter};
+use readyset_client_test_helpers::psql_helpers::{PostgreSQLAdapter, connect};
 use readyset_client_test_helpers::{
-    explain_create_cache, explain_last_statement, sleep, TestBuilder,
+    TestBuilder, explain_create_cache, explain_last_statement, sleep,
 };
 use readyset_data::Dialect;
 use readyset_server::Handle;
@@ -322,10 +322,11 @@ async fn delete_other_column() {
         .unwrap();
     sleep().await;
 
-    assert!(conn
-        .simple_query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.name = 'Bob'")
-        .await
-        .is_err());
+    assert!(
+        conn.simple_query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.name = 'Bob'")
+            .await
+            .is_err()
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -339,10 +340,11 @@ async fn delete_no_keys() {
         .unwrap();
     sleep().await;
 
-    assert!(conn
-        .simple_query("DELETE FROM Cats WHERE 1 = 1")
-        .await
-        .is_err(),);
+    assert!(
+        conn.simple_query("DELETE FROM Cats WHERE 1 = 1")
+            .await
+            .is_err(),
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -1935,10 +1937,11 @@ async fn test_explain_create_cache() {
         .unwrap();
 
     // Wait for t to be replicated
-    eventually!(conn
-        .simple_query("CREATE CACHE FROM SELECT * FROM t")
-        .await
-        .is_ok());
+    eventually!(
+        conn.simple_query("CREATE CACHE FROM SELECT * FROM t")
+            .await
+            .is_ok()
+    );
 
     eventually! {
         let res = explain_create_cache("SELECT * FROM t WHERE x = 5", &mut conn).await;
@@ -1974,10 +1977,11 @@ async fn show_caches_contains_select_statement() {
     conn.simple_query("DROP TABLE IF EXISTS t").await.unwrap();
     conn.simple_query("CREATE TABLE t (x int)").await.unwrap();
 
-    eventually!(conn
-        .simple_query("CREATE CACHE FROM SELECT * FROM t")
-        .await
-        .is_ok());
+    eventually!(
+        conn.simple_query("CREATE CACHE FROM SELECT * FROM t")
+            .await
+            .is_ok()
+    );
 
     let query_text = match conn
         .simple_query("SHOW CACHES")
@@ -2007,10 +2011,11 @@ async fn mixed_comparisons() {
         .await
         .unwrap();
 
-    eventually!(conn
-        .simple_query("CREATE CACHE FROM SELECT * FROM t WHERE x = 1 AND y < 10")
-        .await
-        .is_ok());
+    eventually!(
+        conn.simple_query("CREATE CACHE FROM SELECT * FROM t WHERE x = 1 AND y < 10")
+            .await
+            .is_ok()
+    );
 
     let query_text = match conn
         .simple_query("SHOW CACHES")

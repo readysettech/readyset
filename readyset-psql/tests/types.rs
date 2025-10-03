@@ -1,5 +1,5 @@
-use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_server::{DurabilityMode, Handle};
 use readyset_util::shutdown::ShutdownSender;
 use test_utils::tags;
@@ -29,7 +29,7 @@ mod types {
     use proptest::string::string_regex;
     use readyset_adapter::backend::QueryDestination;
     use readyset_client_test_helpers::psql_helpers::{connect, last_query_info, upstream_config};
-    use readyset_client_test_helpers::{sleep, Adapter};
+    use readyset_client_test_helpers::{Adapter, sleep};
     use readyset_data::DfValue;
     use readyset_decimal::Decimal;
     use readyset_util::arbitrary::{
@@ -117,15 +117,15 @@ mod types {
     }
 
     macro_rules! test_types {
-        ($($(#[$meta:meta])* $test_name:ident($pg_type_name: expr, $rust_type: ty $(, $strategy:expr)?);)+) => {
+        ($($(#[$meta:meta])* $test_name:ident($pg_type_name: expr_2021, $rust_type: ty $(, $strategy:expr_2021)?);)+) => {
             $(test_types!(@impl, $(#[$meta])* $test_name, $pg_type_name, $rust_type $(, $strategy)?);)+
         };
 
-        (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr, $rust_type: ty) => {
+        (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr_2021, $rust_type: ty) => {
             test_types!(@impl, $(#[$meta])* $test_name, $pg_type_name, $rust_type, any::<$rust_type>());
         };
 
-        (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr, $rust_type: ty, $strategy: expr) => {
+        (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr_2021, $rust_type: ty, $strategy: expr_2021) => {
             #[tags(serial, slow, no_retry, postgres_upstream)]
             // these are pretty slow, so we only run a few cases at a time
             #[test_strategy::proptest(ProptestConfig {

@@ -3,19 +3,19 @@ use std::convert::{TryFrom, TryInto};
 
 use psql_srv as ps;
 use readyset_adapter::backend::{
-    self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare,
+    self as cl, SinglePrepareResult, UpstreamPrepare, noria_connector,
 };
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter_types::ParsedCommand;
-use readyset_client::results::{ResultIterator, Results};
 use readyset_client::ColumnSchema;
+use readyset_client::results::{ResultIterator, Results};
 use readyset_data::DfType;
 use readyset_sql::ast::{self, SqlIdentifier};
 use upstream::StatementMeta;
 
 use crate::resultset::Resultset;
 use crate::schema::{NoriaSchema, SelectSchema};
-use crate::{upstream, PostgreSqlUpstream};
+use crate::{PostgreSqlUpstream, upstream};
 
 /// A simple wrapper around `noria_client`'s `PrepareResult`, facilitating conversion to
 /// `psql_srv::PrepareResponse`.

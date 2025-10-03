@@ -17,11 +17,11 @@ use readyset_util::redacted::RedactedString;
 use thiserror::Error;
 use tokio_postgres::SimpleQueryMessage;
 
+use crate::PostgreSqlUpstream;
 use crate::error::Error;
 use crate::query_handler::PostgreSqlQueryHandler;
 use crate::response::{PrepareResponse, QueryResponse};
 use crate::resultset::Resultset;
-use crate::PostgreSqlUpstream;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
 pub enum AuthenticationMethod {

@@ -4,12 +4,12 @@ use std::sync::Arc;
 use assert_matches::assert_matches;
 use chrono::NaiveDate;
 use postgres_types::private::BytesMut;
+use readyset_adapter::BackendBuilder;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::query_status_cache::MigrationStyle;
-use readyset_adapter::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
-use readyset_client_test_helpers::psql_helpers::{connect, upstream_config, PostgreSQLAdapter};
-use readyset_client_test_helpers::{sleep, Adapter, TestBuilder};
+use readyset_client_test_helpers::psql_helpers::{PostgreSQLAdapter, connect, upstream_config};
+use readyset_client_test_helpers::{Adapter, TestBuilder, sleep};
 use readyset_data::DfValue;
 use readyset_server::Handle;
 use readyset_util::eventually;
@@ -20,7 +20,7 @@ use test_utils::tags;
 
 mod common;
 use common::setup_standalone_with_authority;
-use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use tokio_postgres::{Client, CommandCompleteContents, SimpleQueryMessage};
 
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
@@ -31,7 +31,7 @@ async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
 }
 
 macro_rules! assert_last_statement_matches {
-    ($table:expr, $dest:expr, $status:expr, $client:expr) => {
+    ($table:expr_2021, $dest:expr_2021, $status:expr_2021, $client:expr_2021) => {
         let (matches, err) = last_statement_matches($dest, $status, $client).await;
         assert!(
             matches,
@@ -1032,9 +1032,11 @@ async fn replication_failure_ignores_table(failpoint: &str) {
         })
         .collect::<Vec<String>>();
 
-    assert!(results
-        .iter()
-        .all(|r| !r.contains("Last replication error")));
+    assert!(
+        results
+            .iter()
+            .all(|r| !r.contains("Last replication error"))
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -1874,10 +1876,12 @@ async fn recreate_replication_slot() {
     });
 
     // Delete the replication slot while the replicator is waiting to restart
-    eventually!(client
-        .simple_query("SELECT pg_drop_replication_slot('readyset_recreate_replication_slot')")
-        .await
-        .is_ok());
+    eventually!(
+        client
+            .simple_query("SELECT pg_drop_replication_slot('readyset_recreate_replication_slot')")
+            .await
+            .is_ok()
+    );
 
     // Insert another row while the replicator is waiting to restart
     client
@@ -1936,10 +1940,11 @@ async fn named_cache_queryable_after_being_cleared() {
             .await
             .unwrap();
         conn.simple_query("CREATE TABLE t (x int)").await.unwrap();
-        eventually!(conn
-            .simple_query("CREATE CACHE test FROM SELECT * FROM t WHERE x = 1")
-            .await
-            .is_ok());
+        eventually!(
+            conn.simple_query("CREATE CACHE test FROM SELECT * FROM t WHERE x = 1")
+                .await
+                .is_ok()
+        );
         conn.simple_query("SELECT * FROM t WHERE x = 1")
             .await
             .unwrap();
@@ -2488,10 +2493,11 @@ async fn drop_all_proxied_queries() {
         .unwrap();
 
     // Wait for the DDL to propagate to ReadySet
-    eventually!(conn
-        .simple_query("CREATE CACHE FROM SELECT * FROM t")
-        .await
-        .is_ok());
+    eventually!(
+        conn.simple_query("CREATE CACHE FROM SELECT * FROM t")
+            .await
+            .is_ok()
+    );
 
     conn.simple_query("SELECT * FROM t WHERE x = 1")
         .await
@@ -2538,10 +2544,11 @@ async fn numeric_inf_nan() {
         .await
         .unwrap();
 
-    eventually!(conn
-        .simple_query("create cache from select * from numer")
-        .await
-        .is_ok());
+    eventually!(
+        conn.simple_query("create cache from select * from numer")
+            .await
+            .is_ok()
+    );
 
     conn.simple_query("insert into numer (a) values (1.0), ('NaN'), ('Infinity'), ('-Infinity')")
         .await
@@ -2581,10 +2588,11 @@ async fn real_type() {
         .await
         .unwrap();
 
-    eventually!(conn
-        .simple_query("CREATE CACHE FROM SELECT * FROM t WHERE f1 <> 1004.3")
-        .await
-        .is_ok());
+    eventually!(
+        conn.simple_query("CREATE CACHE FROM SELECT * FROM t WHERE f1 <> 1004.3")
+            .await
+            .is_ok()
+    );
 
     eventually! {
         let len = conn

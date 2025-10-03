@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use futures::{ready, Stream};
+use futures::{Stream, ready};
 use ps::{PsqlSrvRow, PsqlValue};
 use psql_srv as ps;
 use readyset_client::results::ResultIterator;
@@ -11,7 +11,7 @@ use tokio_postgres::{
     GenericResult, ResultStream, RowStream, SimpleQueryMessage, SimpleQueryStream,
 };
 
-use crate::schema::{type_to_pgsql, SelectSchema};
+use crate::schema::{SelectSchema, type_to_pgsql};
 use crate::value::TypedDfValue;
 
 enum ResultsetInner {
@@ -211,8 +211,8 @@ mod tests {
     use futures::{StreamExt, TryStreamExt};
     use psql_srv::PsqlValue;
     use readyset_adapter::backend as cl;
-    use readyset_client::results::Results;
     use readyset_client::ColumnSchema;
+    use readyset_client::results::Results;
     use readyset_data::{DfType, DfValue};
 
     use super::*;
