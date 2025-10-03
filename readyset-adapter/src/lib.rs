@@ -19,7 +19,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use clap::ValueEnum;
 
-pub use crate::backend::{Backend, BackendBuilder};
+pub use crate::backend::{recreate_shallow_caches, Backend, BackendBuilder};
 pub use crate::query_handler::{QueryHandler, SetBehavior};
 pub use crate::status_reporter::{ReadySetStatus, ReadySetStatusReporter};
 pub use crate::upstream_database::{

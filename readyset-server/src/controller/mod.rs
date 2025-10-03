@@ -1120,8 +1120,9 @@ impl AuthorityLeaderElectionState {
                         res if res.is_empty() => None,
                         res => Some(res),
                     };
-                    let new_state = state.clone(); // needs to be in a `let` binding for Send reasons...
-                    self.authority.overwrite_controller_state(new_state).await?;
+                    self.authority
+                        .overwrite_controller_state(state.clone())
+                        .await?;
                     (state, cache_ddl)
                 }
                 Err(e) => return Err(e),

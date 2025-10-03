@@ -40,6 +40,7 @@ pub type VolumeId = String;
 pub type WorkerId = String;
 
 const CACHE_DDL_REQUESTS_PATH: &str = "cache_ddl_requests";
+const SHALLOW_CACHE_DDL_REQUESTS_PATH: &str = "shallow_cache_ddl_requests";
 const PERSISTENT_STATS_PATH: &str = "persistent_stats";
 const SCHEMA_REPLICATION_OFFSET_PATH: &str = "schema_replication_offset";
 
@@ -231,7 +232,15 @@ pub trait AuthorityControl: Send + Sync {
     /// This is stored separately from the controller state so that it's always available, using
     /// backwards-compatible serialization, for if the controller state can't be deserialized
     async fn cache_ddl_requests(&self) -> ReadySetResult<Vec<CacheDDLRequest>> {
-        Ok(self.try_read::<Vec<String>>(CACHE_DDL_REQUESTS_PATH)
+        self.ddl_requests(CACHE_DDL_REQUESTS_PATH).await
+    }
+
+    async fn shallow_cache_ddl_requests(&self) -> ReadySetResult<Vec<CacheDDLRequest>> {
+        self.ddl_requests(SHALLOW_CACHE_DDL_REQUESTS_PATH).await
+    }
+
+    async fn ddl_requests(&self, path: &str) -> ReadySetResult<Vec<CacheDDLRequest>> {
+        Ok(self.try_read::<Vec<String>>(path)
             .await?
             .unwrap_or_default()
             .into_iter()
@@ -257,10 +266,32 @@ pub trait AuthorityControl: Send + Sync {
         .await
     }
 
+    async fn add_shallow_cache_ddl_request(
+        &self,
+        cache_ddl_req: CacheDDLRequest,
+    ) -> ReadySetResult<()> {
+        let cache_ddl_req = serde_json::ser::to_string(&cache_ddl_req)?;
+        modify_shallow_cache_ddl_requests(self, move |stmts| {
+            stmts.push(cache_ddl_req.clone());
+        })
+        .await
+    }
+
     /// Removes the provided statement from the store.
     async fn remove_cache_ddl_request(&self, cache_ddl_req: CacheDDLRequest) -> ReadySetResult<()> {
         let cache_ddl_req = serde_json::ser::to_string(&cache_ddl_req)?;
         modify_cache_ddl_requests(self, move |stmts| {
+            stmts.retain(|stmt| *stmt != cache_ddl_req);
+        })
+        .await
+    }
+
+    async fn remove_shallow_cache_ddl_request(
+        &self,
+        cache_ddl_req: CacheDDLRequest,
+    ) -> ReadySetResult<()> {
+        let cache_ddl_req = serde_json::ser::to_string(&cache_ddl_req)?;
+        modify_shallow_cache_ddl_requests(self, move |stmts| {
             stmts.retain(|stmt| *stmt != cache_ddl_req);
         })
         .await
@@ -295,13 +326,13 @@ pub trait AuthorityControl: Send + Sync {
     }
 }
 
-async fn modify_cache_ddl_requests<A, F>(authority: &A, mut f: F) -> ReadySetResult<()>
+async fn modify_ddl_requests<A, F>(authority: &A, path: &str, mut f: F) -> ReadySetResult<()>
 where
     A: AuthorityControl + ?Sized,
     F: FnMut(&mut Vec<String>) + Send,
 {
     authority
-        .read_modify_write::<_, Vec<String>, ReadySetError>(CACHE_DDL_REQUESTS_PATH, move |stmts| {
+        .read_modify_write::<_, Vec<String>, ReadySetError>(path, move |stmts| {
             let mut stmts = stmts.unwrap_or_default();
             f(&mut stmts);
             Ok(stmts)
@@ -309,6 +340,22 @@ where
         .await??;
 
     Ok(())
+}
+
+async fn modify_cache_ddl_requests<A, F>(authority: &A, f: F) -> ReadySetResult<()>
+where
+    A: AuthorityControl + ?Sized,
+    F: FnMut(&mut Vec<String>) + Send,
+{
+    modify_ddl_requests(authority, CACHE_DDL_REQUESTS_PATH, f).await
+}
+
+async fn modify_shallow_cache_ddl_requests<A, F>(authority: &A, f: F) -> ReadySetResult<()>
+where
+    A: AuthorityControl + ?Sized,
+    F: FnMut(&mut Vec<String>) + Send,
+{
+    modify_ddl_requests(authority, SHALLOW_CACHE_DDL_REQUESTS_PATH, f).await
 }
 
 /// Enum that dispatches calls to the `AuthorityControl` trait to

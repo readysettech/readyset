@@ -71,6 +71,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
+use std::future::Future;
 use std::marker::PhantomData;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
@@ -104,7 +105,7 @@ use readyset_sql::ast::{
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
-use readyset_sql_passes::adapter_rewrites::ProcessedQueryParams;
+use readyset_sql_passes::adapter_rewrites::{AdapterRewriteParams, ProcessedQueryParams};
 use readyset_sql_passes::{adapter_rewrites, DetectBucketFunctions};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::{RedactedString, Sensitive};
@@ -2090,41 +2091,27 @@ where
         concurrently: bool,
         ddl_req: Option<CacheDDLRequest>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        if let Some(ref ddl_req) = ddl_req {
+            self.authority
+                .add_cache_ddl_request(ddl_req.clone())
+                .await?;
+        }
+
         let res = self
             .create_cached_query(&mut name, stmt, search_path, always, concurrently)
             .await;
-        // The extend_recipe may have failed, in which case we should remove our intention
-        // to create this cache. Extend recipe waits a bit and then returns an
-        // Ok(ExtendRecipeResult::Pending) if it is still creating a cache in the
-        // background, so we don't remove the ddl request for timeouts.
-        if let Err(e) = &res {
-            if let Some(ddl_req) = ddl_req {
-                let remove_res = retry_with_exponential_backoff!(
-                    || async {
-                        let ddl_req = ddl_req.clone();
-                        self.authority.remove_cache_ddl_request(ddl_req).await
-                    },
-                    retries: 5,
-                    delay: 1,
-                    backoff: 2,
-                );
-                if remove_res.is_err() {
-                    error!("Failed to remove stored 'create cache' request. It will be re-run if there is a backwards incompatible upgrade.");
-                }
-            }
-            error!(
-                name = %name.unwrap_or("".into()).display_unquoted(),
-                "Failed to create cache: {}",
-                e
-            );
-        }
-        res
-    }
 
-    fn convert_eviction_policy(policy: ast::EvictionPolicy) -> readyset_shallow::EvictionPolicy {
-        match policy {
-            ast::EvictionPolicy::Ttl(duration) => readyset_shallow::EvictionPolicy::Ttl(duration),
-        }
+        remove_ddl_on_error(
+            &res,
+            &self.authority,
+            ddl_req,
+            name,
+            "deep",
+            |auth, req| async move { auth.remove_cache_ddl_request(req).await },
+        )
+        .await;
+
+        res
     }
 
     async fn create_shallow_cache(
@@ -2132,19 +2119,39 @@ where
         mut name: Option<Relation>,
         stmt: SelectStatement,
         policy: Option<ast::EvictionPolicy>,
+        ddl_req: Option<CacheDDLRequest>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let (query_id, name, _requested_name) = self.make_name_and_id(&mut name, &stmt);
+        if let Some(ref ddl_req) = ddl_req {
+            self.authority
+                .add_shallow_cache_ddl_request(ddl_req.clone())
+                .await?;
+        }
+
+        let (query_id, name, requested_name) = self.make_name_and_id(&mut name, &stmt);
 
         let policy = policy.ok_or_else(|| internal_err!("Policy required for shallow cache"))?;
-        let policy = Self::convert_eviction_policy(policy);
+        let policy = convert_eviction_policy(policy);
 
-        self.shallow
-            .create_cache(Some(name.clone()), Some(query_id), policy)?;
+        let res = self
+            .shallow
+            .create_cache(Some(name.clone()), Some(query_id), policy);
 
-        self.state.query_status_cache.update_query_migration_state(
-            &ViewCreateRequest::new(stmt.clone(), Vec::new()),
-            MigrationState::Successful(CacheType::Shallow),
-        );
+        if res.is_ok() {
+            self.state.query_status_cache.update_query_migration_state(
+                &ViewCreateRequest::new(stmt.clone(), Vec::new()),
+                MigrationState::Successful(CacheType::Shallow),
+            );
+        }
+
+        remove_ddl_on_error(
+            &res,
+            &self.authority,
+            ddl_req,
+            requested_name,
+            "shallow",
+            |auth, req| async move { auth.remove_shallow_cache_ddl_request(req).await },
+        )
+        .await;
 
         Ok(noria_connector::QueryResult::Empty)
     }
@@ -2586,10 +2593,6 @@ where
                         schema_search_path: self.noria.schema_search_path().to_owned(),
                         dialect: self.settings.dialect.into(),
                     };
-
-                    self.authority
-                        .add_cache_ddl_request(ddl_req.clone())
-                        .await?;
                     Some(ddl_req)
                 } else {
                     None
@@ -2608,7 +2611,8 @@ where
                         .await
                     }
                     CacheType::Shallow => {
-                        self.create_shallow_cache(name.clone(), stmt, *policy).await
+                        self.create_shallow_cache(name.clone(), stmt, *policy, ddl_req)
+                            .await
                     }
                 }
             }
@@ -3645,4 +3649,117 @@ fn readyset_version() -> ReadySetResult<noria_connector::QueryResult<'static>> {
             .map(MetaVariable::from)
             .collect(),
     ))
+}
+
+fn convert_eviction_policy(policy: ast::EvictionPolicy) -> readyset_shallow::EvictionPolicy {
+    match policy {
+        ast::EvictionPolicy::Ttl(duration) => readyset_shallow::EvictionPolicy::Ttl(duration),
+    }
+}
+
+/// Remove a DDL request from authority when cache creation fails.
+///
+/// The extend_recipe may have failed, in which case we should remove our intention
+/// to create this cache. Extend recipe waits a bit and then returns an
+/// Ok(ExtendRecipeResult::Pending) if it is still creating a cache in the
+/// background, so we don't remove the ddl request for timeouts.
+async fn remove_ddl_on_error<T, F, Fut>(
+    res: &Result<T, ReadySetError>,
+    authority: &Arc<Authority>,
+    ddl_req: Option<CacheDDLRequest>,
+    name: Option<Relation>,
+    cache_type: &str,
+    remove: F,
+) where
+    F: Fn(Arc<Authority>, CacheDDLRequest) -> Fut,
+    Fut: Future<Output = ReadySetResult<()>>,
+{
+    if res.is_ok() {
+        return;
+    }
+
+    let Some(ddl_req) = ddl_req else {
+        return;
+    };
+
+    let remove = retry_with_exponential_backoff!(
+        || async {
+            let ddl_req = ddl_req.clone();
+            remove(authority.clone(), ddl_req).await
+        },
+        retries: 5,
+        delay: 1,
+        backoff: 2,
+    );
+    if remove.is_err() {
+        error!(
+            "Failed to remove stored 'create {cache_type} cache' request. \
+             It will be re-run if there is a backwards incompatible upgrade.",
+        );
+    }
+
+    if let Err(ref e) = res {
+        error!(
+            name = %name.unwrap_or("".into()).display_unquoted(),
+            "Failed to create {cache_type} cache: {e}",
+        );
+    }
+}
+
+/// Recreate shallow caches from stored DDL requests on adapter startup.
+pub async fn recreate_shallow_caches(
+    shallow: Arc<CacheManager<ProcessedQueryParams>>,
+    ddl_requests: Vec<CacheDDLRequest>,
+    parsing_preset: ParsingPreset,
+    rewrite_params: AdapterRewriteParams,
+) -> ReadySetResult<()> {
+    for req in ddl_requests {
+        if let Err(e) =
+            recreate_single_shallow_cache(&shallow, req, parsing_preset, rewrite_params).await
+        {
+            warn!(error = %e, "Failed to recreate shallow cache");
+        }
+    }
+    Ok(())
+}
+
+async fn recreate_single_shallow_cache(
+    shallow: &CacheManager<ProcessedQueryParams>,
+    req: CacheDDLRequest,
+    parsing_preset: ParsingPreset,
+    rewrite_params: AdapterRewriteParams,
+) -> ReadySetResult<()> {
+    let query = readyset_sql_parsing::parse_query_with_config(
+        parsing_preset,
+        req.dialect.into(),
+        &req.unparsed_stmt,
+    )?;
+
+    let SqlQuery::CreateCache(create_cache) = query else {
+        return Err(internal_err!("Not a CREATE CACHE statement"));
+    };
+
+    if !matches!(create_cache.cache_type, Some(CacheType::Shallow)) {
+        return Err(internal_err!("Not a shallow cache"));
+    }
+
+    let policy = create_cache
+        .policy
+        .ok_or_else(|| internal_err!("Missing policy"))?;
+
+    let policy = convert_eviction_policy(policy);
+
+    let mut stmt = match create_cache.inner {
+        Ok(CacheInner::Statement(stmt)) => *stmt,
+        Ok(CacheInner::Id(_)) => return Err(internal_err!("Cannot recreate from query ID")),
+        Err(e) => return Err(internal_err!("Failed to parse SELECT: {}", e)),
+    };
+
+    adapter_rewrites::process_query(&mut stmt, rewrite_params)?;
+
+    let query_id = QueryId::from_select(&stmt, &req.schema_search_path);
+    let name = create_cache.name.unwrap_or_else(|| query_id.into());
+
+    shallow.create_cache(Some(name), Some(query_id), policy)?;
+    Ok(())
 }

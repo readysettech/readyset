@@ -38,7 +38,7 @@ use readyset_adapter::{
 };
 use readyset_alloc::{StdThreadBuildWrapper, ThreadBuildWrapper};
 use readyset_alloc_metrics::report_allocator_metrics;
-use readyset_client::consensus::AuthorityType;
+use readyset_client::consensus::{AuthorityControl, AuthorityType};
 use readyset_client::metrics::recorded;
 use readyset_client::ReadySetHandle;
 use readyset_client_metrics::QueryLogMode;
@@ -1303,6 +1303,19 @@ where
         }
 
         let shallow = Arc::new(CacheManager::<ProcessedQueryParams>::new());
+        if let Ok(shallow_ddl_requests) =
+            rt.block_on(adapter_authority.shallow_cache_ddl_requests())
+        {
+            info!("Recreating {} shallow caches", shallow_ddl_requests.len());
+            if let Err(e) = rt.block_on(readyset_adapter::recreate_shallow_caches(
+                shallow.clone(),
+                shallow_ddl_requests,
+                parsing_preset,
+                adapter_rewrite_params,
+            )) {
+                error!("Failed to recreate shallow caches: {}", e);
+            }
+        }
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let client_addr = s.peer_addr()?;
