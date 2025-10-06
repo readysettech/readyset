@@ -13,6 +13,7 @@ itertools = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true }
 paste = { workspace = true }
+postgres-types = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 readyset-adapter = { path = "../readyset-adapter" }
@@ -23,6 +24,7 @@ readyset-util = { path = "../readyset-util" }
 test-strategy = { workspace = true }
 test-utils = { path = "../test-utils" }
 tokio = { workspace = true, features = ["full"] }
+tokio-postgres = { workspace = true }
 
 [features]
 utf8mb4_all_codepoints_test = []

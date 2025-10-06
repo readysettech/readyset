@@ -5045,6 +5045,7 @@ dependencies = [
  "mysql_async",
  "mysql_common",
  "paste",
+ "postgres-types",
  "pretty_assertions",
  "proptest",
  "readyset-adapter",
@@ -5055,6 +5056,7 @@ dependencies = [
  "test-strategy",
  "test-utils",
  "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]
