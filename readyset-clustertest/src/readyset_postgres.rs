@@ -1,3 +1,4 @@
+use assert_matches::assert_matches;
 use database_utils::{QueryableConnection, SimpleQueryResults};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
@@ -177,7 +178,7 @@ async fn embedded_readers_adapters_lt_replicas() {
             (res, dest)
         },
         then_assert: |(res, dest)| {
-            assert_eq!(dest, QueryDestination::Readyset);
+            assert_matches!(dest, QueryDestination::Readyset(_));
             assert_eq!(res, vec![vec![1.into()]]);
         }
     }
@@ -194,7 +195,7 @@ async fn embedded_readers_adapters_lt_replicas() {
             (res, dest)
         },
         then_assert: |(res, dest)| {
-            assert_eq!(dest, QueryDestination::Readyset);
+            assert_matches!(dest, QueryDestination::Readyset(_));
             assert_eq!(res, vec![vec![1.into()]]);
         }
     }
@@ -217,7 +218,7 @@ async fn embedded_readers_adapters_lt_replicas() {
             (res, dest)
         },
         then_assert: |(res, dest)| {
-            assert_eq!(dest, QueryDestination::Readyset);
+            assert_matches!(dest, QueryDestination::Readyset(_));
             assert_eq!(res, vec![vec![1.into()], vec![2.into()]]);
         }
     }
@@ -239,7 +240,7 @@ async fn embedded_readers_adapters_lt_replicas() {
             (res, dest)
         },
         then_assert: |(res, dest)| {
-            assert_eq!(dest, QueryDestination::Readyset);
+            assert_matches!(dest, QueryDestination::Readyset(_));
             assert_eq!(res, vec![vec![2.into()]]);
         }
     }
@@ -261,7 +262,7 @@ async fn embedded_readers_adapters_lt_replicas() {
             (res, dest)
         },
         then_assert: |(res, dest)| {
-            assert_eq!(dest, QueryDestination::Readyset);
+            assert_matches!(dest, QueryDestination::Readyset(_));
             assert_eq!(res, vec![vec![2.into()]]);
         }
     }
@@ -341,7 +342,7 @@ async fn reader_domain_panic_handling() {
             (res, dest)
         },
         then_assert: |(res, dest)| {
-            assert_eq!(dest, QueryDestination::Readyset);
+            assert_matches!(dest, QueryDestination::Readyset(_));
             assert_eq!(res, vec![vec![1.into()]]);
         }
     }
@@ -370,7 +371,7 @@ async fn reader_domain_panic_handling() {
             (res, dest)
         },
         then_assert: |(res, dest)| {
-            assert_eq!(dest, QueryDestination::Readyset);
+            assert_matches!(dest, QueryDestination::Readyset(_));
             assert_eq!(res, vec![vec![1.into()], vec![1.into()]]);
         }
     }
@@ -406,7 +407,7 @@ async fn reader_domain_panic_handling() {
             (res, dest)
         },
         then_assert: |(res, dest)| {
-            assert_eq!(dest, QueryDestination::Readyset);
+            assert_matches!(dest, QueryDestination::Readyset(_));
             assert_eq!(res, vec![vec![2.into()]]);
         }
     }
@@ -456,7 +457,7 @@ async fn base_domain_panic_handling() {
             (res, dest)
         },
         then_assert: |(res, dest)| {
-            assert_eq!(dest, QueryDestination::Readyset);
+            assert_matches!(dest, QueryDestination::Readyset(_));
             assert_eq!(res, vec![vec![1.into()]]);
         }
     }
@@ -485,7 +486,7 @@ async fn base_domain_panic_handling() {
             (res, dest)
         },
         then_assert: |(res, dest)| {
-            assert_eq!(dest, QueryDestination::Readyset);
+            assert_matches!(dest, QueryDestination::Readyset(_));
             assert_eq!(res, vec![vec![1.into()], vec![1.into()]]);
         }
     }

@@ -3,6 +3,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 
+use assert_matches::assert_matches;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql_async::prelude::*;
 use mysql_async::{params, Conn, OptsBuilder, Row, Value};
@@ -1843,7 +1844,7 @@ async fn explain_last_statement() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(destination.destination, QueryDestination::Readyset);
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
 
     shutdown_tx.shutdown().await;
 }

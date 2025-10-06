@@ -6,6 +6,7 @@ authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
+assert_matches = { workspace = true }
 async-trait = { workspace = true }
 bincode = { workspace = true }
 fail = { workspace = true }

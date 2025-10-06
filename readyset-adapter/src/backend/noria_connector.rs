@@ -14,6 +14,7 @@ use readyset_client::{
     ColumnSchema, GraphvizOptions, ReadQuery, ReaderAddress, ReaderHandle, ReadySetHandle,
     SchemaType, Table, TableOperation, View, ViewCreateRequest, ViewQuery,
 };
+use readyset_client_metrics::QueryDestination;
 use readyset_data::encoding::Encoding;
 use readyset_data::{Collation, DfType, DfValue, Dialect};
 use readyset_errors::{
@@ -1545,11 +1546,15 @@ impl NoriaConnector {
         let res = res?;
 
         event.readyset_event = Some(readyset_client_metrics::ReadysetExecutionEvent::CacheRead {
-            cache_name: qname.into_owned(),
+            cache_name: qname.clone().into_owned(),
             num_keys: res.num_keys,
             cache_misses: res.cache_misses,
             duration: start.elapsed(),
         });
+
+        event.destination = Some(QueryDestination::Readyset(Some(
+            qname.display_unquoted().to_string(),
+        )));
 
         Ok(res.result)
     }

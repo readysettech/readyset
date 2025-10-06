@@ -1,3 +1,4 @@
+use assert_matches::assert_matches;
 use chrono::{NaiveDate, NaiveDateTime};
 use test_utils::tags;
 use tokio_postgres::{CommandCompleteContents, SimpleQueryMessage};
@@ -97,10 +98,10 @@ async fn delete_basic() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(
+        assert_matches!(
             deleted,
             SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
-        ));
+        );
         sleep().await;
     }
 
@@ -134,10 +135,10 @@ async fn delete_only_constraint() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(
+        assert_matches!(
             deleted,
             SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
-        ));
+        );
         sleep().await;
     }
 
@@ -172,10 +173,10 @@ async fn delete_multiple() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(
+        assert_matches!(
             deleted,
             SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 2, .. })
-        ));
+        );
         sleep().await;
     }
 
@@ -216,10 +217,10 @@ async fn delete_bogus() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(
+        assert_matches!(
             deleted,
             SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
-        ));
+        );
         sleep().await;
     }
 
@@ -253,10 +254,10 @@ async fn delete_bogus_valid_and() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(
+        assert_matches!(
             deleted,
             SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
-        ));
+        );
         sleep().await;
     }
 
@@ -296,10 +297,10 @@ async fn delete_bogus_valid_or() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(
+        assert_matches!(
             deleted,
             SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
-        ));
+        );
         sleep().await;
     }
 
@@ -371,10 +372,10 @@ async fn delete_compound_primary_key() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(
+        assert_matches!(
             deleted,
             SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
-        ));
+        );
         sleep().await;
     }
 
@@ -1228,10 +1229,10 @@ async fn delete_case_insensitive() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(
+        assert_matches!(
             deleted,
             SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
-        ));
+        );
         sleep().await;
     }
 
@@ -2056,7 +2057,9 @@ WHERE
         _ => panic!(),
     };
 
-    assert_eq!(destination, "readyset");
+    let dest: QueryDestination = destination.as_str().try_into().unwrap();
+
+    assert_matches!(dest, QueryDestination::Readyset(_));
     assert_eq!(status, "ok");
 
     shutdown_tx.shutdown().await;
@@ -2115,7 +2118,7 @@ async fn trunc_in_trx() {
     assert_eq!(res, vec![(4, 4)]);
 
     let last = explain_last_statement(&mut conn).await;
-    assert_eq!(last.destination, QueryDestination::Readyset);
+    assert_matches!(last.destination, QueryDestination::Readyset(_));
 
     shutdown_tx.shutdown().await;
 }

@@ -1,6 +1,7 @@
 use ::readyset_client::metrics::{recorded, DumpedMetricValue};
 use ::readyset_client::query::QueryId;
 use ::readyset_client::{get_metric, ViewCreateRequest};
+use assert_matches::assert_matches;
 use database_utils::QueryableConnection;
 use mysql_async::prelude::Queryable;
 use readyset_adapter::backend::QueryInfo;
@@ -1591,15 +1592,15 @@ async fn views_synchronize_between_deployments() {
 
     // Ensure it's been successfully created in adapter 0
     adapter_0.query_drop("SELECT * FROM t1;").await.unwrap();
-    assert_eq!(
+    assert_matches!(
         last_statement_destination(adapter_0.as_mysql_conn().unwrap()).await,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
 
     // Eventually it should show up in adapter 1 too
     eventually! {
         adapter_1.as_mysql_conn().unwrap().query_drop("SELECT * FROM t1;").await.unwrap();
-        last_statement_destination(adapter_1.as_mysql_conn().unwrap()).await == QueryDestination::Readyset
+        matches!(last_statement_destination(adapter_1.as_mysql_conn().unwrap()).await, QueryDestination::Readyset(_))
     }
 
     deployment.teardown().await.unwrap();
@@ -1775,7 +1776,7 @@ async fn show_query_metrics() {
 
     eventually! {
         adapter.query_drop("SELECT c FROM t where c = 1").await.unwrap();
-        last_statement_destination(adapter.as_mysql_conn().unwrap()).await == QueryDestination::Readyset
+        matches!(last_statement_destination(adapter.as_mysql_conn().unwrap()).await, QueryDestination::Readyset(_))
     }
 
     // Check `SHOW PROXIED QUERIES`
@@ -1838,7 +1839,7 @@ async fn table_aliased_view_survives_restart() {
     }
     eventually! {
         adapter.query_drop("SELECT alias1.value FROM t1 alias1 WHERE alias1.uid = 1").await.unwrap();
-        last_statement_destination(adapter.as_mysql_conn().unwrap()).await == QueryDestination::Readyset
+        matches!(last_statement_destination(adapter.as_mysql_conn().unwrap()).await, QueryDestination::Readyset(_))
     }
 
     // stop standalone mode instance, and restart it
@@ -1853,7 +1854,7 @@ async fn table_aliased_view_survives_restart() {
     }
     eventually! {
         adapter.query_drop("SELECT alias1.value FROM t1 alias1 WHERE alias1.uid = 1").await.unwrap();
-        last_statement_destination(adapter.as_mysql_conn().unwrap()).await == QueryDestination::Readyset
+        matches!(last_statement_destination(adapter.as_mysql_conn().unwrap()).await, QueryDestination::Readyset(_))
     }
 
     deployment.teardown().await.unwrap();

@@ -1050,7 +1050,7 @@ where
 
         let destination = match (upstream_res.is_some(), noria_res.is_some()) {
             (true, true) => Some(QueryDestination::Both),
-            (false, true) => Some(QueryDestination::Readyset),
+            (false, true) => Some(QueryDestination::Readyset(None)),
             (true, false) => Some(QueryDestination::Upstream),
             (false, false) => None,
         };
@@ -1159,7 +1159,7 @@ where
                 _ => internal!(),
             };
             self.last_query = Some(QueryInfo {
-                destination: QueryDestination::Readyset,
+                destination: QueryDestination::Readyset(None),
                 noria_error: String::new(),
             });
 
@@ -1489,7 +1489,7 @@ where
     ) -> ReadySetResult<QueryResult<'a, DB>> {
         use noria_connector::PrepareResult::*;
 
-        event.destination = Some(QueryDestination::Readyset);
+        event.destination = Some(QueryDestination::Readyset(None));
 
         let res = match prep {
             Select { statement, .. } => {
@@ -1852,8 +1852,8 @@ where
             }
         };
 
-        self.last_query = event.destination.map(|d| QueryInfo {
-            destination: d,
+        self.last_query = event.destination.as_ref().map(|d| QueryInfo {
+            destination: d.clone(),
             noria_error: event
                 .noria_error
                 .as_ref()
@@ -2461,7 +2461,7 @@ where
         event: &mut QueryExecutionEvent,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         event.sql_type = SqlQueryType::Other;
-        event.destination = Some(QueryDestination::Readyset);
+        event.destination = Some(QueryDestination::Readyset(None));
 
         let start = Instant::now();
 
@@ -2854,7 +2854,7 @@ where
             .await;
         }
 
-        event.destination = Some(QueryDestination::Readyset);
+        event.destination = Some(QueryDestination::Readyset(None));
         let ctx = ExecuteSelectContext::AdHoc {
             statement: &view_request.statement,
             create_if_missing: settings.migration_mode == MigrationMode::InRequestPath,
@@ -3157,7 +3157,7 @@ where
                     }
                 }
             } else {
-                event.destination = Some(QueryDestination::Readyset);
+                event.destination = Some(QueryDestination::Readyset(None));
                 let start = Instant::now();
 
                 let res = match &query {
@@ -3399,8 +3399,8 @@ where
             }
         };
 
-        self.last_query = event.destination.map(|d| QueryInfo {
-            destination: d,
+        self.last_query = event.destination.as_ref().map(|d| QueryInfo {
+            destination: d.clone(),
             noria_error: event
                 .noria_error
                 .as_ref()

@@ -1,6 +1,7 @@
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
+use assert_matches::assert_matches;
 use chrono::NaiveDate;
 use postgres_types::private::BytesMut;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
@@ -122,10 +123,10 @@ async fn delete_case_sensitive() {
                 .await
                 .unwrap();
             let deleted = res.first().unwrap();
-            assert!(matches!(
+            assert_matches!(
                 deleted,
                 SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
-            ));
+            );
             sleep().await;
         }
 
@@ -389,7 +390,7 @@ async fn generated_columns() {
         .simple_query("DROP TABLE IF EXISTS calc_columns CASCADE")
         .await
         .expect("create failed");
-    assert!(matches!(res[0], SimpleQueryMessage::CommandComplete(_)));
+    assert_matches!(res[0], SimpleQueryMessage::CommandComplete(_));
 
     let res = fallback_conn
         .simple_query(
@@ -402,16 +403,16 @@ async fn generated_columns() {
         )
         .await
         .expect("create failed");
-    assert!(matches!(res[0], SimpleQueryMessage::CommandComplete(_)));
+    assert_matches!(res[0], SimpleQueryMessage::CommandComplete(_));
 
     let res = fallback_conn
         .simple_query("INSERT INTO calc_columns (col1, col2) VALUES(1, 2)")
         .await
         .expect("populate failed");
-    assert!(matches!(
+    assert_matches!(
         res[0],
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
-    ));
+    );
 
     let res = fallback_conn
         .simple_query("SELECT * from calc_columns")
@@ -448,10 +449,10 @@ async fn generated_columns() {
         .simple_query("SHOW CACHES")
         .await
         .expect("show caches failed");
-    assert!(matches!(
+    assert_matches!(
         res[0],
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
-    ));
+    );
 
     // Inserting will go to upstream
     let populate_gen_columns_readyset = "INSERT INTO calc_columns (col1, col2) VALUES(3, 4);";
@@ -459,10 +460,10 @@ async fn generated_columns() {
         .simple_query(populate_gen_columns_readyset)
         .await
         .expect("populate failed");
-    assert!(matches!(
+    assert_matches!(
         res[0],
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
-    ));
+    );
 
     // We should immediately see the inserted data via the upstream connection
     // because the write synchronously falls back to upstream
@@ -470,10 +471,10 @@ async fn generated_columns() {
         .simple_query("SELECT * from calc_columns")
         .await
         .expect("select failed");
-    assert!(matches!(
+    assert_matches!(
         res[2],
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 2, .. })
-    ));
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -2497,10 +2498,10 @@ async fn drop_all_proxied_queries() {
         .into_iter()
         .next_back()
         .unwrap();
-    assert!(matches!(
+    assert_matches!(
         command,
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
-    ));
+    );
 
     conn.simple_query("DROP ALL PROXIED QUERIES").await.unwrap();
 
@@ -2511,10 +2512,10 @@ async fn drop_all_proxied_queries() {
         .into_iter()
         .next_back()
         .unwrap();
-    assert!(matches!(
+    assert_matches!(
         command,
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
-    ));
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -2551,10 +2552,10 @@ async fn numeric_inf_nan() {
 
     // We expect to see all rows because the table was dropped since we don't support NaN/Infinity
     // and the query should be proxied
-    assert!(matches!(
+    assert_matches!(
         command,
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 4, .. })
-    ));
+    );
 
     shutdown_tx.shutdown().await;
 }

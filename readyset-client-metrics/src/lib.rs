@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use clap::ValueEnum;
 use metrics::SharedString;
 use readyset_client::query::QueryId;
-use readyset_errors::ReadySetError;
+use readyset_errors::{ReadySetError, internal};
 use readyset_sql::ast::{Relation, SqlIdentifier, SqlQuery};
 use serde::Serialize;
 
@@ -119,42 +119,52 @@ impl ReadysetExecutionEvent {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Default)]
+#[derive(Debug, PartialEq, Eq, Serialize, Clone)]
 pub enum QueryDestination {
-    #[default]
-    Readyset,
+    Readyset(Option<String>),
     ReadysetShallow,
     ReadysetThenUpstream,
     Upstream,
     Both,
 }
 
+impl Default for QueryDestination {
+    fn default() -> Self {
+        QueryDestination::Readyset(None)
+    }
+}
+
 impl TryFrom<&str> for QueryDestination {
     type Error = ReadySetError;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if let Some(name) = value
+            .strip_prefix("readyset(")
+            .and_then(|s| s.strip_suffix(')'))
+        {
+            return Ok(QueryDestination::Readyset(Some(name.to_string())));
+        };
+
         match value {
-            "readyset" => Ok(QueryDestination::Readyset),
+            "readyset" => Ok(QueryDestination::Readyset(None)),
             "readyset_shallow" => Ok(QueryDestination::ReadysetShallow),
             "readyset_then_upstream" => Ok(QueryDestination::ReadysetThenUpstream),
             "upstream" => Ok(QueryDestination::Upstream),
             "both" => Ok(QueryDestination::Both),
-            _ => Err(ReadySetError::Internal(
-                "Invalid query destination".to_string(),
-            )),
+            _ => internal!("Invalid query destination: {value}"),
         }
     }
 }
 
 impl fmt::Display for QueryDestination {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            QueryDestination::Readyset => "readyset",
-            QueryDestination::ReadysetShallow => "readyset_shallow",
-            QueryDestination::ReadysetThenUpstream => "readyset_then_upstream",
-            QueryDestination::Upstream => "upstream",
-            QueryDestination::Both => "both",
-        };
-        write!(f, "{s}")
+        match self {
+            QueryDestination::Readyset(Some(name)) => write!(f, "readyset({})", name),
+            QueryDestination::Readyset(None) => write!(f, "readyset"),
+            QueryDestination::ReadysetShallow => write!(f, "readyset_shallow"),
+            QueryDestination::ReadysetThenUpstream => write!(f, "readyset_then_upstream"),
+            QueryDestination::Upstream => write!(f, "upstream"),
+            QueryDestination::Both => write!(f, "both"),
+        }
     }
 }
 

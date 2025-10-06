@@ -20,6 +20,7 @@ mod types {
     use std::panic::{AssertUnwindSafe, RefUnwindSafe};
     use std::time::Duration;
 
+    use assert_matches::assert_matches;
     use cidr::IpInet;
     use eui48::MacAddress;
     use pretty_assertions::assert_eq;
@@ -321,7 +322,7 @@ mod types {
             },
             then_assert: |(project_eq_res, dest)| {
                 assert_eq!(project_eq_res, vec![false, false, true, true]);
-                assert_eq!(dest, QueryDestination::Readyset);
+                assert_matches!(dest, QueryDestination::Readyset(_));
             }
         );
 
@@ -335,14 +336,14 @@ mod types {
             .get(0);
         assert_eq!(where_eq_res, 2);
 
-        assert_eq!(
+        assert_matches!(
             last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+            QueryDestination::Readyset(_)
         );
 
-        assert_eq!(
+        assert_matches!(
             last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+            QueryDestination::Readyset(_)
         );
 
         let upquery_res = client
@@ -354,9 +355,9 @@ mod types {
             .collect::<Vec<Abc>>();
         assert_eq!(upquery_res, vec![B]);
 
-        assert_eq!(
+        assert_matches!(
             last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+            QueryDestination::Readyset(_)
         );
 
         let mut nulls_res = client
@@ -369,9 +370,9 @@ mod types {
         nulls_res.sort();
         assert_eq!(nulls_res, vec![None, Some(A), Some(B), Some(C)]);
 
-        assert_eq!(
+        assert_matches!(
             last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+            QueryDestination::Readyset(_)
         );
 
         let sort_res = client
@@ -383,9 +384,9 @@ mod types {
             .collect::<Vec<Abc>>();
         assert_eq!(sort_res, vec![A, A, B, C]);
 
-        assert_eq!(
+        assert_matches!(
             last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+            QueryDestination::Readyset(_)
         );
 
         let mut range_res = client
@@ -398,9 +399,9 @@ mod types {
         range_res.sort();
         assert_eq!(range_res, vec![B, C]);
 
-        assert_eq!(
+        assert_matches!(
             last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+            QueryDestination::Readyset(_)
         );
 
         let mut cast_res = client
@@ -413,9 +414,9 @@ mod types {
         cast_res.sort();
         assert_eq!(cast_res, vec![A, A, B, C]);
 
-        assert_eq!(
+        assert_matches!(
             last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+            QueryDestination::Readyset(_)
         );
 
         let array_res = client
@@ -425,9 +426,9 @@ mod types {
             .get::<_, Vec<Abc>>(0);
         assert_eq!(array_res, vec![A, B, C]);
 
-        assert_eq!(
+        assert_matches!(
             last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+            QueryDestination::Readyset(_)
         );
 
         let proxied_parameter_res = client
@@ -553,9 +554,9 @@ mod types {
         cast_res.sort();
         assert_eq!(cast_res, vec![Abcd::A, Abcd::A, Abcd::B, Abcd::C, Abcd::D]);
 
-        assert_eq!(
+        assert_matches!(
             last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+            QueryDestination::Readyset(_)
         );
 
         client
@@ -623,9 +624,9 @@ mod types {
             }
         );
 
-        assert_eq!(
+        assert_matches!(
             last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+            QueryDestination::Readyset(_)
         );
 
         // Rename the type
@@ -688,9 +689,9 @@ mod types {
             .collect::<Vec<Cba>>();
         assert_eq!(post_rename_res, vec![Cba::C]);
 
-        assert_eq!(
+        assert_matches!(
             last_query_info(&client).await.destination,
-            QueryDestination::Readyset
+            QueryDestination::Readyset(_)
         );
 
         // Rename a variant
@@ -749,7 +750,7 @@ mod types {
             },
             then_assert: |(post_rename_res, dest)| {
                 assert_eq!(post_rename_res, vec![Cba2::C]);
-                assert_eq!(dest, QueryDestination::Readyset);
+                assert_matches!(dest, QueryDestination::Readyset(_));
             }
         );
 
@@ -919,7 +920,7 @@ mod types {
                 (post_insert_value_res, dest)
             },
             then_assert: |(post_insert_value_res, dest)| {
-                assert_eq!(dest, QueryDestination::Readyset);
+                assert_matches!(dest, QueryDestination::Readyset(_));
                 assert_eq!(
                     post_insert_value_res,
                     vec![Abc::A, Abc::A, Abc::AB, Abc::B, Abc::C]
@@ -976,7 +977,7 @@ mod types {
             then_assert: |res| {
                 let (res, dest) = res();
                 assert_eq!(res.unwrap().get::<_, String>(0), "a");
-                assert_eq!(dest, QueryDestination::Readyset);
+                assert_matches!(dest, QueryDestination::Readyset(_));
             }
         );
 
@@ -1037,7 +1038,7 @@ mod types {
             then_assert: |res| {
                 let (res, dest) = res();
                 assert_eq!(res.unwrap().get::<_, String>(0), "a");
-                assert_eq!(dest, QueryDestination::Readyset);
+                assert_matches!(dest, QueryDestination::Readyset(_));
             }
         );
 

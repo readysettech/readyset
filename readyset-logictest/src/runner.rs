@@ -14,6 +14,7 @@ use tracing::{debug, error, info};
 
 use database_utils::tls::ServerCertVerification;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection};
+use readyset_adapter::backend::QueryDestination;
 use readyset_data::{Collation, DfType, DfValue};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_util::retry_with_exponential_backoff;
@@ -513,8 +514,8 @@ impl TestScript {
                 if let Some(destination) = explain.first() {
                     let destination =
                         destination.coerce_to(&DfType::Text(Collation::Utf8), &DfType::Unknown)?;
-                    let destination = destination.as_str().unwrap();
-                    if destination != "readyset" {
+                    let destination: QueryDestination = destination.as_str().unwrap().try_into()?;
+                    if !matches!(destination, QueryDestination::Readyset(_)) {
                         bail!("Query destination should be readyset, was {destination}");
                     }
                 }

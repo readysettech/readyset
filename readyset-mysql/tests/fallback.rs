@@ -1,3 +1,4 @@
+use assert_matches::assert_matches;
 use itertools::Itertools;
 use mysql_async::prelude::*;
 use mysql_async::{ChangeUserOpts, Conn};
@@ -318,9 +319,9 @@ async fn prepare_in_tx_select_out() {
     let prepared = tx.prep("SELECT * FROM t").await.unwrap();
     tx.commit().await.unwrap();
     let _: Option<i64> = conn.exec_first(prepared, ()).await.unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
 
     shutdown_tx.shutdown().await;
@@ -413,9 +414,9 @@ async fn prep_then_always_select_in_tx() {
         .unwrap();
 
     let _: Option<i64> = tx.exec_first(prepared, ()).await.unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut tx).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
     tx.rollback().await.unwrap();
 
@@ -448,9 +449,9 @@ async fn always_should_bypass_tx() {
 
     tx.query_drop("SELECT x FROM t").await.unwrap();
 
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut tx).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
     tx.rollback().await.unwrap();
 
@@ -476,9 +477,9 @@ async fn prep_select() {
 
     let prepared = conn.prep("SELECT * FROM t").await.unwrap();
     let _: Option<i64> = conn.exec_first(prepared, ()).await.unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
 
     shutdown_tx.shutdown().await;
@@ -530,9 +531,9 @@ async fn always_should_never_proxy() {
         .unwrap();
     conn.query_drop("set @foo = 5").await.unwrap();
     conn.query_drop("SELECT * FROM t").await.unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
 
     shutdown_tx.shutdown().await;
@@ -559,16 +560,16 @@ async fn always_should_never_proxy_exec() {
         .unwrap();
     let prepared = conn.prep("SELECT * FROM t").await.unwrap();
     let _: Option<i64> = conn.exec_first(prepared, ()).await.unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
     conn.query_drop("set @foo = 5").await.unwrap();
     let prepared = conn.prep("SELECT * FROM t").await.unwrap();
     let _: Option<i64> = conn.exec_first(prepared, ()).await.unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
 
     shutdown_tx.shutdown().await;
@@ -672,9 +673,9 @@ async fn drop_then_recreate_table_with_query() {
     conn.query_drop("SELECT x FROM t").await.unwrap();
     conn.query_drop("SELECT x FROM t").await.unwrap();
 
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
 
     shutdown_tx.shutdown().await;
@@ -705,9 +706,9 @@ async fn transaction_proxies() {
     conn.query_drop("COMMIT;").await.unwrap();
 
     conn.query_drop("SELECT * FROM t;").await.unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
 
     shutdown_tx.shutdown().await;

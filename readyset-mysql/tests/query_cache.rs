@@ -1,3 +1,4 @@
+use assert_matches::assert_matches;
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Result, Row, Statement};
 use readyset_adapter::backend::{MigrationMode, QueryInfo, UnsupportedSetMode};
@@ -54,9 +55,9 @@ async fn in_request_path_query_with_fallback() {
     res.unwrap();
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
 
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t WHERE a = NOW()").await;
@@ -157,9 +158,9 @@ async fn out_of_band_query_with_fallback() {
     res.unwrap(); // Executed successfully against noria.
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
 
     shutdown_tx.shutdown().await;
@@ -205,7 +206,7 @@ async fn autocommit_state_query() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(destination.destination, QueryDestination::Readyset);
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
 
     conn.query_drop("SELECT y FROM test where x = 4")
         .await
@@ -217,7 +218,7 @@ async fn autocommit_state_query() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(destination.destination, QueryDestination::Readyset);
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
 
     conn.query_drop("SET autocommit=0").await.unwrap();
     sleep().await;
@@ -244,7 +245,7 @@ async fn autocommit_state_query() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(destination.destination, QueryDestination::Readyset);
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
 
     conn.query_drop("SET autocommit=1").await.unwrap();
     sleep().await;
@@ -258,7 +259,7 @@ async fn autocommit_state_query() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(destination.destination, QueryDestination::Readyset);
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
 
     // Same for our ALWAYS query.
     conn.query_drop("SELECT y from test where x = 4")
@@ -272,7 +273,7 @@ async fn autocommit_state_query() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(destination.destination, QueryDestination::Readyset);
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
 
     shutdown_tx.shutdown().await;
 }
@@ -323,7 +324,7 @@ async fn autocommit_prepare_execute() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(destination.destination, QueryDestination::Readyset);
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
 
     conn.query_drop("SELECT y FROM test WHERE x = 4")
         .await
@@ -335,7 +336,7 @@ async fn autocommit_prepare_execute() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(destination.destination, QueryDestination::Readyset);
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
 
     conn.query_drop("SET autocommit=0").await.unwrap();
     sleep().await;
@@ -362,7 +363,7 @@ async fn autocommit_prepare_execute() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(destination.destination, QueryDestination::Readyset);
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
 
     shutdown_tx.shutdown().await;
 }
@@ -401,9 +402,9 @@ async fn in_request_path_prep_exec_with_fallback() {
     res.unwrap();
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
 
     let res: Result<_> = conn.prep("SELECT * FROM t WHERE a = NOW() AND b = 1").await;
@@ -547,18 +548,18 @@ async fn out_of_band_prep_exec_with_fallback() {
         .expect("Executed successfully against noria");
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
 
     let res: Result<Vec<Row>> = conn.exec(&stmt, ()).await;
     res.unwrap();
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Readyset
+        QueryDestination::Readyset(_)
     );
 
     let res: Result<_> = conn.query_drop("DROP CACHE test").await;
@@ -728,7 +729,7 @@ async fn test_binlog_transaction_compression() {
     let row: Vec<(u32, u32)> = conn.query("SELECT a, b FROM t WHERE a = 1").await.unwrap();
     assert_eq!(row.len(), 0);
     let last_status = last_query_info(&mut conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
 
     // Ensure we are processing records from multiple tables.
     conn.query_drop("START TRANSACTION").await.unwrap();
@@ -746,18 +747,18 @@ async fn test_binlog_transaction_compression() {
     let row: Vec<(u32, u32)> = conn.query("SELECT a, b FROM t WHERE a = 3").await.unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
 
     let row: Vec<(u32, u32)> = conn.query("SELECT a, b FROM t2 WHERE a = 1").await.unwrap();
     assert_eq!(row.len(), 1);
     assert!(row.iter().any(|(a, b)| *a == 1 && *b == 2));
     let last_status = last_query_info(&mut conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
 
     let row: Vec<(u32, u32)> = conn.query("SELECT a, b FROM t2 WHERE a = 2").await.unwrap();
     assert_eq!(row.len(), 0);
     let last_status = last_query_info(&mut conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
 
     shutdown_tx.shutdown().await;
 }
@@ -801,7 +802,7 @@ async fn test_char_padding_lookup() {
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
     assert_eq!(row[0].1, "ࠈࠈ");
 
     let row: Vec<(u32, String)> = conn
@@ -810,7 +811,7 @@ async fn test_char_padding_lookup() {
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
     assert_eq!(row[0].1, "A");
 
     let row: Vec<(u32, String)> = conn
@@ -819,7 +820,7 @@ async fn test_char_padding_lookup() {
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
     assert_eq!(row[0].1, "AAA");
     shutdown_tx.shutdown().await;
 }
@@ -867,7 +868,7 @@ async fn test_binary_padding_lookup() {
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
     assert_eq!(row[0].1, "ࠈ");
 
     let row: Vec<(u32, String)> = conn
@@ -876,7 +877,7 @@ async fn test_binary_padding_lookup() {
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
     assert_eq!(row[0].1, "¥\0");
 
     let row: Vec<(u32, String)> = conn
@@ -885,7 +886,7 @@ async fn test_binary_padding_lookup() {
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
     assert_eq!(row[0].1, "A\0\0");
 
     let row: Vec<(u32, String)> = conn
@@ -894,7 +895,7 @@ async fn test_binary_padding_lookup() {
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(&mut conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
     assert_eq!(row[0].1, "A¥");
     shutdown_tx.shutdown().await;
 }
@@ -925,7 +926,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
     assert_eq!(row[0].1, key_upper);
     let row: Vec<(u32, String)> = conn
         .query(format!(
@@ -935,7 +936,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
     assert_eq!(row[0].1, key_upper);
 
     let row: Vec<(u32, String)> = conn
@@ -946,7 +947,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
         .unwrap();
     assert_eq!(row.len(), 0);
     let last_status = last_query_info(conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
 
     let row: Vec<(u32, String)> = conn
         .query(format!(
@@ -956,7 +957,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
     assert_eq!(row[0].1, key_upper);
 
     let row: Vec<(u32, String)> = conn
@@ -967,7 +968,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
     assert_eq!(row[0].1, key_upper);
 
     let row: Vec<(u32, String)> = conn
@@ -978,7 +979,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
     assert_eq!(row[0].1, key_upper);
 
     let row: Vec<(u32, String)> = conn
@@ -989,7 +990,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
         .unwrap();
     assert_eq!(row.len(), 0);
     let last_status = last_query_info(conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
 
     let row: Vec<(u32, String)> = conn
         .query(format!(
@@ -999,7 +1000,7 @@ async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_l
         .unwrap();
     assert_eq!(row.len(), 1);
     let last_status = last_query_info(conn).await;
-    assert_eq!(last_status.destination, QueryDestination::Readyset);
+    assert_matches!(last_status.destination, QueryDestination::Readyset(_));
     assert_eq!(row[0].1, key_upper);
 }
 
