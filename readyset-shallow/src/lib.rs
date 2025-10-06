@@ -4,7 +4,7 @@ use std::time::Duration;
 mod cache;
 mod manager;
 
-pub use manager::{CacheInsertGuard, CacheManager, CacheResult, Values};
+pub use manager::{CacheInsertGuard, CacheManager, CacheResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MySqlMetadata {
@@ -27,8 +27,8 @@ impl QueryMetadata {
 }
 
 #[derive(Debug, Clone)]
-pub struct QueryResult {
-    pub values: Arc<Values>,
+pub struct QueryResult<V> {
+    pub values: Arc<Vec<V>>,
     pub metadata: Arc<QueryMetadata>,
 }
 

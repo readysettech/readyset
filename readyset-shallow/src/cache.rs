@@ -9,7 +9,6 @@ use moka::sync::Cache as MokaCache;
 use readyset_client::query::QueryId;
 use readyset_sql::ast::Relation;
 
-use crate::manager::*;
 use crate::{EvictionPolicy, QueryMetadata, QueryResult};
 
 fn current_timestamp_ms() -> u64 {
@@ -20,25 +19,26 @@ fn current_timestamp_ms() -> u64 {
 }
 
 #[derive(Debug)]
-struct CacheEntry {
-    values: Arc<Values>,
+struct CacheEntry<V> {
+    values: Arc<Vec<V>>,
     metadata: Option<Arc<QueryMetadata>>,
     accessed_ms: AtomicU64,
     refreshed_ms: AtomicU64,
     refreshing: AtomicBool,
 }
 
-pub struct Cache<K> {
-    results: MokaCache<K, Arc<CacheEntry>>,
+pub struct Cache<K, V> {
+    results: MokaCache<K, Arc<CacheEntry<V>>>,
     cache_metadata: OnceLock<Arc<QueryMetadata>>,
     relation: Option<Relation>,
     query_id: Option<QueryId>,
     ttl_ms: Option<u64>,
 }
 
-impl<K> Debug for Cache<K>
+impl<K, V> Debug for Cache<K, V>
 where
     K: Eq + Hash + Send + Sync + 'static,
+    V: Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Cache")
@@ -48,9 +48,10 @@ where
     }
 }
 
-impl<K> Cache<K>
+impl<K, V> Cache<K, V>
 where
     K: Eq + Hash + Send + Sync + 'static,
+    V: Send + Sync + 'static,
 {
     pub(crate) fn new(
         policy: EvictionPolicy,
@@ -72,7 +73,7 @@ where
         }
     }
 
-    pub(crate) fn insert(&self, k: K, v: Values, metadata: QueryMetadata) {
+    pub(crate) fn insert(&self, k: K, v: Vec<V>, metadata: QueryMetadata) {
         let metadata = if let Some(existing) = self.cache_metadata.get() {
             if existing.as_ref() == &metadata {
                 None
@@ -103,7 +104,7 @@ where
         self.results.insert(k, entry);
     }
 
-    pub fn get(&self, k: &K) -> Option<(QueryResult, bool)> {
+    pub fn get(&self, k: &K) -> Option<(QueryResult<V>, bool)> {
         self.results.get(k).map(|entry| {
             let now = current_timestamp_ms();
             entry.accessed_ms.store(now, Ordering::Relaxed);
@@ -148,8 +149,6 @@ where
 mod tests {
     use std::time::Duration;
 
-    use readyset_data::DfValue;
-
     use crate::{EvictionPolicy, QueryMetadata};
 
     use super::Cache;
@@ -158,8 +157,8 @@ mod tests {
     fn test_ttl_expiration() {
         let cache = Cache::new(EvictionPolicy::Ttl(Duration::from_secs(1)), None, None);
 
-        let key = vec![DfValue::from("test_key")];
-        let values = vec![vec![DfValue::from("test_value")]];
+        let key = vec!["test_key"];
+        let values = vec![vec!["test_value"]];
         let metadata = QueryMetadata::empty();
 
         cache.insert(key.clone(), values.clone(), metadata);

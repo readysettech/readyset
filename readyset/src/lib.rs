@@ -1304,7 +1304,10 @@ where
                 })?;
         }
 
-        let shallow = Arc::new(CacheManager::<ProcessedQueryParams>::new());
+        let shallow = Arc::new(CacheManager::<
+            ProcessedQueryParams,
+            <H::UpstreamDatabase as UpstreamDatabase>::CacheEntry,
+        >::new());
         if let Ok(shallow_ddl_requests) =
             rt.block_on(adapter_authority.shallow_cache_ddl_requests())
         {

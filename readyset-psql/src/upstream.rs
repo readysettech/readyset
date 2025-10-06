@@ -94,6 +94,9 @@ pub enum QueryResult {
     },
 }
 
+#[derive(Debug)]
+pub enum CacheEntry {}
+
 impl Debug for QueryResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -133,7 +136,12 @@ impl UpstreamDestination for QueryResult {}
 
 #[async_trait]
 impl Refresh for QueryResult {
-    async fn refresh(self, _cache: CacheInsertGuard<ProcessedQueryParams>) -> std::io::Result<()> {
+    type Entry = CacheEntry;
+
+    async fn refresh(
+        self,
+        _cache: CacheInsertGuard<ProcessedQueryParams, Self::Entry>,
+    ) -> std::io::Result<()> {
         Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "PostgreSQL shallow cache refresh not yet implemented",
@@ -213,6 +221,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     type QueryResult<'a> = QueryResult;
     type PrepareData<'a> = &'a [Type];
     type ExecMeta<'a> = &'a [TransferFormat];
+    type CacheEntry = CacheEntry;
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "13.4 (Readyset)";
     const SQL_DIALECT: readyset_sql::Dialect = readyset_sql::Dialect::PostgreSQL;

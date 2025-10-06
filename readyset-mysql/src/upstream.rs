@@ -96,7 +96,7 @@ impl<'a> QueryResult<'a> {
     pub async fn process<S>(
         self,
         writer: Option<QueryResultWriter<'_, S>>,
-        mut cache: Option<CacheInsertGuard<ProcessedQueryParams>>,
+        mut cache: Option<CacheInsertGuard<ProcessedQueryParams, Vec<DfValue>>>,
     ) -> io::Result<()>
     where
         S: AsyncRead + AsyncWrite + Unpin,
@@ -196,7 +196,12 @@ impl<'a> QueryResult<'a> {
 
 #[async_trait]
 impl Refresh for QueryResult<'_> {
-    async fn refresh(self, cache: CacheInsertGuard<ProcessedQueryParams>) -> io::Result<()> {
+    type Entry = Vec<DfValue>;
+
+    async fn refresh(
+        self,
+        cache: CacheInsertGuard<ProcessedQueryParams, Self::Entry>,
+    ) -> io::Result<()> {
         self.process(
             None::<QueryResultWriter<'_, tokio::net::TcpStream>>,
             Some(cache),
@@ -351,6 +356,7 @@ impl UpstreamDatabase for MySqlUpstream {
     type StatementMeta = StatementMeta;
     type PrepareData<'a> = ();
     type ExecMeta<'a> = ();
+    type CacheEntry = Vec<DfValue>;
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "8.0.26-readyset\0";
     const SQL_DIALECT: readyset_sql::Dialect = readyset_sql::Dialect::MySQL;

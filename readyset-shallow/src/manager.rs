@@ -7,18 +7,14 @@ use papaya::HashMap;
 use tracing::info;
 
 use readyset_client::query::QueryId;
-use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult, internal};
 use readyset_sql::ast::Relation;
 
 use crate::cache::Cache;
 use crate::{EvictionPolicy, QueryMetadata};
 
-pub type Row = Vec<DfValue>;
-pub type Values = Vec<Vec<DfValue>>;
-
-pub struct CacheManager<K> {
-    caches: HashMap<u64, Arc<Cache<K>>>,
+pub struct CacheManager<K, V> {
+    caches: HashMap<u64, Arc<Cache<K, V>>>,
     names: HashMap<Relation, u64>,
     query_ids: HashMap<QueryId, u64>,
     // This lock also synchronizes inserts into the three HashMaps.
@@ -26,9 +22,10 @@ pub struct CacheManager<K> {
 }
 
 // #[derive(Default)] adds a K: Default bound, which we don't want.
-impl<K> Default for CacheManager<K>
+impl<K, V> Default for CacheManager<K, V>
 where
     K: Hash + Eq + Send + Sync + 'static,
+    V: Send + Sync + 'static,
 {
     fn default() -> Self {
         Self {
@@ -40,9 +37,10 @@ where
     }
 }
 
-impl<K> CacheManager<K>
+impl<K, V> CacheManager<K, V>
 where
     K: Hash + Eq + Send + Sync + 'static,
+    V: Send + Sync + 'static,
 {
     pub fn new() -> Self {
         Self::default()
@@ -163,7 +161,7 @@ where
         &self,
         relation: Option<&Relation>,
         query_id: Option<&QueryId>,
-    ) -> Option<Arc<Cache<K>>> {
+    ) -> Option<Arc<Cache<K, V>>> {
         let Ok(()) = Self::check_identifiers(relation, query_id) else {
             return None;
         };
@@ -171,7 +169,7 @@ where
         self.caches.pin().get(&id).cloned()
     }
 
-    fn make_guard(cache: Arc<Cache<K>>, key: K) -> CacheInsertGuard<K> {
+    fn make_guard(cache: Arc<Cache<K, V>>, key: K) -> CacheInsertGuard<K, V> {
         CacheInsertGuard {
             cache,
             key: Some(key),
@@ -181,7 +179,7 @@ where
         }
     }
 
-    pub fn get_or_start_insert(&self, query_id: &QueryId, key: K) -> CacheResult<K> {
+    pub fn get_or_start_insert(&self, query_id: &QueryId, key: K) -> CacheResult<K, V> {
         let Some(cache) = self.get(None, Some(query_id)) else {
             return CacheResult::NotCached;
         };
@@ -193,19 +191,21 @@ where
     }
 }
 
-pub enum CacheResult<K>
+pub enum CacheResult<K, V>
 where
     K: Hash + Eq + Send + Sync + 'static,
+    V: Send + Sync + 'static,
 {
     NotCached,
-    Miss(CacheInsertGuard<K>),
-    Hit(crate::QueryResult),
-    HitAndRefresh(crate::QueryResult, CacheInsertGuard<K>),
+    Miss(CacheInsertGuard<K, V>),
+    Hit(crate::QueryResult<V>),
+    HitAndRefresh(crate::QueryResult<V>, CacheInsertGuard<K, V>),
 }
 
-impl<K> Debug for CacheResult<K>
+impl<K, V> Debug for CacheResult<K, V>
 where
     K: Hash + Eq + Send + Sync + 'static,
+    V: Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -217,20 +217,22 @@ where
     }
 }
 
-pub struct CacheInsertGuard<K>
+pub struct CacheInsertGuard<K, V>
 where
     K: Hash + Eq + Send + Sync + 'static,
+    V: Send + Sync + 'static,
 {
-    cache: Arc<Cache<K>>,
+    cache: Arc<Cache<K, V>>,
     key: Option<K>,
-    results: Option<Values>,
+    results: Option<Vec<V>>,
     metadata: Option<QueryMetadata>,
     filled: bool,
 }
 
-impl<K> Debug for CacheInsertGuard<K>
+impl<K, V> Debug for CacheInsertGuard<K, V>
 where
     K: Hash + Eq + Send + Sync + 'static,
+    V: Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CacheInsertGuard")
@@ -240,15 +242,16 @@ where
     }
 }
 
-impl<K> CacheInsertGuard<K>
+impl<K, V> CacheInsertGuard<K, V>
 where
     K: Hash + Eq + Send + Sync + 'static,
+    V: Send + Sync + 'static,
 {
     pub fn filled(&mut self) {
         self.filled = true;
     }
 
-    pub fn push(&mut self, row: Row) {
+    pub fn push(&mut self, row: V) {
         self.results.as_mut().unwrap().push(row);
     }
 
@@ -257,9 +260,10 @@ where
     }
 }
 
-impl<K> Drop for CacheInsertGuard<K>
+impl<K, V> Drop for CacheInsertGuard<K, V>
 where
     K: Hash + Eq + Send + Sync + 'static,
+    V: Send + Sync + 'static,
 {
     fn drop(&mut self) {
         if self.filled {

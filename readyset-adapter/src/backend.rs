@@ -142,11 +142,14 @@ pub type StatementId = u32;
 
 /// Request to refresh a shallow cached query
 #[derive(Debug)]
-struct ShallowRefreshRequest {
+struct ShallowRefreshRequest<V>
+where
+    V: Send + Sync + 'static,
+{
     query_id: QueryId,
     path: Vec<SqlIdentifier>,
     query: String,
-    cache: CacheInsertGuard<ProcessedQueryParams>,
+    cache: CacheInsertGuard<ProcessedQueryParams, V>,
 }
 
 /// Query metadata used to plan query prepare
@@ -358,7 +361,7 @@ impl BackendBuilder {
         authority: Arc<Authority>,
         status_reporter: ReadySetStatusReporter<DB>,
         adapter_start_time: SystemTime,
-        shallow: Arc<CacheManager<ProcessedQueryParams>>,
+        shallow: Arc<CacheManager<ProcessedQueryParams, DB::CacheEntry>>,
     ) -> Backend<DB, Handler> {
         metrics::gauge!(recorded::CONNECTED_CLIENTS).increment(1.0);
         metrics::counter!(recorded::CLIENT_CONNECTIONS_OPENED).increment(1);
@@ -375,7 +378,8 @@ impl BackendBuilder {
 
         let shallow_refresh_sender = upstream_config.as_ref().map(|config| {
             let cpus = num_cpus::get();
-            let (sender, receiver) = async_channel::bounded::<ShallowRefreshRequest>(5 * cpus);
+            let (sender, receiver) =
+                async_channel::bounded::<ShallowRefreshRequest<DB::CacheEntry>>(5 * cpus);
 
             for _ in 0..cpus {
                 tokio::spawn(Backend::<DB, Handler>::shallow_refresh_worker(
@@ -655,10 +659,10 @@ where
     is_internal_connection: bool,
 
     /// The adapter's shallow cache manager.
-    shallow: Arc<CacheManager<ProcessedQueryParams>>,
+    shallow: Arc<CacheManager<ProcessedQueryParams, DB::CacheEntry>>,
 
     /// Sender for shallow refresh requests to worker pool
-    shallow_refresh_sender: Option<async_channel::Sender<ShallowRefreshRequest>>,
+    shallow_refresh_sender: Option<async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>>>,
 
     /// Memoized upstream database version,
     db_version: Option<String>,
@@ -864,11 +868,11 @@ where
     /// Results from noria
     Noria(noria_connector::QueryResult<'a>),
     /// Results from a Readyset shallow cache
-    Shallow(readyset_shallow::QueryResult),
+    Shallow(readyset_shallow::QueryResult<DB::CacheEntry>),
     /// Results from upstream with optional pending shallow cache insert
     Upstream(
         DB::QueryResult<'a>,
-        Option<CacheInsertGuard<ProcessedQueryParams>>,
+        Option<CacheInsertGuard<ProcessedQueryParams, DB::CacheEntry>>,
     ),
     /// Results from upstream that are explicitly buffered in a Vec (from postgres' Simple Query
     /// Protocol)
@@ -993,7 +997,7 @@ where
         upstream: Option<&'a mut DB>,
         query: &'a str,
         event: &mut QueryExecutionEvent,
-        cache: Option<CacheInsertGuard<ProcessedQueryParams>>,
+        cache: Option<CacheInsertGuard<ProcessedQueryParams, DB::CacheEntry>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let upstream = upstream.ok_or_else(|| {
             ReadySetError::Internal("Un-prepared fallback requires an upstream".to_string())
@@ -2778,12 +2782,12 @@ where
     async fn query_shallow<'a>(
         noria: &'a mut NoriaConnector,
         upstream: Option<&'a mut DB>,
-        shallow: &Arc<CacheManager<ProcessedQueryParams>>,
+        shallow: &Arc<CacheManager<ProcessedQueryParams, DB::CacheEntry>>,
         view_request: &ViewCreateRequest,
         query: &'a str,
         event: &mut QueryExecutionEvent,
         processed_query_params: Option<ProcessedQueryParams>,
-        refresh: Option<&async_channel::Sender<ShallowRefreshRequest>>,
+        refresh: Option<&async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let query_id = QueryId::from_select(&view_request.statement, noria.schema_search_path());
         let res = processed_query_params.map(|p| shallow.get_or_start_insert(&query_id, p));
@@ -2820,7 +2824,7 @@ where
     async fn query_adhoc_select<'a>(
         noria: &'a mut NoriaConnector,
         upstream: Option<&'a mut DB>,
-        shallow: &Arc<CacheManager<ProcessedQueryParams>>,
+        shallow: &Arc<CacheManager<ProcessedQueryParams, DB::CacheEntry>>,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         original_query: &'a str,
@@ -2831,7 +2835,7 @@ where
         sampler_tx: Option<
             &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
         >,
-        refresh: Option<&async_channel::Sender<ShallowRefreshRequest>>,
+        refresh: Option<&async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let original_status = status.clone();
         let did_work = if let Some(ref mut i) = status.execution_info {
@@ -3613,13 +3617,13 @@ where
 {
     async fn shallow_refresh_result(
         result: DB::QueryResult<'_>,
-        cache: CacheInsertGuard<ProcessedQueryParams>,
+        cache: CacheInsertGuard<ProcessedQueryParams, DB::CacheEntry>,
     ) -> std::io::Result<()> {
         result.refresh(cache).await
     }
 
     async fn shallow_refresh_worker(
-        receiver: async_channel::Receiver<ShallowRefreshRequest>,
+        receiver: async_channel::Receiver<ShallowRefreshRequest<DB::CacheEntry>>,
         upstream_config: UpstreamConfig,
     ) {
         let mut upstream: Option<DB> = None;
@@ -3804,12 +3808,15 @@ async fn remove_ddl_on_error<T, F, Fut>(
 }
 
 /// Recreate shallow caches from stored DDL requests on adapter startup.
-pub async fn recreate_shallow_caches(
-    shallow: Arc<CacheManager<ProcessedQueryParams>>,
+pub async fn recreate_shallow_caches<V>(
+    shallow: Arc<CacheManager<ProcessedQueryParams, V>>,
     ddl_requests: Vec<CacheDDLRequest>,
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,
-) -> ReadySetResult<()> {
+) -> ReadySetResult<()>
+where
+    V: Debug + Send + Sync + 'static,
+{
     for req in ddl_requests {
         if let Err(e) =
             recreate_single_shallow_cache(&shallow, req, parsing_preset, rewrite_params).await
@@ -3820,12 +3827,15 @@ pub async fn recreate_shallow_caches(
     Ok(())
 }
 
-async fn recreate_single_shallow_cache(
-    shallow: &CacheManager<ProcessedQueryParams>,
+async fn recreate_single_shallow_cache<V>(
+    shallow: &CacheManager<ProcessedQueryParams, V>,
     req: CacheDDLRequest,
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,
-) -> ReadySetResult<()> {
+) -> ReadySetResult<()>
+where
+    V: Debug + Send + Sync + 'static,
+{
     let query = readyset_sql_parsing::parse_query_with_config(
         parsing_preset,
         req.dialect.into(),

@@ -5470,7 +5470,6 @@ dependencies = [
  "mysql_async",
  "papaya",
  "readyset-client",
- "readyset-data",
  "readyset-errors",
  "readyset-sql",
  "tracing",

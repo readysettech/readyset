@@ -455,7 +455,7 @@ where
 }
 
 async fn handle_shallow_result<S>(
-    result: readyset_shallow::QueryResult,
+    result: readyset_shallow::QueryResult<Vec<DfValue>>,
     writer: QueryResultWriter<'_, S>,
 ) -> io::Result<()>
 where
@@ -490,7 +490,7 @@ where
 async fn handle_upstream_result<S>(
     result: upstream::QueryResult<'_>,
     writer: QueryResultWriter<'_, S>,
-    cache: Option<CacheInsertGuard<ProcessedQueryParams>>,
+    cache: Option<CacheInsertGuard<ProcessedQueryParams, Vec<DfValue>>>,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,

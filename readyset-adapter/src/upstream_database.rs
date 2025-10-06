@@ -18,8 +18,14 @@ pub type UpstreamStatementId = u32;
 /// Trait for refreshing a shallow cache from an upstream query result
 #[async_trait]
 pub trait Refresh {
+    /// The type of value in the shallow cache.
+    type Entry: Send + Sync + 'static;
+
     /// Populate the cache with data from this query result
-    async fn refresh(self, cache: CacheInsertGuard<ProcessedQueryParams>) -> std::io::Result<()>;
+    async fn refresh(
+        self,
+        cache: CacheInsertGuard<ProcessedQueryParams, Self::Entry>,
+    ) -> std::io::Result<()>;
 }
 
 /// Information about a statement that has been prepared in an [`UpstreamDatabase`]
@@ -72,7 +78,7 @@ pub trait UpstreamDatabase: Sized + Send {
     /// This type is used as the value inside of [`QueryResult::Upstream`][]
     ///
     /// [`QueryResult::Upstream`]: crate::backend::QueryResult::Upstream
-    type QueryResult<'a>: Debug + Send + UpstreamDestination + Refresh
+    type QueryResult<'a>: Debug + Send + UpstreamDestination + Refresh<Entry = Self::CacheEntry>
     where
         Self: 'a;
 
@@ -91,6 +97,9 @@ pub trait UpstreamDatabase: Sized + Send {
     ///
     /// [`execute`](UpstreamDatabase::execute)
     type ExecMeta<'a>: Send;
+
+    /// The type of data this protocol stores into an entry in a shallow cache.
+    type CacheEntry: Debug + Send + Sync + 'static;
 
     /// Errors that can be returned from operations on this database
     ///
@@ -287,6 +296,7 @@ where
     type StatementMeta = U::StatementMeta;
     type PrepareData<'a> = U::PrepareData<'a>;
     type ExecMeta<'a> = U::ExecMeta<'a>;
+    type CacheEntry = U::CacheEntry;
     type Error = U::Error;
 
     const DEFAULT_DB_VERSION: &'static str = U::DEFAULT_DB_VERSION;

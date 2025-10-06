@@ -13,6 +13,5 @@ tracing = { workspace = true }
 mysql_async = { workspace = true }
 
 readyset-client = { path = "../readyset-client" }
-readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-sql = { path = "../readyset-sql" }
