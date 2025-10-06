@@ -6,7 +6,7 @@ use database_utils::tls::ServerCertVerification;
 use database_utils::{DatabaseURL, QueryableConnection};
 use readyset_adapter::backend::QueryDestination;
 use readyset_client::consensus::{AuthorityControl, CacheDDLRequest};
-use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
+use readyset_client_test_helpers::psql_helpers::{connect, PostgreSQLAdapter};
 use readyset_client_test_helpers::{
     explain_create_cache, explain_last_statement, sleep, TestBuilder,
 };
@@ -18,7 +18,6 @@ use readyset_util::shutdown::ShutdownSender;
 use crate::common::setup_standalone_with_authority;
 
 mod common;
-use common::connect;
 
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
     readyset_tracing::init_test_logging();
@@ -1609,10 +1608,10 @@ async fn caches_go_in_authority_list() {
 
 mod multiple_create_and_drop {
     use itertools::Itertools;
+    use readyset_client_test_helpers::psql_helpers::connect;
     use readyset_util::eventually;
     use tokio_postgres::Client;
 
-    use crate::common::connect;
     use crate::setup;
 
     async fn create_query(conn: &Client, query_name: &str, query: &str) {

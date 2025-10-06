@@ -6,7 +6,7 @@ use postgres_types::private::BytesMut;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::query_status_cache::MigrationStyle;
 use readyset_adapter::BackendBuilder;
-use readyset_client_test_helpers::psql_helpers::{upstream_config, PostgreSQLAdapter};
+use readyset_client_test_helpers::psql_helpers::{connect, upstream_config, PostgreSQLAdapter};
 use readyset_client_test_helpers::{sleep, Adapter, TestBuilder};
 use readyset_data::DfValue;
 use readyset_server::Handle;
@@ -17,7 +17,7 @@ use readyset_util::shutdown::ShutdownSender;
 use test_utils::tags;
 
 mod common;
-use common::{connect, setup_standalone_with_authority};
+use common::setup_standalone_with_authority;
 use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use tokio_postgres::{Client, CommandCompleteContents, SimpleQueryMessage};
 

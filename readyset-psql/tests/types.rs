@@ -5,7 +5,6 @@ use readyset_util::shutdown::ShutdownSender;
 use test_utils::tags;
 
 mod common;
-use common::connect;
 
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
     TestBuilder::default()
@@ -28,7 +27,7 @@ mod types {
     use proptest::prelude::*;
     use proptest::string::string_regex;
     use readyset_adapter::backend::QueryDestination;
-    use readyset_client_test_helpers::psql_helpers::{last_query_info, upstream_config};
+    use readyset_client_test_helpers::psql_helpers::{connect, last_query_info, upstream_config};
     use readyset_client_test_helpers::{sleep, Adapter};
     use readyset_data::DfValue;
     use readyset_decimal::Decimal;

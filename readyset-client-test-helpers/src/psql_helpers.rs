@@ -8,13 +8,13 @@ use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter::Backend;
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use tokio::net::TcpStream;
-use tokio_postgres::{Client, NoTls, SimpleQueryMessage};
+use tokio_postgres::{Client, Config, NoTls, SimpleQueryMessage};
 use tracing::error;
 
 use crate::{sleep, Adapter};
 
-pub fn upstream_config() -> tokio_postgres::Config {
-    let mut config = tokio_postgres::Config::new();
+pub fn upstream_config() -> Config {
+    let mut config = Config::new();
     config
         .user(env::var("PGUSER").unwrap_or_else(|_| "postgres".into()))
         .password(
@@ -32,11 +32,17 @@ pub fn upstream_config() -> tokio_postgres::Config {
     config
 }
 
+pub async fn connect(config: Config) -> Client {
+    let (client, connection) = config.connect(NoTls).await.unwrap();
+    tokio::spawn(connection);
+    client
+}
+
 pub struct PostgreSQLAdapter;
 
 #[async_trait]
 impl Adapter for PostgreSQLAdapter {
-    type ConnectionOpts = tokio_postgres::Config;
+    type ConnectionOpts = Config;
     type Upstream = LazyUpstream<PostgreSqlUpstream>;
     type Handler = PostgreSqlQueryHandler;
 
@@ -45,7 +51,7 @@ impl Adapter for PostgreSQLAdapter {
     const EXPR_DIALECT: readyset_data::Dialect = readyset_data::Dialect::DEFAULT_POSTGRESQL;
 
     fn connection_opts_with_port(db_name: Option<&str>, port: u16) -> Self::ConnectionOpts {
-        let mut config = tokio_postgres::Config::new();
+        let mut config = Config::new();
         config
             .host("127.0.0.1")
             .port(port)

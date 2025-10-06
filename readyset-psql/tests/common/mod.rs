@@ -4,13 +4,6 @@ use readyset_client::consensus::{Authority, StandaloneAuthority};
 use readyset_client_test_helpers::TestBuilder;
 use readyset_server::DurabilityMode;
 use tempfile::TempDir;
-use tokio_postgres::{Client, Config, NoTls};
-
-pub async fn connect(config: Config) -> Client {
-    let (client, connection) = config.connect(NoTls).await.unwrap();
-    tokio::spawn(connection);
-    client
-}
 
 // This is used in integration.rs, but for some reason clippy isn't detecting that.
 #[allow(dead_code)]
