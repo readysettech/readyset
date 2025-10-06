@@ -54,10 +54,10 @@ impl Aggregation {
                         }
                     }
                     SqlEngine::PostgreSQL => {
-                        if over_col_ty.is_any_int() {
-                            DfType::BigInt
-                        } else if over_col_ty.is_any_bigint() || over_col_ty.is_numeric() {
+                        if over_col_ty.is_any_bigint() || over_col_ty.is_numeric() {
                             DfType::DEFAULT_NUMERIC
+                        } else if over_col_ty.is_any_int() {
+                            DfType::BigInt
                         } else if over_col_ty.is_float() {
                             DfType::Float
                         } else if over_col_ty.is_double() {

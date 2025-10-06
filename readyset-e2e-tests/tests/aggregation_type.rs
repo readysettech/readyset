@@ -149,9 +149,8 @@ test_aggregation_type!(
 );
 test_aggregation_type!(postgres, sum_int2, "sum(x)", SqlType::Int2);
 test_aggregation_type!(postgres, sum_int, "sum(x)", SqlType::Int(None));
-// Disabled due to REA-6022: BIGINT/INT8 return type is incorrect
-// test_aggregation_type!(postgres, sum_bigint, "sum(x)", SqlType::BigInt(None));
-// test_aggregation_type!(postgres, sum_int8, "sum(x)", SqlType::Int8);
+test_aggregation_type!(postgres, sum_bigint, "sum(x)", SqlType::BigInt(None));
+test_aggregation_type!(postgres, sum_int8, "sum(x)", SqlType::Int8);
 
 test_aggregation_type!(postgres, count_bigint, "count(x)", SqlType::BigInt(None));
 test_aggregation_type!(postgres, count_text, "count(x)", SqlType::Text);

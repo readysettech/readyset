@@ -1,0 +1,16 @@
+statement ok
+DROP TABLE IF EXISTS t
+
+
+statement ok
+CREATE TABLE t (c BIGINT)
+
+
+statement ok
+INSERT INTO t (c) VALUES (8573488813442923608)
+
+
+query  rowsort
+SELECT sum(c) FROM t
+----
+8573488813442923608
