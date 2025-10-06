@@ -1,5 +1,7 @@
 use readyset_errors::{ReadySetResult, invalid_query, unsupported};
-use readyset_sql::ast::{Expr, FieldDefinitionExpr, FieldReference, OrderBy, SelectStatement};
+use readyset_sql::ast::{
+    ArrayArguments, Expr, FieldDefinitionExpr, FieldReference, OrderBy, SelectStatement,
+};
 
 /// Check if an expression contains any WindowFunction expressions
 fn contains_window_function(expr: &Expr) -> bool {
@@ -40,7 +42,11 @@ fn contains_window_function(expr: &Expr) -> bool {
         Expr::Cast { expr, .. } | Expr::Collate { expr, .. } | Expr::ConvertUsing { expr, .. } => {
             contains_window_function(expr)
         }
-        Expr::Array(exprs) | Expr::Row { exprs, .. } => exprs.iter().any(contains_window_function),
+        Expr::Row { exprs, .. } => exprs.iter().any(contains_window_function),
+        Expr::Array(args) => match args {
+            ArrayArguments::List(exprs) => exprs.iter().any(contains_window_function),
+            ArrayArguments::Subquery(..) => false,
+        },
         Expr::Call(f) => f.arguments().any(contains_window_function),
         Expr::Literal(_)
         | Expr::Column(_)

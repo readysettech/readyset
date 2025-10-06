@@ -6,8 +6,9 @@ use readyset_errors::{ReadySetResult, unsupported_err};
 use readyset_sql::DialectDisplay;
 use readyset_sql::analysis::is_aggregate;
 use readyset_sql::ast::{
-    BinaryOperator, Column, CommonTableExpr, Expr, FieldDefinitionExpr, FunctionExpr, InValue,
-    JoinClause, JoinRightSide, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+    ArrayArguments, BinaryOperator, Column, CommonTableExpr, Expr, FieldDefinitionExpr,
+    FunctionExpr, InValue, JoinClause, JoinRightSide, Relation, SelectStatement, SqlIdentifier,
+    TableExpr, TableExprInner,
 };
 
 pub(crate) fn join_clause_tables(join: &JoinClause) -> impl Iterator<Item = &TableExpr> {
@@ -184,9 +185,15 @@ pub fn map_aggregates(
                 }
             }
         }
-        Expr::Array(exprs) | Expr::Row { exprs, .. } => {
+        Expr::Row { exprs, .. } => {
             ret.extend(exprs.iter_mut().flat_map(|e| map_aggregates(e, dialect)))
         }
+        Expr::Array(args) => match args {
+            ArrayArguments::List(exprs) => {
+                ret.extend(exprs.iter_mut().flat_map(|e| map_aggregates(e, dialect)))
+            }
+            ArrayArguments::Subquery(..) => {}
+        },
         Expr::Collate { expr, .. } => ret.append(&mut map_aggregates(expr, dialect)),
         // Window functions are handled separately
         // `PARTITION BY` and `ORDER BY` can *NOT* contain aggregates

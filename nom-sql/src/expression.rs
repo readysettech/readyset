@@ -809,7 +809,9 @@ fn bracketed_expr_list(
             ws_sep_comma,
             alt((
                 expression(dialect),
-                map(bracketed_expr_list(dialect), Expr::Array),
+                map(bracketed_expr_list(dialect), |exprs| {
+                    Expr::Array(ArrayArguments::List(exprs))
+                }),
             )),
         )(i)?;
         let (i, _) = tag("]")(i)?;
@@ -822,7 +824,7 @@ fn array_expr(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&
         let (i, _) = tag_no_case("ARRAY")(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, exprs) = bracketed_expr_list(dialect)(i)?;
-        Ok((i, Expr::Array(exprs)))
+        Ok((i, Expr::Array(ArrayArguments::List(exprs))))
     }
 }
 
@@ -835,7 +837,9 @@ fn row_expr_explicit(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlR
             ws_sep_comma,
             alt((
                 expression(dialect),
-                map(bracketed_expr_list(dialect), Expr::Array),
+                map(bracketed_expr_list(dialect), |exprs| {
+                    Expr::Array(ArrayArguments::List(exprs))
+                }),
             )),
         )(i)?;
         let (i, _) = tag(")")(i)?;
@@ -861,7 +865,9 @@ fn row_expr_implicit(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlR
             ws_sep_comma,
             alt((
                 expression(dialect),
-                map(bracketed_expr_list(dialect), Expr::Array),
+                map(bracketed_expr_list(dialect), |exprs| {
+                    Expr::Array(ArrayArguments::List(exprs))
+                }),
             )),
         )(i)?;
         let (i, _) = whitespace0(i)?;
@@ -2306,10 +2312,10 @@ mod tests {
                 let expected = Expr::BinaryOp {
                     lhs: Box::new(Expr::Literal("{\"abc\": 42}".into())),
                     op: BinaryOperator::QuestionMarkPipe,
-                    rhs: Box::new(Expr::Array(vec![
+                    rhs: Box::new(Expr::Array(ArrayArguments::List(vec![
                         Expr::Literal("abc".into()),
                         Expr::Literal("def".into()),
-                    ])),
+                    ]))),
                 };
 
                 let (rem, res) = res.unwrap();
@@ -2327,10 +2333,10 @@ mod tests {
                 let expected = Expr::BinaryOp {
                     lhs: Box::new(Expr::Literal("{\"abc\": 42}".into())),
                     op: BinaryOperator::QuestionMarkAnd,
-                    rhs: Box::new(Expr::Array(vec![
+                    rhs: Box::new(Expr::Array(ArrayArguments::List(vec![
                         Expr::Literal("abc".into()),
                         Expr::Literal("def".into()),
-                    ])),
+                    ]))),
                 };
 
                 let (rem, res) = res.unwrap();
@@ -2558,7 +2564,9 @@ mod tests {
                     Expr::BinaryOp {
                         lhs: Box::new(Expr::Literal("[1, 2, 3]".into())),
                         op: BinaryOperator::HashArrow1,
-                        rhs: Box::new(Expr::Array(vec![Expr::Literal("2".into())])),
+                        rhs: Box::new(Expr::Array(ArrayArguments::List(vec![Expr::Literal(
+                            "2".into()
+                        )]))),
                     }
                 );
             }
@@ -2572,7 +2580,9 @@ mod tests {
                     Expr::BinaryOp {
                         lhs: Box::new(Expr::Literal("[1, 2, 3]".into())),
                         op: BinaryOperator::HashArrow2,
-                        rhs: Box::new(Expr::Array(vec![Expr::Literal("2".into())])),
+                        rhs: Box::new(Expr::Array(ArrayArguments::List(vec![Expr::Literal(
+                            "2".into()
+                        )]))),
                     }
                 );
             }
@@ -2586,7 +2596,9 @@ mod tests {
                     Expr::BinaryOp {
                         lhs: Box::new(Expr::Literal("[1, 2, 3]".into())),
                         op: BinaryOperator::HashSubtract,
-                        rhs: Box::new(Expr::Array(vec![Expr::Literal("2".into())])),
+                        rhs: Box::new(Expr::Array(ArrayArguments::List(vec![Expr::Literal(
+                            "2".into()
+                        )]))),
                     }
                 );
             }
@@ -2600,30 +2612,32 @@ mod tests {
             );
             assert_eq!(
                 res,
-                Expr::Array(vec![
-                    Expr::Array(vec![
+                Expr::Array(ArrayArguments::List(vec![
+                    Expr::Array(ArrayArguments::List(vec![
                         Expr::Literal(1.into()),
                         Expr::Cast {
                             expr: Box::new(Expr::Literal("2".into())),
                             ty: SqlType::Int(None),
                             style: CastStyle::DoubleColon,
                         },
-                    ]),
-                    Expr::Array(vec![Expr::Literal(3.into())])
-                ])
+                    ])),
+                    Expr::Array(ArrayArguments::List(vec![Expr::Literal(3.into())]))
+                ]))
             );
         }
 
         #[test]
         fn format_array_expr() {
-            let expr = Expr::Array(vec![Expr::Array(vec![
-                Expr::Literal(1.into()),
-                Expr::Cast {
-                    expr: Box::new(Expr::Literal("2".into())),
-                    ty: SqlType::Int(None),
-                    style: CastStyle::DoubleColon,
-                },
-            ])]);
+            let expr = Expr::Array(ArrayArguments::List(vec![Expr::Array(
+                ArrayArguments::List(vec![
+                    Expr::Literal(1.into()),
+                    Expr::Cast {
+                        expr: Box::new(Expr::Literal("2".into())),
+                        ty: SqlType::Int(None),
+                        style: CastStyle::DoubleColon,
+                    },
+                ]),
+            )]));
             let res = expr.display(Dialect::PostgreSQL).to_string();
 
             assert_eq!(res, "ARRAY[[1,('2'::INT)]]");

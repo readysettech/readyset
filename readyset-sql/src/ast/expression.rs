@@ -947,6 +947,13 @@ impl Arbitrary for CastStyle {
 
 /// SQL Expression AST
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize)]
+pub enum ArrayArguments {
+    List(Vec<Expr>),
+    Subquery(Box<SelectStatement>),
+}
+
+/// SQL Expression AST
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize)]
 pub enum Expr {
     /// Function call expressions
     ///
@@ -1058,7 +1065,7 @@ pub enum Expr {
     },
 
     /// `ARRAY[expr1, expr2, ...]`
-    Array(Vec<Expr>),
+    Array(ArrayArguments),
 
     /// `ROW` constructor: `ROW(expr1, expr2, ...)` or `(expr1, expr2, ...)`
     Row {
@@ -1187,7 +1194,9 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 op: compare_op.try_into()?,
                 rhs: right.try_into_dialect(dialect)?,
             }),
-            Array(array) => Ok(Self::Array(array.elem.try_into_dialect(dialect)?)),
+            Array(array) => Ok(Self::Array(ArrayArguments::List(
+                array.elem.try_into_dialect(dialect)?,
+            ))),
             AtTimeZone {
                 timestamp,
                 time_zone,
@@ -1739,6 +1748,11 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 }));
             }
             sqlparser::ast::FunctionArguments::Subquery(query) => {
+                if ident.value.eq_ignore_ascii_case("ARRAY") {
+                    let select = query.try_into_dialect(dialect)?;
+                    return Ok(Expr::Array(ArrayArguments::Subquery(select)));
+                }
+
                 return not_yet_implemented!(
                     "subquery function call argument for {ident}: Subquery<{query}>"
                 );
@@ -2122,35 +2136,47 @@ impl DialectDisplay for Expr {
                 let expr = expr.display(dialect);
                 write!(f, "CONVERT({expr} USING {charset})")
             }
-            Expr::Array(exprs) => {
+            Expr::Array(args) => {
                 fn write_value(
                     expr: &Expr,
                     dialect: Dialect,
                     f: &mut fmt::Formatter,
                 ) -> fmt::Result {
                     match expr {
-                        Expr::Array(elems) => {
-                            write!(f, "[")?;
-                            for (i, elem) in elems.iter().enumerate() {
-                                if i != 0 {
-                                    write!(f, ",")?;
+                        Expr::Array(args) => match args {
+                            ArrayArguments::List(elems) => {
+                                write!(f, "[")?;
+                                for (i, elem) in elems.iter().enumerate() {
+                                    if i != 0 {
+                                        write!(f, ",")?;
+                                    }
+                                    write_value(elem, dialect, f)?;
                                 }
-                                write_value(elem, dialect, f)?;
+                                write!(f, "]")
                             }
-                            write!(f, "]")
-                        }
+                            ArrayArguments::Subquery(..) => {
+                                unreachable!("can't have a subquery in lieu of a lower dimension")
+                            }
+                        },
                         _ => write!(f, "{}", expr.display(dialect)),
                     }
                 }
 
-                write!(f, "ARRAY[")?;
-                for (i, expr) in exprs.iter().enumerate() {
-                    if i != 0 {
-                        write!(f, ",")?;
+                match args {
+                    ArrayArguments::List(exprs) => {
+                        write!(f, "ARRAY[")?;
+                        for (i, expr) in exprs.iter().enumerate() {
+                            if i != 0 {
+                                write!(f, ",")?;
+                            }
+                            write_value(expr, dialect, f)?;
+                        }
+                        write!(f, "]")
                     }
-                    write_value(expr, dialect, f)?;
+                    ArrayArguments::Subquery(query) => {
+                        write!(f, "ARRAY ({})", query.display(dialect))
+                    }
                 }
-                write!(f, "]")
             }
             Expr::Row { explicit, exprs } => {
                 if *explicit {
@@ -2373,11 +2399,12 @@ impl Arbitrary for Expr {
                     .prop_map(|(expr, ty, style)| Expr::Cast { expr, ty, style })
                     .boxed())
                 .or(proptest::collection::vec(element, 0..24)
-                    .prop_map(Expr::Array)
+                    .prop_map(|exprs| Expr::Array(ArrayArguments::List(exprs)))
                     .boxed());
             // TODO: once we have Arbitrary for SelectStatement
             // any::<Box<SelectStatement>>().prop_map(Expr::NestedSelect),
             // any::<Box<SelectStatement>>().prop_map(Expr::Exists),
+            // any::<Box<SelectStatement>>().prop_map(Expr::Array(ArrayArguments::Subquery)),
             if params == Some(Dialect::PostgreSQL) {
                 base.or(prop_oneof![
                     (

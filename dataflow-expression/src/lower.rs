@@ -9,8 +9,8 @@ use readyset_errors::{
     ReadySetError, ReadySetResult,
 };
 use readyset_sql::ast::{
-    BinaryOperator as SqlBinaryOperator, CollationName, Column, Expr as AstExpr, FunctionExpr,
-    InValue, Relation, UnaryOperator,
+    ArrayArguments, BinaryOperator as SqlBinaryOperator, CollationName, Column, Expr as AstExpr,
+    FunctionExpr, InValue, Relation, UnaryOperator,
 };
 use readyset_sql::{DialectDisplay, TryIntoDialect as _};
 use readyset_util::redacted::Sensitive;
@@ -1431,13 +1431,23 @@ impl Expr {
                 }
             }
             expr @ AstExpr::Array(_) => {
-                fn find_shape(expr: &AstExpr, out: &mut Vec<usize>) {
-                    if let AstExpr::Array(elems) = expr {
-                        out.push(elems.len());
-                        if let Some(elem) = elems.first() {
-                            find_shape(elem, out)
+                fn find_shape(expr: &AstExpr, out: &mut Vec<usize>) -> ReadySetResult<()> {
+                    if let AstExpr::Array(args) = expr {
+                        match args {
+                            ArrayArguments::List(elems) => {
+                                out.push(elems.len());
+                                if let Some(elem) = elems.first() {
+                                    find_shape(elem, out)?
+                                }
+                            }
+                            ArrayArguments::Subquery(..) => {
+                                internal!(
+                                    "Array subquery constructor should have been desugared earlier",
+                                )
+                            }
                         }
                     }
+                    Ok(())
                 }
 
                 fn flatten<C>(
@@ -1450,11 +1460,18 @@ impl Expr {
                     C: LowerContext,
                 {
                     match expr {
-                        AstExpr::Array(exprs) => {
-                            for expr in exprs {
-                                flatten(expr, out, dialect, context)?;
+                        AstExpr::Array(args) => match args {
+                            ArrayArguments::List(exprs) => {
+                                for expr in exprs {
+                                    flatten(expr, out, dialect, context)?;
+                                }
                             }
-                        }
+                            ArrayArguments::Subquery(..) => {
+                                internal!(
+                                    "Array subquery constructor should have been desugared earlier",
+                                )
+                            }
+                        },
                         _ => out.push(Expr::lower(expr, dialect, context)?),
                     }
                     Ok(())
@@ -1462,7 +1479,7 @@ impl Expr {
 
                 let mut shape = vec![];
                 let mut elements = vec![];
-                find_shape(&expr, &mut shape);
+                find_shape(&expr, &mut shape)?;
                 flatten(expr, &mut elements, dialect, context)?;
 
                 let mut ty =

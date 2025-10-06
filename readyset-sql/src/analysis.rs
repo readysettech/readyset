@@ -76,12 +76,17 @@ impl<'a> ReferredColumnsIter<'a> {
                     }
                 }
             }
-            Expr::Array(exprs) | Expr::Row { exprs, .. } => {
-                exprs.split_first().and_then(|(expr, exprs)| {
+            Expr::Row { exprs, .. } => exprs.split_first().and_then(|(expr, exprs)| {
+                self.exprs_to_visit.extend(exprs);
+                self.visit_expr(expr)
+            }),
+            Expr::Array(args) => match args {
+                ArrayArguments::List(exprs) => exprs.split_first().and_then(|(expr, exprs)| {
                     self.exprs_to_visit.extend(exprs);
                     self.visit_expr(expr)
-                })
-            }
+                }),
+                ArrayArguments::Subquery(..) => None,
+            },
             Expr::NestedSelect(_) => None,
             Expr::Variable(_) => None,
             Expr::Collate { expr, .. } => self.visit_expr(expr),
@@ -216,12 +221,17 @@ impl<'a> ReferredColumnsMut<'a> {
                     }),
                 }
             }
-            Expr::Array(exprs) | Expr::Row { exprs, .. } => {
-                exprs.split_first_mut().and_then(|(expr, exprs)| {
+            Expr::Row { exprs, .. } => exprs.split_first_mut().and_then(|(expr, exprs)| {
+                self.exprs_to_visit.extend(exprs);
+                self.visit_expr(expr)
+            }),
+            Expr::Array(args) => match args {
+                ArrayArguments::List(exprs) => exprs.split_first_mut().and_then(|(expr, exprs)| {
                     self.exprs_to_visit.extend(exprs);
                     self.visit_expr(expr)
-                })
-            }
+                }),
+                ArrayArguments::Subquery(..) => None,
+            },
             Expr::NestedSelect(_) => None,
             Expr::Variable(_) => None,
             Expr::Collate { expr, .. } => self.visit_expr(expr),
@@ -456,7 +466,11 @@ pub fn contains_aggregate(expr: &Expr) -> bool {
                     InValue::List(exprs) => exprs.iter().any(contains_aggregate),
                 }
         }
-        Expr::Array(exprs) | Expr::Row { exprs, .. } => exprs.iter().any(contains_aggregate),
+        Expr::Row { exprs, .. } => exprs.iter().any(contains_aggregate),
+        Expr::Array(args) => match args {
+            ArrayArguments::List(exprs) => exprs.iter().any(contains_aggregate),
+            ArrayArguments::Subquery(..) => false,
+        },
         Expr::Variable(_) | Expr::WindowFunction { .. } => false,
         Expr::Collate { expr, .. } => contains_aggregate(expr),
     }
@@ -543,7 +557,12 @@ impl Expr {
                 rhs: InValue::Subquery(_),
                 ..
             } => Box::new(iter::once(lhs.as_ref())) as _,
-            Expr::Array(exprs) | Expr::Row { exprs, .. } => Box::new(exprs.iter()),
+            Expr::Row { exprs, .. } => Box::new(exprs.iter()),
+            Expr::Array(args) => match args {
+                ArrayArguments::List(exprs) => Box::new(exprs.iter()),
+                ArrayArguments::Subquery(..) => Box::new(iter::empty()) as _,
+            },
+
             Expr::Collate { expr, .. } => expr.immediate_subexpressions(),
             Expr::WindowFunction {
                 function,

@@ -522,9 +522,16 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(
             visitor.visit_sql_type(ty)
         }
         Expr::ConvertUsing { expr, .. } => visitor.visit_expr(expr.as_ref()),
-        Expr::Array(exprs) => {
-            for expr in exprs {
-                visitor.visit_expr(expr)?;
+        Expr::Array(args) => {
+            match args {
+                ArrayArguments::List(exprs) => {
+                    for expr in exprs {
+                        visitor.visit_expr(expr)?;
+                    }
+                }
+                ArrayArguments::Subquery(query) => {
+                    visitor.visit_select_statement(query)?;
+                }
             }
             Ok(())
         }
