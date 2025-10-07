@@ -8,18 +8,15 @@ use readyset_sql::{Dialect, DialectDisplay, ast::SqlType};
 use readyset_util::eventually;
 use test_utils::tags;
 
-async fn test_aggregation_type_inner_postgres(test_name: &str, expr: &str, column_type: SqlType) {
+async fn test_aggregation_type_inner_postgres(expr: &str, column_type: SqlType) {
     readyset_tracing::init_test_logging();
-    let db_name = format!("aggregation_type_{test_name}");
-
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
-        .replicate_db(db_name.clone())
         .build::<psql_helpers::PostgreSQLAdapter>()
         .await;
     let rs_conn = psql_helpers::connect(rs_opts).await;
 
     let mut upstream_config = psql_helpers::upstream_config();
-    upstream_config.dbname(&db_name);
+    upstream_config.dbname("noria");
     let upstream_conn = psql_helpers::connect(upstream_config).await;
 
     upstream_conn
@@ -40,7 +37,7 @@ async fn test_aggregation_type_inner_postgres(test_name: &str, expr: &str, colum
     let upstream_type = upstream_row.columns()[0].type_();
     let upstream_value: Vec<u8> = upstream_row.body().buffer().to_vec();
 
-    eventually!(attempts: 5, run_test: {
+    eventually!(run_test: {
         let rs_row: tokio_postgres::Row = rs_conn
             .query_one(&format!("SELECT {expr} FROM t"), &[])
             .await
@@ -55,17 +52,12 @@ async fn test_aggregation_type_inner_postgres(test_name: &str, expr: &str, colum
     shutdown_tx.shutdown().await;
 }
 
-async fn test_aggregation_type_inner_mysql(test_name: &str, expr: &str, column_type: SqlType) {
+async fn test_aggregation_type_inner_mysql(expr: &str, column_type: SqlType) {
     readyset_tracing::init_test_logging();
-    let db_name = format!("aggregation_type_{test_name}");
-
-    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
-        .replicate_db(db_name.clone())
-        .build::<MySQLAdapter>()
-        .await;
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
     let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
 
-    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&db_name));
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some("noria"));
     let mut upstream_conn = Conn::new(upstream_opts).await.unwrap();
 
     upstream_conn
@@ -84,7 +76,7 @@ async fn test_aggregation_type_inner_mysql(test_name: &str, expr: &str, column_t
     let upstream_type = upstream_row.columns_ref()[0].column_type();
     let upstream_value: mysql_async::Value = upstream_row.get(0).unwrap();
 
-    eventually!(attempts: 5, run_test: {
+    eventually!(run_test: {
         let rs_row: Row = rs_conn
             .query_first(format!("SELECT {expr} FROM t"))
             .await
@@ -106,7 +98,7 @@ macro_rules! test_aggregation_type {
             #[tokio::test]
             #[tags(serial, slow, [<$upstream _upstream>])]
             async fn [<$name _ $upstream>]() {
-                [<test_aggregation_type_inner_ $upstream>](stringify!($name), $expr, $coltype).await;
+                [<test_aggregation_type_inner_ $upstream>]($expr, $coltype).await;
             }
         }
     };
