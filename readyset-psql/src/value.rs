@@ -157,6 +157,18 @@ impl TryFrom<TypedDfValue<'_>> for PsqlValue {
     }
 }
 
+/// Convert a tokio_postgres::Row to Vec<DfValue> for shallow cache insertion
+pub(crate) fn row_to_df_values(row: &tokio_postgres::Row) -> Result<Vec<DfValue>, ps::Error> {
+    let mut values = Vec::with_capacity(row.len());
+    for i in 0..row.len() {
+        let value: DfValue = row.try_get(i).map_err(|e| {
+            ps::Error::InternalError(format!("Failed to convert column {i} to DfValue: {e}"))
+        })?;
+        values.push(value);
+    }
+    Ok(values)
+}
+
 #[cfg(test)]
 mod tests {
 

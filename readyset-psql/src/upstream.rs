@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use postgres_native_tls::MakeTlsConnector;
 use postgres_types::Kind;
 use tokio::task::JoinHandle;
@@ -24,13 +24,14 @@ use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err, invariant_eq, unsupported};
-use readyset_shallow::CacheInsertGuard;
+use readyset_shallow::{CacheInsertGuard, QueryMetadata};
 use readyset_sql::Dialect;
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_sql_passes::adapter_rewrites::ProcessedQueryParams;
 use readyset_util::redacted::RedactedString;
 
 use crate::Error;
+use crate::resultset::{Resultset, copy_simple_query_message};
 
 /// Indicates the minimum upstream server version that we currently support. Used to error out
 /// during connection phase if the version for the upstream server is too low.
@@ -95,7 +96,10 @@ pub enum QueryResult {
 }
 
 #[derive(Debug)]
-pub enum CacheEntry {}
+pub enum CacheEntry {
+    Simple(SimpleQueryMessage),
+    DfValue(Vec<DfValue>),
+}
 
 impl Debug for QueryResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -140,12 +144,59 @@ impl Refresh for QueryResult {
 
     async fn refresh(
         self,
-        _cache: CacheInsertGuard<ProcessedQueryParams, Self::Entry>,
+        mut cache: CacheInsertGuard<ProcessedQueryParams, Self::Entry>,
     ) -> std::io::Result<()> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "PostgreSQL shallow cache refresh not yet implemented",
-        ))
+        async fn drain_resultset(resultset: Resultset) -> std::io::Result<()> {
+            // Run the stream to trigger cache population.
+            resultset
+                .try_for_each(|_| async { Ok(()) })
+                .await
+                .map_err(std::io::Error::other)?;
+            Ok(())
+        }
+
+        match self {
+            QueryResult::Stream { first_row, stream } => {
+                let field_types = first_row
+                    .columns()
+                    .iter()
+                    .map(|c| c.type_().clone())
+                    .collect();
+                let resultset = Resultset::from_stream(stream, first_row, field_types, Some(cache));
+                drain_resultset(resultset).await
+            }
+            QueryResult::RowStream { first_row, stream } => {
+                let field_types = first_row
+                    .columns()
+                    .iter()
+                    .map(|c| c.type_().clone())
+                    .collect();
+                let resultset =
+                    Resultset::from_row_stream(stream, first_row, field_types, Some(cache));
+                drain_resultset(resultset).await
+            }
+            QueryResult::SimpleQueryStream {
+                first_message,
+                stream,
+            } => {
+                let resultset =
+                    Resultset::from_simple_query_stream(stream, first_message, Some(cache));
+                drain_resultset(resultset).await
+            }
+            QueryResult::SimpleQuery(ref messages) => {
+                for msg in messages {
+                    let copied = copy_simple_query_message(msg).map_err(std::io::Error::other)?;
+                    cache.push(CacheEntry::Simple(copied));
+                }
+                cache.set_metadata(QueryMetadata::PostgreSql(Default::default()));
+                cache.filled();
+                Ok(())
+            }
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "This QueryResult variant does not support shallow cache refresh",
+            )),
+        }
     }
 }
 

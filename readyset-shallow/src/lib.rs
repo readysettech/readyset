@@ -11,10 +11,16 @@ pub struct MySqlMetadata {
     pub columns: Arc<[mysql_async::Column]>,
 }
 
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct PostgreSqlMetadata {
+    pub schema: Vec<psql_srv::Column>,
+    pub types: Vec<tokio_postgres::types::Type>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryMetadata {
     MySql(MySqlMetadata),
-    PostgreSql(()),
+    PostgreSql(PostgreSqlMetadata),
 }
 
 impl QueryMetadata {

@@ -11,6 +11,8 @@ moka = { workspace = true }
 papaya = { workspace = true }
 tracing = { workspace = true }
 mysql_async = { workspace = true }
+tokio-postgres = { workspace = true }
+psql-srv = { path = "../psql-srv" }
 
 readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }

@@ -5469,9 +5469,11 @@ dependencies = [
  "moka",
  "mysql_async",
  "papaya",
+ "psql-srv",
  "readyset-client",
  "readyset-errors",
  "readyset-sql",
+ "tokio-postgres",
  "tracing",
 ]
 

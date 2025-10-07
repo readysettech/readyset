@@ -77,6 +77,8 @@ pub struct ResultIterator {
 enum ResultIteratorInner {
     /// Owned results returned from noria server
     OwnedResults(OwnedResultIterator),
+    /// Arc-wrapped owned results (for shallow cache to avoid cloning)
+    ArcResults(ArcResultIterator),
     /// Cached results returned from a ['CachingView`] for more than one key
     MultiKey(MultiKeyIterator),
     /// Cached results returned from a ['CachingView`] for more than one key, merging the set with
@@ -93,6 +95,13 @@ struct OwnedResultIterator {
     data: Vec<Results>,
     // Current position in the data vector
     set: usize,
+    row: Option<usize>,
+}
+
+/// Iterator over Arc-wrapped owned results (avoids cloning for shallow cache)
+#[derive(Debug)]
+struct ArcResultIterator {
+    data: Arc<Vec<Vec<DfValue>>>,
     row: Option<usize>,
 }
 
@@ -349,6 +358,19 @@ impl ResultIterator {
         }
     }
 
+    /// Create from Arc-wrapped data (avoids cloning for shallow cache)
+    pub fn arc_owned(data: Arc<Vec<Vec<DfValue>>>) -> Self {
+        ResultIterator {
+            inner: ResultIteratorInner::ArcResults(ArcResultIterator { data, row: None }),
+            limit: None,
+            offset: None,
+            default_row: None,
+            non_empty: false,
+            filter: None,
+            cols: usize::MAX,
+        }
+    }
+
     /// Get aggregated stats for all results in the set
     pub fn total_stats(&self) -> Option<ReadReplyStats> {
         match &self.inner {
@@ -408,6 +430,25 @@ impl StreamingIterator for OwnedResultIterator {
     fn get(&self) -> Option<&Self::Item> {
         self.row
             .and_then(|row| self.data.get(self.set).and_then(|s| s.results.get(row)))
+            .map(|v| v.as_slice())
+    }
+}
+
+impl StreamingIterator for ArcResultIterator {
+    type Item = [DfValue];
+
+    #[inline(always)]
+    fn advance(&mut self) {
+        match self.row {
+            None => self.row = Some(0),
+            Some(ref mut row) => *row += 1,
+        }
+    }
+
+    #[inline(always)]
+    fn get(&self) -> Option<&Self::Item> {
+        self.row
+            .and_then(|row| self.data.get(row))
             .map(|v| v.as_slice())
     }
 }
@@ -638,6 +679,7 @@ impl StreamingIterator for ResultIteratorInner {
     fn advance(&mut self) {
         match self {
             ResultIteratorInner::OwnedResults(i) => i.advance(),
+            ResultIteratorInner::ArcResults(i) => i.advance(),
             ResultIteratorInner::MultiKey(i) => i.advance(),
             ResultIteratorInner::MultiKeyMerge(i) => i.advance(),
             ResultIteratorInner::MultiKeyAggregateMerge(i) => i.advance(),
@@ -648,6 +690,7 @@ impl StreamingIterator for ResultIteratorInner {
     fn get(&self) -> Option<&Self::Item> {
         match &self {
             ResultIteratorInner::OwnedResults(i) => i.get(),
+            ResultIteratorInner::ArcResults(i) => i.get(),
             ResultIteratorInner::MultiKey(i) => i.get(),
             ResultIteratorInner::MultiKeyMerge(i) => i.get(),
             ResultIteratorInner::MultiKeyAggregateMerge(i) => i.get(),

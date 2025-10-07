@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
+use std::sync::Arc;
 
 use psql_srv as ps;
 use readyset_adapter::backend::{
@@ -10,10 +11,11 @@ use readyset_adapter_types::ParsedCommand;
 use readyset_client::ColumnSchema;
 use readyset_client::results::{ResultIterator, Results};
 use readyset_data::DfType;
+use readyset_shallow::QueryMetadata;
 use readyset_sql::ast::{self, SqlIdentifier};
-use upstream::StatementMeta;
+use upstream::{CacheEntry, StatementMeta};
 
-use crate::resultset::Resultset;
+use crate::resultset::{Resultset, copy_simple_query_message};
 use crate::schema::{NoriaSchema, SelectSchema};
 use crate::{PostgreSqlUpstream, upstream};
 
@@ -205,25 +207,63 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     resultset,
                 })
             }
-            #[allow(clippy::todo)]
-            Shallow(_) => todo!(),
-            Upstream(upstream::QueryResult::EmptyRead, _) => Ok(ps::QueryResponse::Select {
-                schema: vec![],
-                resultset: Resultset::empty(),
-            }),
-            Upstream(upstream::QueryResult::Stream { first_row, stream }, _) => {
-                let field_types = first_row
-                    .columns()
-                    .iter()
-                    .map(|c| c.type_().clone())
-                    .collect();
+            Shallow(result) => {
+                let QueryMetadata::PostgreSql(metadata) = result.metadata.as_ref() else {
+                    return Err(ps::Error::InternalError("wrong metadata for psql".to_string()));
+                };
 
-                Ok(ps::QueryResponse::Select {
-                    schema: vec![], // Schema isn't necessary for upstream execute results
-                    resultset: Resultset::from_stream(stream, first_row, field_types),
+                if let Some(first) = result.values.first() {
+                    match first {
+                        CacheEntry::DfValue(_) => {
+                            let rows = result
+                                .values
+                                .iter()
+                                .map(|entry| match entry {
+                                    CacheEntry::DfValue(vals) => vals.clone(),
+                                    _ => unreachable!("mixed psql result format"),
+                                })
+                                .collect();
+
+                            Ok(Select {
+                                schema: metadata.schema.clone(),
+                                resultset: Resultset::from_shallow(
+                                    Arc::new(rows),
+                                    metadata.types.clone(),
+                                ),
+                            })
+                        }
+                        CacheEntry::Simple(_) => {
+                            let messages: Result<Vec<_>, _> = result
+                                .values
+                                .iter()
+                                .map(|entry| match entry {
+                                    CacheEntry::Simple(msg) => copy_simple_query_message(msg),
+                                    _ => unreachable!("mixed psql result format"),
+                                })
+                                .collect();
+
+                            Ok(SimpleQuery(messages?))
+                        }
+                    }
+                } else {
+                    Ok(Select {
+                        schema: metadata.schema.clone(),
+                        resultset: Resultset::empty(),
+                    })
+                }
+            }
+            Upstream(upstream::QueryResult::EmptyRead, cache) => {
+                if let Some(mut cache) = cache {
+                    let meta = QueryMetadata::PostgreSql(Default::default());
+                    cache.set_metadata(meta);
+                    cache.filled();
+                }
+                Ok(Select {
+                    schema: Vec::new(),
+                    resultset: Resultset::empty(),
                 })
             }
-            Upstream(upstream::QueryResult::RowStream { first_row, stream }, _) => {
+            Upstream(upstream::QueryResult::Stream { first_row, stream }, cache) => {
                 let field_types = first_row
                     .columns()
                     .iter()
@@ -232,7 +272,19 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
 
                 Ok(ps::QueryResponse::Select {
                     schema: vec![], // Schema isn't necessary for upstream execute results
-                    resultset: Resultset::from_row_stream(stream, first_row, field_types),
+                    resultset: Resultset::from_stream(stream, first_row, field_types, cache),
+                })
+            }
+            Upstream(upstream::QueryResult::RowStream { first_row, stream }, cache) => {
+                let field_types = first_row
+                    .columns()
+                    .iter()
+                    .map(|c| c.type_().clone())
+                    .collect();
+
+                Ok(ps::QueryResponse::Select {
+                    schema: vec![], // Schema isn't necessary for upstream execute results
+                    resultset: Resultset::from_row_stream(stream, first_row, field_types, cache),
                 })
             }
             Upstream(upstream::QueryResult::Write { num_rows_affected }, _) => {
@@ -242,8 +294,8 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
             Upstream(upstream::QueryResult::SimpleQueryStream {
                 first_message,
                 stream,
-            }, _) => Ok(ps::QueryResponse::Stream {
-                resultset: Resultset::from_simple_query_stream(stream, first_message),
+            }, cache) => Ok(ps::QueryResponse::Stream {
+                resultset: Resultset::from_simple_query_stream(stream, first_message, cache),
             }),
             // We still use the SimpleQuery response for some upstream responses that are not
             // Selects
