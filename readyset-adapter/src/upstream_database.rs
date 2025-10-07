@@ -222,6 +222,9 @@ pub trait UpstreamDatabase: Sized + Send {
     /// in MySQL can be thought of as a schema search path that only has one element
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error>;
 
+    /// Set the schema search path for future queries on the upstream database.
+    async fn set_schema_search_path(&mut self, path: &[SqlIdentifier]) -> Result<(), Self::Error>;
+
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error>;
 
     async fn lower_case_database_names(&mut self) -> Result<bool, Self::Error>;
@@ -412,6 +415,10 @@ where
 
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
         self.upstream().await?.schema_search_path().await
+    }
+
+    async fn set_schema_search_path(&mut self, path: &[SqlIdentifier]) -> Result<(), Self::Error> {
+        self.upstream().await?.set_schema_search_path(path).await
     }
 
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error> {

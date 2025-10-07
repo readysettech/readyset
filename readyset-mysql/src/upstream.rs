@@ -26,6 +26,7 @@ use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_shallow::{CacheInsertGuard, MySqlMetadata, QueryMetadata};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
+use readyset_sql::Dialect;
 use readyset_sql_passes::adapter_rewrites::ProcessedQueryParams;
 use readyset_util::redacted::RedactedString;
 
@@ -542,6 +543,19 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
         Ok(self.database().into_iter().map(|s| s.into()).collect())
+    }
+
+    async fn set_schema_search_path(&mut self, path: &[SqlIdentifier]) -> Result<(), Self::Error> {
+        let database = match path {
+            [] => internal!("Cannot set empty schema search path in MySQL"),
+            [_, _, ..] => internal!("MySQL only supports using a single database at a time"),
+            [db] => db,
+        };
+
+        let query = format!("USE {}", Dialect::MySQL.quote_identifier(database));
+        debug!(%query, "Setting database on upstream");
+        self.conn.query_drop(&query).await?;
+        Ok(())
     }
 
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error> {

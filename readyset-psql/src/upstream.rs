@@ -26,6 +26,7 @@ use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use readyset_shallow::CacheInsertGuard;
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
+use readyset_sql::Dialect;
 use readyset_sql_passes::adapter_rewrites::ProcessedQueryParams;
 use readyset_util::redacted::RedactedString;
 
@@ -552,6 +553,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             .get::<_, String>("search_path");
         debug!(%raw_search_path, "Loaded search path from upstream");
 
+        // FIXME This parser is clearly quite primitive.
         Ok(raw_search_path
             .split(", ")
             .map(|schema| schema.trim_matches('"'))
@@ -563,6 +565,18 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                 }
             })
             .collect())
+    }
+
+    async fn set_schema_search_path(&mut self, path: &[SqlIdentifier]) -> Result<(), Self::Error> {
+        let path = path
+            .iter()
+            .map(|schema| Dialect::PostgreSQL.quote_identifier(schema).to_string());
+        let path = itertools::join(path, ", ");
+
+        let query = format!("SET search_path TO {}", path);
+        debug!(%query, "Setting search path on upstream");
+        self.client.simple_query(&query).await?;
+        Ok(())
     }
 
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error> {
