@@ -1,0 +1,357 @@
+# tests for postgres-style array constructor (with subquery).
+
+statement ok
+create table dogs (id int, name text);
+
+statement ok
+create table tags (d_id int, tag text);
+
+# empty result set
+query T
+select array(select tag from tags where d_id = d.id) from dogs d where d.id = 1;
+----
+
+
+statement ok
+insert into dogs values
+  (1, 'kidnap'),
+  (2, 'snoopy');
+
+
+# 1 row result, but empty array
+query T
+select array(select tag from tags where d_id = d.id) from dogs d where d.id = 1;
+----
+{}
+
+statement ok
+insert into tags values
+  (1, 'bbb'),
+  (1, 'aaa'),
+  (1, 'ccc'),
+  (2, 'yyy'),
+  (2, 'zzz');
+
+
+# simple query (no NULLs in data)
+query T
+select array(select tag from tags where d_id = d.id) from dogs d where d.id = 1;
+----
+{bbb,aaa,ccc}
+
+statement ok
+insert into tags values (1, 'bbb');
+
+# simple query (no NULLs in data)
+query T
+select array(select tag from tags where d_id = d.id) from dogs d where d.id = 1;
+----
+{bbb,aaa,ccc,bbb}
+
+# simple query with a semi-interesting expression in the subquery
+# query T
+# select array(select concat(tag::text, '::woohoo') as woohoo_tags from tags where d_id = d.id) from dogs d where d.id = 1;
+# ----
+# {ccc::woohoo,aaa::woohoo,bbb::woohoo,aaa::woohoo}
+
+# simple query (with NULLs in data)
+# Note: array_agg() _does_ include nulls in the output
+statement ok
+insert into tags values
+  (1, NULL),
+  (1, 'aaa');
+
+query T
+select array(select tag from tags where d_id = d.id) from dogs d where d.id = 1;
+----
+{bbb,aaa,ccc,bbb,NULL,aaa}
+
+# simple query (with NULLs and dupes!)
+query T
+select array(select distinct tag from tags where d_id = d.id) from dogs d where d.id = 1;
+----
+{NULL,aaa,bbb,ccc}
+
+# add in an extra NULL, for fun (for testing distinct in the order by clauses)
+statement ok
+insert into tags values
+  (1, NULL);
+
+query T
+select array(select tag from tags where d_id = d.id) from dogs d where d.id = 1;
+----
+{bbb,aaa,ccc,bbb,NULL,aaa,NULL}
+
+
+#####
+## order by ASC testing
+####
+
+# order by asc
+query T
+select array(select tag from tags where d_id = d.id order by tag) from dogs d where d.id = 1;
+----
+{aaa,aaa,bbb,bbb,ccc,NULL,NULL}
+
+# order by asc, NULLs first
+query T
+select array(select tag from tags where d_id = d.id order by tag nulls first) from dogs d where d.id = 1;
+----
+{NULL,NULL,aaa,aaa,bbb,bbb,ccc}
+
+# order by asc, NULLs last
+query T
+select array(select tag from tags where d_id = d.id order by tag nulls last) from dogs d where d.id = 1;
+----
+{aaa,aaa,bbb,bbb,ccc,NULL,NULL}
+
+# order by asc with distinct
+query T
+select array(select distinct tag from tags where d_id = d.id order by tag) from dogs d where d.id = 1;
+----
+{aaa,bbb,ccc,NULL}
+
+# order by asc, NULLs first, with distinct
+query T
+select array(select distinct tag from tags where d_id = d.id order by tag nulls first) from dogs d where d.id = 1;
+----
+{NULL,aaa,bbb,ccc}
+
+# order by asc, NULLs last, with distinct
+query T
+select array(select distinct tag from tags where d_id = d.id order by tag nulls last) from dogs d where d.id = 1;
+----
+{aaa,bbb,ccc,NULL}
+
+
+# test with two array constructors
+query ITT
+select d.id, array(select tag from tags where d_id = d.id) as tags, array(select distinct tag from tags where d_id = d.id) as tags2 from dogs d where d.id = 1;
+----
+1
+{bbb,aaa,ccc,bbb,NULL,aaa,NULL}
+{NULL,aaa,bbb,ccc}
+
+#####
+## order by DESC testing
+####
+
+# order by desc
+query T
+select array(select tag from tags where d_id = d.id order by tag desc) from dogs d where d.id = 1;
+----
+{NULL,NULL,ccc,bbb,bbb,aaa,aaa}
+
+# order by desc, NULLs first
+query T
+select array(select tag from tags where d_id = d.id order by tag desc nulls first) from dogs d where d.id = 1;
+----
+{NULL,NULL,ccc,bbb,bbb,aaa,aaa}
+
+# order by desc, NULLs last
+query T
+select array(select tag from tags where d_id = d.id order by tag desc nulls last) from dogs d where d.id = 1;
+----
+{ccc,bbb,bbb,aaa,aaa,NULL,NULL}
+
+
+# order by desc with distinct
+query T
+select array(select distinct tag from tags where d_id = d.id order by tag desc) from dogs d where d.id = 1;
+----
+{NULL,ccc,bbb,aaa}
+
+# order by desc, NULLs first, with distinct
+query T
+select array(select distinct tag from tags where d_id = d.id order by tag desc nulls first) from dogs d where d.id = 1;
+----
+{NULL,ccc,bbb,aaa}
+
+# order by desc, NULLs last, with distinct
+query T
+select array(select distinct tag from tags where d_id = d.id order by tag desc nulls last) from dogs d where d.id = 1;
+----
+{ccc,bbb,aaa,NULL}
+
+# ORDER BY referencing target by alias
+
+query tt
+select
+    d.name,
+    array(
+        select max(t.d_id) max_id
+        from tags t
+        where t.d_id = d.id
+        group by t.d_id
+        order by max_id
+    ) as tags
+from dogs d
+where d.id = 1;
+----
+kidnap
+{1}
+
+
+#######
+# test only empty/NULL inputs
+
+statement ok
+insert into dogs values (3, 'rover');
+
+# empty results - dog 3 has no tags yet
+query
+select array(select tag from tags where d_id = d.id) from dogs d where d.id = 3;
+----
+{}
+
+statement ok
+insert into tags values
+  (3, NULL);
+
+# only NULL rows - dog 3 has one NULL tag
+query
+select array(select tag from tags where d_id = d.id) from dogs d where d.id = 3;
+----
+{NULL}
+
+
+#####
+# post-lookup aggregations
+
+query T
+select array(select tag from tags where d_id = d.id) from dogs d where d.id in (1, 2);
+----
+{bbb,aaa,ccc,bbb,NULL,aaa,NULL}
+{yyy,zzz}
+
+# distinct, but add in a value for id 2 that overlaps with id 1 values
+statement ok
+insert into tags values (2, 'AAA');
+
+query T
+select array(select distinct tag from tags where d_id = d.id) from dogs d where d.id in (1, 2);
+----
+{NULL,aaa,bbb,ccc}
+{AAA,yyy,zzz}
+
+# order by
+query T
+select array(select tag from tags where d_id = d.id order by tag desc) from dogs d where d.id in (1, 2);
+----
+{NULL,NULL,ccc,bbb,bbb,aaa,aaa}
+{zzz,yyy,AAA}
+
+query T
+select array(select tag from tags where d_id = d.id order by tag desc nulls first) from dogs d where d.id in (1, 2);
+----
+{NULL,NULL,ccc,bbb,bbb,aaa,aaa}
+{zzz,yyy,AAA}
+
+query T
+select array(select tag from tags where d_id = d.id order by tag asc nulls last) from dogs d where d.id in (1, 2);
+----
+{aaa,aaa,bbb,bbb,ccc,NULL,NULL}
+{AAA,yyy,zzz}
+
+statement ok
+insert into dogs values (12345, 'ghost'), (23456, 'phantom');
+
+# empty results
+query
+select array(select tag from tags where d_id = d.id) from dogs d where d.id in (12345, 23456);
+----
+{}
+{}
+
+statement ok
+insert into tags values
+  (12345, NULL);
+
+# only NULL rows
+query
+select array(select tag from tags where d_id = d.id) from dogs d where d.id in (12345, 23456);
+----
+{NULL}
+{}
+
+statement ok
+insert into tags values
+  (23456, NULL);
+
+# only NULL rows
+query
+select array(select tag from tags where d_id = d.id) from dogs d where d.id in (12345, 23456);
+----
+{NULL}
+{NULL}
+
+######
+# random queries
+
+# lateral join, 3 times
+query TT
+select d.name, subq.tags from dogs d left outer join lateral (select array(select tag from tags t where t.d_id = d.id) as tags ) as subq on true where d.id = 1;
+----
+kidnap
+{bbb,aaa,ccc,bbb,NULL,aaa,NULL}
+
+
+query
+select d.name, subq.tags from dogs d left outer join lateral (select array(select tag from tags t where t.d_id = d.id) as tags ) as subq on true where d.id = 5;
+----
+
+
+#####
+# TopK scenarios (ORDER BY with LIMIT)
+####
+
+# TopK: get top 3 tags ordered by tag asc
+query T
+select array(select tag from tags where d_id = d.id order by tag asc limit 3) from dogs d where d.id = 1;
+----
+{aaa,aaa,bbb}
+
+# TopK: get top 2 tags ordered by tag desc
+query T
+select array(select tag from tags where d_id = d.id order by tag desc limit 2) from dogs d where d.id = 1;
+----
+{NULL,NULL}
+
+# TopK: get top 2 tags ordered by tag desc nulls last
+query T
+select array(select tag from tags where d_id = d.id order by tag desc nulls last limit 2) from dogs d where d.id = 1;
+----
+{ccc,bbb}
+
+# TopK: get top 4 tags ordered by tag asc nulls last
+query T
+select array(select tag from tags where d_id = d.id order by tag asc nulls last limit 4) from dogs d where d.id = 1;
+----
+{aaa,aaa,bbb,bbb}
+
+# TopK: LIMIT 1 (single element array)
+query T
+select array(select tag from tags where d_id = d.id order by tag asc nulls last limit 1) from dogs d where d.id = 1;
+----
+{aaa}
+
+# TopK: LIMIT larger than result set
+query T
+select array(select tag from tags where d_id = d.id order by tag asc limit 100) from dogs d where d.id = 1;
+----
+{aaa,aaa,bbb,bbb,ccc,NULL,NULL}
+
+# TopK: with post-lookup aggregation (multiple dogs)
+query T
+select array(select tag from tags where d_id = d.id order by tag asc nulls last limit 2) from dogs d where d.id in (1, 2);
+----
+{aaa,aaa}
+{AAA,yyy}
+
+# TopK: LIMIT 0 (empty array)
+query T
+select array(select tag from tags where d_id = d.id order by tag asc limit 0) from dogs d where d.id = 1;
+----
+{}
+
+

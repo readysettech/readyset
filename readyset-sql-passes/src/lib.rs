@@ -1,6 +1,7 @@
 pub mod adapter_rewrites;
 pub mod alias_removal;
 pub mod anonymize;
+mod array_constructor;
 mod create_table_columns;
 mod detect_bucket_functions;
 mod detect_problematic_self_joins;
@@ -40,6 +41,7 @@ use readyset_sql::ast::{
 };
 
 pub use crate::alias_removal::AliasRemoval;
+pub use crate::array_constructor::ArrayConstructorRewrite;
 pub use crate::create_table_columns::CreateTableColumns;
 pub use crate::detect_bucket_functions::DetectBucketFunctions;
 pub use crate::detect_problematic_self_joins::DetectProblematicSelfJoins;
@@ -186,6 +188,8 @@ impl Rewrite for SelectStatement {
             .resolve_schemas(&context)?
             .expand_stars(&context)?
             .expand_implied_tables(&context)?
+            .rewrite_array_constructors()?
+            .rewrite_array_constructors()?
             .unnest_subqueries(&context)?
             .normalize_topk_with_aggregate(&context)?
             .detect_problematic_self_joins()?
