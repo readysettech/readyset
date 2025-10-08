@@ -266,6 +266,11 @@ impl TestScript {
         #[cfg(feature = "in-process-readyset")]
         let mut update_system_timezone = false;
 
+        let retries = std::env::var("LOGICTEST_RETRIES")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(8);
+
         for record in &self.records {
             match record {
                 Record::Statement(stmt) => {
@@ -280,9 +285,17 @@ impl TestScript {
                         update_system_timezone = true;
                     }
                     debug!(command = stmt.command, "Running statement");
-                    self.run_statement(stmt, conn)
-                        .await
-                        .with_context(|| format!("Running statement {}", stmt.command))?
+                    retry_with_exponential_backoff!(
+                        {
+                        self.run_statement(stmt, conn)
+                            .await
+                            .with_context(|| format!("Running statement {}", stmt.command))
+                        },
+                        retries: retries,
+                        delay: 100,
+                        backoff: 2,
+                    )
+                    .with_context(|| format!("Running statement with {retries} retries"))?;
                 }
 
                 Record::Query(query) => {
@@ -312,11 +325,6 @@ impl TestScript {
                         }
                         update_system_timezone = false;
                     }
-
-                    let retries = std::env::var("LOGICTEST_RETRIES")
-                        .ok()
-                        .and_then(|s| s.parse::<u32>().ok())
-                        .unwrap_or(8);
 
                     // 100 ms, 2x backoff
                     // 25.5 seconds total
