@@ -2622,6 +2622,8 @@ async fn numeric_inf_nan() {
         .next_back()
         .unwrap();
 
+    assert_last_statement_matches!("numer", "upstream", "view destroyed|ok", &conn);
+
     // We expect to see all rows because the table was dropped since we don't support NaN/Infinity
     // and the query should be proxied
     assert_matches!(

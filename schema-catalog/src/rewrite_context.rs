@@ -3,7 +3,8 @@ use std::sync::Arc;
 use readyset_data::Dialect;
 use readyset_sql::ast::{NonReplicatedRelation, Relation, SqlIdentifier};
 use readyset_sql_passes::{
-    CanQuery, ResolveSchemasContext, RewriteDialectContext, adapter_rewrites::AdapterRewriteContext,
+    CanQuery, ResolveSchemasContext, RewriteDialectContext, StarExpansionContext,
+    adapter_rewrites::AdapterRewriteContext,
 };
 
 use crate::{SchemaCatalog, SchemaGeneration};
@@ -89,7 +90,7 @@ impl ResolveSchemasContext for RewriteContext {
 
         if self.schema_catalog.view_schemas.contains_key(&relation)
             || self.schema_catalog.base_schemas.contains_key(&relation)
-            || self.schema_catalog.uncompiled_views.contains(&relation)
+            || self.schema_catalog.uncompiled_views.contains_key(&relation)
         {
             Some(CanQuery::Yes)
         } else if self.is_non_replicated_relation(&relation) {
@@ -112,6 +113,25 @@ impl ResolveSchemasContext for RewriteContext {
             .custom_types
             .get(schema)
             .is_some_and(|tys| tys.contains(custom_type))
+    }
+}
+
+impl StarExpansionContext for RewriteContext {
+    fn schema_for_relation(
+        &self,
+        relation: &Relation,
+    ) -> Option<impl IntoIterator<Item = SqlIdentifier>> {
+        self.schema_catalog
+            .view_schemas
+            .get(relation)
+            .or_else(|| self.schema_catalog.uncompiled_views.get(relation))
+            .cloned()
+    }
+
+    fn is_relation_non_replicated(&self, relation: &Relation) -> bool {
+        self.schema_catalog
+            .non_replicated_relations
+            .contains(&NonReplicatedRelation::new(relation.clone()))
     }
 }
 

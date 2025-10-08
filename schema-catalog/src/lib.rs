@@ -68,7 +68,7 @@ pub struct SchemaCatalog {
     /// Base table schemas, mapping relation names to their CREATE TABLE definitions.
     pub base_schemas: HashMap<Relation, CreateTableBody>,
     /// Views that have been declared but not yet compiled into the dataflow graph.
-    pub uncompiled_views: Vec<Relation>,
+    pub uncompiled_views: HashMap<Relation, Vec<SqlIdentifier>>,
     /// Custom types (enums, composite types, etc.), mapping schema names to a set of type names.
     pub custom_types: HashMap<SqlIdentifier, HashSet<SqlIdentifier>>,
     /// Map from names of views and tables to (ordered) lists of column names.
@@ -154,8 +154,8 @@ impl SchemaCatalog {
         }
 
         // uncompiled_views: symmetric difference (these are just Relation values, no payloads)
-        let old_views: HashSet<&Relation> = uncompiled_views.iter().collect();
-        let new_views: HashSet<&Relation> = new_uncompiled_views.iter().collect();
+        let old_views: HashSet<&Relation> = uncompiled_views.keys().collect();
+        let new_views: HashSet<&Relation> = new_uncompiled_views.keys().collect();
         for &relation in old_views.symmetric_difference(&new_views) {
             changed.insert(relation.clone());
         }
@@ -391,7 +391,8 @@ mod tests {
     fn diff_uncompiled_view_added() {
         let old = SchemaCatalog::new();
         let mut new = SchemaCatalog::new();
-        new.uncompiled_views.push(Relation::from("v_pending"));
+        new.uncompiled_views
+            .insert(Relation::from("v_pending"), Vec::new());
 
         match old.diff(&new) {
             SchemaChanges::Relations(tables) => {
@@ -405,7 +406,8 @@ mod tests {
     #[test]
     fn diff_uncompiled_view_removed() {
         let mut old = SchemaCatalog::new();
-        old.uncompiled_views.push(Relation::from("v_pending"));
+        old.uncompiled_views
+            .insert(Relation::from("v_pending"), Vec::new());
         let new = SchemaCatalog::new();
 
         match old.diff(&new) {
@@ -465,9 +467,11 @@ mod tests {
     #[test]
     fn diff_uncompiled_view_unchanged() {
         let mut old = SchemaCatalog::new();
-        old.uncompiled_views.push(Relation::from("uv1"));
+        old.uncompiled_views
+            .insert(Relation::from("uv1"), Vec::new());
         let mut new = SchemaCatalog::new();
-        new.uncompiled_views.push(Relation::from("uv1"));
+        new.uncompiled_views
+            .insert(Relation::from("uv1"), Vec::new());
 
         assert_eq!(old.diff(&new), SchemaChanges::None);
     }

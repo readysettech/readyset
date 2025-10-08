@@ -1935,16 +1935,23 @@ async fn test_explain_create_cache() {
     );
 
     eventually! {
-        let res = explain_create_cache("SELECT * FROM t WHERE x = 5", &mut conn).await;
-
-        res.supported == "yes" && res.rewritten_query == r#"SELECT * FROM "t" WHERE ("x" = $1)"#
+        run_test: {
+            explain_create_cache("SELECT * FROM t WHERE x = 5", &mut conn).await
+        },
+        then_assert: |res| {
+            assert_eq!(res.supported, "yes");
+            assert_eq!(res.rewritten_query, r#"SELECT "t"."x", "t"."y" FROM "t" WHERE ("x" = $1)"#);
+        }
     }
 
     eventually! {
-        let res = explain_create_cache("SELECT * FROM t WHERE t.x = RANDOM()", &mut conn).await;
-
-        res.supported.starts_with("no")
-        && res.rewritten_query == r#"SELECT * FROM "t" WHERE ("t"."x" = random())"#
+        run_test: {
+            explain_create_cache("SELECT * FROM t WHERE t.x = RANDOM()", &mut conn).await
+        },
+        then_assert: |res| {
+            assert!(res.supported.starts_with("no"), "Expected 'no' but got {:?}", res.supported);
+            assert_eq!(res.rewritten_query, r#"SELECT "t"."x", "t"."y" FROM "t" WHERE ("t"."x" = random())"#);
+        }
     }
 
     conn.simple_query("CREATE CACHE FROM SELECT * FROM t WHERE x = 5")
@@ -1953,7 +1960,10 @@ async fn test_explain_create_cache() {
 
     let res = explain_create_cache("SELECT * FROM t WHERE x = 1", &mut conn).await;
     assert_eq!(res.supported, "cached");
-    assert_eq!(res.rewritten_query, r#"SELECT * FROM "t" WHERE ("x" = $1)"#);
+    assert_eq!(
+        res.rewritten_query,
+        r#"SELECT "t"."x", "t"."y" FROM "t" WHERE ("x" = $1)"#
+    );
 
     shutdown_tx.shutdown().await;
 }

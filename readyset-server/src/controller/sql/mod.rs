@@ -7,6 +7,7 @@ use std::vec::Vec;
 use ::mir::visualize::GraphViz;
 use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
+use itertools::Itertools;
 use petgraph::graph::NodeIndex;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
@@ -20,8 +21,8 @@ use readyset_errors::{
 };
 use readyset_sql::ast::{
     self, AlterTableDefinition, CacheType, CompoundSelectStatement, CreateTableBody,
-    CreateTableOption, FieldDefinitionExpr, NonReplicatedRelation, Relation, SelectSpecification,
-    SelectStatement, SqlIdentifier, SqlType, TableExpr, TableKey,
+    CreateTableOption, Expr, FieldDefinitionExpr, NonReplicatedRelation, Relation,
+    SelectSpecification, SelectStatement, SqlIdentifier, SqlType, TableExpr, TableKey,
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteContext;
@@ -79,6 +80,9 @@ struct UncompiledView {
 
     /// The definition of the view itself
     definition: SelectSpecification,
+
+    /// The schema of the view
+    schema: Vec<SqlIdentifier>,
 
     /// The schema search path that the view was created with
     schema_search_path: Vec<SqlIdentifier>,
@@ -631,15 +635,52 @@ impl SqlIncorporator {
     ) -> ReadySetResult<()> {
         trace!(name = %name.display_unquoted(), "Adding uncompiled view");
         self.remove_non_replicated_relation(&NonReplicatedRelation::new(name.clone()));
+
+        let rewritten_definition = self.rewrite(
+            definition.clone(),
+            Some(&name.name),
+            &schema_search_path,
+            self.dialect,
+            None,
+            None,
+        )?;
+
+        let schema = Self::schema_from_select_spec(&rewritten_definition)?;
+
         self.uncompiled_views.insert(
             name.clone(),
             UncompiledView {
                 name,
                 definition,
+                schema,
                 schema_search_path,
             },
         );
         Ok(())
+    }
+
+    fn schema_from_select_spec(spec: &SelectSpecification) -> ReadySetResult<Vec<SqlIdentifier>> {
+        let fields = match spec {
+            SelectSpecification::Simple(select) => &select.fields,
+            SelectSpecification::Compound(select) => {
+                if let Some((_, first_select)) = select.selects.first() {
+                    &first_select.fields
+                } else {
+                    return Ok(Vec::new());
+                }
+            }
+        };
+
+        fields
+            .iter()
+            .map(|field| match field {
+                FieldDefinitionExpr::Expr { alias: Some(alias), .. } => Ok(alias.clone()),
+                FieldDefinitionExpr::Expr { expr: Expr::Column(column), .. } => Ok(column.name.clone()),
+                _ => internal!(
+                    "Star expansion should have already happened during rewrite, got non-alias {field:?}"
+                ),
+            })
+            .try_collect()
     }
 
     /// Add a new query to the graph, using the given `mig` to track changes.
@@ -1335,6 +1376,7 @@ impl SqlIncorporator {
             name,
             mut definition,
             schema_search_path,
+            schema: _,
         } = uncompiled_view;
 
         let mir_leaf = match &mut definition {
@@ -1496,7 +1538,11 @@ impl SqlIncorporator {
             .map(|(relation, base_schema)| (relation.clone(), base_schema.statement.clone()))
             .collect();
 
-        let uncompiled_views = self.uncompiled_views.keys().cloned().collect();
+        let uncompiled_views = self
+            .uncompiled_views
+            .iter()
+            .map(|(relation, view)| (relation.clone(), view.schema.clone()))
+            .collect();
 
         // Custom types without a schema are filtered out here because the SchemaCatalog indexes
         // custom types by schema. Schema-less types shouldn't occur in practice (they always come
@@ -1607,9 +1653,14 @@ impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
 impl StarExpansionContext for SqlIncorporatorRewriteContext<'_> {
     fn schema_for_relation(
         &self,
-        table: &Relation,
+        relation: &Relation,
     ) -> Option<impl IntoIterator<Item = SqlIdentifier>> {
-        self.this.view_schemas.get(table).cloned()
+        self.this.view_schemas.get(relation).cloned().or_else(|| {
+            self.this
+                .uncompiled_views
+                .get(relation)
+                .map(|view| view.schema.clone())
+        })
     }
 
     fn is_relation_non_replicated(&self, relation: &Relation) -> bool {

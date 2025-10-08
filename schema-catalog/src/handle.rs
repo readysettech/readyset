@@ -439,7 +439,7 @@ mod tests {
                 catalog: SchemaCatalog {
                     generation: SchemaGeneration::new(42).unwrap(),
                     base_schemas: HashMap::new(),
-                    uncompiled_views: Vec::new(),
+                    uncompiled_views: HashMap::new(),
                     custom_types: HashMap::new(),
                     view_schemas: HashMap::new(),
                     non_replicated_relations: HashSet::new(),
@@ -699,7 +699,7 @@ mod tests {
         let catalog = SchemaCatalog {
             generation: SchemaGeneration::new(42).expect("valid generation"),
             base_schemas: HashMap::new(),
-            uncompiled_views: Vec::new(),
+            uncompiled_views: HashMap::new(),
             custom_types: HashMap::new(),
             view_schemas: HashMap::new(),
             non_replicated_relations: HashSet::new(),
