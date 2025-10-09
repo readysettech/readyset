@@ -2,13 +2,13 @@ use std::collections::{HashMap, HashSet};
 use std::iter;
 
 use itertools::Either;
-use readyset_errors::{unsupported_err, ReadySetResult};
+use readyset_errors::{ReadySetResult, unsupported_err};
+use readyset_sql::DialectDisplay;
 use readyset_sql::analysis::is_aggregate;
 use readyset_sql::ast::{
     BinaryOperator, Column, CommonTableExpr, Expr, FieldDefinitionExpr, FunctionExpr, InValue,
     JoinClause, JoinRightSide, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
-use readyset_sql::DialectDisplay;
 
 pub(crate) fn join_clause_tables(join: &JoinClause) -> impl Iterator<Item = &TableExpr> {
     match &join.right {
@@ -60,10 +60,7 @@ fn field_names(
                 expr: Expr::Column(Column { name, .. }),
                 ..
             } => Ok(name),
-            FieldDefinitionExpr::Expr {
-                ref mut alias,
-                expr,
-            } => {
+            FieldDefinitionExpr::Expr { alias, expr } => {
                 if let Some(a) = alias {
                     Ok(a)
                 } else {

@@ -3,7 +3,7 @@ use std::mem;
 
 use itertools::Itertools;
 use readyset_errors::ReadySetResult;
-use readyset_sql::analysis::visit_mut::{self, walk_select_statement, VisitorMut};
+use readyset_sql::analysis::visit_mut::{self, VisitorMut, walk_select_statement};
 use readyset_sql::ast::{
     Column, CommonTableExpr, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlQuery,
     TableExpr, TableExprInner,
@@ -163,12 +163,11 @@ impl<'ast> VisitorMut<'ast> for RemoveAliasesVisitor<'_> {
             table_expr.inner = TableExprInner::Table(table);
         } else if let TableExprInner::Table(orig_table @ Relation { schema: None, .. }) =
             &table_expr.inner
+            && let Some(table) = self.col_table_remap.get(&orig_table.name)
         {
-            if let Some(table) = self.col_table_remap.get(&orig_table.name) {
-                // No schema, but table name in `col_table_remap`, means we're referencing an
-                // aliased subquery or CTE
-                table_expr.inner = TableExprInner::Table(table.clone());
-            }
+            // No schema, but table name in `col_table_remap`, means we're referencing an
+            // aliased subquery or CTE
+            table_expr.inner = TableExprInner::Table(table.clone());
         }
 
         if !matches!(&table_expr.inner, TableExprInner::Subquery(_)) {
@@ -244,7 +243,7 @@ mod tests {
     use super::{AliasRemoval, TableAliasRewrite};
 
     macro_rules! rewrites_to {
-        ($before: expr, $after: expr) => {{
+        ($before: expr_2021, $after: expr_2021) => {{
             let mut q = parse_query(Dialect::MySQL, $before).unwrap();
             let expected = parse_query(Dialect::MySQL, $after).unwrap();
             q.rewrite_table_aliases("query", None).unwrap();

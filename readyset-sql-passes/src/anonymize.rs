@@ -173,8 +173,8 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
         create_table_option: &'ast mut CreateTableOption,
     ) -> Result<(), Self::Error> {
         match create_table_option {
-            CreateTableOption::Comment(ref mut comment) => *comment = "<anonymized>".to_string(),
-            CreateTableOption::DataDirectory(ref mut data_directory) => {
+            CreateTableOption::Comment(comment) => *comment = "<anonymized>".to_string(),
+            CreateTableOption::DataDirectory(data_directory) => {
                 *data_directory = "<anonymized>".to_string()
             }
             // No anonymization needed for any of these
@@ -192,7 +192,7 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
         show_statement: &'ast mut ShowStatement,
     ) -> Result<(), Self::Error> {
         match show_statement {
-            ShowStatement::Tables(ref mut tables) => {
+            ShowStatement::Tables(tables) => {
                 if let Some(ref mut from_db) = tables.from_db {
                     self.anonymize_string(from_db)
                 }

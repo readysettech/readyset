@@ -3,7 +3,7 @@ use std::iter;
 
 use itertools::{Either, Itertools};
 use readyset_errors::{
-    internal_err, invalid_query_err, unsupported, unsupported_err, ReadySetResult,
+    ReadySetResult, internal_err, invalid_query_err, unsupported, unsupported_err,
 };
 use readyset_sql::ast::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, JoinConstraint, JoinRightSide, Relation,
@@ -32,7 +32,8 @@ fn check_select_statement<'a>(
         col: &'a Column,
         stmt: &'a SelectStatement,
         cte_ctx: &HashMap<&'a SqlIdentifier, &'a SelectStatement>,
-    ) -> ReadySetResult<impl Iterator<Item = ReadySetResult<(Relation, &'a str)>> + 'a> {
+    ) -> ReadySetResult<impl Iterator<Item = ReadySetResult<(Relation, &'a str)>> + 'a + use<'a>>
+    {
         let table = col.table.as_ref().ok_or_else(|| {
             internal_err!("detect_problematic_self_joins must be run after expand_implied_tables")
         })?;
@@ -43,10 +44,10 @@ fn check_select_statement<'a>(
         };
 
         macro_rules! once_ok {
-            ($tn: expr, $cn: expr) => {
+            ($tn: expr_2021, $cn: expr_2021) => {
                 once_ok!(($tn, $cn))
             };
-            ($col: expr) => {
+            ($col: expr_2021) => {
                 Either::Left(iter::once(Ok($col)))
             };
         }
@@ -69,8 +70,9 @@ fn check_select_statement<'a>(
                 table: Relation,
                 col_name: &'a str,
                 ctes: &HashMap<&'a SqlIdentifier, &'a SelectStatement>,
-            ) -> ReadySetResult<impl Iterator<Item = ReadySetResult<(Relation, &'a str)>> + 'a>
-            {
+            ) -> ReadySetResult<
+                impl Iterator<Item = ReadySetResult<(Relation, &'a str)>> + 'a + use<'a>,
+            > {
                 check_select_statement(stmt, ctes)?;
                 let expr = stmt
                     .fields

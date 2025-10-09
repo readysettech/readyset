@@ -8,9 +8,9 @@ use crate::rewrite_utils::{
 };
 use crate::{get_local_from_items_iter, get_local_from_items_iter_mut};
 use itertools::Either;
-use readyset_errors::{unsupported, unsupported_err, ReadySetError, ReadySetResult};
+use readyset_errors::{ReadySetError, ReadySetResult, unsupported, unsupported_err};
 use readyset_sql::analysis::is_aggregate;
-use readyset_sql::analysis::visit::{walk_select_statement, Visitor};
+use readyset_sql::analysis::visit::{Visitor, walk_select_statement};
 use readyset_sql::ast::{
     Column, Expr, FunctionExpr, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
     Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
@@ -258,15 +258,14 @@ fn extract_correlated_subquery(
 
         // Verify the remaining expression has no correlation.
         // **NOTE**: We are visiting the outermost columns only, w/o walking into sub-queries.
-        if let Some(remaining_expr) = &remaining_expr {
-            if columns_iter(remaining_expr)
+        if let Some(remaining_expr) = &remaining_expr
+            && columns_iter(remaining_expr)
                 .any(|col| column_does_not_belong_from_items(col, &local_from_items))
-            {
-                unsupported!(
-                    "Unsupported correlation in subquery: {}",
-                    remaining_expr.display(Dialect::PostgreSQL)
-                );
-            }
+        {
+            unsupported!(
+                "Unsupported correlation in subquery: {}",
+                remaining_expr.display(Dialect::PostgreSQL)
+            );
         }
 
         // `correlated_expr` contains equality constraints and simple filters,
@@ -471,7 +470,7 @@ fn analyse_lone_aggregates_subquery_fields(
 ) -> ReadySetResult<()> {
     // Constructs a COALESCE function call for a column and a literal fallback.
     macro_rules! make_coalesce {
-        ($col:expr, $lit:expr) => {
+        ($col:expr_2021, $lit:expr_2021) => {
             Expr::Call(FunctionExpr::Call {
                 name: "coalesce".into(),
                 arguments: Some(vec![Expr::Column($col), Expr::Literal($lit)]),
@@ -570,14 +569,14 @@ fn coalesce_fields_references(
     };
     // 3: apply coalesce replacements
     for expr in collect_outermost_columns_mut(&mut bogo_stmt)? {
-        if let Expr::Column(col) = expr {
-            if let Some(inl_expr) = fields_map.get(col) {
-                match inl_expr {
-                    Ok(inl_expr) => {
-                        let _ = mem::replace(expr, inl_expr.clone());
-                    }
-                    Err(e) => return Err(e.clone()),
+        if let Expr::Column(col) = expr
+            && let Some(inl_expr) = fields_map.get(col)
+        {
+            match inl_expr {
+                Ok(inl_expr) => {
+                    let _ = mem::replace(expr, inl_expr.clone());
                 }
+                Err(e) => return Err(e.clone()),
             }
         }
     }
@@ -807,8 +806,8 @@ fn resolve_lateral_subqueries(stmt: &mut SelectStatement) -> ReadySetResult<bool
 #[cfg(test)]
 mod tests {
     use crate::lateral_join::RewriteLateralJoin;
-    use readyset_sql::ast::SqlQuery;
     use readyset_sql::Dialect;
+    use readyset_sql::ast::SqlQuery;
     use readyset_sql_parsing::{parse_query, parse_select};
 
     /* How to create and populate the tables used in the test module:
@@ -856,8 +855,7 @@ mod tests {
 
     #[test]
     fn test2() {
-        let original_stmt =
-            "SELECT T1.auth_id FROM test1 T1, LATERAL(SELECT T11.auth_id, T11.i FROM test2 T11 \
+        let original_stmt = "SELECT T1.auth_id FROM test1 T1, LATERAL(SELECT T11.auth_id, T11.i FROM test2 T11 \
                             WHERE T1.b = T11.b AND T1.t = T11.t AND T11.dt = '2025-02-18'\
                          ) TT \
                         WHERE T1.t = 'aa'";
@@ -987,8 +985,7 @@ mod tests {
 
     #[test]
     fn test8() {
-        let original_stmt =
-            "select T1.i from test T1 left join \
+        let original_stmt = "select T1.i from test T1 left join \
              LATERAL(select max(T3.i) i from test3 T3 WHERE T3.b = T1.b group by T3.t) T2 on T1.i = T2.i \
              WHERE T1.t = 'aa'";
         let expect_stmt = r#"SELECT "t1"."i" FROM "test" AS "t1" LEFT JOIN
@@ -999,8 +996,7 @@ mod tests {
 
     #[test]
     fn test9() {
-        let original_stmt =
-            "select T1.i from test T1 left join \
+        let original_stmt = "select T1.i from test T1 left join \
                 LATERAL(select max(T3.i) i, T3.b bb from test3 T3 WHERE T3.b = T1.b group by bb) T2 on T1.i = T2.i WHERE T1.t = 'aa'";
         let expect_stmt = r#"SELECT "t1"."i" FROM "test" AS "t1" LEFT JOIN
             (SELECT max("t3"."i") AS "i", "t3"."b" AS "bb" FROM "test3" AS "t3" GROUP BY "bb") AS "t2"
@@ -1085,8 +1081,7 @@ mod tests {
     // Negative test: LATERAL sub-query using correlation on a table, which is not preceding the LATERAL
     #[test]
     fn test14() {
-        let original_stmt =
-            "select test1.b, T1.i from test1 join \
+        let original_stmt = "select test1.b, T1.i from test1 join \
                LATERAL(select max(T3.i) i from test3 T3 WHERE T1.i = T3.i and test1.t = T3.t) T2 on test1.i = T2.i \
                 left join test T1 on T1.i = T2.i \
              WHERE T1.t = 'aa'";

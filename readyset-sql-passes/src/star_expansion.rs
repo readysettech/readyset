@@ -264,7 +264,7 @@ mod tests {
         expands_stars(
             "WITH users AS (SELECT Users.* FROM Users) SELECT * FROM users",
             "WITH users AS (SELECT Users.uid, Users.name FROM Users) SELECT users.uid, users.name FROM users",
-            HashMap::from([("Users".into(), vec!["uid".into(), "name".into()])])
+            HashMap::from([("Users".into(), vec!["uid".into(), "name".into()])]),
         );
     }
 
@@ -288,7 +288,7 @@ mod tests {
             HashMap::from([
                 ("PaperTag".into(), vec!["paper_id".into(), "tag_id".into()]),
                 ("Users".into(), vec!["uid".into(), "name".into()]),
-            ])
+            ]),
         );
     }
 
@@ -297,9 +297,7 @@ mod tests {
         expands_stars(
             "SELECT users.* FROM PaperTag JOIN (SELECT Users.* FROM Users) users On paper_id = uid",
             "SELECT users.uid, users.name FROM PaperTag JOIN (SELECT Users.uid, Users.name FROM Users) users On paper_id = uid",
-            HashMap::from([
-                ( "Users".into(), vec!["uid".into(), "name".into()] ),
-                    ])
+            HashMap::from([("Users".into(), vec!["uid".into(), "name".into()])]),
         );
     }
 

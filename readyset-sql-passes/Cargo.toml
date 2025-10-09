@@ -3,7 +3,7 @@ name = "readyset-sql-passes"
 version = "0.0.1"
 publish = false
 authors = ["Readyset Technology, Inc. <info@readyset.io>"]
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 itertools = { workspace = true }

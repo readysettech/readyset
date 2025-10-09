@@ -14,10 +14,10 @@ pub trait InlineLiterals {
 impl<'ast> VisitorMut<'ast> for InlineLiteralsVisitor<'_> {
     type Error = std::convert::Infallible;
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
-        if let Literal::Placeholder(ItemPlaceholder::DollarNumber(p)) = literal {
-            if let Some(inlined_literal) = self.placeholder_literal_map.get(&(*p as usize)) {
-                *literal = inlined_literal.clone();
-            }
+        if let Literal::Placeholder(ItemPlaceholder::DollarNumber(p)) = literal
+            && let Some(inlined_literal) = self.placeholder_literal_map.get(&(*p as usize))
+        {
+            *literal = inlined_literal.clone();
         }
         Ok(())
     }

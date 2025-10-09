@@ -69,8 +69,8 @@ impl Borrow<SelectStatement> for SelectStatementSkeleton {
 
 #[cfg(test)]
 mod test {
-    use readyset_sql::ast::{ItemPlaceholder, Literal};
     use readyset_sql::Dialect;
+    use readyset_sql::ast::{ItemPlaceholder, Literal};
     use readyset_sql_parsing::parse_select;
 
     use crate::strip_literals::SelectStatementSkeleton;

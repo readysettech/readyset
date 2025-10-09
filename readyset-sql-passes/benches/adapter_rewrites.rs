@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Bencher, Criterion};
+use criterion::{BatchSize, Bencher, Criterion, black_box, criterion_group, criterion_main};
 use readyset_sql::Dialect;
 use readyset_sql_parsing::parse_select;
 use readyset_sql_passes::adapter_rewrites;

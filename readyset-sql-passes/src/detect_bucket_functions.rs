@@ -1,5 +1,5 @@
-use readyset_errors::{invalid_query, ReadySetError, ReadySetResult};
-use readyset_sql::analysis::visit::{walk_function_expr, Visitor};
+use readyset_errors::{ReadySetError, ReadySetResult, invalid_query};
+use readyset_sql::analysis::visit::{Visitor, walk_function_expr};
 use readyset_sql::ast::{CacheInner, CreateCacheStatement, FunctionExpr, SelectStatement};
 
 /// A trait for detecting bucket functions in queries and validating that the ALWAYS keyword
@@ -27,7 +27,8 @@ impl DetectBucketFunctions for CreateCacheStatement {
 
         if has_bucket_function && !self.always {
             invalid_query!(
-                "CREATE CACHE statements containing Bucket function must use the ALWAYS keyword (CREATE CACHE ALWAYS ...)")
+                "CREATE CACHE statements containing Bucket function must use the ALWAYS keyword (CREATE CACHE ALWAYS ...)"
+            )
         }
 
         Ok(())
@@ -154,9 +155,11 @@ mod tests {
         );
 
         let error = result.unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("Bucket function must use the ALWAYS keyword"));
+        assert!(
+            error
+                .to_string()
+                .contains("Bucket function must use the ALWAYS keyword")
+        );
     }
 
     #[test]

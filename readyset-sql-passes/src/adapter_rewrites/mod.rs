@@ -6,10 +6,10 @@ use std::fmt::Debug;
 use std::{iter, mem};
 
 pub use autoparameterize::auto_parameterize_query;
-use itertools::{repeat_n, Either, Itertools};
+use itertools::{Either, Itertools, repeat_n};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{
-    internal_err, invalid_query_err, unsupported, ReadySetError, ReadySetResult,
+    ReadySetError, ReadySetResult, internal_err, invalid_query_err, unsupported,
 };
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
@@ -400,16 +400,16 @@ impl<'ast> VisitorMut<'ast> for CollapseWhereInVisitor {
             ..
         } = expression
         {
-            if let Expr::Row { exprs: ref l, .. } = **lhs {
-                if list.iter().any(|expr| match expr {
+            if let Expr::Row { exprs: ref l, .. } = **lhs
+                && list.iter().any(|expr| match expr {
                     Expr::Row { exprs: r, .. } if l.len() != r.len() => true,
                     Expr::Row { .. } => false,
                     _ => true,
-                }) {
-                    return Err(ReadySetError::InvalidQuery(
-                        "Expected a list of Tuples with the same arity".to_string(),
-                    ));
-                }
+                })
+            {
+                return Err(ReadySetError::InvalidQuery(
+                    "Expected a list of Tuples with the same arity".to_string(),
+                ));
             };
 
             if list.iter().any(|l| match l {
@@ -586,11 +586,7 @@ fn reorder_numbered_placeholders(query: &mut SelectStatement) -> Option<Vec<usiz
         prev = *n;
     }
 
-    if contiguous {
-        None
-    } else {
-        Some(visitor.out)
-    }
+    if contiguous { None } else { Some(visitor.out) }
 }
 
 /// Reorder the values in `params` according to `order_map`. `order_map` is a slice of indices where
@@ -702,10 +698,11 @@ mod tests {
         /// Asserts that ALL SelectStatements's metadatas contain
         /// `CollapsedWhereIn`, then clear them.
         fn clear_metadata(&mut self) {
-            assert!(self
-                .metadata
-                .iter()
-                .contains(&SelectMetadata::CollapsedWhereIn));
+            assert!(
+                self.metadata
+                    .iter()
+                    .contains(&SelectMetadata::CollapsedWhereIn)
+            );
 
             let mut visitor = ClearMetadataVisitor;
             visitor.visit_select_statement(self).unwrap();

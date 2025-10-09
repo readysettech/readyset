@@ -1,6 +1,6 @@
 use dataflow_expression::{Dialect, Expr as DataflowExpr, LowerContext};
 use readyset_data::{DfType, DfValue};
-use readyset_errors::{internal, ReadySetResult};
+use readyset_errors::{ReadySetResult, internal};
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{Column, Expr, Literal, Relation};
 
@@ -91,7 +91,7 @@ mod tests {
 
     macro_rules! cf_tests {
         () => {};
-        ($name:ident($input: expr, $expected: expr);$($rest:tt)*) => {
+        ($name:ident($input: expr_2021, $expected: expr_2021);$($rest:tt)*) => {
             #[test]
             fn $name() {
                 rewrites_to($input, $expected)

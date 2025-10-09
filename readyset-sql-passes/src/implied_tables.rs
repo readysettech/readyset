@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::mem;
 
 use itertools::Itertools;
-use readyset_errors::{internal, invalid_query_err, ReadySetError, ReadySetResult};
+use readyset_errors::{ReadySetError, ReadySetResult, internal, invalid_query_err};
 use readyset_sql::analysis::visit_mut::{
-    walk_group_by_clause, walk_order_clause, walk_select_statement, VisitorMut,
+    VisitorMut, walk_group_by_clause, walk_order_clause, walk_select_statement,
 };
 use readyset_sql::ast::{
     Column, FieldDefinitionExpr, GroupByClause, OrderClause, Relation, SelectStatement,
@@ -56,11 +56,7 @@ impl ExpandImpliedTablesVisitor<'_> {
             .filter_map(|(t, ws)| {
                 let num_matching = ws.iter().filter(|c| **c == column_name).count();
                 assert!(num_matching <= 1);
-                if num_matching == 1 {
-                    Some(t)
-                } else {
-                    None
-                }
+                if num_matching == 1 { Some(t) } else { None }
             })
             .collect::<Vec<_>>();
 
@@ -259,7 +255,7 @@ mod tests {
         BinaryOperator, Column, Expr, FieldDefinitionExpr, SelectStatement, SqlQuery, TableExpr,
     };
     use readyset_sql::{Dialect, DialectDisplay};
-    use readyset_sql_parsing::{parse_query, parse_query_with_config, ParsingPreset};
+    use readyset_sql_parsing::{ParsingPreset, parse_query, parse_query_with_config};
 
     use super::*;
 

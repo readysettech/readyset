@@ -52,7 +52,7 @@ pub use crate::rewrite_between::RewriteBetween;
 pub use crate::star_expansion::StarExpansion;
 pub use crate::strip_literals::{SelectStatementSkeleton, StripLiterals};
 pub use crate::util::{
-    is_correlated, is_logical_op, is_predicate, map_aggregates, outermost_table_exprs, LogicalOp,
+    LogicalOp, is_correlated, is_logical_op, is_predicate, map_aggregates, outermost_table_exprs,
 };
 pub use crate::validate_window_functions::ValidateWindowFunctions;
 
@@ -223,10 +223,10 @@ impl Rewrite for SelectSpecification {
 
 impl Rewrite for CreateViewStatement {
     fn rewrite(mut self, context: &mut RewriteContext) -> ReadySetResult<Self> {
-        if self.name.schema.is_none() {
-            if let Some(first_schema) = context.search_path.first() {
-                self.name.schema = Some(first_schema.clone())
-            }
+        if self.name.schema.is_none()
+            && let Some(first_schema) = context.search_path.first()
+        {
+            self.name.schema = Some(first_schema.clone())
         }
 
         Ok(Self {

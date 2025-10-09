@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use readyset_errors::{ReadySetError, ReadySetResult, internal_err};
 use readyset_sql::ast::{
     BinaryOperator, Column, ColumnConstraint, CreateTableBody, Expr, LimitClause, Relation,
     SelectStatement, SqlQuery, TableExpr, TableKey,
@@ -95,10 +95,10 @@ fn compares_unique_key_against_literal(
 ) -> ReadySetResult<bool> {
     match expr {
         Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_ref(), op, rhs.as_ref()) {
-            (Expr::Literal(_), BinaryOperator::Equal, Expr::Column(ref c))
-            | (Expr::Literal(_), BinaryOperator::Is, Expr::Column(ref c))
-            | (Expr::Column(ref c), BinaryOperator::Equal, Expr::Literal(_))
-            | (Expr::Column(ref c), BinaryOperator::Is, Expr::Literal(_)) => {
+            (Expr::Literal(_), BinaryOperator::Equal, Expr::Column(c))
+            | (Expr::Literal(_), BinaryOperator::Is, Expr::Column(c))
+            | (Expr::Column(c), BinaryOperator::Equal, Expr::Literal(_))
+            | (Expr::Column(c), BinaryOperator::Is, Expr::Literal(_)) => {
                 Ok(is_unique_or_primary(c, base_schemas, table_exprs)?)
             }
             (lhs, BinaryOperator::And, rhs) => {
@@ -126,13 +126,12 @@ impl OrderLimitRemoval for SelectStatement {
         );
         // If the query uses an equality filter on a column that has a unique or primary key
         // index, remove order and limit
-        if has_limit {
-            if let Some(ref expr) = self.where_clause {
-                if compares_unique_key_against_literal(expr, base_schemas, &self.tables)? {
-                    self.limit_clause = LimitClause::default();
-                    self.order = None;
-                }
-            }
+        if has_limit
+            && let Some(ref expr) = self.where_clause
+            && compares_unique_key_against_literal(expr, base_schemas, &self.tables)?
+        {
+            self.limit_clause = LimitClause::default();
+            self.order = None;
         }
         Ok(self)
     }
@@ -152,8 +151,8 @@ impl OrderLimitRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use readyset_sql::ast::{ColumnSpecification, CreateTableBody, Relation, SqlType};
     use readyset_sql::Dialect;
+    use readyset_sql::ast::{ColumnSpecification, CreateTableBody, Relation, SqlType};
     use readyset_sql_parsing::parse_query;
 
     use super::*;

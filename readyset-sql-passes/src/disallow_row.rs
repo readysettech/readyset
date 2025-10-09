@@ -1,4 +1,4 @@
-use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{ReadySetError, ReadySetResult, unsupported};
 use readyset_sql::analysis::visit_mut::VisitorMut;
 use readyset_sql::ast::{Expr, FieldDefinitionExpr, SelectStatement, SqlQuery};
 

@@ -1,4 +1,4 @@
-use readyset_errors::{internal, invalid_query_err, ReadySetResult};
+use readyset_errors::{ReadySetResult, internal, invalid_query_err};
 use readyset_sql::ast::{
     Expr, FieldDefinitionExpr, FieldReference, OrderBy, SelectStatement, SqlQuery,
 };

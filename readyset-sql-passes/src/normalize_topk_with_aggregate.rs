@@ -112,8 +112,8 @@ impl NormalizeTopKWithAggregate for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use readyset_sql::ast::{Expr, LimitValue, NullOrder, OrderClause, OrderType};
     use readyset_sql::Dialect;
+    use readyset_sql::ast::{Expr, LimitValue, NullOrder, OrderClause, OrderType};
     use readyset_sql_parsing::parse_query;
 
     use super::*;

@@ -1,4 +1,4 @@
-use readyset_errors::{invalid_query, unsupported, ReadySetResult};
+use readyset_errors::{ReadySetResult, invalid_query, unsupported};
 use readyset_sql::ast::{Expr, FieldDefinitionExpr, FieldReference, OrderBy, SelectStatement};
 
 /// Check if an expression contains any WindowFunction expressions
@@ -88,26 +88,26 @@ fn contains_nested_window_function(expr: &Expr) -> bool {
 /// Validate that WindowFunction expressions are not used in invalid contexts (WHERE, HAVING, GROUP BY, ORDER BY, JOIN ON)
 fn validate_window_function_usage(stmt: &SelectStatement) -> ReadySetResult<()> {
     // Check WHERE clause
-    if let Some(where_expr) = &stmt.where_clause {
-        if contains_window_function(where_expr) {
-            invalid_query!("Window functions are not allowed in WHERE clauses")
-        }
+    if let Some(where_expr) = &stmt.where_clause
+        && contains_window_function(where_expr)
+    {
+        invalid_query!("Window functions are not allowed in WHERE clauses")
     }
 
     // Check HAVING clause
-    if let Some(having_expr) = &stmt.having {
-        if contains_window_function(having_expr) {
-            invalid_query!("Window functions are not allowed in HAVING clauses")
-        }
+    if let Some(having_expr) = &stmt.having
+        && contains_window_function(having_expr)
+    {
+        invalid_query!("Window functions are not allowed in HAVING clauses")
     }
 
     // Check GROUP BY clause
     if let Some(group_by) = &stmt.group_by {
         for field in &group_by.fields {
-            if let FieldReference::Expr(expr) = field {
-                if contains_window_function(expr) {
-                    invalid_query!("Window functions are not allowed in GROUP BY clauses")
-                }
+            if let FieldReference::Expr(expr) = field
+                && contains_window_function(expr)
+            {
+                invalid_query!("Window functions are not allowed in GROUP BY clauses")
             }
         }
     }
@@ -115,31 +115,30 @@ fn validate_window_function_usage(stmt: &SelectStatement) -> ReadySetResult<()> 
     // Check ORDER BY clause
     if let Some(order) = &stmt.order {
         for OrderBy { field, .. } in &order.order_by {
-            if let FieldReference::Expr(expr) = field {
-                if contains_window_function(expr) {
-                    unsupported!("Window functions in ORDER BY clauses are not supported")
-                }
+            if let FieldReference::Expr(expr) = field
+                && contains_window_function(expr)
+            {
+                unsupported!("Window functions in ORDER BY clauses are not supported")
             }
         }
     }
 
     // Check JOIN ON conditions
     for join in &stmt.join {
-        if let readyset_sql::ast::JoinConstraint::On(expr) = &join.constraint {
-            if contains_window_function(expr) {
-                invalid_query!("Window functions are not allowed in JOIN ON conditions")
-            }
+        if let readyset_sql::ast::JoinConstraint::On(expr) = &join.constraint
+            && contains_window_function(expr)
+        {
+            invalid_query!("Window functions are not allowed in JOIN ON conditions")
         }
     }
 
     // Check for nested window functions in SELECT fields
     for field in &stmt.fields {
-        if let FieldDefinitionExpr::Expr { expr, .. } = field {
-            if let Expr::WindowFunction { .. } = expr {
-                if contains_nested_window_function(expr) {
-                    invalid_query!("Window functions cannot contain nested window functions")
-                }
-            }
+        if let FieldDefinitionExpr::Expr { expr, .. } = field
+            && let Expr::WindowFunction { .. } = expr
+            && contains_nested_window_function(expr)
+        {
+            invalid_query!("Window functions cannot contain nested window functions")
         }
     }
 

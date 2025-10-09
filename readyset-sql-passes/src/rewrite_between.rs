@@ -1,9 +1,9 @@
+use Expr::*;
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
     BinaryOperator, DeleteStatement, Expr, SelectStatement, SqlQuery, UnaryOperator,
     UpdateStatement,
 };
-use Expr::*;
 
 /// Things that contain subexpressions of type `ConditionExpr` that can be targeted for the
 /// desugaring of BETWEEN

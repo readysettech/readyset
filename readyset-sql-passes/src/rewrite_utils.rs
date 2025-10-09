@@ -1,9 +1,9 @@
 use readyset_errors::{
-    internal, internal_err, invalid_query, invalid_query_err, ReadySetError, ReadySetResult,
+    ReadySetError, ReadySetResult, internal, internal_err, invalid_query, invalid_query_err,
 };
-use readyset_sql::analysis::visit::{walk_function_expr, Visitor};
-use readyset_sql::analysis::visit_mut::{walk_expr, VisitorMut};
-use readyset_sql::analysis::{is_aggregate, ReferredColumns};
+use readyset_sql::analysis::visit::{Visitor, walk_function_expr};
+use readyset_sql::analysis::visit_mut::{VisitorMut, walk_expr};
+use readyset_sql::analysis::{ReferredColumns, is_aggregate};
 use readyset_sql::ast::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
     InValue, JoinConstraint, JoinRightSide, Literal, OrderBy, Relation, SelectStatement,
@@ -14,7 +14,7 @@ use readyset_sql::{Dialect, DialectDisplay};
 /// Iterate over all FROM items, including JOIN right-hand tables (mutable).
 #[macro_export]
 macro_rules! get_local_from_items_iter_mut {
-    ($stmt:expr) => {
+    ($stmt:expr_2021) => {
         $stmt
             .tables
             .iter_mut()
@@ -33,7 +33,7 @@ macro_rules! get_local_from_items_iter_mut {
 /// Iterate over all FROM items, including JOIN right-hand tables.
 #[macro_export]
 macro_rules! get_local_from_items_iter {
-    ($stmt:expr) => {
+    ($stmt:expr_2021) => {
         $stmt
             .tables
             .iter()
@@ -428,7 +428,7 @@ pub(crate) fn find_group_by_key(
             FieldReference::Expr(Expr::Column(alias))
                 if alias.table.is_none() && alias.name.eq(key_alias) =>
             {
-                return Ok(Some(pos))
+                return Ok(Some(pos));
             }
             // `g` is an expression, so match by the expression
             FieldReference::Expr(expr) if expr.eq(key) => return Ok(Some(pos)),

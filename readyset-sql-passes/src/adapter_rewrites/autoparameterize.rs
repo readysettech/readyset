@@ -1,6 +1,6 @@
 use std::mem;
 
-use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{ReadySetError, ReadySetResult, unsupported};
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
 
@@ -616,10 +616,10 @@ mod tests {
     #[test]
     fn literal_in_in_rhs() {
         test_auto_parameterize_mysql(
-                "select hashtags.* from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (10,20,31)",
-                "select hashtags.* from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (?,?,?)",
-                    vec![(0, 10.into()), (1, 20.into()), (2, 31.into())],
-            );
+            "select hashtags.* from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (10,20,31)",
+            "select hashtags.* from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (?,?,?)",
+            vec![(0, 10.into()), (1, 20.into()), (2, 31.into())],
+        );
     }
 
     #[test]

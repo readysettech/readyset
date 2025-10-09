@@ -108,17 +108,16 @@ impl<'ast> VisitorMut<'ast> for ResolveSchemaVisitor<'_> {
     type Error = ReadySetError;
 
     fn visit_sql_type(&mut self, sql_type: &'ast mut SqlType) -> Result<(), Self::Error> {
-        if let SqlType::Other(ty) = sql_type {
-            if ty.schema.is_none() {
-                if let Some(schema) = self.search_path.iter().find(|schema| {
-                    self.custom_types
-                        .get(schema)
-                        .into_iter()
-                        .any(|tys| tys.contains(&ty.name))
-                }) {
-                    ty.schema = Some(schema.clone());
-                }
-            }
+        if let SqlType::Other(ty) = sql_type
+            && ty.schema.is_none()
+            && let Some(schema) = self.search_path.iter().find(|schema| {
+                self.custom_types
+                    .get(schema)
+                    .into_iter()
+                    .any(|tys| tys.contains(&ty.name))
+            })
+        {
+            ty.schema = Some(schema.clone());
         }
 
         visit_mut::walk_sql_type(self, sql_type)
