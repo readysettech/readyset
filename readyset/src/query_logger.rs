@@ -61,7 +61,7 @@ impl QueryLogger {
         match query {
             SqlQuery::Select(stmt) => {
                 let mut stmt = stmt.clone();
-                if adapter_rewrites::process_query(&mut stmt, rewrite_params).is_ok() {
+                if adapter_rewrites::rewrite_query(&mut stmt, rewrite_params).is_ok() {
                     anonymize_literals(&mut stmt);
                     let query_string = stmt.display(dialect).to_string();
 

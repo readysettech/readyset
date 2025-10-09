@@ -1432,7 +1432,7 @@ impl NoriaConnector {
 
         trace!("select::collapse where-in clauses");
         let processed_query_params =
-            adapter_rewrites::process_query(&mut statement, self.rewrite_params())?;
+            adapter_rewrites::rewrite_query(&mut statement, self.rewrite_params())?;
 
         // check if we already have this query prepared
         trace!("select::access view");

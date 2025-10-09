@@ -1230,7 +1230,7 @@ where
     /// Provides metadata required to prepare a select query
     fn plan_prepare_select(&mut self, stmt: SelectStatement) -> PrepareMeta {
         let mut rewritten = stmt.clone();
-        let _ = adapter_rewrites::process_query(&mut rewritten, self.noria.rewrite_params())
+        let _ = adapter_rewrites::rewrite_query(&mut rewritten, self.noria.rewrite_params())
             .map_err(|e| {
                 warn!(
                     statement = %Sensitive(&stmt.display(self.settings.dialect)),
@@ -2509,7 +2509,7 @@ where
                         let view_request = match inner {
                             CacheInner::Statement(stmt) => {
                                 let mut stmt = *stmt.clone();
-                                adapter_rewrites::process_query(
+                                adapter_rewrites::rewrite_query(
                                     &mut stmt,
                                     self.noria.rewrite_params(),
                                 )?;
@@ -2594,7 +2594,7 @@ where
                     Err(err) => Err(ReadySetError::UnparseableQuery(err.clone())),
                 }?;
 
-                adapter_rewrites::process_query(&mut stmt, self.noria.rewrite_params())?;
+                adapter_rewrites::rewrite_query(&mut stmt, self.noria.rewrite_params())?;
 
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
@@ -2992,7 +2992,7 @@ where
         q: &mut ViewCreateRequest,
         params: AdapterRewriteParams,
     ) -> (bool, Option<QueryStatus>, Option<DfQueryParameters>) {
-        match adapter_rewrites::process_query(&mut q.statement, params) {
+        match adapter_rewrites::rewrite_query(&mut q.statement, params) {
             Ok(processed_query_params) => {
                 let status = self.state.query_status_cache.query_status(q);
                 let should_try = if self.state.proxy_state.should_proxy() {
@@ -3043,7 +3043,8 @@ where
     ///
     /// For TopK-eligible queries (ORDER BY + literal LIMIT), this function implements dual cache
     /// lookup based on which cache was actually created:
-    /// 1. First checks if a TopK cache exists (created with literal LIMIT, e.g., CREATE CACHE ... LIMIT 10)
+    /// 1. First checks if a TopK cache exists (created with literal LIMIT, e.g., CREATE CACHE
+    ///    ... LIMIT 10)
     /// 2. If TopK cache exists, uses it (preferred as it's more efficient than letting the adapter
     ///    fetch all records then apply the limit)
     /// 3. Otherwise checks if parameterized cache exists (parameterized LIMITs are removed by the
@@ -3051,8 +3052,8 @@ where
     /// 4. If parameterized cache exists, uses it.
     /// 5. If neither cache exists, processes normally (go upstream if possible, else fail).
     ///
-    /// All other query rewrites (autoparameterization, IN conditions, etc.) are applied consistently
-    /// regardless of which path is taken.
+    /// All other query rewrites (autoparameterization, IN conditions, etc.) are applied
+    /// consistently regardless of which path is taken.
     ///
     /// Returns whether noria should try the select, along with the query status if it was obtained
     /// during processing.
@@ -3862,7 +3863,7 @@ where
         Err(e) => return Err(internal_err!("Failed to parse SELECT: {}", e)),
     };
 
-    adapter_rewrites::process_query(&mut stmt, rewrite_params)?;
+    adapter_rewrites::rewrite_query(&mut stmt, rewrite_params)?;
 
     let query_id = QueryId::from_select(&stmt, &req.schema_search_path);
     let name = create_cache.name.unwrap_or_else(|| query_id.into());

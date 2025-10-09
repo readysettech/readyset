@@ -23,7 +23,7 @@ use tracing::trace;
 /// A fancier `QueryParameters` that augments parameters with additional limit-related information
 /// parameterized out.
 ///
-/// Construct a [`DfQueryParameters`] by calling [`process_query`], then pass the list of
+/// Construct a [`DfQueryParameters`] by calling [`rewrite_query`], then pass the list of
 /// user-provided parameters to [`DfQueryParameters::make_keys`] to make a list of lookup keys to
 /// pass to noria.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -78,7 +78,7 @@ fn use_fallback_pagination(
     true
 }
 
-/// Parameters to be passed to [`process_query`].
+/// Parameters to be passed to [`rewrite_query`].
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct AdapterRewriteParams {
     /// The dialect of the SQL query.
@@ -188,7 +188,7 @@ pub fn rewrite_for_readyset(
 }
 
 /// Perform both generic SQL and Readyset-specific query rewriting.
-pub fn process_query(
+pub fn rewrite_query(
     query: &mut SelectStatement,
     flags: AdapterRewriteParams,
 ) -> ReadySetResult<DfQueryParameters> {
@@ -1304,7 +1304,7 @@ mod tests {
         }
     }
 
-    mod process_query {
+    mod rewrite_query {
         use pretty_assertions::assert_eq;
         use readyset_data::DfValue;
 
@@ -1325,7 +1325,7 @@ mod tests {
             dialect: Dialect,
         ) -> (Vec<Vec<DfValue>>, SelectStatement) {
             let mut query = parse_select_statement(query, dialect);
-            let processed = process_query(&mut query, rewrite_params(dialect)).unwrap();
+            let processed = rewrite_query(&mut query, rewrite_params(dialect)).unwrap();
             (
                 processed
                     .make_keys(&params)
@@ -1356,7 +1356,7 @@ mod tests {
             params: &[DfValue],
             dialect: Dialect,
         ) -> (Option<usize>, Option<usize>) {
-            let proc = process_query(
+            let proc = rewrite_query(
                 &mut parse_select_statement(query, dialect),
                 rewrite_params(dialect),
             )
@@ -1381,7 +1381,7 @@ mod tests {
                 "SELECT id FROM users WHERE credit_card_number = $1 AND id = $2",
             );
 
-            process_query(&mut query, rewrite_params(Dialect::PostgreSQL))
+            rewrite_query(&mut query, rewrite_params(Dialect::PostgreSQL))
                 .expect("Should be able to rewrite query");
             assert_eq!(
                 query.display(Dialect::PostgreSQL).to_string(),
@@ -1398,7 +1398,7 @@ mod tests {
                 "SELECT id FROM users WHERE credit_card_number = $1 AND id = $2",
             );
 
-            process_query(&mut query, rewrite_params(Dialect::PostgreSQL))
+            rewrite_query(&mut query, rewrite_params(Dialect::PostgreSQL))
                 .expect("Should be able to rewrite query");
             assert_eq!(
                 query.display(Dialect::PostgreSQL).to_string(),
@@ -1414,7 +1414,7 @@ mod tests {
             let expected = parse_select_statement_postgres(
                 "SELECT id + 3 FROM users WHERE credit_card_number = $1",
             );
-            process_query(&mut query, rewrite_params(Dialect::PostgreSQL))
+            rewrite_query(&mut query, rewrite_params(Dialect::PostgreSQL))
                 .expect("Should be able to rewrite query");
             assert_eq!(query, expected);
         }

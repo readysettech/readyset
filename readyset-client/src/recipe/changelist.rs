@@ -483,7 +483,7 @@ impl Change {
                     Err(err) => return Err(ReadySetError::UnparseableQuery(err)),
                 };
 
-                adapter_rewrites::process_query(
+                adapter_rewrites::rewrite_query(
                     &mut statement,
                     adapter_rewrite_params
                 )?;
