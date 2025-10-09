@@ -24,11 +24,11 @@ use tracing::trace;
 /// provides support for converting a user-supplied parameter list into a set of lookup keys to pass
 /// to ReadySet.
 ///
-/// Construct a [`ProcessedQueryParams`] by calling [`process_query`], then pass the list of
-/// user-provided parameters to [`ProcessedQueryParams::make_keys`] to make a list of lookup keys to
+/// Construct a [`DfQueryParameters`] by calling [`process_query`], then pass the list of
+/// user-provided parameters to [`DfQueryParameters::make_keys`] to make a list of lookup keys to
 /// pass to noria.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct ProcessedQueryParams {
+pub struct DfQueryParameters {
     dialect: Dialect,
     reordered_placeholders: Option<Vec<usize>>,
     rewritten_in_conditions: Vec<RewrittenIn>,
@@ -109,7 +109,7 @@ impl AdapterRewriteParams {
 pub fn process_query(
     query: &mut SelectStatement,
     params: AdapterRewriteParams,
-) -> ReadySetResult<ProcessedQueryParams> {
+) -> ReadySetResult<DfQueryParameters> {
     let reordered_placeholders = reorder_numbered_placeholders(query);
 
     let force_paginate_in_adapter = use_fallback_pagination(
@@ -130,7 +130,7 @@ pub fn process_query(
         autoparameterize::auto_parameterize_query(query, params.server_supports_mixed_comparisons);
     let rewritten_in_conditions = collapse_where_in(query, params.dialect)?;
     number_placeholders(query)?;
-    Ok(ProcessedQueryParams {
+    Ok(DfQueryParameters {
         dialect: params.dialect,
         reordered_placeholders,
         rewritten_in_conditions,
@@ -142,7 +142,7 @@ pub fn process_query(
     })
 }
 
-impl ProcessedQueryParams {
+impl DfQueryParameters {
     /// If the query has values for OFFSET or LIMIT, get their values, returning a tuple of `limit,
     /// offset`
     pub fn limit_offset_params(

@@ -28,7 +28,7 @@ use readyset_sql::ast::{
     UpdateStatement,
 };
 use readyset_sql::{DialectDisplay, TryFromDialect as _, TryIntoDialect as _};
-use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams, ProcessedQueryParams};
+use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams, DfQueryParameters};
 use readyset_util::redacted::Sensitive;
 use readyset_util::shared_cache::{self, LocalCache};
 use tokio::sync::RwLock;
@@ -40,7 +40,7 @@ use crate::utils;
 #[derive(Clone, Debug)]
 pub struct PreparedSelectStatement {
     name: Relation,
-    processed_query_params: ProcessedQueryParams,
+    processed_query_params: DfQueryParameters,
 }
 
 pub struct NoriaBackend {
@@ -346,7 +346,7 @@ pub(crate) enum ExecuteSelectContext<'ctx> {
     AdHoc {
         statement: &'ctx SelectStatement,
         create_if_missing: bool,
-        processed_query_params: ProcessedQueryParams,
+        processed_query_params: DfQueryParameters,
     },
 }
 
@@ -1616,7 +1616,7 @@ impl NoriaConnector {
 /// View::build_view_query.
 fn build_view_query<'a>(
     getter: &'a mut View,
-    processed_query_params: &ProcessedQueryParams,
+    processed_query_params: &DfQueryParameters,
     params: &[DfValue],
     read_behavior: ReadBehavior,
     dialect: Dialect,
@@ -1644,7 +1644,7 @@ struct ReadResult<'a> {
 #[allow(clippy::too_many_arguments)]
 async fn do_read<'a>(
     getter: &'a mut View,
-    processed_query_params: &ProcessedQueryParams,
+    processed_query_params: &DfQueryParameters,
     params: &[DfValue],
     read_behavior: ReadBehavior,
     read_request_handler: Option<&'a mut ReadRequestHandler>,

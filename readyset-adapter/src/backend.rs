@@ -106,7 +106,7 @@ use readyset_sql::ast::{
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
-use readyset_sql_passes::adapter_rewrites::{AdapterRewriteParams, ProcessedQueryParams};
+use readyset_sql_passes::adapter_rewrites::{AdapterRewriteParams, DfQueryParameters};
 use readyset_sql_passes::{adapter_rewrites, DetectBucketFunctions};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::{RedactedString, Sensitive};
@@ -149,7 +149,7 @@ where
     query_id: QueryId,
     path: Vec<SqlIdentifier>,
     query: String,
-    cache: CacheInsertGuard<ProcessedQueryParams, V>,
+    cache: CacheInsertGuard<DfQueryParameters, V>,
 }
 
 /// Query metadata used to plan query prepare
@@ -361,7 +361,7 @@ impl BackendBuilder {
         authority: Arc<Authority>,
         status_reporter: ReadySetStatusReporter<DB>,
         adapter_start_time: SystemTime,
-        shallow: Arc<CacheManager<ProcessedQueryParams, DB::CacheEntry>>,
+        shallow: Arc<CacheManager<DfQueryParameters, DB::CacheEntry>>,
     ) -> Backend<DB, Handler> {
         metrics::gauge!(recorded::CONNECTED_CLIENTS).increment(1.0);
         metrics::counter!(recorded::CLIENT_CONNECTIONS_OPENED).increment(1);
@@ -659,7 +659,7 @@ where
     is_internal_connection: bool,
 
     /// The adapter's shallow cache manager.
-    shallow: Arc<CacheManager<ProcessedQueryParams, DB::CacheEntry>>,
+    shallow: Arc<CacheManager<DfQueryParameters, DB::CacheEntry>>,
 
     /// Sender for shallow refresh requests to worker pool
     shallow_refresh_sender: Option<async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>>>,
@@ -872,7 +872,7 @@ where
     /// Results from upstream with optional pending shallow cache insert
     Upstream(
         DB::QueryResult<'a>,
-        Option<CacheInsertGuard<ProcessedQueryParams, DB::CacheEntry>>,
+        Option<CacheInsertGuard<DfQueryParameters, DB::CacheEntry>>,
     ),
     /// Results from upstream that are explicitly buffered in a Vec (from postgres' Simple Query
     /// Protocol)
@@ -997,7 +997,7 @@ where
         upstream: Option<&'a mut DB>,
         query: &'a str,
         event: &mut QueryExecutionEvent,
-        cache: Option<CacheInsertGuard<ProcessedQueryParams, DB::CacheEntry>>,
+        cache: Option<CacheInsertGuard<DfQueryParameters, DB::CacheEntry>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let upstream = upstream.ok_or_else(|| {
             ReadySetError::Internal("Un-prepared fallback requires an upstream".to_string())
@@ -2782,11 +2782,11 @@ where
     async fn query_shallow<'a>(
         noria: &'a mut NoriaConnector,
         upstream: Option<&'a mut DB>,
-        shallow: &Arc<CacheManager<ProcessedQueryParams, DB::CacheEntry>>,
+        shallow: &Arc<CacheManager<DfQueryParameters, DB::CacheEntry>>,
         view_request: &ViewCreateRequest,
         query: &'a str,
         event: &mut QueryExecutionEvent,
-        processed_query_params: Option<ProcessedQueryParams>,
+        processed_query_params: Option<DfQueryParameters>,
         refresh: Option<&async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let query_id = QueryId::from_select(&view_request.statement, noria.schema_search_path());
@@ -2824,14 +2824,14 @@ where
     async fn query_adhoc_select<'a>(
         noria: &'a mut NoriaConnector,
         upstream: Option<&'a mut DB>,
-        shallow: &Arc<CacheManager<ProcessedQueryParams, DB::CacheEntry>>,
+        shallow: &Arc<CacheManager<DfQueryParameters, DB::CacheEntry>>,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         original_query: &'a str,
         view_request: &ViewCreateRequest,
         mut status: QueryStatus,
         event: &mut QueryExecutionEvent,
-        processed_query_params: ProcessedQueryParams,
+        processed_query_params: DfQueryParameters,
         sampler_tx: Option<
             &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
         >,
@@ -2990,8 +2990,8 @@ where
     fn process_and_check_query(
         &self,
         q: &mut ViewCreateRequest,
-        params: adapter_rewrites::AdapterRewriteParams,
-    ) -> (bool, Option<QueryStatus>, Option<ProcessedQueryParams>) {
+        params: AdapterRewriteParams,
+    ) -> (bool, Option<QueryStatus>, Option<DfQueryParameters>) {
         match adapter_rewrites::process_query(&mut q.statement, params) {
             Ok(processed_query_params) => {
                 let status = self.state.query_status_cache.query_status(q);
@@ -3020,8 +3020,8 @@ where
     fn lookup_topk_cache(
         &self,
         q: &mut ViewCreateRequest,
-        rewrite_params: adapter_rewrites::AdapterRewriteParams,
-    ) -> Option<(bool, Option<QueryStatus>, Option<ProcessedQueryParams>)> {
+        rewrite_params: AdapterRewriteParams,
+    ) -> Option<(bool, Option<QueryStatus>, Option<DfQueryParameters>)> {
         // if the cache is not yet created, it's probably better
         // to let the adapter try the other path.
         let (_should_try, status, params) = self.process_and_check_query(q, rewrite_params);
@@ -3059,7 +3059,7 @@ where
     fn noria_should_try_select(
         &self,
         q: &mut ViewCreateRequest,
-    ) -> (bool, Option<QueryStatus>, Option<ProcessedQueryParams>) {
+    ) -> (bool, Option<QueryStatus>, Option<DfQueryParameters>) {
         let mut rewrite_params = self.noria.rewrite_params();
 
         let is_topk_candidate =
@@ -3617,7 +3617,7 @@ where
 {
     async fn shallow_refresh_result(
         result: DB::QueryResult<'_>,
-        cache: CacheInsertGuard<ProcessedQueryParams, DB::CacheEntry>,
+        cache: CacheInsertGuard<DfQueryParameters, DB::CacheEntry>,
     ) -> std::io::Result<()> {
         result.refresh(cache).await
     }
@@ -3809,7 +3809,7 @@ async fn remove_ddl_on_error<T, F, Fut>(
 
 /// Recreate shallow caches from stored DDL requests on adapter startup.
 pub async fn recreate_shallow_caches<V>(
-    shallow: Arc<CacheManager<ProcessedQueryParams, V>>,
+    shallow: Arc<CacheManager<DfQueryParameters, V>>,
     ddl_requests: Vec<CacheDDLRequest>,
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,
@@ -3828,7 +3828,7 @@ where
 }
 
 async fn recreate_single_shallow_cache<V>(
-    shallow: &CacheManager<ProcessedQueryParams, V>,
+    shallow: &CacheManager<DfQueryParameters, V>,
     req: CacheDDLRequest,
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,

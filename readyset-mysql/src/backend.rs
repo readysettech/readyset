@@ -23,7 +23,7 @@ use readyset_data::encoding::Encoding;
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
 use readyset_shallow::{CacheInsertGuard, QueryMetadata};
-use readyset_sql_passes::adapter_rewrites::ProcessedQueryParams;
+use readyset_sql_passes::adapter_rewrites::DfQueryParameters;
 use readyset_util::redacted::{RedactedString, Sensitive};
 use std::io::ErrorKind;
 use streaming_iterator::StreamingIterator;
@@ -490,7 +490,7 @@ where
 async fn handle_upstream_result<S>(
     result: upstream::QueryResult<'_>,
     writer: QueryResultWriter<'_, S>,
-    cache: Option<CacheInsertGuard<ProcessedQueryParams, Vec<DfValue>>>,
+    cache: Option<CacheInsertGuard<DfQueryParameters, Vec<DfValue>>>,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
