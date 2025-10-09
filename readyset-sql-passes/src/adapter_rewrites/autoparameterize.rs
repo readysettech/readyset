@@ -12,6 +12,7 @@ struct AutoParameterizeVisitor {
     in_supported_position: bool,
     param_index: usize,
     query_depth: u8,
+    visit_limit_clause: bool,
 }
 
 impl AutoParameterizeVisitor {
@@ -243,6 +244,17 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
 
         visit_mut::walk_offset(self, offset)
     }
+
+    fn visit_limit_clause(
+        &mut self,
+        limit_clause: &'ast mut readyset_sql::ast::LimitClause,
+    ) -> Result<(), Self::Error> {
+        if self.visit_limit_clause {
+            visit_mut::walk_limit_clause(self, limit_clause)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Walks through the query to determine whether the query has equals comparisons, range
@@ -392,7 +404,9 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
 /// where they appear as a tuple of (placeholder position, value).
 pub fn auto_parameterize_query(
     query: &mut SelectStatement,
+    prev: Vec<(usize, Literal)>,
     server_supports_mixed_comparisons: bool,
+    visit_limit_clause: bool,
 ) -> Vec<(usize, Literal)> {
     // Don't try to auto-parameterize equal-queries that already contain range params for now, since
     // we don't yet allow mixing range and equal parameters in the same query
@@ -437,6 +451,9 @@ pub fn auto_parameterize_query(
     let mut visitor = AutoParameterizeVisitor {
         autoparameterize_equals,
         autoparameterize_ranges,
+        param_index: prev.len(),
+        out: prev,
+        visit_limit_clause,
         ..Default::default()
     };
     #[allow(clippy::unwrap_used)] // error is !, which can never be returned
@@ -469,7 +486,12 @@ mod tests {
     ) {
         let mut query = parse_select_statement(query, dialect);
         let expected = parse_select_statement(expected_query, dialect);
-        let res = auto_parameterize_query(&mut query, server_supports_mixed_comparisons);
+        let res = auto_parameterize_query(
+            &mut query,
+            Vec::new(),
+            server_supports_mixed_comparisons,
+            true,
+        );
         assert_eq!(
             query,
             expected,

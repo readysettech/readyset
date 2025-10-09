@@ -20,9 +20,8 @@ use readyset_sql::{Dialect, DialectDisplay, TryFromDialect, TryIntoDialect as _}
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
-/// Struct storing information about parameters processed from a raw user supplied query, which
-/// provides support for converting a user-supplied parameter list into a set of lookup keys to pass
-/// to ReadySet.
+/// A fancier `QueryParameters` that augments parameters with additional limit-related information
+/// parameterized out.
 ///
 /// Construct a [`DfQueryParameters`] by calling [`process_query`], then pass the list of
 /// user-provided parameters to [`DfQueryParameters::make_keys`] to make a list of lookup keys to
@@ -34,6 +33,15 @@ pub struct DfQueryParameters {
     rewritten_in_conditions: Vec<RewrittenIn>,
     auto_parameters: Vec<(usize, Literal)>,
     pagination_parameters: AdapterPaginationParams,
+}
+
+/// Information about parameters from a query, which allows converting a parameter list into a
+/// set of lookup keys.
+#[derive(Debug, Clone)]
+pub struct QueryParameters {
+    dialect: Dialect,
+    reordered_placeholders: Option<Vec<usize>>,
+    auto_parameters: Vec<(usize, Literal)>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -99,22 +107,54 @@ impl AdapterRewriteParams {
     }
 }
 
-/// This rewrite pass accomplishes the following:
+/// An initial rewrite pass mostly for autoparameterization.
+///
+/// The transformations applied to the query result in a query that is equivalent to the
+/// original query.
+///
 /// - Remaps dollar sign placeholders so that they appear in order
 /// - Replaces literals with placeholders when they can be used as lookup indices in the noria
 ///   dataflow representation of the query. Note that this pass may not replace all literals and is
 ///   therefore cannot guarantee that the rewritten query is free of user PII.
-/// - Collapses 'WHERE <expr> IN ?, ... ?' to 'WHERE <expr> = ?'
-/// - Removes `OFFSET ?` if there isn't a `LIMIT`
-pub fn process_query(
+pub fn rewrite_equivalent(
     query: &mut SelectStatement,
-    params: AdapterRewriteParams,
-) -> ReadySetResult<DfQueryParameters> {
+    flags: AdapterRewriteParams,
+) -> ReadySetResult<QueryParameters> {
     let reordered_placeholders = reorder_numbered_placeholders(query);
+    let auto_parameters = autoparameterize::auto_parameterize_query(
+        query,
+        Vec::new(),
+        flags.server_supports_mixed_comparisons,
+        false,
+    );
+    number_placeholders(query)?;
+
+    Ok(QueryParameters {
+        dialect: flags.dialect,
+        reordered_placeholders,
+        auto_parameters,
+    })
+}
+
+/// Additional rewrites for Readyset requirements.
+///
+/// After these transformations, the query is NOT equivalent to the original query unless
+/// paired with the data contained in the `DfQueryParameters`.
+pub fn rewrite_for_readyset(
+    query: &mut SelectStatement,
+    flags: AdapterRewriteParams,
+    prev: QueryParameters,
+) -> ReadySetResult<DfQueryParameters> {
+    let QueryParameters {
+        dialect,
+        reordered_placeholders,
+        auto_parameters,
+    } = prev;
+    assert_eq!(dialect, flags.dialect);
 
     let force_paginate_in_adapter = use_fallback_pagination(
-        params.server_supports_pagination,
-        params.server_supports_topk,
+        flags.server_supports_pagination,
+        flags.server_supports_topk,
         &query.limit_clause,
         &query.order,
     );
@@ -126,20 +166,112 @@ pub fn process_query(
         query.limit_clause.clone()
     };
 
-    let auto_parameters =
-        autoparameterize::auto_parameterize_query(query, params.server_supports_mixed_comparisons);
-    let rewritten_in_conditions = collapse_where_in(query, params.dialect)?;
-    number_placeholders(query)?;
-    Ok(DfQueryParameters {
-        dialect: params.dialect,
-        reordered_placeholders,
-        rewritten_in_conditions,
+    let auto_parameters = autoparameterize::auto_parameterize_query(
+        query,
         auto_parameters,
+        flags.server_supports_mixed_comparisons,
+        true,
+    );
+    let rewritten_in_conditions = collapse_where_in(query, flags.dialect)?;
+    number_placeholders(query)?;
+
+    Ok(DfQueryParameters {
+        dialect,
+        reordered_placeholders,
+        auto_parameters,
+        rewritten_in_conditions,
         pagination_parameters: AdapterPaginationParams {
             limit_clause,
             force_paginate_in_adapter,
         },
     })
+}
+
+/// Perform both generic SQL and Readyset-specific query rewriting.
+pub fn process_query(
+    query: &mut SelectStatement,
+    flags: AdapterRewriteParams,
+) -> ReadySetResult<DfQueryParameters> {
+    let params = rewrite_equivalent(query, flags)?;
+    rewrite_for_readyset(query, flags, params)
+}
+
+fn make_keys<'param, T>(
+    dialect: Dialect,
+    reordered_placeholders: &Option<Vec<usize>>,
+    auto_parameters: &[(usize, Literal)],
+    rewritten_in_conditions: Option<&[RewrittenIn]>,
+    pagination_parameters: Option<&AdapterPaginationParams>,
+    params: &'param [T],
+) -> ReadySetResult<Vec<Cow<'param, [T]>>>
+where
+    T: Clone + TryFromDialect<Literal> + Debug + Default + PartialEq,
+{
+    let params = if let Some(order_map) = reordered_placeholders {
+        Cow::Owned(reorder_params(params, order_map)?)
+    } else {
+        Cow::Borrowed(params)
+    };
+
+    let mut params = params.as_ref();
+
+    if let Some(pagination_parameters) = pagination_parameters {
+        let AdapterPaginationParams {
+            limit_clause,
+            force_paginate_in_adapter,
+        } = pagination_parameters;
+
+        if *force_paginate_in_adapter {
+            // When fallback pagination is used, remove the parameters for offset and limit from the
+            // list
+            if matches!(limit_clause.offset(), Some(Literal::Placeholder(_))) {
+                // Skip parameter for offset
+                params = &params[..params.len() - 1];
+            }
+            if matches!(limit_clause.limit(), Some(Literal::Placeholder(_))) {
+                // Skip parameter for limit
+                params = &params[..params.len() - 1];
+            }
+        }
+    }
+
+    if params.is_empty() && auto_parameters.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let auto_parameters = auto_parameters
+        .iter()
+        .map(|(i, lit)| -> ReadySetResult<_> { Ok((*i, lit.clone().try_into_dialect(dialect)?)) })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let params = splice_auto_parameters(params, &auto_parameters);
+
+    if let Some(rewritten_in_conditions) = rewritten_in_conditions
+        && !rewritten_in_conditions.is_empty()
+    {
+        let params = explode_params(params.as_ref(), rewritten_in_conditions)
+            .map(|k| Cow::Owned(k.into_owned()))
+            .collect();
+        Ok(params)
+    } else {
+        Ok(vec![Cow::Owned(params.into_owned())])
+    }
+}
+
+impl QueryParameters {
+    pub fn make_keys<'param, T>(&self, params: &'param [T]) -> ReadySetResult<Vec<Cow<'param, [T]>>>
+    where
+        T: Clone + TryFromDialect<Literal> + Debug + Default + PartialEq,
+    {
+        make_keys(
+            self.dialect,
+            &self.reordered_placeholders,
+            &self.auto_parameters,
+            None,
+            None,
+            params,
+        )
+    }
 }
 
 impl DfQueryParameters {
@@ -213,53 +345,13 @@ impl DfQueryParameters {
     where
         T: Clone + TryFromDialect<Literal> + Debug + Default + PartialEq,
     {
-        let params = if let Some(order_map) = &self.reordered_placeholders {
-            Cow::Owned(reorder_params(params, order_map)?)
-        } else {
-            Cow::Borrowed(params)
-        };
-
-        let mut params = params.as_ref();
-
-        let AdapterPaginationParams {
-            limit_clause,
-            force_paginate_in_adapter,
-        } = &self.pagination_parameters;
-
-        if *force_paginate_in_adapter {
-            // When fallback pagination is used, remove the parameters for offset and limit from the
-            // list
-            if matches!(limit_clause.offset(), Some(Literal::Placeholder(_))) {
-                // Skip parameter for offset
-                params = &params[..params.len() - 1];
-            }
-            if matches!(limit_clause.limit(), Some(Literal::Placeholder(_))) {
-                // Skip parameter for limit
-                params = &params[..params.len() - 1];
-            }
-        }
-
-        if params.is_empty() && self.auto_parameters.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let auto_parameters = self
-            .auto_parameters
-            .clone()
-            .into_iter()
-            .map(|(i, lit)| -> ReadySetResult<_> { Ok((i, lit.try_into_dialect(self.dialect)?)) })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let params = splice_auto_parameters(params, &auto_parameters);
-
-        if self.rewritten_in_conditions.is_empty() {
-            return Ok(vec![Cow::Owned(params.into_owned())]);
-        }
-
-        Ok(
-            explode_params(params.as_ref(), &self.rewritten_in_conditions)
-                .map(|k| Cow::Owned(k.into_owned()))
-                .collect(),
+        make_keys(
+            self.dialect,
+            &self.reordered_placeholders,
+            &self.auto_parameters,
+            Some(&self.rewritten_in_conditions),
+            Some(&self.pagination_parameters),
+            params,
         )
     }
 }
