@@ -81,7 +81,8 @@ pub mod utils;
 // Benchmarks
 mod workload_emulator;
 
-pub use workload_emulator::{QuerySet, WorkloadEmulator};
+pub use spec::QuerySet;
+pub use workload_emulator::WorkloadEmulator;
 
 pub const QUANTILES: &[(&str, f64)] = &[
     ("p10", 0.1),

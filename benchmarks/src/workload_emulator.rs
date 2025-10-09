@@ -12,29 +12,23 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
-use database_utils::{DatabaseConnection, DatabaseStatement, DatabaseType, QueryableConnection};
+use database_utils::{DatabaseType, QueryableConnection};
 use hdrhistogram::Histogram;
 use metrics::Unit;
-use rand::distr::Uniform;
-use rand_distr::weighted::WeightedAliasIndex;
-use rand_distr::{Distribution, Zipf};
-use readyset_data::{DfType, DfValue, Dialect};
-use readyset_sql::ast::SqlType;
+use readyset_data::DfValue;
 use readyset_sql_parsing::ParsingPreset;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
-use crate::spec::WorkloadSpec;
+use crate::spec::{Query, QuerySet, WorkloadSpec};
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::query::interpolate_params;
 use crate::utils::us_to_ms;
 
 const REPORT_RESULTS_INTERVAL: Duration = Duration::from_millis(500);
-
-pub type Distributions = HashMap<String, Arc<(Vec<Vec<DfValue>>, Sampler)>>;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 pub enum BenchmarkType {
@@ -109,20 +103,6 @@ pub struct WorkloadEmulator {
     query_set: Arc<Mutex<Option<Arc<QuerySet>>>>,
 }
 
-/// A query with its index and generator
-pub struct Query {
-    pub(crate) spec: String,
-    pub idx: usize,
-    pub(crate) cols: Vec<ColGenerator>,
-    pub migrate: bool,
-}
-
-/// A vector of queries and weights
-pub struct QuerySet {
-    pub(crate) queries: Vec<Query>,
-    pub(crate) weights: WeightedAliasIndex<usize>,
-}
-
 #[derive(Clone)]
 pub(crate) struct WorkloadThreadParams {
     deployment: DeploymentParameters,
@@ -131,18 +111,6 @@ pub(crate) struct WorkloadThreadParams {
     query_execution_mode: QueryExecutionMode,
     target_qps: Option<u64>,
     workers: u64,
-}
-
-pub enum Sampler {
-    Zipf(Zipf<f64>),
-    Uniform(Uniform<usize>),
-}
-
-/// Generates parameter data for a single placeholder in the query
-pub(crate) struct ColGenerator {
-    pub(crate) dist: Arc<(Vec<Vec<DfValue>>, Sampler)>,
-    pub(crate) sql_type: SqlType,
-    pub(crate) col: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -266,118 +234,6 @@ impl BenchmarkControl for WorkloadEmulator {
 
     fn data_generator(&mut self) -> Option<&mut DataGenerator> {
         self.data_generator.as_mut()
-    }
-}
-
-impl Sampler {
-    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> usize {
-        match self {
-            Sampler::Zipf(z) => z.sample(rng).round() as _,
-            Sampler::Uniform(u) => u.sample(rng),
-        }
-    }
-}
-
-impl QuerySet {
-    pub async fn prepare_all(
-        &self,
-        conn: &mut DatabaseConnection,
-    ) -> anyhow::Result<Vec<DatabaseStatement>> {
-        let mut prepared = Vec::with_capacity(self.queries.len());
-        for query in self.queries.iter() {
-            prepared.push(conn.prepare(query.spec.to_string()).await?);
-        }
-        Ok(prepared)
-    }
-
-    pub fn get_query(&self) -> &Query {
-        if self.queries.len() == 1 {
-            return &self.queries[0];
-        }
-
-        let mut rng = rand::rng();
-        &self.queries[self.weights.sample(&mut rng)]
-    }
-
-    pub fn queries(&self) -> &[Query] {
-        &self.queries
-    }
-}
-
-impl Query {
-    /// Get params for this query in a specific index
-    pub fn get_params_index(&self, index: usize) -> Option<Vec<DfValue>> {
-        if self.cols.is_empty() {
-            return None;
-        }
-
-        let mut ret = Vec::with_capacity(self.cols.len());
-        let mut last_row: &Vec<DfValue> = &vec![];
-        let mut last_set: Option<Arc<_>> = None;
-
-        for ColGenerator {
-            dist,
-            sql_type,
-            col,
-        } in &self.cols
-        {
-            if *col == 0
-                || last_set
-                    .as_ref()
-                    .map(|s| !Arc::ptr_eq(dist, s))
-                    .unwrap_or(false)
-            {
-                last_set = Some(dist.clone());
-                last_row = dist.0.get(index)?;
-            }
-
-            let target_type =
-                DfType::from_sql_type(sql_type, Dialect::DEFAULT_MYSQL, |_| None, None).unwrap();
-
-            ret.push(
-                last_row[*col]
-                    .coerce_to(&target_type, &DfType::Unknown) // No from_ty, we're dealing with literal params
-                    .unwrap(),
-            )
-        }
-
-        Some(ret)
-    }
-
-    pub fn get_params(&self) -> Vec<DfValue> {
-        let mut ret = Vec::with_capacity(self.cols.len());
-        let mut rng = rand::rng();
-
-        let mut last_row: &Vec<DfValue> = &vec![];
-        let mut last_set: Option<Arc<_>> = None;
-
-        for ColGenerator {
-            dist,
-            sql_type,
-            col,
-        } in &self.cols
-        {
-            if *col == 0
-                || last_set
-                    .as_ref()
-                    .map(|s| !Arc::ptr_eq(dist, s))
-                    .unwrap_or(false)
-            {
-                last_set = Some(dist.clone());
-                last_row = &dist.0[dist.1.sample(&mut rng)];
-            }
-
-            let target_type =
-                DfType::from_sql_type(sql_type, Dialect::DEFAULT_MYSQL, |_| None, None).unwrap();
-
-            ret.push(
-                last_row[*col]
-                    .coerce_to(&target_type, &DfType::Unknown) // No from_ty, we're dealing with literal params
-                    .unwrap(),
-            )
-        }
-
-        ret
     }
 }
 

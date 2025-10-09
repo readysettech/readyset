@@ -100,17 +100,18 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
-use database_utils::{DatabaseConnection, QueryableConnection};
+use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
 use rand::distr::Uniform;
 use rand::Rng;
-use rand_distr::{weighted::WeightedAliasIndex, Zipf};
-use readyset_data::DfValue;
+use rand_distr::weighted::WeightedAliasIndex;
+use rand_distr::{Distribution, Zipf};
+use readyset_data::{DfType, DfValue};
 use readyset_sql::{ast::*, Dialect, DialectDisplay};
 use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tracing::info;
 
-use crate::workload_emulator::{ColGenerator, Distributions, Query, QuerySet, Sampler};
+pub type Distributions = HashMap<String, Arc<(Vec<Vec<DfValue>>, Sampler)>>;
 
 /// A Noria/upstream workload specification, consisting of a list of distributions that specify how
 /// to generate data for the workload, and a list of weighted queries to run
@@ -233,9 +234,6 @@ impl WorkloadSpec {
                         .collect()
                 }
                 WorkloadDistributionSource::Query { query } => {
-                    // Make sure we don't get a timeout when inserting into the database
-                    conn.query_drop("SET SESSION MAX_EXECUTION_TIME=0").await?;
-
                     conn.query(query).await?.try_into()?
                 }
             };
@@ -325,11 +323,151 @@ impl WorkloadSpec {
                 spec: spec.clone(),
                 cols,
                 migrate: *migrate,
+                dialect: conn.dialect().into(),
             })
         }
 
         Ok(QuerySet { weights, queries })
     }
+}
+
+/// A query with its index and generator
+pub struct Query {
+    pub(crate) spec: String,
+    pub idx: usize,
+    pub(crate) cols: Vec<ColGenerator>,
+    pub migrate: bool,
+    dialect: readyset_data::Dialect,
+}
+
+impl Query {
+    /// Get params for this query in a specific index
+    pub fn get_params_index(&self, index: usize) -> Option<Vec<DfValue>> {
+        if self.cols.is_empty() {
+            return None;
+        }
+
+        let mut ret = Vec::with_capacity(self.cols.len());
+        let mut last_row: &Vec<DfValue> = &vec![];
+        let mut last_set: Option<Arc<_>> = None;
+
+        for ColGenerator {
+            dist,
+            sql_type,
+            col,
+        } in &self.cols
+        {
+            if *col == 0
+                || last_set
+                    .as_ref()
+                    .map(|s| !Arc::ptr_eq(dist, s))
+                    .unwrap_or(false)
+            {
+                last_set = Some(dist.clone());
+                last_row = dist.0.get(index)?;
+            }
+
+            let target_type =
+                DfType::from_sql_type(sql_type, self.dialect, |_| None, None).unwrap();
+
+            ret.push(
+                last_row[*col]
+                    .coerce_to(&target_type, &DfType::Unknown) // No from_ty, we're dealing with literal params
+                    .unwrap(),
+            )
+        }
+
+        Some(ret)
+    }
+
+    pub fn get_params(&self) -> Vec<DfValue> {
+        let mut ret = Vec::with_capacity(self.cols.len());
+        let mut rng = rand::rng();
+
+        let mut last_row: &Vec<DfValue> = &vec![];
+        let mut last_set: Option<Arc<_>> = None;
+
+        for ColGenerator {
+            dist,
+            sql_type,
+            col,
+        } in &self.cols
+        {
+            if *col == 0
+                || last_set
+                    .as_ref()
+                    .map(|s| !Arc::ptr_eq(dist, s))
+                    .unwrap_or(false)
+            {
+                last_set = Some(dist.clone());
+                last_row = &dist.0[dist.1.sample(&mut rng)];
+            }
+
+            let target_type =
+                DfType::from_sql_type(sql_type, self.dialect, |_| None, None).unwrap();
+
+            ret.push(
+                last_row[*col]
+                    .coerce_to(&target_type, &DfType::Unknown) // No from_ty, we're dealing with literal params
+                    .unwrap(),
+            )
+        }
+
+        ret
+    }
+}
+
+/// A vector of queries and weights
+pub struct QuerySet {
+    pub(crate) queries: Vec<Query>,
+    pub(crate) weights: WeightedAliasIndex<usize>,
+}
+
+impl QuerySet {
+    pub async fn prepare_all(
+        &self,
+        conn: &mut DatabaseConnection,
+    ) -> anyhow::Result<Vec<DatabaseStatement>> {
+        let mut prepared = Vec::with_capacity(self.queries.len());
+        for query in self.queries.iter() {
+            prepared.push(conn.prepare(query.spec.to_string()).await?);
+        }
+        Ok(prepared)
+    }
+
+    pub fn get_query(&self) -> &Query {
+        if self.queries.len() == 1 {
+            return &self.queries[0];
+        }
+
+        let mut rng = rand::rng();
+        &self.queries[self.weights.sample(&mut rng)]
+    }
+
+    pub fn queries(&self) -> &[Query] {
+        &self.queries
+    }
+}
+
+pub enum Sampler {
+    Zipf(Zipf<f64>),
+    Uniform(Uniform<usize>),
+}
+
+impl Sampler {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> usize {
+        match self {
+            Sampler::Zipf(z) => z.sample(rng).round() as _,
+            Sampler::Uniform(u) => u.sample(rng),
+        }
+    }
+}
+
+/// Generates parameter data for a single placeholder in the query
+pub(crate) struct ColGenerator {
+    pub(crate) dist: Arc<(Vec<Vec<DfValue>>, Sampler)>,
+    pub(crate) sql_type: SqlType,
+    pub(crate) col: usize,
 }
 
 #[cfg(test)]
