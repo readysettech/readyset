@@ -334,6 +334,7 @@ impl WorkloadSpec {
 /// A query with its index and generator
 pub struct Query {
     pub(crate) spec: String,
+    /// The index of this query within the enclosing `QuerySet`.
     pub idx: usize,
     pub(crate) cols: Vec<ColGenerator>,
     pub migrate: bool,

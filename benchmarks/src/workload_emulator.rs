@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use clap::{Parser, ValueEnum};
 use database_utils::{DatabaseType, QueryableConnection};
 use hdrhistogram::Histogram;
-use metrics::Unit;
+use metrics::{counter, histogram, Unit};
 use readyset_data::DfValue;
 use readyset_sql_parsing::ParsingPreset;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
-use crate::spec::{Query, QuerySet, WorkloadSpec};
+use crate::spec::{QuerySet, WorkloadSpec};
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::query::interpolate_params;
@@ -104,6 +104,12 @@ pub struct WorkloadEmulator {
 }
 
 #[derive(Clone)]
+pub(crate) struct WorkloadMetrics {
+    latency: metrics::Histogram,
+    count: metrics::Counter,
+}
+
+#[derive(Clone)]
 pub(crate) struct WorkloadThreadParams {
     deployment: DeploymentParameters,
     query_set: Arc<QuerySet>,
@@ -111,6 +117,7 @@ pub(crate) struct WorkloadThreadParams {
     query_execution_mode: QueryExecutionMode,
     target_qps: Option<u64>,
     workers: u64,
+    metrics: Option<Vec<WorkloadMetrics>>,
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +192,31 @@ impl BenchmarkControl for WorkloadEmulator {
         let queries = spec
             .load_queries_with_config(&distributions, &mut conn, parsing_config)
             .await?;
+
+        // if the user has passed in a prometheus push gateway URL, they clearly want
+        // prometheus metrics recorded. Create the metrics instances here, to be referenced later.
+        let metrics = if deployment.prometheus_push_gateway.is_some() {
+            Some(
+                queries
+                    .queries
+                    .iter()
+                    .map(|q| {
+                        let latency = histogram!(
+                            "readyset_benchmark_execution_time_us",
+                            "query" => q.spec.clone(),
+                        );
+                        let count = counter!(
+                            "readyset_benchmark_execution_count",
+                            "query" => q.spec.clone(),
+                        );
+                        WorkloadMetrics { latency, count }
+                    })
+                    .collect(),
+            )
+        } else {
+            None
+        };
+
         *self.query_set.lock().unwrap() = Some(Arc::new(queries));
 
         let thread_data = WorkloadThreadParams {
@@ -194,6 +226,7 @@ impl BenchmarkControl for WorkloadEmulator {
             query_execution_mode: self.query_execution_mode,
             target_qps: self.target_qps,
             workers: self.workers,
+            metrics,
         };
 
         multi_thread::run_multithread_benchmark::<Self>(
@@ -209,23 +242,19 @@ impl BenchmarkControl for WorkloadEmulator {
     }
 
     fn labels(&self) -> HashMap<String, String> {
-        let mut labels: HashMap<String, String> = [
+        [
             ("spec".to_string(), self.spec.display().to_string()),
             ("workers".to_string(), self.workers.to_string()),
             (
                 "bench_type".to_string(),
                 format!("{:?}", self.benchmark_type),
             ),
+            (
+                "stmt_type".to_string(),
+                format!("{:?}", self.query_execution_mode),
+            ),
         ]
-        .into();
-
-        if let Some(queryset) = self.query_set.lock().unwrap().as_ref() {
-            for Query { spec, idx, .. } in &queryset.queries {
-                labels.insert(format!("query_{idx}"), spec.to_string());
-            }
-        }
-
-        labels
+        .into()
     }
 
     fn name(&self) -> &'static str {
@@ -337,7 +366,7 @@ impl MultithreadBenchmark for WorkloadEmulator {
                 interval.tick().await;
             }
 
-            let query = params.query_set.get_query();
+            let query = query_set.get_query();
             let query_params = query.get_params();
 
             // allow the specific execution mode to set up the query/params before starting the timer.
@@ -367,6 +396,13 @@ impl MultithreadBenchmark for WorkloadEmulator {
                     start.elapsed()
                 }
             };
+
+            if let Some(ref metrics) = params.metrics {
+                metrics[query.idx]
+                    .latency
+                    .record(duration.as_micros() as f64);
+                metrics[query.idx].count.increment(1);
+            }
 
             result_batch.queries[query.idx]
                 .record(duration.as_micros() as u64)
