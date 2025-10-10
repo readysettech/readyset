@@ -41,13 +41,26 @@ steps:
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
+    agents:
+      queue: c7a-xlarge
     retry: *retry_on_agent_kill
 
   - label: ':rust: :lock: Check cargo-deny'
-    commands:
-      - '[ -d public ] && cd public'
-      - export RUST_BACKTRACE=full
-      - cargo --locked deny check
+    command: |
+      [ -d public ] && cd public
+      export RUST_BACKTRACE=full
+      hard_fail=0
+      soft_fail=0
+      cargo --locked deny check bans licenses sources  || hard_fail=1
+      cargo --locked deny check advisories             || soft_fail=1
+
+      if [ $$hard_fail -eq 1 ]; then
+        exit 1  # Hard fail for bans/licenses/sources
+      elif [ $$soft_fail -eq 1 ]; then
+        exit 3  # Soft fail for advisories only
+      else
+        exit 0
+      fi
     plugins:
       - docker#${DOCKER_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
@@ -59,8 +72,11 @@ steps:
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
+    agents:
+      queue: c7a-2xlarge
     retry: *retry_on_agent_kill
-    soft_fail: true
+    soft_fail:
+      - exit_status: 3
 
   - label: ':clippy: Check clippy'
     key: check-clippy
@@ -81,6 +97,8 @@ steps:
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
+    agents:
+      queue: c7a-2xlarge
     retry: *retry_on_agent_kill
 
   - label: ":rust: Run tests (nextest, default upstreams, MRBR off): {{ matrix.arch }}"
