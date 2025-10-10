@@ -57,12 +57,14 @@ readyset-decimal = { path = "../readyset-decimal" }
 replication-offset = { path = "../replication-offset" }
 
 [dev-dependencies]
+assert_matches = { workspace = true }
 bincode = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 proptest-stateful = { path = "../proptest-stateful" }
 rand = { workspace = true }
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers" }
+readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-server = { path = "../readyset-server" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = [
     "test-util",

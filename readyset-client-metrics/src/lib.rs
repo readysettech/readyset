@@ -155,6 +155,13 @@ impl TryFrom<&str> for QueryDestination {
     }
 }
 
+impl TryFrom<String> for QueryDestination {
+    type Error = ReadySetError;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.as_str().try_into()
+    }
+}
+
 impl fmt::Display for QueryDestination {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

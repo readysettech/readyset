@@ -29,11 +29,13 @@ use std::iter::once;
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 
+use assert_matches::assert_matches;
 use async_trait::async_trait;
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, OptsBuilder, Row};
 use mysql_time::MySqlTime;
+use pretty_assertions::assert_eq;
 use proptest::prelude::*;
 use proptest::strategy::{BoxedStrategy, Just, Strategy};
 use proptest::{collection, sample};
@@ -41,6 +43,7 @@ use proptest_stateful::{
     proptest_config_with_local_failure_persistence, ModelState, ProptestStatefulConfig,
 };
 use rand::seq::IndexedRandom as _;
+use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::{mysql_helpers, TestBuilder};
 use readyset_data::DfValue;
@@ -809,8 +812,9 @@ impl ModelState for DDLModelState {
             rs_results.sort_unstable();
             mysql_results.sort_unstable();
 
-            pretty_assertions::assert_eq!(mysql_results, rs_results, "MySQL(left) and Readyset(right) results do not match for table: {TABLE_NAME}");
-            pretty_assertions::assert_eq!(rs_executed_at.0, "readyset", "Readyset did not execute the last statement for table: {TABLE_NAME}");
+            assert_eq!(mysql_results, rs_results, "MySQL(left) and Readyset(right) results do not match for table: {TABLE_NAME}");
+            let destination: QueryDestination = rs_executed_at.0.try_into().unwrap();
+            assert_matches!(destination, QueryDestination::Readyset(_), "Readyset did not execute the last statement for table: {TABLE_NAME}");
         });
     }
 

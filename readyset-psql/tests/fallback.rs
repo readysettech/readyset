@@ -7,6 +7,7 @@ use postgres_types::private::BytesMut;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::query_status_cache::MigrationStyle;
 use readyset_adapter::BackendBuilder;
+use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::psql_helpers::{connect, upstream_config, PostgreSQLAdapter};
 use readyset_client_test_helpers::{sleep, Adapter, TestBuilder};
 use readyset_data::DfValue;
@@ -1954,7 +1955,10 @@ async fn named_cache_queryable_after_being_cleared() {
             _ => panic!(),
         };
 
-        assert_eq!(destination, "readyset");
+        assert_eq!(
+            destination.as_str().try_into(),
+            Ok(QueryDestination::Readyset(Some("test".into())))
+        );
 
         shutdown_tx.shutdown().await;
         sleep().await;
@@ -2005,7 +2009,10 @@ async fn named_cache_queryable_after_being_cleared() {
         AssertUnwindSafe(|| destination)
     },
     then_assert: |destination| {
-        assert_eq!(destination(), "readyset");
+        assert_eq!(
+            destination().try_into(),
+            Ok(QueryDestination::Readyset(Some("test".into())))
+        );
     });
 
     shutdown_tx.shutdown().await;
