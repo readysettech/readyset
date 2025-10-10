@@ -15,7 +15,9 @@
 //! [presampling](presampled) - sampling spans at creation time rather than when a subscriber would
 //! send them to a collector.
 
+use std::backtrace::Backtrace;
 use std::fs::{File, OpenOptions};
+use std::panic::PanicHookInfo;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -358,6 +360,8 @@ impl Options {
         #[cfg(debug_assertions)]
         tracing::warn!("Running a debug build");
 
+        install_tracing_panic_hook();
+
         if let Err(e) = dynamic::init(reload_handle) {
             tracing::warn!("Could not initialize dynamic LOG_LEVEL update callback: {e}")
         }
@@ -394,6 +398,28 @@ impl Options {
             None => format!("{deployment}_statements.log"),
         }
     }
+}
+
+fn panic_hook(panic_info: &PanicHookInfo<'_>) {
+    // TODO: Use [`PanicHookInfo::payload_as_str`] when/if it gets stabilized
+    let payload = panic_info.payload();
+    let payload = payload
+        .downcast_ref::<&str>()
+        .map(|s| &**s)
+        .or_else(|| payload.downcast_ref::<String>().map(|s| s.as_str()));
+
+    tracing::error!(
+        panic = true,
+        thread = std::thread::current().name(),
+        payload,
+        location = panic_info.location().map(|l| l.to_string()),
+        backtrace = %Backtrace::capture(),
+        "thread panicked",
+    );
+}
+
+fn install_tracing_panic_hook() {
+    std::panic::set_hook(Box::new(panic_hook));
 }
 
 /// Guard that handles cleanup of OpenTelemetry resources on drop
@@ -433,6 +459,9 @@ pub fn init_test_logging() {
             .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
             .with_writer(file)
             .try_init();
+        // We enable this here but not in normal tests only to preserve the pretty colors and
+        // formatting afforded by `pretty_assertions`.
+        install_tracing_panic_hook();
     } else {
         let _ = tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
