@@ -40,9 +40,10 @@ mysql-time = { path = "../mysql-time" }
 nom-sql = { path = "../nom-sql" }
 psql-srv = { path = "../psql-srv", optional = true }
 query-generator = { path = "../query-generator" }
-readyset-adapter = { path = "../readyset-adapter/", optional = true }
-readyset-alloc = { path = "../readyset-alloc/" }
-readyset-client = { path = "../readyset-client/", optional = true }
+readyset-adapter = { path = "../readyset-adapter", optional = true }
+readyset-alloc = { path = "../readyset-alloc" }
+readyset-client = { path = "../readyset-client", optional = true }
+readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-data = { path = "../readyset-data" }
 readyset-decimal = { path = "../readyset-decimal" }
 readyset-mysql = { path = "../readyset-mysql", optional = true }

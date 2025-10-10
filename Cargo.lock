@@ -5216,6 +5216,7 @@ dependencies = [
  "readyset-adapter",
  "readyset-alloc",
  "readyset-client",
+ "readyset-client-metrics",
  "readyset-data",
  "readyset-decimal",
  "readyset-mysql",

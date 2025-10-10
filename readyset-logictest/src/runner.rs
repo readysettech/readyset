@@ -10,11 +10,14 @@ use std::{io, mem};
 use anyhow::{anyhow, bail, Context};
 use itertools::Itertools;
 use tokio::time::sleep;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
+
+#[cfg(feature = "in-process-readyset")]
+use tracing::error;
 
 use database_utils::tls::ServerCertVerification;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection};
-use readyset_adapter::backend::QueryDestination;
+use readyset_client_metrics::QueryDestination;
 use readyset_data::{Collation, DfType, DfValue};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_util::retry_with_exponential_backoff;
