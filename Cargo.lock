@@ -1424,15 +1424,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dir-size"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e76a7e228331a28ca06810117daf0b28eb87083fc31a8972af17b7d13024e3a"
-dependencies = [
- "rayon",
-]
-
-[[package]]
 name = "dirs-next"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4709,7 +4700,6 @@ dependencies = [
  "crossbeam-skiplist",
  "database-utils",
  "dataflow-state",
- "dir-size",
  "fail",
  "failpoint-macros",
  "futures",
@@ -4754,6 +4744,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-futures",
+ "walkdir",
 ]
 
 [[package]]

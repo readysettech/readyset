@@ -14,7 +14,6 @@ antithesis_sdk = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 crossbeam-skiplist = { workspace = true }
-dir-size = { workspace = true }
 futures-util = { workspace = true }
 fail = { workspace = true }
 failpoint-macros = { path = "../failpoint-macros" }
@@ -30,6 +29,7 @@ tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
 tokio-stream = { workspace = true, features = ["net"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 tracing-futures = { workspace = true }
+walkdir = { workspace = true }
 
 # Local dependencies
 database-utils = { path = "../database-utils" }

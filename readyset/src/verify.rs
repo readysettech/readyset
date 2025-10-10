@@ -1,12 +1,12 @@
 use std::env::current_dir;
 use std::fmt::{Display, Formatter};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, ensure, Error, Result};
-use dir_size::get_size_in_bytes;
 use regex::{Captures, Regex};
 use sysinfo::Disks;
 use tracing::info;
+use walkdir::WalkDir;
 
 use database_utils::tls::ServerCertVerification;
 use database_utils::{
@@ -248,6 +248,15 @@ async fn verify_permissions(conn: &mut DatabaseConnection, options: &Options) ->
     Ok(())
 }
 
+fn dir_size(dir: &Path) -> u64 {
+    WalkDir::new(dir)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
+        .sum()
+}
+
 async fn verify_disk_space(conn: &mut DatabaseConnection, options: &Options) -> Result<()> {
     let config = &options.server_worker_options.replicator_config;
     if config.replication_tables.is_some() || config.replication_tables_ignore.is_some() {
@@ -290,9 +299,7 @@ async fn verify_disk_space(conn: &mut DatabaseConnection, options: &Options) -> 
     let free_bytes = disk.available_space();
     let used_bytes = if deployment_dir.exists() {
         // A preexisting deployment exists, get its size to discount it from the estimate.
-        get_size_in_bytes(&deployment_dir).map_err(|e| {
-            anyhow!("Failed to determine consumed space in directory {display}: {e}")
-        })?
+        dir_size(&deployment_dir)
     } else {
         0
     };

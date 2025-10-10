@@ -134,7 +134,6 @@ derive_more = { version = "2.0.1", features = [
     "display",
 ] }
 diff = "0.1.13"
-dir-size = "0.1"
 enum-display-derive = "0.1.1"
 enum-kinds = "0.5.1"
 enum_dispatch = "0.3.13"
