@@ -38,7 +38,7 @@ impl SizeOf for MemoryState {
     }
 
     fn is_empty(&self) -> bool {
-        self.state[0].is_empty()
+        self.state.iter().all(|s| s.is_empty())
     }
 }
 
@@ -1349,5 +1349,26 @@ mod tests {
 
             proptest_stateful::test::<IndexModelState>(config);
         }
+    }
+
+    #[test]
+    fn state_is_not_empty() {
+        let mut state = MemoryState::default();
+
+        let index = Index::hash_map(vec![0]);
+        let tag = Tag::new(1);
+
+        let index2 = Index::hash_map(vec![1]);
+        let tag2 = Tag::new(2);
+
+        state.add_index(index, Some(vec![tag]));
+        state.add_index(index2, Some(vec![tag2]));
+
+        // we must first fill a hole then insert a row.
+        state.mark_filled(KeyComparison::Equal(vec1![100.into()]), tag2);
+        state.insert(vec![1.into(), 100.into()], Some(tag2));
+
+        assert_eq!(state.row_count(), 1);
+        assert!(!state.is_empty());
     }
 }
