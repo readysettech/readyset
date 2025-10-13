@@ -15,6 +15,9 @@ use crate::{DfType, DfValue};
 /// The format for timestamps when parsed as text
 pub const TIMESTAMP_PARSE_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
 
+/// The ISO-8601 format for timestamps with T separator
+pub const ISO_TIMESTAMP_PARSE_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.f";
+
 /// The format for timestamps when presented as text
 pub const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
@@ -388,6 +391,7 @@ impl TimestampTz {
         Ok(
             if let Ok((naive_date_time, offset_tag)) =
                 NaiveDateTime::parse_and_remainder(ts, TIMESTAMP_PARSE_FORMAT)
+                    .or_else(|_| NaiveDateTime::parse_and_remainder(ts, ISO_TIMESTAMP_PARSE_FORMAT))
             {
                 if let Some(offset) = parse_timestamp_tag(offset_tag) {
                     offset?
@@ -398,8 +402,6 @@ impl TimestampTz {
                 } else {
                     naive_date_time.into()
                 }
-            } else if let Ok(dt) = NaiveDateTime::parse_from_str(ts, TIMESTAMP_PARSE_FORMAT) {
-                dt.into()
             } else if let Ok(dt) = NaiveDate::parse_from_str(ts, DATE_FORMAT) {
                 // Make TimestampTz object with time portion 00:00:00
                 dt.and_hms_opt(0, 0, 0)
@@ -838,8 +840,32 @@ mod tests {
                 .unwrap()
         );
 
+        // Test ISO-8601 format with T separator
+        assert_eq!(
+            TimestampTz::from_str("2012-02-09T12:12:12")
+                .unwrap()
+                .to_chrono()
+                .naive_local(),
+            chrono::NaiveDate::from_ymd_opt(2012, 2, 9)
+                .unwrap()
+                .and_hms_opt(12, 12, 12)
+                .unwrap()
+        );
+
         assert_eq!(
             TimestampTz::from_str("2004-10-19 10:23:54+02")
+                .unwrap()
+                .to_chrono(),
+            chrono::FixedOffset::east_opt(2 * 60 * 60)
+                .unwrap()
+                .with_ymd_and_hms(2004, 10, 19, 10, 23, 54)
+                .single()
+                .unwrap()
+        );
+
+        // Test ISO-8601 format with T separator and timezone
+        assert_eq!(
+            TimestampTz::from_str("2004-10-19T10:23:54+02")
                 .unwrap()
                 .to_chrono(),
             chrono::FixedOffset::east_opt(2 * 60 * 60)

@@ -50,7 +50,17 @@ const STARTUP_MESSAGE_APPLICATION_NAME_PARAMETER: &str = "application_name";
 const HEADER_LENGTH: usize = 5;
 const LENGTH_NULL_SENTINEL: i32 = -1;
 const NUL_BYTE: u8 = b'\0';
+
+/// The standard postgres representation of a timestamp, as per [0].
+///
+/// [0] www.postgresql.org/docs/current/datatype-datetime.html
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
+
+/// Postgres also supports the standard ISO-8601 format, the the `T` separator
+/// between the date and the time. See note in pg docs: [0].
+///
+/// https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-INPUT
+const ISO_TIMESTAMP_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.f";
 
 impl Decoder for Codec {
     type Item = FrontendMessage;
@@ -455,7 +465,9 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
             // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
             let (datetime, timezone_tag) =
-                NaiveDateTime::parse_and_remainder(text_str, TIMESTAMP_FORMAT)?;
+                NaiveDateTime::parse_and_remainder(text_str, TIMESTAMP_FORMAT).or_else(|_| {
+                    NaiveDateTime::parse_and_remainder(text_str, ISO_TIMESTAMP_FORMAT)
+                })?;
             if timezone_tag.is_empty() {
                 return Ok(PsqlValue::Timestamp(datetime));
             }
@@ -1483,6 +1495,19 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_text_timestamp_separator() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(22); // size
+        buf.extend_from_slice(b"2020-01-02T03:04:05.66"); // value
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::TIMESTAMP).unwrap(),
+            PsqlValue::Timestamp(
+                NaiveDateTime::parse_from_str("2020-01-02 03:04:05.66", TIMESTAMP_FORMAT).unwrap()
+            )
+        );
+    }
+
+    #[test]
     fn test_decode_text_timestamp() {
         let mut buf = BytesMut::new();
         buf.put_i32(22); // size
@@ -1494,7 +1519,6 @@ mod tests {
             )
         );
     }
-
     #[test]
     fn test_decode_text_timestamp_with_offset() {
         let expected =
