@@ -14,7 +14,8 @@ async fn assert_last_target_was(rs_conn: &mut Conn, expected: QueryDestination) 
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(destination.destination, expected);
+    let msg = destination.noria_error;
+    assert_eq!(destination.destination, expected, "{msg}");
 }
 
 /// Tests TopK functionality with dual lookup patterns.
@@ -111,6 +112,41 @@ async fn test_topk_dual_lookup() {
     assert_last_target_was(
         &mut rs_conn,
         QueryDestination::Readyset(Some("top_1".into())),
+    )
+    .await;
+
+    rs_conn
+        .query_drop(
+            "CREATE CACHE with_predicate FROM SELECT * FROM test WHERE x > 3 ORDER BY x LIMIT 1",
+        )
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let result: Vec<(i32, i32)> = rs_conn
+        .query("SELECT * FROM test WHERE x > 3 ORDER BY x LIMIT 1")
+        .await
+        .unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0], (4, 2));
+
+    assert_last_target_was(
+        &mut rs_conn,
+        QueryDestination::Readyset(Some("with_predicate".into())),
+    )
+    .await;
+
+    let result: Vec<(i32, i32)> = rs_conn
+        .query("SELECT * FROM test WHERE x > 2 ORDER BY x LIMIT 1")
+        .await
+        .unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0], (4, 2));
+
+    assert_last_target_was(
+        &mut rs_conn,
+        QueryDestination::Readyset(Some("with_predicate".into())),
     )
     .await;
 

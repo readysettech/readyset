@@ -73,6 +73,7 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::future::Future;
 use std::marker::PhantomData;
+use std::mem;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -3028,7 +3029,7 @@ where
     ///    fetch all records then apply the limit)
     /// 3. Otherwise checks if parameterized cache exists (parameterized LIMITs are removed by the
     ///    adapter, since the server can't handle parameterized LIMITs).
-    /// 4. If parameterized cache exists, uses it/
+    /// 4. If parameterized cache exists, uses it.
     /// 5. If neither cache exists, processes normally (go upstream if possible, else fail).
     ///
     /// All other query rewrites (autoparameterization, IN conditions, etc.) are applied consistently
@@ -3046,15 +3047,16 @@ where
             rewrite_params.server_supports_topk && Self::has_topk_literal_limit(&q.statement);
 
         if is_topk_candidate {
-            if let Some((should_try, status, params)) =
-                self.lookup_topk_cache(&mut q.clone(), rewrite_params)
-            {
+            let mut original = q.clone();
+
+            if let Some((should_try, status, params)) = self.lookup_topk_cache(q, rewrite_params) {
                 return (should_try, status, params);
             } else {
                 trace!("No TopK cache for query, trying parameterized cache");
-                // we will try the query again, but this time without the LIMIT
+                // We will try the query again, but this time without the LIMIT
                 // to try and hit a cache that was created with a paramterized LIMIT (LIMIT ?)
                 rewrite_params.server_supports_topk = false;
+                mem::swap(q, &mut original);
             }
         }
 
