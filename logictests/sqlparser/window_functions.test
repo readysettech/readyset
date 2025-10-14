@@ -649,3 +649,7 @@ SELECT a, sum(b) OVER (PARTITION BY a ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) 
 onlyif readyset
 statement error: Using multiple window functions is not yet supported
 SELECT a, sum(b) OVER (PARTITION BY a), avg(b) OVER (PARTITION BY a) FROM t;
+
+onlyif readyset
+statement error: too many arguments for function
+SELECT a, rank(some_col) OVER () FROM t;

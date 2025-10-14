@@ -1861,7 +1861,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
         } else if ident.value.eq_ignore_ascii_case("ROW") {
             Self::Row {
                 explicit: true,
-                exprs: exprs.try_collect()?,
+                exprs: exprs.by_ref().collect::<Result<_, _>>()?,
             }
         } else if ident.value.eq_ignore_ascii_case("SUM") {
             Self::Call(FunctionExpr::Sum {
@@ -1883,10 +1883,14 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
         } else {
             ident.value.make_ascii_lowercase();
             Self::Call(FunctionExpr::Call {
-                name: ident.into_dialect(dialect),
-                arguments: Some(exprs.try_collect()?),
+                name: ident.clone().into_dialect(dialect),
+                arguments: Some(exprs.by_ref().collect::<Result<_, _>>()?),
             })
         };
+
+        if exprs.len() != 0 {
+            return failed!("too many arguments for function '{ident}'");
+        }
 
         if let Some(window) = over {
             sqlparser_window_to_window_function(window, dialect, expr)
