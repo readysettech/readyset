@@ -27,7 +27,7 @@ use readyset_errors::{ReadySetError, ReadySetResult, internal_err, invariant_eq,
 use readyset_shallow::{CacheInsertGuard, QueryMetadata};
 use readyset_sql::Dialect;
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
-use readyset_sql_passes::adapter_rewrites::DfQueryParameters;
+use readyset_sql_passes::adapter_rewrites::QueryParameters;
 use readyset_util::redacted::RedactedString;
 
 use crate::Error;
@@ -144,7 +144,7 @@ impl Refresh for QueryResult {
 
     async fn refresh(
         self,
-        mut cache: CacheInsertGuard<DfQueryParameters, Self::Entry>,
+        mut cache: CacheInsertGuard<QueryParameters, Self::Entry>,
     ) -> std::io::Result<()> {
         async fn drain_resultset(resultset: Resultset) -> std::io::Result<()> {
             // Run the stream to trigger cache population.

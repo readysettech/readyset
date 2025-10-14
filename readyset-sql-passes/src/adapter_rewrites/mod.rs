@@ -37,7 +37,7 @@ pub struct DfQueryParameters {
 
 /// Information about parameters from a query, which allows converting a parameter list into a
 /// set of lookup keys.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct QueryParameters {
     dialect: Dialect,
     reordered_placeholders: Option<Vec<usize>>,

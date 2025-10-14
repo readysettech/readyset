@@ -106,7 +106,9 @@ use readyset_sql::ast::{
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
-use readyset_sql_passes::adapter_rewrites::{AdapterRewriteParams, DfQueryParameters};
+use readyset_sql_passes::adapter_rewrites::{
+    AdapterRewriteParams, DfQueryParameters, QueryParameters,
+};
 use readyset_sql_passes::{adapter_rewrites, DetectBucketFunctions};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::{RedactedString, Sensitive};
@@ -149,7 +151,7 @@ where
     query_id: QueryId,
     path: Vec<SqlIdentifier>,
     query: String,
-    cache: CacheInsertGuard<DfQueryParameters, V>,
+    cache: CacheInsertGuard<QueryParameters, V>,
 }
 
 /// Query metadata used to plan query prepare
@@ -361,7 +363,7 @@ impl BackendBuilder {
         authority: Arc<Authority>,
         status_reporter: ReadySetStatusReporter<DB>,
         adapter_start_time: SystemTime,
-        shallow: Arc<CacheManager<DfQueryParameters, DB::CacheEntry>>,
+        shallow: Arc<CacheManager<QueryParameters, DB::CacheEntry>>,
     ) -> Backend<DB, Handler> {
         metrics::gauge!(recorded::CONNECTED_CLIENTS).increment(1.0);
         metrics::counter!(recorded::CLIENT_CONNECTIONS_OPENED).increment(1);
@@ -659,7 +661,7 @@ where
     is_internal_connection: bool,
 
     /// The adapter's shallow cache manager.
-    shallow: Arc<CacheManager<DfQueryParameters, DB::CacheEntry>>,
+    shallow: Arc<CacheManager<QueryParameters, DB::CacheEntry>>,
 
     /// Sender for shallow refresh requests to worker pool
     shallow_refresh_sender: Option<async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>>>,
@@ -872,7 +874,7 @@ where
     /// Results from upstream with optional pending shallow cache insert
     Upstream(
         DB::QueryResult<'a>,
-        Option<CacheInsertGuard<DfQueryParameters, DB::CacheEntry>>,
+        Option<CacheInsertGuard<QueryParameters, DB::CacheEntry>>,
     ),
     /// Results from upstream that are explicitly buffered in a Vec (from postgres' Simple Query
     /// Protocol)
@@ -997,7 +999,7 @@ where
         upstream: Option<&'a mut DB>,
         query: &'a str,
         event: &mut QueryExecutionEvent,
-        cache: Option<CacheInsertGuard<DfQueryParameters, DB::CacheEntry>>,
+        cache: Option<CacheInsertGuard<QueryParameters, DB::CacheEntry>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let upstream = upstream.ok_or_else(|| {
             ReadySetError::Internal("Un-prepared fallback requires an upstream".to_string())
@@ -2105,12 +2107,14 @@ where
     async fn create_deep_cache(
         &mut self,
         mut name: Option<Relation>,
-        stmt: SelectStatement,
+        mut stmt: SelectStatement,
         search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
         concurrently: bool,
         ddl_req: Option<CacheDDLRequest>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        adapter_rewrites::rewrite_query(&mut stmt, self.noria.rewrite_params())?;
+
         if let Some(ref ddl_req) = ddl_req {
             self.authority
                 .add_cache_ddl_request(ddl_req.clone())
@@ -2137,10 +2141,12 @@ where
     async fn create_shallow_cache(
         &mut self,
         mut name: Option<Relation>,
-        stmt: SelectStatement,
+        mut stmt: SelectStatement,
         policy: Option<ast::EvictionPolicy>,
         ddl_req: Option<CacheDDLRequest>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        adapter_rewrites::rewrite_equivalent(&mut stmt, self.noria.rewrite_params())?;
+
         if let Some(ref ddl_req) = ddl_req {
             self.authority
                 .add_shallow_cache_ddl_request(ddl_req.clone())
@@ -2575,7 +2581,7 @@ where
                     concurrently,
                     unparsed_create_cache_statement,
                 } = create_cache_stmt;
-                let (mut stmt, search_path) = match inner {
+                let (stmt, search_path) = match inner {
                     Ok(CacheInner::Statement(st)) => Ok((*st.clone(), None)),
                     Ok(CacheInner::Id(id)) => {
                         match self.state.query_status_cache.query(id.as_str()) {
@@ -2593,8 +2599,6 @@ where
                     }
                     Err(err) => Err(ReadySetError::UnparseableQuery(err.clone())),
                 }?;
-
-                adapter_rewrites::rewrite_query(&mut stmt, self.noria.rewrite_params())?;
 
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
@@ -2782,22 +2786,29 @@ where
     async fn query_shallow<'a>(
         noria: &'a mut NoriaConnector,
         upstream: Option<&'a mut DB>,
-        shallow: &Arc<CacheManager<DfQueryParameters, DB::CacheEntry>>,
-        view_request: &ViewCreateRequest,
+        shallow: &Arc<CacheManager<QueryParameters, DB::CacheEntry>>,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
+        mut req: ViewCreateRequest,
         query: &'a str,
         event: &mut QueryExecutionEvent,
-        processed_query_params: Option<DfQueryParameters>,
+        sampler_tx: Option<
+            &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
+        >,
         refresh: Option<&async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let query_id = QueryId::from_select(&view_request.statement, noria.schema_search_path());
-        let res = processed_query_params.map(|p| shallow.get_or_start_insert(&query_id, p));
+        let params =
+            adapter_rewrites::rewrite_equivalent(&mut req.statement, noria.rewrite_params())?;
+        let query_id = QueryId::from_select(&req.statement, noria.schema_search_path());
+        event.query_id = Some(query_id).into();
+        let res = shallow.get_or_start_insert(&query_id, params.clone());
 
-        let cache = match res {
-            Some(CacheResult::Hit(values)) => {
+        match res {
+            CacheResult::Hit(values) => {
                 event.destination = Some(QueryDestination::ReadysetShallow);
-                return Ok(QueryResult::Shallow(values));
+                Ok(QueryResult::Shallow(values))
             }
-            Some(CacheResult::HitAndRefresh(values, cache)) => {
+            CacheResult::HitAndRefresh(values, cache) => {
                 if let Some(refresh) = refresh {
                     let request = ShallowRefreshRequest {
                         query_id,
@@ -2811,31 +2822,70 @@ where
                 }
 
                 event.destination = Some(QueryDestination::ReadysetShallow);
-                return Ok(QueryResult::Shallow(values));
+                Ok(QueryResult::Shallow(values))
             }
-            Some(CacheResult::Miss(cache)) => Some(cache),
-            None | Some(CacheResult::NotCached) => None,
-        };
-
-        Self::query_fallback(upstream, query, event, cache).await
+            CacheResult::Miss(cache) => {
+                Self::query_fallback(upstream, query, event, Some(cache)).await
+            }
+            CacheResult::NotCached => {
+                Self::try_noria_adhoc_select(
+                    noria, upstream, settings, state, query, req, params, event, sampler_tx,
+                )
+                .await
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn query_adhoc_select<'a>(
+    async fn try_noria_adhoc_select<'a>(
         noria: &'a mut NoriaConnector,
         upstream: Option<&'a mut DB>,
-        shallow: &Arc<CacheManager<DfQueryParameters, DB::CacheEntry>>,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
-        original_query: &'a str,
-        view_request: &ViewCreateRequest,
-        mut status: QueryStatus,
+        query: &'a str,
+        mut view_request: ViewCreateRequest,
+        params: QueryParameters,
         event: &mut QueryExecutionEvent,
-        processed_query_params: DfQueryParameters,
         sampler_tx: Option<
             &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
         >,
-        refresh: Option<&async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>>>,
+    ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        // if should_try is true then status and params MUST be Some
+        let (noria_should_try, status, params) =
+            Self::noria_should_try_select(noria, settings, state, &mut view_request, params);
+        if noria_should_try {
+            Self::noria_adhoc_select(
+                noria,
+                upstream,
+                settings,
+                state,
+                query,
+                view_request,
+                status.unwrap(),
+                event,
+                params.unwrap(),
+                sampler_tx,
+            )
+            .await
+        } else {
+            Self::query_fallback(upstream, query, event, None).await
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn noria_adhoc_select<'a>(
+        noria: &'a mut NoriaConnector,
+        upstream: Option<&'a mut DB>,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
+        original_query: &'a str,
+        view_request: ViewCreateRequest,
+        mut status: QueryStatus,
+        event: &mut QueryExecutionEvent,
+        params: DfQueryParameters,
+        sampler_tx: Option<
+            &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
+        >,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let original_status = status.clone();
         let did_work = if let Some(ref mut i) = status.execution_info {
@@ -2863,28 +2913,18 @@ where
         {
             if did_work {
                 state.query_status_cache.update_transition_time(
-                    view_request,
+                    &view_request,
                     &status.execution_info.unwrap().last_transition_time,
                 );
             }
-            return Self::query_shallow(
-                noria,
-                upstream,
-                shallow,
-                view_request,
-                original_query,
-                event,
-                Some(processed_query_params),
-                refresh,
-            )
-            .await;
+            return Self::query_fallback(upstream, original_query, event, None).await;
         }
 
         event.destination = Some(QueryDestination::Readyset(None));
         let ctx = ExecuteSelectContext::AdHoc {
             statement: &view_request.statement,
             create_if_missing: settings.migration_mode == MigrationMode::InRequestPath,
-            processed_query_params,
+            processed_query_params: params,
         };
         let res = noria.execute_select(ctx, event).await;
         if status.execution_info.is_none() {
@@ -2904,7 +2944,7 @@ where
                 if status != original_status {
                     state
                         .query_status_cache
-                        .update_query_status(view_request, status);
+                        .update_query_status(&view_request, status);
                 }
                 // Enqueue the original query for background sampling if enabled.
                 if let Some(tx) = sampler_tx {
@@ -2941,7 +2981,7 @@ where
                 if status != original_status {
                     state
                         .query_status_cache
-                        .update_query_status(view_request, status);
+                        .update_query_status(&view_request, status);
                 }
 
                 // Try to execute on fallback if present, as long as query is not an `always`
@@ -2988,25 +3028,27 @@ where
     /// Helper function to process a query and determine if Readyset should handle it.
     /// Returns (should_try, query_status, processed_params).
     fn process_and_check_query(
-        &self,
+        settings: &BackendSettings,
+        state: &BackendState<DB>,
         q: &mut ViewCreateRequest,
-        params: AdapterRewriteParams,
+        rewrite_params: AdapterRewriteParams,
+        params: QueryParameters,
     ) -> (bool, Option<QueryStatus>, Option<DfQueryParameters>) {
-        match adapter_rewrites::rewrite_query(&mut q.statement, params) {
-            Ok(processed_query_params) => {
-                let status = self.state.query_status_cache.query_status(q);
-                let should_try = if self.state.proxy_state.should_proxy() {
-                    status.always
+        match adapter_rewrites::rewrite_for_readyset(&mut q.statement, rewrite_params, params) {
+            Ok(params) => {
+                let s = state.query_status_cache.query_status(q);
+                let should_try = if state.proxy_state.should_proxy() {
+                    s.always
                 } else {
                     true
                 };
-                (should_try, Some(status), Some(processed_query_params))
+                (should_try, Some(s), Some(params))
             }
             Err(e) => {
                 warn!(
-                    statement = %Sensitive(&q.statement.display(self.settings.dialect)),
+                    statement = %Sensitive(&q.statement.display(settings.dialect)),
                     error = e.to_string(),
-                    "Query could not be rewritten by Readyset",
+                    "This statement could not be rewritten by Readyset",
                 );
                 (false, None, None)
             }
@@ -3018,13 +3060,16 @@ where
     /// Returns Some(result) if a cache exists that can handle the query with TopK processing,
     /// None if no such cache exists and normal processing should be attempted.
     fn lookup_topk_cache(
-        &self,
+        settings: &BackendSettings,
+        state: &BackendState<DB>,
         q: &mut ViewCreateRequest,
         rewrite_params: AdapterRewriteParams,
+        params: QueryParameters,
     ) -> Option<(bool, Option<QueryStatus>, Option<DfQueryParameters>)> {
         // if the cache is not yet created, it's probably better
         // to let the adapter try the other path.
-        let (_should_try, status, params) = self.process_and_check_query(q, rewrite_params);
+        let (_should_try, status, params) =
+            Self::process_and_check_query(settings, state, q, rewrite_params, params);
 
         let should_try = matches!(
             status.as_ref().map(|s| s.migration_state.clone()),
@@ -3058,10 +3103,13 @@ where
     /// Returns whether noria should try the select, along with the query status if it was obtained
     /// during processing.
     fn noria_should_try_select(
-        &self,
+        noria: &NoriaConnector,
+        settings: &BackendSettings,
+        state: &BackendState<DB>,
         q: &mut ViewCreateRequest,
+        params: QueryParameters,
     ) -> (bool, Option<QueryStatus>, Option<DfQueryParameters>) {
-        let mut rewrite_params = self.noria.rewrite_params();
+        let mut rewrite_params = noria.rewrite_params();
 
         let is_topk_candidate =
             rewrite_params.server_supports_topk && Self::has_topk_literal_limit(&q.statement);
@@ -3069,7 +3117,9 @@ where
         if is_topk_candidate {
             let mut original = q.clone();
 
-            if let Some((should_try, status, params)) = self.lookup_topk_cache(q, rewrite_params) {
+            if let Some((should_try, status, params)) =
+                Self::lookup_topk_cache(settings, state, q, rewrite_params, params.clone())
+            {
                 return (should_try, status, params);
             } else {
                 trace!("No TopK cache for query, trying parameterized cache");
@@ -3080,7 +3130,7 @@ where
             }
         }
 
-        self.process_and_check_query(q, rewrite_params)
+        Self::process_and_check_query(settings, state, q, rewrite_params, params)
     }
 
     /// Handles a parsed set statement by deferring to `Handler::handle_set_statement` and
@@ -3427,7 +3477,7 @@ where
                 }
             }
             Ok(SqlQuery::Select(stmt)) => {
-                let mut view_request =
+                let view_request =
                     ViewCreateRequest::new(stmt, self.noria.schema_search_path().to_owned());
 
                 event.sql_type = SqlQueryType::Read;
@@ -3441,43 +3491,24 @@ where
                 event.query_id =
                     QueryIdWrapper::Uncalculated(self.noria.schema_search_path().into());
 
-                // if should_try is true then status and params MUST be Some
-                let (noria_should_try, status, processed_query_params) =
-                    self.noria_should_try_select(&mut view_request);
                 let sampler_tx = if !self.is_internal_connection {
                     self.sampler_tx.as_ref()
                 } else {
                     None
                 };
-                if noria_should_try {
-                    Self::query_adhoc_select(
-                        &mut self.noria,
-                        self.upstream.as_mut(),
-                        &self.shallow,
-                        &self.settings,
-                        &mut self.state,
-                        query,
-                        &view_request,
-                        status.unwrap(),
-                        &mut event,
-                        processed_query_params.unwrap(),
-                        sampler_tx,
-                        self.shallow_refresh_sender.as_ref(),
-                    )
-                    .await
-                } else {
-                    Self::query_shallow(
-                        &mut self.noria,
-                        self.upstream.as_mut(),
-                        &self.shallow,
-                        &view_request,
-                        query,
-                        &mut event,
-                        processed_query_params,
-                        self.shallow_refresh_sender.as_ref(),
-                    )
-                    .await
-                }
+                Self::query_shallow(
+                    &mut self.noria,
+                    self.upstream.as_mut(),
+                    &self.shallow,
+                    &self.settings,
+                    &mut self.state,
+                    view_request,
+                    query,
+                    &mut event,
+                    sampler_tx,
+                    self.shallow_refresh_sender.as_ref(),
+                )
+                .await
             }
             Ok(SqlQuery::Deallocate(stmt)) => Ok(Self::handle_deallocate_statement(stmt)),
             Ok(_) if self.state.proxy_state.should_proxy() => {
@@ -3618,7 +3649,7 @@ where
 {
     async fn shallow_refresh_result(
         result: DB::QueryResult<'_>,
-        cache: CacheInsertGuard<DfQueryParameters, DB::CacheEntry>,
+        cache: CacheInsertGuard<QueryParameters, DB::CacheEntry>,
     ) -> std::io::Result<()> {
         result.refresh(cache).await
     }
@@ -3810,7 +3841,7 @@ async fn remove_ddl_on_error<T, F, Fut>(
 
 /// Recreate shallow caches from stored DDL requests on adapter startup.
 pub async fn recreate_shallow_caches<V>(
-    shallow: Arc<CacheManager<DfQueryParameters, V>>,
+    shallow: Arc<CacheManager<QueryParameters, V>>,
     ddl_requests: Vec<CacheDDLRequest>,
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,
@@ -3829,7 +3860,7 @@ where
 }
 
 async fn recreate_single_shallow_cache<V>(
-    shallow: &CacheManager<DfQueryParameters, V>,
+    shallow: &CacheManager<QueryParameters, V>,
     req: CacheDDLRequest,
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,
@@ -3863,7 +3894,7 @@ where
         Err(e) => return Err(internal_err!("Failed to parse SELECT: {}", e)),
     };
 
-    adapter_rewrites::rewrite_query(&mut stmt, rewrite_params)?;
+    adapter_rewrites::rewrite_equivalent(&mut stmt, rewrite_params)?;
 
     let query_id = QueryId::from_select(&stmt, &req.schema_search_path);
     let name = create_cache.name.unwrap_or_else(|| query_id.into());

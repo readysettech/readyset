@@ -52,7 +52,7 @@ use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequ
 use readyset_server::{PrometheusBuilder, WorkerOptions};
 use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
-use readyset_sql_passes::adapter_rewrites::{AdapterRewriteParams, DfQueryParameters};
+use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_tracing::TracingGuard;
 #[cfg(feature = "failure_injection")]
@@ -1316,7 +1316,7 @@ where
         }
 
         let shallow = Arc::new(CacheManager::<
-            DfQueryParameters,
+            _,
             <H::UpstreamDatabase as UpstreamDatabase>::CacheEntry,
         >::new());
         if let Ok(shallow_ddl_requests) =

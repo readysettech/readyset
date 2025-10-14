@@ -8,7 +8,7 @@ use psql_srv as ps;
 use readyset_client::results::ResultIterator;
 use readyset_data::DfValue;
 use readyset_shallow::{CacheInsertGuard, PostgreSqlMetadata, QueryMetadata};
-use readyset_sql_passes::adapter_rewrites::DfQueryParameters;
+use readyset_sql_passes::adapter_rewrites::QueryParameters;
 use tokio_postgres::types::Type;
 use tokio_postgres::{
     GenericResult, ResultStream, RowStream, SimpleQueryMessage, SimpleQueryStream,
@@ -76,7 +76,7 @@ pub struct Resultset {
     project_field_names: Vec<String>,
 
     /// Optional cache guard for shallow cache insertion during streaming
-    cache: Option<CacheInsertGuard<DfQueryParameters, CacheEntry>>,
+    cache: Option<CacheInsertGuard<QueryParameters, CacheEntry>>,
 }
 
 impl Resultset {
@@ -148,7 +148,7 @@ impl Resultset {
         stream: Pin<Box<ResultStream>>,
         first_row: tokio_postgres::Row,
         schema: Vec<Type>,
-        cache: Option<CacheInsertGuard<DfQueryParameters, CacheEntry>>,
+        cache: Option<CacheInsertGuard<QueryParameters, CacheEntry>>,
     ) -> Self {
         let names = first_row
             .columns()
@@ -170,7 +170,7 @@ impl Resultset {
         stream: Pin<Box<RowStream>>,
         first_row: tokio_postgres::Row,
         schema: Vec<Type>,
-        cache: Option<CacheInsertGuard<DfQueryParameters, CacheEntry>>,
+        cache: Option<CacheInsertGuard<QueryParameters, CacheEntry>>,
     ) -> Self {
         let names = first_row
             .columns()
@@ -191,7 +191,7 @@ impl Resultset {
     pub fn from_simple_query_stream(
         stream: Pin<Box<SimpleQueryStream>>,
         first_msg: tokio_postgres::SimpleQueryMessage,
-        cache: Option<CacheInsertGuard<DfQueryParameters, CacheEntry>>,
+        cache: Option<CacheInsertGuard<QueryParameters, CacheEntry>>,
     ) -> Self {
         Self {
             results: ResultsetInner::SimpleQueryStream {
