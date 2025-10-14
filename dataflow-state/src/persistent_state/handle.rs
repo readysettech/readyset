@@ -62,21 +62,30 @@ impl PersistentStateHandle {
         }
     }
 
-    /// Acquires read locks on both the RocksDB handle and the shared state. The decision not
-    /// to expose the ability to acquire a read lock on the shared state alone was deliberate:
-    /// by requiring that a thread already have a read lock on the RocksDB handle before
-    /// acquiring a read lock on the shared state, we eliminate the potential for deadlocks.
-    pub(super) fn inner(&self) -> PersistentStateReadGuard<'_> {
+    /// Acquires read locks on both the RocksDB handle and the shared state, initially yielding to
+    /// writers already waiting for the lock.
+    ///
+    /// WARNING: If a write has been requested, this will block.  Be careful to avoid deadlocks and
+    /// use this only when you know it's safe to block.  If you're already holding the read lock,
+    /// call inner() instead.
+    pub(super) fn inner_fair(&self) -> PersistentStateReadGuard<'_> {
         PersistentStateReadGuard {
             db: self.db.read(),
             shared_state: self.shared_state.read(),
         }
     }
 
-    /// Acquires write locks on both the RocksDB handle and the shared state. The decision not
-    /// to expose the ability to acquire a write lock on the shared state alone was deliberate:
-    /// by requiring that a thread already have a write lock on the RocksDB handle before
-    /// acquiring a write lock on the shared state, we eliminate the potential for deadlocks.
+    /// Acquires read locks on both the RocksDB handle and the shared state.
+    ///
+    /// Lock granted immediately if read lock already held.
+    pub(super) fn inner(&self) -> PersistentStateReadGuard<'_> {
+        PersistentStateReadGuard {
+            db: self.db.read_recursive(),
+            shared_state: self.shared_state.read_recursive(),
+        }
+    }
+
+    /// Acquires write locks on both the RocksDB handle and the shared state.
     pub(super) fn inner_mut(&self) -> PersistentStateWriteGuard<'_> {
         PersistentStateWriteGuard {
             db: self.db.write(),
@@ -98,7 +107,7 @@ impl PersistentStateHandle {
         if keys.is_empty() {
             return vec![];
         }
-        let inner = self.inner();
+        let inner = self.inner_fair();
 
         let index = inner.shared_state.index(IndexType::HashMap, columns);
         let is_primary = index.is_primary;
@@ -161,7 +170,7 @@ impl PersistentStateHandle {
     /// index keys from that secondary index, then perform a lookup into the primary
     /// index
     pub(super) fn do_lookup(&self, columns: &[usize], key: &PointKey) -> Option<Vec<Vec<DfValue>>> {
-        let inner = self.inner();
+        let inner = self.inner_fair();
         if self.replication_offset < inner.shared_state.replication_offset {
             // We are checking the replication offset under a read lock, and the lock remains in
             // place until after the read completed, guaranteeing that no write takes place. An

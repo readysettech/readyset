@@ -133,7 +133,7 @@ impl MetricsReporter {
     }
 
     fn memory_stats(&self) {
-        let inner = self.state_handle.inner();
+        let inner = self.state_handle.inner_fair();
         let db = inner.db;
         // We don't have references to the caches, so we can't report their memory usage from
         // the `get_memory_usage_stats()` function.

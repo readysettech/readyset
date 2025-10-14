@@ -536,7 +536,12 @@ impl WalFlusher {
         loop {
             match self.rx.recv_timeout(self.flush_interval) {
                 Err(RecvTimeoutError::Timeout) => {
-                    let wal_state = self.state_handle.inner().shared_state.wal_state.clone();
+                    let wal_state = self
+                        .state_handle
+                        .inner_fair()
+                        .shared_state
+                        .wal_state
+                        .clone();
 
                     // We don't need to check `last_wal_flush_error` here because we just want to
                     // keep retrying based on our current state. If there's further action to be
@@ -958,7 +963,7 @@ impl State for PersistentStateHandle {
     }
 
     fn lookup_range(&self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'_> {
-        let inner = self.inner();
+        let inner = self.inner_fair();
         if self.replication_offset < inner.shared_state.replication_offset {
             debug!("Consistency miss in PersistentStateHandle");
             // TODO(vlad): The read handle missed on binlog position, but that doesn't mean we want
@@ -1511,7 +1516,7 @@ impl AllRecords {
     /// Construct an RAII guard providing the ability to stream all the records out of a persistent
     /// state
     pub fn read(&self) -> AllRecordsGuard<'_> {
-        AllRecordsGuard(self.0.inner())
+        AllRecordsGuard(self.0.inner_fair())
     }
 }
 
@@ -2300,7 +2305,7 @@ impl PersistentState {
     /// families. The insert is performed in a context of a [`rocksdb::WriteBatch`]
     /// operation and is therefore guaranteed to be atomic.
     fn insert(&mut self, batch: &mut WriteBatch, r: &[DfValue]) -> ReadySetResult<()> {
-        let inner = self.db.inner();
+        let inner = self.db.inner_fair();
         let primary_index = inner
             .shared_state
             .indices
@@ -2346,7 +2351,7 @@ impl PersistentState {
     }
 
     fn remove(&self, batch: &mut WriteBatch, r: &[DfValue]) -> ReadySetResult<()> {
-        let inner = self.db.inner();
+        let inner = self.db.inner_fair();
 
         let primary_index = inner
             .shared_state
@@ -2449,7 +2454,7 @@ impl PersistentState {
             write_options.disable_wal(true);
             write_options.set_sync(false);
         } else {
-            let inner = &self.db.inner();
+            let inner = &self.db.inner_fair();
             if self.snapshot_mode.is_enabled() && replication_offset.is_some() {
                 // We are setting the replication offset, which is great, but all of our previous
                 // writes are not guaranteed to flush to disk even if the next write is synced. We
@@ -2483,7 +2488,7 @@ impl PersistentState {
         }
 
         self.db
-            .inner()
+            .inner_fair()
             .db
             .write_opt(batch, &write_options)
             .map_err(|e| internal_err!("Write failed: {e}"))?;
@@ -2634,7 +2639,7 @@ impl SizeOf for PersistentStateHandle {
 
 impl SizeOf for PersistentState {
     fn deep_size_of(&self) -> usize {
-        let inner = self.db.inner();
+        let inner = self.db.inner_fair();
         inner
             .shared_state
             .indices
