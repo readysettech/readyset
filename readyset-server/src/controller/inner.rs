@@ -277,15 +277,13 @@ impl Leader {
     fn log_incoming_create_cache_stmts(&self, changelist: &ChangeList) {
         changelist.changes().for_each(|c| {
             if let Change::CreateCache(cc) = c {
-                if let Some(name) = &cc.name {
-                    info!(always = %cc.always, "creating cache {}", name.display_unquoted());
-                } else {
-                    info!(
-                        always = %cc.always,
-                        "creating cache {}",
-                        QueryId::from_select(&cc.statement, &changelist.schema_search_path)
-                    );
-                };
+                let query_id = QueryId::from_select(&cc.statement, &changelist.schema_search_path);
+                info!(
+                    query_id = %query_id,
+                    name = cc.name.as_ref().map(|n| n.display_unquoted().to_string()),
+                    always = %cc.always,
+                    "creating cache"
+                );
             }
         });
     }
