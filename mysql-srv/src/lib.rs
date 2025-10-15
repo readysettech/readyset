@@ -431,27 +431,6 @@ impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
     }
 }
 
-impl<B: MySqlShim<S> + Send, S: AsyncRead + AsyncWrite + Unpin + Send> MySqlIntermediary<B, S> {
-    /// Create a new server over a stream and process client commands until the client
-    /// disconnects or an error occurs. See also [`MySqlIntermediary::run_on`].
-    pub async fn run_on_stream(
-        shim: B,
-        stream: S,
-        enable_statement_logging: bool,
-        tls_acceptor: Option<Arc<TlsAcceptor>>,
-        tls_mode: TlsMode,
-    ) -> Result<(), io::Error> {
-        MySqlIntermediary::run_on(
-            shim,
-            stream,
-            enable_statement_logging,
-            tls_acceptor,
-            tls_mode,
-        )
-        .await
-    }
-}
-
 /// Send an error packet to the given stream, then close it
 pub async fn send_immediate_err<S>(stream: S, error_kind: ErrorKind, msg: &[u8]) -> io::Result<()>
 where
