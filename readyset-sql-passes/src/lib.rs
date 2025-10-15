@@ -34,11 +34,13 @@ use alias_removal::TableAliasRewrite;
 use disallow_row::DisallowRow;
 use readyset_data::Dialect;
 use readyset_errors::ReadySetResult;
+use readyset_sql::DialectDisplay as _;
 use readyset_sql::ast::{
     CompoundSelectStatement, CreateCacheStatement, CreateTableBody, CreateTableStatement,
     CreateViewStatement, NonReplicatedRelation, Relation, SelectSpecification, SelectStatement,
     SqlIdentifier,
 };
+use tracing::{trace, trace_span};
 
 pub use crate::alias_removal::AliasRemoval;
 pub use crate::array_constructor::ArrayConstructorRewrite;
@@ -179,24 +181,41 @@ impl Rewrite for CreateTableStatement {
 
 impl Rewrite for SelectStatement {
     fn rewrite<C: RewriteContext>(&mut self, context: C) -> ReadySetResult<&mut Self> {
+        let span = trace_span!("server_rewrites").entered();
         let query_name = context.query_name().unwrap_or("unknown");
+        let sql_dialect = context.dialect().into();
+        trace!(query_pre = %self.display(sql_dialect), "Rewriting query");
 
-        self.rewrite_between()
-            .disallow_row()?
-            .validate_window_functions()?
-            .scalar_optimize_expressions(&context)
-            .resolve_schemas(&context)?
-            .expand_stars(&context)?
-            .expand_implied_tables(&context)?
-            .rewrite_array_constructors()?
-            .rewrite_array_constructors()?
-            .unnest_subqueries(&context)?
-            .normalize_topk_with_aggregate(&context)?
-            .detect_problematic_self_joins()?
-            .remove_numeric_field_references()?
-            .order_limit_removal(context.base_schemas())?
-            .rewrite_table_aliases(query_name, context.table_alias_rewrites())?;
+        self.rewrite_between();
+        trace!(parent: &span, pass="rewrite_between", query = %self.display(sql_dialect));
+        self.disallow_row()?;
+        trace!(parent: &span, pass="disallow_row", query = %self.display(sql_dialect));
+        self.validate_window_functions()?;
+        trace!(parent: &span, pass="validate_window_functions", query = %self.display(sql_dialect));
+        self.scalar_optimize_expressions(&context);
+        trace!(parent: &span, pass="scalar_optimize_expressions", query = %self.display(sql_dialect));
+        self.resolve_schemas(&context)?;
+        trace!(parent: &span, pass="resolve_schemas", query = %self.display(sql_dialect));
+        self.expand_stars(&context)?;
+        trace!(parent: &span, pass="expand_stars", query = %self.display(sql_dialect));
+        self.expand_implied_tables(&context)?;
+        trace!(parent: &span, pass="expand_implied_tables", query = %self.display(sql_dialect));
+        self.rewrite_array_constructors()?;
+        trace!(parent: &span, pass="rewrite_array_constructors", query = %self.display(sql_dialect));
+        self.unnest_subqueries(&context)?;
+        trace!(parent: &span, pass="unnest_subqueries", query = %self.display(sql_dialect));
+        self.normalize_topk_with_aggregate(&context)?;
+        trace!(parent: &span, pass="normalize_topk_with_aggregate", query = %self.display(sql_dialect));
+        self.detect_problematic_self_joins()?;
+        trace!(parent: &span, pass="detect_problematic_self_joins", query = %self.display(sql_dialect));
+        self.remove_numeric_field_references()?;
+        trace!(parent: &span, pass="remove_numeric_field_references", query = %self.display(sql_dialect));
+        self.order_limit_removal(context.base_schemas())?;
+        trace!(parent: &span, pass="order_limit_removal", query = %self.display(sql_dialect));
+        self.rewrite_table_aliases(query_name, context.table_alias_rewrites())?;
+        trace!(parent: &span, pass="rewrite_table_aliases", query = %self.display(sql_dialect));
 
+        trace!(query_post = %self.display(sql_dialect), "Query rewritten");
         Ok(self)
     }
 }

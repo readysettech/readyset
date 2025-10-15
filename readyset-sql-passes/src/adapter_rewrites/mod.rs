@@ -18,7 +18,7 @@ use readyset_sql::ast::{
 };
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
 use serde::{Deserialize, Serialize};
-use tracing::trace;
+use tracing::{trace, trace_span};
 
 /// A fancier `QueryParameters` that augments parameters with additional limit-related information
 /// parameterized out.
@@ -120,14 +120,25 @@ pub fn rewrite_equivalent(
     query: &mut SelectStatement,
     flags: AdapterRewriteParams,
 ) -> ReadySetResult<QueryParameters> {
+    let span = trace_span!("adapter_rewrites", part = "equivalent").entered();
+    trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite query placeholders");
+
     let reordered_placeholders = reorder_numbered_placeholders(query);
+    trace!(
+        parent: &span,
+        pass="reorder_numbered_placeholders",
+        query = %query.display(flags.dialect),
+        placeholders=?reordered_placeholders
+    );
     let auto_parameters = autoparameterize::auto_parameterize_query(
         query,
         Vec::new(),
         flags.server_supports_mixed_comparisons,
         false,
     );
+    trace!(parent: &span, pass="auto_parameterize_query", query = %query.display(flags.dialect), auto_parameters=?auto_parameters);
     number_placeholders(query)?;
+    trace!(parent: &span, pass="number_placeholders", query = %query.display(flags.dialect));
 
     Ok(QueryParameters {
         dialect: flags.dialect,
@@ -145,6 +156,9 @@ pub fn rewrite_for_readyset(
     flags: AdapterRewriteParams,
     prev: QueryParameters,
 ) -> ReadySetResult<DfQueryParameters> {
+    let span = trace_span!("adapter_rewrites", part = "readyset").entered();
+    trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite query for Readyset");
+
     let QueryParameters {
         dialect,
         reordered_placeholders,
@@ -158,13 +172,18 @@ pub fn rewrite_for_readyset(
         &query.limit_clause,
         &query.order,
     );
-
     let limit_clause = if force_paginate_in_adapter {
-        trace!("Will use fallback LIMIT/OFFSET for query");
         mem::take(&mut query.limit_clause)
     } else {
         query.limit_clause.clone()
     };
+    trace!(
+        parent: &span,
+        pass = "use_fallback_pagination",
+        query = %query.display(flags.dialect),
+        force_paginate_in_adapter,
+        limit_clause = %limit_clause.display(flags.dialect)
+    );
 
     let auto_parameters = autoparameterize::auto_parameterize_query(
         query,
@@ -172,8 +191,11 @@ pub fn rewrite_for_readyset(
         flags.server_supports_mixed_comparisons,
         true,
     );
+    trace!(parent: &span, pass="auto_parameterize_query", query = %query.display(flags.dialect), auto_parameters=?auto_parameters);
     let rewritten_in_conditions = collapse_where_in(query, flags.dialect)?;
+    trace!(parent: &span, pass="collapse_where_in", query = %query.display(flags.dialect), rewritten_in_conditions=?rewritten_in_conditions);
     number_placeholders(query)?;
+    trace!(parent: &span, pass="number_placeholders", query = %query.display(flags.dialect), auto_parameters=?auto_parameters);
 
     Ok(DfQueryParameters {
         dialect,

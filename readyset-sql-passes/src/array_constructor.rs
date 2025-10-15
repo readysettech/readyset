@@ -99,7 +99,6 @@ use readyset_sql::ast::{
     JoinClause, JoinConstraint, JoinOperator, JoinRightSide, OrderClause, Relation,
     SelectStatement, SqlIdentifier, SqlQuery, TableExpr, TableExprInner,
 };
-use readyset_sql::{Dialect, DialectDisplay};
 
 use crate::get_local_from_items_iter_mut;
 use crate::rewrite_utils::{
@@ -459,18 +458,10 @@ fn rewrite_array_constructors_in_select(
 
 impl ArrayConstructorRewrite for SelectStatement {
     fn rewrite_array_constructors(&mut self) -> ReadySetResult<&mut Self> {
-        tracing::trace!(
-            "ArrayConstructorRewrite - BEFORE: {}",
-            self.display(Dialect::PostgreSQL)
-        );
         // fail fast if array constructors in disallowed locations
         validate_no_disallowed_array_constructors(self)?;
 
         rewrite_array_constructors_in_select(self, false)?;
-        tracing::trace!(
-            "ArrayConstructorRewrite - AFTER: {}",
-            self.display(Dialect::PostgreSQL)
-        );
         Ok(self)
     }
 }
