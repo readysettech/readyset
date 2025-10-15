@@ -786,18 +786,17 @@ impl SelectSchema<'_> {
 }
 
 /// Adapter clients need only one of the prepare results returned from prepare().
-/// PrepareResult provides noria_biased() and upstream_biased() to get
-/// the single relevant prepare result from `PrepareResult` which may return
-/// PrepareResult::Both.
+/// PrepareResult provides upstream_biased() to get the single relevant prepare result from
+/// `PrepareResult`.
 pub enum SinglePrepareResult<'a, DB: UpstreamDatabase> {
     Noria(&'a noria_connector::PrepareResult),
     Upstream(&'a UpstreamPrepare<DB>),
 }
 
-pub enum PrepareResultInner<DB: UpstreamDatabase> {
+enum PrepareResultInner<DB: UpstreamDatabase> {
     Noria(noria_connector::PrepareResult),
     Upstream(UpstreamPrepare<DB>),
-    Both(noria_connector::PrepareResult, UpstreamPrepare<DB>),
+    NoriaAndUpstream(noria_connector::PrepareResult, UpstreamPrepare<DB>),
 }
 
 impl<DB: UpstreamDatabase> Debug for PrepareResultInner<DB> {
@@ -805,7 +804,11 @@ impl<DB: UpstreamDatabase> Debug for PrepareResultInner<DB> {
         match self {
             Self::Noria(r) => f.debug_tuple("Noria").field(r).finish(),
             Self::Upstream(r) => f.debug_tuple("Upstream").field(r).finish(),
-            Self::Both(nr, ur) => f.debug_tuple("Both").field(nr).field(ur).finish(),
+            Self::NoriaAndUpstream(nr, ur) => f
+                .debug_tuple("NoriaAndUpstream")
+                .field(nr)
+                .field(ur)
+                .finish(),
         }
     }
 }
@@ -818,25 +821,16 @@ pub struct PrepareResult<DB: UpstreamDatabase> {
 }
 
 impl<DB: UpstreamDatabase> PrepareResult<DB> {
-    pub fn new(statement_id: StatementId, inner: PrepareResultInner<DB>) -> Self {
+    fn new(statement_id: StatementId, inner: PrepareResultInner<DB>) -> Self {
         Self {
             statement_id,
             inner,
         }
     }
 
-    pub fn noria_biased(&self) -> SinglePrepareResult<'_, DB> {
-        match &self.inner {
-            PrepareResultInner::Noria(res) | PrepareResultInner::Both(res, _) => {
-                SinglePrepareResult::Noria(res)
-            }
-            PrepareResultInner::Upstream(res) => SinglePrepareResult::Upstream(res),
-        }
-    }
-
     pub fn upstream_biased(&self) -> SinglePrepareResult<'_, DB> {
         match &self.inner {
-            PrepareResultInner::Upstream(res) | PrepareResultInner::Both(_, res) => {
+            PrepareResultInner::Upstream(res) | PrepareResultInner::NoriaAndUpstream(_, res) => {
                 SinglePrepareResult::Upstream(res)
             }
             PrepareResultInner::Noria(res) => SinglePrepareResult::Noria(res),
@@ -845,17 +839,21 @@ impl<DB: UpstreamDatabase> PrepareResult<DB> {
 
     pub fn into_upstream(self) -> Option<UpstreamPrepare<DB>> {
         match self.inner {
-            PrepareResultInner::Upstream(ur) | PrepareResultInner::Both(_, ur) => Some(ur),
+            PrepareResultInner::Upstream(ur) | PrepareResultInner::NoriaAndUpstream(_, ur) => {
+                Some(ur)
+            }
             _ => None,
         }
     }
 
-    /// If this [`PrepareResult`] is a [`PrepareResult::Both`], convert it into only a
+    /// If this [`PrepareResult`] is a [`PrepareResult::NoriaAndUpstream`], convert it into only a
     /// [`PrepareResult::Upstream`]
     pub fn make_upstream_only(&mut self) {
         match &mut self.inner {
             PrepareResultInner::Noria(_) | PrepareResultInner::Upstream(_) => {}
-            PrepareResultInner::Both(_, u) => self.inner = PrepareResultInner::Upstream(u.clone()),
+            PrepareResultInner::NoriaAndUpstream(_, u) => {
+                self.inner = PrepareResultInner::Upstream(u.clone())
+            }
         }
     }
 }
@@ -1045,7 +1043,7 @@ where
     /// Prepares query against ReadySet. If an upstream database exists, the prepare is mirrored to
     /// the upstream database.
     ///
-    /// This function may perform a migration, and update a queries migration state, if
+    /// This function may perform a migration and update a query's migration state, if
     /// InRequestPath mode is enabled or of not upstream is set
     async fn mirror_prepare(
         &mut self,
@@ -1126,7 +1124,7 @@ where
 
         let prep_result = match (upstream_res, noria_res) {
             (Some(upstream_res), Some(Ok(noria_res))) => {
-                PrepareResultInner::Both(noria_res, upstream_res?)
+                PrepareResultInner::NoriaAndUpstream(noria_res, upstream_res?)
             }
             (None, Some(Ok(noria_res))) => {
                 if matches!(
@@ -1663,10 +1661,10 @@ where
         };
 
         // At this point we got a successful noria prepare, so we want to replace the Upstream
-        // result with a Both result
+        // result with a NoriaAndUpstream result
         cached_entry.prep = PrepareResult::new(
             cached_entry.prep.statement_id,
-            PrepareResultInner::Both(noria_prep, upstream_prep),
+            PrepareResultInner::NoriaAndUpstream(noria_prep, upstream_prep),
         );
         // If the query was previously `Pending`, update to `Successful`. If it was inlined, we do
         // not update the migration state.
@@ -1830,10 +1828,10 @@ where
                 }
                 Self::execute_upstream(upstream, prep, params, exec_meta, &mut event, false).await
             }
-            PrepareResultInner::Both(.., uprep) if should_fallback => {
+            PrepareResultInner::NoriaAndUpstream(.., uprep) if should_fallback => {
                 Self::execute_upstream(upstream, uprep, params, exec_meta, &mut event, false).await
             }
-            PrepareResultInner::Both(nprep, uprep) => {
+            PrepareResultInner::NoriaAndUpstream(nprep, uprep) => {
                 if cached_statement.execution_info.is_none() {
                     cached_statement.execution_info = Some(ExecutionInfo {
                         state: ExecutionState::Failed,
