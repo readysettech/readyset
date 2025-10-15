@@ -19,6 +19,7 @@ use test_utils::tags;
 async fn setup_with(
     backend_builder: BackendBuilder,
 ) -> (mysql_async::Opts, Handle, ShutdownSender) {
+    readyset_tracing::init_test_logging();
     TestBuilder::new(backend_builder)
         .fallback(true)
         .build::<MySQLAdapter>()
