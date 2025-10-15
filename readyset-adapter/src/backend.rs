@@ -151,7 +151,7 @@ where
     query_id: QueryId,
     path: Vec<SqlIdentifier>,
     query: String,
-    cache: CacheInsertGuard<QueryParameters, V>,
+    cache: CacheInsertGuard<Vec<DfValue>, V>,
 }
 
 /// Query metadata used to plan query prepare
@@ -363,7 +363,7 @@ impl BackendBuilder {
         authority: Arc<Authority>,
         status_reporter: ReadySetStatusReporter<DB>,
         adapter_start_time: SystemTime,
-        shallow: Arc<CacheManager<QueryParameters, DB::CacheEntry>>,
+        shallow: Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
     ) -> Backend<DB, Handler> {
         metrics::gauge!(recorded::CONNECTED_CLIENTS).increment(1.0);
         metrics::counter!(recorded::CLIENT_CONNECTIONS_OPENED).increment(1);
@@ -661,7 +661,7 @@ where
     is_internal_connection: bool,
 
     /// The adapter's shallow cache manager.
-    shallow: Arc<CacheManager<QueryParameters, DB::CacheEntry>>,
+    shallow: Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
 
     /// Sender for shallow refresh requests to worker pool
     shallow_refresh_sender: Option<async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>>>,
@@ -874,7 +874,7 @@ where
     /// Results from upstream with optional pending shallow cache insert
     Upstream(
         DB::QueryResult<'a>,
-        Option<CacheInsertGuard<QueryParameters, DB::CacheEntry>>,
+        Option<CacheInsertGuard<Vec<DfValue>, DB::CacheEntry>>,
     ),
     /// Results from upstream that are explicitly buffered in a Vec (from postgres' Simple Query
     /// Protocol)
@@ -999,7 +999,7 @@ where
         upstream: Option<&'a mut DB>,
         query: &'a str,
         event: &mut QueryExecutionEvent,
-        cache: Option<CacheInsertGuard<QueryParameters, DB::CacheEntry>>,
+        cache: Option<CacheInsertGuard<Vec<DfValue>, DB::CacheEntry>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let upstream = upstream.ok_or_else(|| {
             ReadySetError::Internal("Un-prepared fallback requires an upstream".to_string())
@@ -2786,7 +2786,7 @@ where
     async fn query_shallow<'a>(
         noria: &'a mut NoriaConnector,
         upstream: Option<&'a mut DB>,
-        shallow: &Arc<CacheManager<QueryParameters, DB::CacheEntry>>,
+        shallow: &Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         mut req: ViewCreateRequest,
@@ -2801,7 +2801,9 @@ where
             adapter_rewrites::rewrite_equivalent(&mut req.statement, noria.rewrite_params())?;
         let query_id = QueryId::from_select(&req.statement, noria.schema_search_path());
         event.query_id = Some(query_id).into();
-        let res = shallow.get_or_start_insert(&query_id, params.clone());
+        let keys = params.make_keys::<DfValue>(&[])?;
+        let key = keys.into_iter().next().unwrap_or_default().into_owned();
+        let res = shallow.get_or_start_insert(&query_id, key);
 
         match res {
             CacheResult::Hit(values) => {
@@ -3649,7 +3651,7 @@ where
 {
     async fn shallow_refresh_result(
         result: DB::QueryResult<'_>,
-        cache: CacheInsertGuard<QueryParameters, DB::CacheEntry>,
+        cache: CacheInsertGuard<Vec<DfValue>, DB::CacheEntry>,
     ) -> std::io::Result<()> {
         result.refresh(cache).await
     }
@@ -3841,7 +3843,7 @@ async fn remove_ddl_on_error<T, F, Fut>(
 
 /// Recreate shallow caches from stored DDL requests on adapter startup.
 pub async fn recreate_shallow_caches<V>(
-    shallow: Arc<CacheManager<QueryParameters, V>>,
+    shallow: Arc<CacheManager<Vec<DfValue>, V>>,
     ddl_requests: Vec<CacheDDLRequest>,
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,
@@ -3860,7 +3862,7 @@ where
 }
 
 async fn recreate_single_shallow_cache<V>(
-    shallow: &CacheManager<QueryParameters, V>,
+    shallow: &CacheManager<Vec<DfValue>, V>,
     req: CacheDDLRequest,
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,

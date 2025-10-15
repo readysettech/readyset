@@ -27,7 +27,6 @@ use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_shallow::{CacheInsertGuard, MySqlMetadata, QueryMetadata};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_sql::Dialect;
-use readyset_sql_passes::adapter_rewrites::QueryParameters;
 use readyset_util::redacted::RedactedString;
 
 use crate::backend::write_query_results;
@@ -96,7 +95,7 @@ impl<'a> QueryResult<'a> {
     pub async fn process<S>(
         self,
         writer: Option<QueryResultWriter<'_, S>>,
-        mut cache: Option<CacheInsertGuard<QueryParameters, Vec<DfValue>>>,
+        mut cache: Option<CacheInsertGuard<Vec<DfValue>, Vec<DfValue>>>,
     ) -> io::Result<()>
     where
         S: AsyncRead + AsyncWrite + Unpin,
@@ -198,10 +197,7 @@ impl<'a> QueryResult<'a> {
 impl Refresh for QueryResult<'_> {
     type Entry = Vec<DfValue>;
 
-    async fn refresh(
-        self,
-        cache: CacheInsertGuard<QueryParameters, Self::Entry>,
-    ) -> io::Result<()> {
+    async fn refresh(self, cache: CacheInsertGuard<Vec<DfValue>, Self::Entry>) -> io::Result<()> {
         self.process(
             None::<QueryResultWriter<'_, tokio::net::TcpStream>>,
             Some(cache),

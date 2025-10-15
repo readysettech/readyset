@@ -9,7 +9,6 @@ use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
 use readyset_shallow::CacheInsertGuard;
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
-use readyset_sql_passes::adapter_rewrites::QueryParameters;
 use readyset_util::redacted::RedactedString;
 use tracing::debug;
 
@@ -24,7 +23,7 @@ pub trait Refresh {
     /// Populate the cache with data from this query result
     async fn refresh(
         self,
-        cache: CacheInsertGuard<QueryParameters, Self::Entry>,
+        cache: CacheInsertGuard<Vec<DfValue>, Self::Entry>,
     ) -> std::io::Result<()>;
 }
 
