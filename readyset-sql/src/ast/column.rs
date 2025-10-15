@@ -298,11 +298,9 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
                 ),
                 sqlparser::ast::ColumnOption::Unique {
                     is_primary,
-                    characteristics,
+                    characteristics: _, // Parse but ignore constraint timing for column-level constraints
                 } => {
-                    if characteristics.is_some() {
-                        return not_yet_implemented!("constraint timing on column definitions");
-                    } else if is_primary {
+                    if is_primary {
                         constraints.push(ColumnConstraint::PrimaryKey)
                     } else {
                         constraints.push(ColumnConstraint::Unique)

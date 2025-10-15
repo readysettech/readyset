@@ -7,6 +7,7 @@ use nom_locate::LocatedSpan;
 use readyset_sql::{ast::*, Dialect};
 
 use crate::common::{collation_name, column_identifier_no_alias, parse_comment};
+use crate::create::deferrable;
 use crate::expression::expression;
 use crate::sql_type::type_identifier;
 use crate::whitespace::{whitespace0, whitespace1};
@@ -67,15 +68,21 @@ pub fn column_constraint(
             |_| ColumnConstraint::AutoIncrement,
         );
         let primary_key = map(
-            delimited(whitespace0, tag_no_case("primary key"), whitespace0),
+            tuple((
+                delimited(whitespace0, tag_no_case("primary key"), whitespace0),
+                opt(deferrable(dialect, false)),
+            )),
             |_| ColumnConstraint::PrimaryKey,
         );
         let unique = map(
-            delimited(
-                whitespace0,
-                delimited(tag_no_case("unique"), whitespace0, opt(tag_no_case("key"))),
-                whitespace0,
-            ),
+            tuple((
+                delimited(
+                    whitespace0,
+                    delimited(tag_no_case("unique"), whitespace0, opt(tag_no_case("key"))),
+                    whitespace0,
+                ),
+                opt(deferrable(dialect, false)),
+            )),
             |_| ColumnConstraint::Unique,
         );
         let character_set = map(

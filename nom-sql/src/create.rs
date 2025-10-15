@@ -269,6 +269,8 @@ fn foreign_key(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
             Some((on_delete, on_update)) => (on_delete, on_update),
             None => (None, None),
         };
+
+        let (i, _constraint_timing) = opt(deferrable(dialect, false))(i)?;
         debug_print("after foreign_key", &i);
 
         Ok((
@@ -312,7 +314,7 @@ fn nulls_distinct(
     }
 }
 
-fn deferrable(
+pub(crate) fn deferrable(
     dialect: Dialect,
     require_whitespace: bool,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Option<ConstraintTiming>> {
@@ -361,6 +363,18 @@ fn deferrable(
             move |i| {
                 let (i, _) = tag_no_case("deferrable")(i)?;
                 Ok((i, Some(ConstraintTiming::Deferrable)))
+            },
+            move |i| {
+                let (i, _) = tag_no_case("initially")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("immediate")(i)?;
+                Ok((i, Some(ConstraintTiming::NotDeferrableInitiallyImmediate)))
+            },
+            move |i| {
+                let (i, _) = tag_no_case("initially")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("deferred")(i)?;
+                Ok((i, Some(ConstraintTiming::NotDeferrable)))
             },
         ))(i)
     }

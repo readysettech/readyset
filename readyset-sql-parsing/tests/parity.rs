@@ -1046,3 +1046,93 @@ fn create_view() {
         r#"CREATE VIEW "v1" AS SELECT t1.i FROM (t1 JOIN t2 ON ((t1.i = t2.j)))"#
     );
 }
+
+#[test]
+fn constraint_deferrable_timing() {
+    // Table-level PRIMARY KEY constraints with DEFERRABLE
+    check_parse_postgres!("CREATE TABLE test (id INT, CONSTRAINT pk PRIMARY KEY (id))");
+    check_parse_postgres!("CREATE TABLE test (id INT, CONSTRAINT pk PRIMARY KEY (id) DEFERRABLE)");
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT pk PRIMARY KEY (id) DEFERRABLE INITIALLY DEFERRED)"
+    );
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT pk PRIMARY KEY (id) DEFERRABLE INITIALLY IMMEDIATE)"
+    );
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT pk PRIMARY KEY (id) NOT DEFERRABLE)"
+    );
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT pk PRIMARY KEY (id) NOT DEFERRABLE INITIALLY IMMEDIATE)"
+    );
+
+    // Table-level UNIQUE constraints with DEFERRABLE
+    check_parse_postgres!("CREATE TABLE test (id INT, CONSTRAINT uk UNIQUE (id))");
+    check_parse_postgres!("CREATE TABLE test (id INT, CONSTRAINT uk UNIQUE (id) DEFERRABLE)");
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT uk UNIQUE (id) DEFERRABLE INITIALLY DEFERRED)"
+    );
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT uk UNIQUE (id) DEFERRABLE INITIALLY IMMEDIATE)"
+    );
+    check_parse_postgres!("CREATE TABLE test (id INT, CONSTRAINT uk UNIQUE (id) NOT DEFERRABLE)");
+
+    // Table-level FOREIGN KEY constraints with DEFERRABLE
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT fk FOREIGN KEY (id) REFERENCES other(id))"
+    );
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT fk FOREIGN KEY (id) REFERENCES other(id) DEFERRABLE)"
+    );
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT fk FOREIGN KEY (id) REFERENCES other(id) DEFERRABLE INITIALLY DEFERRED)"
+    );
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT fk FOREIGN KEY (id) REFERENCES other(id) DEFERRABLE INITIALLY IMMEDIATE)"
+    );
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT fk FOREIGN KEY (id) REFERENCES other(id) NOT DEFERRABLE)"
+    );
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT fk FOREIGN KEY (id) REFERENCES other(id) NOT DEFERRABLE INITIALLY IMMEDIATE)"
+    );
+
+    // Multiple constraints with mixed timing
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, fid INT, CONSTRAINT pk PRIMARY KEY (id) DEFERRABLE INITIALLY DEFERRED,
+        CONSTRAINT uk UNIQUE (fid) NOT DEFERRABLE, CONSTRAINT fk FOREIGN KEY (fid) REFERENCES other(id) DEFERRABLE INITIALLY IMMEDIATE)"
+    );
+
+    // Test INITIALLY without DEFERRABLE
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT pk PRIMARY KEY (id) INITIALLY IMMEDIATE)"
+    );
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT, CONSTRAINT pk PRIMARY KEY (id) INITIALLY DEFERRED)"
+    );
+}
+
+#[test]
+fn constraint_deferrable_timing_column_level() {
+    // PRIMARY KEY constraints with DEFERRABLE
+    check_parse_postgres!("CREATE TABLE test (id INT PRIMARY KEY)");
+    check_parse_postgres!("CREATE TABLE test (id INT PRIMARY KEY DEFERRABLE)");
+    check_parse_postgres!("CREATE TABLE test (id INT PRIMARY KEY DEFERRABLE INITIALLY DEFERRED)");
+    check_parse_postgres!("CREATE TABLE test (id INT PRIMARY KEY DEFERRABLE INITIALLY IMMEDIATE)");
+    check_parse_postgres!("CREATE TABLE test (id INT PRIMARY KEY NOT DEFERRABLE)");
+    check_parse_postgres!(
+        "CREATE TABLE test (id INT PRIMARY KEY NOT DEFERRABLE INITIALLY IMMEDIATE)"
+    );
+
+    // UNIQUE constraints with DEFERRABLE
+    check_parse_postgres!("CREATE TABLE test (id INT UNIQUE)");
+    check_parse_postgres!("CREATE TABLE test (id INT UNIQUE DEFERRABLE)");
+    check_parse_postgres!("CREATE TABLE test (id INT UNIQUE DEFERRABLE INITIALLY DEFERRED)");
+    check_parse_postgres!("CREATE TABLE test (id INT UNIQUE DEFERRABLE INITIALLY IMMEDIATE)");
+    check_parse_postgres!("CREATE TABLE test (id INT UNIQUE NOT DEFERRABLE)");
+
+    // INITIALLY without DEFERRABLE
+    check_parse_postgres!("CREATE TABLE test (id INT PRIMARY KEY INITIALLY IMMEDIATE)");
+    check_parse_postgres!("CREATE TABLE test (id INT PRIMARY KEY INITIALLY DEFERRED)");
+    check_parse_postgres!("CREATE TABLE test (id INT UNIQUE INITIALLY IMMEDIATE)");
+    check_parse_postgres!("CREATE TABLE test (id INT UNIQUE INITIALLY DEFERRED)");
+}
