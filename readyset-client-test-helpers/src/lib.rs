@@ -383,6 +383,7 @@ impl TestBuilder {
                                 .lower_case_table_names()
                                 .await
                                 .unwrap(),
+                            db_version: cdc_upstream.version(),
                         }
                     } else {
                         UpstreamSystemProperties {

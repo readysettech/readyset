@@ -10,6 +10,7 @@ pub struct UpstreamSystemProperties {
     pub timezone_name: SqlIdentifier,
     pub lower_case_database_names: bool,
     pub lower_case_table_names: bool,
+    pub db_version: String,
 }
 
 impl fmt::Display for UpstreamSystemProperties {

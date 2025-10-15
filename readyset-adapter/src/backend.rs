@@ -314,6 +314,7 @@ pub struct BackendBuilder {
     allow_cache_ddl: bool,
     sampler_tx:
         Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
+    db_version: Option<String>,
 }
 
 impl Default for BackendBuilder {
@@ -337,6 +338,7 @@ impl Default for BackendBuilder {
             connections: None,
             allow_cache_ddl: true,
             sampler_tx: None,
+            db_version: None,
         }
     }
 }
@@ -422,6 +424,7 @@ impl BackendBuilder {
             is_internal_connection: false,
             shallow,
             shallow_refresh_sender,
+            db_version: self.db_version,
             _query_handler: PhantomData,
         }
     }
@@ -523,6 +526,11 @@ impl BackendBuilder {
         tx: Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
     ) -> Self {
         self.sampler_tx = tx;
+        self
+    }
+
+    pub fn db_version(mut self, db_version: String) -> Self {
+        self.db_version = Some(db_version);
         self
     }
 }
@@ -651,6 +659,9 @@ where
 
     /// Sender for shallow refresh requests to worker pool
     shallow_refresh_sender: Option<async_channel::Sender<ShallowRefreshRequest>>,
+
+    /// Memoized upstream database version,
+    db_version: Option<String>,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -905,6 +916,10 @@ where
     Handler: 'static + QueryHandler,
 {
     pub fn version(&self) -> String {
+        if let Some(version) = &self.db_version {
+            return version.clone();
+        }
+
         self.upstream
             .as_ref()
             .map(|upstream| upstream.version())
