@@ -1,3 +1,5 @@
+use std::panic::AssertUnwindSafe;
+
 use mysql_async::{Conn, Row, prelude::Queryable};
 use readyset_client_test_helpers::{
     TestBuilder,
@@ -38,13 +40,13 @@ async fn test_aggregation_type_inner_postgres(expr: &str, column_type: SqlType) 
     let upstream_value: Vec<u8> = upstream_row.body().buffer().to_vec();
 
     eventually!(run_test: {
-        let rs_row: tokio_postgres::Row = rs_conn
+        let rs_row = rs_conn
             .query_one(&format!("SELECT {expr} FROM t"), &[])
-            .await
-            .unwrap();
-        (rs_row.columns()[0].type_().clone(), rs_row.body().buffer().to_vec())
+            .await;
+        AssertUnwindSafe(|| { rs_row })
     }, then_assert: |result| {
-        let (rs_type, rs_value): (tokio_postgres::types::Type, Vec<u8>) = result;
+        let rs_row = result().unwrap();
+        let (rs_type, rs_value) = (rs_row.columns()[0].type_().clone(), rs_row.body().buffer().to_vec());
         assert_eq!(*upstream_type, rs_type);
         assert_eq!(upstream_value, rs_value);
     });
@@ -77,14 +79,14 @@ async fn test_aggregation_type_inner_mysql(expr: &str, column_type: SqlType) {
     let upstream_value: mysql_async::Value = upstream_row.get(0).unwrap();
 
     eventually!(run_test: {
-        let rs_row: Row = rs_conn
+        let rs_row = rs_conn
             .query_first(format!("SELECT {expr} FROM t"))
-            .await
-            .unwrap()
-            .unwrap();
-        (rs_row.columns_ref()[0].column_type(), rs_row.get(0).unwrap())
+            .await;
+        AssertUnwindSafe(|| { rs_row })
     }, then_assert: |result| {
-        let (rs_type, rs_value): (mysql_async::consts::ColumnType, mysql_async::Value) = result;
+        let rs_row: Row = result().unwrap().unwrap();
+        let rs_type = rs_row.columns_ref()[0].column_type();
+        let rs_value = rs_row.get(0).unwrap();
         assert_eq!(upstream_type, rs_type);
         assert_eq!(upstream_value, rs_value);
     });

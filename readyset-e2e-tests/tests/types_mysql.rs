@@ -99,14 +99,13 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
 
     // Check the result of snapshot on Readyset
     eventually!(attempts: 5, run_test: {
-        let rs_rows: Vec<Row> = rs_conn
+        let rs_rows: Result<Vec<Row>, _> = rs_conn
             .exec(
                 "SELECT * FROM snapshot WHERE value = ?",
                 Params::from(vec![upstream_val]),
             )
-            .await
-            .unwrap();
-        AssertUnwindSafe(move || get_value(&rs_rows, upstream_val))
+            .await;
+        AssertUnwindSafe(move || get_value(&rs_rows.unwrap(), upstream_val))
     }, then_assert: |result| {
         assert_eq!(*upstream_val, result());
     });
@@ -138,15 +137,14 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
     assert_eq!(upstream_val, &replicated_upstream_rows[0][0]);
 
     // Check the result of streaming replication on Readyset
-    eventually!(attempts: 5, run_test: {
-        let replicated_rs_rows: Vec<Row> = rs_conn
+    eventually!(run_test: {
+        let replicated_rs_rows: Result<Vec<Row>, _> = rs_conn
             .exec(
                 "SELECT * FROM replicate WHERE value = ?",
                 Params::from(vec![upstream_val]),
             )
-            .await
-            .unwrap();
-        AssertUnwindSafe(move || get_value(&replicated_rs_rows, upstream_val))
+            .await;
+        AssertUnwindSafe(move || get_value(&replicated_rs_rows.unwrap(), upstream_val))
     }, then_assert: |result| {
         assert_eq!(*upstream_val, result());
     });
@@ -175,14 +173,13 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
 
     // Check the update propogated through Readyset
     eventually!(attempts: 5, run_test: {
-        let updated_rs_rows: Vec<Row> = rs_conn
+        let updated_rs_rows: Result<Vec<Row>, _> = rs_conn
             .exec(
                 "SELECT * FROM snapshot WHERE value = ?",
                 Params::from(vec![updated_upstream_val]),
             )
-            .await
-            .unwrap();
-        AssertUnwindSafe(move || get_value(&updated_rs_rows, updated_upstream_val))
+            .await;
+        AssertUnwindSafe(move || get_value(&updated_rs_rows.unwrap(), updated_upstream_val))
     }, then_assert: |result| {
         assert_eq!(*updated_upstream_val, result());
     });
@@ -211,14 +208,13 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
 
     // Check the update propogated through Readyset
     eventually!(attempts: 5, run_test: {
-        let updated_rs_rows: Vec<Row> = rs_conn
+        let updated_rs_rows: Result<Vec<Row>, _> = rs_conn
             .exec(
                 "SELECT * FROM replicate WHERE value = ?",
                 Params::from(vec![updated_upstream_val]),
             )
-            .await
-            .unwrap();
-        AssertUnwindSafe(move || get_value(&updated_rs_rows, updated_upstream_val))
+            .await;
+        AssertUnwindSafe(move || get_value(&updated_rs_rows.unwrap(), updated_upstream_val))
     }, then_assert: |result| {
         assert_eq!(*updated_upstream_val, result());
     });

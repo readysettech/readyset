@@ -1711,10 +1711,14 @@ async fn multi_keyed_state() {
         .await
         .unwrap();
 
-    let result: (u32, u32, u32, u32, u32, u32, u32, u32,) = conn
-        .exec_first("SELECT * FROM test WHERE a = ? AND b = ? AND c = ? AND d = ? AND e = ? AND f = ? AND g = ?", (2, 3, 4, 5, 6, 7, 8,))
-        .await.unwrap().unwrap();
-    assert_eq!(result, (1, 2, 3, 4, 5, 6, 7, 8,));
+    eventually!(run_test: {
+        let result = conn
+            .exec_first("SELECT * FROM test WHERE a = ? AND b = ? AND c = ? AND d = ? AND e = ? AND f = ? AND g = ?", (2, 3, 4, 5, 6, 7, 8,))
+            .await;
+        AssertUnwindSafe(move || result)
+    }, then_assert: |result| {
+        assert_eq!(result().unwrap(), Some((1, 2, 3, 4, 5, 6, 7, 8,)));
+    });
 
     shutdown_tx.shutdown().await;
 }
@@ -3123,6 +3127,7 @@ async fn test_utf8(coll: &str) {
         ))
         .await
         .unwrap();
+    sleep().await;
     rs.query_drop(format!(
         "create cache from select * from {coll} order by b, a"
     ))
