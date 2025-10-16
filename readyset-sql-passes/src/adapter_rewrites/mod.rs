@@ -26,6 +26,7 @@ pub use shallow_cache_rewrites::{
 use tracing::{trace, trace_span};
 
 use crate::disallow_row::DisallowRow as _;
+use crate::expr::ScalarOptimizeExpressions as _;
 use crate::{
     ImpliedTableExpansion as _, ImpliedTablesContext, ResolveSchemas as _, ResolveSchemasContext,
     RewriteDialectContext, StarExpansion as _, StarExpansionContext,
@@ -258,6 +259,8 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     trace!(parent: &span, pass="disallow_row", query = %query.display(flags.dialect));
     query.resolve_schemas(&context)?;
     trace!(parent: &span, pass="resolve_schemas", query = %query.display(flags.dialect));
+    query.scalar_optimize_expressions(&context);
+    trace!(parent: &span, pass="scalar_optimize_expressions", query = %query.display(flags.dialect));
     query.expand_stars(&context)?;
     trace!(parent: &span, pass="expand_stars", query = %query.display(flags.dialect));
     query.expand_implied_tables(&context)?;
@@ -2451,6 +2454,36 @@ mod tests {
                 err.to_string().contains("Too many keys"),
                 "Error should mention 'Too many keys': {}",
                 err
+            );
+        }
+
+        #[test]
+        fn scalar_optimization_constant_folding() {
+            let mut query = parse_select_statement_mysql("SELECT (1 + 2) FROM t");
+            let context = rewrite_context(Dialect::MySQL);
+
+            rewrite_query(&mut query, rewrite_params(Dialect::MySQL), &context).unwrap();
+
+            assert_eq!(
+                query,
+                parse_select_statement_mysql("SELECT 3 FROM t"),
+                "{}",
+                query.display(Dialect::MySQL)
+            );
+        }
+
+        #[test]
+        fn scalar_optimization_integration() {
+            let mut query = parse_select_statement_mysql("SELECT (1 + 2) FROM t WHERE x = 3");
+            let context = rewrite_context(Dialect::MySQL);
+
+            rewrite_query(&mut query, rewrite_params(Dialect::MySQL), &context).unwrap();
+
+            assert_eq!(
+                query,
+                parse_select_statement_mysql("SELECT 3 FROM t WHERE t.x = $1"),
+                "{}",
+                query.display(Dialect::MySQL)
             );
         }
     }

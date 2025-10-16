@@ -49,6 +49,13 @@ impl<'ast> VisitorMut<'ast> for ConstantFoldVisitor {
             return visit_mut::walk_expr(self, expr);
         }
 
+        if let Expr::Row { exprs, .. } = expr {
+            for e in exprs {
+                self.visit_expr(e)?;
+            }
+            return Ok(());
+        }
+
         // Since we have to recursively traverse the expression's AST to convert it into a dataflow
         // expression anyway, we don't need to do an extra pass here to find if the expression is
         // constant-valued; we just try to evaluate it in a context where we return errors for
