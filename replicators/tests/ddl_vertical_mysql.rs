@@ -363,6 +363,33 @@ struct DDLModelState {
     deleted_views: HashSet<String>,
 }
 
+/// Drop views that select from this table.
+async fn drop_dependent_views(
+    state: &DDLModelState,
+    readyset: &mut Conn,
+    upstream: &mut Conn,
+    table: &str,
+) {
+    for (view, def) in state.views.iter() {
+        match def {
+            TestViewDef::Simple(table_source) => {
+                if table == table_source {
+                    let drop_view = format!("DROP VIEW `{view}`");
+                    readyset.query_drop(&drop_view).await.unwrap();
+                    upstream.query_drop(&drop_view).await.unwrap();
+                }
+            }
+            TestViewDef::Join { table_a, table_b } => {
+                if table == table_a || table == table_b {
+                    let drop_view = format!("DROP VIEW `{view}`");
+                    readyset.query_drop(&drop_view).await.unwrap();
+                    upstream.query_drop(&drop_view).await.unwrap();
+                }
+            }
+        }
+    }
+}
+
 #[async_trait(?Send)]
 impl ModelState for DDLModelState {
     type Operation = Operation;
@@ -705,7 +732,9 @@ impl ModelState for DDLModelState {
                 });
             }
             Operation::DropTable(name) => {
-                let query = format!("DROP TABLE `{name}` CASCADE");
+                // MySQL does not implement DROP TABLE ... CASCADE.
+                drop_dependent_views(self, rs_conn, mysql_conn, name).await;
+                let query = format!("DROP TABLE `{name}`");
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
             }
@@ -768,26 +797,9 @@ impl ModelState for DDLModelState {
                 col_name,
                 new_name,
             } => {
+                drop_dependent_views(self, rs_conn, mysql_conn, table).await;
                 let query =
                     format!("ALTER TABLE `{table}` RENAME COLUMN `{col_name}` TO `{new_name}`");
-                for (view, def) in self.views.iter() {
-                    match def {
-                        TestViewDef::Simple(table_source) => {
-                            if table == table_source {
-                                let drop_view = format!("DROP VIEW `{view}`");
-                                rs_conn.query_drop(&drop_view).await.unwrap();
-                                mysql_conn.query_drop(&drop_view).await.unwrap();
-                            }
-                        }
-                        TestViewDef::Join { table_a, table_b } => {
-                            if table == table_a || table == table_b {
-                                let drop_view = format!("DROP VIEW `{view}`");
-                                rs_conn.query_drop(&drop_view).await.unwrap();
-                                mysql_conn.query_drop(&drop_view).await.unwrap();
-                            }
-                        }
-                    }
-                }
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
             }

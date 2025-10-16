@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc d86d0444adfbbed5f9bf8cf8fe33f7b676d93043a4e6fa9270e3d47d88409306 # shrinks to [CreateTable("___3_gj_7vljlcl___aw866_w13", [ColumnSpec { name: "u4t9_z89_3k__2", sql_type: Text }, ColumnSpec { name: "to", sql_type: Blob }]), AddKey { table: "___3_gj_7vljlcl___aw866_w13", column: "to" }]
+cc 6d0191c3eda9cef596e500d671f6e84b1646242344a5c0e28a7de634816c5b3e # shrinks to [CreateTable("g_1_1su2u", [ColumnSpec { name: "s_u__28o__2ry_6wyqsz0k__60____", sql_type: Timestamp }, ColumnSpec { name: "ymtr68l75gi8_q609_", sql_type: DateTime(None) }]), CreateTable("t7vq1", [ColumnSpec { name: "_5128_6_____w_7dw70___3___s_0_jb", sql_type: Int(None) }]), CreateSimpleView { name: "__", table_source: "t7vq1" }, DropTable("t7vq1"), CreateSimpleView { name: "__", table_source: "g_1_1su2u" }]
