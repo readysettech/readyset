@@ -1434,7 +1434,6 @@ async fn schema_qualifier() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn schema_search_path() {
-    readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE s1.t (a int)")
@@ -1462,7 +1461,6 @@ async fn schema_search_path() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn view_schema_resolution() {
-    readyset_tracing::init_test_logging();
     let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
 
@@ -1537,7 +1535,6 @@ async fn view_schema_resolution() {
 /// different search paths, are executed as separate queries
 #[tokio::test(flavor = "multi_thread")]
 async fn same_query_different_search_path() {
-    readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE s1.t (a int)")
@@ -1655,7 +1652,6 @@ mod multiple_create_and_drop {
     #[ignore = "REA-3159"]
     #[tokio::test(flavor = "multi_thread")]
     async fn same_query_name() {
-        readyset_tracing::init_test_logging();
         let (opts, _handle, shutdown_tx) = setup().await;
         let conn = connect(opts).await;
 
@@ -1704,7 +1700,6 @@ mod multiple_create_and_drop {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn different_query_name() {
-        readyset_tracing::init_test_logging();
         let (opts, _handle, shutdown_tx) = setup().await;
         let conn = connect(opts).await;
 
@@ -1762,7 +1757,6 @@ mod multiple_create_and_drop {
             }
         }
 
-        readyset_tracing::init_test_logging();
         let (opts, _handle, shutdown_tx) = setup().await;
         let conn = connect(opts).await;
 
@@ -1819,7 +1813,6 @@ mod multiple_create_and_drop {
             }
         }
 
-        readyset_tracing::init_test_logging();
         let (opts, _handle, shutdown_tx) = setup().await;
         let conn = connect(opts).await;
 
@@ -1924,7 +1917,6 @@ async fn drop_all_caches_clears_authority_list() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_explain_create_cache() {
-    readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = DatabaseURL::from(opts)
         .connect(&ServerCertVerification::Default)
@@ -1970,7 +1962,6 @@ async fn test_explain_create_cache() {
 // and not the entire `CREATE CACHE` statement
 #[tokio::test(flavor = "multi_thread")]
 async fn show_caches_contains_select_statement() {
-    readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = setup().await;
     let conn = connect(opts).await;
 

@@ -1725,7 +1725,6 @@ async fn multi_keyed_state() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn reuse_similar_query() {
-    readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
