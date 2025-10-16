@@ -1,6 +1,6 @@
 use mysql_async::{self as mysql};
 use readyset_errors::ReadySetResult;
-use readyset_sql::ast::{Column, SqlIdentifier};
+use readyset_sql::ast::{Column, Relation, SqlIdentifier};
 use readyset_sql::DialectDisplay;
 
 use super::utils::MYSQL_BATCH_SIZE;
@@ -67,7 +67,7 @@ impl SnapshotType {
     ///   and the collation query
     pub fn get_queries(
         &self,
-        table: &readyset_client::Table,
+        table_name: &Relation,
         snapshot_query_comment: Option<String>,
     ) -> (String, String, String, String) {
         let force_index = match self {
@@ -83,7 +83,7 @@ impl SnapshotType {
             }
             SnapshotType::FullTableScan => "".to_string(),
         };
-        let schema = match table.table_name().schema.as_ref() {
+        let schema = match table_name.schema.as_ref() {
             Some(schema) => {
                 format!("AND TABLE_SCHEMA = '{schema}'")
             }
@@ -91,19 +91,18 @@ impl SnapshotType {
         };
         let collation_query = format!(
             "SELECT cl.ID FROM information_schema.COLUMNS c LEFT JOIN information_schema.COLLATIONS cl USING (COLLATION_NAME) WHERE c.TABLE_NAME = '{}' {} ORDER BY c.ORDINAL_POSITION",
-            table.table_name().name,
+            table_name.name,
             schema
         );
         let count_query = format!(
             "SELECT TABLE_ROWS FROM information_schema.tables WHERE TABLE_NAME = '{}' {}",
-            table.table_name().name,
-            schema
+            table_name.name, schema
         );
 
         let snapshot_query_comment = snapshot_query_comment
             .map(|s| s.replace("/*", "").replace("*/", ""))
             .filter(|s| !s.is_empty())
-            .map(|s| format!(" /* {s} */"))
+            .map(|s| format!(" /*{s} */"))
             .unwrap_or_default();
 
         let (initial_query, bound_based_query) = match self {
@@ -131,14 +130,14 @@ impl SnapshotType {
 
                 let initial_query = format!(
                     "SELECT{snapshot_query_comment} * FROM {} {} ORDER BY {} LIMIT {}",
-                    table.table_name().display(readyset_sql::Dialect::MySQL),
+                    table_name.display(readyset_sql::Dialect::MySQL),
                     force_index,
                     order_by,
                     MYSQL_BATCH_SIZE
                 );
                 let bound_based_query = format!(
                     "SELECT{snapshot_query_comment} * FROM {} {} WHERE {} ORDER BY {} LIMIT {}",
-                    table.table_name().display(readyset_sql::Dialect::MySQL),
+                    table_name.display(readyset_sql::Dialect::MySQL),
                     force_index,
                     next_bound,
                     order_by,
@@ -149,7 +148,7 @@ impl SnapshotType {
             SnapshotType::FullTableScan => {
                 let initial_query = format!(
                     "SELECT{snapshot_query_comment} * FROM {}",
-                    table.table_name().display(readyset_sql::Dialect::MySQL)
+                    table_name.display(readyset_sql::Dialect::MySQL)
                 );
                 (initial_query.clone(), initial_query)
             }
@@ -203,5 +202,65 @@ impl SnapshotType {
     /// * True if the snapshot type is key based, false otherwise
     pub fn is_key_based(&self) -> bool {
         matches!(self, SnapshotType::KeyBased { .. })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_query_no_comment() {
+        let snapshot_type = SnapshotType::KeyBased {
+            name: Some(SqlIdentifier::from("PRIMARY")),
+            keys: vec![Column::from(SqlIdentifier::from("id"))],
+            column_indices: vec![0],
+        };
+        let table_name = Relation {
+            schema: Some(SqlIdentifier::from("test")),
+            name: SqlIdentifier::from("test"),
+        };
+        let (count_query, initial_query, bound_based_query, collation_query) =
+            snapshot_type.get_queries(&table_name, None);
+        assert_eq!(count_query, "SELECT TABLE_ROWS FROM information_schema.tables WHERE TABLE_NAME = 'test' AND TABLE_SCHEMA = 'test'");
+        assert_eq!(
+            initial_query,
+            "SELECT * FROM `test`.`test` FORCE INDEX (`PRIMARY`) ORDER BY `id` ASC LIMIT 100000"
+        );
+        assert_eq!(bound_based_query, "SELECT * FROM `test`.`test` FORCE INDEX (`PRIMARY`) WHERE ((`id` > ?)) ORDER BY `id` ASC LIMIT 100000");
+        assert_eq!(collation_query, "SELECT cl.ID FROM information_schema.COLUMNS c LEFT JOIN information_schema.COLLATIONS cl USING (COLLATION_NAME) WHERE c.TABLE_NAME = 'test' AND TABLE_SCHEMA = 'test' ORDER BY c.ORDINAL_POSITION");
+
+        let snapshot_type = SnapshotType::FullTableScan;
+        let (_count_query, initial_query, bound_based_query, _collation_query) =
+            snapshot_type.get_queries(&table_name, None);
+        assert_eq!(bound_based_query, initial_query);
+        assert_eq!(initial_query, "SELECT * FROM `test`.`test`");
+    }
+
+    #[test]
+    fn snapshot_query_with_comment() {
+        let snapshot_type = SnapshotType::KeyBased {
+            name: Some(SqlIdentifier::from("PRIMARY")),
+            keys: vec![Column::from(SqlIdentifier::from("id"))],
+            column_indices: vec![0],
+        };
+        let table_name = Relation {
+            schema: Some(SqlIdentifier::from("test")),
+            name: SqlIdentifier::from("test"),
+        };
+
+        let (_count_query, initial_query, bound_based_query, _collation_query) =
+            snapshot_type.get_queries(&table_name, Some("+ PT_KILL_BYPASS".to_string()));
+        assert_eq!(initial_query, "SELECT /*+ PT_KILL_BYPASS */ * FROM `test`.`test` FORCE INDEX (`PRIMARY`) ORDER BY `id` ASC LIMIT 100000");
+        assert_eq!(bound_based_query, "SELECT /*+ PT_KILL_BYPASS */ * FROM `test`.`test` FORCE INDEX (`PRIMARY`) WHERE ((`id` > ?)) ORDER BY `id` ASC LIMIT 100000");
+
+        let snapshot_type = SnapshotType::FullTableScan;
+        let (_count_query, initial_query, bound_based_query, _collation_query) =
+            snapshot_type.get_queries(&table_name, Some("+ PT_KILL_BYPASS".to_string()));
+        assert_eq!(
+            initial_query,
+            "SELECT /*+ PT_KILL_BYPASS */ * FROM `test`.`test`"
+        );
+        assert_eq!(bound_based_query, initial_query);
     }
 }

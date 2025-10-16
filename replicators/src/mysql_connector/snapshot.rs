@@ -439,7 +439,7 @@ impl MySqlReplicator<'_> {
         // don't have support to lookup a collation from its name. Temporally get the
         // collation ID from querying IS. Later we can avoid the extra query.
         let (count_query, initial_query, bound_base_query, collation_query) =
-            snapshot_type.get_queries(&table_mutator, snapshot_query_comment);
+            snapshot_type.get_queries(table_mutator.table_name(), snapshot_query_comment);
 
         let collations = trx
             .query(collation_query)
