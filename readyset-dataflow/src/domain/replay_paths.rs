@@ -184,12 +184,25 @@ impl ReplayPaths {
                     TriggerEndpoint::Local(key) | TriggerEndpoint::Start(key) => {
                         let maybe_downstream_keys = path.target_node().and_then(|target| {
                             path.target_index.as_ref().and_then(|target_index| {
-                                remapped_keys.remove(
-                                    path.last_segment().node,
-                                    target,
-                                    &target_index.columns,
-                                    keys,
-                                )
+                                let result = remapped_keys.remove(
+                                    path.last_segment().node, // The node with generated columns (join)
+                                    &path.last_segment().partial_index.as_ref().unwrap().columns,
+                                    target, // The source node we're evicting from
+                                    &target_index.columns, // The columns we're evicting from in the source
+                                    keys,                  // The keys being evicted
+                                );
+
+                                if result.is_some() {
+                                    tracing::trace!(
+                                        ?tag,
+                                        ?node,
+                                        ?index,
+                                        target_node = ?path.last_segment().node,
+                                        num_remapped = result.as_ref().map(|v| v.len()),
+                                        "found remapped keys for eviction"
+                                    );
+                                }
+                                result
                             })
                         });
 

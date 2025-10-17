@@ -1,6 +1,9 @@
 pub(crate) mod channel;
 mod domain_metrics;
+mod remapped_keys;
 pub mod replay_paths;
+
+use remapped_keys::RemappedKeys;
 
 use std::borrow::Cow;
 use std::cell::RefMut;
@@ -16,7 +19,7 @@ use std::{cell, cmp, mem, process, time};
 
 use ahash::RandomState;
 use antithesis_sdk::assert_reachable;
-use common::{Len, LenMetric};
+use common::LenMetric;
 use dataflow_state::{
     BaseTableState, EvictBytesResult, EvictKeysResult, EvictRandomResult, MaterializedNodeState,
     PersistenceType, PointKey, RangeKey, RangeLookupResult,
@@ -537,124 +540,6 @@ struct TimedPurge {
     view: LocalNodeIndex,
     keys: HashSet<KeyComparison>,
 }
-
-/// Mapping, for nodes which [generate columns][], from *upstream* keys, to downstream keys which
-/// have remapped to those upstream keys.
-///
-/// Used when we receive an eviction for those upstream keys, to rewrite that eviction into an
-/// eviction for the downstream keys.
-///
-/// # Internals
-///
-/// The internals of this type are reasonably complicated, and best illustrated by an example.
-///
-/// Consider we have some join, `n3`, with two parents `n1` and `n2`, and which is indexed on
-/// columns `[1, 2]`, where column `1` maps to column `1` in `n1`, and column `2` maps to column `1`
-/// in `n2` (a [straddled join][]). Now let's say we get some upquery on `[1, 2] = ["a", "b"]` for
-/// that join.  That upquery would get remapped to a pair of upqueries on the parents, `[1] = ["a"]`
-/// on `n1` and `[1] = ["b"]` on `n2`. We then perform both of those upqueries, and then once both
-/// have finished we perform the join and return the results.
-///
-/// Now let's say `n3` gets an eviction for `[1] = ["a"]` from `n1`. We don't have an index on only
-/// column `[1]` in `n3`, so we need to find a way of *mapping* that eviction into an eviction on
-/// `[1, 2] = ["a", "b"]`. In that case, this data structure would look something like:
-///
-/// ```notrust
-/// {
-///     n3: { // The node we're processing through
-///         n1: { // The node we got an eviction from
-///             [1]: { // The column indices in the eviction
-///                 ["a"]: { // The upstream key for the eviction
-///                     { Tag(some tag): [["a", "b"]] } // The downstream eviction(s) to rewrite to
-///                 }
-///             }
-///         }
-///     }
-/// }
-/// ```
-///
-/// Which is sufficient information to remap our upstream eviction to a downstream one
-///
-/// [generate columns]: http://docs/dataflow/replay_paths.html#generated-columns
-/// [straddled join]: http://docs/dataflow/replay_paths.html#straddled-joins
-#[derive(Debug, Clone, Default)]
-#[allow(clippy::type_complexity)]
-struct RemappedKeys {
-    // map from nodes which generate columns...
-    map: NodeMap<
-        // ...to nodes which are the source of those columns (which might be the same node)...
-        NodeMap<
-            // ...to the column indices within the source node which those columns are generated
-            // from...
-            HashMap<
-                Vec<usize>,
-                // ...to the upstream keys which have been remapped to...
-                HashMap<
-                    Vec<KeyComparison>,
-                    // ...to the downstream tags and key comparisons which have remapped to those
-                    // keys.
-                    HashMap<Tag, Vec<KeyComparison>>,
-                >,
-            >,
-        >,
-    >,
-    len: usize,
-}
-
-impl RemappedKeys {
-    /// Record that some downstream key was rewritten by `miss_in` into an `upstream_miss`.
-    fn insert(
-        &mut self,
-        miss_in: LocalNodeIndex,
-        upstream_miss: ColumnMiss,
-        downstream_key: KeyComparison,
-        downstream_tag: Tag,
-    ) {
-        self.len += 1;
-        self.map
-            .entry(miss_in)
-            .or_default()
-            .entry(upstream_miss.node)
-            .or_default()
-            .entry(upstream_miss.column_indices)
-            .or_default()
-            .entry(upstream_miss.missed_keys.into_vec())
-            .or_default()
-            .entry(downstream_tag)
-            .or_default()
-            .push(downstream_key);
-    }
-
-    /// If `node` rewrites some of its downstream keys into upstream upqueries to `column` in a
-    /// `target` node, look up the set of downstream tags and keys which have been rewritten to
-    /// `keys`.
-    fn remove(
-        &mut self,
-        node: LocalNodeIndex,
-        target: LocalNodeIndex,
-        columns: &[usize],
-        keys: &[KeyComparison],
-    ) -> Option<impl ExactSizeIterator<Item = (Tag, Vec<KeyComparison>)>> {
-        // NOTE: we consciously don't remove nested maps here; the idea is that the only thing
-        // that's actually a large state-space is the keys, which are the leaves, so we can leave
-        // empty maps in up to the keys if we want (and that greatly simplifies this method)
-        let iter = self
-            .map
-            .get_mut(node)
-            .and_then(|m| m.get_mut(target))
-            .and_then(|m| m.get_mut(columns))
-            .and_then(|m| m.remove(keys))
-            .map(|m| m.into_iter());
-        iter.inspect(|i| self.len -= i.len())
-    }
-}
-
-impl Len for RemappedKeys {
-    fn len(&self) -> usize {
-        self.len
-    }
-}
-
 /// A [`Domain`] is a well-connected sub-graph of the overall dataflow graph, used as the unit
 /// of execution of the dataflow engine. The dataflow graph is split up into domains using
 /// [heuristics](../src/readyset_server/controller/migrate/assignment.rs.html)
@@ -986,12 +871,14 @@ impl Domain {
                     if state.is_partial() {
                         self.remapped_keys.insert(
                             miss_in,
-                            upstream_miss.clone(),
+                            miss_columns.to_vec(),
                             replay_key.clone(),
+                            upstream_miss.clone(),
                             needed_for,
                         )
                     }
                 }
+                println!("remapped_keys: {:?}", *self.remapped_keys);
 
                 invariant!(
                     !lhs_misses.is_empty(),
