@@ -169,6 +169,10 @@ where
         self.caches.pin().get(&id).cloned()
     }
 
+    pub fn exists(&self, relation: Option<&Relation>, query_id: Option<&QueryId>) -> bool {
+        self.get(relation, query_id).is_some()
+    }
+
     fn make_guard(cache: Arc<Cache<K, V>>, key: K) -> CacheInsertGuard<K, V> {
         CacheInsertGuard {
             cache,

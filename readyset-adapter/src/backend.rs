@@ -180,9 +180,17 @@ enum PrepareMeta {
 struct PrepareSelectMeta {
     stmt: SelectStatement,
     rewritten: SelectStatement,
-    must_migrate: bool,
-    should_do_noria: bool,
-    always: bool,
+    backend: PrepareSelectBackend,
+}
+
+#[derive(Debug)]
+enum PrepareSelectBackend {
+    Deep {
+        must_migrate: bool,
+        should_do_noria: bool,
+        always: bool,
+    },
+    Shallow {},
 }
 
 /// How to behave when receiving unsupported `SET` statements
@@ -534,7 +542,7 @@ struct PreparedStatement<DB>
 where
     DB: UpstreamDatabase,
 {
-    /// Indicates if the statement was prepared for ReadySet, Fallback, or Both
+    /// Indicates if the statement was prepared for ReadySet, Fallback, Shallow, or multiple
     prep: PrepareResult<DB>,
     /// The current ReadySet migration state
     migration_state: MigrationState,
@@ -1053,8 +1061,14 @@ where
         statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
-        let do_noria = select_meta.should_do_noria;
-        let do_migrate = select_meta.must_migrate;
+        let (do_noria, do_migrate) = match &select_meta.backend {
+            PrepareSelectBackend::Deep {
+                should_do_noria,
+                must_migrate,
+                ..
+            } => (*should_do_noria, *must_migrate),
+            PrepareSelectBackend::Shallow { .. } => (false, false),
+        };
 
         let up_prep: OptionFuture<_> = self
             .upstream
@@ -1232,14 +1246,43 @@ where
     /// Provides metadata required to prepare a select query
     fn plan_prepare_select(&mut self, stmt: SelectStatement) -> PrepareMeta {
         let mut rewritten = stmt.clone();
-        let _ = adapter_rewrites::rewrite_query(&mut rewritten, self.noria.rewrite_params())
-            .map_err(|e| {
+        let params =
+            match adapter_rewrites::rewrite_equivalent(&mut rewritten, self.noria.rewrite_params())
+            {
+                Ok(params) => params,
+                Err(e) => {
+                    warn!(
+                        statement = %Sensitive(&stmt.display(self.settings.dialect)),
+                        "This statement could not be rewritten for Readyset"
+                    );
+                    return PrepareMeta::FailedToRewrite(e);
+                }
+            };
+
+        let query_id = QueryId::from_select(&rewritten, self.noria.schema_search_path());
+
+        if self.shallow.exists(None, Some(&query_id)) {
+            return PrepareMeta::Select(PrepareSelectMeta {
+                stmt,
+                rewritten,
+                backend: PrepareSelectBackend::Shallow {},
+            });
+        }
+
+        match adapter_rewrites::rewrite_for_readyset(
+            &mut rewritten,
+            self.noria.rewrite_params(),
+            params,
+        ) {
+            Ok(_params) => {}
+            Err(e) => {
                 warn!(
                     statement = %Sensitive(&stmt.display(self.settings.dialect)),
-                    "This statement could not be rewritten by Readyset"
+                    "This statement could not be rewritten for Readyset"
                 );
-                PrepareMeta::FailedToRewrite(e)
-            });
+                return PrepareMeta::FailedToRewrite(e);
+            }
+        }
 
         let status = self
             .state
@@ -1256,12 +1299,14 @@ where
             PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
                 rewritten,
-                should_do_noria: should_do_readyset,
-                // For select statements only InRequestPath should trigger migrations
-                // synchronously, or if no upstream is present.
-                must_migrate: self.settings.migration_mode == MigrationMode::InRequestPath
-                    || !self.has_fallback(),
-                always: status.always,
+                backend: PrepareSelectBackend::Deep {
+                    // For select statements only InRequestPath should trigger migrations
+                    // synchronously, or if no upstream is present.
+                    must_migrate: self.settings.migration_mode == MigrationMode::InRequestPath
+                        || !self.has_fallback(),
+                    should_do_noria: should_do_readyset,
+                    always: status.always,
+                },
             })
         }
     }
@@ -1405,9 +1450,12 @@ where
             PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
                 rewritten,
-                always,
-                ..
+                backend,
             }) => {
+                let always = match &backend {
+                    PrepareSelectBackend::Deep { always, .. } => *always,
+                    PrepareSelectBackend::Shallow { .. } => false,
+                };
                 let request =
                     ViewCreateRequest::new(rewritten, self.noria.schema_search_path().to_owned());
                 let migration_state = self
