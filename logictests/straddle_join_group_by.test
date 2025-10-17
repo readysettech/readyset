@@ -1,0 +1,23 @@
+statement ok
+CREATE TABLE items (ID int , description varchar(20), active char(1), cat_id int)
+
+statement ok
+INSERT INTO items VALUES (1,'i1','y',1),(2,'i2','y',1),(3,'i3','n',1),(4,'i4','y',2),(5,'i5','y',1),(6,'i6','y',3),(7,'i7','y',2),(8,'i8','y',4)
+
+statement ok
+CREATE TABLE category (ID int , active int, name varchar(20))
+
+statement ok
+INSERT INTO category VALUES (1,1,'cat1'),(2,1,'cat2'),(3,1,'cat3'),(4,0,'cat4')
+
+query nosort
+SELECT c.name, count(*) FROM items i JOIN category c ON (i.cat_id = c.ID) WHERE i.active=? AND c.active = ? GROUP BY c.name
+? = y
+? = 1
+----
+cat1
+3
+cat2
+2
+cat3
+1

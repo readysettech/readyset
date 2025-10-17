@@ -50,11 +50,12 @@ pub(super) struct Plan<'a> {
     /// Map from indexes we're adding to this node, to the list of tags which identify those
     /// indexes
     indexes: HashMap<Index, Vec<Tag>>,
-    /// Indexes in *parent* nodes for extended replay paths we've already added
+    /// Tracks mappings from upstream indices to downstream indices for extended replay paths
     ///
-    /// Used to prevent adding the same replay path for an extended replay path twice, for example
-    /// if two different downstream sets of columns remap to the same set of columns in the parent
-    parent_indexes: HashMap<NodeIndex, HashSet<Index>>,
+    /// Maps (parent_node, upstream_index) -> set of downstream indices that use this upstream index.
+    /// This prevents adding duplicate replay paths while allowing different downstream indices
+    /// to share the same upstream index (as in straddled joins).
+    parent_indexes: HashMap<(NodeIndex, Index), HashSet<Index>>,
     /// New paths added in this run of the planner.
     paths: HashMap<Tag, (Index, Vec<NodeIndex>)>,
     /// Do we already have some replay paths for this node?
@@ -356,10 +357,13 @@ impl<'a> Plan<'a> {
         // happen to remap to the same set of columns upstream
         paths.retain(|p| {
             if p.has_extension() {
-                p.target().index.iter().all(|idx| {
+                // For extended replay paths (e.g., straddled joins), check if we've already
+                // created a path from this upstream index to this specific downstream index.
+                // Multiple downstream indices can share the same upstream index.
+                p.target().index.iter().all(|upstream_idx| {
                     self.parent_indexes
-                        .get(&p.target().node)
-                        .is_none_or(|idxs| !idxs.contains(idx))
+                        .get(&(p.target().node, upstream_idx.clone()))
+                        .is_none_or(|downstream_idxs| !downstream_idxs.contains(&index_on))
                 })
             } else {
                 p.target()
@@ -419,11 +423,12 @@ impl<'a> Plan<'a> {
             );
 
             if path.has_extension() {
-                if let Some(index) = path.target().index.clone() {
+                if let Some(upstream_index) = path.target().index.clone() {
+                    // Track that this downstream index (index_on) uses this upstream index
                     self.parent_indexes
-                        .entry(path.target().node)
+                        .entry((path.target().node, upstream_index))
                         .or_default()
-                        .insert(index);
+                        .insert(index_on.clone());
                 }
                 self.indexes.entry(index_on.clone()).or_default().push(tag);
             } else {

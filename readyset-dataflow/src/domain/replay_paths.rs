@@ -21,6 +21,10 @@ use crate::NodeMap;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReplayPath {
     pub(super) source: Option<LocalNodeIndex>,
+    /// Partial index (if any) at the *destination* of this replay path (the last node in the path).
+    /// For extended replay paths with multiple downstream indices sharing the same upstream index,
+    /// this tracks which specific downstream index this path is for.
+    pub(super) destination_index: Option<Index>,
     /// Partial index (if any) at the *target* of this replay path.
     pub(super) target_index: Option<Index>,
     /// The nodes in the replay path.
@@ -32,7 +36,7 @@ pub struct ReplayPath {
 
 impl fmt::Display for ReplayPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ReplayPath {{ source: {:?}, target_index: {:?}, path: {:?}, notify_done: {:?}, partial_unicast_sharder: {:?}, trigger: {:?} }}", self.source, self.target_index, self.path, self.notify_done, self.partial_unicast_sharder, self.trigger)
+        write!(f, "ReplayPath {{ source: {:?}, destination_index: {:?}, target_index: {:?}, path: {:?}, notify_done: {:?}, partial_unicast_sharder: {:?}, trigger: {:?} }}", self.source, self.destination_index, self.target_index, self.path, self.notify_done, self.partial_unicast_sharder, self.trigger)
     }
 }
 
@@ -182,29 +186,32 @@ impl ReplayPaths {
             .flat_map(move |(tag, path)| {
                 match &path.trigger {
                     TriggerEndpoint::Local(key) | TriggerEndpoint::Start(key) => {
-                        let maybe_downstream_keys = path.target_node().and_then(|target| {
-                            path.target_index.as_ref().and_then(|target_index| {
-                                let result = remapped_keys.remove(
-                                    path.last_segment().node, // The node with generated columns (join)
-                                    &path.last_segment().partial_index.as_ref().unwrap().columns,
-                                    target, // The source node we're evicting from
-                                    &target_index.columns, // The columns we're evicting from in the source
-                                    keys,                  // The keys being evicted
-                                );
-
-                                if result.is_some() {
-                                    tracing::trace!(
-                                        ?tag,
-                                        ?node,
-                                        ?index,
-                                        target_node = ?path.last_segment().node,
-                                        num_remapped = result.as_ref().map(|v| v.len()),
-                                        "found remapped keys for eviction"
+                        let maybe_downstream_keys =
+                            path.target_index.as_ref().and_then(|_target_index| {
+                                if let Some(destination_index) = &path.destination_index {
+                                    let result = remapped_keys.remove(
+                                        path.last_segment().node, // The node with generated columns (join)
+                                        &destination_index.columns,
+                                        node,           // The source node we're evicting from
+                                        &index.columns, // The columns we're evicting from in the source
+                                        keys,           // The keys being evicted
                                     );
+                                    if result.is_some() {
+                                        tracing::trace!(
+                                            ?tag,
+                                            ?node,
+                                            ?index,
+                                            destination_index = ?destination_index,
+                                            target_node = ?path.last_segment().node,
+                                            num_remapped = result.as_ref().map(|v| v.len()),
+                                            "found remapped keys for eviction"
+                                        );
+                                    }
+                                    result
+                                } else {
+                                    None
                                 }
-                                result
-                            })
-                        });
+                            });
 
                         if let Some(downstream) = maybe_downstream_keys {
                             Either::Left(downstream.map(move |(tag, keys)| {
@@ -337,10 +344,14 @@ impl ReplayPaths {
             None
         };
 
+        // Get the destination index from the last segment of the path
+        let destination_index = path.last().partial_index.clone();
+
         self.by_tag.insert(
             tag,
             ReplayPath {
                 source,
+                destination_index,
                 target_index,
                 path,
                 notify_done,

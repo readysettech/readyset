@@ -731,17 +731,44 @@ impl Domain {
         cols: &[usize],
         dst: Destination,
         target: Target,
+        dst_index: Option<&Index>,
     ) -> ReadySetResult<HashSet<Tag>> {
         let index = Index::new(IndexType::best_for_keys(keys), cols.to_vec());
-        let tags = self
+        let candidate_tags = self
             .replay_paths
             .tags_for_index(dst, target, &index)
             .cloned()
             .unwrap_or_default();
 
+        // If dst_index is provided (for extended replay paths), filter tags to only those
+        // whose destination_index matches the queried index
+        let tags = if let Some(dst_idx) = dst_index {
+            candidate_tags
+                .into_iter()
+                .filter(|&tag| {
+                    if let Some(path) = self.replay_paths.get(tag) {
+                        // For extended replay paths, check if destination_index matches
+                        if dst.0 != target.0 {
+                            path.destination_index
+                                .as_ref()
+                                .map(|di| di.columns == dst_idx.columns)
+                                .unwrap_or(false)
+                        } else {
+                            // For normal replay paths, no filtering needed
+                            true
+                        }
+                    } else {
+                        false
+                    }
+                })
+                .collect::<HashSet<_>>()
+        } else {
+            candidate_tags
+        };
+
         invariant!(
             !tags.is_empty(),
-            "no tag found for value {:?} in {}.{:?}{}",
+            "no tag found for value {:?} in {}.{:?}{}{}",
             Sensitive(&keys),
             dst.0,
             index,
@@ -749,9 +776,13 @@ impl Domain {
                 "".to_owned()
             } else {
                 format!(" (targeting {})", target.0)
+            },
+            if let Some(dst_idx) = dst_index {
+                format!(" (from destination index {:?})", dst_idx)
+            } else {
+                "".to_owned()
             }
         );
-
         Ok(tags)
     }
 
@@ -770,6 +801,7 @@ impl Domain {
     ///
     /// * `miss_columns` must not be empty
     /// * `dst` and `target` must both be nodes in this domain
+    #[allow(clippy::too_many_arguments)]
     fn find_tags_and_replay(
         &mut self,
         ex: &mut dyn Executor,
@@ -778,8 +810,9 @@ impl Domain {
         dst: Destination,
         target: Target,
         cache_name: Relation,
+        dst_index: Option<&Index>,
     ) -> ReadySetResult<()> {
-        let tags = self.find_tags(&miss_keys, miss_columns, dst, target)?;
+        let tags = self.find_tags(&miss_keys, miss_columns, dst, target, dst_index)?;
 
         for &tag in &tags {
             let (miss_keys, cache_name) = (miss_keys.clone(), cache_name.clone());
@@ -878,7 +911,6 @@ impl Domain {
                         )
                     }
                 }
-                println!("remapped_keys: {:?}", *self.remapped_keys);
 
                 invariant!(
                     !lhs_misses.is_empty(),
@@ -932,7 +964,24 @@ impl Domain {
 
         self.waiting.insert(miss_in, w);
 
+        // For extended replay paths (straddled joins), we need to pass the destination index
+        // so we can filter tags to only those that match the original queried index.
+        // Only use dst_index filtering if columns were generated (is_generated), meaning this
+        // is a node with multiple indices that might share upstream keys.
+        let dst_index = if is_generated {
+            Some(Index::new(IndexType::HashMap, miss_columns.to_vec()))
+        } else {
+            None
+        };
+
         for ((target, columns), keys) in needed_replays {
+            // Only pass dst_index if this is an extended replay path (dst != target) AND
+            // the columns were generated (is_generated)
+            let dst_idx_param = if miss_in != target.0 && dst_index.is_some() {
+                dst_index.as_ref()
+            } else {
+                None
+            };
             self.find_tags_and_replay(
                 ex,
                 keys,
@@ -940,6 +989,7 @@ impl Domain {
                 Destination(miss_in),
                 target,
                 cache_name.clone(),
+                dst_idx_param,
             )?
         }
 
@@ -2496,6 +2546,7 @@ impl Domain {
                             *tag,
                             ReplayPath {
                                 source: path.source,
+                                destination_index: path.destination_index.clone(),
                                 target_index: path.target_index.clone(),
                                 path: path.path.clone(),
                                 notify_done: path.notify_done,
@@ -2557,7 +2608,7 @@ impl Domain {
             return Ok(());
         };
 
-        let tags = self.find_tags(&keys, cols, Destination(node), Target(node))?;
+        let tags = self.find_tags(&keys, cols, Destination(node), Target(node), None)?;
 
         for tag in tags {
             if self.replay_paths[tag].trigger.is_local() {
@@ -2751,6 +2802,7 @@ impl Domain {
                         Destination(node),
                         Target(node),
                         cache_name.clone(),
+                        None, // Readers don't have extended replay paths
                     )?;
                 }
 
