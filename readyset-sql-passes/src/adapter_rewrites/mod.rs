@@ -30,6 +30,7 @@ use crate::drop_redundant_join::DropRedundantSelfJoin as _;
 use crate::expr::ScalarOptimizeExpressions as _;
 use crate::inline_leading_derived_table::InlineLeadingDerivedTable as _;
 use crate::rewrite_utils::contains_question_mark_placeholders;
+use crate::unnest_subqueries::UnnestSubqueries as _;
 use crate::{
     ArrayConstructorRewrite as _, BaseSchemasContext, ImpliedTableExpansion as _,
     ImpliedTablesContext, OrderLimitRemoval as _, ResolveSchemas as _, ResolveSchemasContext,
@@ -282,6 +283,8 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
         trace!(parent: &span, pass="drop_redundant_join", query = %query.display(flags.dialect));
         query.inline_leading_derived_table()?;
         trace!(parent: &span, pass="inline_leading_derived_table", query = %query.display(flags.dialect));
+        query.unnest_subqueries(&context)?;
+        trace!(parent: &span, pass="unnest_subqueries", query = %query.display(flags.dialect));
     }
     query.order_limit_removal(&context)?;
     trace!(parent: &span, pass="order_limit_removal", query = %query.display(flags.dialect));

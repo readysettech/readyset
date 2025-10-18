@@ -64,7 +64,6 @@ pub use crate::rewrite_between::RewriteBetween;
 pub use crate::star_expansion::StarExpansion;
 pub use crate::star_expansion::StarExpansionContext;
 pub use crate::strip_literals::{SelectStatementSkeleton, StripLiterals};
-use crate::unnest_subqueries::UnnestSubqueries;
 pub use crate::util::{
     LogicalOp, is_correlated, is_logical_op, is_predicate, map_aggregates, outermost_table_exprs,
 };
@@ -218,8 +217,6 @@ impl Rewrite for SelectStatement {
         trace!(parent: &span, pass="expand_stars", query = %self.display(sql_dialect));
         self.expand_implied_tables(&context)?;
         trace!(parent: &span, pass="expand_implied_tables", query = %self.display(sql_dialect));
-        self.unnest_subqueries(&context)?;
-        trace!(parent: &span, pass="unnest_subqueries", query = %self.display(sql_dialect));
         self.normalize_topk_with_aggregate(&context)?;
         trace!(parent: &span, pass="normalize_topk_with_aggregate", query = %self.display(sql_dialect));
         self.detect_problematic_self_joins()?;
