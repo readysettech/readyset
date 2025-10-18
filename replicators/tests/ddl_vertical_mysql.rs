@@ -3,11 +3,11 @@
 //! [doc]: https://docs.google.com/document/d/1GRYV7okEzz2T-KuF06M5Y4EkyRv7euMSb1viroT9JTk
 //!
 //! Note that this test suite is ignored by default, and conditionally de-ignored with the
-//! `ddl_vertical_tests` feature to prevent it running in normal builds (since it's slow and may
-//! find new bugs); to run it locally run:
+//! `vertical_tests` feature to prevent it running in normal builds (since it's slow and may find
+//! new bugs); to run it locally run:
 //!
 //! ```notrust
-//! cargo test -p replicators --features ddl_vertical_tests --test ddl_vertical_mysql
+//! cargo test -p replicators --features vertical_tests --test ddl_vertical_mysql
 //! ```
 //!
 //! This test suite will connect to a local MySQL database, which can be set up with all the
