@@ -10,9 +10,9 @@ use readyset_sql::analysis::visit_mut::{VisitorMut, walk_expr};
 use readyset_sql::analysis::{ReferredColumns, is_aggregate, visit, visit_mut};
 use readyset_sql::ast::{
     ArrayArguments, BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference,
-    FunctionExpr, GroupByClause, InValue, JoinClause, JoinConstraint, JoinOperator, JoinRightSide,
-    LimitClause, Literal, OrderBy, OrderClause, OrderType, Relation, SelectStatement,
-    SqlIdentifier, TableExpr, TableExprInner,
+    FunctionExpr, GroupByClause, InValue, ItemPlaceholder, JoinClause, JoinConstraint,
+    JoinOperator, JoinRightSide, LimitClause, Literal, OrderBy, OrderClause, OrderType, Relation,
+    SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use std::collections::{HashMap, HashSet};
@@ -2497,4 +2497,24 @@ pub(crate) fn normalize_comma_separated_lhs(stmt: &mut SelectStatement) -> Ready
     } else {
         false
     })
+}
+
+struct QuestionMarkPlaceholderVisitor {
+    found: bool,
+}
+
+impl<'ast> Visitor<'ast> for QuestionMarkPlaceholderVisitor {
+    type Error = ReadySetError;
+    fn visit_literal(&mut self, literal: &'ast Literal) -> Result<(), Self::Error> {
+        if !self.found && matches!(literal, Literal::Placeholder(ItemPlaceholder::QuestionMark)) {
+            self.found = true;
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn contains_question_mark_placeholders(query: &SelectStatement) -> ReadySetResult<bool> {
+    let mut visitor = QuestionMarkPlaceholderVisitor { found: false };
+    visitor.visit_select_statement(query)?;
+    Ok(visitor.found)
 }

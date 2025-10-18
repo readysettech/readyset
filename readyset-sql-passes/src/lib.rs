@@ -204,8 +204,6 @@ impl Rewrite for SelectStatement {
         trace!(parent: &span, pass="expand_stars", query = %self.display(sql_dialect));
         self.expand_implied_tables(&context)?;
         trace!(parent: &span, pass="expand_implied_tables", query = %self.display(sql_dialect));
-        self.rewrite_array_constructors()?;
-        trace!(parent: &span, pass="rewrite_array_constructors", query = %self.display(sql_dialect));
         self.drop_redundant_join(&context)?;
         trace!(parent: &span, pass="drop_redundant_join", query = %self.display(sql_dialect));
         self.inline_leading_derived_table()?;
