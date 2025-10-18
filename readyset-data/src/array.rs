@@ -203,7 +203,7 @@ impl Display for Array {
                     }
 
                     if let Ok(s) = <&str>::try_from(val) {
-                        write!(f, "\"{}\"", s.replace('"', "\\\""))?;
+                        write!(f, "\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))?;
                     } else {
                         write!(f, "{val}")?;
                     }
@@ -721,6 +721,22 @@ mod tests {
         };
 
         assert_eq!(arr.to_string(), "[-5:-4][4:6]={{1,2,3},{4,5,6}}");
+    }
+
+    #[test]
+    fn print_array_with_escaped_strings() {
+        // Test escaping of backslashes, quotes, and combinations
+        let arr = Array::from(vec![
+            DfValue::from(r"hello\world"),      // backslash
+            DfValue::from(r#"say "hello""#),    // quotes
+            DfValue::from(r#"path\to\"file""#), // both backslash and quotes
+            DfValue::from(""),                  // empty string
+            DfValue::from("NULL"),              // NULL string
+        ]);
+        assert_eq!(
+            arr.to_string(),
+            r#"{"hello\\world","say \"hello\"","path\\to\\\"file\"","","NULL"}"#
+        );
     }
 
     #[test]
