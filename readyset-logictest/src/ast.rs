@@ -391,6 +391,21 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
                     .join(",");
                 Ok(Self::Text(format!("{{{}}}", joined)))
             }
+            Type::INT8_ARRAY => {
+                // convert an int array into something like "{int,int,NULL,int}"
+                // we need to handle NULLs in some sane way, and this mimics what
+                // pg's array_agg() function does.
+                let int_array = Vec::<Option<i64>>::from_sql(ty, raw)?;
+                let joined = int_array
+                    .iter()
+                    .map(|opt| match opt {
+                        Some(v) => v.to_string(),
+                        None => "NULL".to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                Ok(Self::Text(format!("{{{}}}", joined)))
+            }
             Type::DATE => {
                 // This is a hack to work around the fact that we don't have
                 // a distinct 'Date' type, and that the existing 'Date' is
@@ -430,6 +445,7 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             | Type::INT2
             | Type::INT4
             | Type::INT8
+            | Type::INT8_ARRAY
             | Type::FLOAT4
             | Type::FLOAT8
             | Type::NUMERIC
