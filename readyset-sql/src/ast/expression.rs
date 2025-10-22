@@ -164,7 +164,7 @@ pub enum FunctionExpr {
 macro_rules! order_by_clause_str {
     ($o:expr, $dialect:expr) => {
         $o.as_ref()
-            .map(|clause| clause.display($dialect).to_string())
+            .map(|clause| format!(" {}", clause.display($dialect).to_string()))
             .unwrap_or_else(String::new)
     };
 }
