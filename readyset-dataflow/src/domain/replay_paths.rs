@@ -214,8 +214,10 @@ impl ReplayPaths {
                             });
 
                         if let Some(downstream) = maybe_downstream_keys {
-                            Either::Left(downstream.map(move |(tag, keys)| {
-                                (tag, self.get(tag).unwrap(), Cow::Owned(keys))
+                            // CRITICAL: Use the ORIGINAL path (which points to the join node),
+                            // but with the REMAPPED keys!
+                            Either::Left(downstream.map(move |(_remapped_tag, remapped_keys)| {
+                                (*tag, path, Cow::Owned(remapped_keys))
                             }))
                         } else if key == index {
                             // TODO: what if the key is the same, but with the columns in another
