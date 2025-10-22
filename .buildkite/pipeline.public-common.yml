@@ -261,17 +261,7 @@ steps:
     command:
       - 'echo +++ Running readyset-logictest'
       - '[ -d public ] && cd public'
-      - 'export RUST_BACKTRACE=full'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests'
-      - 'TZ=UTC cargo --locked run --bin readyset-logictest -- verify logictests/timeseries --database-type postgresql'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/psql --database-type postgresql'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/mysql --database-type mysql'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/psql --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/postgis --database-type postgresql --replication-url postgresql://postgres:noria@postgres/noria --parsing-preset both-prefer-sqlparser'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/replicated/mysql --database-type mysql --replication-url mysql://root:noria@mysql/noria'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/sqlparser --parsing-preset=only-sqlparser'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/sqlparser/mysql --parsing-preset=only-sqlparser --database-type mysql'
-      - 'cargo --locked run --bin readyset-logictest -- verify logictests/sqlparser/psql --parsing-preset=only-sqlparser --database-type postgresql'
+      - './.buildkite/run-logictests.sh'
     timeout_in_minutes: 60
     plugins:
       - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
@@ -283,6 +273,7 @@ steps:
             - CARGO_INCREMENTAL=0
             - RUST_BACKTRACE=full
             - CARGO_TERM_PROGRESS_WHEN=never     # disable progress bars if tty=true
+            - LOG_LEVEL=${LOG_LEVEL:-info}
           config:
             - "${GIT_PUBLIC_ROOT}build/docker-compose.yml"
             - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-default.yml"
