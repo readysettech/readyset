@@ -65,7 +65,6 @@
 //!         source_keys: [KeyComparison::Equal(["a"])]                  // The source/upstream keys that were missed on n1
 //!         } -> RemappingInfo {
 //!             destination_keys: [KeyComparison::Equal(["a", "b"])],  // The destination/downstream keys that were remapped to the source/upstream keys
-//!             tag: Tag(some_tag)                                     // The tag that triggered the remapping (the miss on n3)
 //!         }
 //!     },
 //!     len: 1,
@@ -79,7 +78,7 @@
 //! Information about a single remapping from downstream keys to upstream keys.
 //! This replaces the complex nested HashMap structure with a more readable flat structure.
 use crate::processing::ColumnMiss;
-use common::{Len, Tag};
+use common::Len;
 use readyset_client::{internal::LocalNodeIndex, KeyComparison};
 use std::collections::HashMap;
 
@@ -97,17 +96,12 @@ struct RemappingKey {
 struct RemappingInfo {
     /// The downstream keys that have been remapped to the upstream keys
     destination_keys: Vec<KeyComparison>,
-    /// The tag associated with this remapping
-    tag: Tag,
 }
 
 impl RemappingInfo {
-    /// Create a new RemappingInfo with the given downstream keys and tag
-    fn new(destination_keys: Vec<KeyComparison>, tag: Tag) -> Self {
-        Self {
-            destination_keys,
-            tag,
-        }
+    /// Create a new RemappingInfo with the given downstream keys
+    fn new(destination_keys: Vec<KeyComparison>) -> Self {
+        Self { destination_keys }
     }
 
     /// Add a destination key
@@ -130,7 +124,6 @@ impl RemappedKeys {
         destination_columns: Vec<usize>,
         destination_key: KeyComparison,
         source_miss: ColumnMiss,
-        tag: Tag,
     ) {
         let key = RemappingKey {
             destination_node,
@@ -142,11 +135,10 @@ impl RemappedKeys {
 
         match self.remappings.entry(key) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
-                debug_assert_eq!(entry.get().tag, tag);
                 entry.get_mut().add_destination_key(destination_key);
             }
             std::collections::hash_map::Entry::Vacant(entry) => {
-                let new_remapping = RemappingInfo::new(vec![destination_key], tag);
+                let new_remapping = RemappingInfo::new(vec![destination_key]);
                 entry.insert(new_remapping);
             }
         }
@@ -154,7 +146,7 @@ impl RemappedKeys {
     }
 
     /// If `node` rewrites some of its downstream keys into upstream upqueries to `column` in a
-    /// `target` node, look up the set of downstream tags and keys which have been rewritten to
+    /// `target` node, look up the set of downstream keys which have been rewritten to
     /// `keys`.
     pub fn remove(
         &mut self,
@@ -163,7 +155,7 @@ impl RemappedKeys {
         source_node: LocalNodeIndex,
         source_columns: &[usize],
         source_keys: &[KeyComparison],
-    ) -> Option<impl ExactSizeIterator<Item = (Tag, Vec<KeyComparison>)>> {
+    ) -> Option<Vec<KeyComparison>> {
         let lookup_key = RemappingKey {
             destination_node,
             destination_columns: destination_columns.into(),
@@ -173,10 +165,9 @@ impl RemappedKeys {
         };
 
         if let Some(remapping_info) = self.remappings.remove(&lookup_key) {
-            let tag = remapping_info.tag;
             let destination_keys = remapping_info.destination_keys;
             self.len -= destination_keys.len();
-            return Some(std::iter::once((tag, destination_keys)));
+            return Some(destination_keys);
         }
         None
     }
@@ -210,10 +201,6 @@ mod tests {
         KeyComparison::Equal(Vec1::try_from_vec(values).unwrap())
     }
 
-    fn create_test_tag(id: u32) -> Tag {
-        Tag::new(id)
-    }
-
     #[test]
     fn test_insert_single_entry() {
         let mut remapped_keys = RemappedKeys::default();
@@ -228,14 +215,12 @@ mod tests {
             ])],
         );
         let downstream_key = create_test_key_comparison(vec![DfValue::Int(3), DfValue::Int(4)]);
-        let downstream_tag = create_test_tag(1);
 
         remapped_keys.insert(
             miss_in,
             vec![0, 1],
             downstream_key.clone(),
-            upstream_miss,
-            downstream_tag,
+            upstream_miss.clone(),
         );
 
         assert_eq!(remapped_keys.len(), 1);
@@ -252,7 +237,6 @@ mod tests {
             vec![create_test_key_comparison(vec![DfValue::Int(1)])],
         );
         let downstream_key1 = create_test_key_comparison(vec![DfValue::Int(2)]);
-        let downstream_tag1 = create_test_tag(1);
 
         let upstream_miss2 = create_test_column_miss(
             LocalNodeIndex::make(3),
@@ -260,22 +244,9 @@ mod tests {
             vec![create_test_key_comparison(vec![DfValue::Int(3)])],
         );
         let downstream_key2 = create_test_key_comparison(vec![DfValue::Int(4)]);
-        let downstream_tag2 = create_test_tag(2);
 
-        remapped_keys.insert(
-            miss_in,
-            vec![0],
-            downstream_key1,
-            upstream_miss1,
-            downstream_tag1,
-        );
-        remapped_keys.insert(
-            miss_in,
-            vec![0],
-            downstream_key2,
-            upstream_miss2,
-            downstream_tag2,
-        );
+        remapped_keys.insert(miss_in, vec![0], downstream_key1, upstream_miss1);
+        remapped_keys.insert(miss_in, vec![0], downstream_key2, upstream_miss2);
 
         assert_eq!(remapped_keys.len(), 2);
     }
@@ -292,25 +263,12 @@ mod tests {
         );
         let downstream_key1 = create_test_key_comparison(vec![DfValue::Int(2)]);
         let downstream_key2 = create_test_key_comparison(vec![DfValue::Int(3)]);
-        let downstream_tag = create_test_tag(1);
 
         // Insert first downstream key
-        remapped_keys.insert(
-            miss_in,
-            vec![0],
-            downstream_key1,
-            upstream_miss.clone(),
-            downstream_tag,
-        );
+        remapped_keys.insert(miss_in, vec![0], downstream_key1, upstream_miss.clone());
 
         // Insert second downstream key for the same remapping
-        remapped_keys.insert(
-            miss_in,
-            vec![0],
-            downstream_key2,
-            upstream_miss,
-            downstream_tag,
-        );
+        remapped_keys.insert(miss_in, vec![0], downstream_key2, upstream_miss);
 
         assert_eq!(remapped_keys.len(), 2);
     }
@@ -326,7 +284,6 @@ mod tests {
             vec![create_test_key_comparison(vec![DfValue::Int(1)])],
         );
         let downstream_key = create_test_key_comparison(vec![DfValue::Int(2)]);
-        let downstream_tag = create_test_tag(1);
 
         // Insert the same downstream key twice
         remapped_keys.insert(
@@ -334,15 +291,8 @@ mod tests {
             vec![0],
             downstream_key.clone(),
             upstream_miss.clone(),
-            downstream_tag,
         );
-        remapped_keys.insert(
-            miss_in,
-            vec![0],
-            downstream_key,
-            upstream_miss,
-            downstream_tag,
-        );
+        remapped_keys.insert(miss_in, vec![0], downstream_key, upstream_miss);
 
         assert_eq!(remapped_keys.len(), 2);
     }
@@ -358,16 +308,9 @@ mod tests {
             vec![create_test_key_comparison(vec![DfValue::Int(1)])],
         );
         let downstream_key = create_test_key_comparison(vec![DfValue::Int(2)]);
-        let downstream_tag = create_test_tag(1);
 
         // Insert entry
-        remapped_keys.insert(
-            miss_in,
-            vec![0],
-            downstream_key.clone(),
-            upstream_miss,
-            downstream_tag,
-        );
+        remapped_keys.insert(miss_in, vec![0], downstream_key.clone(), upstream_miss);
         assert_eq!(remapped_keys.len(), 1);
 
         // Remove entry
@@ -380,10 +323,8 @@ mod tests {
         );
 
         assert!(result.is_some());
-        let mut result = result.unwrap();
-        let (tag, keys) = result.next().unwrap();
-        assert_eq!(tag, create_test_tag(1));
-        assert_eq!(keys, vec![downstream_key]);
+        let result = result.unwrap();
+        assert_eq!(result, vec![downstream_key]);
         assert_eq!(remapped_keys.len(), 0);
     }
 
@@ -398,16 +339,9 @@ mod tests {
             vec![create_test_key_comparison(vec![DfValue::Int(1)])],
         );
         let downstream_key = create_test_key_comparison(vec![DfValue::Int(2)]);
-        let downstream_tag = create_test_tag(1);
 
         // Insert entry
-        remapped_keys.insert(
-            miss_in,
-            vec![0],
-            downstream_key,
-            upstream_miss,
-            downstream_tag,
-        );
+        remapped_keys.insert(miss_in, vec![0], downstream_key, upstream_miss);
         assert_eq!(remapped_keys.len(), 1);
 
         // Try to remove non-existing entry
@@ -437,16 +371,9 @@ mod tests {
             ])],
         );
         let downstream_key = create_test_key_comparison(vec![DfValue::Int(3)]);
-        let downstream_tag = create_test_tag(1);
 
         // Insert entry
-        remapped_keys.insert(
-            miss_in,
-            vec![0],
-            downstream_key,
-            upstream_miss,
-            downstream_tag,
-        );
+        remapped_keys.insert(miss_in, vec![0], downstream_key, upstream_miss);
         assert_eq!(remapped_keys.len(), 1);
 
         // Try to remove with different columns
@@ -473,16 +400,9 @@ mod tests {
             vec![create_test_key_comparison(vec![DfValue::Int(1)])],
         );
         let downstream_key = create_test_key_comparison(vec![DfValue::Int(2)]);
-        let downstream_tag = create_test_tag(1);
 
         // Insert entry
-        remapped_keys.insert(
-            miss_in,
-            vec![0],
-            downstream_key,
-            upstream_miss,
-            downstream_tag,
-        );
+        remapped_keys.insert(miss_in, vec![0], downstream_key, upstream_miss);
         assert_eq!(remapped_keys.len(), 1);
 
         // Try to remove with different keys
@@ -510,7 +430,6 @@ mod tests {
         );
         let downstream_key1 = create_test_key_comparison(vec![DfValue::Int(2)]);
         let downstream_key2 = create_test_key_comparison(vec![DfValue::Int(3)]);
-        let downstream_tag = create_test_tag(1);
 
         // Insert multiple downstream keys for the same remapping
         remapped_keys.insert(
@@ -518,15 +437,8 @@ mod tests {
             vec![0],
             downstream_key1.clone(),
             upstream_miss.clone(),
-            downstream_tag,
         );
-        remapped_keys.insert(
-            miss_in,
-            vec![0],
-            downstream_key2.clone(),
-            upstream_miss,
-            downstream_tag,
-        );
+        remapped_keys.insert(miss_in, vec![0], downstream_key2.clone(), upstream_miss);
 
         assert_eq!(remapped_keys.len(), 2);
 
@@ -540,12 +452,10 @@ mod tests {
         );
 
         assert!(result.is_some());
-        let mut result = result.unwrap();
-        let (tag, keys) = result.next().unwrap();
-        assert_eq!(tag, create_test_tag(1));
-        assert_eq!(keys.len(), 2);
-        assert!(keys.contains(&downstream_key1));
-        assert!(keys.contains(&downstream_key2));
+        let result = result.unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&downstream_key1));
+        assert!(result.contains(&downstream_key2));
         assert_eq!(remapped_keys.len(), 0);
     }
 
@@ -561,7 +471,6 @@ mod tests {
             vec![create_test_key_comparison(vec![DfValue::Int(1)])],
         );
         let downstream_key1 = create_test_key_comparison(vec![DfValue::Int(2)]);
-        let downstream_tag1 = create_test_tag(1);
 
         let upstream_miss2 = create_test_column_miss(
             LocalNodeIndex::make(3),
@@ -569,26 +478,13 @@ mod tests {
             vec![create_test_key_comparison(vec![DfValue::Int(3)])],
         );
         let downstream_key2 = create_test_key_comparison(vec![DfValue::Int(4)]);
-        let downstream_tag2 = create_test_tag(2);
 
         // Insert first entry
-        remapped_keys.insert(
-            miss_in,
-            vec![0],
-            downstream_key1,
-            upstream_miss1,
-            downstream_tag1,
-        );
+        remapped_keys.insert(miss_in, vec![0], downstream_key1, upstream_miss1);
         assert_eq!(remapped_keys.len(), 1);
 
         // Insert second entry
-        remapped_keys.insert(
-            miss_in,
-            vec![0],
-            downstream_key2,
-            upstream_miss2,
-            downstream_tag2,
-        );
+        remapped_keys.insert(miss_in, vec![0], downstream_key2, upstream_miss2);
         assert_eq!(remapped_keys.len(), 2);
 
         // Remove first entry
@@ -615,7 +511,6 @@ mod tests {
             vec![create_test_key_comparison(vec![DfValue::Int(1)])],
         );
         let downstream_key1 = create_test_key_comparison(vec![DfValue::Int(2)]);
-        let downstream_tag1 = create_test_tag(1);
 
         let upstream_miss2 = create_test_column_miss(
             LocalNodeIndex::make(3),
@@ -626,23 +521,10 @@ mod tests {
             ])],
         );
         let downstream_key2 = create_test_key_comparison(vec![DfValue::Int(5)]);
-        let downstream_tag2 = create_test_tag(2);
 
         // Insert both remappings
-        remapped_keys.insert(
-            miss_in,
-            vec![0],
-            downstream_key1,
-            upstream_miss1,
-            downstream_tag1,
-        );
-        remapped_keys.insert(
-            miss_in,
-            vec![0, 1],
-            downstream_key2,
-            upstream_miss2,
-            downstream_tag2,
-        );
+        remapped_keys.insert(miss_in, vec![0], downstream_key1, upstream_miss1);
+        remapped_keys.insert(miss_in, vec![0, 1], downstream_key2, upstream_miss2);
 
         assert_eq!(remapped_keys.len(), 2);
 

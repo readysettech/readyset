@@ -907,7 +907,6 @@ impl Domain {
                             miss_columns.to_vec(),
                             replay_key.clone(),
                             upstream_miss.clone(),
-                            needed_for,
                         )
                     }
                 }
