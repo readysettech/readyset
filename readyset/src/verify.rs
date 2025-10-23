@@ -362,7 +362,7 @@ pub async fn verify(options: &Options) -> Result<()> {
         conn = add_err!(verify_connection(cdc_url, verification, "CDC").await);
         if let Some(upstream_url) = &upstream_url {
             if cdc_url != upstream_url {
-                conn = add_err!(verify_connection(upstream_url, verification, "upstream").await);
+                add_err!(verify_connection(upstream_url, verification, "upstream").await);
             }
         }
     }
