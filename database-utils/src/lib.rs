@@ -577,7 +577,7 @@ impl DatabaseURL {
         }
     }
 
-    /// Returns the user name for this database URL
+    /// Returns the username for this database URL.
     pub fn user(&self) -> Option<&str> {
         match self {
             DatabaseURL::MySQL(opts) => opts.user(),
@@ -585,7 +585,19 @@ impl DatabaseURL {
         }
     }
 
-    /// Returns the password for this database URL
+    /// Sets the username for this database URL.
+    pub fn set_user(&mut self, user: &str) {
+        match self {
+            DatabaseURL::MySQL(opts) => {
+                *opts = OptsBuilder::from_opts(opts.clone()).user(Some(user)).into();
+            }
+            DatabaseURL::PostgreSQL(config) => {
+                config.user(user);
+            }
+        }
+    }
+
+    /// Returns the password for this database URL.
     ///
     /// # Panics
     ///
@@ -596,6 +608,18 @@ impl DatabaseURL {
             DatabaseURL::PostgreSQL(opts) => opts.get_password().map(|p| -> &str {
                 str::from_utf8(p).expect("PostgreSQL URL configured with non-utf8 password")
             }),
+        }
+    }
+
+    /// Sets the password for this database URL.
+    pub fn set_password(&mut self, pass: &str) {
+        match self {
+            DatabaseURL::MySQL(opts) => {
+                *opts = OptsBuilder::from_opts(opts.clone()).pass(Some(pass)).into();
+            }
+            DatabaseURL::PostgreSQL(config) => {
+                config.password(pass);
+            }
         }
     }
 
