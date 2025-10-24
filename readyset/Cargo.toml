@@ -17,6 +17,7 @@ crossbeam-skiplist = { workspace = true }
 futures-util = { workspace = true }
 fail = { workspace = true }
 failpoint-macros = { path = "../failpoint-macros" }
+futures = { workspace = true }
 metrics = { workspace = true }
 mysql_common = { workspace = true }
 regex = { workspace = true }

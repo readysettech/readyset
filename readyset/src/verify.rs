@@ -1,8 +1,10 @@
 use std::env::current_dir;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail, ensure, Error, Result};
+use futures::future::join_all;
 use regex::{Captures, Regex};
 use sysinfo::Disks;
 use tracing::info;
@@ -70,26 +72,80 @@ fn verify_upstream_url(options: &Options) -> Result<DatabaseURL> {
     Ok(url)
 }
 
-async fn verify_tls(options: &Options) -> Result<ServerCertVerification> {
+async fn verify_tls(options: &Options) -> Result<Arc<ServerCertVerification>> {
     let verification =
         ServerCertVerification::from(&options.server_worker_options.replicator_config)
             .await
             .map_err(|e| anyhow!("Failed to verify TLS configuration: {e}"))?;
     info!("Verified TLS configuration");
-    Ok(verification)
+    Ok(Arc::new(verification))
 }
 
 async fn verify_connection(
     url: &DatabaseURL,
     verification: &ServerCertVerification,
-    name: &str,
+    report_name: Option<&str>,
 ) -> Result<DatabaseConnection> {
-    let conn = url
-        .connect(verification)
-        .await
-        .map_err(|e| anyhow!("Failed to establish {name} connection: {e}"))?;
+    let conn = url.connect(verification).await;
+    let name = match report_name {
+        Some(name) => name,
+        None => return Ok(conn?),
+    };
+    let conn = conn.map_err(|e| anyhow!("Failed to establish {name} connection: {e}"))?;
     info!("Verified and established {name} connection");
     Ok(conn)
+}
+
+async fn verify_user(
+    mut url: DatabaseURL,
+    verification: Arc<ServerCertVerification>,
+    user: String,
+    pass: String,
+) -> Result<()> {
+    url.set_user(&user);
+    url.set_password(&pass);
+    verify_connection(&url, &verification, None).await?;
+    Ok(())
+}
+
+async fn verify_users(
+    url: &DatabaseURL,
+    verification: Arc<ServerCertVerification>,
+    options: &Options,
+) -> Result<()> {
+    let mut users = Vec::new();
+    let allow_all = options.allow_unauthenticated_connections;
+    for (user, pass) in options.get_allowed_users(allow_all)? {
+        let verification = Arc::clone(&verification);
+        users.push((
+            user.clone(),
+            tokio::spawn(verify_user(url.clone(), verification, user, pass)),
+        ));
+    }
+    let users = join_all(
+        users
+            .into_iter()
+            .map(|(user, handle)| async move { Ok((user, handle.await?)) }),
+    )
+    .await
+    .into_iter()
+    .collect::<Result<Vec<(String, Result<()>)>>>()?;
+
+    let mut failed: Vec<String> = users
+        .into_iter()
+        .filter_map(|(user, res)| match res {
+            Ok(()) => None,
+            Err(_) => Some(user),
+        })
+        .collect();
+    failed.sort();
+
+    if !failed.is_empty() {
+        let s = if failed.len() == 1 { "" } else { "s" };
+        let users = failed.join(", ");
+        bail!("Failed to establish connection for user{s}: {users}");
+    }
+    Ok(())
 }
 
 async fn query_one_value<T>(conn: &mut DatabaseConnection, query: &str) -> Result<T>
@@ -357,21 +413,19 @@ pub async fn verify(options: &Options) -> Result<()> {
     let cdc_url = add_err!(verify_cdc_url(options));
     let upstream_url = add_err!(verify_upstream_url(options));
 
-    let mut conn = None;
-    if let (Some(verification), Some(cdc_url)) = (&verification, &cdc_url) {
-        conn = add_err!(verify_connection(cdc_url, verification, "CDC").await);
-        if let Some(upstream_url) = &upstream_url {
-            if cdc_url != upstream_url {
-                add_err!(verify_connection(upstream_url, verification, "upstream").await);
-            }
-        }
+    let conn = if let (Some(verification), Some(cdc_url)) = (&verification, &cdc_url) {
+        add_err!(verify_connection(cdc_url, verification, Some("CDC")).await)
+    } else {
+        None
+    };
+    if let (Some(verification), Some(upstream_url)) = (&verification, &upstream_url) {
+        add_err!(verify_users(upstream_url, Arc::clone(verification), options).await);
     }
-
-    if let Some(conn) = &mut conn {
-        add_err!(verify_version(conn).await);
-        add_err!(verify_replication(conn).await);
-        add_err!(verify_permissions(conn, options).await);
-        add_err!(verify_disk_space(conn, options).await);
+    if let Some(mut conn) = conn {
+        add_err!(verify_version(&mut conn).await);
+        add_err!(verify_replication(&mut conn).await);
+        add_err!(verify_permissions(&mut conn, options).await);
+        add_err!(verify_disk_space(&mut conn, options).await);
     }
 
     if errors.is_empty() {
