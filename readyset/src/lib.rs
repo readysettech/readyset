@@ -5,6 +5,7 @@ pub mod psql;
 pub mod query_logger;
 pub mod verify;
 
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::fs::remove_dir_all;
 use std::future::Future;
@@ -16,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use std::{io, process};
 
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, ensure};
 use clap::builder::NonEmptyStringValueParser;
 use clap::{ArgAction, ArgGroup, Parser};
 use crossbeam_skiplist::SkipSet;
@@ -235,8 +236,11 @@ pub struct Options {
     /// Comma list of allowed usernames:passwords to authenticate database connections with.
     /// If not set, the username and password in --upstream-db-url will be used.
     /// If --allow-unauthenticated-connections is passed, this will be ignored.
-    #[arg(long, env = "ALLOWED_USERS")]
-    allowed_users: Option<RedactedString>,
+    #[arg(long, long = "allowed-users", env = "ALLOWED_USERS")]
+    allowed_users_arg: Option<RedactedString>,
+
+    #[clap(skip)]
+    allowed_users: OnceCell<anyhow::Result<HashMap<String, String>>>,
 
     /// Enable recording and exposing Prometheus metrics
     #[arg(long, env = "PROMETHEUS_METRICS", default_value = "true", hide = true)]
@@ -562,33 +566,30 @@ impl Options {
             (Some(user), Some(pass)) => {
                 let user = user.trim();
                 let pass = pass.trim();
-                if user.is_empty() || pass.is_empty() {
-                    return Err(anyhow::anyhow!(
-                        "Invalid user:password pair format. Expected format: user:password"
-                    ));
-                }
+                ensure!(
+                    !user.is_empty() && !pass.is_empty(),
+                    "Invalid user:password pair format. Expected format: user:password"
+                );
                 if !seen_users.insert(user.to_string()) {
-                    return Err(anyhow::anyhow!("Duplicate user found: {}", user));
+                    bail!("Duplicate user found: {user}");
                 }
                 Ok((user.to_string(), pass.to_string()))
             }
-            _ => Err(anyhow::anyhow!(
-                "Invalid user:password pair format. Expected format: user:password"
-            )),
+            _ => bail!("Invalid user:password pair format. Expected format: user:password"),
         }
     }
 
-    // Build list of allowed user to connect to Readyset
-    fn build_allowed_users(&self) -> Result<HashMap<String, String>, anyhow::Error> {
-        let upstream_config = self.server_worker_options.replicator_config.clone();
-        let upstream_url = upstream_config
+    fn build_allowed_users(&self) -> anyhow::Result<HashMap<String, String>> {
+        let upstream_url = self
+            .server_worker_options
+            .replicator_config
             .upstream_db_url
             .as_ref()
             .and_then(|s| s.parse::<DatabaseURL>().ok());
         let mut seen_users = std::collections::HashSet::new();
         // Parse allowed users from comma-separated "user:pass" pairs
         let mut allowed_users = self
-            .allowed_users
+            .allowed_users_arg
             .as_ref()
             .map(|s| {
                 let mut users = HashMap::new();
@@ -631,9 +632,7 @@ impl Options {
                     users.insert(user, pass);
                 }
 
-                if in_quotes {
-                    return Err(anyhow::anyhow!("Unclosed quote in input"));
-                }
+                ensure!(!in_quotes, "Unclosed quote in input");
 
                 Ok(users)
             })
@@ -648,13 +647,38 @@ impl Options {
                 if seen_users.insert(user.to_owned()) {
                     allowed_users.insert(user.to_owned(), pass.to_owned())
                 } else {
-                    return Err(anyhow::anyhow!("Duplicate user found: {}", user));
+                    bail!("Duplicate user found: {user}");
                 }
             }
             _ => None,
         };
 
+        ensure!(
+            !allowed_users.is_empty(),
+            "At least one user must be allowed"
+        );
+
         Ok(allowed_users)
+    }
+
+    /// Get mappings of username -> password allowed to connect to Readyset.
+    fn get_allowed_users(&self, allow_all: bool) -> anyhow::Result<HashMap<String, String>> {
+        if allow_all {
+            return Ok(HashMap::new());
+        }
+        match self
+            .allowed_users
+            .get_or_init(|| self.build_allowed_users())
+        {
+            Ok(users) => Ok(users.clone()),
+            Err(e) => bail!(
+                "Failed to build authentication map from --upstream-db-url or --allowed-users. \
+                 Please ensure they are present and correctly formatted as follows: \
+                 --upstream-db-url \
+                 <protocol>://<username>:<password>@<address>[:<port>][/<database>] or \
+                 --allowed-users <username:password>[,<username:password>...]: {e}"
+            ),
+        }
     }
 }
 
@@ -801,24 +825,11 @@ where
 
         if options.cleanup {
             info!(?options, "Cleaning up deployment");
-
             return rt.block_on(async { self.cleanup(upstream_config, deployment_dir).await });
         }
-        let users = options.build_allowed_users()?;
-        let users: &'static HashMap<String, String> = if !options.allow_unauthenticated_connections
-        {
-            if users.is_empty() {
-                bail!(
-                    "Failed to build authentication map from \
-                upstream DB URL or --allowed-users. Please ensure they are present and \
-                correctly formatted as follows: --upstream-db-url <protocol>://<username>:<password>@<address>[:<port>][/<database>] \
-                or --allowed-users <username:password>[,<username:password>...]"
-                )
-            }
-            Box::leak(Box::new(users))
-        } else {
-            Box::leak(Box::new(HashMap::new()))
-        };
+        let users = Box::leak(Box::new(
+            options.get_allowed_users(options.allow_unauthenticated_connections)?,
+        ));
 
         info!(version = %VERSION_STR_ONELINE);
 
@@ -1730,12 +1741,16 @@ mod tests {
             "--upstream-db-url",
             "mysql://root:password@mysql:3306/readyset",
         ]);
-        let user_list = opts.build_allowed_users().unwrap();
+        let user_list = opts.get_allowed_users(false).unwrap();
         assert_eq!(user_list.len(), 4);
         assert_eq!(user_list["user1"], "pass1");
         assert_eq!(user_list["u"], "pwd,");
         assert_eq!(user_list["u2"], "pwd,:,");
         assert_eq!(user_list["root"], "password");
+
+        // allow everyone
+        let users = opts.get_allowed_users(true).unwrap();
+        assert!(users.is_empty(), "Unexpected --allowed-users: {users:?}");
 
         // duplicate user
         let opts = Options::parse_from(vec![
@@ -1745,7 +1760,7 @@ mod tests {
             "--upstream-db-url",
             "mysql://root:password@mysql:3306/readyset",
         ]);
-        opts.build_allowed_users().unwrap_err();
+        opts.get_allowed_users(false).unwrap_err();
 
         // duplicate user between allowed-users and upstream-db-url
         let opts = Options::parse_from(vec![
@@ -1755,6 +1770,6 @@ mod tests {
             "--upstream-db-url",
             "mysql://user1:pass1@mysql:3306/readyset",
         ]);
-        opts.build_allowed_users().unwrap_err();
+        opts.get_allowed_users(false).unwrap_err();
     }
 }
