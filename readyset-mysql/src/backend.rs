@@ -695,7 +695,7 @@ where
 
         let results_encoding = self.noria.noria.results_encoding();
 
-        match self.execute(id, &value_params, ()).await {
+        match self.execute(id, &value_params, &()).await {
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select { mut rows, schema })) => {
                 let CachedSchema {
                     mysql_schema,

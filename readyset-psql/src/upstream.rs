@@ -270,8 +270,9 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     type StatementMeta = StatementMeta;
     type QueryResult<'a> = QueryResult;
     type PrepareData<'a> = &'a [Type];
-    type ExecMeta<'a> = &'a [TransferFormat];
+    type ExecMeta = [TransferFormat];
     type CacheEntry = CacheEntry;
+    type ShallowExecMeta = Vec<TransferFormat>;
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "13.4 (Readyset)";
     const SQL_DIALECT: readyset_sql::Dialect = readyset_sql::Dialect::PostgreSQL;
@@ -467,7 +468,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         &'a mut self,
         statement_id: &UpstreamStatementId,
         params: &[DfValue],
-        exec_meta: &'_ [TransferFormat],
+        exec_meta: &Self::ExecMeta,
     ) -> Result<Self::QueryResult<'a>, Error> {
         let result_formats = exec_meta.iter().map(|tf| (*tf).into());
         let pstmt = self.prepared_statements.get(*statement_id as usize);
@@ -654,6 +655,13 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 
     async fn lower_case_table_names(&mut self) -> Result<bool, Self::Error> {
         Ok(false)
+    }
+
+    async fn shallow_exec_meta(
+        &mut self,
+        meta: &Self::ExecMeta,
+    ) -> Result<Self::ShallowExecMeta, Self::Error> {
+        Ok(vec![TransferFormat::Binary; meta.len()])
     }
 }
 

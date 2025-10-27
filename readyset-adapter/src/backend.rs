@@ -1586,12 +1586,13 @@ where
         res
     }
 
-    /// Execute a prepared statement on ReadySet
+    /// Execute a prepared statement on upstream using the statement ID
     async fn execute_upstream<'a>(
         upstream: &'a mut Option<DB>,
         prep: &UpstreamPrepare<DB>,
         params: &[DfValue],
-        exec_meta: DB::ExecMeta<'_>,
+        exec_meta: &DB::ExecMeta,
+        _shallow_exec_meta: Option<&DB::ShallowExecMeta>,
         event: &mut QueryExecutionEvent,
         is_fallback: bool,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
@@ -1621,7 +1622,7 @@ where
         noria_prep: &noria_connector::PrepareResult,
         upstream_prep: &UpstreamPrepare<DB>,
         params: &[DfValue],
-        exec_meta: DB::ExecMeta<'_>,
+        exec_meta: &DB::ExecMeta,
         ex_info: Option<&mut ExecutionInfo>,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
@@ -1656,8 +1657,16 @@ where
                           "Error received from noria, sending query to fallback");
                 }
 
-                Self::execute_upstream(upstream, upstream_prep, params, exec_meta, event, true)
-                    .await
+                Self::execute_upstream(
+                    upstream,
+                    upstream_prep,
+                    params,
+                    exec_meta,
+                    None,
+                    event,
+                    true,
+                )
+                .await
             }
         }
     }
@@ -1764,7 +1773,7 @@ where
         &mut self,
         id: u32,
         params: &[DfValue],
-        exec_meta: DB::ExecMeta<'_>,
+        exec_meta: &DB::ExecMeta,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         self.last_query = None;
         let cached_statement = self
@@ -1876,10 +1885,12 @@ where
                         .query_status_cache
                         .inlined_cache_miss(cached_statement.as_view_request()?, params.to_vec())
                 }
-                Self::execute_upstream(upstream, prep, params, exec_meta, &mut event, false).await
+                Self::execute_upstream(upstream, prep, params, exec_meta, None, &mut event, false)
+                    .await
             }
             PrepareResultInner::NoriaAndUpstream(.., uprep) if should_fallback => {
-                Self::execute_upstream(upstream, uprep, params, exec_meta, &mut event, false).await
+                Self::execute_upstream(upstream, uprep, params, exec_meta, None, &mut event, false)
+                    .await
             }
             PrepareResultInner::NoriaAndUpstream(nprep, uprep) => {
                 if cached_statement.execution_info.is_none() {

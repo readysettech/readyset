@@ -351,8 +351,9 @@ impl UpstreamDatabase for MySqlUpstream {
     type QueryResult<'a> = QueryResult<'a>;
     type StatementMeta = StatementMeta;
     type PrepareData<'a> = ();
-    type ExecMeta<'a> = ();
+    type ExecMeta = ();
     type CacheEntry = Vec<DfValue>;
+    type ShallowExecMeta = ();
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "8.0.26-readyset\0";
     const SQL_DIALECT: readyset_sql::Dialect = readyset_sql::Dialect::MySQL;
@@ -458,7 +459,7 @@ impl UpstreamDatabase for MySqlUpstream {
         &'a mut self,
         id: &UpstreamStatementId,
         params: &[DfValue],
-        _exec_meta: Self::ExecMeta<'_>,
+        _exec_meta: &Self::ExecMeta,
     ) -> Result<Self::QueryResult<'a>, Error> {
         let params = dt_to_value_params(params)?;
 
@@ -581,6 +582,13 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn lower_case_database_names(&mut self) -> Result<bool, Self::Error> {
         self.lower_case_table_names().await
+    }
+
+    async fn shallow_exec_meta(
+        &mut self,
+        _meta: &Self::ExecMeta,
+    ) -> Result<Self::ShallowExecMeta, Self::Error> {
+        Ok(())
     }
 }
 

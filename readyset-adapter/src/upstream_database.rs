@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::error::Error;
 use std::fmt::Debug;
 
@@ -89,13 +90,16 @@ pub trait UpstreamDatabase: Sized + Send {
 
     /// Extra data passed to [`prepare`] by the protocol shim
     ///
-    /// [`prepare`](UpstreamDatabase::prepaare)
+    /// [`prepare`](UpstreamDatabase::prepare)
     type PrepareData<'a>: Default + Send;
 
     /// Metadata passed to [`execute`] by the protocol shim
     ///
     /// [`execute`](UpstreamDatabase::execute)
-    type ExecMeta<'a>: Send;
+    type ExecMeta: Send + Sync + ?Sized;
+
+    /// Metadata to be used when executing during a shallow cache insertion.
+    type ShallowExecMeta: Borrow<Self::ExecMeta> + Send + Sync;
 
     /// The type of data this protocol stores into an entry in a shallow cache.
     type CacheEntry: Debug + Send + Sync + 'static;
@@ -183,7 +187,7 @@ pub trait UpstreamDatabase: Sized + Send {
         &'a mut self,
         statement_id: &UpstreamStatementId,
         params: &[DfValue],
-        exec_meta: Self::ExecMeta<'_>,
+        exec_meta: &Self::ExecMeta,
     ) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Remove a prepared statement from the cache, and tell the upstream database to remove it and
@@ -237,6 +241,12 @@ pub trait UpstreamDatabase: Sized + Send {
 
     async fn lower_case_database_names(&mut self) -> Result<bool, Self::Error>;
     async fn lower_case_table_names(&mut self) -> Result<bool, Self::Error>;
+
+    /// Convert the supplied metadata into temporary metadata during a shallow cache insertion.
+    async fn shallow_exec_meta(
+        &mut self,
+        meta: &Self::ExecMeta,
+    ) -> Result<Self::ShallowExecMeta, Self::Error>;
 }
 
 pub struct LazyUpstream<U> {
@@ -294,8 +304,9 @@ where
         U: 'a;
     type StatementMeta = U::StatementMeta;
     type PrepareData<'a> = U::PrepareData<'a>;
-    type ExecMeta<'a> = U::ExecMeta<'a>;
+    type ExecMeta = U::ExecMeta;
     type CacheEntry = U::CacheEntry;
+    type ShallowExecMeta = U::ShallowExecMeta;
     type Error = U::Error;
 
     const DEFAULT_DB_VERSION: &'static str = U::DEFAULT_DB_VERSION;
@@ -384,7 +395,7 @@ where
         &'a mut self,
         statement_id: &UpstreamStatementId,
         params: &[DfValue],
-        exec_meta: Self::ExecMeta<'_>,
+        exec_meta: &Self::ExecMeta,
     ) -> Result<Self::QueryResult<'a>, Self::Error> {
         self.upstream()
             .await?
@@ -440,5 +451,12 @@ where
 
     async fn lower_case_table_names(&mut self) -> Result<bool, Self::Error> {
         self.upstream().await?.lower_case_table_names().await
+    }
+
+    async fn shallow_exec_meta(
+        &mut self,
+        meta: &Self::ExecMeta,
+    ) -> Result<Self::ShallowExecMeta, Self::Error> {
+        self.upstream().await?.shallow_exec_meta(meta).await
     }
 }
