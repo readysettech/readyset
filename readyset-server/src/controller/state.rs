@@ -1482,7 +1482,11 @@ impl DfState {
                 domain_idx,
                 tag,
                 key,
-            }) => (domain_idx, Tag::new(tag), Some(key)),
+            }) => (
+                domain_idx,
+                Tag::new(tag),
+                Some(key).filter(|k| !k.is_empty()),
+            ),
             None => {
                 let tags = self.materializations.partial_tags();
                 if tags.is_empty() {
