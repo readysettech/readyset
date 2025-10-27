@@ -293,7 +293,7 @@ impl State for MemoryState {
         // this can happen if an upstream domain issues an eviction for a replay path that we have
         // been told about, but that has not yet been finalized.
         self.by_tag.get(&tag).cloned().map(move |state_index| {
-            let rows_evicted = self.state[state_index].evict_keys(keys);
+            let (_key_was_present, rows_evicted) = self.state[state_index].evict_keys(keys);
             let mut bytes_freed = 0;
 
             rows_evicted

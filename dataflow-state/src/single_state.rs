@@ -371,19 +371,65 @@ impl SingleState {
             })
     }
 
-    /// Evicts a specified key from this state, returning the removed rows
-    pub(super) fn evict_keys(&mut self, keys: &[KeyComparison]) -> Rows {
+    /// Evicts a specified key from this state, returning whether any key was present and the
+    /// removed rows
+    ///
+    /// The boolean indicates whether at least one of the keys was present in the state (even if it
+    /// had 0 rows). This is useful for distinguishing between:
+    /// - A key that doesn't exist in the state → `false`
+    /// - A key that exists but has 0 rows → `true`
+    /// - A key that exists with rows → `true`
+    ///
+    /// For range keys, "present" means the range (or part of it) was marked as filled, even if
+    /// it contains no actual key entries.
+    pub(super) fn evict_keys(&mut self, keys: &[KeyComparison]) -> (bool, Rows) {
+        let mut key_was_present = false;
         let evicted = keys
             .iter()
             .flat_map(|k| match k {
-                KeyComparison::Equal(equal) => Either::Left(
-                    self.state
-                        .evict(equal)
-                        .into_iter()
-                        .flat_map(|r| r.into_iter().map(|(r, _)| r)),
-                ),
+                KeyComparison::Equal(equal) => {
+                    let result = self.state.evict(equal);
+                    // Track if the key was present (even if it had 0 rows)
+                    if result.is_some() {
+                        key_was_present = true;
+                    }
+                    Either::Left(
+                        result
+                            .into_iter()
+                            .flat_map(|r| r.into_iter().map(|(r, _)| r)),
+                    )
+                }
                 KeyComparison::Range(range) => {
-                    Either::Right(self.state.evict_range(range).into_iter().map(|(r, _)| r))
+                    // For ranges, check if any part of the range was marked as filled before evicting.
+                    // This allows us to distinguish between:
+                    // - A range that was (partially or fully) filled but has no keys
+                    // - A range that was never filled at all
+                    let range_key = RangeKey::from(range);
+                    let lookup_result = self.lookup_range(&range_key);
+
+                    let was_filled = match lookup_result {
+                        RangeLookupResult::Some(_) => {
+                            // Entire range is fully filled
+                            true
+                        }
+                        RangeLookupResult::Missing(misses) => {
+                            // If the misses cover the entire query range, nothing was present.
+                            // Otherwise, at least part of the range was present.
+                            // Check if there's exactly one miss that matches the entire query range.
+                            // Note: misses use Vec<DfValue> while range uses Vec1<DfValue>
+                            !(misses.len() == 1
+                                && misses[0].0 == range.0.as_ref().map(|v| v.as_vec().clone())
+                                && misses[0].1 == range.1.as_ref().map(|v| v.as_vec().clone()))
+                        }
+                    };
+
+                    let range_rows = self.state.evict_range(range);
+
+                    // Set key_was_present if any part of the range was filled
+                    if was_filled {
+                        key_was_present = true;
+                    }
+                    Either::Right(range_rows.into_iter().map(|(r, _)| r))
                 }
             })
             .collect::<Rows>();
@@ -396,10 +442,11 @@ impl SingleState {
             index = ?self.index,
             num_evicted,
             row_count = self.row_count,
+            key_was_present,
             "evicted rows from index"
         );
 
-        evicted
+        (key_was_present, evicted)
     }
 
     pub(super) fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Rows> + 'a> {
@@ -469,7 +516,8 @@ mod tests {
     fn mark_filled_point() {
         let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
         state.mark_filled(KeyComparison::Equal(vec1![0.into()]));
-        assert!(state.lookup(&PointKey::from([0.into()])).is_some())
+        assert!(state.lookup(&PointKey::from([0.into()])).is_some());
+        assert!(state.is_empty());
     }
 
     #[test]
@@ -496,7 +544,8 @@ mod tests {
             let key = KeyComparison::Equal(vec1![0.into()]);
             state.mark_filled(key.clone());
             state.insert_row(vec![0.into(), 1.into()].into());
-            state.evict_keys(&[key]);
+            let (was_present, _rows) = state.evict_keys(&[key]);
+            assert!(was_present, "Key should be present");
             assert!(state.lookup(&PointKey::from([0.into()])).is_missing())
         }
 
@@ -513,7 +562,8 @@ mod tests {
                 .is_some());
 
             state.insert_row(vec![0.into(), 1.into()].into());
-            state.evict_keys(&[key]);
+            let (was_present, _rows) = state.evict_keys(&[key]);
+            assert!(was_present, "Key should be present");
             assert!(state.lookup(&PointKey::from([0.into()])).is_missing());
             assert!(state
                 .lookup_range(&RangeKey::from(
@@ -557,7 +607,8 @@ mod tests {
             assert!(!state.is_empty());
 
             // Evict key1 (2 rows)
-            let evicted = state.evict_keys(&[key1]);
+            let (was_present, evicted) = state.evict_keys(&[key1]);
+            assert!(was_present, "Key should be present");
             assert_eq!(evicted.len(), 2);
             assert_eq!(state.row_count, 0);
             assert!(state.is_empty());
@@ -583,7 +634,8 @@ mod tests {
             assert_eq!(state.row_count, 3);
 
             // Evict all keys at once
-            let evicted = state.evict_keys(&[key1, key2, key3]);
+            let (was_present, evicted) = state.evict_keys(&[key1, key2, key3]);
+            assert!(was_present, "Keys should be present");
             assert_eq!(evicted.len(), 3);
             assert_eq!(state.row_count, 0);
             assert!(
@@ -610,7 +662,8 @@ mod tests {
             assert!(!state.is_empty());
 
             // Evict the entire range
-            let evicted = state.evict_keys(&[range]);
+            let (was_present, evicted) = state.evict_keys(&[range]);
+            assert!(was_present, "Range should be present");
             assert_eq!(evicted.len(), 3);
             assert_eq!(state.row_count, 0);
             assert!(
@@ -637,7 +690,8 @@ mod tests {
             assert!(!state.is_empty());
 
             // Evict only one key
-            state.evict_keys(&[key1]);
+            let (was_present, _rows) = state.evict_keys(&[key1]);
+            assert!(was_present, "Key should be present");
             assert_eq!(state.row_count, 1);
             assert!(
                 !state.is_empty(),
@@ -645,12 +699,248 @@ mod tests {
             );
 
             // Evict the last key
-            state.evict_keys(&[key2]);
+            let (was_present, _rows) = state.evict_keys(&[key2]);
+            assert!(was_present, "Key should be present");
             assert_eq!(state.row_count, 0);
             assert!(
                 state.is_empty(),
                 "State should be empty after all keys evicted"
             );
+        }
+
+        /// Test that evict_keys returns true for keys that exist but have 0 rows
+        /// This is important for tracking whether a key was filled but empty vs never existed
+        #[test]
+        fn evict_keys_distinguishes_empty_key_from_missing_key() {
+            let mut state = SingleState::new(Index::new(IndexType::HashMap, vec![0]), true);
+
+            // Case 1: Key is marked as filled but has no rows
+            let key_filled_empty = KeyComparison::Equal(vec1![1.into()]);
+            state.mark_filled(key_filled_empty.clone());
+            // Don't insert any rows for this key
+
+            let (was_present, rows) = state.evict_keys(&[key_filled_empty]);
+            assert!(
+                was_present,
+                "Key that was filled but has 0 rows should return true"
+            );
+            assert_eq!(rows.len(), 0, "Should return 0 rows");
+
+            // Case 2: Key was never filled (doesn't exist in state)
+            let key_never_filled = KeyComparison::Equal(vec1![2.into()]);
+            let (was_present, rows) = state.evict_keys(&[key_never_filled]);
+            assert!(
+                !was_present,
+                "Key that was never filled should return false"
+            );
+            assert_eq!(rows.len(), 0, "Should return 0 rows");
+
+            // Case 3: Key with rows
+            let key_with_rows = KeyComparison::Equal(vec1![3.into()]);
+            state.mark_filled(key_with_rows.clone());
+            state.insert_row(vec![3.into(), 300.into()].into());
+
+            let (was_present, rows) = state.evict_keys(&[key_with_rows]);
+            assert!(was_present, "Key with rows should return true");
+            assert_eq!(rows.len(), 1, "Should return 1 row");
+        }
+
+        /// Test evict_keys with BTreeMap for point keys (Equal)
+        /// This ensures the boolean return value works correctly for BTreeMap indices
+        #[test]
+        fn evict_keys_btree_point_keys() {
+            let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
+
+            // Case 1: Key is marked as filled but has no rows
+            let key_filled_empty = KeyComparison::Equal(vec1![1.into()]);
+            state.mark_filled(key_filled_empty.clone());
+            // Don't insert any rows for this key
+
+            let (was_present, rows) = state.evict_keys(&[key_filled_empty]);
+            assert!(
+                was_present,
+                "BTreeMap: Key that was filled but has 0 rows should return true"
+            );
+            assert_eq!(rows.len(), 0, "Should return 0 rows");
+
+            // Case 2: Key was never filled (doesn't exist in state)
+            let key_never_filled = KeyComparison::Equal(vec1![2.into()]);
+            let (was_present, rows) = state.evict_keys(&[key_never_filled]);
+            assert!(
+                !was_present,
+                "BTreeMap: Key that was never filled should return false"
+            );
+            assert_eq!(rows.len(), 0, "Should return 0 rows");
+
+            // Case 3: Key with rows
+            let key_with_rows = KeyComparison::Equal(vec1![3.into()]);
+            state.mark_filled(key_with_rows.clone());
+            state.insert_row(vec![3.into(), 300.into()].into());
+            state.insert_row(vec![3.into(), 301.into()].into());
+
+            let (was_present, rows) = state.evict_keys(&[key_with_rows]);
+            assert!(was_present, "BTreeMap: Key with rows should return true");
+            assert_eq!(rows.len(), 2, "Should return 2 rows");
+            assert_eq!(state.row_count, 0, "Row count should be 0 after eviction");
+        }
+
+        /// Test evict_keys with BTreeMap for range keys
+        #[test]
+        fn evict_keys_btree_range_keys() {
+            let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
+
+            // Case 1: Range is marked as filled but has no rows
+            let range_filled_empty =
+                KeyComparison::from_range(&(vec1![10.into()]..vec1![20.into()]));
+            let included_small_range_1 =
+                KeyComparison::from_range(&(vec1![10.into()]..vec1![15.into()]));
+            let included_small_range_2 =
+                KeyComparison::from_range(&(vec1![16.into()]..vec1![20.into()]));
+            let excluded_small_range_1 =
+                KeyComparison::from_range(&(vec1![14.into()]..vec1![20.into()]));
+            state.mark_filled(range_filled_empty.clone());
+            // Don't insert any rows in this range
+
+            let (was_present, rows) = state.evict_keys(&[included_small_range_1]);
+            assert!(
+                was_present,
+                "BTreeMap: Range that was filled but has 0 keys should return true"
+            );
+            assert_eq!(rows.len(), 0, "Should return 0 rows");
+
+            let (was_present, rows) = state.evict_keys(&[excluded_small_range_1]);
+            assert!(
+                was_present,
+                "BTreeMap: the range that overlaps with filled and holes should return true"
+            );
+            assert_eq!(rows.len(), 0, "Should return 0 rows");
+
+            let (was_present, rows) = state.evict_keys(&[included_small_range_2]);
+            assert!(
+                !was_present,
+                "BTreeMap: Range was completely evicted from previous calls. Should return false"
+            );
+            assert_eq!(rows.len(), 0, "Should return 0 rows");
+
+            // Case 2: Range was never filled (doesn't exist in state)
+            let range_never_filled =
+                KeyComparison::from_range(&(vec1![30.into()]..vec1![40.into()]));
+            let (was_present, rows) = state.evict_keys(&[range_never_filled]);
+            assert!(
+                !was_present,
+                "BTreeMap: Range that was never filled should return false"
+            );
+            assert_eq!(rows.len(), 0, "Should return 0 rows");
+
+            // Case 3: Range with rows
+            let range_with_rows = KeyComparison::from_range(&(vec1![50.into()]..vec1![60.into()]));
+            state.mark_filled(range_with_rows.clone());
+            state.insert_row(vec![50.into(), 500.into()].into());
+            state.insert_row(vec![55.into(), 550.into()].into());
+            state.insert_row(vec![59.into(), 590.into()].into());
+
+            let (was_present, rows) = state.evict_keys(&[range_with_rows]);
+            assert!(was_present, "BTreeMap: Range with rows should return true");
+            assert_eq!(rows.len(), 3, "Should return 3 rows");
+            assert_eq!(state.row_count, 0, "Row count should be 0 after eviction");
+        }
+
+        /// Test evict_keys with BTreeMap for multiple keys at once
+        #[test]
+        fn evict_keys_btree_multiple_keys() {
+            let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
+
+            // Setup: Create mix of filled/unfilled keys and ranges
+            let key1 = KeyComparison::Equal(vec1![1.into()]);
+            let key2 = KeyComparison::Equal(vec1![2.into()]);
+            let key3 = KeyComparison::Equal(vec1![3.into()]);
+            let range1 = KeyComparison::from_range(&(vec1![10.into()]..vec1![15.into()]));
+
+            state.mark_filled(key1.clone());
+            state.insert_row(vec![1.into(), 100.into()].into());
+
+            state.mark_filled(key2.clone());
+            // key2 has no rows
+
+            // key3 is never filled
+
+            state.mark_filled(range1.clone());
+            state.insert_row(vec![10.into(), 1000.into()].into());
+            state.insert_row(vec![12.into(), 1200.into()].into());
+
+            // Evict all at once
+            let (was_present, rows) = state.evict_keys(&[key1, key2, key3.clone(), range1]);
+            assert!(
+                was_present,
+                "BTreeMap: Should return true if at least one key was present"
+            );
+            assert_eq!(
+                rows.len(),
+                3,
+                "Should return 3 rows total (1 from key1, 2 from range1)"
+            );
+            assert_eq!(state.row_count, 0);
+
+            // Verify all keys are now missing
+            assert!(state.lookup(&PointKey::from([1.into()])).is_missing());
+            assert!(state.lookup(&PointKey::from([2.into()])).is_missing());
+        }
+
+        /// Test evict_keys with BTreeMap multi-column index
+        #[test]
+        fn evict_keys_btree_multi_column() {
+            let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0, 1]), true);
+
+            // Case 1: Multi-column key that's filled but empty
+            let key_empty = KeyComparison::Equal(vec1![1.into(), 10.into()]);
+            state.mark_filled(key_empty.clone());
+
+            let (was_present, rows) = state.evict_keys(&[key_empty]);
+            assert!(
+                was_present,
+                "BTreeMap multi-column: Empty key should return true"
+            );
+            assert_eq!(rows.len(), 0);
+
+            // Case 2: Multi-column key with rows
+            let key_with_rows = KeyComparison::Equal(vec1![2.into(), 20.into()]);
+            state.mark_filled(key_with_rows.clone());
+            state.insert_row(vec![2.into(), 20.into(), 200.into()].into());
+            state.insert_row(vec![2.into(), 20.into(), 201.into()].into());
+
+            let (was_present, rows) = state.evict_keys(&[key_with_rows]);
+            assert!(
+                was_present,
+                "BTreeMap multi-column: Key with rows should return true"
+            );
+            assert_eq!(rows.len(), 2);
+
+            // Case 3: Multi-column key never filled
+            let key_missing = KeyComparison::Equal(vec1![3.into(), 30.into()]);
+            let (was_present, rows) = state.evict_keys(&[key_missing]);
+            assert!(
+                !was_present,
+                "BTreeMap multi-column: Missing key should return false"
+            );
+            assert_eq!(rows.len(), 0);
+        }
+
+        /// Test evict_keys with BTreeMap - edge case of evicting only unfilled keys
+        #[test]
+        fn evict_keys_btree_only_missing_keys() {
+            let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
+
+            // Try to evict multiple keys that were never filled
+            let key1 = KeyComparison::Equal(vec1![1.into()]);
+            let key2 = KeyComparison::Equal(vec1![2.into()]);
+            let key3 = KeyComparison::Equal(vec1![3.into()]);
+
+            let (was_present, rows) = state.evict_keys(&[key1, key2, key3]);
+            assert!(
+                !was_present,
+                "BTreeMap: Should return false when no keys were present"
+            );
+            assert_eq!(rows.len(), 0, "Should return 0 rows");
         }
     }
 }
