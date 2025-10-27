@@ -293,7 +293,7 @@ impl State for MemoryState {
         // this can happen if an upstream domain issues an eviction for a replay path that we have
         // been told about, but that has not yet been finalized.
         self.by_tag.get(&tag).cloned().map(move |state_index| {
-            let (_key_was_present, rows_evicted) = self.state[state_index].evict_keys(keys);
+            let (key_was_present, rows_evicted) = self.state[state_index].evict_keys(keys);
             let mut bytes_freed = 0;
 
             rows_evicted
@@ -305,7 +305,12 @@ impl State for MemoryState {
                 .map(base_row_bytes_from_comparison)
                 .sum::<usize>();
 
-            self.mem_size = self.mem_size.saturating_sub(bytes_freed + key_bytes);
+            // If we actually evicted a key, include this to the bytes freed.
+            // This will cause downstream nodes to propagate the eviction.
+            if key_was_present {
+                bytes_freed += key_bytes;
+            }
+            self.mem_size = self.mem_size.saturating_sub(bytes_freed);
 
             EvictKeysResult {
                 index: self.state[state_index].index(),
@@ -1370,5 +1375,24 @@ mod tests {
 
         assert_eq!(state.row_count(), 1);
         assert!(!state.is_empty());
+    }
+
+    #[test]
+    fn evict_keys_bytes() {
+        let mut state = MemoryState::default();
+
+        let index = Index::hash_map(vec![0]);
+        let tag = Tag::new(1);
+
+        state.add_index(index, Some(vec![tag]));
+        state.mark_filled(KeyComparison::Equal(vec1![1.into()]), tag);
+
+        let result = state.evict_keys(tag, &[KeyComparison::Equal(vec1![2.into()])]);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().bytes_freed, 0);
+
+        let result = state.evict_keys(tag, &[KeyComparison::Equal(vec1![1.into()])]);
+        assert!(result.is_some());
+        assert!(result.unwrap().bytes_freed > 0);
     }
 }
