@@ -4134,22 +4134,25 @@ impl Domain {
                         bytes_freed += result.bytes_freed;
                         // we can only evict from partial replay paths, so we must have a
                         // partial key
-                        bytes_freed += Self::trigger_downstream_evictions(
-                            #[allow(clippy::unwrap_used)]
-                            dest.partial_index.as_ref().unwrap(),
-                            &keys,
-                            dest.node,
-                            ex,
-                            not_ready,
-                            replay_paths,
-                            shard,
-                            replica,
-                            state,
-                            reader_write_handles,
-                            nodes,
-                            remapped_keys,
-                            auxiliary_node_states,
-                        )?;
+                        // Only trigger downstream evictions if we actually evicted something.
+                        if result.bytes_freed > 0 {
+                            bytes_freed += Self::trigger_downstream_evictions(
+                                #[allow(clippy::unwrap_used)]
+                                dest.partial_index.as_ref().unwrap(),
+                                &keys,
+                                dest.node,
+                                ex,
+                                not_ready,
+                                replay_paths,
+                                shard,
+                                replica,
+                                state,
+                                reader_write_handles,
+                                nodes,
+                                remapped_keys,
+                                auxiliary_node_states,
+                            )?;
+                        }
                     }
                 }
                 TriggerEndpoint::Start(_) => {
