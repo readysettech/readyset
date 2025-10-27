@@ -892,6 +892,19 @@ where
     }
 }
 
+/// The determination of whether we should attempt to select from ReadySet.
+enum ShouldTrySelect {
+    /// We should attempt to select from ReadySet, with the given status and params.
+    Yes {
+        status: QueryStatus,
+        params: DfQueryParameters,
+    },
+    /// We should not attempt to select from ReadySet, and should proxy if there is an upstream. If
+    /// there is no upstream, we should return an error. If there is no error, it is because we are
+    /// in a proxying state (e.g. in transaction) and the cache was not marked `ALWAYS`.
+    No { error: Option<ReadySetError> },
+}
+
 /// TODO: The ideal approach for query handling is as follows:
 /// 1. If we know we can't support a query, send it to fallback.
 /// 2. If we think we can support a query, try to send it to ReadySet. If that hits an error that
@@ -2844,25 +2857,31 @@ where
             &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
         >,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        // if should_try is true then status and params MUST be Some
-        let (noria_should_try, status, params) =
-            Self::noria_should_try_select(noria, settings, state, &mut view_request, params);
-        if noria_should_try {
-            Self::noria_adhoc_select(
-                noria,
-                upstream,
-                settings,
-                state,
-                query,
-                view_request,
-                status.unwrap(),
-                event,
-                params.unwrap(),
-                sampler_tx,
-            )
-            .await
-        } else {
-            Self::query_fallback(upstream, query, event, None).await
+        match Self::noria_should_try_select(noria, settings, state, &mut view_request, params) {
+            ShouldTrySelect::Yes { status, params } => {
+                Self::noria_adhoc_select(
+                    noria,
+                    upstream,
+                    settings,
+                    state,
+                    query,
+                    view_request,
+                    status,
+                    event,
+                    params,
+                    sampler_tx,
+                )
+                .await
+            }
+            ShouldTrySelect::No { error } => {
+                if upstream.is_none() {
+                    Err(error
+                        .unwrap_or(ReadySetError::InvalidUpstreamDatabase)
+                        .into())
+                } else {
+                    Self::query_fallback(upstream, query, event, None).await
+                }
+            }
         }
     }
 
@@ -3027,53 +3046,57 @@ where
         q: &mut ViewCreateRequest,
         rewrite_params: AdapterRewriteParams,
         params: QueryParameters,
-    ) -> (bool, Option<QueryStatus>, Option<DfQueryParameters>) {
+    ) -> ShouldTrySelect {
         match adapter_rewrites::rewrite_for_readyset(&mut q.statement, rewrite_params, params) {
             Ok(params) => {
-                let s = state.query_status_cache.query_status(q);
+                let status = state.query_status_cache.query_status(q);
                 let should_try = if state.proxy_state.should_proxy() {
-                    s.always
+                    status.always
                 } else {
                     true
                 };
-                (should_try, Some(s), Some(params))
+                if should_try {
+                    ShouldTrySelect::Yes { status, params }
+                } else {
+                    ShouldTrySelect::No { error: None }
+                }
             }
-            Err(e) => {
+            Err(error) => {
                 warn!(
                     statement = %Sensitive(&q.statement.display(settings.dialect)),
-                    error = e.to_string(),
+                    %error,
                     "This statement could not be rewritten by Readyset",
                 );
-                (false, None, None)
+                ShouldTrySelect::No { error: Some(error) }
             }
         }
     }
 
     /// For TopK-eligible queries, attempts to use a cache that preserves the literal LIMIT.
     ///
-    /// Returns Some(result) if a cache exists that can handle the query with TopK processing,
-    /// None if no such cache exists and normal processing should be attempted.
+    /// Returns [`ShouldTrySelect::Yes`] if a cache exists that can handle the query with TopK
+    /// processing, [`ShouldTrySelect::No`] if no such cache exists and normal processing should be
+    /// attempted.
     fn lookup_topk_cache(
         settings: &BackendSettings,
         state: &BackendState<DB>,
         q: &mut ViewCreateRequest,
         rewrite_params: AdapterRewriteParams,
         params: QueryParameters,
-    ) -> Option<(bool, Option<QueryStatus>, Option<DfQueryParameters>)> {
+    ) -> ShouldTrySelect {
         // if the cache is not yet created, it's probably better
         // to let the adapter try the other path.
-        let (_should_try, status, params) =
-            Self::process_and_check_query(settings, state, q, rewrite_params, params);
-
-        let should_try = matches!(
-            status.as_ref().map(|s| s.migration_state.clone()),
-            Some(MigrationState::Successful(_)) | Some(MigrationState::Inlined(_))
-        );
-
-        if should_try {
-            Some((should_try, status, params))
-        } else {
-            None
+        match Self::process_and_check_query(settings, state, q, rewrite_params, params) {
+            ShouldTrySelect::Yes {
+                status:
+                    status @ QueryStatus {
+                        migration_state: MigrationState::Successful(_) | MigrationState::Inlined(_),
+                        ..
+                    },
+                params,
+            } => ShouldTrySelect::Yes { status, params },
+            ShouldTrySelect::Yes { .. } => ShouldTrySelect::No { error: None },
+            no => no,
         }
     }
 
@@ -3102,7 +3125,7 @@ where
         state: &BackendState<DB>,
         q: &mut ViewCreateRequest,
         params: QueryParameters,
-    ) -> (bool, Option<QueryStatus>, Option<DfQueryParameters>) {
+    ) -> ShouldTrySelect {
         let mut rewrite_params = noria.rewrite_params();
 
         let is_topk_candidate =
@@ -3111,16 +3134,15 @@ where
         if is_topk_candidate {
             let mut original = q.clone();
 
-            if let Some((should_try, status, params)) =
-                Self::lookup_topk_cache(settings, state, q, rewrite_params, params.clone())
-            {
-                return (should_try, status, params);
-            } else {
-                trace!("No TopK cache for query, trying parameterized cache");
-                // We will try the query again, but this time without the LIMIT
-                // to try and hit a cache that was created with a paramterized LIMIT (LIMIT ?)
-                rewrite_params.server_supports_topk = false;
-                mem::swap(q, &mut original);
+            match Self::lookup_topk_cache(settings, state, q, rewrite_params, params.clone()) {
+                yes @ ShouldTrySelect::Yes { .. } => return yes,
+                ShouldTrySelect::No { .. } => {
+                    trace!("No TopK cache for query, trying parameterized cache");
+                    // We will try the query again, but this time without the LIMIT, to try and hit
+                    // a cache that was created with a paramterized LIMIT (LIMIT ?)
+                    rewrite_params.server_supports_topk = false;
+                    mem::swap(q, &mut original);
+                }
             }
         }
 
