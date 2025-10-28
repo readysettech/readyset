@@ -78,7 +78,7 @@ case "$UPSTREAM_CONFIG" in
     ;;
 esac
 
-if [[ "${RUN_SLOW_TESTS:-false}" != "true" ]]; then
+if [[ -z "${RUN_SLOW_TESTS+x}" ]]; then
     if [[ ${#NEXTEST_FILTER[@]} -gt 0 ]]; then
         NEXTEST_FILTER+=("and")
     fi
