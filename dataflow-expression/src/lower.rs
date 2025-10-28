@@ -14,6 +14,7 @@ use readyset_sql::ast::{
 };
 use readyset_sql::{DialectDisplay, TryIntoDialect as _};
 use readyset_util::redacted::Sensitive;
+use serde_json::json;
 use vec1::Vec1;
 
 use crate::{
@@ -178,9 +179,9 @@ impl BuiltinFunction {
             null_on_failure: true,
         };
 
+        antithesis_sdk::assert_reachable!("Lowering builtin function", &json!({"function": name}));
         let result = match name {
             "convert_tz" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: convert_tz");
                 // Type is inferred from input argument
                 let input = next_arg()?;
                 let ty = input.ty().clone();
@@ -201,14 +202,12 @@ impl BuiltinFunction {
                 )
             }
             "dayofweek" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: dayofweek");
                 (
                     Self::DayOfWeek(try_cast(next_arg()?, DfType::Date)),
                     DfType::Int, // Day of week is always an int
                 )
             }
             "ifnull" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: ifnull");
                 let expr = next_arg()?;
                 let val = next_arg()?;
                 // Type is inferred from the value provided
@@ -216,14 +215,12 @@ impl BuiltinFunction {
                 (Self::IfNull(expr, val), ty)
             }
             "month" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: month");
                 (
                     Self::Month(try_cast(next_arg()?, DfType::Date)),
                     DfType::Int, // Month is always an int
                 )
             }
             "timediff" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: timediff");
                 (
                     Self::Timediff(next_arg()?, next_arg()?),
                     // type is always time
@@ -233,7 +230,6 @@ impl BuiltinFunction {
                 )
             }
             "addtime" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: addtime");
                 let base_time = next_arg()?;
                 let mut ty = base_time.ty().clone();
 
@@ -248,15 +244,11 @@ impl BuiltinFunction {
 
                 (Self::Addtime(base_time, next_arg()?), ty)
             }
-            "date_format" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: date_format");
-                (
-                    Self::DateFormat(next_arg()?, next_arg()?),
-                    DfType::DEFAULT_TEXT,
-                )
-            }
+            "date_format" => (
+                Self::DateFormat(next_arg()?, next_arg()?),
+                DfType::DEFAULT_TEXT,
+            ),
             "round" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: round");
                 let expr = next_arg()?;
                 let prec = args.next().unwrap_or(Expr::Literal {
                     val: DfValue::Int(0),
@@ -265,26 +257,11 @@ impl BuiltinFunction {
                 let ty = type_for_round(&expr, &prec);
                 (Self::Round(expr, prec), ty)
             }
-            "json_depth" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: json_depth");
-                (Self::JsonDepth(next_arg()?), DfType::Int)
-            }
-            "json_valid" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: json_valid");
-                (Self::JsonValid(next_arg()?), DfType::BigInt)
-            }
-            "json_overlaps" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: json_overlaps");
-                (Self::JsonOverlaps(next_arg()?, next_arg()?), DfType::BigInt)
-            }
-            "json_quote" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: json_quote");
-                (Self::JsonQuote(next_arg()?), DfType::DEFAULT_TEXT)
-            }
+            "json_depth" => (Self::JsonDepth(next_arg()?), DfType::Int),
+            "json_valid" => (Self::JsonValid(next_arg()?), DfType::BigInt),
+            "json_overlaps" => (Self::JsonOverlaps(next_arg()?, next_arg()?), DfType::BigInt),
+            "json_quote" => (Self::JsonQuote(next_arg()?), DfType::DEFAULT_TEXT),
             "json_typeof" | "jsonb_typeof" => {
-                antithesis_sdk::assert_reachable!(
-                    "Lowering builtin function: json_typeof/jsonb_typeof"
-                );
                 (
                     Self::JsonTypeof(next_arg()?),
                     // Always returns text containing the JSON type.
@@ -292,7 +269,6 @@ impl BuiltinFunction {
                 )
             }
             "json_object" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: json_object");
                 match dialect.engine() {
                     // TODO(ENG-1536): https://dev.mysql.com/doc/refman/8.0/en/json-creation-functions.html#function_json-object
                     SqlEngine::MySQL => {
@@ -321,7 +297,6 @@ impl BuiltinFunction {
                 }
             }
             "json_build_object" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: json_build_object");
                 let exprs: Vec<_> = args.by_ref().collect();
 
                 if exprs.is_empty() || exprs.len() % 2 != 0 {
@@ -337,7 +312,6 @@ impl BuiltinFunction {
                 )
             }
             "jsonb_build_object" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: jsonb_build_object");
                 let exprs: Vec<_> = args.by_ref().collect();
 
                 if exprs.is_empty() || exprs.len() % 2 != 0 {
@@ -352,111 +326,71 @@ impl BuiltinFunction {
                     DfType::Json,
                 )
             }
-            "jsonb_object" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: jsonb_object");
-                (
-                    Self::JsonObject {
-                        arg1: next_arg()?,
-                        arg2: args.next(),
-                        allow_duplicate_keys: false,
-                    },
-                    DfType::Jsonb,
-                )
-            }
+            "jsonb_object" => (
+                Self::JsonObject {
+                    arg1: next_arg()?,
+                    arg2: args.next(),
+                    allow_duplicate_keys: false,
+                },
+                DfType::Jsonb,
+            ),
             "json_array_length" | "jsonb_array_length" => {
-                antithesis_sdk::assert_reachable!(
-                    "Lowering builtin function: json_array_length/jsonb_array_length"
-                );
                 (Self::JsonArrayLength(next_arg()?), DfType::Int)
             }
-            "json_strip_nulls" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: json_strip_nulls");
-                (Self::JsonStripNulls(next_arg()?), DfType::Json)
-            }
-            "jsonb_strip_nulls" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: jsonb_strip_nulls");
-                (Self::JsonStripNulls(next_arg()?), DfType::Jsonb)
-            }
-            "json_extract_path" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: json_extract_path");
-                (
-                    Self::JsonExtractPath {
-                        json: next_arg()?,
-                        keys: Vec1::try_from_vec(args.by_ref().collect())
-                            .map_err(|_| arity_error())?,
-                    },
-                    DfType::Json,
-                )
-            }
-            "jsonb_extract_path" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: jsonb_extract_path");
-                (
-                    Self::JsonExtractPath {
-                        json: next_arg()?,
-                        keys: Vec1::try_from_vec(args.by_ref().collect())
-                            .map_err(|_| arity_error())?,
-                    },
-                    DfType::Jsonb,
-                )
-            }
-            "json_extract_path_text" | "jsonb_extract_path_text" => {
-                antithesis_sdk::assert_reachable!(
-                    "Lowering builtin function: json_extract_path_text/jsonb_extract_path_text"
-                );
-                (
-                    Self::JsonExtractPath {
-                        json: next_arg()?,
-                        keys: Vec1::try_from_vec(args.by_ref().collect())
-                            .map_err(|_| arity_error())?,
-                    },
-                    DfType::DEFAULT_TEXT,
-                )
-            }
-            "jsonb_insert" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: jsonb_insert");
-                (
-                    Self::JsonbInsert(next_arg()?, next_arg()?, next_arg()?, args.next()),
-                    DfType::Jsonb,
-                )
-            }
-            "jsonb_set" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: jsonb_set");
-                (
-                    Self::JsonbSet(
-                        next_arg()?,
-                        next_arg()?,
-                        next_arg()?,
-                        args.next(),
-                        NullValueTreatmentArg::ReturnNull,
-                    ),
-                    DfType::Jsonb,
-                )
-            }
-            "jsonb_set_lax" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: jsonb_set_lax");
-                (
-                    Self::JsonbSet(
-                        next_arg()?,
-                        next_arg()?,
-                        next_arg()?,
-                        args.next(),
-                        NullValueTreatmentArg::Expr(args.next()),
-                    ),
-                    DfType::Jsonb,
-                )
-            }
-            "jsonb_pretty" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: jsonb_pretty");
-                (Self::JsonbPretty(next_arg()?), DfType::DEFAULT_TEXT)
-            }
+            "json_strip_nulls" => (Self::JsonStripNulls(next_arg()?), DfType::Json),
+            "jsonb_strip_nulls" => (Self::JsonStripNulls(next_arg()?), DfType::Jsonb),
+            "json_extract_path" => (
+                Self::JsonExtractPath {
+                    json: next_arg()?,
+                    keys: Vec1::try_from_vec(args.by_ref().collect()).map_err(|_| arity_error())?,
+                },
+                DfType::Json,
+            ),
+            "jsonb_extract_path" => (
+                Self::JsonExtractPath {
+                    json: next_arg()?,
+                    keys: Vec1::try_from_vec(args.by_ref().collect()).map_err(|_| arity_error())?,
+                },
+                DfType::Jsonb,
+            ),
+            "json_extract_path_text" | "jsonb_extract_path_text" => (
+                Self::JsonExtractPath {
+                    json: next_arg()?,
+                    keys: Vec1::try_from_vec(args.by_ref().collect()).map_err(|_| arity_error())?,
+                },
+                DfType::DEFAULT_TEXT,
+            ),
+            "jsonb_insert" => (
+                Self::JsonbInsert(next_arg()?, next_arg()?, next_arg()?, args.next()),
+                DfType::Jsonb,
+            ),
+            "jsonb_set" => (
+                Self::JsonbSet(
+                    next_arg()?,
+                    next_arg()?,
+                    next_arg()?,
+                    args.next(),
+                    NullValueTreatmentArg::ReturnNull,
+                ),
+                DfType::Jsonb,
+            ),
+            "jsonb_set_lax" => (
+                Self::JsonbSet(
+                    next_arg()?,
+                    next_arg()?,
+                    next_arg()?,
+                    args.next(),
+                    NullValueTreatmentArg::Expr(args.next()),
+                ),
+                DfType::Jsonb,
+            ),
+            "jsonb_pretty" => (Self::JsonbPretty(next_arg()?), DfType::DEFAULT_TEXT),
             "coalesce" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: coalesce");
                 let arg1 = next_arg()?;
                 let ty = arg1.ty().clone();
                 (Self::Coalesce(arg1, args.by_ref().collect()), ty)
             }
             "concat" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: concat");
                 let arg1 = next_arg()?;
                 let rest_args = args.by_ref().collect::<Vec<_>>();
                 let collation = Collation::unwrap_or_default(
@@ -481,7 +415,6 @@ impl BuiltinFunction {
                 )
             }
             "concat_ws" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: concat_ws");
                 let arg1 = next_arg()?;
                 let arg2 = next_arg()?;
                 let rest_args = args.by_ref().collect::<Vec<_>>();
@@ -508,7 +441,6 @@ impl BuiltinFunction {
                 )
             }
             "substring" | "substr" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: substring/substr");
                 let string = next_arg()?;
                 let ty = if string.ty().is_any_text() {
                     string.ty().clone()
@@ -525,19 +457,15 @@ impl BuiltinFunction {
                     ty,
                 )
             }
-            "split_part" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: split_part");
-                (
-                    Self::SplitPart(
-                        cast(next_arg()?, DfType::DEFAULT_TEXT),
-                        cast(next_arg()?, DfType::DEFAULT_TEXT),
-                        cast(next_arg()?, DfType::Int),
-                    ),
-                    DfType::DEFAULT_TEXT,
-                )
-            }
+            "split_part" => (
+                Self::SplitPart(
+                    cast(next_arg()?, DfType::DEFAULT_TEXT),
+                    cast(next_arg()?, DfType::DEFAULT_TEXT),
+                    cast(next_arg()?, DfType::Int),
+                ),
+                DfType::DEFAULT_TEXT,
+            ),
             "greatest" | "least" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: greatest/least");
                 // The type inference rules for GREATEST and LEAST are the same, so this block
                 // covers both then dispatches for the actual function construction at the end
                 let arg1 = next_arg()?;
@@ -578,7 +506,6 @@ impl BuiltinFunction {
                 )
             }
             "array_to_string" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: array_to_string");
                 let array_arg = next_arg()?;
                 let elem_ty = match array_arg.ty() {
                     DfType::Array(t) => (**t).clone(),
@@ -594,7 +521,6 @@ impl BuiltinFunction {
                 )
             }
             "date_trunc" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: date_trunc");
                 // this is the time unit (precision) to truncate by ('hour', 'minute', and so on).
                 // called 'field' in the postgres docs.
                 let precision = next_arg()?;
@@ -614,9 +540,6 @@ impl BuiltinFunction {
                 (Self::DateTrunc(precision, source), ret_type)
             }
             "length" | "octet_length" | "char_length" | "character_length" => {
-                antithesis_sdk::assert_reachable!(
-                    "Lowering builtin function: length/octet_length/char_length/character_length"
-                );
                 // MySQL - `LENGTH()`, `OCTET_LENGTH()` = in bytes | `CHAR_LENGTH()`, `CHARACTER_LENGTH()` = in characters
                 // PostgreSQL - `OCTET_LENGTH()` = in bytes | `LENGTH()`, `CHAR_LENGTH()`, `CHARACTER_LENGTH()` = in characters
                 let expr = next_arg()?;
@@ -637,12 +560,10 @@ impl BuiltinFunction {
                 )
             }
             "ascii" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: ascii");
                 let expr = next_arg()?;
                 (Self::Ascii { expr, dialect }, DfType::UnsignedInt)
             }
             "hex" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: hex");
                 if dialect.engine() != SqlEngine::MySQL {
                     unsupported!("Function {name} does not exist in {}", dialect.engine());
                 }
@@ -650,7 +571,6 @@ impl BuiltinFunction {
                 (Self::Hex(expr), DfType::Text(Collation::Utf8))
             }
             "st_astext" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: st_astext");
                 // Note: `ST_AsText` is supported by both MySQL and PostGIS,
                 let expr = next_arg()?;
                 (
@@ -659,7 +579,6 @@ impl BuiltinFunction {
                 )
             }
             "st_aswkt" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: st_aswkt");
                 // `ST_AsWKT` is only supported by MySQL.
                 match dialect.engine() {
                     SqlEngine::MySQL => {
@@ -675,7 +594,6 @@ impl BuiltinFunction {
                 }
             }
             "st_asewkt" => {
-                antithesis_sdk::assert_reachable!("Lowering builtin function: st_asewkt");
                 // `ST_AsEWKT` is only supported by postgis.
                 match dialect.engine() {
                     SqlEngine::PostgreSQL => {
