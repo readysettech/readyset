@@ -7,6 +7,7 @@ use dataflow_expression::grouped::accumulator::{AccumulationOp, AccumulatorData}
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{internal_err, invariant_eq, ReadySetResult};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::node::{AuxiliaryNodeState, Node};
 use crate::ops::grouped::{GroupedOperation, GroupedOperator};
@@ -43,25 +44,15 @@ impl Accumulator {
         over_col_ty: &DfType,
         _dialect: &Dialect,
     ) -> ReadySetResult<GroupedOperator<Accumulator>> {
+        let op_name: &'static str = op.clone().into();
+        antithesis_sdk::assert_reachable!("Accumulation", &json!({"op": op_name}));
         let collation = over_col_ty.collation().unwrap_or(Collation::Utf8);
 
         let out_ty = match &op {
-            AccumulationOp::ArrayAgg { .. } => {
-                antithesis_sdk::assert_reachable!("Accumulation::ArrayAgg");
-                DfType::Array(Box::new(over_col_ty.clone()))
-            }
-            AccumulationOp::GroupConcat { .. } => {
-                antithesis_sdk::assert_reachable!("Accumulation::GroupConcat");
-                DfType::Text(collation)
-            }
-            AccumulationOp::JsonObjectAgg { .. } => {
-                antithesis_sdk::assert_reachable!("Accumulation::JsonObjectAgg");
-                DfType::Text(collation)
-            }
-            AccumulationOp::StringAgg { .. } => {
-                antithesis_sdk::assert_reachable!("Accumulation::StringAgg");
-                DfType::Text(collation)
-            }
+            AccumulationOp::ArrayAgg { .. } => DfType::Array(Box::new(over_col_ty.clone())),
+            AccumulationOp::GroupConcat { .. } => DfType::Text(collation),
+            AccumulationOp::JsonObjectAgg { .. } => DfType::Text(collation),
+            AccumulationOp::StringAgg { .. } => DfType::Text(collation),
         };
 
         Ok(GroupedOperator::new(

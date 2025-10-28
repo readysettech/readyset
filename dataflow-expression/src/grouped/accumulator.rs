@@ -23,9 +23,10 @@ use readyset_sql::ast::{
     DistinctOption, Expr, FieldReference, FunctionExpr, NullOrder, OrderClause, OrderType,
 };
 use serde::{Deserialize, Serialize};
+use strum::IntoStaticStr;
 
 /// Supported accumulation operators.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, IntoStaticStr)]
 pub enum AccumulationOp {
     /// Concatenate values into an array. Allows NULL values in the output array.
     ArrayAgg {

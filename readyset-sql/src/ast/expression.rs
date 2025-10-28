@@ -9,6 +9,7 @@ use proptest::{
 };
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use strum::IntoStaticStr;
 use test_strategy::Arbitrary;
 
 use crate::ast::*;
@@ -17,7 +18,19 @@ use crate::{
 };
 
 /// Function call expressions
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    Arbitrary,
+    IntoStaticStr,
+)]
 pub enum FunctionExpr {
     /// `ARRAY_AGG` aggregation - PostgreSQL array aggregation function
     ///

@@ -10,6 +10,7 @@ use readyset_sql::{
     analysis::{is_aggregate, ReferredColumns},
     DialectDisplay,
 };
+use serde_json::json;
 use FunctionExpr::*;
 
 use crate::controller::sql::mir::join::make_joins_for_aggregates;
@@ -294,6 +295,11 @@ fn joinable_aggregate_nodes(
         .collect()
 }
 
+fn record_reachable(function: &FunctionExpr) {
+    let fn_name: &'static str = function.into();
+    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction", &json!({"function": fn_name}));
+}
+
 /// Build up the set of [`PostLookupAggregates`] for the given query, given as both the query
 /// graph itself and the select statement that the query is built from.
 ///
@@ -341,7 +347,7 @@ pub(super) fn post_lookup_aggregates(
             column: Column::named(alias.clone()).aliased_as_table(query_name.clone()),
             function: match function {
                 ArrayAgg { .. } => {
-                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::ArrayAgg");
+                    record_reachable(function);
                     PostLookupAggregateFunction::ArrayAgg {
                         op: function.try_into()?,
                     }
@@ -363,19 +369,19 @@ pub(super) fn post_lookup_aggregates(
                 // Count and sum are handled the same way, as re-aggregating counts is
                 // done by just summing the numbers together
                 Count { .. } | CountStar | Sum { .. } => {
-                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::Sum");
+                    record_reachable(function);
                     PostLookupAggregateFunction::Sum
                 }
                 Max(_) => {
-                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::Max");
+                    record_reachable(function);
                     PostLookupAggregateFunction::Max
                 }
                 Min(_) => {
-                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::Min");
+                    record_reachable(function);
                     PostLookupAggregateFunction::Min
                 }
                 GroupConcat { .. } => {
-                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::GroupConcat");
+                    record_reachable(function);
                     PostLookupAggregateFunction::GroupConcat {
                         op: function.try_into()?,
                     }
@@ -388,13 +394,13 @@ pub(super) fn post_lookup_aggregates(
                 | Bucket { .. } => continue,
                 // TODO: should this be supported given the projection workaround we have?
                 JsonObjectAgg { .. } => {
-                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::JsonObjectAgg");
+                    record_reachable(function);
                     PostLookupAggregateFunction::JsonObjectAgg {
                         op: function.try_into()?,
                     }
                 }
                 StringAgg { .. } => {
-                    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction::StringAgg");
+                    record_reachable(function);
                     PostLookupAggregateFunction::StringAgg {
                         op: function.try_into()?,
                     }
