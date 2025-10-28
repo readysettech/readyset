@@ -209,6 +209,17 @@ steps:
     agents:
       queue: c6a-4xlarge
     retry: *retry_on_agent_kill
+    
+  - label: ":junit: Annotate JUnit XML"
+    depends_on:
+      - rust-tests
+      - rust-tests-mrbr
+    allow_dependency_failure: true
+    plugins:
+      - junit-annotate#v2.7.0:
+          artifacts: target/nextest/ci/junit-buildkite-job-*.xml
+          failed-download-exit-code: 0
+    agents: { queue: t3a-small }
 
   - label: ':rust: Run doctests :books:'
     key: rust-dectests

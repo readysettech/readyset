@@ -5,7 +5,8 @@ upload_artifacts() {
     echo "--- Uploading proptest-regressions to buildkite artifacts"
     buildkite-agent artifact upload '**/proptest-regressions/*.txt'
     buildkite-agent artifact upload '**/*.proptest-regressions'
-    buildkite-agent artifact upload 'target/**/junit.xml'
+    mv target/nextest/ci/junit.xml "target/nextest/ci/junit-buildkite-job-$BUILDKITE_JOB_ID.xml"
+    buildkite-agent artifact upload "target/nextest/ci/junit-buildkite-job-$BUILDKITE_JOB_ID.xml"
     exit 1
 }
 
