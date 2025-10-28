@@ -100,6 +100,10 @@ impl PersistentStateHandle {
         columns: &[usize],
         keys: &[PointKey],
     ) -> Vec<RecordResult<'_>> {
+        debug!(
+            "lookup_multi: db: {:?}, columns: {:?}, keys: {:?}",
+            self.db, columns, keys
+        );
         if keys.is_empty() {
             return vec![];
         }
@@ -166,6 +170,10 @@ impl PersistentStateHandle {
     /// index keys from that secondary index, then perform a lookup into the primary
     /// index
     pub(super) fn do_lookup(&self, columns: &[usize], key: &PointKey) -> Option<Vec<Vec<DfValue>>> {
+        debug!(
+            "do_lookup: db: {:?}, columns: {:?}, key: {:?}",
+            self.db, columns, key
+        );
         let inner = self.inner_fair();
         if self.replication_offset < inner.shared_state.replication_offset {
             // We are checking the replication offset under a read lock, and the lock remains in

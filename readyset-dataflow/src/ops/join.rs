@@ -8,7 +8,7 @@ use readyset_errors::{internal_err, ReadySetResult};
 use readyset_util::intervals::into_bound_endpoint;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use tracing::trace;
+use tracing::debug;
 use vec1::{vec1, Vec1};
 
 use super::Side;
@@ -123,7 +123,10 @@ impl Join {
                 compute_in_place_emit(Side::Right),
             )
         };
-
+        debug!(
+            "Join::new: left: {:?}, right: {:?}, kind: {:?}, on: {:?}, rhs_full_mat: {:?}",
+            left, right, kind, on, rhs_full_mat
+        );
         Self {
             left: left.into(),
             right: right.into(),
@@ -920,11 +923,9 @@ impl Ingredient for Join {
         _auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         let join_execution_mode = self.execution_type_for_replay(replay, from);
-        trace!(
-            "on_input join_execution_mode: {:?} for from: {:?} for replay: {:?}",
-            join_execution_mode,
-            from,
-            replay
+        debug!(
+            "on_input join_execution_mode: {:?} for from: {:?} for replay: {:?}, records: {:?}, rhs_full_mat: {:?}",
+            join_execution_mode, from, replay, rs.len(), self.rhs_full_mat
         );
         match join_execution_mode {
             JoinExecutionMode::RegularLookup => {
