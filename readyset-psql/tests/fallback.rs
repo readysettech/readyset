@@ -2072,7 +2072,11 @@ mod failure_injection_tests {
                 AssertUnwindSafe(|| row)
             },
             then_assert: |result| {
-                assert_eq!(result(), ["readyset", "ok"]);
+                let row = result();
+                let destination = QueryDestination::try_from(row.first().unwrap().as_str()).unwrap();
+                assert_matches!(destination, QueryDestination::Readyset(_));
+                let status = row.get(1).unwrap();
+                assert_eq!(status, "ok");
             }
         }
     }
