@@ -87,9 +87,9 @@ use proptest::strategy::{BoxedStrategy, Strategy};
 use readyset_data::{Collation, DfType, DfValue, Dialect};
 use readyset_sql::analysis::{contains_aggregate, ReferredColumns};
 use readyset_sql::ast::{
-    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
-    CreateTableBody, CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
-    InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause,
+    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CreateTableBody,
+    CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
+    ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause,
     LimitValue, Literal, NullOrder, OrderBy, OrderClause, OrderType, Relation, SelectStatement,
     SqlIdentifier, SqlType, SqlTypeArbitraryOptions, TableExpr, TableExprInner, TableKey,
 };
@@ -1632,7 +1632,6 @@ impl Arbitrary for BuiltinFunction {
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 #[arbitrary(args = QueryDialect)]
 pub enum SubqueryPosition {
-    Cte(JoinOperator),
     Join(JoinOperator),
     /// TODO, once we support them:
     ///
@@ -1811,10 +1810,8 @@ const ALL_AGGREGATE_TYPES: &[AggregateType] = &[
     AggregateType::StringAgg { distinct: false },
 ];
 
-const ALL_SUBQUERY_POSITIONS: &[SubqueryPosition] = &[
-    SubqueryPosition::Join(JoinOperator::InnerJoin),
-    SubqueryPosition::Cte(JoinOperator::InnerJoin),
-];
+const ALL_SUBQUERY_POSITIONS: &[SubqueryPosition] =
+    &[SubqueryPosition::Join(JoinOperator::InnerJoin)];
 
 /// Generate all possible QueryOperations for the given dialect
 pub fn all_operations_for_dialect(dialect: ParseDialect) -> Vec<QueryOperation> {
@@ -2665,7 +2662,6 @@ impl QueryOperation {
 /// | project_literal                         | A projected literal value               |
 /// | project_builtin                         | Project a built-in function             |
 /// | subqueries                              | All subqueries                          |
-/// | cte                                     | CTEs (WITH statements)                  |
 /// | join_subquery                           | JOIN to a subquery directly             |
 /// | topk                                    | ORDER BY combined with LIMIT            |
 /// | paginate                                | ORDER BY combined with LIMIT and OFFSET |
@@ -2803,7 +2799,6 @@ impl FromStr for Operations {
                 .cloned()
                 .map(Subquery)
                 .collect()),
-            "cte" => Ok(vec![Subquery(SubqueryPosition::Cte(JoinOperator::InnerJoin))].into()),
             "join_subquery" => {
                 Ok(vec![Subquery(SubqueryPosition::Join(JoinOperator::InnerJoin))].into())
             }
@@ -3074,19 +3069,6 @@ impl Subquery {
 
         let subquery_name = state.fresh_alias();
         let (join_rhs, operator) = match self.position {
-            SubqueryPosition::Cte(operator) => {
-                query.ctes.push(CommonTableExpr {
-                    name: subquery_name.clone(),
-                    statement: subquery,
-                });
-                (
-                    JoinRightSide::Table(TableExpr::from(Relation {
-                        name: subquery_name.clone(),
-                        schema: None,
-                    })),
-                    operator,
-                )
-            }
             SubqueryPosition::Join(operator) => (
                 JoinRightSide::Table(TableExpr {
                     inner: TableExprInner::Subquery(Box::new(subquery)),
@@ -3643,39 +3625,6 @@ mod tests {
 
         let key = query.state.key();
         assert_eq!(key.len(), 3);
-    }
-
-    #[test]
-    fn into_query_seeds_just_subquery() {
-        let opts = GenerateOpts {
-            operations: Some(
-                vec![vec![QueryOperation::Subquery(SubqueryPosition::Cte(
-                    JoinOperator::InnerJoin,
-                ))]]
-                .into(),
-            ),
-            subquery_depth: 1,
-            num_operations: None,
-        };
-
-        let seeds = opts
-            .into_query_seeds(ParseDialect::PostgreSQL)
-            .unwrap()
-            .collect::<Vec<_>>();
-        assert_eq!(seeds.len(), 1);
-        assert_eq!(
-            seeds.first().unwrap(),
-            &QuerySeed {
-                operations: vec![],
-                subqueries: vec![Subquery {
-                    position: SubqueryPosition::Cte(JoinOperator::InnerJoin),
-                    seed: QuerySeed {
-                        operations: vec![],
-                        subqueries: vec![]
-                    }
-                }]
-            }
-        )
     }
 
     #[test]
