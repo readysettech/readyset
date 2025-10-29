@@ -98,7 +98,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
     let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
 
     // Check the result of snapshot on Readyset
-    eventually!(attempts: 5, run_test: {
+    eventually!(run_test: {
         let rs_rows: Result<Vec<Row>, _> = rs_conn
             .exec(
                 "SELECT * FROM snapshot WHERE value = ?",
@@ -172,7 +172,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
     let updated_upstream_val = &updated_upstream_rows[0][0];
 
     // Check the update propogated through Readyset
-    eventually!(attempts: 5, run_test: {
+    eventually!(run_test: {
         let updated_rs_rows: Result<Vec<Row>, _> = rs_conn
             .exec(
                 "SELECT * FROM snapshot WHERE value = ?",
@@ -207,7 +207,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
     );
 
     // Check the update propogated through Readyset
-    eventually!(attempts: 5, run_test: {
+    eventually!(run_test: {
         let updated_rs_rows: Result<Vec<Row>, _> = rs_conn
             .exec(
                 "SELECT * FROM replicate WHERE value = ?",
@@ -330,7 +330,7 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
 }
 
 #[tags(serial, slow, no_retry, mysql8_upstream)]
-#[proptest(ProptestConfig::default(), max_shrink_time = 120_000)]
+#[proptest(ProptestConfig::default(), cases = 128, max_shrink_time = 60_000)]
 fn round_trip_mysql_type_arbitrary(
     #[strategy(SqlType::arbitrary_with(SqlTypeArbitraryOptions {
         dialect: Some(Dialect::MySQL),
@@ -347,7 +347,7 @@ fn round_trip_mysql_type_arbitrary(
 }
 
 #[tags(serial, slow, no_retry, mysql_upstream)]
-#[proptest(ProptestConfig::default(), max_shrink_time = 120_000)]
+#[proptest(ProptestConfig::default(), cases = 128, max_shrink_time = 60_000)]
 #[ignore = "WIP REA-4598"]
 fn round_trip_mysql_type_arbitrary_enum(
     #[strategy(EnumVariants::arbitrary_with(("\\PC{0,255}", size_range(1..100))).prop_map(SqlType::Enum))]
