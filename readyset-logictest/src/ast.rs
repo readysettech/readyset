@@ -391,7 +391,7 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
                     .join(",");
                 Ok(Self::Text(format!("{{{}}}", joined)))
             }
-            Type::INT8_ARRAY => {
+            Type::INT4_ARRAY | Type::INT8_ARRAY => {
                 // convert an int array into something like "{int,int,NULL,int}"
                 // we need to handle NULLs in some sane way, and this mimics what
                 // pg's array_agg() function does.
@@ -445,6 +445,7 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             | Type::INT2
             | Type::INT4
             | Type::INT8
+            | Type::INT4_ARRAY
             | Type::INT8_ARRAY
             | Type::FLOAT4
             | Type::FLOAT8
