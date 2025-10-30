@@ -192,7 +192,9 @@ enum PrepareSelectBackend {
         should_do_noria: bool,
         always: bool,
     },
-    Shallow {},
+    Shallow {
+        params: QueryParameters,
+    },
 }
 
 /// How to behave when receiving unsupported `SET` statements
@@ -563,6 +565,8 @@ where
     /// If statement was successfully rewritten, will store all information necessary to install
     /// the view in readyset
     view_request: Option<ViewCreateRequest>,
+    /// Query parameters from rewrite_equivalent, used for shallow cache key generation
+    params: Option<QueryParameters>,
 }
 
 impl<DB> PreparedStatement<DB>
@@ -795,6 +799,7 @@ enum PrepareResultInner<DB: UpstreamDatabase> {
     Noria(noria_connector::PrepareResult),
     Upstream(UpstreamPrepare<DB>),
     NoriaAndUpstream(noria_connector::PrepareResult, UpstreamPrepare<DB>),
+    Shallow(UpstreamPrepare<DB>),
 }
 
 impl<DB: UpstreamDatabase> Debug for PrepareResultInner<DB> {
@@ -807,6 +812,7 @@ impl<DB: UpstreamDatabase> Debug for PrepareResultInner<DB> {
                 .field(nr)
                 .field(ur)
                 .finish(),
+            Self::Shallow(r) => f.debug_tuple("Shallow").field(r).finish(),
         }
     }
 }
@@ -828,18 +834,18 @@ impl<DB: UpstreamDatabase> PrepareResult<DB> {
 
     pub fn upstream_biased(&self) -> SinglePrepareResult<'_, DB> {
         match &self.inner {
-            PrepareResultInner::Upstream(res) | PrepareResultInner::NoriaAndUpstream(_, res) => {
-                SinglePrepareResult::Upstream(res)
-            }
+            PrepareResultInner::Upstream(res)
+            | PrepareResultInner::NoriaAndUpstream(_, res)
+            | PrepareResultInner::Shallow(res) => SinglePrepareResult::Upstream(res),
             PrepareResultInner::Noria(res) => SinglePrepareResult::Noria(res),
         }
     }
 
     pub fn into_upstream(self) -> Option<UpstreamPrepare<DB>> {
         match self.inner {
-            PrepareResultInner::Upstream(ur) | PrepareResultInner::NoriaAndUpstream(_, ur) => {
-                Some(ur)
-            }
+            PrepareResultInner::Upstream(ur)
+            | PrepareResultInner::NoriaAndUpstream(_, ur)
+            | PrepareResultInner::Shallow(ur) => Some(ur),
             _ => None,
         }
     }
@@ -848,7 +854,9 @@ impl<DB: UpstreamDatabase> PrepareResult<DB> {
     /// [`PrepareResult::Upstream`]
     pub fn make_upstream_only(&mut self) {
         match &mut self.inner {
-            PrepareResultInner::Noria(_) | PrepareResultInner::Upstream(_) => {}
+            PrepareResultInner::Noria(_)
+            | PrepareResultInner::Upstream(_)
+            | PrepareResultInner::Shallow(_) => {}
             PrepareResultInner::NoriaAndUpstream(_, u) => {
                 self.inner = PrepareResultInner::Upstream(u.clone())
             }
@@ -871,6 +879,7 @@ where
     Upstream(
         DB::QueryResult<'a>,
         Option<CacheInsertGuard<Vec<DfValue>, DB::CacheEntry>>,
+        Option<&'a DB::ExecMeta>,
     ),
     /// Results from upstream that are explicitly buffered in a Vec (from postgres' Simple Query
     /// Protocol)
@@ -893,7 +902,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Noria(r) => f.debug_tuple("Noria").field(r).finish(),
-            Self::Upstream(r, _) => f.debug_tuple("Upstream").field(r).finish(),
+            Self::Upstream(r, _, _) => f.debug_tuple("Upstream").field(r).finish(),
             Self::UpstreamBufferedInMemory(r) => {
                 f.debug_tuple("UpstreamBufferedInMemory").field(r).finish()
             }
@@ -1020,7 +1029,7 @@ where
             Ok(qr) => qr.destination(),
             Err(_) => QueryDestination::Upstream,
         });
-        result.map(|r| QueryResult::Upstream(r, cache))
+        result.map(|r| QueryResult::Upstream(r, cache, None))
     }
 
     /// Executes query on the upstream database using the "simple query" protocol, which buffers
@@ -1064,13 +1073,13 @@ where
         statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
-        let (do_noria, do_migrate) = match &select_meta.backend {
+        let (do_noria, do_migrate, shallow) = match &select_meta.backend {
             PrepareSelectBackend::Deep {
                 should_do_noria,
                 must_migrate,
                 ..
-            } => (*should_do_noria, *must_migrate),
-            PrepareSelectBackend::Shallow { .. } => (false, false),
+            } => (*should_do_noria, *must_migrate, false),
+            PrepareSelectBackend::Shallow { .. } => (false, false, true),
         };
 
         let up_prep: OptionFuture<_> = self
@@ -1162,6 +1171,7 @@ where
                 PrepareResultInner::Noria(noria_res)
             }
             (None, Some(Err(noria_err))) => return Err(noria_err.into()),
+            (Some(upstream_res), _) if shallow => PrepareResultInner::Shallow(upstream_res?),
             (Some(upstream_res), _) => PrepareResultInner::Upstream(upstream_res?),
             (None, None) => return Err(ReadySetError::Unsupported(query.to_string()).into()),
         };
@@ -1268,7 +1278,7 @@ where
             return PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
                 rewritten,
-                backend: PrepareSelectBackend::Shallow {},
+                backend: PrepareSelectBackend::Shallow { params },
             });
         }
 
@@ -1440,6 +1450,7 @@ where
                 parsed_query: Some(Arc::new(stmt)),
                 view_request: None,
                 always: false,
+                params: None,
             },
             PrepareMeta::Set { stmt } => PreparedStatement {
                 query_id: None,
@@ -1449,15 +1460,16 @@ where
                 parsed_query: Some(Arc::new(SqlQuery::Set(stmt))),
                 view_request: None,
                 always: false,
+                params: None,
             },
             PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
                 rewritten,
                 backend,
             }) => {
-                let always = match &backend {
-                    PrepareSelectBackend::Deep { always, .. } => *always,
-                    PrepareSelectBackend::Shallow { .. } => false,
+                let (always, params) = match &backend {
+                    PrepareSelectBackend::Deep { always, .. } => (*always, None),
+                    PrepareSelectBackend::Shallow { params, .. } => (false, Some(params.clone())),
                 };
                 let request =
                     ViewCreateRequest::new(rewritten, self.noria.schema_search_path().to_owned());
@@ -1473,6 +1485,7 @@ where
                     parsed_query: Some(Arc::new(SqlQuery::Select(stmt))),
                     view_request: Some(request),
                     always,
+                    params,
                 }
             }
             PrepareMeta::Proxy
@@ -1486,6 +1499,7 @@ where
                 parsed_query: None,
                 view_request: None,
                 always: false,
+                params: None,
             },
         }
     }
@@ -1590,14 +1604,16 @@ where
     }
 
     /// Execute a prepared statement on upstream using the statement ID
+    #[allow(clippy::too_many_arguments)]
     async fn execute_upstream<'a>(
         upstream: &'a mut Option<DB>,
         prep: &UpstreamPrepare<DB>,
         params: &[DfValue],
-        exec_meta: &DB::ExecMeta,
-        _shallow_exec_meta: Option<&DB::ShallowExecMeta>,
+        exec_meta: &'a DB::ExecMeta,
+        shallow_exec_meta: Option<&DB::ShallowExecMeta>,
         event: &mut QueryExecutionEvent,
         is_fallback: bool,
+        cache: Option<CacheInsertGuard<Vec<DfValue>, DB::CacheEntry>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let upstream = upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("This condition requires an upstream connector".to_string())
@@ -1611,10 +1627,95 @@ where
 
         let _t = event.start_upstream_timer();
 
-        upstream
-            .execute(&prep.statement_id, params, exec_meta)
-            .await
-            .map(|r| QueryResult::Upstream(r, None))
+        let meta = shallow_exec_meta.map_or(exec_meta, |m| m.borrow());
+        let result = upstream.execute(&prep.statement_id, params, meta).await?;
+
+        let client_exec_meta = if cache.is_some() && shallow_exec_meta.is_some() {
+            Some(exec_meta)
+        } else {
+            None
+        };
+
+        Ok(QueryResult::Upstream(result, cache, client_exec_meta))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_shallow<'a>(
+        upstream: &'a mut Option<DB>,
+        shallow: &Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
+        prep: &UpstreamPrepare<DB>,
+        params: &[DfValue],
+        exec_meta: &'a DB::ExecMeta,
+        event: &mut QueryExecutionEvent,
+        query_id: &QueryId,
+        query_params: &QueryParameters,
+        refresh: Option<
+            &async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
+        >,
+        view_request: &ViewCreateRequest,
+        dialect: Dialect,
+    ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        let keys = query_params.make_keys(params)?;
+        let [key] = &keys[..] else {
+            internal!("shallow cache {query_id} query had {} keys", keys.len());
+        };
+        let res = shallow.get_or_start_insert(query_id, key.to_vec());
+
+        match res {
+            CacheResult::Hit(values) => {
+                event.destination = Some(QueryDestination::ReadysetShallow);
+                Ok(QueryResult::Shallow(values))
+            }
+            CacheResult::HitAndRefresh(values, cache) => {
+                if let Some(refresh) = refresh {
+                    let shallow_exec_meta = match upstream.as_mut() {
+                        Some(upstream_ref) => upstream_ref.shallow_exec_meta(exec_meta).await.ok(),
+                        None => None,
+                    };
+
+                    let literalized =
+                        adapter_rewrites::literalize(&view_request.statement, params)?;
+                    let query = literalized.display(dialect).to_string();
+
+                    let request = ShallowRefreshRequest {
+                        query_id: *query_id,
+                        path: view_request.schema_search_path.clone(),
+                        query,
+                        cache,
+                        shallow_exec_meta,
+                    };
+                    if let Err(e) = refresh.try_send(request) {
+                        warn!("Failed to send shallow refresh request: {e}");
+                    }
+                }
+
+                event.destination = Some(QueryDestination::ReadysetShallow);
+                Ok(QueryResult::Shallow(values))
+            }
+            CacheResult::Miss(guard) => {
+                let shallow_exec_meta = {
+                    let upstream_ref = upstream
+                        .as_mut()
+                        .ok_or_else(|| internal_err!("Shallow cache requires an upstream"))?;
+                    upstream_ref.shallow_exec_meta(exec_meta).await?
+                };
+                Self::execute_upstream(
+                    upstream,
+                    prep,
+                    params,
+                    exec_meta,
+                    Some(&shallow_exec_meta),
+                    event,
+                    false,
+                    Some(guard),
+                )
+                .await
+            }
+            CacheResult::NotCached => {
+                Self::execute_upstream(upstream, prep, params, exec_meta, None, event, false, None)
+                    .await
+            }
+        }
     }
 
     /// Execute on ReadySet, and if fails execute on upstream
@@ -1625,7 +1726,7 @@ where
         noria_prep: &noria_connector::PrepareResult,
         upstream_prep: &UpstreamPrepare<DB>,
         params: &[DfValue],
-        exec_meta: &DB::ExecMeta,
+        exec_meta: &'a DB::ExecMeta,
         ex_info: Option<&mut ExecutionInfo>,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
@@ -1668,6 +1769,7 @@ where
                     None,
                     event,
                     true,
+                    None,
                 )
                 .await
             }
@@ -1772,12 +1874,12 @@ where
     /// A [`QueryExecutionEvent`], is used to track metrics and behavior scoped to the
     /// execute operation.
     #[inline]
-    pub async fn execute(
-        &mut self,
+    pub async fn execute<'a>(
+        &'a mut self,
         id: u32,
         params: &[DfValue],
-        exec_meta: &DB::ExecMeta,
-    ) -> Result<QueryResult<'_, DB>, DB::Error> {
+        exec_meta: &'a DB::ExecMeta,
+    ) -> Result<QueryResult<'a, DB>, DB::Error> {
         self.last_query = None;
         let cached_statement = self
             .state
@@ -1888,12 +1990,16 @@ where
                         .query_status_cache
                         .inlined_cache_miss(cached_statement.as_view_request()?, params.to_vec())
                 }
-                Self::execute_upstream(upstream, prep, params, exec_meta, None, &mut event, false)
-                    .await
+                Self::execute_upstream(
+                    upstream, prep, params, exec_meta, None, &mut event, false, None,
+                )
+                .await
             }
             PrepareResultInner::NoriaAndUpstream(.., uprep) if should_fallback => {
-                Self::execute_upstream(upstream, uprep, params, exec_meta, None, &mut event, false)
-                    .await
+                Self::execute_upstream(
+                    upstream, uprep, params, exec_meta, None, &mut event, false, None,
+                )
+                .await
             }
             PrepareResultInner::NoriaAndUpstream(nprep, uprep) => {
                 if cached_statement.execution_info.is_none() {
@@ -1911,6 +2017,32 @@ where
                     exec_meta,
                     cached_statement.execution_info.as_mut(),
                     &mut event,
+                )
+                .await
+            }
+            PrepareResultInner::Shallow(prep) => {
+                let query_id = cached_statement
+                    .query_id
+                    .as_ref()
+                    .ok_or_else(|| internal_err!("Shallow prepare missing query_id"))?;
+                let query_params = cached_statement
+                    .params
+                    .as_ref()
+                    .ok_or_else(|| internal_err!("Shallow prepare missing params"))?;
+                let view_request = cached_statement.as_view_request()?;
+
+                Self::execute_shallow(
+                    upstream,
+                    &self.shallow,
+                    prep,
+                    params,
+                    exec_meta,
+                    &mut event,
+                    query_id,
+                    query_params,
+                    self.shallow_refresh_sender.as_ref(),
+                    view_request,
+                    self.settings.dialect,
                 )
                 .await
             }
@@ -2018,17 +2150,17 @@ where
 
         match query {
             SqlQuery::StartTransaction(inner) => {
-                let result = QueryResult::Upstream(upstream.start_tx(inner).await?, None);
+                let result = QueryResult::Upstream(upstream.start_tx(inner).await?, None, None);
                 proxy_state.start_transaction();
                 Ok(result)
             }
             SqlQuery::Commit(_) => {
-                let result = QueryResult::Upstream(upstream.commit().await?, None);
+                let result = QueryResult::Upstream(upstream.commit().await?, None, None);
                 proxy_state.end_transaction();
                 Ok(result)
             }
             SqlQuery::Rollback(_) => {
-                let result = QueryResult::Upstream(upstream.rollback().await?, None);
+                let result = QueryResult::Upstream(upstream.rollback().await?, None, None);
                 proxy_state.end_transaction();
                 Ok(result)
             }
@@ -3083,7 +3215,7 @@ where
                         fallback
                             .query(original_query)
                             .await
-                            .map(|r| QueryResult::Upstream(r, None))
+                            .map(|r| QueryResult::Upstream(r, None, None))
                     }
                 }
             }
@@ -3342,7 +3474,7 @@ where
                         let _t = event.start_upstream_timer();
 
                         let query_result = upstream.query(raw_query).await;
-                        query_result.map(|r| QueryResult::Upstream(r, None))
+                        query_result.map(|r| QueryResult::Upstream(r, None, None))
                     }
 
                     SqlQuery::CreateDatabase(_)
@@ -3358,7 +3490,7 @@ where
                         upstream
                             .query(raw_query)
                             .await
-                            .map(|r| QueryResult::Upstream(r, None))
+                            .map(|r| QueryResult::Upstream(r, None, None))
                     }
                     SqlQuery::RenameTable(_) => {
                         unsupported!("{} not yet supported", query.query_type());
@@ -3371,7 +3503,7 @@ where
                         upstream
                             .query(raw_query)
                             .await
-                            .map(|r| QueryResult::Upstream(r, None))
+                            .map(|r| QueryResult::Upstream(r, None, None))
                     }
 
                     SqlQuery::StartTransaction(_) | SqlQuery::Commit(_) | SqlQuery::Rollback(_) => {

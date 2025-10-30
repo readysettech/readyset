@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use futures::{Stream, ready};
-use ps::{PsqlSrvRow, PsqlValue};
+use ps::{PsqlSrvRow, PsqlValue, TransferFormat};
 use psql_srv as ps;
 use readyset_client::results::ResultIterator;
 use readyset_data::DfValue;
@@ -76,6 +76,9 @@ pub struct Resultset {
 
     /// Optional cache guard for shallow cache insertion during streaming
     cache: Option<CacheInsertGuard<Vec<DfValue>, CacheEntry>>,
+
+    /// Client's requested result formats
+    client_formats: Option<Vec<TransferFormat>>,
 }
 
 impl Resultset {
@@ -121,6 +124,7 @@ impl Resultset {
             project_field_types: Vec::new(),
             project_field_names: Vec::new(),
             cache: None,
+            client_formats: None,
         }
     }
 
@@ -140,6 +144,7 @@ impl Resultset {
             project_field_types,
             project_field_names: Vec::new(),
             cache: None,
+            client_formats: None,
         })
     }
 
@@ -162,6 +167,7 @@ impl Resultset {
             project_field_types: schema,
             project_field_names: names,
             cache,
+            client_formats: None,
         }
     }
 
@@ -170,6 +176,7 @@ impl Resultset {
         first_row: tokio_postgres::Row,
         schema: Vec<Type>,
         cache: Option<CacheInsertGuard<Vec<DfValue>, CacheEntry>>,
+        client_formats: Option<Vec<TransferFormat>>,
     ) -> Self {
         let names = first_row
             .columns()
@@ -184,6 +191,7 @@ impl Resultset {
             project_field_types: schema,
             project_field_names: names,
             cache,
+            client_formats,
         }
     }
 
@@ -200,6 +208,7 @@ impl Resultset {
             project_field_types: Vec::new(),
             project_field_names: Vec::new(),
             cache,
+            client_formats: None,
         }
     }
 
@@ -211,6 +220,7 @@ impl Resultset {
             project_field_types,
             project_field_names: Vec::new(),
             cache: None,
+            client_formats: None,
         }
     }
 }
@@ -277,7 +287,30 @@ impl Stream for Resultset {
                 };
 
                 s.copy_row_to_cache(&row)?;
-                row.map(|res| res.map(PsqlSrvRow::RawRow))
+
+                if s.client_formats.is_some() && s.cache.is_some() {
+                    match row {
+                        Some(Ok(row)) => {
+                            let df_values = row_to_df_values(&row)?;
+                            let psql_values: Result<_, _> = df_values
+                                .into_iter()
+                                .zip(&s.project_field_types)
+                                .map(|(val, typ)| {
+                                    TypedDfValue {
+                                        value: val,
+                                        col_type: typ,
+                                    }
+                                    .try_into()
+                                })
+                                .collect();
+                            Some(Ok(PsqlSrvRow::ValueVec(psql_values?)))
+                        }
+                        Some(Err(e)) => Some(Err(e)),
+                        None => None,
+                    }
+                } else {
+                    row.map(|res| res.map(PsqlSrvRow::RawRow))
+                }
             }
             ResultsetInner::Stream { first_row, stream } => {
                 let row = match first_row.take() {

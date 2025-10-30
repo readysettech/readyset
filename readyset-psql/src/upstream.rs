@@ -171,7 +171,7 @@ impl Refresh for QueryResult {
                     .map(|c| c.type_().clone())
                     .collect();
                 let resultset =
-                    Resultset::from_row_stream(stream, first_row, field_types, Some(cache));
+                    Resultset::from_row_stream(stream, first_row, field_types, Some(cache), None);
                 drain_resultset(resultset).await
             }
             QueryResult::SimpleQueryStream {
@@ -191,9 +191,9 @@ impl Refresh for QueryResult {
                 cache.filled();
                 Ok(())
             }
-            _ => Err(std::io::Error::new(
+            x => Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
-                "This QueryResult variant does not support shallow cache refresh",
+                format!("This QueryResult ({x:?}) does not support shallow cache refresh"),
             )),
         }
     }

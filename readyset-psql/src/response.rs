@@ -252,7 +252,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     })
                 }
             }
-            Upstream(upstream::QueryResult::EmptyRead, cache) => {
+            Upstream(upstream::QueryResult::EmptyRead, cache, _) => {
                 if let Some(mut cache) = cache {
                     let meta = QueryMetadata::PostgreSql(Default::default());
                     cache.set_metadata(meta);
@@ -263,43 +263,44 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     resultset: Resultset::empty(),
                 })
             }
-            Upstream(upstream::QueryResult::Stream { first_row, stream }, cache) => {
+            Upstream(upstream::QueryResult::Stream { first_row, stream }, cache, _) => {
                 let field_types = first_row
                     .columns()
                     .iter()
                     .map(|c| c.type_().clone())
                     .collect();
-
                 Ok(ps::QueryResponse::Select {
                     schema: vec![], // Schema isn't necessary for upstream execute results
                     resultset: Resultset::from_stream(stream, first_row, field_types, cache),
                 })
             }
-            Upstream(upstream::QueryResult::RowStream { first_row, stream }, cache) => {
+            Upstream(upstream::QueryResult::RowStream { first_row, stream }, cache, meta) => {
                 let field_types = first_row
                     .columns()
                     .iter()
                     .map(|c| c.type_().clone())
                     .collect();
-
+                let client_formats = meta.map(|m| m.to_vec());
                 Ok(ps::QueryResponse::Select {
                     schema: vec![], // Schema isn't necessary for upstream execute results
-                    resultset: Resultset::from_row_stream(stream, first_row, field_types, cache),
+                    resultset: Resultset::from_row_stream(
+                        stream, first_row, field_types, cache, client_formats
+                    ),
                 })
             }
-            Upstream(upstream::QueryResult::Write { num_rows_affected }, _) => {
+            Upstream(upstream::QueryResult::Write { num_rows_affected }, _, _) => {
                 Ok(Insert(num_rows_affected))
             }
-            Upstream(upstream::QueryResult::Command { tag }, _) => Ok(Command(tag)),
+            Upstream(upstream::QueryResult::Command { tag }, _, _) => Ok(Command(tag)),
             Upstream(upstream::QueryResult::SimpleQueryStream {
                 first_message,
                 stream,
-            }, cache) => Ok(ps::QueryResponse::Stream {
+            }, cache, _) => Ok(ps::QueryResponse::Stream {
                 resultset: Resultset::from_simple_query_stream(stream, first_message, cache),
             }),
             // We still use the SimpleQuery response for some upstream responses that are not
             // Selects
-            Upstream(upstream::QueryResult::SimpleQuery(resp), _) => Ok(SimpleQuery(resp)),
+            Upstream(upstream::QueryResult::SimpleQuery(resp), _, _) => Ok(SimpleQuery(resp)),
             UpstreamBufferedInMemory(upstream::QueryResult::SimpleQuery(resp)) => Ok(SimpleQuery(resp)),
             UpstreamBufferedInMemory(..) => Err(ps::Error::InternalError(
                 "Mismatched QueryResult for UpstreamBufferedInMemory response type: Expected SimpleQuery".to_string(),

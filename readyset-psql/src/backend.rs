@@ -111,12 +111,12 @@ impl Backend {
         ))
     }
 
-    async fn execute(
-        &mut self,
+    async fn execute<'a>(
+        &'a mut self,
         id: u32,
         params: &[DfValue],
-        result_transfer_formats: &[TransferFormat],
-    ) -> Result<QueryResponse<'_>, Error> {
+        result_transfer_formats: &'a [TransferFormat],
+    ) -> Result<QueryResponse<'a>, Error> {
         Ok(QueryResponse(
             self.inner
                 .execute(id, params, result_transfer_formats)

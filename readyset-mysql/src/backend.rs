@@ -510,7 +510,7 @@ where
             handle_readyset_result(result, writer, results_encoding).await
         }
         Ok(QueryResult::Shallow(result)) => handle_shallow_result(result, writer).await,
-        Ok(QueryResult::Upstream(result, cache)) => {
+        Ok(QueryResult::Upstream(result, cache, _)) => {
             handle_upstream_result(result, writer, cache).await
         }
         Ok(QueryResult::UpstreamBufferedInMemory(..)) => handle_error!(
