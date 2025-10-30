@@ -3,6 +3,7 @@ use std::{fmt, str};
 
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::ChangeList;
+use readyset_client::recipe::ExprInfo;
 use readyset_client::{TableStatus, ViewCreateRequest};
 use readyset_data::Dialect;
 use readyset_errors::ReadySetResult;
@@ -199,16 +200,16 @@ impl Recipe {
         &self.inc
     }
 
-    /// Returns the query name if, after rewriting according to `dialect`, `self` contains a query
+    /// Returns the query info if, after rewriting according to `dialect`, `self` contains a query
     /// that is semantically equivalent to the given `query`. Returns `None` if `self` does not
     /// contain the query.
     ///
     /// Returns an error if rewriting fails for any reason
-    pub(crate) fn expression_name_for_query(
+    pub(crate) fn expression_info_for_query(
         &self,
         query: ViewCreateRequest,
         dialect: Dialect,
-    ) -> ReadySetResult<Option<Relation>> {
+    ) -> ReadySetResult<Option<ExprInfo>> {
         let statement = self.inc.rewrite(
             query.statement,
             None,
@@ -217,7 +218,7 @@ impl Recipe {
             None,
             None,
         )?;
-        Ok(self.inc.registry.expression_name(&statement))
+        Ok(self.inc.registry.expression_info(&statement))
     }
 
     /// Returns the MatchedCaches for the query if they exists.

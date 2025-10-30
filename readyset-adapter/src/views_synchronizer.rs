@@ -163,12 +163,13 @@ impl ViewsSynchronizer {
         for chunk in queries.chunks(128) {
             match self
                 .controller
-                .view_names(chunk.to_vec(), self.dialect)
+                .views_info(chunk.to_vec(), self.dialect)
                 .await
             {
                 Ok(statuses) => {
                     let chunk_hashes = hashes.iter().take(chunk.len());
-                    for ((query, name), hash) in chunk.iter().zip(statuses).zip(chunk_hashes) {
+                    for ((query, info), hash) in chunk.iter().zip(statuses).zip(chunk_hashes) {
+                        let name = info.map(|info| info.name().clone());
                         trace!(
                             query = %query.statement.display(self.dialect.into()),
                             name = ?name,

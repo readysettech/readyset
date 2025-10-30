@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::PostgresTableMetadata;
+use readyset_client::recipe::{CacheInfo, ExprInfo};
 use readyset_client::PlaceholderIdx;
 use readyset_errors::{internal_err, unsupported_err, ReadySetError, ReadySetResult};
 use readyset_sql::analysis::visit::{self, Visitor};
@@ -453,17 +454,20 @@ impl ExprRegistry {
         self.expressions.get(query_id)
     }
 
-    /// Returns the name of the given expression if it is present in the recipe.
-    pub(super) fn expression_name<E>(&self, expression: E) -> Option<Relation>
+    /// Returns info about expression if it is present in the recipe.
+    pub(super) fn expression_info<E>(&self, expression: E) -> Option<ExprInfo>
     where
         E: Into<ExprId>,
     {
         self.expressions
             .get(&expression.into())
             .map(|exp| match exp {
-                RecipeExpr::View { name, .. }
-                | RecipeExpr::Cache { name, .. }
-                | RecipeExpr::Table { name, .. } => name.clone(),
+                RecipeExpr::View { name, .. } => ExprInfo::View(name.clone()),
+                RecipeExpr::Cache { name, always, .. } => ExprInfo::Cache(CacheInfo {
+                    name: name.clone(),
+                    always: *always,
+                }),
+                RecipeExpr::Table { name, .. } => ExprInfo::Table(name.clone()),
             })
     }
 
@@ -1041,7 +1045,7 @@ mod tests {
 
             registry.add_query(expr).unwrap();
 
-            assert!(registry.expression_name(&stmt).is_some())
+            assert!(registry.expression_info(&stmt).is_some())
         }
 
         #[test]

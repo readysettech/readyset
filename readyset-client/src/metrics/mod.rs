@@ -357,9 +357,9 @@ pub mod recorded {
     /// | path | The http path associated with the rpc request. |
     pub const CONTROLLER_RPC_REQUEST_TIME: &str = "readyset_controller.rpc_request_time_us";
 
-    /// Gauge: The number of queries sent to the `/view_names` controller RPC.
-    pub const CONTROLLER_RPC_VIEW_NAMES_NUM_QUERIES: &str =
-        "readyset_controller.rpc_view_names_num_queries";
+    /// Gauge: The number of queries sent to the `/views_info` controller RPC.
+    pub const CONTROLLER_RPC_VIEWS_INFO_NUM_QUERIES: &str =
+        "readyset_controller.rpc_views_info_num_queries";
 
     /// Histgoram: Write propagation time in microseconds from binlog to reader node.
     /// For each input packet, this is recorded for each reader node that the packet

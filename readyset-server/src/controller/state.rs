@@ -45,7 +45,7 @@ use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
 use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{Change, ChangeList};
-use readyset_client::recipe::{CacheExpr, ExtendRecipeSpec};
+use readyset_client::recipe::{CacheExpr, ExprInfo, ExtendRecipeSpec};
 use readyset_client::{
     PersistencePoint, SingleKeyEviction, TableStatus, ViewCreateRequest, ViewFilter, ViewRequest,
     ViewSchema,
@@ -315,16 +315,16 @@ impl DfState {
             .collect()
     }
 
-    pub(super) fn view_names(
+    pub(super) fn views_info(
         &self,
         queries: Vec<ViewCreateRequest>,
         dialect: Dialect,
-    ) -> Vec<Option<Relation>> {
+    ) -> Vec<Option<ExprInfo>> {
         queries
             .into_iter()
             .map(|query| {
                 self.recipe
-                    .expression_name_for_query(query, dialect)
+                    .expression_info_for_query(query, dialect)
                     .unwrap_or(None)
             })
             .collect()

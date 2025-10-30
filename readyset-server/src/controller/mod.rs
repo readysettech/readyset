@@ -1607,8 +1607,8 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn view_names() {
-        let (mut noria, shutdown_tx) = start_simple("view_names").await;
+    async fn views_info() {
+        let (mut noria, shutdown_tx) = start_simple("views_info").await;
 
         let query1 = parse_select(Dialect::MySQL, "SELECT * FROM t1").unwrap();
         let query2 = parse_select(Dialect::MySQL, "SELECT * FROM t2").unwrap();
@@ -1616,7 +1616,7 @@ mod tests {
         let schema_search_path = vec!["s1".into()];
 
         let res1 = noria
-            .view_names(
+            .views_info(
                 vec![
                     ViewCreateRequest::new(query1.clone(), schema_search_path.clone()),
                     ViewCreateRequest::new(query2.clone(), schema_search_path.clone()),
@@ -1643,7 +1643,7 @@ mod tests {
             .unwrap();
 
         let res2 = noria
-            .view_names(
+            .views_info(
                 vec![
                     ViewCreateRequest::new(query1.clone(), schema_search_path.clone()),
                     ViewCreateRequest::new(query2.clone(), schema_search_path.clone()),
@@ -1657,7 +1657,7 @@ mod tests {
         // A syntactically distinct, but semantically equivalent query
         let query1_equivalent = parse_select(Dialect::MySQL, "SELECT x FROM t1").unwrap();
         let res3 = noria
-            .view_names(
+            .views_info(
                 vec![ViewCreateRequest::new(
                     query1_equivalent,
                     schema_search_path.clone(),
@@ -1671,7 +1671,7 @@ mod tests {
         // A change in schema_search_path that doesn't change the semantics
         let query1_equivalent = parse_select(Dialect::MySQL, "SELECT x FROM t1").unwrap();
         let res3 = noria
-            .view_names(
+            .views_info(
                 vec![ViewCreateRequest::new(
                     query1_equivalent,
                     vec!["s2".into(), "s1".into()],
@@ -1696,7 +1696,7 @@ mod tests {
 
         let query1_equivalent = parse_select(Dialect::MySQL, "SELECT x FROM t1").unwrap();
         let res3 = noria
-            .view_names(
+            .views_info(
                 vec![ViewCreateRequest::new(
                     query1_equivalent,
                     vec!["s2".into(), "s1".into()],

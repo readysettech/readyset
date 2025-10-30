@@ -32,7 +32,7 @@ use crate::internal::{DomainIndex, ReplicaAddress};
 use crate::metrics::MetricsDump;
 use crate::query::QueryId;
 use crate::recipe::changelist::ChangeList;
-use crate::recipe::{CacheExpr, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
+use crate::recipe::{CacheExpr, ExprInfo, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use crate::status::ReadySetControllerStatus;
 use crate::table::{PersistencePoint, Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
@@ -594,10 +594,10 @@ impl ReadySetHandle {
         /// To save on data, this returns a list of `Option<Relation>` corresponding to the provided
         /// list of queries, where each option is `Some(<query name>)` if the query at the same
         /// position in the argument list has been installed as a view.
-        view_names(
+        views_info(
             queries: Vec<ViewCreateRequest>,
             dialect: dataflow_expression::Dialect,
-        ) -> Vec<Option<Relation>>
+        ) -> Vec<Option<ExprInfo>>
     );
 
     /// Obtain a `View` that allows you to query the given external view.

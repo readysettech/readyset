@@ -782,7 +782,7 @@
             "disableTextWrap": false,
             "editorMode": "builder",
             "exemplar": true,
-            "expr": "readyset_controller_rpc_view_names_num_queries{deployment=~\"$deployment\"}",
+            "expr": "readyset_controller_rpc_views_info_num_queries{deployment=~\"$deployment\"}",
             "fullMetaSearch": false,
             "includeNullMetadata": true,
             "interval": "",

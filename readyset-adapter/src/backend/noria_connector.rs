@@ -1102,11 +1102,12 @@ impl NoriaConnector {
                         self.inner,
                         self.inner
                             .noria
-                            .view_names(vec![view_request.clone()], self.dialect)
+                            .views_info(vec![view_request.clone()], self.dialect)
                     )?
                     .into_iter()
                     .nth(0)
-                    .unwrap();
+                    .unwrap()
+                    .map(|info| info.name().clone());
 
                     if let Some(qname) = qname {
                         // The server has the view, so we retrieve it and insert it into the view
@@ -1604,11 +1605,13 @@ impl NoriaConnector {
         &mut self,
         query: ViewCreateRequest,
     ) -> ReadySetResult<Option<Relation>> {
-        self.inner
+        Ok(self
+            .inner
             .noria
-            .view_names(vec![query], self.dialect)
+            .views_info(vec![query], self.dialect)
             .await
-            .map(|names| names.into_iter().nth(0).unwrap())
+            .map(|names| names.into_iter().nth(0).unwrap())?
+            .map(|info| info.name().clone()))
     }
 }
 

@@ -135,3 +135,31 @@ impl DialectDisplay for CacheExpr {
         })
     }
 }
+
+/// Represents some high-level information about a cache.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct CacheInfo {
+    pub name: Relation,
+    pub always: bool,
+}
+
+/// Represents some high-level information about an expression.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub enum ExprInfo {
+    /// The expression is a view, and this is its name.
+    View(Relation),
+    /// The expression is a cache, and this is its info.
+    Cache(CacheInfo),
+    /// The expression is a table, and this is its name.
+    Table(Relation),
+}
+
+impl ExprInfo {
+    pub fn name(&self) -> &Relation {
+        match self {
+            ExprInfo::View(name)
+            | ExprInfo::Cache(CacheInfo { name, .. })
+            | ExprInfo::Table(name) => name,
+        }
+    }
+}
