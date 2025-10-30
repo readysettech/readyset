@@ -16,7 +16,7 @@ use readyset_sql::ast::{
     BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, OrderClause,
     SelectMetadata, SelectStatement,
 };
-use readyset_sql::{Dialect, DialectDisplay, TryFromDialect, TryIntoDialect as _};
+use readyset_sql::{Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
@@ -764,6 +764,48 @@ fn splice_auto_parameters<'param, T: Clone>(
     }
     res.extend(params.to_vec());
     Cow::Owned(res)
+}
+
+struct LiteralizeVisitor {
+    params: Vec<Literal>,
+}
+
+impl<'ast> VisitorMut<'ast> for LiteralizeVisitor {
+    type Error = ReadySetError;
+
+    fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+        if let Literal::Placeholder(ItemPlaceholder::DollarNumber(n)) = literal {
+            let idx = (*n as usize)
+                .checked_sub(1)
+                .ok_or_else(|| invalid_query_err!("Invalid placeholder number: ${}", n))?;
+
+            let param = self.params.get(idx).ok_or_else(|| {
+                invalid_query_err!(
+                    "Missing parameter for placeholder ${n}: only {} parameters provided",
+                    self.params.len()
+                )
+            })?;
+
+            *literal = param.clone();
+        }
+        Ok(())
+    }
+}
+
+/// Replace all dollar-number placeholders in a query with the provided parameter values.
+///
+/// This operation is the inverse of autoparameterization.
+pub fn literalize(query: &SelectStatement, params: &[DfValue]) -> ReadySetResult<SelectStatement> {
+    let mut query = query.clone();
+    let params = params
+        .iter()
+        .cloned()
+        .map(Literal::try_from)
+        .collect::<ReadySetResult<_>>()?;
+
+    let mut visitor = LiteralizeVisitor { params };
+    visitor.visit_select_statement(&mut query)?;
+    Ok(query)
 }
 
 #[cfg(test)]
@@ -1924,6 +1966,98 @@ mod tests {
                 keys,
                 vec![vec![1.into(), 1.into()], vec![1.into(), 2.into()]]
             );
+        }
+
+        #[test]
+        fn literalize_basic() {
+            let query = parse_select_statement_postgres("SELECT * FROM users WHERE id = $1");
+            let params = vec![DfValue::from(42)];
+            let result = literalize(&query, &params).unwrap();
+            let expected = parse_select_statement_postgres("SELECT * FROM users WHERE id = 42");
+            assert_eq!(result, expected);
+        }
+
+        #[test]
+        fn literalize_multiple_parameters() {
+            let query = parse_select_statement_postgres(
+                "SELECT * FROM users WHERE id = $1 AND name = $2 AND age = $3",
+            );
+            let params = vec![DfValue::from(42), DfValue::from("Alice"), DfValue::from(25)];
+            let result = literalize(&query, &params).unwrap();
+            let expected = parse_select_statement_postgres(
+                "SELECT * FROM users WHERE id = 42 AND name = 'Alice' AND age = 25",
+            );
+            assert_eq!(result, expected);
+        }
+
+        #[test]
+        fn literalize_non_sequential() {
+            let query = parse_select_statement_postgres(
+                "SELECT * FROM t WHERE x = $3 AND y = $1 AND z = $2",
+            );
+            let params = vec![DfValue::from(10), DfValue::from(20), DfValue::from(30)];
+            let result = literalize(&query, &params).unwrap();
+            let expected = parse_select_statement_postgres(
+                "SELECT * FROM t WHERE x = 30 AND y = 10 AND z = 20",
+            );
+            assert_eq!(result, expected);
+        }
+
+        #[test]
+        fn literalize_reused_parameters() {
+            let query = parse_select_statement_postgres(
+                "SELECT * FROM t WHERE x = $1 AND y = $1 AND z = $1",
+            );
+            let params = vec![DfValue::from(42)];
+            let result = literalize(&query, &params).unwrap();
+            let expected = parse_select_statement_postgres(
+                "SELECT * FROM t WHERE x = 42 AND y = 42 AND z = 42",
+            );
+            assert_eq!(result, expected);
+        }
+
+        #[test]
+        fn literalize_with_limit_offset() {
+            let query =
+                parse_select_statement_postgres("SELECT * FROM t WHERE id = $1 LIMIT $2 OFFSET $3");
+            let params = vec![DfValue::from(5), DfValue::from(10), DfValue::from(20)];
+            let result = literalize(&query, &params).unwrap();
+            let expected =
+                parse_select_statement_postgres("SELECT * FROM t WHERE id = 5 LIMIT 10 OFFSET 20");
+            assert_eq!(result, expected);
+        }
+
+        #[test]
+        fn literalize_missing_parameter() {
+            let query = parse_select_statement_postgres("SELECT * FROM t WHERE x = $1 AND y = $2");
+            let params = vec![DfValue::from(42)];
+            let result = literalize(&query, &params);
+            assert!(matches!(
+                result,
+                Err(e) if e.to_string().contains("Missing parameter for placeholder $2")
+            ));
+        }
+
+        #[test]
+        fn literalize_no_parameters() {
+            let query = parse_select_statement_postgres("SELECT * FROM users WHERE id = 42");
+            let params: Vec<DfValue> = vec![];
+            let result = literalize(&query, &params).unwrap();
+            let expected = parse_select_statement_postgres("SELECT * FROM users WHERE id = 42");
+            assert_eq!(result, expected);
+        }
+
+        #[test]
+        fn literalize_in_subquery() {
+            let query = parse_select_statement_postgres(
+                "SELECT * FROM t WHERE id IN (SELECT id FROM s WHERE x = $1)",
+            );
+            let params = vec![DfValue::from(10)];
+            let result = literalize(&query, &params).unwrap();
+            let expected = parse_select_statement_postgres(
+                "SELECT * FROM t WHERE id IN (SELECT id FROM s WHERE x = 10)",
+            );
+            assert_eq!(result, expected);
         }
     }
 }
