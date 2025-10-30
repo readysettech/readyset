@@ -378,8 +378,8 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             Type::FLOAT4 => Ok(Self::from(f32::from_sql(ty, raw)? as f64)),
             Type::FLOAT8 => Ok(Self::from(f64::from_sql(ty, raw)?)),
             Type::NUMERIC => Ok(Self::Numeric(Decimal::from_sql(ty, raw)?)),
-            Type::TEXT => Ok(Self::Text(String::from_sql(ty, raw)?)),
-            Type::TEXT_ARRAY => {
+            Type::TEXT | Type::VARCHAR => Ok(Self::Text(String::from_sql(ty, raw)?)),
+            Type::TEXT_ARRAY | Type::VARCHAR_ARRAY => {
                 // convert a text array into something like "{string1,string2,NULL,string3}"
                 // we need to handle NULLs in some sane way, and this mimics what
                 // pg's array_agg() function does.
@@ -452,6 +452,8 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             | Type::NUMERIC
             | Type::TEXT
             | Type::TEXT_ARRAY
+            | Type::VARCHAR
+            | Type::VARCHAR_ARRAY
             | Type::DATE
             | Type::TIMESTAMP
             | Type::TIMESTAMPTZ
