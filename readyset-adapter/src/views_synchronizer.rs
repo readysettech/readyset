@@ -180,6 +180,7 @@ impl ViewsSynchronizer {
                             self.query_status_cache.update_query_migration_state(
                                 query,
                                 MigrationState::Successful(CacheType::Deep),
+                                None,
                             );
                             self.views_checked.insert(*hash);
                         }

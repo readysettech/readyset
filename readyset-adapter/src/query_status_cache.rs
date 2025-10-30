@@ -519,7 +519,9 @@ impl QueryStatusCache {
     /// `MigrationState::Unsupported` or `MigrationState::Inlined`. An unsupported query cannot
     /// currently become supported once again. An Inlined query can only transition to the
     /// Unsupported state.
-    pub fn update_query_migration_state<Q>(&self, q: &Q, m: MigrationState)
+    ///
+    /// If provided, also updates this query's ALWAYS status.
+    pub fn update_query_migration_state<Q>(&self, q: &Q, m: MigrationState, always: Option<bool>)
     where
         Q: QueryStatusKey,
     {
@@ -540,6 +542,9 @@ impl QueryStatusCache {
                         // All other state transitions are allowed.
                         _ => s.migration_state = m.clone(),
                     }
+                    if let Some(always) = always {
+                        s.always = always;
+                    }
                     false
                 }
                 None => true,
@@ -551,7 +556,7 @@ impl QueryStatusCache {
                 QueryStatus {
                     migration_state: m,
                     execution_info: None,
-                    always: false,
+                    always: always.unwrap_or(false),
                 },
             );
         }
@@ -965,8 +970,8 @@ mod tests {
         let q1 = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let q2 = ViewCreateRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]);
 
-        cache.update_query_migration_state(&q1, MigrationState::Pending);
-        cache.update_query_migration_state(&q2, MigrationState::Successful(CacheType::Deep));
+        cache.update_query_migration_state(&q1, MigrationState::Pending, None);
+        cache.update_query_migration_state(&q2, MigrationState::Successful(CacheType::Deep), None);
 
         let h1 = QueryId::from(&q1);
         let h2 = QueryId::from(&q2);
@@ -996,12 +1001,16 @@ mod tests {
 
         // Explicitly updating it also lets it be returned from pending_migration(), allow_list(),
         // and deny_list()
-        cache.update_query_migration_state(&query, MigrationState::Pending);
+        cache.update_query_migration_state(&query, MigrationState::Pending, None);
         assert_eq!(cache.pending_migration().len(), 1);
         assert_eq!(cache.allow_list().len(), 0);
         assert_eq!(cache.deny_list().len(), 0);
 
-        cache.update_query_migration_state(&query, MigrationState::Successful(CacheType::Deep));
+        cache.update_query_migration_state(
+            &query,
+            MigrationState::Successful(CacheType::Deep),
+            None,
+        );
         assert_eq!(cache.pending_migration().len(), 0);
         assert_eq!(cache.allow_list().len(), 1);
         assert_eq!(cache.deny_list().len(), 0);
@@ -1016,12 +1025,12 @@ mod tests {
             cache.query_migration_state(&query).1,
             MigrationState::Pending
         );
-        cache.update_query_migration_state(&query, MigrationState::Pending);
+        cache.update_query_migration_state(&query, MigrationState::Pending, None);
         assert_eq!(cache.pending_migration().len(), 1);
         assert_eq!(cache.allow_list().len(), 0);
         assert_eq!(cache.deny_list().len(), 0);
 
-        cache.update_query_migration_state(&query, MigrationState::Unsupported("".into()));
+        cache.update_query_migration_state(&query, MigrationState::Unsupported("".into()), None);
         assert_eq!(cache.pending_migration().len(), 0);
         assert_eq!(cache.allow_list().len(), 0);
         assert_eq!(cache.deny_list().len(), 1);
@@ -1036,12 +1045,12 @@ mod tests {
             cache.query_migration_state(&query).1,
             MigrationState::Pending
         );
-        cache.update_query_migration_state(&query, MigrationState::Pending);
+        cache.update_query_migration_state(&query, MigrationState::Pending, None);
         assert_eq!(cache.pending_migration().len(), 1);
         assert_eq!(cache.allow_list().len(), 0);
         assert_eq!(cache.deny_list().len(), 1);
 
-        cache.update_query_migration_state(&query, MigrationState::Unsupported("".into()));
+        cache.update_query_migration_state(&query, MigrationState::Unsupported("".into()), None);
         assert_eq!(cache.pending_migration().len(), 0);
         assert_eq!(cache.allow_list().len(), 0);
         assert_eq!(cache.deny_list().len(), 1);
@@ -1054,6 +1063,7 @@ mod tests {
         cache.update_query_migration_state(
             &ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]),
             MigrationState::Successful(CacheType::Deep),
+            None,
         );
         cache.update_query_migration_state(
             &ViewCreateRequest::new(
@@ -1061,6 +1071,7 @@ mod tests {
                 vec![],
             ),
             MigrationState::Successful(CacheType::Deep),
+            None,
         );
         assert_eq!(cache.allow_list().len(), 2);
 
@@ -1074,19 +1085,20 @@ mod tests {
         let q1 = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let q2 = ViewCreateRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]);
 
-        cache.update_query_migration_state(&q1, MigrationState::Successful(CacheType::Deep));
+        cache.update_query_migration_state(&q1, MigrationState::Successful(CacheType::Deep), None);
         cache.update_query_migration_state(
             &q2,
             MigrationState::Inlined(InlinedState {
                 inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
                 epoch: 0,
             }),
+            None,
         );
         // q1: supported -> pending
         cache.view_not_found_for_query(&q1);
         assert_eq!(cache.pending_migration().len(), 1);
         // q1: pending -> unsupported
-        cache.update_query_migration_state(&q1, MigrationState::Unsupported("".to_string()));
+        cache.update_query_migration_state(&q1, MigrationState::Unsupported("".to_string()), None);
         assert_eq!(cache.pending_migration().len(), 0);
         // q2: inlined -> inlined
         cache.view_not_found_for_query(&q2);
@@ -1098,13 +1110,13 @@ mod tests {
         let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
-        cache.update_query_migration_state(&q, MigrationState::Pending);
-        cache.update_query_migration_state(&q, MigrationState::Unsupported("Failed".into()));
+        cache.update_query_migration_state(&q, MigrationState::Pending, None);
+        cache.update_query_migration_state(&q, MigrationState::Unsupported("Failed".into()), None);
         assert_eq!(
             cache.query_migration_state(&q).1,
             MigrationState::Unsupported("Failed".into())
         );
-        cache.update_query_migration_state(&q, MigrationState::Pending);
+        cache.update_query_migration_state(&q, MigrationState::Pending, None);
         assert_eq!(
             cache.query_migration_state(&q).1,
             MigrationState::Unsupported("Failed".into())
@@ -1115,12 +1127,13 @@ mod tests {
                 inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
                 epoch: 0,
             }),
+            None,
         );
         assert_eq!(
             cache.query_migration_state(&q).1,
             MigrationState::Unsupported("Failed".into())
         );
-        cache.update_query_migration_state(&q, MigrationState::Successful(CacheType::Deep));
+        cache.update_query_migration_state(&q, MigrationState::Successful(CacheType::Deep), None);
         assert_eq!(
             cache.query_migration_state(&q).1,
             MigrationState::Unsupported("Failed".into())
@@ -1138,13 +1151,17 @@ mod tests {
             epoch: 0,
         });
 
-        cache.update_query_migration_state(&q, inlined_state.clone());
+        cache.update_query_migration_state(&q, inlined_state.clone(), None);
         assert_eq!(cache.query_migration_state(&q).1, inlined_state);
-        cache.update_query_migration_state(&q, MigrationState::Pending);
+        cache.update_query_migration_state(&q, MigrationState::Pending, None);
         assert_eq!(cache.query_migration_state(&q).1, inlined_state);
-        cache.update_query_migration_state(&q, MigrationState::Successful(CacheType::Deep));
+        cache.update_query_migration_state(&q, MigrationState::Successful(CacheType::Deep), None);
         assert_eq!(cache.query_migration_state(&q).1, inlined_state);
-        cache.update_query_migration_state(&q, MigrationState::Unsupported("Should fail".into()));
+        cache.update_query_migration_state(
+            &q,
+            MigrationState::Unsupported("Should fail".into()),
+            None,
+        );
         assert_eq!(
             cache.query_migration_state(&q).1,
             MigrationState::Unsupported("Should fail".into())
@@ -1161,7 +1178,7 @@ mod tests {
             inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
             epoch: 0,
         });
-        cache.update_query_migration_state(&q, inlined_state);
+        cache.update_query_migration_state(&q, inlined_state, None);
 
         cache.inlined_cache_miss(&q, vec![DfValue::None]);
         cache.inlined_cache_miss(&q, vec![DfValue::None]);
@@ -1189,7 +1206,7 @@ mod tests {
             inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
             epoch: 0,
         });
-        cache.update_query_migration_state(&q, inlined_state);
+        cache.update_query_migration_state(&q, inlined_state, None);
 
         cache.inlined_cache_miss(&q, vec![DfValue::None]);
 
@@ -1215,7 +1232,7 @@ mod tests {
             inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
             epoch: 0,
         });
-        cache.update_query_migration_state(&q, inlined_state.clone());
+        cache.update_query_migration_state(&q, inlined_state.clone(), None);
 
         cache.inlined_cache_miss(&q, vec![DfValue::None]);
         cache.inlined_cache_miss(&q, vec![DfValue::Max]);
@@ -1227,7 +1244,7 @@ mod tests {
             inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
             epoch: 1,
         });
-        cache.update_query_migration_state(&q, inlined_state.clone());
+        cache.update_query_migration_state(&q, inlined_state.clone(), None);
         let state = cache.query_status(&q).migration_state;
         assert_eq!(state, inlined_state);
         assert_eq!(
@@ -1259,7 +1276,7 @@ mod tests {
             inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
             epoch: 0,
         });
-        cache.update_query_migration_state(&q, inlined_state);
+        cache.update_query_migration_state(&q, inlined_state, None);
 
         cache.inlined_cache_miss(&q, vec![DfValue::None]);
         cache.inlined_cache_miss(&q, vec![DfValue::Max]);
@@ -1298,6 +1315,7 @@ mod tests {
         cache.update_query_migration_state(
             &ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]),
             MigrationState::Successful(CacheType::Deep),
+            None,
         );
         cache.update_query_migration_state(
             &ViewCreateRequest::new(
@@ -1305,6 +1323,7 @@ mod tests {
                 vec![],
             ),
             MigrationState::Successful(CacheType::Deep),
+            None,
         );
         cache.update_query_migration_state(
             &ViewCreateRequest::new(
@@ -1312,10 +1331,12 @@ mod tests {
                 vec![],
             ),
             MigrationState::Pending,
+            None,
         );
         cache.update_query_migration_state(
             &ViewCreateRequest::new(select_statement("SELECT y FROM t2").unwrap(), vec![]),
             MigrationState::Unsupported("Should fail".to_string()),
+            None,
         );
         assert_eq!(cache.allow_list().len(), 2);
         assert_eq!(cache.deny_list().len(), 2);
@@ -1355,17 +1376,30 @@ mod tests {
             ViewCreateRequest::new(select_statement("SELECT * FROM t4").unwrap(), vec![]);
 
         // Add all queries to cache
-        cache.update_query_migration_state(&simple_t1, MigrationState::Successful(CacheType::Deep));
-        cache.update_query_migration_state(&simple_t2, MigrationState::Successful(CacheType::Deep));
-        cache
-            .update_query_migration_state(&join_query, MigrationState::Successful(CacheType::Deep));
+        cache.update_query_migration_state(
+            &simple_t1,
+            MigrationState::Successful(CacheType::Deep),
+            None,
+        );
+        cache.update_query_migration_state(
+            &simple_t2,
+            MigrationState::Successful(CacheType::Deep),
+            None,
+        );
+        cache.update_query_migration_state(
+            &join_query,
+            MigrationState::Successful(CacheType::Deep),
+            None,
+        );
         cache.update_query_migration_state(
             &complex_query,
             MigrationState::Successful(CacheType::Deep),
+            None,
         );
         cache.update_query_migration_state(
             &unaffected_query,
             MigrationState::Successful(CacheType::Deep),
+            None,
         );
 
         assert_eq!(cache.allow_list().len(), 5);
@@ -1396,6 +1430,7 @@ mod tests {
         cache.update_query_migration_state(
             &complex_query,
             MigrationState::Successful(CacheType::Deep),
+            None,
         );
         assert_eq!(cache.allow_list().len(), 3);
 

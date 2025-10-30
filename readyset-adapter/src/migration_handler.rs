@@ -238,6 +238,7 @@ impl MigrationHandler {
                 self.query_status_cache.update_query_migration_state(
                     view_request,
                     MigrationState::Successful(CacheType::Deep),
+                    None,
                 );
             }
             Err(e) if e.caused_by_unsupported() => {
@@ -251,6 +252,7 @@ impl MigrationHandler {
                 self.query_status_cache.update_query_migration_state(
                     view_request,
                     MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
+                    None,
                 );
             }
             // Errors that were not caused by unsupported may be transient, do nothing
@@ -266,6 +268,7 @@ impl MigrationHandler {
                     self.query_status_cache.update_query_migration_state(
                         view_request,
                         MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
+                        None,
                     );
                 }
             }
@@ -332,6 +335,7 @@ impl MigrationHandler {
             self.query_status_cache.update_query_migration_state(
                 view_request,
                 MigrationState::Unsupported("dry run timed out".into()),
+                None,
             );
             return;
         }
@@ -367,6 +371,7 @@ impl MigrationHandler {
                 self.query_status_cache.update_query_migration_state(
                     view_request,
                     MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
+                    None,
                 );
             }
             _ => {} // Leave it as pending.

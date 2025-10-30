@@ -1091,6 +1091,7 @@ where
                         self.noria.schema_search_path().to_owned(),
                     ),
                     MigrationState::Successful(CacheType::Deep),
+                    None,
                 );
             }
             Some(Err(e)) => {
@@ -1109,6 +1110,7 @@ where
                             self.noria.schema_search_path().to_owned(),
                         ),
                         MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
+                        None,
                     );
                 } else {
                     error!(
@@ -1866,6 +1868,7 @@ where
                 self.state.query_status_cache.update_query_migration_state(
                     cached_statement.as_view_request()?,
                     MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
+                    None,
                 );
             } else if matches!(e, ReadySetError::NoCacheForQuery) {
                 self.state
@@ -2094,6 +2097,7 @@ where
         self.state.query_status_cache.update_query_migration_state(
             &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
             migration_state,
+            None,
         );
         self.state.query_status_cache.always_attempt_readyset(
             &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
@@ -2164,6 +2168,7 @@ where
             self.state.query_status_cache.update_query_migration_state(
                 &ViewCreateRequest::new(stmt.clone(), Vec::new()),
                 MigrationState::Successful(CacheType::Shallow),
+                None,
             );
         }
 
@@ -2236,7 +2241,7 @@ where
 
         self.state
             .query_status_cache
-            .update_query_migration_state(&req, migration_state);
+            .update_query_migration_state(&req, migration_state, None);
 
         Ok(noria_connector::QueryResult::Meta(results))
     }
@@ -2249,9 +2254,11 @@ where
         let maybe_view_request = self.noria.view_create_request_from_name(name).await;
         let result = self.noria.drop_view(name).await?;
         if let Some(view_request) = maybe_view_request {
-            self.state
-                .query_status_cache
-                .update_query_migration_state(&view_request, MigrationState::Pending);
+            self.state.query_status_cache.update_query_migration_state(
+                &view_request,
+                MigrationState::Pending,
+                None,
+            );
             self.state
                 .query_status_cache
                 .always_attempt_readyset(&view_request, false);
