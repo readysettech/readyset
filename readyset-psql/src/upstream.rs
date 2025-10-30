@@ -456,6 +456,28 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         }
     }
 
+    async fn query_ext<'a>(
+        &'a mut self,
+        query: &'a str,
+        exec_meta: &Self::ExecMeta,
+    ) -> Result<Self::QueryResult<'a>, Error> {
+        let result_formats = exec_meta.iter().map(|tf| (*tf).into());
+        let mut stream = Box::pin(
+            self.client
+                .query_typed_raw(query, Vec::<(&DfValue, Type)>::new(), result_formats)
+                .await?,
+        );
+
+        match stream.next().await {
+            None => Ok(QueryResult::EmptyRead),
+            Some(Err(e)) => Err(e.into()),
+            Some(Ok(GenericResult::Command(_, tag))) => Ok(QueryResult::Command { tag }),
+            Some(Ok(GenericResult::Row(first_row))) => {
+                Ok(QueryResult::RowStream { first_row, stream })
+            }
+        }
+    }
+
     async fn simple_query<'a>(
         &'a mut self,
         query: &'a str,

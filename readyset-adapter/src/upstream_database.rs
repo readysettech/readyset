@@ -199,6 +199,13 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Execute a raw, un-prepared query
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Self::Error>;
 
+    /// Execute a raw, un-prepared query with execution metadata.
+    async fn query_ext<'a>(
+        &'a mut self,
+        query: &'a str,
+        exec_meta: &Self::ExecMeta,
+    ) -> Result<Self::QueryResult<'a>, Self::Error>;
+
     /// Execute a raw, un-prepared query (or multiple queries concatenated in the provided `query`
     /// string, separated by semicolons) using the 'simple query' protocol flow[0],
     ///
@@ -409,6 +416,14 @@ where
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Self::Error> {
         self.upstream().await?.query(query).await
+    }
+
+    async fn query_ext<'a>(
+        &'a mut self,
+        query: &'a str,
+        exec_meta: &Self::ExecMeta,
+    ) -> Result<Self::QueryResult<'a>, Self::Error> {
+        self.upstream().await?.query_ext(query, exec_meta).await
     }
 
     async fn simple_query<'a>(

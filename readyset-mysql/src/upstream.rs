@@ -507,6 +507,14 @@ impl UpstreamDatabase for MySqlUpstream {
         handle_query_result!(result)
     }
 
+    async fn query_ext<'a>(
+        &'a mut self,
+        query: &'a str,
+        _exec_meta: &Self::ExecMeta,
+    ) -> Result<Self::QueryResult<'a>, Error> {
+        self.query(query).await
+    }
+
     // MySQL does not have a separation of Simple/Extended query protocols like Postgres does.
     async fn simple_query<'a>(
         &'a mut self,
