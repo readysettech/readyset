@@ -99,7 +99,7 @@ pub trait UpstreamDatabase: Sized + Send {
     type ExecMeta: Send + Sync + ?Sized;
 
     /// Metadata to be used when executing during a shallow cache insertion.
-    type ShallowExecMeta: Borrow<Self::ExecMeta> + Send + Sync;
+    type ShallowExecMeta: Borrow<Self::ExecMeta> + Debug + Clone + Send + Sync + 'static;
 
     /// The type of data this protocol stores into an entry in a shallow cache.
     type CacheEntry: Debug + Send + Sync + 'static;

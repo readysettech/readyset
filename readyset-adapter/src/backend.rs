@@ -68,7 +68,7 @@
 //! only trigger on networking related errors specifically to try to prevent this feature from
 //! being too heavy handed.
 
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::future::Future;
@@ -144,14 +144,16 @@ pub type StatementId = u32;
 
 /// Request to refresh a shallow cached query
 #[derive(Debug)]
-pub struct ShallowRefreshRequest<V>
+pub struct ShallowRefreshRequest<V, M>
 where
     V: Send + Sync + 'static,
+    M: Send + Sync + 'static,
 {
     query_id: QueryId,
     path: Vec<SqlIdentifier>,
     query: String,
     cache: CacheInsertGuard<Vec<DfValue>, V>,
+    shallow_exec_meta: Option<M>,
 }
 
 /// Query metadata used to plan query prepare
@@ -372,7 +374,7 @@ impl BackendBuilder {
         adapter_start_time: SystemTime,
         shallow: Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
         shallow_refresh_sender: Option<
-            async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>>,
+            async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
         >,
     ) -> Backend<DB, Handler> {
         metrics::gauge!(recorded::CONNECTED_CLIENTS).increment(1.0);
@@ -659,7 +661,8 @@ where
     shallow: Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
 
     /// Sender for shallow refresh requests to worker pool
-    shallow_refresh_sender: Option<async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>>>,
+    shallow_refresh_sender:
+        Option<async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>>,
 
     /// Memoized upstream database version,
     db_version: Option<String>,
@@ -2859,7 +2862,9 @@ where
         sampler_tx: Option<
             &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
         >,
-        refresh: Option<&async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>>>,
+        refresh: Option<
+            &async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
+        >,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let params =
             adapter_rewrites::rewrite_equivalent(&mut req.statement, noria.rewrite_params())?;
@@ -2881,6 +2886,7 @@ where
                         path: noria.schema_search_path().to_vec(),
                         query: query.to_string(),
                         cache,
+                        shallow_exec_meta: None,
                     };
                     if let Err(e) = refresh.try_send(request) {
                         warn!("Failed to send shallow refresh request: {}", e);
@@ -3731,7 +3737,9 @@ where
     }
 
     async fn shallow_refresh_worker(
-        receiver: async_channel::Receiver<ShallowRefreshRequest<DB::CacheEntry>>,
+        receiver: async_channel::Receiver<
+            ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>,
+        >,
         upstream_config: UpstreamConfig,
     ) {
         let mut upstream: Option<DB> = None;
@@ -3761,6 +3769,7 @@ where
                 path,
                 query,
                 cache,
+                shallow_exec_meta,
             } = request;
 
             match conn.set_schema_search_path(&path).await {
@@ -3776,7 +3785,12 @@ where
                 }
             }
 
-            let result = match conn.query(&query).await {
+            let result = match shallow_exec_meta {
+                Some(ref exec_meta) => conn.query_ext(&query, exec_meta.borrow()).await,
+                None => conn.query(&query).await,
+            };
+
+            let result = match result {
                 Ok(result) => result,
                 Err(e) => {
                     warn!(
@@ -3802,10 +3816,11 @@ where
     pub fn start_shallow_refresh_workers(
         rt: &tokio::runtime::Handle,
         config: &UpstreamConfig,
-    ) -> async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>> {
+    ) -> async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>> {
         let cpus = num_cpus::get();
-        let (sender, receiver) =
-            async_channel::bounded::<ShallowRefreshRequest<DB::CacheEntry>>(5 * cpus);
+        let (sender, receiver) = async_channel::bounded::<
+            ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>,
+        >(5 * cpus);
 
         for _ in 0..cpus {
             rt.spawn(Self::shallow_refresh_worker(
