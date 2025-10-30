@@ -381,8 +381,8 @@ impl DialectDisplay for FunctionExpr {
             FunctionExpr::Bucket { expr, interval } => write!(
                 f,
                 "bucket({}, {})",
+                expr.display(dialect),
                 interval.display(dialect),
-                expr.display(dialect)
             ),
             FunctionExpr::Sum { expr, .. } => write!(f, "sum({})", expr.display(dialect)),
             FunctionExpr::Max(col) => write!(f, "max({})", col.display(dialect)),
