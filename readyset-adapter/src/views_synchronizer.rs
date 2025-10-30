@@ -5,6 +5,7 @@ use dataflow_expression::Dialect;
 use metrics::{counter, Counter};
 use metrics::{gauge, Gauge};
 use readyset_client::query::MigrationState;
+use readyset_client::recipe::{CacheInfo, ExprInfo};
 use readyset_client::{ReadySetHandle, ViewCreateRequest};
 use readyset_client_metrics::recorded;
 use readyset_sql::ast::CacheType;
@@ -169,18 +170,24 @@ impl ViewsSynchronizer {
                 Ok(statuses) => {
                     let chunk_hashes = hashes.iter().take(chunk.len());
                     for ((query, info), hash) in chunk.iter().zip(statuses).zip(chunk_hashes) {
-                        let name = info.map(|info| info.name().clone());
+                        let name = info.as_ref().map(|info| info.name());
                         trace!(
                             query = %query.statement.display(self.dialect.into()),
                             name = ?name,
                             "Loaded query status from controller"
                         );
-                        if let Some(name) = name {
+                        if let Some(info) = info {
+                            let name = info.name().clone();
+                            let always = if let ExprInfo::Cache(CacheInfo { always, .. }) = info {
+                                always
+                            } else {
+                                false
+                            };
                             self.view_name_cache.insert(query.clone(), name).await;
                             self.query_status_cache.update_query_migration_state(
                                 query,
                                 MigrationState::Successful(CacheType::Deep),
-                                None,
+                                Some(always),
                             );
                             self.views_checked.insert(*hash);
                         }
