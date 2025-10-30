@@ -34,6 +34,7 @@ use readyset_errors::{
 };
 use readyset_sql::ast::{self, ColumnSpecification, Expr, NullOrder, OrderType, Relation};
 use readyset_sql::TryIntoDialect as _;
+use serde_json::json;
 
 use crate::controller::Migration;
 use crate::manual::ops::grouped::aggregate::Aggregation;
@@ -94,6 +95,7 @@ pub(super) fn mir_node_to_flow_parts(
                     ..
                 } => {
                     invariant_eq!(ancestors.len(), 1);
+                    record_reachable("accumulator");
                     let parent = ancestors[0];
                     Some(make_grouped_node(
                         graph,
@@ -113,7 +115,7 @@ pub(super) fn mir_node_to_flow_parts(
                     ..
                 } => {
                     invariant_eq!(ancestors.len(), 1);
-                    antithesis_sdk::assert_reachable!("Create dataflow node for aggregation");
+                    record_reachable("aggregation");
                     let parent = ancestors[0];
                     Some(make_grouped_node(
                         graph,
@@ -132,7 +134,7 @@ pub(super) fn mir_node_to_flow_parts(
                     ref unique_keys,
                     ..
                 } => {
-                    antithesis_sdk::assert_reachable!("Create dataflow base node");
+                    record_reachable("base");
                     Some(make_base_node(
                         name,
                         column_specs.as_slice(),
@@ -149,7 +151,7 @@ pub(super) fn mir_node_to_flow_parts(
                     ..
                 } => {
                     invariant_eq!(ancestors.len(), 1);
-                    antithesis_sdk::assert_reachable!("Create dataflow node for extremum");
+                    record_reachable("extremum");
                     let parent = ancestors[0];
                     Some(make_grouped_node(
                         graph,
@@ -171,7 +173,7 @@ pub(super) fn mir_node_to_flow_parts(
                     ref output_column,
                 } => {
                     invariant_eq!(ancestors.len(), 1);
-                    antithesis_sdk::assert_reachable!("Create dataflow node for window");
+                    record_reachable("window");
                     Some(make_window_node(
                         graph,
                         name,
@@ -187,7 +189,7 @@ pub(super) fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Filter { ref conditions } => {
                     invariant_eq!(ancestors.len(), 1);
-                    antithesis_sdk::assert_reachable!("Create dataflow node for filter");
+                    record_reachable("filter");
                     let parent = ancestors[0];
                     Some(make_filter_node(
                         graph,
@@ -201,7 +203,7 @@ pub(super) fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Identity => {
                     invariant_eq!(ancestors.len(), 1);
-                    antithesis_sdk::assert_reachable!("Create dataflow node for identity");
+                    record_reachable("identity");
                     let parent = ancestors[0];
                     Some(make_identity_node(
                         graph,
@@ -217,7 +219,8 @@ pub(super) fn mir_node_to_flow_parts(
                     ..
                 } => {
                     invariant_eq!(ancestors.len(), 2);
-                    antithesis_sdk::assert_reachable!("Create dataflow node for join");
+                    record_reachable("join");
+
                     let left = ancestors[0];
                     let right = ancestors[1];
                     Some(make_join_node(
@@ -234,7 +237,7 @@ pub(super) fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::JoinAggregates => {
                     invariant_eq!(ancestors.len(), 2);
-                    antithesis_sdk::assert_reachable!("Create dataflow node for join aggregate");
+                    record_reachable("join aggregate");
                     let left = ancestors[0];
                     let right = ancestors[1];
                     Some(make_join_aggregates_node(
@@ -272,7 +275,7 @@ pub(super) fn mir_node_to_flow_parts(
                 } => {
                     if !lowered_to_df {
                         invariant_eq!(ancestors.len(), 1);
-                        antithesis_sdk::assert_reachable!("Create dataflow leaf node");
+                        record_reachable("leaf");
                         let parent = ancestors[0];
                         let reader_processing = make_reader_processing(
                             graph,
@@ -301,7 +304,7 @@ pub(super) fn mir_node_to_flow_parts(
                     ..
                 } => {
                     invariant_eq!(ancestors.len(), 2);
-                    antithesis_sdk::assert_reachable!("Create dataflow node for left join");
+                    record_reachable("left join");
                     let left = ancestors[0];
                     let right = ancestors[1];
                     Some(make_join_node(
@@ -318,7 +321,7 @@ pub(super) fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Project { ref emit } => {
                     invariant_eq!(ancestors.len(), 1);
-                    antithesis_sdk::assert_reachable!("Create dataflow project node");
+                    record_reachable("project");
                     let parent = ancestors[0];
                     Some(make_project_node(
                         graph,
@@ -334,7 +337,7 @@ pub(super) fn mir_node_to_flow_parts(
                     duplicate_mode,
                 } => {
                     invariant_eq!(ancestors.len(), emit.len());
-                    antithesis_sdk::assert_reachable!("Create dataflow node for union");
+                    record_reachable("union");
                     #[allow(clippy::unwrap_used)]
                     Some(make_union_node(
                         graph,
@@ -350,7 +353,7 @@ pub(super) fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Distinct { ref group_by } => {
                     invariant_eq!(ancestors.len(), 1);
-                    antithesis_sdk::assert_reachable!("Create dataflow distinct node");
+                    record_reachable("distinct");
                     let parent = ancestors[0];
                     Some(make_distinct_node(
                         graph,
@@ -373,7 +376,7 @@ pub(super) fn mir_node_to_flow_parts(
                     limit,
                 } => {
                     invariant_eq!(ancestors.len(), 1);
-                    antithesis_sdk::assert_reachable!("Create dataflow paginate/topk node");
+                    record_reachable("paginate/topk node");
                     let parent = ancestors[0];
                     Some(make_paginate_or_topk_node(
                         graph,
@@ -408,6 +411,10 @@ pub(super) fn mir_node_to_flow_parts(
         }
         Some(flow_node) => Ok(Some(flow_node)),
     }
+}
+
+fn record_reachable(node: &str) {
+    antithesis_sdk::assert_reachable!("Create dataflow node", &json!({"node_type": node}));
 }
 
 fn column_names(cs: &[Column]) -> Vec<&str> {
