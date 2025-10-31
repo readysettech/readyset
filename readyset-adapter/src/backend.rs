@@ -1606,7 +1606,7 @@ where
     /// Execute a prepared statement on upstream using the statement ID
     #[allow(clippy::too_many_arguments)]
     async fn execute_upstream<'a>(
-        upstream: &'a mut Option<DB>,
+        upstream: &'a mut DB,
         prep: &UpstreamPrepare<DB>,
         params: &[DfValue],
         exec_meta: &'a DB::ExecMeta,
@@ -1615,10 +1615,6 @@ where
         is_fallback: bool,
         cache: Option<CacheInsertGuard<Vec<DfValue>, DB::CacheEntry>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let upstream = upstream.as_mut().ok_or_else(|| {
-            ReadySetError::Internal("This condition requires an upstream connector".to_string())
-        })?;
-
         if is_fallback {
             event.destination = Some(QueryDestination::ReadysetThenUpstream);
         } else {
@@ -1641,7 +1637,7 @@ where
 
     #[allow(clippy::too_many_arguments)]
     async fn execute_shallow<'a>(
-        upstream: &'a mut Option<DB>,
+        upstream: &'a mut DB,
         shallow: &Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
         prep: &UpstreamPrepare<DB>,
         params: &[DfValue],
@@ -1668,11 +1664,7 @@ where
             }
             CacheResult::HitAndRefresh(values, cache) => {
                 if let Some(refresh) = refresh {
-                    let shallow_exec_meta = match upstream.as_mut() {
-                        Some(upstream_ref) => upstream_ref.shallow_exec_meta(exec_meta).await.ok(),
-                        None => None,
-                    };
-
+                    let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await.ok();
                     let literalized =
                         adapter_rewrites::literalize(&view_request.statement, params)?;
                     let query = literalized.display(dialect).to_string();
@@ -1693,12 +1685,7 @@ where
                 Ok(QueryResult::Shallow(values))
             }
             CacheResult::Miss(guard) => {
-                let shallow_exec_meta = {
-                    let upstream_ref = upstream
-                        .as_mut()
-                        .ok_or_else(|| internal_err!("Shallow cache requires an upstream"))?;
-                    upstream_ref.shallow_exec_meta(exec_meta).await?
-                };
+                let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await?;
                 Self::execute_upstream(
                     upstream,
                     prep,
@@ -1722,7 +1709,7 @@ where
     #[allow(clippy::too_many_arguments)] // meh.
     async fn execute_cascade<'a>(
         noria: &'a mut NoriaConnector,
-        upstream: &'a mut Option<DB>,
+        upstream: &'a mut DB,
         noria_prep: &noria_connector::PrepareResult,
         upstream_prep: &UpstreamPrepare<DB>,
         params: &[DfValue],
@@ -1869,6 +1856,12 @@ where
             .for_each(|ps| ps.make_upstream_only());
     }
 
+    fn upstream_mut(upstream: &mut Option<DB>) -> ReadySetResult<&mut DB> {
+        upstream
+            .as_mut()
+            .ok_or_else(|| internal_err!("Execution upstream requires an upstream"))
+    }
+
     /// Executes a prepared statement identified by `id` with parameters specified by the client
     /// `params`.
     /// A [`QueryExecutionEvent`], is used to track metrics and behavior scoped to the
@@ -1991,13 +1984,27 @@ where
                         .inlined_cache_miss(cached_statement.as_view_request()?, params.to_vec())
                 }
                 Self::execute_upstream(
-                    upstream, prep, params, exec_meta, None, &mut event, false, None,
+                    Self::upstream_mut(upstream)?,
+                    prep,
+                    params,
+                    exec_meta,
+                    None,
+                    &mut event,
+                    false,
+                    None,
                 )
                 .await
             }
             PrepareResultInner::NoriaAndUpstream(.., uprep) if should_fallback => {
                 Self::execute_upstream(
-                    upstream, uprep, params, exec_meta, None, &mut event, false, None,
+                    Self::upstream_mut(upstream)?,
+                    uprep,
+                    params,
+                    exec_meta,
+                    None,
+                    &mut event,
+                    false,
+                    None,
                 )
                 .await
             }
@@ -2010,7 +2017,7 @@ where
                 }
                 Self::execute_cascade(
                     noria,
-                    upstream,
+                    Self::upstream_mut(upstream)?,
                     nprep,
                     uprep,
                     params,
@@ -2032,7 +2039,7 @@ where
                 let view_request = cached_statement.as_view_request()?;
 
                 Self::execute_shallow(
-                    upstream,
+                    Self::upstream_mut(upstream)?,
                     &self.shallow,
                     prep,
                     params,
