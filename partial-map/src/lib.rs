@@ -367,21 +367,9 @@ where
         R: RangeBounds<B> + 'a,
     {
         self.interval_tree.remove_interval(&range.as_std_range());
-        // NOTE: it is deeply unfortunate that rust's BTreeMap doesn't have a drain(range) function
-        // the way Vec does. This is forcing us into an O(n) operation where we could have an
-        // O(log(n)) one.
-        let mut iter = ExtractedIterator::new();
-        let mut keys = Vec::new();
-        for k in self.map.keys() {
-            if range.contains(k.borrow()) {
-                keys.push(k.clone());
-            }
-        }
-        for k in &keys {
-            let (k, v) = self.map.remove_entry(k.borrow()).unwrap();
-            iter.push(k, v);
-        }
-        iter
+        // BTreeMap's extract_if can't take borrowed keys, so O(n) instead of O(log(n)).
+        self.map
+            .extract_if(.., move |k, _| range.contains(k.borrow()))
     }
 
     /// Clone the interval tree from the given partial map into our interval tree/
@@ -396,36 +384,6 @@ where
         self.interval_tree.clone_from(&other.interval_tree)
     }
 }
-
-struct ExtractedIterator<K, V> {
-    items: Vec<(K, V)>,
-}
-
-impl<K, V> ExtractedIterator<K, V> {
-    fn new() -> Self {
-        Self { items: Vec::new() }
-    }
-
-    fn push(&mut self, k: K, v: V) {
-        self.items.push((k, v))
-    }
-}
-
-impl<K, V> Iterator for ExtractedIterator<K, V> {
-    type Item = (K, V);
-
-    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
-        self.items.pop()
-    }
-}
-
-impl<K, V> ExactSizeIterator for ExtractedIterator<K, V> {
-    fn len(&self) -> usize {
-        self.items.len()
-    }
-}
-
-impl<K, V> std::iter::FusedIterator for ExtractedIterator<K, V> {}
 
 impl<K, V> Extend<(K, V)> for PartialMap<K, V>
 where
