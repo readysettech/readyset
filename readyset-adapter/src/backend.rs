@@ -1635,6 +1635,16 @@ where
         Ok(QueryResult::Upstream(result, cache, client_exec_meta))
     }
 
+    async fn is_meta_compatible(
+        upstream: &mut DB,
+        values: &readyset_shallow::QueryResult<DB::CacheEntry>,
+    ) -> Result<bool, DB::Error> {
+        let Some(first) = values.values.first() else {
+            return Ok(true);
+        };
+        upstream.is_meta_compatible(first).await
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn execute_shallow<'a>(
         upstream: &'a mut DB,
@@ -1658,11 +1668,13 @@ where
         let res = shallow.get_or_start_insert(query_id, key.to_vec());
 
         match res {
-            CacheResult::Hit(values) => {
+            CacheResult::Hit(values, _) if Self::is_meta_compatible(upstream, &values).await? => {
                 event.destination = Some(QueryDestination::ReadysetShallow);
                 Ok(QueryResult::Shallow(values))
             }
-            CacheResult::HitAndRefresh(values, cache) => {
+            CacheResult::HitAndRefresh(values, cache)
+                if Self::is_meta_compatible(upstream, &values).await? =>
+            {
                 if let Some(refresh) = refresh {
                     let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await.ok();
                     let literalized =
@@ -1684,7 +1696,9 @@ where
                 event.destination = Some(QueryDestination::ReadysetShallow);
                 Ok(QueryResult::Shallow(values))
             }
-            CacheResult::Miss(guard) => {
+            CacheResult::Miss(cache)
+            | CacheResult::Hit(_, cache)
+            | CacheResult::HitAndRefresh(_, cache) => {
                 let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await?;
                 Self::execute_upstream(
                     upstream,
@@ -1694,7 +1708,7 @@ where
                     Some(&shallow_exec_meta),
                     event,
                     false,
-                    Some(guard),
+                    Some(cache),
                 )
                 .await
             }
@@ -3014,7 +3028,7 @@ where
         let res = shallow.get_or_start_insert(&query_id, key);
 
         match res {
-            CacheResult::Hit(values) => {
+            CacheResult::Hit(values, _) => {
                 event.destination = Some(QueryDestination::ReadysetShallow);
                 Ok(QueryResult::Shallow(values))
             }

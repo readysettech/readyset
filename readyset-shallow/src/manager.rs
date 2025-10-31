@@ -187,10 +187,12 @@ where
         let Some(cache) = self.get(None, Some(query_id)) else {
             return CacheResult::NotCached;
         };
-        match cache.get(&key) {
-            Some((res, false)) => CacheResult::Hit(res),
-            Some((res, true)) => CacheResult::HitAndRefresh(res, Self::make_guard(cache, key)),
-            None => CacheResult::Miss(Self::make_guard(cache, key)),
+        let res = cache.get(&key);
+        let guard = Self::make_guard(cache, key);
+        match res {
+            Some((res, false)) => CacheResult::Hit(res, guard),
+            Some((res, true)) => CacheResult::HitAndRefresh(res, guard),
+            None => CacheResult::Miss(guard),
         }
     }
 }
@@ -202,7 +204,7 @@ where
 {
     NotCached,
     Miss(CacheInsertGuard<K, V>),
-    Hit(crate::QueryResult<V>),
+    Hit(crate::QueryResult<V>, CacheInsertGuard<K, V>),
     HitAndRefresh(crate::QueryResult<V>, CacheInsertGuard<K, V>),
 }
 

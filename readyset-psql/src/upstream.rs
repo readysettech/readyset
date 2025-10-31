@@ -685,6 +685,13 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     ) -> Result<Self::ShallowExecMeta, Self::Error> {
         Ok(vec![TransferFormat::Binary; meta.len()])
     }
+
+    async fn is_meta_compatible(&mut self, cache: &Self::CacheEntry) -> Result<bool, Self::Error> {
+        match cache {
+            CacheEntry::Simple(_) => Ok(false),
+            CacheEntry::DfValue(_) => Ok(true),
+        }
+    }
 }
 
 impl Drop for PostgreSqlUpstream {

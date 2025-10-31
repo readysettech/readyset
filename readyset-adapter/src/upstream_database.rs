@@ -254,6 +254,9 @@ pub trait UpstreamDatabase: Sized + Send {
         &mut self,
         meta: &Self::ExecMeta,
     ) -> Result<Self::ShallowExecMeta, Self::Error>;
+
+    /// Is this cache entry compatible with the current query metadata.
+    async fn is_meta_compatible(&mut self, cache: &Self::CacheEntry) -> Result<bool, Self::Error>;
 }
 
 pub struct LazyUpstream<U> {
@@ -473,5 +476,9 @@ where
         meta: &Self::ExecMeta,
     ) -> Result<Self::ShallowExecMeta, Self::Error> {
         self.upstream().await?.shallow_exec_meta(meta).await
+    }
+
+    async fn is_meta_compatible(&mut self, cache: &Self::CacheEntry) -> Result<bool, Self::Error> {
+        self.upstream().await?.is_meta_compatible(cache).await
     }
 }

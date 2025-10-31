@@ -598,6 +598,10 @@ impl UpstreamDatabase for MySqlUpstream {
     ) -> Result<Self::ShallowExecMeta, Self::Error> {
         Ok(())
     }
+
+    async fn is_meta_compatible(&mut self, _cache: &Self::CacheEntry) -> Result<bool, Self::Error> {
+        Ok(true)
+    }
 }
 
 impl Drop for MySqlUpstream {
