@@ -15,7 +15,7 @@ use readyset_adapter::{
     backend::{noria_connector::ReadBehavior, NoriaConnector},
     query_status_cache::QueryStatusCache,
     upstream_database::LazyUpstream,
-    BackendBuilder, ReadySetStatusReporter, UpstreamDatabase,
+    Backend, BackendBuilder, ReadySetStatusReporter, UpstreamDatabase,
 };
 use readyset_client::ReadySetHandle;
 use readyset_data::{
@@ -168,6 +168,17 @@ async fn setup_adapter(
                     Vec::new(),
                 );
                 let shallow = Arc::new(CacheManager::new());
+                let shallow_refresh_sender =
+                    if let Some(config) = replication_url.map(UpstreamConfig::from_url) {
+                        Some(
+                            Backend::<$upstream, $handler>::start_shallow_refresh_workers(
+                                &tokio::runtime::Handle::current(),
+                                &config,
+                            ),
+                        )
+                    } else {
+                        None
+                    };
                 BackendBuilder::new()
                     .require_authentication(false)
                     .dialect($dialect)
@@ -175,12 +186,12 @@ async fn setup_adapter(
                     .build::<_, $handler>(
                         noria,
                         upstream,
-                        replication_url.clone().map(UpstreamConfig::from_url),
                         query_status_cache,
                         authority,
                         status_reporter,
                         adapter_start_time,
                         shallow,
+                        shallow_refresh_sender,
                     )
             }};
         }

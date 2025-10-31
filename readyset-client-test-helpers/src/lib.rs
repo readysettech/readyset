@@ -353,7 +353,25 @@ impl TestBuilder {
         let adapter_start_time = SystemTime::now();
 
         let mut backend_shutdown_rx = shutdown_tx.subscribe();
+
+        // backend either has upstream or noria writer
         let cdc_url = cdc_url_and_db_name.as_ref().map(|(f, _)| f.clone());
+        let cdc_upstream_config = if let Some(f) = &cdc_url {
+            UpstreamConfig::from_url(f)
+        } else {
+            UpstreamConfig::default()
+        };
+        let shallow = Arc::new(CacheManager::new());
+        let shallow_refresh_sender = if cdc_url.is_some() {
+            Some(
+                Backend::<A::Upstream, A::Handler>::start_shallow_refresh_workers(
+                    &tokio::runtime::Handle::current(),
+                    &cdc_upstream_config,
+                ),
+            )
+        } else {
+            None
+        };
         tokio::spawn(async move {
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();
             let connection_fut = async move {
@@ -362,15 +380,11 @@ impl TestBuilder {
                     let backend_builder = self.backend_builder.clone();
                     let auto_increments = auto_increments.clone();
 
-                    // backend either has upstream or noria writer
-                    let mut cdc_upstream_config = UpstreamConfig::default();
-                    let mut cdc_upstream = if let Some(f) = &cdc_url {
-                        cdc_upstream_config = UpstreamConfig::from_url(f);
-                        Some(A::make_upstream(f.clone()).await)
+                    let mut cdc_upstream = if let Some(url) = &cdc_url {
+                        Some(A::make_upstream(url.clone()).await)
                     } else {
                         None
                     };
-
                     let mut sys_props = if let Some(cdc_upstream) = &mut cdc_upstream {
                         UpstreamSystemProperties {
                             search_path: cdc_upstream.schema_search_path().await.unwrap(),
@@ -425,19 +439,18 @@ impl TestBuilder {
                         authority.clone(),
                         Vec::new(),
                     );
-                    let shallow = Arc::new(CacheManager::new());
                     let backend = backend_builder
                         .dialect(A::DIALECT)
                         .migration_mode(self.migration_mode)
                         .build(
                             noria,
                             fallback_upstream,
-                            Some(cdc_upstream_config),
                             query_status_cache,
                             authority.clone(),
                             status_reporter,
                             adapter_start_time,
-                            shallow,
+                            shallow.clone(),
+                            shallow_refresh_sender.clone(),
                         );
 
                     let mut backend_shutdown_rx_clone = backend_shutdown_rx_connection.clone();

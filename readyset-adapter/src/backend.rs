@@ -144,7 +144,7 @@ pub type StatementId = u32;
 
 /// Request to refresh a shallow cached query
 #[derive(Debug)]
-struct ShallowRefreshRequest<V>
+pub struct ShallowRefreshRequest<V>
 where
     V: Send + Sync + 'static,
 {
@@ -358,12 +358,14 @@ impl BackendBuilder {
         self,
         noria: NoriaConnector,
         upstream: Option<DB>,
-        upstream_config: Option<UpstreamConfig>,
         query_status_cache: &'static QueryStatusCache,
         authority: Arc<Authority>,
         status_reporter: ReadySetStatusReporter<DB>,
         adapter_start_time: SystemTime,
         shallow: Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
+        shallow_refresh_sender: Option<
+            async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>>,
+        >,
     ) -> Backend<DB, Handler> {
         metrics::gauge!(recorded::CONNECTED_CLIENTS).increment(1.0);
         metrics::counter!(recorded::CLIENT_CONNECTIONS_OPENED).increment(1);
@@ -377,21 +379,6 @@ impl BackendBuilder {
         if let Some(connections) = &self.connections {
             connections.insert(self.client_addr);
         }
-
-        let shallow_refresh_sender = upstream_config.as_ref().map(|config| {
-            let cpus = num_cpus::get();
-            let (sender, receiver) =
-                async_channel::bounded::<ShallowRefreshRequest<DB::CacheEntry>>(5 * cpus);
-
-            for _ in 0..cpus {
-                tokio::spawn(Backend::<DB, Handler>::shallow_refresh_worker(
-                    receiver.clone(),
-                    config.clone(),
-                ));
-            }
-
-            sender
-        });
 
         Backend {
             client_addr: self.client_addr,
@@ -3652,7 +3639,8 @@ where
 
 impl<DB, Handler> Backend<DB, Handler>
 where
-    DB: UpstreamDatabase,
+    DB: UpstreamDatabase + 'static,
+    Handler: 'static,
 {
     async fn shallow_refresh_result(
         result: DB::QueryResult<'_>,
@@ -3728,6 +3716,24 @@ where
                 );
             }
         }
+    }
+
+    pub fn start_shallow_refresh_workers(
+        rt: &tokio::runtime::Handle,
+        config: &UpstreamConfig,
+    ) -> async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry>> {
+        let cpus = num_cpus::get();
+        let (sender, receiver) =
+            async_channel::bounded::<ShallowRefreshRequest<DB::CacheEntry>>(5 * cpus);
+
+        for _ in 0..cpus {
+            rt.spawn(Self::shallow_refresh_worker(
+                receiver.clone(),
+                config.clone(),
+            ));
+        }
+
+        sender
     }
 }
 

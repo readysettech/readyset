@@ -1332,6 +1332,11 @@ where
                 error!("Failed to recreate shallow caches: {}", e);
             }
         }
+        let shallow_refresh_sender =
+            Backend::<H::UpstreamDatabase, H>::start_shallow_refresh_workers(
+                rt.handle(),
+                &upstream_config,
+            );
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let client_addr = s.peer_addr()?;
@@ -1347,6 +1352,7 @@ where
             let view_cache = view_cache.clone();
             let mut connection_handler = self.connection_handler.clone();
             let shallow = shallow.clone();
+            let shallow_refresh_sender = shallow_refresh_sender.clone();
             // If cache_ddl_address is not set, allow cache ddl from all addresses.
             let local_addr = s.local_addr()?;
             let allow_cache_ddl = options
@@ -1430,12 +1436,12 @@ where
                                     .build(
                                         noria,
                                         upstream,
-                                        Some(upstream_config.clone()),
                                         query_status_cache,
                                         adapter_authority.clone(),
                                         status_reporter_clone,
                                         adapter_start_time,
                                         shallow,
+                                        Some(shallow_refresh_sender),
                                     );
                                 connection_handler.process_connection(s, backend).await;
                             }
