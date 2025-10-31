@@ -176,7 +176,6 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
     "git+https://github.com/antithesishq/antithesis-sdk-rust",
     "git+https://github.com/apache/datafusion-sqlparser-rs",
-    "git+https://github.com/unicode-org/icu4x.git",
 ]
 
 [sources.allow-org]
