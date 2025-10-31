@@ -12,7 +12,7 @@ use database_utils::{
 use itertools::Itertools as _;
 use mysql_srv::MySqlIntermediary;
 use readyset_adapter::{
-    backend::{noria_connector::ReadBehavior, NoriaConnector},
+    backend::{noria_connector::ReadBehavior, MigrationMode, NoriaConnector},
     query_status_cache::QueryStatusCache,
     upstream_database::LazyUpstream,
     Backend, BackendBuilder, ReadySetStatusReporter, UpstreamDatabase,
@@ -84,6 +84,7 @@ async fn start_noria_server(
 async fn setup_adapter(
     run_opts: &RunOptions,
     authority: Arc<readyset_server::Authority>,
+    migration_mode: MigrationMode,
 ) -> (tokio::task::JoinHandle<()>, DatabaseURL) {
     let database_type = run_opts.database_type;
     let replication_url = run_opts.replication_url.clone();
@@ -183,6 +184,7 @@ async fn setup_adapter(
                     .require_authentication(false)
                     .dialect($dialect)
                     .parsing_preset(parsing_preset)
+                    .migration_mode(migration_mode)
                     .build::<_, $handler>(
                         noria,
                         upstream,
@@ -246,6 +248,7 @@ async fn setup_adapter(
 
 pub(crate) async fn start_readyset(
     run_opts: &RunOptions,
+    migration_mode: MigrationMode,
 ) -> (
     readyset_server::Handle,
     ShutdownSender,
@@ -255,7 +258,7 @@ pub(crate) async fn start_readyset(
     let authority =
         Arc::new(readyset_client::consensus::AuthorityType::Local.to_authority("", "logictest"));
     let (noria_handle, shutdown_tx) = start_noria_server(run_opts, authority.clone()).await;
-    let (adapter_task, db_url) = setup_adapter(run_opts, authority).await;
+    let (adapter_task, db_url) = setup_adapter(run_opts, authority, migration_mode).await;
     (noria_handle, shutdown_tx, adapter_task, db_url)
 }
 

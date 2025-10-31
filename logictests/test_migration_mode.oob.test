@@ -1,0 +1,30 @@
+statement ok
+CREATE TABLE test_table(
+  id INTEGER PRIMARY KEY,
+  value TEXT
+);
+
+statement ok
+INSERT INTO test_table (id, value) VALUES (1, 'first'), (2, 'second');
+
+# This query should FAIL because we're in OutOfBand mode with no fallback
+# The query cannot be cached automatically and cannot be proxied
+statement error: Could not find view for query
+SELECT * FROM test_table WHERE id = 1;
+
+# Now explicitly create a cache for the query
+statement ok
+CREATE CACHE FROM SELECT * FROM test_table WHERE id = ?;
+
+# After creating the cache, parameterized queries should work
+query IT nosort
+SELECT * FROM test_table WHERE id = 1;
+----
+1
+first
+
+query IT nosort
+SELECT * FROM test_table WHERE id = 2;
+----
+2
+second
