@@ -1122,6 +1122,37 @@ impl MySqlBinlogConnector {
         Ok(hash_actions.into_values().collect())
     }
 
+    /// Process metadata from ROW V1 events. At the moment, we only check if the event affects the current tables.
+    ///
+    /// # Arguments
+    /// * `table_id` - the table id of the event
+    ///
+    /// # Returns
+    /// This function returns a [`ReplicationAction`] indicating if the event does not affect the current tables or panics if it does.
+    async fn process_row_v1_metadata(
+        &mut self,
+        table_id: u64,
+    ) -> ReadySetResult<ReplicationAction> {
+        // Retrieve the corresponding TABLE_MAP_EVENT, charset and signedness metadata
+        let tme = handle_err!(
+            self,
+            self.reader
+                .get_tme(table_id)
+                .ok_or_else(|| format!("TME not found for table ID {table_id}"))
+        );
+
+        if !self
+            .table_filter
+            .should_be_processed(tme.database_name().as_ref(), tme.table_name().as_ref())
+        {
+            return Ok(ReplicationAction::Empty);
+        }
+        unimplemented!(
+            "Row V1 event that will affect current tables: {:?}",
+            self.next_position
+        );
+    }
+
     /// Check whatever we need to report the current position
     /// If last_reported_pos_ts has elapsed, update it with the current timestamp.
     ///
@@ -1242,15 +1273,27 @@ impl MySqlBinlogConnector {
                     continue;
                 }
 
-                EventType::WRITE_ROWS_EVENT_V1 => unimplemented!(), /* The V1 event numbers are */
-                // used from 5.1.16 until
-                // mysql-5.6.
-                EventType::UPDATE_ROWS_EVENT_V1 => unimplemented!(), /* The V1 event numbers are */
-                // used from 5.1.16 until
-                // mysql-5.6.
-                EventType::DELETE_ROWS_EVENT_V1 => unimplemented!(), /* The V1 event numbers are */
-                // used from 5.1.16 until
-                // mysql-5.6.
+                /* The V1 event numbers are used from 5.1.16 until OR MariaDB */
+                EventType::WRITE_ROWS_EVENT_V1 => {
+                    let event: binlog::events::WriteRowsEventV1<'_> =
+                        handle_err!(self, binlog_event.read_event());
+                    let action = self.process_row_v1_metadata(event.table_id()).await?;
+                    return Ok((vec![action], &self.next_position));
+                }
+
+                EventType::UPDATE_ROWS_EVENT_V1 => {
+                    let event: binlog::events::UpdateRowsEventV1<'_> =
+                        handle_err!(self, binlog_event.read_event());
+                    let action = self.process_row_v1_metadata(event.table_id()).await?;
+                    return Ok((vec![action], &self.next_position));
+                }
+
+                EventType::DELETE_ROWS_EVENT_V1 => {
+                    let event: binlog::events::DeleteRowsEventV1<'_> =
+                        handle_err!(self, binlog_event.read_event());
+                    let action = self.process_row_v1_metadata(event.table_id()).await?;
+                    return Ok((vec![action], &self.next_position));
+                }
                 EventType::GTID_EVENT => {
                     // GTID stands for Global Transaction Identifier It is composed of two parts:
                     // SID for Source Identifier, and GNO for Group Number. The basic idea is to
