@@ -1,6 +1,6 @@
 use std::env::current_dir;
 use std::fmt::{Display, Formatter};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, ensure, Error, Result};
@@ -329,7 +329,7 @@ async fn verify_disk_space(conn: &mut DatabaseConnection, options: &Options) -> 
     dir.pop();
     let dir = if dir.is_absolute() {
         dir
-    } else if dir == PathBuf::from(".") {
+    } else if *dir == *"." {
         // Storage directory is default relative path.  Use current, absolute directory.
         current_dir().map_err(|e| anyhow!("Could not determine current directory: {e}"))?
     } else if dir.exists() {
