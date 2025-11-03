@@ -7,6 +7,7 @@ use readyset_client::internal::Index;
 use readyset_client::KeyComparison;
 use readyset_data::{Bound, DfValue, RangeBounds};
 use readyset_util::SizeOf;
+use tracing::debug;
 use vec1::Vec1;
 
 use crate::keyed_state::KeyedState;
@@ -79,19 +80,19 @@ impl SingleState {
     }
 
     fn mark_point_filled(&mut self, key: Vec1<DfValue>) {
+        debug!("marking index: {:?} with key: {:?}", self.index, key);
         let mut key = key.into_iter();
-        let replaced = match self.state {
+        match self.state {
             KeyedState::AllRows(_) => {
                 // No-op (can't be partial)
-                return;
             }
             KeyedState::SingleBTree(ref mut map) => {
                 assert_eq!(key.len(), 1);
-                map.insert(key.next().unwrap(), Rows::default())
+                map.insert(key.next().unwrap(), Rows::default());
             }
             KeyedState::DoubleBTree(ref mut map) => {
                 assert_eq!(key.len(), 2);
-                map.insert((key.next().unwrap(), key.next().unwrap()), Rows::default())
+                map.insert((key.next().unwrap(), key.next().unwrap()), Rows::default());
             }
             KeyedState::TriBTree(ref mut map) => {
                 assert_eq!(key.len(), 3);
@@ -102,7 +103,7 @@ impl SingleState {
                         key.next().unwrap(),
                     ),
                     Rows::default(),
-                )
+                );
             }
             KeyedState::QuadBTree(ref mut map) => {
                 assert_eq!(key.len(), 4);
@@ -114,7 +115,7 @@ impl SingleState {
                         key.next().unwrap(),
                     ),
                     Rows::default(),
-                )
+                );
             }
             KeyedState::QuinBTree(ref mut map) => {
                 assert_eq!(key.len(), 5);
@@ -127,7 +128,7 @@ impl SingleState {
                         key.next().unwrap(),
                     ),
                     Rows::default(),
-                )
+                );
             }
             KeyedState::SexBTree(ref mut map) => {
                 assert_eq!(key.len(), 6);
@@ -141,24 +142,24 @@ impl SingleState {
                         key.next().unwrap(),
                     ),
                     Rows::default(),
-                )
+                );
             }
             KeyedState::MultiBTree(ref mut map, len) => {
                 // I hope LLVM optimizes away the unnecessary into_iter() -> collect()
                 assert_eq!(key.len(), len);
-                map.insert(key.collect(), Rows::default())
+                map.insert(key.collect(), Rows::default());
             }
             KeyedState::MultiHash(ref mut map, len) => {
                 assert_eq!(key.len(), len);
-                map.insert(key.collect(), Rows::default())
+                map.insert(key.collect(), Rows::default());
             }
             KeyedState::SingleHash(ref mut map) => {
                 assert_eq!(key.len(), 1);
-                map.insert(key.next().unwrap(), Rows::default())
+                map.insert(key.next().unwrap(), Rows::default());
             }
             KeyedState::DoubleHash(ref mut map) => {
                 assert_eq!(key.len(), 2);
-                map.insert((key.next().unwrap(), key.next().unwrap()), Rows::default())
+                map.insert((key.next().unwrap(), key.next().unwrap()), Rows::default());
             }
             KeyedState::TriHash(ref mut map) => {
                 assert_eq!(key.len(), 3);
@@ -169,7 +170,7 @@ impl SingleState {
                         key.next().unwrap(),
                     ),
                     Rows::default(),
-                )
+                );
             }
             KeyedState::QuadHash(ref mut map) => {
                 assert_eq!(key.len(), 4);
@@ -181,7 +182,7 @@ impl SingleState {
                         key.next().unwrap(),
                     ),
                     Rows::default(),
-                )
+                );
             }
             KeyedState::QuinHash(ref mut map) => {
                 assert_eq!(key.len(), 5);
@@ -194,7 +195,7 @@ impl SingleState {
                         key.next().unwrap(),
                     ),
                     Rows::default(),
-                )
+                );
             }
             KeyedState::SexHash(ref mut map) => {
                 assert_eq!(key.len(), 6);
@@ -208,10 +209,9 @@ impl SingleState {
                         key.next().unwrap(),
                     ),
                     Rows::default(),
-                )
+                );
             }
         };
-        assert!(replaced.is_none());
     }
 
     fn mark_range_filled(&mut self, range: (Bound<Vec1<DfValue>>, Bound<Vec1<DfValue>>)) {
