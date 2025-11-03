@@ -240,6 +240,12 @@ async fn verify_replication(conn: &mut DatabaseConnection) -> Result<()> {
                 // MySQL 5.7 doesn't have this.
                 ensure!(!encryption, "Upstream binlog_encryption is not supported");
             }
+            if let Ok(v1) =
+                query_one_value::<bool>(conn, "SELECT @@log_bin_use_v1_row_events").await
+            {
+                // Removed in MySQL 8.3.
+                ensure!(!v1, "Upstream log_bin_use_v1_row_events is not supported");
+            }
         }
         Dialect::PostgreSQL => {
             if let Ok(rds_logical) =
