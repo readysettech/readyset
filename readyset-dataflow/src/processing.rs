@@ -38,6 +38,14 @@ pub(crate) enum MissReplayKey {
     /// * The endpoints of the range must be the same length
     /// * The endpoints of the range may not be empty
     Range((Bound<Vec1<DfValue>>, Bound<Vec1<DfValue>>)),
+
+    /// An explicit point key for replays that span multiple sources (e.g., straddled joins)
+    /// where the key cannot be extracted from a single record
+    ///
+    /// # Invariants
+    ///
+    /// * The values cannot be empty
+    Explicit(Vec1<DfValue>),
 }
 
 /// Indication, for a [`Miss`], for how to derive the key that was used for the lookup that resulted
@@ -233,6 +241,7 @@ impl Miss {
             MissReplayKey::Range((lower, upper)) => {
                 KeyComparison::Range((lower.clone(), upper.clone()))
             }
+            MissReplayKey::Explicit(values) => KeyComparison::Equal(values.clone()),
         })
     }
 
