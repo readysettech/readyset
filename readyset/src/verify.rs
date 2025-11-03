@@ -215,16 +215,13 @@ async fn verify_version(conn: &mut DatabaseConnection) -> Result<()> {
 async fn verify_replication(conn: &mut DatabaseConnection) -> Result<()> {
     match conn.dialect() {
         Dialect::MySQL => {
-            let (enabled, format, image, encryption): (bool, String, String, bool) = async {
+            let (enabled, format, image): (bool, String, String) = async {
                 let row = conn
-                    .query(
-                        "SELECT @@log_bin, @@binlog_format, @@binlog_row_image, \
-                                @@binlog_encryption",
-                    )
+                    .query("SELECT @@log_bin, @@binlog_format, @@binlog_row_image")
                     .await?
                     .into_iter()
                     .get_single_row()?;
-                Ok::<_, DatabaseError>((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                Ok::<_, DatabaseError>((row.get(0)?, row.get(1)?, row.get(2)?))
             }
             .await
             .map_err(|e| anyhow!("Failed to retrieve binlog settings: {e}"))?;
@@ -237,7 +234,12 @@ async fn verify_replication(conn: &mut DatabaseConnection) -> Result<()> {
                 image == "FULL" || image == "MINIMAL",
                 "Upstream binlog_row_image needs to be FULL or MINIMAL, but was: {image}"
             );
-            ensure!(!encryption, "Upstream binlog_encryption is not supported");
+            if let Ok(encryption) =
+                query_one_value::<bool>(conn, "SELECT @@binlog_encryption").await
+            {
+                // MySQL 5.7 doesn't have this.
+                ensure!(!encryption, "Upstream binlog_encryption is not supported");
+            }
         }
         Dialect::PostgreSQL => {
             if let Ok(rds_logical) =
