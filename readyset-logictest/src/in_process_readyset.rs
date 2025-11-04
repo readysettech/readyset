@@ -248,7 +248,7 @@ async fn setup_adapter(
 
 pub(crate) async fn start_readyset(
     run_opts: &RunOptions,
-    migration_mode: MigrationMode,
+    out_of_band_migration: bool,
 ) -> (
     readyset_server::Handle,
     ShutdownSender,
@@ -258,6 +258,11 @@ pub(crate) async fn start_readyset(
     let authority =
         Arc::new(readyset_client::consensus::AuthorityType::Local.to_authority("", "logictest"));
     let (noria_handle, shutdown_tx) = start_noria_server(run_opts, authority.clone()).await;
+    let migration_mode = if out_of_band_migration {
+        MigrationMode::OutOfBand
+    } else {
+        MigrationMode::InRequestPath
+    };
     let (adapter_task, db_url) = setup_adapter(run_opts, authority, migration_mode).await;
     (noria_handle, shutdown_tx, adapter_task, db_url)
 }

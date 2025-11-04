@@ -17,7 +17,6 @@ use tracing::error;
 
 use database_utils::tls::ServerCertVerification;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection};
-use readyset_adapter::backend::MigrationMode;
 use readyset_client_metrics::QueryDestination;
 use readyset_data::{Collation, DfType, DfValue};
 use readyset_sql_parsing::ParsingPreset;
@@ -178,11 +177,7 @@ impl TestScript {
 
         // Check filename to determine migration mode.
         // Check comments on MigrationMode for details.
-        let migration_mode = if self.path.to_string_lossy().contains(".oob.") {
-            MigrationMode::OutOfBand
-        } else {
-            MigrationMode::InRequestPath
-        };
+        let out_of_band_migration = self.path.to_string_lossy().contains(".oob.");
 
         // Recreate the test database, unless this is a long-lived remote readyset instance (e.g.
         // running under Antithesis) in which case the state needs to be managed/reset externally;
@@ -212,7 +207,7 @@ impl TestScript {
             self.run_on_database(&opts, &mut conn, opts.upstream_database_is_readyset)
                 .await?;
         } else {
-            self.run_on_noria(&opts, migration_mode).await?;
+            self.run_on_noria(&opts, out_of_band_migration).await?;
         };
 
         Ok(())
@@ -223,7 +218,7 @@ impl TestScript {
     pub async fn run_on_noria(
         &self,
         _opts: &RunOptions,
-        _migration_mode: MigrationMode,
+        _out_of_band_migration: bool,
     ) -> anyhow::Result<()> {
         panic!("in-process-readyset feature is not enabled, cannot start Readyset server");
     }
@@ -233,10 +228,10 @@ impl TestScript {
     pub async fn run_on_noria(
         &self,
         opts: &RunOptions,
-        migration_mode: MigrationMode,
+        out_of_band_migration: bool,
     ) -> anyhow::Result<()> {
         let (_noria_handle, shutdown_tx, adapter_task, db_url) =
-            crate::in_process_readyset::start_readyset(opts, migration_mode).await;
+            crate::in_process_readyset::start_readyset(opts, out_of_band_migration).await;
         let mut conn = match db_url
             .connect(&ServerCertVerification::Default)
             .await
