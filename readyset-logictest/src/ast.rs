@@ -369,6 +369,25 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
     ) -> Result<Self, Box<dyn Error + Sync + Send>> {
         use pgsql::types::Type;
 
+        // Macro to handle integer array conversion for different integer types
+        macro_rules! handle_int_array {
+            ($int_type:ty) => {{
+                // convert an int array into something like "{int,int,NULL,int}"
+                // we need to handle NULLs in some sane way, and this mimics what
+                // pg's array_agg() function does.
+                let int_array = Vec::<Option<$int_type>>::from_sql(ty, raw)?;
+                let joined = int_array
+                    .iter()
+                    .map(|opt| match opt {
+                        Some(v) => v.to_string(),
+                        None => "NULL".to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                Ok(Self::Text(format!("{{{}}}", joined)))
+            }};
+        }
+
         match *ty {
             Type::BOOL => Ok(Self::Integer(bool::from_sql(ty, raw)? as _)),
             Type::CHAR => Ok(Self::Integer(i8::from_sql(ty, raw)? as _)),
@@ -391,21 +410,9 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
                     .join(",");
                 Ok(Self::Text(format!("{{{}}}", joined)))
             }
-            Type::INT4_ARRAY | Type::INT8_ARRAY => {
-                // convert an int array into something like "{int,int,NULL,int}"
-                // we need to handle NULLs in some sane way, and this mimics what
-                // pg's array_agg() function does.
-                let int_array = Vec::<Option<i64>>::from_sql(ty, raw)?;
-                let joined = int_array
-                    .iter()
-                    .map(|opt| match opt {
-                        Some(v) => v.to_string(),
-                        None => "NULL".to_string(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(",");
-                Ok(Self::Text(format!("{{{}}}", joined)))
-            }
+            Type::INT2_ARRAY => handle_int_array!(i16),
+            Type::INT4_ARRAY => handle_int_array!(i32),
+            Type::INT8_ARRAY => handle_int_array!(i64),
             Type::DATE => {
                 // This is a hack to work around the fact that we don't have
                 // a distinct 'Date' type, and that the existing 'Date' is
