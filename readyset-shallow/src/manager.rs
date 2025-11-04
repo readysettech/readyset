@@ -221,11 +221,11 @@ where
         }
     }
 
-    pub fn get_or_start_insert(&self, query_id: &QueryId, key: K) -> CacheResult<K, V> {
+    pub async fn get_or_start_insert(&self, query_id: &QueryId, key: K) -> CacheResult<K, V> {
         let Some(cache) = self.get(None, Some(query_id)) else {
             return CacheResult::NotCached;
         };
-        let res = cache.get(&key);
+        let res = cache.get(&key).await;
         let guard = Self::make_guard(cache, key);
         match res {
             Some((res, false)) => CacheResult::Hit(res, guard),
@@ -314,11 +314,12 @@ where
             let Some(metadata) = self.metadata.take() else {
                 panic!("no metadata for result set")
             };
-            self.cache.insert(
-                self.key.take().unwrap(),
-                self.results.take().unwrap(),
-                metadata,
-            );
+            let cache = Arc::clone(&self.cache);
+            let key = self.key.take().unwrap();
+            let results = self.results.take().unwrap();
+            tokio::spawn(async move {
+                cache.insert(key, results, metadata).await;
+            });
         }
     }
 }

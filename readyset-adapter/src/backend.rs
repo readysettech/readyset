@@ -1666,7 +1666,7 @@ where
         let [key] = &keys[..] else {
             internal!("shallow cache {query_id} query had {} keys", keys.len());
         };
-        let res = shallow.get_or_start_insert(query_id, key.to_vec());
+        let res = shallow.get_or_start_insert(query_id, key.to_vec()).await;
 
         match res {
             CacheResult::Hit(values, _) if Self::is_meta_compatible(upstream, &values).await? => {
@@ -3213,7 +3213,7 @@ where
         event.query_id = Some(query_id).into();
         let keys = params.make_keys::<DfValue>(&[])?;
         let key = keys.into_iter().next().unwrap_or_default().into_owned();
-        let res = shallow.get_or_start_insert(&query_id, key);
+        let res = shallow.get_or_start_insert(&query_id, key).await;
 
         match res {
             CacheResult::Hit(values, _) => {

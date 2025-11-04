@@ -9,6 +9,7 @@ edition = "2024"
 dashmap = { workspace = true }
 moka = { workspace = true }
 papaya = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true }
 mysql_async = { workspace = true }
 tokio-postgres = { workspace = true }

@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use moka::sync::Cache as MokaCache;
+use moka::future::Cache as MokaCache;
 
 use readyset_client::query::QueryId;
 use readyset_sql::ast::{
@@ -106,7 +106,7 @@ where
         }
     }
 
-    pub(crate) fn insert(&self, k: K, v: Vec<V>, metadata: QueryMetadata) {
+    pub(crate) async fn insert(&self, k: K, v: Vec<V>, metadata: QueryMetadata) {
         let metadata = if let Some(existing) = self.cache_metadata.get() {
             if existing.as_ref() == &metadata {
                 None
@@ -134,11 +134,11 @@ where
             refreshed_ms: now.into(),
             refreshing: false.into(),
         });
-        self.results.insert(k, entry);
+        self.results.insert(k, entry).await;
     }
 
-    pub fn get(&self, k: &K) -> Option<(QueryResult<V>, bool)> {
-        self.results.get(k).map(|entry| {
+    pub async fn get(&self, k: &K) -> Option<(QueryResult<V>, bool)> {
+        self.results.get(k).await.map(|entry| {
             let now = current_timestamp_ms();
             entry.accessed_ms.store(now, Ordering::Relaxed);
             let refresh = if let Some(ttl_ms) = self.ttl_ms
@@ -198,8 +198,8 @@ mod tests {
 
     use super::Cache;
 
-    #[test]
-    fn test_ttl_expiration() {
+    #[tokio::test]
+    async fn test_ttl_expiration() {
         let cache = Cache::new(
             EvictionPolicy::Ttl(Duration::from_secs(1)),
             None,
@@ -212,12 +212,12 @@ mod tests {
         let values = vec![vec!["test_value"]];
         let metadata = QueryMetadata::empty();
 
-        cache.insert(key.clone(), values.clone(), metadata);
-        let result = cache.get(&key).unwrap();
+        cache.insert(key.clone(), values.clone(), metadata).await;
+        let result = cache.get(&key).await.unwrap();
         assert_eq!(result.0.values.as_ref(), &values);
 
-        std::thread::sleep(Duration::from_secs(2));
+        tokio::time::sleep(Duration::from_secs(2)).await;
 
-        assert!(cache.get(&key).is_none());
+        assert!(cache.get(&key).await.is_none());
     }
 }
