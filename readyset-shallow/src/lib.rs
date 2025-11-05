@@ -39,6 +39,7 @@ pub struct QueryResult<V> {
     pub metadata: Arc<QueryMetadata>,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum EvictionPolicy {
     Ttl(Duration),
 }

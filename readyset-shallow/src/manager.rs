@@ -3,6 +3,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use moka::future::Cache as MokaCache;
 use papaya::HashMap;
 use tracing::info;
 
@@ -10,31 +11,16 @@ use readyset_client::query::QueryId;
 use readyset_errors::{ReadySetError, ReadySetResult, internal};
 use readyset_sql::ast::{Relation, SelectStatement, SqlIdentifier};
 
-use crate::cache::{Cache, CacheInfo};
+use crate::cache::{Cache, CacheExpiration, CacheInfo, InnerCache};
 use crate::{EvictionPolicy, QueryMetadata};
 
 pub struct CacheManager<K, V> {
     caches: HashMap<u64, Arc<Cache<K, V>>>,
     names: HashMap<Relation, u64>,
     query_ids: HashMap<QueryId, u64>,
+    inner: InnerCache<K, V>,
     // This lock also synchronizes inserts into the three HashMaps.
     next_id: Mutex<u64>,
-}
-
-// #[derive(Default)] adds a K: Default bound, which we don't want.
-impl<K, V> Default for CacheManager<K, V>
-where
-    K: Hash + Eq + Send + Sync + 'static,
-    V: Send + Sync + 'static,
-{
-    fn default() -> Self {
-        Self {
-            caches: Default::default(),
-            names: Default::default(),
-            query_ids: Default::default(),
-            next_id: Default::default(),
-        }
-    }
 }
 
 impl<K, V> CacheManager<K, V>
@@ -42,8 +28,19 @@ where
     K: Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
+    pub(crate) fn new_inner() -> InnerCache<K, V> {
+        Arc::new(MokaCache::builder().expire_after(CacheExpiration).build())
+    }
+
+    #[allow(clippy::new_without_default)] // temporary
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            caches: Default::default(),
+            names: Default::default(),
+            query_ids: Default::default(),
+            inner: Self::new_inner(),
+            next_id: Default::default(),
+        }
     }
 
     fn check_identifiers(
@@ -106,7 +103,10 @@ where
             return Err(ReadySetError::ViewAlreadyExists(display_name));
         }
 
+        let inner = Arc::clone(&self.inner);
         let cache = Arc::new(Cache::new(
+            id,
+            inner,
             policy,
             name.clone(),
             query_id,
@@ -225,7 +225,7 @@ where
         let Some(cache) = self.get(None, Some(query_id)) else {
             return CacheResult::NotCached;
         };
-        let res = cache.get(&key).await;
+        let (res, key) = cache.get(key).await;
         let guard = Self::make_guard(cache, key);
         match res {
             Some((res, false)) => CacheResult::Hit(res, guard),

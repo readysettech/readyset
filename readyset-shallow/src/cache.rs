@@ -14,6 +14,8 @@ use readyset_sql::ast::{
 
 use crate::{EvictionPolicy, QueryMetadata, QueryResult};
 
+pub(crate) type InnerCache<K, V> = Arc<MokaCache<(u64, K), Arc<CacheEntry<V>>>>;
+
 fn current_timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -22,7 +24,7 @@ fn current_timestamp_ms() -> u64 {
 }
 
 #[derive(Debug)]
-struct CacheEntry<V> {
+pub(crate) struct CacheEntry<V> {
     values: Arc<Vec<V>>,
     metadata: Option<Arc<QueryMetadata>>,
     accessed_ms: AtomicU64,
@@ -31,7 +33,7 @@ struct CacheEntry<V> {
     ttl_ms: Option<u64>,
 }
 
-struct CacheExpiration;
+pub(crate) struct CacheExpiration;
 
 impl<K, V> Expiry<K, Arc<CacheEntry<V>>> for CacheExpiration {
     fn expire_after_create(
@@ -80,7 +82,8 @@ impl From<CacheInfo> for CreateCacheStatement {
 }
 
 pub struct Cache<K, V> {
-    results: MokaCache<K, Arc<CacheEntry<V>>>,
+    id: u64,
+    inner: InnerCache<K, V>,
     cache_metadata: OnceLock<Arc<QueryMetadata>>,
     name: Option<Relation>,
     query_id: Option<QueryId>,
@@ -109,20 +112,21 @@ where
     V: Send + Sync + 'static,
 {
     pub(crate) fn new(
+        id: u64,
+        inner: InnerCache<K, V>,
         policy: EvictionPolicy,
         name: Option<Relation>,
         query_id: Option<QueryId>,
         query: SelectStatement,
         schema_search_path: Vec<SqlIdentifier>,
     ) -> Self {
-        let builder = MokaCache::builder().expire_after(CacheExpiration);
-
         let ttl_ms = match policy {
             EvictionPolicy::Ttl(ttl) => Some(ttl.as_millis().try_into().unwrap_or(u64::MAX)),
         };
 
         Self {
-            results: builder.build(),
+            id,
+            inner,
             cache_metadata: Default::default(),
             name,
             query_id,
@@ -161,11 +165,12 @@ where
             refreshing: false.into(),
             ttl_ms: self.ttl_ms,
         });
-        self.results.insert(k, entry).await;
+        self.inner.insert((self.id, k), entry).await;
     }
 
-    pub async fn get(&self, k: &K) -> Option<(QueryResult<V>, bool)> {
-        self.results.get(k).await.map(|entry| {
+    pub async fn get(&self, k: K) -> (Option<(QueryResult<V>, bool)>, K) {
+        let k = (self.id, k);
+        let res = self.inner.get(&k).await.map(|entry| {
             let now = current_timestamp_ms();
             entry.accessed_ms.store(now, Ordering::Relaxed);
             let refresh = if let Some(ttl_ms) = self.ttl_ms
@@ -193,7 +198,8 @@ where
                 },
                 refresh,
             )
-        })
+        });
+        (res, k.1)
     }
 
     pub fn get_info(&self) -> CacheInfo {
@@ -221,56 +227,107 @@ mod tests {
 
     use readyset_sql::ast::SelectStatement;
 
-    use crate::{EvictionPolicy, QueryMetadata};
+    use crate::{CacheManager, EvictionPolicy, QueryMetadata};
 
-    use super::Cache;
+    use super::*;
 
-    #[tokio::test]
-    async fn test_ttl_expiration() {
-        let cache = Cache::new(
-            EvictionPolicy::Ttl(Duration::from_secs(1)),
+    const ID: u64 = 0;
+
+    fn new<K, V>(policy: EvictionPolicy) -> Cache<K, V>
+    where
+        K: Eq + Hash + Send + Sync + 'static,
+        V: Send + Sync + 'static,
+    {
+        let inner = CacheManager::new_inner();
+        Cache::new(
+            ID,
+            inner,
+            policy,
             None,
             None,
             SelectStatement::default(),
             vec![],
-        );
+        )
+    }
+
+    #[tokio::test]
+    async fn test_ttl_expiration() {
+        let cache = new(EvictionPolicy::Ttl(Duration::from_secs(1)));
 
         let key = vec!["test_key"];
         let values = vec![vec!["test_value"]];
         let metadata = QueryMetadata::empty();
 
         cache.insert(key.clone(), values.clone(), metadata).await;
-        let result = cache.get(&key).await.unwrap();
+        let result = cache.get(key.clone()).await.0.unwrap();
         assert_eq!(result.0.values.as_ref(), &values);
 
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert!(cache.get(&key).await.is_none());
+        assert!(cache.get(key).await.0.is_none());
     }
 
     #[tokio::test]
     async fn test_ttl_update() {
-        let cache = Cache::new(
-            EvictionPolicy::Ttl(Duration::from_secs(1)),
-            None,
-            None,
-            SelectStatement::default(),
-            vec![],
-        );
+        let cache = new(EvictionPolicy::Ttl(Duration::from_secs(2)));
 
         let key = vec!["test_key"];
         let values = vec![vec!["test_value"]];
         let metadata = QueryMetadata::empty();
 
         for _ in 0..4 {
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
             cache
                 .insert(key.clone(), values.clone(), metadata.clone())
                 .await;
-            let result = cache.get(&key).await.unwrap();
+            let result = cache.get(key.clone()).await.0.unwrap();
             assert_eq!(result.0.values.as_ref(), &values);
         }
 
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        assert!(cache.get(&key).await.is_none());
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(cache.get(key).await.0.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_shared_inner_cache() {
+        let inner = CacheManager::new_inner();
+        let policy = EvictionPolicy::Ttl(Duration::from_secs(60));
+        let stmt = SelectStatement::default();
+
+        let cache_0 = Cache::new(
+            0,
+            Arc::clone(&inner),
+            policy,
+            None,
+            None,
+            stmt.clone(),
+            vec![],
+        );
+        let cache_1 = Cache::new(
+            1,
+            Arc::clone(&inner),
+            policy,
+            None,
+            None,
+            stmt.clone(),
+            vec![],
+        );
+
+        let key = vec!["shared_key"];
+        let values_0 = vec![vec!["value_from_cache_0"]];
+        let values_1 = vec![vec!["value_from_cache_1"]];
+        let metadata = QueryMetadata::empty();
+
+        cache_0
+            .insert(key.clone(), values_0.clone(), metadata.clone())
+            .await;
+        cache_1
+            .insert(key.clone(), values_1.clone(), metadata.clone())
+            .await;
+
+        let result_0 = cache_0.get(key.clone()).await.0.unwrap();
+        assert_eq!(result_0.0.values.as_ref(), &values_0);
+
+        let result_1 = cache_1.get(key.clone()).await.0.unwrap();
+        assert_eq!(result_1.0.values.as_ref(), &values_1);
     }
 }
