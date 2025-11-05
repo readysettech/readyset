@@ -7,10 +7,15 @@
 //!
 //! These two conversions are used to convert the [`ReadySetControllerStatus`] structs to a format
 //! that can be passed to various SQL clients.
-use std::fmt::{self, Display};
+use std::{
+    borrow::Cow,
+    fmt::{self, Display},
+};
 
-use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
+
+use readyset_sql::ast::CacheType;
+use replication_offset::ReplicationOffset;
 
 // Consts for variable names.
 
@@ -81,23 +86,31 @@ impl Display for CurrentStatus {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CacheProperties {
+    cache_type: CacheType,
     always: bool,
 }
 
 impl Display for CacheProperties {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // List the most important properties first.
-        let mut properties = vec![];
+        let mut properties = vec![Cow::Owned(format!("{}", self.cache_type))];
         if self.always {
-            properties.push("always");
+            properties.push(Cow::Borrowed("always"));
         }
         write!(f, "{}", properties.join(", "))
     }
 }
 
 impl CacheProperties {
+    pub fn new(cache_type: CacheType) -> Self {
+        Self {
+            cache_type,
+            always: false,
+        }
+    }
+
     pub fn set_always(&mut self, always: bool) {
         self.always = always;
     }

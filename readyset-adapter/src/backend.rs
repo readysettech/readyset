@@ -2663,7 +2663,7 @@ where
             let query =
                 Self::format_query_text(view.statement.display(DB::SQL_DIALECT).to_string()).into();
             let properties = {
-                let mut properties = CacheProperties::default();
+                let mut properties = CacheProperties::new(CacheType::Deep);
                 properties.set_always(view.always);
                 properties.to_string().into()
             };
