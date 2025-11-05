@@ -2,9 +2,10 @@ use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use moka::future::Cache as MokaCache;
+use moka::policy::Expiry;
 
 use readyset_client::query::QueryId;
 use readyset_sql::ast::{
@@ -27,6 +28,30 @@ struct CacheEntry<V> {
     accessed_ms: AtomicU64,
     refreshed_ms: AtomicU64,
     refreshing: AtomicBool,
+    ttl_ms: Option<u64>,
+}
+
+struct CacheExpiration;
+
+impl<K, V> Expiry<K, Arc<CacheEntry<V>>> for CacheExpiration {
+    fn expire_after_create(
+        &self,
+        _key: &K,
+        value: &Arc<CacheEntry<V>>,
+        _created: Instant,
+    ) -> Option<Duration> {
+        value.ttl_ms.map(Duration::from_millis)
+    }
+
+    fn expire_after_update(
+        &self,
+        _key: &K,
+        value: &Arc<CacheEntry<V>>,
+        _updated: Instant,
+        _left: Option<Duration>,
+    ) -> Option<Duration> {
+        value.ttl_ms.map(Duration::from_millis)
+    }
 }
 
 #[derive(Debug)]
@@ -73,6 +98,7 @@ where
         f.debug_struct("Cache")
             .field("name", &self.name)
             .field("query_id", &self.query_id)
+            .field("ttl_ms", &self.ttl_ms)
             .finish_non_exhaustive()
     }
 }
@@ -89,10 +115,10 @@ where
         query: SelectStatement,
         schema_search_path: Vec<SqlIdentifier>,
     ) -> Self {
-        let builder = MokaCache::builder();
+        let builder = MokaCache::builder().expire_after(CacheExpiration);
 
-        let (builder, ttl_ms) = match policy {
-            EvictionPolicy::Ttl(ttl) => (builder.time_to_live(ttl), Some(ttl.as_millis() as _)),
+        let ttl_ms = match policy {
+            EvictionPolicy::Ttl(ttl) => Some(ttl.as_millis().try_into().unwrap_or(u64::MAX)),
         };
 
         Self {
@@ -133,6 +159,7 @@ where
             accessed_ms: now.into(),
             refreshed_ms: now.into(),
             refreshing: false.into(),
+            ttl_ms: self.ttl_ms,
         });
         self.results.insert(k, entry).await;
     }
@@ -217,7 +244,33 @@ mod tests {
         assert_eq!(result.0.values.as_ref(), &values);
 
         tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(cache.get(&key).await.is_none());
+    }
 
+    #[tokio::test]
+    async fn test_ttl_update() {
+        let cache = Cache::new(
+            EvictionPolicy::Ttl(Duration::from_secs(1)),
+            None,
+            None,
+            SelectStatement::default(),
+            vec![],
+        );
+
+        let key = vec!["test_key"];
+        let values = vec![vec!["test_value"]];
+        let metadata = QueryMetadata::empty();
+
+        for _ in 0..4 {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            cache
+                .insert(key.clone(), values.clone(), metadata.clone())
+                .await;
+            let result = cache.get(&key).await.unwrap();
+            assert_eq!(result.0.values.as_ref(), &values);
+        }
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
         assert!(cache.get(&key).await.is_none());
     }
 }
