@@ -409,8 +409,8 @@
               "Value #Readyset QPS": true,
               "cache name": true,
               "count": true,
-              "fallback behavior": true,
-              "fallback behavior results": true,
+              "properties": true,
+              "properties results": true,
               "name results": true
             },
             "includeByName": {},
@@ -429,7 +429,7 @@
               "Value #Readyset QPS": 12,
               "cache name": 14,
               "count": 16,
-              "fallback behavior": 15,
+              "properties": 15,
               "query text": 1,
               "query_id": 0
             },

@@ -80,3 +80,25 @@ impl Display for CurrentStatus {
         write!(f, "{s}")
     }
 }
+
+#[derive(Debug, Default)]
+pub struct CacheProperties {
+    always: bool,
+}
+
+impl Display for CacheProperties {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // List the most important properties first.
+        let mut properties = vec![];
+        if self.always {
+            properties.push("always");
+        }
+        write!(f, "{}", properties.join(", "))
+    }
+}
+
+impl CacheProperties {
+    pub fn set_always(&mut self, always: bool) {
+        self.always = always;
+    }
+}

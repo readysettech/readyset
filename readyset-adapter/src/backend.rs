@@ -89,6 +89,7 @@ use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
 use readyset_client::query::*;
 use readyset_client::recipe::CacheExpr;
 use readyset_client::results::Results;
+use readyset_client::status::CacheProperties;
 use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{
@@ -2641,8 +2642,6 @@ where
             None => None,
         };
 
-        let views = self.noria.verbose_views(query_id, None).await?;
-
         let select_schema = if let Some(handle) = self.metrics_handle.as_mut() {
             // Must snapshot histograms to get the latest metrics
             handle.snapshot_counters(readyset_client_metrics::DatabaseType::ReadySet);
@@ -2650,41 +2649,42 @@ where
                 "query id",
                 "cache name",
                 "query text",
-                "fallback behavior",
+                "properties",
                 "count"
             )
         } else {
-            create_dummy_schema!("query id", "cache name", "query text", "fallback behavior")
+            create_dummy_schema!("query id", "cache name", "query text", "properties")
         };
 
-        // Get the cache name for each query from the view cache
-        let mut results: Vec<Vec<DfValue>> = vec![];
-        for view in views {
-            let mut row: Vec<DfValue> = vec![
-                view.query_id.to_string().into(),
-                view.name.display_unquoted().to_string().into(),
-                Self::format_query_text(view.statement.display(DB::SQL_DIALECT).to_string()).into(),
-                if view.always {
-                    "no fallback".into()
-                } else {
-                    "fallback allowed".into()
-                },
-            ];
+        let mut rows = vec![];
+        for view in self.noria.verbose_views(query_id, None).await? {
+            let query_id = view.query_id.to_string().into();
+            let name = view.name.display_unquoted().to_string().into();
+            let query =
+                Self::format_query_text(view.statement.display(DB::SQL_DIALECT).to_string()).into();
+            let properties = {
+                let mut properties = CacheProperties::default();
+                properties.set_always(view.always);
+                properties.to_string().into()
+            };
+            let count = self.metrics_handle.as_ref().map(|h| {
+                h.metrics_summary(view.query_id.to_string())
+                    .unwrap_or_default()
+                    .sample_count
+                    .into()
+            });
 
-            // Append metrics if we have them
-            if let Some(handle) = self.metrics_handle.as_ref() {
-                let MetricsSummary { sample_count } = handle
-                    .metrics_summary(view.query_id.to_string())
-                    .unwrap_or_default();
-                row.push(DfValue::from(format!("{sample_count}")));
-            }
-
-            results.push(row);
+            let row = if let Some(count) = count {
+                vec![query_id, name, query, properties, count]
+            } else {
+                vec![query_id, name, query, properties]
+            };
+            rows.push(row);
         }
 
         Ok(noria_connector::QueryResult::from_owned(
             select_schema,
-            vec![Results::new(results)],
+            vec![Results::new(rows)],
         ))
     }
 
