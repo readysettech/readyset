@@ -27,12 +27,21 @@ struct CacheEntry<V> {
     refreshing: AtomicBool,
 }
 
+#[allow(unused)]
+#[derive(Debug)]
+pub struct CacheInfo {
+    pub name: Option<Relation>,
+    pub query_id: Option<QueryId>,
+    pub query: SelectStatement,
+    pub ttl_ms: Option<u64>,
+}
+
 pub struct Cache<K, V> {
     results: MokaCache<K, Arc<CacheEntry<V>>>,
     cache_metadata: OnceLock<Arc<QueryMetadata>>,
     name: Option<Relation>,
     query_id: Option<QueryId>,
-    _query: SelectStatement,
+    query: SelectStatement,
     ttl_ms: Option<u64>,
 }
 
@@ -71,7 +80,7 @@ where
             cache_metadata: Default::default(),
             name,
             query_id,
-            _query: query,
+            query,
             ttl_ms,
         }
     }
@@ -137,6 +146,15 @@ where
                 refresh,
             )
         })
+    }
+
+    pub fn get_info(&self) -> CacheInfo {
+        CacheInfo {
+            name: self.name.clone(),
+            query_id: self.query_id,
+            query: self.query.clone(),
+            ttl_ms: self.ttl_ms,
+        }
     }
 
     pub fn name(&self) -> &Option<Relation> {

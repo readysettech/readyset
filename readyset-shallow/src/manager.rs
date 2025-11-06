@@ -10,7 +10,7 @@ use readyset_client::query::QueryId;
 use readyset_errors::{ReadySetError, ReadySetResult, internal};
 use readyset_sql::ast::{Relation, SelectStatement};
 
-use crate::cache::Cache;
+use crate::cache::{Cache, CacheInfo};
 use crate::{EvictionPolicy, QueryMetadata};
 
 pub struct CacheManager<K, V> {
@@ -154,6 +154,15 @@ where
 
         info!("dropped shallow cache {display_name}");
         Ok(())
+    }
+
+    pub fn list_caches(&self, query_id: &Option<QueryId>) -> Vec<CacheInfo> {
+        self.caches
+            .pin()
+            .values()
+            .filter(|cache| query_id.is_none() || cache.query_id() == query_id)
+            .map(|cache| cache.get_info())
+            .collect()
     }
 
     fn get(&self, name: Option<&Relation>, query_id: Option<&QueryId>) -> Option<Arc<Cache<K, V>>> {
