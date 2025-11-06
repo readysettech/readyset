@@ -99,7 +99,7 @@ use readyset_client_metrics::{
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
-use readyset_shallow::{CacheInsertGuard, CacheManager, CacheResult};
+use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
     self, AlterReadysetStatement, CacheInner, CacheType, CreateCacheStatement, DeallocateStatement,
     DropCacheStatement, ExplainStatement, Relation, SelectStatement, SetStatement, ShowStatement,
@@ -2657,6 +2657,15 @@ where
         };
 
         let mut rows = vec![];
+        let mut push_row = |query_id, name, query, properties, count| {
+            let row = if let Some(count) = count {
+                vec![query_id, name, query, properties, count]
+            } else {
+                vec![query_id, name, query, properties]
+            };
+            rows.push(row);
+        };
+
         for view in self.noria.verbose_views(query_id, None).await? {
             let query_id = view.query_id.to_string().into();
             let name = view.name.display_unquoted().to_string().into();
@@ -2674,12 +2683,32 @@ where
                     .into()
             });
 
-            let row = if let Some(count) = count {
-                vec![query_id, name, query, properties, count]
-            } else {
-                vec![query_id, name, query, properties]
+            push_row(query_id, name, query, properties, count);
+        }
+        for CacheInfo {
+            name,
+            query_id,
+            query,
+            ttl_ms,
+        } in self.shallow.list_caches(query_id)
+        {
+            let query_id = query_id
+                .map(|id| id.to_string().into())
+                .unwrap_or("".into());
+            let name = name
+                .map(|n| n.display_unquoted().to_string().into())
+                .unwrap_or("".into());
+            let query = query.display(DB::SQL_DIALECT).to_string().into();
+            let properties = {
+                let mut properties = CacheProperties::new(CacheType::Shallow);
+                if let Some(ttl_ms) = ttl_ms {
+                    properties.set_ttl(ttl_ms);
+                }
+                properties.to_string().into()
             };
-            rows.push(row);
+            let count = self.metrics_handle.as_ref().map(|_| 0.into());
+
+            push_row(query_id, name, query, properties, count);
         }
 
         Ok(noria_connector::QueryResult::from_owned(

@@ -27,7 +27,6 @@ struct CacheEntry<V> {
     refreshing: AtomicBool,
 }
 
-#[allow(unused)]
 #[derive(Debug)]
 pub struct CacheInfo {
     pub name: Option<Relation>,

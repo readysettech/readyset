@@ -156,11 +156,11 @@ where
         Ok(())
     }
 
-    pub fn list_caches(&self, query_id: &Option<QueryId>) -> Vec<CacheInfo> {
+    pub fn list_caches(&self, query_id: Option<QueryId>) -> Vec<CacheInfo> {
         self.caches
             .pin()
             .values()
-            .filter(|cache| query_id.is_none() || cache.query_id() == query_id)
+            .filter(|cache| query_id.is_none() || *cache.query_id() == query_id)
             .map(|cache| cache.get_info())
             .collect()
     }

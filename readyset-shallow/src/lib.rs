@@ -4,6 +4,7 @@ use std::time::Duration;
 mod cache;
 mod manager;
 
+pub use cache::CacheInfo;
 pub use manager::{CacheInsertGuard, CacheManager, CacheResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

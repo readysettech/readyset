@@ -89,6 +89,7 @@ impl Display for CurrentStatus {
 #[derive(Debug)]
 pub struct CacheProperties {
     cache_type: CacheType,
+    ttl_ms: Option<u64>,
     always: bool,
 }
 
@@ -99,6 +100,9 @@ impl Display for CacheProperties {
         if self.always {
             properties.push(Cow::Borrowed("always"));
         }
+        if let Some(ttl_ms) = self.ttl_ms {
+            properties.push(Cow::Owned(format!("ttl {ttl_ms} ms")));
+        }
         write!(f, "{}", properties.join(", "))
     }
 }
@@ -107,11 +111,16 @@ impl CacheProperties {
     pub fn new(cache_type: CacheType) -> Self {
         Self {
             cache_type,
+            ttl_ms: None,
             always: false,
         }
     }
 
     pub fn set_always(&mut self, always: bool) {
         self.always = always;
+    }
+
+    pub fn set_ttl(&mut self, ttl_ms: u64) {
+        self.ttl_ms = Some(ttl_ms);
     }
 }
