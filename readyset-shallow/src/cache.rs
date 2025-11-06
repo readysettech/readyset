@@ -30,7 +30,7 @@ struct CacheEntry<V> {
 pub struct Cache<K, V> {
     results: MokaCache<K, Arc<CacheEntry<V>>>,
     cache_metadata: OnceLock<Arc<QueryMetadata>>,
-    relation: Option<Relation>,
+    name: Option<Relation>,
     query_id: Option<QueryId>,
     ttl_ms: Option<u64>,
 }
@@ -42,7 +42,7 @@ where
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Cache")
-            .field("relation", &self.relation)
+            .field("name", &self.name)
             .field("query_id", &self.query_id)
             .finish_non_exhaustive()
     }
@@ -55,7 +55,7 @@ where
 {
     pub(crate) fn new(
         policy: EvictionPolicy,
-        relation: Option<Relation>,
+        name: Option<Relation>,
         query_id: Option<QueryId>,
     ) -> Self {
         let builder = MokaCache::builder();
@@ -67,7 +67,7 @@ where
         Self {
             results: builder.build(),
             cache_metadata: Default::default(),
-            relation,
+            name,
             query_id,
             ttl_ms,
         }
@@ -136,8 +136,8 @@ where
         })
     }
 
-    pub fn relation(&self) -> &Option<Relation> {
-        &self.relation
+    pub fn name(&self) -> &Option<Relation> {
+        &self.name
     }
 
     pub fn query_id(&self) -> &Option<QueryId> {
