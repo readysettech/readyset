@@ -3019,8 +3019,19 @@ where
             &async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
         >,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let params =
-            adapter_rewrites::rewrite_equivalent(&mut req.statement, noria.rewrite_params())?;
+        let params = match adapter_rewrites::rewrite_equivalent(
+            &mut req.statement,
+            noria.rewrite_params(),
+        ) {
+            Ok(params) => params,
+            Err(err) => {
+                if upstream.is_some() {
+                    return Self::query_fallback(upstream, query, event, None).await;
+                } else {
+                    return Err(err.into());
+                }
+            }
+        };
         let query_id = QueryId::from_select(&req.statement, noria.schema_search_path());
         event.query_id = Some(query_id).into();
         let keys = params.make_keys::<DfValue>(&[])?;
