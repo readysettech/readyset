@@ -2,8 +2,10 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::fmt;
+use std::mem::size_of;
 
 use proptest::arbitrary::Arbitrary;
+use readyset_util::SizeOf;
 
 use crate::{AstConversionError, Dialect, FromDialect, IntoDialect, TryFromDialect};
 
@@ -472,6 +474,19 @@ impl Arbitrary for SqlIdentifier {
         //
         // A simplified version
         "[a-zA-Z_][a-zA-Z_0-9]{1,62}".prop_map(Into::into).boxed()
+    }
+}
+
+impl SizeOf for SqlIdentifier {
+    fn deep_size_of(&self) -> usize {
+        match &self.0 {
+            IdentInner::Tiny(_) => size_of::<Self>(),
+            IdentInner::Text(text) => size_of::<Self>() + text.0.deep_size_of(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        false
     }
 }
 

@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
+use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -11,6 +12,7 @@ use readyset_client::query::QueryId;
 use readyset_sql::ast::{
     CacheInner, CacheType, CreateCacheStatement, Relation, SelectStatement, SqlIdentifier,
 };
+use readyset_util::SizeOf;
 
 use crate::{EvictionPolicy, QueryMetadata, QueryResult};
 
@@ -31,6 +33,23 @@ pub(crate) struct CacheEntry<V> {
     refreshed_ms: AtomicU64,
     refreshing: AtomicBool,
     ttl_ms: Option<u64>,
+}
+
+impl<V> SizeOf for CacheEntry<V>
+where
+    V: SizeOf,
+{
+    fn deep_size_of(&self) -> usize {
+        let mut sz = size_of::<Self>() + self.values.deep_size_of();
+        if let Some(ref meta) = self.metadata {
+            sz += meta.deep_size_of();
+        }
+        sz
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
 }
 
 pub(crate) struct CacheExpiration;
@@ -235,8 +254,8 @@ mod tests {
 
     fn new<K, V>(policy: EvictionPolicy) -> Cache<K, V>
     where
-        K: Eq + Hash + Send + Sync + 'static,
-        V: Send + Sync + 'static,
+        K: Eq + Hash + Send + Sync + SizeOf + 'static,
+        V: Send + Sync + SizeOf + 'static,
     {
         let inner = CacheManager::new_inner();
         Cache::new(
@@ -329,5 +348,19 @@ mod tests {
 
         let result_1 = cache_1.get(key.clone()).await.0.unwrap();
         assert_eq!(result_1.0.values.as_ref(), &values_1);
+    }
+
+    #[test]
+    fn test_size_of() {
+        let now = current_timestamp_ms();
+        let entry = CacheEntry {
+            values: Arc::new(vec![1u64, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
+            metadata: Some(Arc::new(QueryMetadata::Test)),
+            accessed_ms: now.into(),
+            refreshed_ms: now.into(),
+            refreshing: false.into(),
+            ttl_ms: None,
+        };
+        assert!(entry.deep_size_of() > 10 * 0u64.deep_size_of());
     }
 }

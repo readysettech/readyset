@@ -1,10 +1,13 @@
 //! This crate provides miscellaneous utilities and extensions to the Rust standard library, for use
 //! in all crates in this workspace.
+
 #![deny(missing_docs, rustdoc::missing_crate_level_docs)]
+
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 use std::mem::size_of_val;
+use std::sync::Arc;
 
 #[cfg(feature = "failure_injection")]
 pub mod failpoints;
@@ -196,5 +199,90 @@ where
 
     fn is_empty(&self) -> bool {
         false
+    }
+}
+
+impl<T> SizeOf for Arc<T>
+where
+    T: SizeOf,
+{
+    fn deep_size_of(&self) -> usize {
+        (**self).deep_size_of()
+    }
+
+    fn is_empty(&self) -> bool {
+        (**self).is_empty()
+    }
+}
+
+impl<H, T> SizeOf for triomphe::ThinArc<H, T> {
+    fn deep_size_of(&self) -> usize {
+        size_of::<Self>() + size_of_val(&self.slice)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.slice.is_empty()
+    }
+}
+
+impl SizeOf for &str {
+    fn deep_size_of(&self) -> usize {
+        self.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+}
+
+macro_rules! sizeof_integer {
+    ($t:ty) => {
+        impl SizeOf for $t {
+            fn deep_size_of(&self) -> usize {
+                size_of::<$t>()
+            }
+
+            fn is_empty(&self) -> bool {
+                false
+            }
+        }
+    };
+}
+
+sizeof_integer!(u8);
+sizeof_integer!(u16);
+sizeof_integer!(u32);
+sizeof_integer!(u64);
+sizeof_integer!(u128);
+sizeof_integer!(i8);
+sizeof_integer!(i16);
+sizeof_integer!(i32);
+sizeof_integer!(i64);
+sizeof_integer!(i128);
+
+impl<A, B> SizeOf for (A, B)
+where
+    A: SizeOf,
+    B: SizeOf,
+{
+    fn deep_size_of(&self) -> usize {
+        size_of::<A>() + size_of::<B>()
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+}
+
+impl<T> SizeOf for Option<T>
+where
+    T: SizeOf,
+{
+    fn deep_size_of(&self) -> usize {
+        size_of::<Self>() + self.as_ref().map_or(0, |v| v.deep_size_of())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.is_none()
     }
 }

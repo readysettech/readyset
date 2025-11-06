@@ -5405,11 +5405,13 @@ dependencies = [
  "dashmap",
  "moka",
  "mysql_async",
+ "mysql_common",
  "papaya",
  "psql-srv",
  "readyset-client",
  "readyset-errors",
  "readyset-sql",
+ "readyset-util",
  "tokio",
  "tokio-postgres",
  "tracing",
@@ -5567,6 +5569,7 @@ dependencies = [
  "thiserror 2.0.16",
  "tokio",
  "tracing",
+ "triomphe",
  "uuid 0.8.2",
 ]
 

@@ -25,6 +25,7 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
+triomphe = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]

@@ -26,6 +26,7 @@ pub mod util;
 mod value;
 
 use std::collections::HashMap;
+use std::mem::size_of;
 use std::sync::Arc;
 
 use database_utils::TlsMode;
@@ -37,6 +38,7 @@ use protocol::Protocol;
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_sql::ast::SqlIdentifier;
 use readyset_util::redacted::RedactedString;
+use readyset_util::SizeOf;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_native_tls::TlsAcceptor;
 use tokio_postgres::OwnedField;
@@ -239,4 +241,30 @@ where
         .await?;
     channel::Channel::new(channel).send(packet).await?;
     Ok(())
+}
+
+impl SizeOf for Column {
+    fn deep_size_of(&self) -> usize {
+        match self {
+            Column::Column {
+                name,
+                table_oid,
+                attnum,
+                col_type,
+            } => {
+                size_of::<Self>()
+                    + name.deep_size_of()
+                    + table_oid.deep_size_of()
+                    + attnum.deep_size_of()
+                    + size_of_val(col_type)
+            }
+            Column::OwnedField(field) => {
+                size_of::<Self>() + size_of_val(field) + field.name().len()
+            }
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
 }
