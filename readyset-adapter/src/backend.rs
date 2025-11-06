@@ -2376,13 +2376,13 @@ where
         let policy = policy.ok_or_else(|| internal_err!("Policy required for shallow cache"))?;
         let policy = convert_eviction_policy(policy);
 
-        let res = self
-            .shallow
-            .create_cache(Some(name.clone()), Some(query_id), policy);
+        let res =
+            self.shallow
+                .create_cache(Some(name.clone()), Some(query_id), stmt.clone(), policy);
 
         if res.is_ok() {
             self.state.query_status_cache.update_query_migration_state(
-                &ViewCreateRequest::new(stmt.clone(), Vec::new()),
+                &ViewCreateRequest::new(stmt, Vec::new()),
                 MigrationState::Successful(CacheType::Shallow),
                 None,
             );
@@ -4146,11 +4146,11 @@ where
     )?;
 
     let SqlQuery::CreateCache(create_cache) = query else {
-        return Err(internal_err!("Not a CREATE CACHE statement"));
+        internal!("Not a CREATE CACHE statement");
     };
 
     if !matches!(create_cache.cache_type, Some(CacheType::Shallow)) {
-        return Err(internal_err!("Not a shallow cache"));
+        internal!("Not a shallow cache");
     }
 
     let policy = create_cache
@@ -4161,8 +4161,8 @@ where
 
     let mut stmt = match create_cache.inner {
         Ok(CacheInner::Statement(stmt)) => *stmt,
-        Ok(CacheInner::Id(_)) => return Err(internal_err!("Cannot recreate from query ID")),
-        Err(e) => return Err(internal_err!("Failed to parse SELECT: {}", e)),
+        Ok(CacheInner::Id(_)) => internal!("Cannot recreate from query ID"),
+        Err(e) => internal!("Failed to parse SELECT: {e}"),
     };
 
     adapter_rewrites::rewrite_equivalent(&mut stmt, rewrite_params)?;
@@ -4170,6 +4170,6 @@ where
     let query_id = QueryId::from_select(&stmt, &req.schema_search_path);
     let name = create_cache.name.unwrap_or_else(|| query_id.into());
 
-    shallow.create_cache(Some(name), Some(query_id), policy)?;
+    shallow.create_cache(Some(name), Some(query_id), stmt, policy)?;
     Ok(())
 }

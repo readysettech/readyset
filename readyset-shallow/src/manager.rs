@@ -8,7 +8,7 @@ use tracing::info;
 
 use readyset_client::query::QueryId;
 use readyset_errors::{ReadySetError, ReadySetResult, internal};
-use readyset_sql::ast::Relation;
+use readyset_sql::ast::{Relation, SelectStatement};
 
 use crate::cache::Cache;
 use crate::{EvictionPolicy, QueryMetadata};
@@ -85,6 +85,7 @@ where
         &self,
         name: Option<Relation>,
         query_id: Option<QueryId>,
+        query: SelectStatement,
         policy: EvictionPolicy,
     ) -> ReadySetResult<()> {
         Self::check_identifiers(name.as_ref(), query_id.as_ref())?;
@@ -104,7 +105,7 @@ where
             return Err(ReadySetError::ViewAlreadyExists(display_name));
         }
 
-        let cache = Arc::new(Cache::new(policy, name.clone(), query_id));
+        let cache = Arc::new(Cache::new(policy, name.clone(), query_id, query));
 
         if let Some(name) = name {
             let guard = self.names.pin();

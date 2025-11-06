@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use moka::sync::Cache as MokaCache;
 
 use readyset_client::query::QueryId;
-use readyset_sql::ast::Relation;
+use readyset_sql::ast::{Relation, SelectStatement};
 
 use crate::{EvictionPolicy, QueryMetadata, QueryResult};
 
@@ -32,6 +32,7 @@ pub struct Cache<K, V> {
     cache_metadata: OnceLock<Arc<QueryMetadata>>,
     name: Option<Relation>,
     query_id: Option<QueryId>,
+    _query: SelectStatement,
     ttl_ms: Option<u64>,
 }
 
@@ -57,6 +58,7 @@ where
         policy: EvictionPolicy,
         name: Option<Relation>,
         query_id: Option<QueryId>,
+        query: SelectStatement,
     ) -> Self {
         let builder = MokaCache::builder();
 
@@ -69,6 +71,7 @@ where
             cache_metadata: Default::default(),
             name,
             query_id,
+            _query: query,
             ttl_ms,
         }
     }
@@ -149,13 +152,20 @@ where
 mod tests {
     use std::time::Duration;
 
+    use readyset_sql::ast::SelectStatement;
+
     use crate::{EvictionPolicy, QueryMetadata};
 
     use super::Cache;
 
     #[test]
     fn test_ttl_expiration() {
-        let cache = Cache::new(EvictionPolicy::Ttl(Duration::from_secs(1)), None, None);
+        let cache = Cache::new(
+            EvictionPolicy::Ttl(Duration::from_secs(1)),
+            None,
+            None,
+            SelectStatement::default(),
+        );
 
         let key = vec!["test_key"];
         let values = vec![vec!["test_value"]];
