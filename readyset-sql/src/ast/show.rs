@@ -16,7 +16,7 @@ pub struct ReadySetTablesOptions {
 pub enum ShowStatement {
     Events,
     Tables(Tables),
-    CachedQueries(Option<String>),
+    CachedQueries(Option<CacheType>, Option<String>),
     ProxiedQueries(ProxiedQueriesOptions),
     ReadySetStatus,
     ReadySetStatusAdapter,
@@ -35,12 +35,15 @@ impl DialectDisplay for ShowStatement {
             match self {
                 Self::Events => write!(f, "EVENTS"),
                 Self::Tables(tables) => write!(f, "{}", tables.display(dialect)),
-                Self::CachedQueries(maybe_query_id) => {
-                    if let Some(query_id) = maybe_query_id {
-                        write!(f, "CACHES WHERE query_id = '{query_id}'")
-                    } else {
-                        write!(f, "CACHES")
+                Self::CachedQueries(cache_type, query_id) => {
+                    if let Some(cache_type) = cache_type {
+                        write!(f, "{} ", cache_type.display(dialect))?;
                     }
+                    write!(f, "CACHES")?;
+                    if let Some(query_id) = query_id {
+                        write!(f, " WHERE query_id = '{query_id}'")?;
+                    }
+                    Ok(())
                 }
                 Self::ProxiedQueries(options) => {
                     write!(f, "PROXIED ")?;

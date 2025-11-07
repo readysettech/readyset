@@ -24,14 +24,20 @@ fn where_query_id(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResu
     }
 }
 
-fn cached_queries(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
+fn caches(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
     move |i| {
+        let (i, cache_type) = opt(alt((
+            map(tag_no_case("deep"), |_| CacheType::Deep),
+            map(tag_no_case("shallow"), |_| CacheType::Shallow),
+        )))(i)?;
+        let i = match cache_type {
+            Some(..) => whitespace1(i)?.0,
+            None => i,
+        };
         let (i, _) = tag_no_case("caches")(i)?;
-        let (i, q_id) = opt(preceded(whitespace1, where_query_id(dialect)))(i)?;
+        let (i, query_id) = opt(preceded(whitespace1, where_query_id(dialect)))(i)?;
 
-        Ok((i, ShowStatement::CachedQueries(q_id)))
+        Ok((i, ShowStatement::CachedQueries(cache_type, query_id)))
     }
 }
 
@@ -137,7 +143,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
         let (i, _) = tag_no_case("show")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, statement) = alt((
-            cached_queries(dialect),
+            caches(dialect),
             proxied_queries(dialect),
             show_rls(dialect),
             readyset_migration_status,
@@ -298,8 +304,32 @@ mod tests {
         let res2 = show(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
             .unwrap()
             .1;
-        assert_eq!(res1, ShowStatement::CachedQueries(None));
-        assert_eq!(res2, ShowStatement::CachedQueries(None));
+        assert_eq!(res1, ShowStatement::CachedQueries(None, None));
+        assert_eq!(res2, ShowStatement::CachedQueries(None, None));
+    }
+
+    #[test]
+    fn show_deep_caches() {
+        let query = "SHOW DEEP CACHES";
+        let actual = show(Dialect::MySQL)(LocatedSpan::new(query.as_bytes()))
+            .unwrap()
+            .1;
+        assert_eq!(
+            actual,
+            ShowStatement::CachedQueries(Some(CacheType::Deep), None)
+        );
+    }
+
+    #[test]
+    fn show_shallow_caches() {
+        let query = "SHOW SHALLOW CACHES";
+        let actual = show(Dialect::MySQL)(LocatedSpan::new(query.as_bytes()))
+            .unwrap()
+            .1;
+        assert_eq!(
+            actual,
+            ShowStatement::CachedQueries(Some(CacheType::Shallow), None)
+        );
     }
 
     #[test]
@@ -308,7 +338,22 @@ mod tests {
         let res1 = show(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
             .unwrap()
             .1;
-        assert_eq!(res1, ShowStatement::CachedQueries(Some("test".to_string())));
+        assert_eq!(
+            res1,
+            ShowStatement::CachedQueries(None, Some("test".to_string()))
+        );
+    }
+
+    #[test]
+    fn show_caches_with_type_and_where() {
+        let query = "SHOW DEEP CACHES WHERE query_id = 'foo'";
+        let actual = show(Dialect::MySQL)(LocatedSpan::new(query.as_bytes()))
+            .unwrap()
+            .1;
+        assert_eq!(
+            actual,
+            ShowStatement::CachedQueries(Some(CacheType::Deep), Some("foo".to_string()))
+        );
     }
 
     #[test]

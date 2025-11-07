@@ -327,7 +327,7 @@ impl SqlQuery {
                 ShowStatement::Events | ShowStatement::Tables(_) | ShowStatement::Databases => {
                     false
                 }
-                ShowStatement::CachedQueries(_)
+                ShowStatement::CachedQueries(..)
                 | ShowStatement::ProxiedQueries(_)
                 | ShowStatement::ReadySetStatus
                 | ShowStatement::ReadySetStatusAdapter

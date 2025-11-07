@@ -2634,6 +2634,7 @@ where
     /// Responds to a `SHOW CACHES` query
     async fn show_caches(
         &mut self,
+        _cache_type: Option<CacheType>,
         query_id: Option<&str>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let query_id = match query_id {
@@ -2948,7 +2949,7 @@ where
                 }
                 self.drop_all_proxied_queries().await
             }
-            SqlQuery::Show(ShowStatement::CachedQueries(query_id)) => {
+            SqlQuery::Show(ShowStatement::CachedQueries(cache_type, query_id)) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
                     if let Err(e) = telemetry_sender.send_event(TelemetryEvent::ShowCaches) {
@@ -2958,7 +2959,7 @@ where
                     trace!("No telemetry sender. not sending metric for SHOW CACHES");
                 }
 
-                self.show_caches(query_id.as_deref()).await
+                self.show_caches(*cache_type, query_id.as_deref()).await
             }
             SqlQuery::Show(ShowStatement::ReadySetStatus) => Ok(self
                 .status_reporter

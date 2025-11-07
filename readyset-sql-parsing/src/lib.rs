@@ -618,6 +618,27 @@ fn parse_explain(
         .try_into_dialect(dialect)?)
 }
 
+fn parse_show_caches(
+    parser: &mut Parser,
+    cache_type: Option<CacheType>,
+) -> Result<SqlQuery, ReadysetParsingError> {
+    let query_id = if parser.parse_keyword(Keyword::WHERE) {
+        let lhs = parser.parse_identifier()?;
+        if lhs.value != "query_id" {
+            return Err(ReadysetParsingError::ReadysetParsingError(
+                "expected 'query_id' after WHERE".into(),
+            ));
+        }
+        parser.expect_token(&Token::Eq)?;
+        Some(parser.parse_identifier()?.value)
+    } else {
+        None
+    };
+    Ok(SqlQuery::Show(
+        readyset_sql::ast::ShowStatement::CachedQueries(cache_type, query_id),
+    ))
+}
+
 /// Expects `SHOW` was already parsed. Attempts to parse a Readyset-specific SHOW statement,
 /// otherwise falls back to [`Parser::parse_show`].
 ///
@@ -702,21 +723,12 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
             ),
         ))
     } else if parse_readyset_keyword(parser, ReadysetKeyword::CACHES) {
-        let query_id = if parser.parse_keyword(Keyword::WHERE) {
-            let lhs = parser.parse_identifier()?;
-            if lhs.value != "query_id" {
-                return Err(ReadysetParsingError::ReadysetParsingError(
-                    "expected 'query_id' after WHERE".into(),
-                ));
-            }
-            parser.expect_token(&Token::Eq)?;
-            Some(parser.parse_identifier()?.value)
-        } else {
-            None
-        };
-        Ok(SqlQuery::Show(
-            readyset_sql::ast::ShowStatement::CachedQueries(query_id),
-        ))
+        parse_show_caches(parser, None)
+    } else if parse_readyset_keywords(parser, &[ReadysetKeyword::DEEP, ReadysetKeyword::CACHES]) {
+        parse_show_caches(parser, Some(CacheType::Deep))
+    } else if parse_readyset_keywords(parser, &[ReadysetKeyword::SHALLOW, ReadysetKeyword::CACHES])
+    {
+        parse_show_caches(parser, Some(CacheType::Shallow))
     } else {
         Ok(parser.parse_show()?.try_into_dialect(dialect)?)
     }
