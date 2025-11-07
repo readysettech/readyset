@@ -197,7 +197,6 @@ fn sqlparser_dialect_from_readyset_dialect(
 #[expect(clippy::upper_case_acronyms, reason = "SQL keywords are capitalized")]
 #[derive(Debug, Clone, Copy)]
 enum ReadysetKeyword {
-    CACHED,
     CACHES,
     DEEP,
     DOMAINS,
@@ -223,7 +222,6 @@ enum ReadysetKeyword {
 impl ReadysetKeyword {
     fn as_str(&self) -> &str {
         match self {
-            Self::CACHED => "CACHED",
             Self::CACHES => "CACHES",
             Self::DEEP => "DEEP",
             Self::DOMAINS => "DOMAINS",
@@ -630,7 +628,6 @@ fn parse_explain(
 ///     | ALL TABLES
 /// SHOW
 ///     | CACHES
-///     | CACHED QUERIES
 ///     | PROXIED QUERIES
 fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keyword(parser, ReadysetKeyword::READYSET) {
@@ -704,9 +701,7 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
                 },
             ),
         ))
-    } else if parse_readyset_keyword(parser, ReadysetKeyword::CACHES)
-        || parse_readyset_keywords(parser, &[ReadysetKeyword::CACHED, ReadysetKeyword::QUERIES])
-    {
+    } else if parse_readyset_keyword(parser, ReadysetKeyword::CACHES) {
         let query_id = if parser.parse_keyword(Keyword::WHERE) {
             let lhs = parser.parse_identifier()?;
             if lhs.value != "query_id" {
