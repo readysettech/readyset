@@ -1,0 +1,33 @@
+statement ok
+CREATE TABLE foo (x INT PRIMARY KEY);
+
+statement ok
+CREATE TABLE foo_tmp (x INT PRIMARY KEY);
+
+statement ok
+INSERT INTO foo VALUES (1), (2);
+
+statement ok
+INSERT INTO foo_tmp VALUES (42);
+
+query I rowsort
+SELECT * FROM foo;
+----
+1
+2
+
+# Perform the rename operation (swap)
+statement ok
+RENAME TABLE foo TO foo_old, foo_tmp TO foo;
+
+# bust the cache: not needed after REA-6108
+statement ok
+SELECT * FROM foo;
+
+statement ok
+CREATE CACHE FROM SELECT * FROM foo;
+
+query I rowsort
+SELECT * FROM foo;
+----
+42

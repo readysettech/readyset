@@ -534,13 +534,21 @@ impl TestScript {
             let explain_results = conn.simple_query("EXPLAIN LAST STATEMENT").await?;
             let explain_values: Vec<Vec<DfValue>> = explain_results.try_into()?;
             if let Some(explain) = explain_values.first() {
-                if let Some(destination) = explain.first() {
-                    let destination =
-                        destination.coerce_to(&DfType::Text(Collation::Utf8), &DfType::Unknown)?;
-                    let destination: QueryDestination = destination.as_str().unwrap().try_into()?;
+                let mut strings = explain.iter().map(|v| {
+                    v.coerce_to(&DfType::Text(Collation::Utf8), &DfType::Unknown)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_string()
+                });
+                let destination = strings.next().map(|s| s.try_into()).transpose()?;
+                let status = strings.next().unwrap_or("no status".to_string());
+                if let Some(destination) = destination {
                     if !matches!(destination, QueryDestination::Readyset(_)) {
-                        bail!("Query destination should be readyset, was {destination}");
+                        bail!("Query destination should be readyset, was {destination}: {status}");
                     }
+                } else {
+                    bail!("Could not get destination");
                 }
             }
         }
