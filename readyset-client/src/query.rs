@@ -236,8 +236,9 @@ impl QueryStatus {
     ///
     /// [successfully migrated]: MigrationState::Successful
     #[must_use]
-    pub fn is_successful(&self) -> bool {
-        matches!(self.migration_state, MigrationState::Successful(_))
+    pub fn is_successful(&self, cache_type: Option<CacheType>) -> bool {
+        matches!(self.migration_state,
+            MigrationState::Successful(t) if cache_type == Some(t) || cache_type.is_none())
     }
 
     /// Returns true if this query status represents an [unsupported][] query

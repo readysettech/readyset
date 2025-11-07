@@ -102,8 +102,8 @@ use readyset_errors::{internal, internal_err, unsupported, unsupported_err, Read
 use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
     self, AlterReadysetStatement, CacheInner, CacheType, CreateCacheStatement, DeallocateStatement,
-    DropCacheStatement, ExplainStatement, Relation, SelectStatement, SetStatement, ShowStatement,
-    SqlIdentifier, SqlQuery, StatementIdentifier, UseStatement,
+    DropAllCachesStatement, DropCacheStatement, ExplainStatement, Relation, SelectStatement,
+    SetStatement, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
@@ -2486,14 +2486,21 @@ where
     }
 
     /// Forwards a `DROP ALL CACHES` request to noria
-    async fn drop_all_caches(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        self.authority.remove_all_cache_ddl_requests().await?;
-        self.authority
-            .remove_all_shallow_cache_ddl_requests()
-            .await?;
-        self.noria.drop_all_caches().await?;
-        self.shallow.drop_all_caches();
-        self.state.query_status_cache.clear();
+    async fn drop_all_caches(
+        &mut self,
+        cache_type: Option<CacheType>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        if matches!(cache_type, Some(CacheType::Deep) | None) {
+            self.authority.remove_all_cache_ddl_requests().await?;
+            self.noria.drop_all_caches().await?;
+        }
+        if matches!(cache_type, Some(CacheType::Shallow) | None) {
+            self.authority
+                .remove_all_shallow_cache_ddl_requests()
+                .await?;
+            self.shallow.drop_all_caches();
+        }
+        self.state.query_status_cache.clear(cache_type);
         self.state.prepared_statements.iter_mut().for_each(
             |(
                 _,
@@ -2503,7 +2510,9 @@ where
                     ..
                 },
             )| {
-                if matches!(*migration_state, MigrationState::Successful(_)) {
+                if matches!(*migration_state,
+                    MigrationState::Successful(t) if cache_type == Some(t) || cache_type.is_none())
+                {
                     *migration_state = MigrationState::Pending;
                 }
                 prep.make_upstream_only();
@@ -2946,11 +2955,11 @@ where
                     res
                 }
             }
-            SqlQuery::DropAllCaches(_) => {
+            SqlQuery::DropAllCaches(DropAllCachesStatement { cache_type }) => {
                 if !self.allow_cache_ddl {
                     unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
                 }
-                self.drop_all_caches().await
+                self.drop_all_caches(*cache_type).await
             }
             SqlQuery::DropAllProxiedQueries(_) => {
                 if !self.allow_cache_ddl {

@@ -7,7 +7,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::table_extraction_visitor::extract_referenced_tables;
 use anyhow::anyhow;
 use clap::ValueEnum;
 use dashmap::mapref::entry::Entry;
@@ -15,12 +14,15 @@ use dashmap::DashMap;
 use lru::LruCache;
 use metrics::gauge;
 use parking_lot::RwLock;
+use tracing::{error, warn};
+
 use readyset_client::metrics::recorded;
 use readyset_client::query::*;
 use readyset_client::ViewCreateRequest;
 use readyset_data::DfValue;
-use readyset_sql::ast::Relation;
-use tracing::{error, warn};
+use readyset_sql::ast::{CacheType, Relation};
+
+use crate::table_extraction_visitor::extract_referenced_tables;
 
 pub const DEFAULT_QUERY_STATUS_CAPACITY: usize = 100_000;
 
@@ -113,7 +115,7 @@ impl PersistentStatusCacheHandle {
             .iter()
             .filter_map(|(query_id, (query, status))| match query {
                 Query::Parsed(view) => {
-                    if status.is_successful() {
+                    if status.is_successful(None) {
                         Some((*query_id, view.clone(), status.clone()))
                     } else {
                         None
@@ -647,10 +649,10 @@ impl QueryStatusCache {
     }
 
     /// Clear all queries currently marked as successful from the cache.
-    pub fn clear(&self) {
+    pub fn clear(&self, cache_type: Option<CacheType>) {
         self.id_to_status
             .iter_mut()
-            .filter(|v| v.is_successful())
+            .filter(|v| v.is_successful(cache_type))
             .for_each(|mut v| {
                 v.migration_state = MigrationState::Pending;
                 v.always = false;
@@ -658,7 +660,7 @@ impl QueryStatusCache {
         let mut statuses = self.persistent_handle.statuses.write();
         statuses
             .iter_mut()
-            .filter(|(_query_id, (_query, status))| status.is_successful())
+            .filter(|(_query_id, (_query, status))| status.is_successful(cache_type))
             .for_each(|(_query_id, (_query, ref mut status))| {
                 status.migration_state = MigrationState::Pending;
                 status.always = false;
@@ -668,12 +670,12 @@ impl QueryStatusCache {
     /// Clear all queries not marked as successful from the cache.
     pub fn clear_proxied_queries(&self) {
         self.id_to_status
-            .retain(|_query_id, status| status.is_successful());
+            .retain(|_query_id, status| status.is_successful(None));
 
         let mut statuses = self.persistent_handle.statuses.write();
         let keys_to_remove: Vec<QueryId> = statuses
             .iter()
-            .filter(|(_, (_, status))| !status.is_successful())
+            .filter(|(_, (_, status))| !status.is_successful(None))
             .map(|(query_id, _)| *query_id)
             .collect();
 
@@ -1075,7 +1077,7 @@ mod tests {
         );
         assert_eq!(cache.allow_list().len(), 2);
 
-        cache.clear();
+        cache.clear(None);
         assert_eq!(cache.allow_list().len(), 0);
     }
 
