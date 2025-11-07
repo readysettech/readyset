@@ -156,6 +156,17 @@ where
         Ok(())
     }
 
+    pub fn drop_all_caches(&self) {
+        let _lock = self
+            .next_id
+            .lock()
+            .expect("couldn't lock next_id to drop all");
+
+        self.caches.pin().clear();
+        self.names.pin().clear();
+        self.query_ids.pin().clear();
+    }
+
     pub fn list_caches(&self, query_id: Option<QueryId>) -> Vec<CacheInfo> {
         self.caches
             .pin()

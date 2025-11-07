@@ -2488,7 +2488,11 @@ where
     /// Forwards a `DROP ALL CACHES` request to noria
     async fn drop_all_caches(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         self.authority.remove_all_cache_ddl_requests().await?;
+        self.authority
+            .remove_all_shallow_cache_ddl_requests()
+            .await?;
         self.noria.drop_all_caches().await?;
+        self.shallow.drop_all_caches();
         self.state.query_status_cache.clear();
         self.state.prepared_statements.iter_mut().for_each(
             |(
