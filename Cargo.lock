@@ -4768,6 +4768,7 @@ dependencies = [
  "slab",
  "smallvec",
  "streaming-iterator",
+ "strum",
  "tempfile",
  "test-strategy",
  "test-utils",
@@ -7034,6 +7035,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

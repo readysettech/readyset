@@ -8,7 +8,7 @@ use std::task::{Context, Poll};
 use anyhow::anyhow;
 use futures::TryFutureExt;
 use health_reporter::{HealthReporter, State};
-use hyper::header::CONTENT_TYPE;
+use hyper::header::{CACHE_CONTROL, CONTENT_TYPE};
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response, StatusCode};
 use readyset_alloc::{
@@ -16,14 +16,16 @@ use readyset_alloc::{
     print_memory_and_per_thread_stats,
 };
 use readyset_client::metrics::recorded;
-use readyset_errors::ReadySetError;
+use readyset_errors::{internal, ReadySetError};
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
-use tokio_stream::wrappers::TcpListenerStream;
+use tokio_stream::wrappers::{BroadcastStream, TcpListenerStream};
+use tokio_stream::StreamExt as _;
 use tower::Service;
 use tracing::{info, warn};
 
+use crate::controller::events::EventsHandle;
 use crate::controller::ControllerRequest;
 use crate::metrics::{get_global_recorder, Clear, RecorderType};
 use crate::worker::WorkerRequest;
@@ -43,6 +45,9 @@ pub struct NoriaServerHttpRouter {
     pub worker_tx: Sender<WorkerRequest>,
     /// Channel to the running `Controller`.
     pub controller_tx: Sender<ControllerRequest>,
+    /// Handle for broadcasting events on the SSE stream. The handle is always present, but will
+    /// only actively broadcast events when this controller is the leader.
+    pub events_handle: EventsHandle,
     /// Used to record and report the servers current health.
     pub health_reporter: HealthReporter,
     /// Used to communicate externally that a failpoint request has been received and successfully
@@ -356,6 +361,28 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                 };
                 Ok(res.unwrap())
             }),
+            // SSE endpoint for schema catalog updates (or whatever events the server publishes)
+            (&Method::GET, "/events/stream") => {
+                let res = if let Some(events_rx) = self.events_handle.subscribe() {
+                    let stream = BroadcastStream::new(events_rx).map(move |event| match event {
+                        Ok(event) => event.to_sse(),
+                        Err(e) => internal!("Error processing event: {e}"),
+                    });
+                    let body = hyper::Body::wrap_stream(stream);
+                    res.status(StatusCode::OK)
+                        .header(CONTENT_TYPE, "text/event-stream")
+                        .header(CACHE_CONTROL, "no-cache")
+                        .body(body)
+                } else {
+                    res.status(StatusCode::SERVICE_UNAVAILABLE)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from(
+                            "Leader not ready or we're not the leader",
+                        ))
+                };
+
+                Box::pin(async move { Ok(res.unwrap()) })
+            }
             _ => {
                 metrics::counter!(recorded::SERVER_CONTROLLER_REQUESTS).increment(1);
 

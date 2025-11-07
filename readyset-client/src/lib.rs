@@ -240,6 +240,7 @@ pub const CONNECTION_FROM_BASE: u8 = 1;
 pub const CONNECTION_FROM_DOMAIN: u8 = 2;
 
 mod controller;
+pub mod events;
 pub mod metrics;
 pub mod query;
 pub mod recipe;

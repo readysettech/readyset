@@ -37,6 +37,7 @@ use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 use url::Url;
 
+use crate::controller::events::EventsHandle;
 use crate::controller::inner::Leader;
 use crate::controller::migrate::Migration;
 use crate::controller::sql::Recipe;
@@ -46,6 +47,7 @@ use crate::worker::WorkerRequestKind;
 use crate::{Config, VolumeId};
 
 mod domain_handle;
+pub(crate) mod events;
 mod inner;
 mod keys;
 pub(crate) mod migrate;
@@ -414,6 +416,9 @@ pub struct Controller {
     table_statuses: TableStatusState,
     /// Any TableStatus updates sent here will be sent to the leading controller.
     table_status_tx: UnboundedSender<(Relation, TableStatus)>,
+    /// If we are the leader, this broadcast channel will be used to notify connected adapters of
+    /// schema changes.
+    events_handle: EventsHandle,
     /// Handle used to receive a shutdown signal
     shutdown_rx: ShutdownReceiver,
 }
@@ -432,6 +437,7 @@ impl Controller {
         dialect: Option<readyset_sql::Dialect>,
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
         table_status_rx: UnboundedReceiver<(Relation, TableStatus)>,
+        events_handle: EventsHandle,
         shutdown_rx: ShutdownReceiver,
     ) -> Self {
         // If we don't have an upstream, we allow permissive writes to base tables.
@@ -465,6 +471,7 @@ impl Controller {
             dialect,
             table_statuses,
             table_status_tx,
+            events_handle,
             shutdown_rx,
         }
     }
@@ -532,6 +539,7 @@ impl Controller {
         match msg {
             AuthorityUpdate::LeaderChange(descriptor) => {
                 gauge!(recorded::CONTROLLER_IS_LEADER).set(0f64);
+                self.events_handle.stop();
                 self.controller_http
                     .set(descriptor.controller_uri, CONTROLLER_REQUEST_TIMEOUT)
                     .await?;
@@ -578,6 +586,8 @@ impl Controller {
                     )
                     .await?;
                 self.cache_ddl = cache_ddl;
+
+                self.events_handle.start();
             }
             AuthorityUpdate::NewWorkers(w) => {
                 let mut guard = self.inner.write().await;
@@ -798,6 +808,7 @@ impl Controller {
                 }
                 _ = self.shutdown_rx.recv() => {
                     info!("Controller shutting down after shutdown signal received");
+                    self.events_handle.stop();
                     break;
                 }
             }

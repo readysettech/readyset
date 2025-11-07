@@ -74,6 +74,7 @@ use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tracing::error;
 use url::Url;
 
+use crate::controller::events::EventsHandle;
 use crate::controller::{Controller, ControllerRequest, HandleRequest};
 use crate::handle::Handle;
 use crate::http_router::NoriaServerHttpRouter;
@@ -165,6 +166,7 @@ fn start_controller(
     dialect: Option<Dialect>,
     table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     table_status_rx: UnboundedReceiver<(Relation, TableStatus)>,
+    events_handle: EventsHandle,
     shutdown_rx: ShutdownReceiver,
 ) -> Result<ControllerDescriptor, anyhow::Error> {
     set_failpoint!(failpoints::START_CONTROLLER);
@@ -193,6 +195,7 @@ fn start_controller(
         dialect,
         table_status_tx,
         table_status_rx,
+        events_handle,
         shutdown_rx,
     );
 
@@ -214,6 +217,7 @@ async fn start_request_router(
     external_addr: SocketAddr,
     worker_tx: Sender<WorkerRequest>,
     controller_tx: Sender<ControllerRequest>,
+    events_handle: EventsHandle,
     abort_on_task_failure: bool,
     health_reporter: HealthReporter,
     failpoint_channel: Option<Arc<Sender<()>>>,
@@ -224,6 +228,7 @@ async fn start_request_router(
         port: external_addr.port(),
         worker_tx,
         controller_tx,
+        events_handle,
         health_reporter: health_reporter.clone(),
         failpoint_channel,
     };
@@ -301,6 +306,7 @@ pub(crate) async fn start_instance_inner(
     let alloc_shutdown = shutdown_rx.clone();
     tokio::spawn(report_allocator_metrics(alloc_shutdown));
 
+    let events_handle = EventsHandle::new();
     let (tx, rx) = maybe_create_failpoint_chann(wait_for_failpoint);
     let mut health_reporter = HealthReporter::new();
     let http_uri = start_request_router(
@@ -308,6 +314,7 @@ pub(crate) async fn start_instance_inner(
         external_addr,
         worker_tx.clone(),
         controller_tx,
+        events_handle.clone(),
         abort_on_task_failure,
         health_reporter.clone(),
         tx,
@@ -352,6 +359,7 @@ pub(crate) async fn start_instance_inner(
         dialect,
         table_status_tx,
         table_status_rx,
+        events_handle,
         shutdown_rx,
     )?;
 

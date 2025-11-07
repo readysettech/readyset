@@ -259,7 +259,7 @@ tokio = { version = "1.44", features = ["full"] }
 tokio-native-tls = "0.3.1"
 tokio-retry = "0.3"
 tokio-scoped = "0.2.0"
-tokio-stream = "0.1.15"
+tokio-stream = { version = "0.1.15", features = ["sync"] }
 tokio-test = { version = "0.4.4" }
 tokio-tower = "0.5.1"
 tokio-util = "0.7.12"

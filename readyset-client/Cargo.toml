@@ -56,6 +56,8 @@ triomphe = { workspace = true }
 streaming-iterator = { workspace = true }
 test-strategy = { workspace = true }
 deadpool = { workspace = true }
+strum = { workspace = true }
+
 
 # consensus/
 enum_dispatch = { workspace = true }
