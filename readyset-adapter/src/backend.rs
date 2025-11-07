@@ -3515,6 +3515,7 @@ where
                     | SqlQuery::DropTable(_)
                     | SqlQuery::DropView(_)
                     | SqlQuery::AlterTable(_)
+                    | SqlQuery::RenameTable(_)
                     | SqlQuery::Truncate(_)
                     | SqlQuery::Use(_)
                     | SqlQuery::CreateIndex(_) => {
@@ -3523,9 +3524,6 @@ where
                             .query(raw_query)
                             .await
                             .map(|r| QueryResult::Upstream(r, None, None))
-                    }
-                    SqlQuery::RenameTable(_) => {
-                        unsupported!("{} not yet supported", query.query_type());
                     }
                     SqlQuery::Set(_)
                     | SqlQuery::CompoundSelect(_)

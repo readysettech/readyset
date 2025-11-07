@@ -890,8 +890,21 @@ fn where_not_in_not_between() {
 #[test]
 fn rename_table() {
     check_parse_both!("RENAME TABLE tb1 TO tb2");
-    check_parse_both!("ALTER TABLE tb1 RENAME TO tb2");
-    check_parse_both!("ALTER TABLE tb1 RENAME AS tb2");
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "ALTER TABLE tb1 RENAME TO tb2",
+        "nom-sql AST differs"
+    );
+    check_parse_fails!(
+        Dialect::MySQL,
+        "ALTER TABLE tb1 RENAME TO tb2",
+        "nom-sql AST differs"
+    );
+    check_parse_fails!(
+        Dialect::MySQL,
+        "ALTER TABLE tb1 RENAME AS tb2",
+        "nom-sql AST differs"
+    );
 }
 
 #[test]

@@ -116,3 +116,10 @@ fn create_index() {
         "found: SPATIAL"
     );
 }
+
+#[test]
+fn test_alter_table_rename() {
+    check_rt_mysql_sqlparser!("ALTER TABLE tb1 RENAME TO tb2");
+    check_rt_postgres_sqlparser!("ALTER TABLE tb1 RENAME TO tb2");
+    check_rt_mysql_sqlparser!("ALTER TABLE tb1 RENAME AS tb2");
+}

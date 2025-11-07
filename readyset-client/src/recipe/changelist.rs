@@ -41,7 +41,8 @@ use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
     AlterTableDefinition, AlterTableStatement, CacheInner, CreateCacheStatement,
     CreateTableStatement, CreateViewStatement, DropTableStatement, DropViewStatement,
-    NonReplicatedRelation, Relation, SelectStatement, SqlIdentifier, SqlQuery, TableKey,
+    NonReplicatedRelation, Relation, RenameTableStatement, SelectStatement, SqlIdentifier,
+    SqlQuery, TableKey,
 };
 use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
@@ -110,6 +111,25 @@ impl IntoChanges for DropViewStatement {
 impl IntoChanges for AlterTableStatement {
     fn into_changes(self) -> Vec<Change> {
         vec![Change::AlterTable(self)]
+    }
+}
+
+impl IntoChanges for RenameTableStatement {
+    /// For simplicity, we map MySQL `RENAME TABLE` statements to multiple `ALTER TABLE` statements.
+    /// This way, Postgres (no `RENAME`) and MySQL don't diverge, and we can handle this the same
+    /// way and in the same place as `ALTER TABLE RENAME`.
+    fn into_changes(self) -> Vec<Change> {
+        self.ops
+            .into_iter()
+            .map(|op| {
+                let alter_statement = AlterTableStatement {
+                    table: op.from,
+                    only: false, // RENAME TABLE doesn't have an ONLY keyword
+                    definitions: Ok(vec![AlterTableDefinition::RenameTable { new_name: op.to }]),
+                };
+                Change::AlterTable(alter_statement)
+            })
+            .collect()
     }
 }
 
@@ -211,6 +231,9 @@ impl ChangeList {
                     name: dcs.name,
                     if_exists: false,
                 }),
+                SqlQuery::RenameTable(rts) => {
+                    changes.extend(rts.into_changes());
+                }
                 _ => unsupported!(
                     "Only DDL statements supported in ChangeList (got {})",
                     parsed.query_type()
@@ -400,6 +423,7 @@ impl Change {
                         | AlterTableDefinition::DropColumn { .. }
                         | AlterTableDefinition::ChangeColumn { .. }
                         | AlterTableDefinition::RenameColumn { .. }
+                        | AlterTableDefinition::RenameTable { .. }
                         | AlterTableDefinition::AddKey(TableKey::PrimaryKey { .. })
                         | AlterTableDefinition::AddKey(TableKey::UniqueKey { .. })
                         | AlterTableDefinition::DropForeignKey { .. }

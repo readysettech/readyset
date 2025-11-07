@@ -795,9 +795,27 @@ impl<'a> NoriaAdapter<'a> {
                 }
                 keep
             }
-            Change::AlterTable(stmt) => self
-                .table_filter
-                .should_be_processed(schema.as_str(), stmt.table.name.as_str()),
+            Change::AlterTable(stmt) => {
+                // If this alter table is a rename, we also check whether the new name is filtered
+                // out. Only if both are ignored will this return false and this event get skipped.
+                self.table_filter
+                    .should_be_processed(schema.as_str(), stmt.table.name.as_str())
+                    || if let Ok(defs) = &stmt.definitions {
+                        defs.iter().any(|def| {
+                            if let readyset_sql::ast::AlterTableDefinition::RenameTable {
+                                new_name,
+                            } = def
+                            {
+                                self.table_filter
+                                    .should_be_processed(schema.as_str(), new_name.name.as_str())
+                            } else {
+                                false
+                            }
+                        })
+                    } else {
+                        false
+                    }
+            }
             _ => true,
         });
 
@@ -810,6 +828,35 @@ impl<'a> NoriaAdapter<'a> {
                     reason: NotReplicatedReason::Configuration,
                 })
             }));
+
+        // Resolve schemas and drop renamed tables; the new names will get snapshotted when we
+        // return `ResnapshotNeeded` in the next `if` block
+        for change in changelist.changes_mut() {
+            if let Change::AlterTable(stmt) = change {
+                if stmt.table.schema.is_none() {
+                    stmt.table.schema = Some(schema.clone().into());
+                }
+
+                if let Ok(definitions) = &mut stmt.definitions {
+                    for def in definitions.iter_mut() {
+                        if let readyset_sql::ast::AlterTableDefinition::RenameTable { new_name } =
+                            def
+                        {
+                            if new_name.schema.is_none() {
+                                new_name.schema = Some(schema.clone().into());
+                            }
+
+                            info!(
+                                old_table = %stmt.table.display_unquoted(),
+                                new_table = %new_name.display_unquoted(),
+                                "Table rename detected, triggering resnapshot for table"
+                            );
+                            self.drop_table_for_resnapshot(stmt.table.clone()).await?;
+                        }
+                    }
+                }
+            }
+        }
 
         if self.supports_resnapshot && changelist.changes().any(Change::requires_resnapshot) {
             // In case we detect a DDL change that requires a full schema resnapshot exit the loop

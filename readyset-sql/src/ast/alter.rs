@@ -7,6 +7,7 @@ use proptest::{
 };
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use sqlparser::ast::RenameTableNameKind;
 use test_strategy::Arbitrary;
 
 use crate::{
@@ -172,6 +173,9 @@ pub enum AlterTableDefinition {
         name: SqlIdentifier,
         new_name: SqlIdentifier,
     },
+    RenameTable {
+        new_name: Relation,
+    },
     DropConstraint {
         name: SqlIdentifier,
         drop_behavior: Option<DropBehavior>,
@@ -234,6 +238,12 @@ impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinitio
             } => Ok(Self::RenameColumn {
                 name: old_column_name.into_dialect(dialect),
                 new_name: new_column_name.into_dialect(dialect),
+            }),
+            sqlparser::ast::AlterTableOperation::RenameTable {
+                table_name:
+                    RenameTableNameKind::As(object_name) | RenameTableNameKind::To(object_name),
+            } => Ok(Self::RenameTable {
+                new_name: object_name.try_into_dialect(dialect)?,
             }),
             ChangeColumn {
                 old_name,
@@ -309,6 +319,9 @@ impl DialectDisplay for AlterTableDefinition {
                     dialect.quote_identifier(name),
                     dialect.quote_identifier(new_name)
                 )
+            }
+            Self::RenameTable { new_name } => {
+                write!(f, "RENAME TO {}", new_name.display(dialect))
             }
             Self::DropConstraint {
                 name,

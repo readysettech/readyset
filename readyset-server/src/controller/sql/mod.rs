@@ -1062,6 +1062,7 @@ impl SqlIncorporator {
                             | AlterTableDefinition::DropColumn { .. }
                             | AlterTableDefinition::ChangeColumn { .. }
                             | AlterTableDefinition::RenameColumn { .. }
+                            | AlterTableDefinition::RenameTable { .. }
                             | AlterTableDefinition::DropConstraint { .. }
                             | AlterTableDefinition::ReplicaIdentity(_)
                             | AlterTableDefinition::DropForeignKey { .. } => {
