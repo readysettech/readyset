@@ -157,6 +157,8 @@ enum Operation {
         col_name: String,
         new_name: String,
     },
+    /// Renames one or more tables
+    RenameTables(Vec<(String, String)>),
     /// Creates a simple view that does a SELECT * on a given table
     CreateSimpleView { name: String, table_source: String },
     /// Creates a view that does a SELECT * on a JOIN of two tables
@@ -285,6 +287,37 @@ prop_compose! {
                  -> Operation {
         Operation::DropColumn(table, col_name)
     }
+}
+
+fn gen_rename_tables(tables: Vec<String>) -> impl Strategy<Value = Operation> {
+    let max_renames = tables.len().min(2);
+    debug_assert!(
+        max_renames > 0,
+        "rename generator should only run when at least one table exists"
+    );
+
+    sample::subsequence(tables, 1..=max_renames).prop_flat_map(|from_tables| {
+        let rename_count = from_tables.len();
+        let from_tables_for_filter = from_tables.clone();
+        collection::vec(SQL_NAME_REGEX, rename_count)
+            .prop_filter(
+                "Renamed tables must have unique targets different from their sources",
+                move |to_names| {
+                    to_names.iter().all_unique()
+                        && to_names
+                            .iter()
+                            .zip(from_tables_for_filter.iter())
+                            .all(|(to, from)| !to.eq_ignore_ascii_case(from))
+                },
+            )
+            .prop_map(move |to_names| {
+                Operation::RenameTables(from_tables.iter().cloned().zip(to_names).collect::<Vec<(
+                    String,
+                    String,
+                )>>(
+                ))
+            })
+    })
 }
 
 prop_compose! {
@@ -429,12 +462,43 @@ impl ModelState for DDLModelState {
                 gen_create_simple_view(self.tables.keys().cloned().collect()).boxed();
             let add_key_strat = gen_add_key(self.tables.clone()).boxed();
 
+            let tables_clone = self.tables.clone();
+            let views_clone = self.views.clone();
+            let rename_strategy = gen_rename_tables(self.tables.keys().cloned().collect())
+                .prop_filter(
+                    "New table names must not be in use or duplicated",
+                    move |op| match op {
+                        Operation::RenameTables(renames) => {
+                            let from_names: HashSet<String> =
+                                renames.iter().map(|(from, _)| from.clone()).collect();
+                            if from_names.len() != renames.len() {
+                                return false;
+                            }
+
+                            let to_names: Vec<String> =
+                                renames.iter().map(|(_, to)| to.clone()).collect();
+                            if to_names.iter().all_unique() {
+                                to_names.iter().all(|to| {
+                                    let name_in_use = tables_clone.contains_key(to)
+                                        || views_clone.contains_key(to);
+                                    !name_in_use || from_names.contains(to)
+                                })
+                            } else {
+                                false
+                            }
+                        }
+                        _ => unreachable!(),
+                    },
+                )
+                .boxed();
+
             possible_ops.extend([
                 drop_strategy,
                 write_strategy,
                 add_col_strat,
                 create_simple_view_strat,
                 add_key_strat,
+                rename_strategy,
             ]);
         }
 
@@ -554,6 +618,34 @@ impl ModelState for DDLModelState {
                     TestViewDef::Join { table_a, table_b } => table != table_a && table != table_b,
                 });
             }
+            Operation::RenameTables(renames) => {
+                let mut temp_tables = BTreeMap::new();
+                let mut temp_pkeys = BTreeMap::new();
+
+                for (from, to) in renames {
+                    if let Some(cols) = self.tables.remove(from) {
+                        temp_tables.insert(to.clone(), cols);
+                    }
+                    if let Some(keys) = self.pkeys.remove(from) {
+                        temp_pkeys.insert(to.clone(), keys);
+                    }
+                    self.deleted_tables.insert(from.clone());
+                    self.deleted_tables.remove(to);
+                }
+
+                self.tables.extend(temp_tables);
+                self.pkeys.extend(temp_pkeys);
+
+                let from_names: HashSet<_> = renames.iter().map(|(from, _)| from).collect();
+
+                // Drop views that depend on renamed tables
+                self.views.retain(|_view_name, view_def| match view_def {
+                    TestViewDef::Simple(table_source) => !from_names.contains(table_source),
+                    TestViewDef::Join { table_a, table_b } => {
+                        !from_names.contains(table_a) && !from_names.contains(table_b)
+                    }
+                });
+            }
             Operation::DeleteRow(..) => (),
             Operation::CreateSimpleView { name, table_source } => {
                 self.views
@@ -649,6 +741,25 @@ impl ModelState for DDLModelState {
             } => self.tables.get(table).is_some_and(|t| {
                 t.iter().any(|cs| cs.name == *col_name) && t.iter().all(|cs| cs.name != *new_name)
             }),
+            Operation::RenameTables(renames) => {
+                if renames.is_empty() {
+                    return false;
+                }
+                let from_names: HashSet<_> = renames.iter().map(|(from, _)| from).collect();
+                if from_names.len() != renames.len() {
+                    return false; // duplicate from table
+                }
+
+                let to_names: HashSet<_> = renames.iter().map(|(_, to)| to).collect();
+                if to_names.len() != renames.len() {
+                    return false; // duplicate to table
+                }
+
+                renames.iter().all(|(from, to)| {
+                    self.tables.contains_key(from)
+                        && (!self.name_in_use(to) || from_names.contains(to))
+                })
+            }
             Operation::CreateSimpleView { name, table_source } => {
                 !self.name_in_use(name) && self.tables.contains_key(table_source)
             }
@@ -800,6 +911,39 @@ impl ModelState for DDLModelState {
                 drop_dependent_views(self, rs_conn, mysql_conn, table).await;
                 let query =
                     format!("ALTER TABLE `{table}` RENAME COLUMN `{col_name}` TO `{new_name}`");
+                rs_conn.query_drop(&query).await.unwrap();
+                mysql_conn.query_drop(&query).await.unwrap();
+            }
+            Operation::RenameTables(renames) => {
+                debug_assert!(
+                    !renames.is_empty(),
+                    "RenameTables operations should always contain at least one clause"
+                );
+                let from_names: HashSet<_> =
+                    renames.iter().map(|(from, _)| from.as_str()).collect();
+                for (view, def) in self.views.iter() {
+                    let should_drop = match def {
+                        TestViewDef::Simple(table_source) => {
+                            from_names.contains(table_source.as_str())
+                        }
+                        TestViewDef::Join { table_a, table_b } => {
+                            from_names.contains(table_a.as_str())
+                                || from_names.contains(table_b.as_str())
+                        }
+                    };
+                    if should_drop {
+                        let drop_view = format!("DROP VIEW `{view}`");
+                        rs_conn.query_drop(&drop_view).await.unwrap();
+                        mysql_conn.query_drop(&drop_view).await.unwrap();
+                    }
+                }
+
+                let rename_clauses: Vec<_> = renames
+                    .iter()
+                    .map(|(from, to)| format!("`{from}` TO `{to}`"))
+                    .collect();
+                let query = format!("RENAME TABLE {}", rename_clauses.join(", "));
+                println!("Renaming tables: {}", query);
                 rs_conn.query_drop(&query).await.unwrap();
                 mysql_conn.query_drop(&query).await.unwrap();
             }
