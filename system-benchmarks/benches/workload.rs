@@ -757,7 +757,7 @@ async fn drop_cached_queries(
     let mut conn = DatabaseURL::from_str(&readyset_url(database_name, database_type))?
         .connect(&ServerCertVerification::None)
         .await?;
-    conn.query_drop(DropAllCachesStatement {}.to_string())
+    conn.query_drop(DropAllCachesStatement { cache_type: None }.to_string())
         .await?;
     Ok(())
 }

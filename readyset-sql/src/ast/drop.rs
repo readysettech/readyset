@@ -77,11 +77,17 @@ impl DialectDisplay for DropViewStatement {
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct DropAllCachesStatement;
+pub struct DropAllCachesStatement {
+    pub cache_type: Option<CacheType>,
+}
 
 impl fmt::Display for DropAllCachesStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DROP ALL CACHES")
+        match self.cache_type {
+            Some(CacheType::Deep) => write!(f, "DROP ALL DEEP CACHES"),
+            Some(CacheType::Shallow) => write!(f, "DROP ALL SHALLOW CACHES"),
+            None => write!(f, "DROP ALL CACHES"),
+        }
     }
 }
 

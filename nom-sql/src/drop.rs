@@ -1,3 +1,4 @@
+use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
@@ -94,9 +95,16 @@ pub fn drop_all_caches(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropAllCach
     let (i, _) = tag_no_case("drop")(i)?;
     let (i, _) = whitespace1(i)?;
     let (i, _) = tag_no_case("all")(i)?;
+    let (i, cache_type) = opt(preceded(
+        whitespace1,
+        alt((
+            map(tag_no_case("deep"), |_| CacheType::Deep),
+            map(tag_no_case("shallow"), |_| CacheType::Shallow),
+        )),
+    ))(i)?;
     let (i, _) = whitespace1(i)?;
     let (i, _) = tag_no_case("caches")(i)?;
-    Ok((i, DropAllCachesStatement {}))
+    Ok((i, DropAllCachesStatement { cache_type }))
 }
 
 #[cfg(test)]

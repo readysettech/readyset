@@ -739,7 +739,7 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
 ///
 /// DROP
 ///   | ALL PROXIED QUERIES
-///   | ALL CACHES
+///   | ALL [DEEP|SHALLOW] CACHES
 ///   | CACHE <query_id>
 fn parse_drop(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keywords(
@@ -753,15 +753,21 @@ fn parse_drop(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
         Ok(SqlQuery::DropAllProxiedQueries(
             readyset_sql::ast::DropAllProxiedQueriesStatement {},
         ))
-    } else if parse_readyset_keywords(
-        parser,
-        &[
-            ReadysetKeyword::Standard(Keyword::ALL),
-            ReadysetKeyword::CACHES,
-        ],
-    ) {
+    } else if parser.parse_keyword(Keyword::ALL) {
+        let cache_type = if parse_readyset_keyword(parser, ReadysetKeyword::DEEP) {
+            Some(CacheType::Deep)
+        } else if parse_readyset_keyword(parser, ReadysetKeyword::SHALLOW) {
+            Some(CacheType::Shallow)
+        } else {
+            None
+        };
+        if !parse_readyset_keyword(parser, ReadysetKeyword::CACHES) {
+            return Err(ReadysetParsingError::ReadysetParsingError(
+                "expected CACHES".into(),
+            ));
+        }
         Ok(SqlQuery::DropAllCaches(
-            readyset_sql::ast::DropAllCachesStatement {},
+            readyset_sql::ast::DropAllCachesStatement { cache_type },
         ))
     } else if parser.parse_keyword(Keyword::CACHE) {
         let name = parser.parse_object_name(false)?.try_into_dialect(dialect)?;

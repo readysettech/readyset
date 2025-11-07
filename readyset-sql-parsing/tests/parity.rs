@@ -766,6 +766,13 @@ fn create_deep_cache_policy_fails() {
 }
 
 #[test]
+fn drop_all_caches() {
+    check_parse_both!("DROP ALL CACHES");
+    check_parse_both!("DROP ALL DEEP CACHES");
+    check_parse_both!("DROP ALL SHALLOW CACHES");
+}
+
+#[test]
 fn explain_create_cache() {
     check_parse_mysql!("EXPLAIN CREATE CACHE FROM SELECT * FROM users WHERE id = ?");
     check_parse_mysql!("EXPLAIN\nCREATE CACHE FROM SELECT * FROM users WHERE id = ?");

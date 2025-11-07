@@ -157,8 +157,33 @@ mod tests {
 
     #[test]
     fn drop_all_caches() {
-        let res = parse_query(Dialect::MySQL, "drOP ALL    caCHEs").unwrap();
-        assert_eq!(res, SqlQuery::DropAllCaches(DropAllCachesStatement {}));
+        let actual = parse_query(Dialect::MySQL, "drOP ALL    caCHEs").unwrap();
+        assert_eq!(
+            actual,
+            SqlQuery::DropAllCaches(DropAllCachesStatement { cache_type: None })
+        );
+    }
+
+    #[test]
+    fn drop_all_deep_caches() {
+        let actual = parse_query(Dialect::MySQL, "DROP ALL DEEP CACHES").unwrap();
+        assert_eq!(
+            actual,
+            SqlQuery::DropAllCaches(DropAllCachesStatement {
+                cache_type: Some(CacheType::Deep)
+            })
+        );
+    }
+
+    #[test]
+    fn drop_all_shallow_caches() {
+        let actual = parse_query(Dialect::MySQL, "DROP ALL SHALLOW CACHES").unwrap();
+        assert_eq!(
+            actual,
+            SqlQuery::DropAllCaches(DropAllCachesStatement {
+                cache_type: Some(CacheType::Shallow)
+            })
+        );
     }
 
     mod mysql {
