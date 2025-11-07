@@ -235,6 +235,16 @@ impl SizeOf for &str {
     }
 }
 
+impl SizeOf for String {
+    fn deep_size_of(&self) -> usize {
+        self.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+}
+
 macro_rules! sizeof_integer {
     ($t:ty) => {
         impl SizeOf for $t {

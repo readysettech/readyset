@@ -337,6 +337,15 @@ pub struct Options {
     #[arg(long, env = "NON_BLOCKING_READS", hide = true)]
     non_blocking_reads: bool,
 
+    /// Percentage of memory-limit to allocate for shallow cache (0.0-100.0).
+    /// Only applies when memory-limit is set. If not specified, shallow cache has no memory limit.
+    #[arg(
+        long,
+        env = "SHALLOW_MEMORY_PERCENT",
+        value_parser = clap::value_parser!(u32).range(0..=100)
+    )]
+    shallow_memory_percent: Option<f64>,
+
     #[command(flatten)]
     pub server_worker_options: WorkerOptions,
 
@@ -1223,6 +1232,8 @@ where
 
         let parsing_preset = options.server_worker_options.parsing_preset;
 
+        let memory_limit = options.server_worker_options.memory_limit;
+
         // Run a readyset-server instance within this adapter.
         let internal_server_handle = if options.deployment_mode.has_reader_nodes() {
             let authority = options.authority.clone();
@@ -1315,10 +1326,17 @@ where
                 })?;
         }
 
+        let shallow_max_capacity = options.shallow_memory_percent.and_then(|percent| {
+            if memory_limit > 0 {
+                Some((memory_limit as f64 * percent / 100.0) as u64)
+            } else {
+                None
+            }
+        });
         let shallow = Arc::new(CacheManager::<
             _,
             <H::UpstreamDatabase as UpstreamDatabase>::CacheEntry,
-        >::new());
+        >::new(shallow_max_capacity));
         if let Ok(shallow_ddl_requests) =
             rt.block_on(adapter_authority.shallow_cache_ddl_requests())
         {

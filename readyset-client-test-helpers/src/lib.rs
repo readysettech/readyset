@@ -378,7 +378,7 @@ impl TestBuilder {
         } else {
             UpstreamConfig::default()
         };
-        let shallow = Arc::new(CacheManager::new());
+        let shallow = Arc::new(CacheManager::new(None));
         let shallow_refresh_sender = if cdc_url.is_some() {
             Some(
                 Backend::<A::Upstream, A::Handler>::start_shallow_refresh_workers(

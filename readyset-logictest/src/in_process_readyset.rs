@@ -168,7 +168,7 @@ async fn setup_adapter(
                     authority.clone(),
                     Vec::new(),
                 );
-                let shallow = Arc::new(CacheManager::new());
+                let shallow = Arc::new(CacheManager::new(None));
                 let shallow_refresh_sender =
                     if let Some(config) = replication_url.map(UpstreamConfig::from_url) {
                         Some(

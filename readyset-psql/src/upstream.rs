@@ -1,9 +1,12 @@
 use std::fmt::Debug;
+use std::mem::{size_of, size_of_val};
+use std::ops::Range;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use fallible_iterator::FallibleIterator;
 use futures::{StreamExt, TryStreamExt};
 use postgres_native_tls::MakeTlsConnector;
 use postgres_types::Kind;
@@ -13,6 +16,7 @@ use tokio_postgres::{
     Client, Config, GenericResult, ResultStream, Row, RowStream, SimpleQueryMessage,
     SimpleQueryStream, Statement,
 };
+use tokio_postgres::{OwnedField, SimpleColumn};
 use tracing::{debug, info_span};
 use tracing_futures::Instrument;
 
@@ -27,6 +31,7 @@ use readyset_errors::{ReadySetError, ReadySetResult, internal_err, invariant_eq,
 use readyset_shallow::{CacheInsertGuard, QueryMetadata};
 use readyset_sql::Dialect;
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
+use readyset_util::SizeOf;
 use readyset_util::redacted::RedactedString;
 
 use crate::Error;
@@ -98,6 +103,34 @@ pub enum QueryResult {
 pub enum CacheEntry {
     Simple(SimpleQueryMessage),
     DfValue(Vec<DfValue>),
+}
+
+impl SizeOf for CacheEntry {
+    fn deep_size_of(&self) -> usize {
+        let size = match self {
+            CacheEntry::Simple(SimpleQueryMessage::Row(row)) => {
+                size_of_val(row.fields())
+                    + row.body().buffer().len()
+                    + size_of::<Option<Range<usize>>>()
+                        * row.body().ranges().count().unwrap_or_default()
+            }
+            CacheEntry::Simple(SimpleQueryMessage::CommandComplete(row)) => {
+                size_of::<OwnedField>() * row.fields.as_ref().map(|x| x.len()).unwrap_or_default()
+                    + row.tag.len()
+            }
+            CacheEntry::Simple(SimpleQueryMessage::RowDescription(row)) => {
+                size_of::<SimpleColumn>() * row.len()
+            }
+            CacheEntry::Simple(_) => 0,
+            CacheEntry::DfValue(vec) => vec.deep_size_of(),
+        };
+
+        size + size_of::<Self>()
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
 }
 
 impl Debug for QueryResult {

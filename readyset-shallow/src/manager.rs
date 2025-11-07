@@ -10,9 +10,20 @@ use tracing::info;
 use readyset_client::query::QueryId;
 use readyset_errors::{ReadySetError, ReadySetResult, internal};
 use readyset_sql::ast::{Relation, SelectStatement, SqlIdentifier};
+use readyset_util::SizeOf;
 
 use crate::cache::{Cache, CacheExpiration, CacheInfo, InnerCache};
 use crate::{EvictionPolicy, QueryMetadata};
+
+fn weight<K, V>(k: &K, v: &V) -> u32
+where
+    K: SizeOf,
+    V: SizeOf,
+{
+    (k.deep_size_of() + v.deep_size_of())
+        .try_into()
+        .unwrap_or(u32::MAX)
+}
 
 pub struct CacheManager<K, V> {
     caches: HashMap<u64, Arc<Cache<K, V>>>,
@@ -25,20 +36,25 @@ pub struct CacheManager<K, V> {
 
 impl<K, V> CacheManager<K, V>
 where
-    K: Hash + Eq + Send + Sync + 'static,
-    V: Send + Sync + 'static,
+    K: Hash + Eq + Send + Sync + SizeOf + 'static,
+    V: Send + Sync + SizeOf + 'static,
 {
-    pub(crate) fn new_inner() -> InnerCache<K, V> {
-        Arc::new(MokaCache::builder().expire_after(CacheExpiration).build())
+    pub(crate) fn new_inner(max_capacity: Option<u64>) -> InnerCache<K, V> {
+        let mut builder = MokaCache::builder()
+            .expire_after(CacheExpiration)
+            .weigher(weight);
+        if let Some(capacity) = max_capacity {
+            builder = builder.max_capacity(capacity);
+        }
+        Arc::new(builder.build())
     }
 
-    #[allow(clippy::new_without_default)] // temporary
-    pub fn new() -> Self {
+    pub fn new(max_capacity: Option<u64>) -> Self {
         Self {
             caches: Default::default(),
             names: Default::default(),
             query_ids: Default::default(),
-            inner: Self::new_inner(),
+            inner: Self::new_inner(max_capacity),
             next_id: Default::default(),
         }
     }

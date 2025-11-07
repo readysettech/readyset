@@ -42,10 +42,11 @@ xxhash-rust = { workspace = true }
 rand = { workspace = true }
 streaming-iterator = { workspace = true }
 
-readyset-adapter-types = { path = "../readyset-adapter-types/" }
-readyset-alloc = { path = "../readyset-alloc/" }
-readyset-client = { path = "../readyset-client/" }
-readyset-errors = { path = "../readyset-errors/" }
+readyset-adapter-types = { path = "../readyset-adapter-types" }
+readyset-alloc = { path = "../readyset-alloc" }
+readyset-client = { path = "../readyset-client" }
+readyset-common = { path = "../readyset-common" }
+readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data/" }
 readyset-server = { path = "../readyset-server" }
 readyset-shallow = { path = "../readyset-shallow" }

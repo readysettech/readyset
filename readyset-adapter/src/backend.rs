@@ -114,6 +114,7 @@ use readyset_sql_passes::{adapter_rewrites, DetectBucketFunctions};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::{RedactedString, Sensitive};
 use readyset_util::retry_with_exponential_backoff;
+use readyset_util::SizeOf;
 use readyset_version::READYSET_VERSION;
 use slab::Slab;
 use tokio::sync::mpsc::UnboundedSender;
@@ -938,6 +939,7 @@ enum ShouldTrySelect {
 impl<DB, Handler> Backend<DB, Handler>
 where
     DB: 'static + UpstreamDatabase,
+    DB::CacheEntry: SizeOf,
     Handler: 'static + QueryHandler,
 {
     pub fn version(&self) -> String {
@@ -4302,7 +4304,7 @@ pub async fn recreate_shallow_caches<V>(
     rewrite_params: AdapterRewriteParams,
 ) -> ReadySetResult<()>
 where
-    V: Debug + Send + Sync + 'static,
+    V: Debug + Send + Sync + SizeOf + 'static,
 {
     for req in ddl_requests {
         if let Err(e) =
@@ -4321,7 +4323,7 @@ async fn recreate_single_shallow_cache<V>(
     rewrite_params: AdapterRewriteParams,
 ) -> ReadySetResult<()>
 where
-    V: Debug + Send + Sync + 'static,
+    V: Debug + Send + Sync + SizeOf + 'static,
 {
     let query = readyset_sql_parsing::parse_query_with_config(
         parsing_preset,

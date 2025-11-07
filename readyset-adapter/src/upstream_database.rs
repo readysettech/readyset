@@ -11,6 +11,7 @@ use readyset_errors::ReadySetError;
 use readyset_shallow::CacheInsertGuard;
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_util::redacted::RedactedString;
+use readyset_util::SizeOf;
 use tracing::debug;
 
 pub type UpstreamStatementId = u32;
@@ -102,7 +103,7 @@ pub trait UpstreamDatabase: Sized + Send {
     type ShallowExecMeta: Borrow<Self::ExecMeta> + Debug + Clone + Send + Sync + 'static;
 
     /// The type of data this protocol stores into an entry in a shallow cache.
-    type CacheEntry: Debug + Send + Sync + 'static;
+    type CacheEntry: Debug + Send + Sync + SizeOf + 'static;
 
     /// Errors that can be returned from operations on this database
     ///

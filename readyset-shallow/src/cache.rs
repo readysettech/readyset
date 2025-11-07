@@ -252,12 +252,12 @@ mod tests {
 
     const ID: u64 = 0;
 
-    fn new<K, V>(policy: EvictionPolicy) -> Cache<K, V>
+    fn new<K, V>(max_capacity: Option<u64>, policy: EvictionPolicy) -> Cache<K, V>
     where
         K: Eq + Hash + Send + Sync + SizeOf + 'static,
         V: Send + Sync + SizeOf + 'static,
     {
-        let inner = CacheManager::new_inner();
+        let inner = CacheManager::new_inner(max_capacity);
         Cache::new(
             ID,
             inner,
@@ -271,7 +271,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ttl_expiration() {
-        let cache = new(EvictionPolicy::Ttl(Duration::from_secs(1)));
+        let cache = new(None, EvictionPolicy::Ttl(Duration::from_secs(1)));
 
         let key = vec!["test_key"];
         let values = vec![vec!["test_value"]];
@@ -287,7 +287,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ttl_update() {
-        let cache = new(EvictionPolicy::Ttl(Duration::from_secs(2)));
+        let cache = new(None, EvictionPolicy::Ttl(Duration::from_secs(1)));
 
         let key = vec!["test_key"];
         let values = vec![vec!["test_value"]];
@@ -308,7 +308,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_inner_cache() {
-        let inner = CacheManager::new_inner();
+        let inner = CacheManager::new_inner(None);
         let policy = EvictionPolicy::Ttl(Duration::from_secs(60));
         let stmt = SelectStatement::default();
 
@@ -362,5 +362,21 @@ mod tests {
             ttl_ms: None,
         };
         assert!(entry.deep_size_of() > 10 * 0u64.deep_size_of());
+    }
+
+    #[tokio::test]
+    async fn test_max_capacity() {
+        const BYTES: u64 = 1000;
+        const COUNT: u64 = 100;
+
+        let cache = new(Some(BYTES), EvictionPolicy::Ttl(Duration::from_secs(1)));
+        for i in 0..COUNT {
+            let v = vec!["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string()];
+            cache.insert(i, v, QueryMetadata::Test).await;
+        }
+        cache.inner.run_pending_tasks().await;
+
+        assert!(cache.inner.weighted_size() <= BYTES); // under limit?
+        assert!(cache.inner.entry_count() < COUNT); // did we have to evict?
     }
 }
