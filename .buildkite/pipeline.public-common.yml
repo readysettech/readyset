@@ -209,7 +209,7 @@ steps:
     agents:
       queue: c6a-4xlarge
     retry: *retry_on_agent_kill
-    
+
   - label: ":junit: Annotate JUnit XML"
     depends_on:
       - rust-tests
@@ -219,6 +219,7 @@ steps:
       - junit-annotate#v2.7.0:
           artifacts: target/nextest/ci/junit-buildkite-job-*.xml
           failed-download-exit-code: 0
+          ruby-image: ${PUBLIC_REPO_BASE:-public.ecr.aws}/docker/library/ruby:3.1-alpine
     agents: { queue: t3a-small }
 
   - label: ':rust: Run doctests :books:'
