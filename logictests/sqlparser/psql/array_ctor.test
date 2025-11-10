@@ -32,6 +32,12 @@ insert into tags values
   (2, 'yyy'),
   (2, 'zzz');
 
+# a simple, non-correlated subquery
+query T
+select array(select tag from tags) from dogs;
+----
+{bbb,aaa,ccc,yyy,zzz}
+{bbb,aaa,ccc,yyy,zzz}
 
 # simple query (no NULLs in data)
 query T

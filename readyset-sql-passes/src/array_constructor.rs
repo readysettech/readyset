@@ -96,7 +96,7 @@ use readyset_errors::{ReadySetError, ReadySetResult, unsupported};
 use readyset_sql::analysis::visit::{Visitor, walk_expr, walk_select_statement};
 use readyset_sql::ast::{
     ArrayArguments, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
-    JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderClause, Relation,
+    JoinClause, JoinConstraint, JoinOperator, JoinRightSide, OrderClause, Relation,
     SelectStatement, SqlIdentifier, SqlQuery, TableExpr, TableExprInner,
 };
 use readyset_sql::{Dialect, DialectDisplay};
@@ -289,10 +289,23 @@ fn validate_no_disallowed_array_constructors(stmt: &SelectStatement) -> ReadySet
 }
 
 /// Rewrite a single array constructor into a lateral join with `array_agg()`.
-/// Returns (new_field_expr, lateral_table) for the rewritten array constructor.
 ///
-/// The `existing_aliases` argument is to allow for multiple array constructors at this level,
-/// as we have not added the derived tables into the `stmt` yet.
+/// # Arguments
+///
+/// * `query` - The subquery we are inspecting.
+/// * `alias` - The alias of `query` as it appeared in `stmt`.
+/// * `stmt` - The outer query for `query`.
+/// * `existing_aliases` - allow for multiple array constructors at this level,
+///   as we have not added the derived tables into the `stmt` yet.
+/// * `in_lateral_context` - `true` if there is some outer, enclosing query of `query`
+///   that is declared as LATERAL.
+///
+/// # Returns
+///
+/// A tuple consisting of:
+/// - `FieldDefinitionExpr` - a new field to be added to the `stmt` SELECT list,
+///   which a `coalesce()` around the alias to the subquery.
+/// - `TableExpr` - a derived table that be joined to the `stmt` FROM clause.
 fn rewrite_single_array_constructor(
     query: Box<SelectStatement>,
     alias: Option<SqlIdentifier>,
@@ -432,10 +445,12 @@ fn rewrite_array_constructors_in_select(
     }
     // All remaining laterals become LEFT OUTER JOINs
     for lateral_table in lateral_tables {
+        // even if the subquery is correlated, we always set the join condition
+        // as `Empty` as further rewrite passes will handle it.
         stmt.join.push(JoinClause {
             operator: JoinOperator::LeftOuterJoin,
             right: JoinRightSide::Table(lateral_table),
-            constraint: JoinConstraint::On(Expr::Literal(Literal::Boolean(true))),
+            constraint: JoinConstraint::Empty,
         });
     }
 
