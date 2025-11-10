@@ -42,7 +42,7 @@ steps:
           login: true
           retries: 3
     agents:
-      queue: c7a-xlarge
+      queue: c7a-xlarge-nospot
     retry: *retry_on_agent_kill
 
   - label: ':rust: :lock: Check cargo-deny'
