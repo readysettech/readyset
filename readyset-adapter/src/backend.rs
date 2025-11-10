@@ -2250,24 +2250,8 @@ where
         let (query_id, name, requested_name) = self.make_name_and_id(name, &stmt);
 
         // If we have existing caches with the same query_id or name, drop them first.
-        for CacheExpr {
-            name,
-            statement,
-            query_id,
-            ..
-        } in self
-            .noria
-            .verbose_views(Some(query_id), requested_name.as_ref())
-            .await?
-        {
-            warn!(
-                query_id = %query_id,
-                name = %name.display(DB::SQL_DIALECT),
-                statement = %Sensitive(&statement.display(self.settings.dialect)),
-                "Dropping previously cached query",
-            );
-            self.drop_cached_query(&name).await?;
-        }
+        self.drop_caches_on_collision(Some(query_id), requested_name.as_ref())
+            .await?;
 
         // Now migrate the new query
         let migration_state = match self
@@ -2372,6 +2356,9 @@ where
         }
 
         let (query_id, name, requested_name) = self.make_name_and_id(&mut name, &stmt);
+
+        self.drop_caches_on_collision(Some(query_id), requested_name.as_ref())
+            .await?;
 
         let policy = policy.ok_or_else(|| internal_err!("Policy required for shallow cache"))?;
         let policy = convert_eviction_policy(policy);
@@ -2519,6 +2506,49 @@ where
             },
         );
         Ok(noria_connector::QueryResult::Empty)
+    }
+
+    /// Drop caches with matching query_id or name.
+    async fn drop_caches_on_collision(
+        &mut self,
+        query_id: Option<QueryId>,
+        name: Option<&Relation>,
+    ) -> ReadySetResult<()> {
+        if query_id.is_none() && name.is_none() {
+            return Ok(());
+        }
+
+        for CacheExpr {
+            name,
+            statement,
+            query_id,
+            ..
+        } in self.noria.verbose_views(query_id, name).await?
+        {
+            warn!(
+                %query_id,
+                name = %name.display(DB::SQL_DIALECT),
+                statement = %Sensitive(&statement.display(self.settings.dialect)),
+                "Dropping previously cached query",
+            );
+            self.drop_cached_query(&name).await?;
+        }
+        for CacheInfo {
+            name,
+            query_id,
+            query,
+            ..
+        } in self.shallow.list_caches(query_id, name)
+        {
+            warn!(
+                query_id = ?query_id.map(|query_id| query_id.to_string()),
+                name = ?name.as_ref().map(|name| name.display(DB::SQL_DIALECT).to_string()),
+                statement = %Sensitive(&query.display(self.settings.dialect)),
+                "Dropping previously shallow-cached query",
+            );
+            self.shallow.drop_cache(name.as_ref(), query_id.as_ref())?;
+        }
+        Ok(())
     }
 
     /// Handles a `DROP ALL PROXIED QUERIES` request
@@ -2708,7 +2738,7 @@ where
                 query_id,
                 query,
                 ttl_ms,
-            } in self.shallow.list_caches(query_id)
+            } in self.shallow.list_caches(query_id, None)
             {
                 let query_id = query_id
                     .map(|id| id.to_string().into())

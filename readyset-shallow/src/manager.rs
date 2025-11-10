@@ -167,11 +167,23 @@ where
         self.query_ids.pin().clear();
     }
 
-    pub fn list_caches(&self, query_id: Option<QueryId>) -> Vec<CacheInfo> {
+    /// List the current shallow caches.
+    ///
+    /// Optionally, query_id and name can be passed to filter the results.  Passing both will
+    /// include only results that match at least one.
+    pub fn list_caches(
+        &self,
+        query_id: Option<QueryId>,
+        name: Option<&Relation>,
+    ) -> Vec<CacheInfo> {
         self.caches
             .pin()
             .values()
-            .filter(|cache| query_id.is_none() || *cache.query_id() == query_id)
+            .filter(|cache| {
+                (query_id.is_none() && name.is_none())
+                    || *cache.query_id() == query_id
+                    || cache.name().as_ref() == name
+            })
             .map(|cache| cache.get_info())
             .collect()
     }
