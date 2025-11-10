@@ -15,11 +15,12 @@ use readyset_errors::ReadySetError;
 use readyset_sql::ast::Relation;
 pub use replication_offset::mysql::MySqlPosition;
 pub use replication_offset::postgres::PostgresPosition;
+use strum::EnumDiscriminants;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, info};
 
 /// Event notification sent to the controller.
-#[derive(Debug)]
+#[derive(Debug, EnumDiscriminants)]
 pub enum ControllerMessage {
     /// The replicator is about to begin a snapshot (initial or re-snapshot)
     SnapshotStarting,

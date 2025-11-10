@@ -24,7 +24,9 @@ use readyset_util::shutdown::ShutdownSender;
 use readyset_util::{eventually, retry_with_exponential_backoff};
 use replicators::db_util::error_is_slot_not_found;
 use replicators::table_filter::TableFilter;
-use replicators::{ControllerMessage, NoriaAdapter, ReplicatorMessage};
+use replicators::{
+    ControllerMessage, ControllerMessageDiscriminants, NoriaAdapter, ReplicatorMessage,
+};
 use test_utils::tags;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::sleep;
@@ -139,6 +141,20 @@ impl TestChannel {
     /// complete. Will timeout after the duration specified by the SNAPSHOT_TIMEOUT_MS
     /// environment variable (defaults to 60 seconds).
     async fn snapshot_completed(&mut self) -> ReadySetResult<()> {
+        self.wait_for_controller_messages(
+            &[ControllerMessageDiscriminants::SnapshotDone],
+            &[ControllerMessageDiscriminants::SnapshotStarting],
+        )
+        .await
+    }
+
+    /// Wait for one of an arbitrary set of controller messages, ignore another arbitrary set, and
+    /// error on any others.
+    async fn wait_for_controller_messages(
+        &mut self,
+        wait_for: &[ControllerMessageDiscriminants],
+        ignore: &[ControllerMessageDiscriminants],
+    ) -> ReadySetResult<()> {
         let timeout_ms = std::env::var("SNAPSHOT_TIMEOUT_MS")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
@@ -156,17 +172,17 @@ impl TestChannel {
                     })?
                     .ok_or_else(|| internal_err!("Did not receive snapshot controller message"))?;
 
-            match msg {
-                ControllerMessage::SnapshotDone => return Ok(()),
-                ControllerMessage::UnrecoverableError(e) => return Err(e),
-                ControllerMessage::SnapshotStarting => continue,
-                ControllerMessage::ReplicationStarted
-                | ControllerMessage::RecoverableError(_)
-                | ControllerMessage::EnterMaintenanceMode
-                | ControllerMessage::ExitMaintenanceMode => {
-                    internal!("Unexpected controller message while waiting for snapshot: {msg:?}")
-                }
+            let discriminant: ControllerMessageDiscriminants = (&msg).into();
+            if wait_for.contains(&discriminant) {
+                return Ok(());
             }
+            if ignore.contains(&discriminant) {
+                continue;
+            }
+            if let ControllerMessage::UnrecoverableError(e) = msg {
+                return Err(e);
+            }
+            internal!("Unexpected controller message while waiting for snapshot: {msg:?}")
         }
     }
 }
@@ -1029,6 +1045,87 @@ async fn mysql_replication_all_schemas() {
 #[tags(serial, slow, postgres_upstream)]
 async fn pgsql_replication_resnapshot() {
     resnapshot_inner(&pgsql_url()).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow, mysql_upstream)]
+async fn mysql_rename_swap_with_ignore() {
+    readyset_tracing::init_test_logging();
+    let url = &mysql_url();
+    let mut client = DbConnection::connect(url).await.unwrap();
+
+    // Create the tables
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS foo CASCADE;
+            DROP TABLE IF EXISTS foo_tmp CASCADE;
+            DROP TABLE IF EXISTS foo_old CASCADE;
+            CREATE TABLE foo (x INT PRIMARY KEY);
+            CREATE TABLE foo_tmp (x INT PRIMARY KEY);
+            INSERT INTO foo VALUES (1), (2);
+            INSERT INTO foo_tmp VALUES (42);
+            ",
+        )
+        .await
+        .unwrap();
+
+    // Start replication with foo_tmp ignored
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(
+        url.to_string(),
+        Some(Config {
+            replication_tables_ignore: Some("foo_tmp".to_string()),
+            ..Default::default()
+        }),
+    )
+    .await
+    .unwrap();
+
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Verify that only foo is replicated
+    check_results!(
+        ctx,
+        "foo",
+        "rename_before_swap",
+        &[&[DfValue::Int(1)], &[DfValue::Int(2)]]
+    );
+
+    // Ensure foo_tmp is not replicated
+    ctx.assert_table_exists("public", "foo").await;
+    ctx.assert_table_missing("public", "foo_tmp").await;
+
+    // Perform the rename operation (swap)
+    client
+        .query("RENAME TABLE foo TO foo_old, foo_tmp TO foo")
+        .await
+        .unwrap();
+
+    // RENAME will cause resnapshot, wait for it to complete
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .wait_for_controller_messages(
+            &[ControllerMessageDiscriminants::SnapshotDone],
+            &[
+                ControllerMessageDiscriminants::ReplicationStarted,
+                ControllerMessageDiscriminants::SnapshotStarting,
+            ],
+        )
+        .await
+        .unwrap();
+
+    // Verify that foo now has the data from the original foo_tmp
+    check_results!(ctx, "foo", "rename_after_swap", &[&[DfValue::Int(42)]]);
+
+    ctx.stop().await;
+    client.stop().await;
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

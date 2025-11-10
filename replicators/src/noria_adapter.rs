@@ -1228,7 +1228,7 @@ impl<'a> NoriaAdapter<'a> {
         let changelist = ChangeList::from_change(
             Change::Drop {
                 name: table.clone(),
-                if_exists: false,
+                if_exists: true,
             },
             self.dialect,
         );
