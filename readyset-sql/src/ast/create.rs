@@ -795,6 +795,12 @@ impl DialectDisplay for EvictionPolicy {
     }
 }
 
+impl EvictionPolicy {
+    pub fn from_ttl_ms(ttl_ms: u64) -> Self {
+        Self::Ttl(Duration::from_millis(ttl_ms))
+    }
+}
+
 /// The SelectStatement or query ID referenced in a [`CreateCacheStatement`]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, From, Arbitrary)]
 pub enum CacheInner {

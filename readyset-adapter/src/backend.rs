@@ -4003,13 +4003,20 @@ where
 
     /// Gets a list of all `CREATE CACHE ...` statements
     async fn explain_caches(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let results: Vec<Vec<DfValue>> = self
+        let mut results: Vec<Vec<DfValue>> = self
             .noria
             .list_create_cache_stmts()
             .await?
             .into_iter()
             .map(|s| vec![DfValue::from(s)])
             .collect();
+        results.extend(
+            self.shallow
+                .list_caches(None, None)
+                .into_iter()
+                .map(CreateCacheStatement::from)
+                .map(|create| vec![DfValue::from(create.display(DB::SQL_DIALECT).to_string())]),
+        );
 
         let select_schema = create_dummy_schema!("query text");
 

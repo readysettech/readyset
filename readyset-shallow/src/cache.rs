@@ -7,7 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use moka::sync::Cache as MokaCache;
 
 use readyset_client::query::QueryId;
-use readyset_sql::ast::{Relation, SelectStatement, SqlIdentifier};
+use readyset_sql::ast::{
+    CacheInner, CacheType, CreateCacheStatement, Relation, SelectStatement, SqlIdentifier,
+};
 
 use crate::{EvictionPolicy, QueryMetadata, QueryResult};
 
@@ -34,6 +36,22 @@ pub struct CacheInfo {
     pub query: SelectStatement,
     pub schema_search_path: Vec<SqlIdentifier>,
     pub ttl_ms: Option<u64>,
+}
+
+impl From<CacheInfo> for CreateCacheStatement {
+    fn from(info: CacheInfo) -> Self {
+        Self {
+            name: info.name,
+            cache_type: Some(CacheType::Shallow),
+            policy: info
+                .ttl_ms
+                .map(readyset_sql::ast::EvictionPolicy::from_ttl_ms),
+            inner: Ok(CacheInner::Statement(Box::new(info.query))),
+            unparsed_create_cache_statement: None,
+            always: false,
+            concurrently: false,
+        }
+    }
 }
 
 pub struct Cache<K, V> {
