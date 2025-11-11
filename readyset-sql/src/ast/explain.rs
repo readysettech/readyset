@@ -42,6 +42,7 @@ pub enum ExplainStatement {
         inner: Result<CacheInner, String>,
         /// A full copy of the original 'explain create cache' statement.
         unparsed_explain_create_cache_statement: String,
+        cache_type: Option<CacheType>,
     },
 }
 
@@ -66,12 +67,14 @@ impl PartialEq for ExplainStatement {
                 ExplainStatement::CreateCache {
                     inner: ia,
                     unparsed_explain_create_cache_statement: _,
+                    cache_type: ta,
                 },
                 ExplainStatement::CreateCache {
                     inner: ib,
                     unparsed_explain_create_cache_statement: _,
+                    cache_type: tb,
                 },
-            ) => ia == ib,
+            ) => ia == ib && ta == tb,
             (_, _) => false,
         }
     }
@@ -86,7 +89,11 @@ impl Hash for ExplainStatement {
             ExplainStatement::CreateCache {
                 inner,
                 unparsed_explain_create_cache_statement: _,
-            } => inner.hash(state),
+                cache_type,
+            } => {
+                inner.hash(state);
+                cache_type.hash(state);
+            }
             ExplainStatement::Graphviz {
                 simplified,
                 for_cache,
@@ -121,8 +128,14 @@ impl DialectDisplay for ExplainStatement {
                 ExplainStatement::Domains => write!(f, "DOMAINS;"),
                 ExplainStatement::Caches => write!(f, "CACHES;"),
                 ExplainStatement::Materializations => write!(f, "MATERIALIZATIONS;"),
-                ExplainStatement::CreateCache { inner, .. } => {
-                    write!(f, "CREATE CACHE FROM ")?;
+                ExplainStatement::CreateCache {
+                    inner, cache_type, ..
+                } => {
+                    write!(f, "CREATE")?;
+                    if let Some(cache_type) = cache_type {
+                        write!(f, " {}", cache_type.display(dialect))?;
+                    }
+                    write!(f, " CACHE FROM ")?;
 
                     match inner {
                         Ok(inner) => write!(f, "{}", inner.display(dialect)),

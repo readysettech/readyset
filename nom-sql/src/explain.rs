@@ -5,8 +5,8 @@ use nom::sequence::{terminated, tuple};
 use nom_locate::LocatedSpan;
 use readyset_sql::{ast::*, Dialect};
 
-use crate::common::{parse_fallible, statement_terminator, until_statement_terminator};
-use crate::create::cached_query_inner;
+use crate::common::statement_terminator;
+use crate::create::create_cached_query;
 use crate::table::relation;
 use crate::whitespace::whitespace1;
 use crate::NomSqlResult;
@@ -41,19 +41,13 @@ fn explain_create_cache(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ExplainStatement> {
     move |i| {
         let unparsed_explain_create_cache_statement: String = String::from_utf8_lossy(*i).into();
-        let (i, _) = tag_no_case("create")(i)?;
-        let (i, _) = whitespace1(i)?;
-        let (i, _) = tag_no_case("cache")(i)?;
-        let (i, _) = whitespace1(i)?;
-        let (i, _) = tag_no_case("from")(i)?;
-        let (i, _) = whitespace1(i)?;
-        let (i, inner) =
-            parse_fallible(cached_query_inner(dialect), until_statement_terminator)(i)?;
+        let (i, create) = create_cached_query(dialect)(i)?;
         Ok((
             i,
             ExplainStatement::CreateCache {
-                inner,
+                inner: create.inner,
                 unparsed_explain_create_cache_statement,
+                cache_type: create.cache_type,
             },
         ))
     }

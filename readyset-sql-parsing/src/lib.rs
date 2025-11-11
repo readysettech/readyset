@@ -688,6 +688,7 @@ fn parse_explain(
                         unparsed_explain_create_cache_statement: inner
                             .unparsed_create_cache_statement
                             .unwrap_or_default(),
+                        cache_type: inner.cache_type,
                     },
                 ));
             }

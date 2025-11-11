@@ -999,7 +999,7 @@ fn cached_query_options(
 
 /// Extract the [`SelectStatement`] or Query ID from a CREATE CACHE statement. Query ID is
 /// parsed as a SqlIdentifier
-pub fn cached_query_inner(
+fn cached_query_inner(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CacheInner> {
     move |i| {

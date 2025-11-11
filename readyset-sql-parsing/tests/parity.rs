@@ -801,7 +801,16 @@ fn explain_create_cache() {
 }
 
 #[test]
-#[ignore = "nom-sql doesn't support these options"]
+fn explain_create_shallow_cache() {
+    check_parse_mysql!("EXPLAIN CREATE SHALLOW CACHE FROM SELECT * FROM foo");
+    check_parse_mysql!("EXPLAIN CREATE SHALLOW CACHE POLICY TTL 10 SECONDS FROM SELECT * FROM foo");
+    check_parse_mysql!("EXPLAIN CREATE SHALLOW CACHE c1 FROM SELECT * FROM foo");
+    check_parse_mysql!(
+        "EXPLAIN CREATE SHALLOW CACHE POLICY TTL 10 SECONDS c1 FROM SELECT * FROM foo"
+    );
+}
+
+#[test]
 fn explain_create_cache_options() {
     check_parse_both!("EXPLAIN CREATE CACHE ALWAYS FROM SELECT * FROM users WHERE id = $1");
     check_parse_both!(
