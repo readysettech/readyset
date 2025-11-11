@@ -20,7 +20,7 @@ use replication_offset::ReplicationOffsets;
 use schema_catalog::SchemaCatalog;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{broadcast, Mutex, RwLock};
 use tower::ServiceExt;
 use tower_service::Service;
 use tracing::{debug, trace};
@@ -29,6 +29,7 @@ use url::Url;
 use crate::consensus::{Authority, AuthorityControl};
 use crate::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use crate::debug::stats;
+use crate::events::{ControllerEvent, ControllerEventsClient};
 use crate::internal::{DomainIndex, ReplicaAddress};
 use crate::metrics::MetricsDump;
 use crate::query::QueryId;
@@ -192,6 +193,12 @@ struct Controller {
     /// The last valid leader URL seen by this service. Used to circumvent requests to Consul in
     /// the happy-path.
     leader_url: Arc<parking_lot::RwLock<Option<Url>>>,
+}
+
+impl Controller {
+    fn authority(&self) -> Arc<Authority> {
+        self.authority.clone()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -393,6 +400,11 @@ pub struct ReadySetHandle {
     views: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     request_timeout: Option<Duration>,
     migration_timeout: Option<Duration>,
+    /// An SSE-based client for receiving events from the controller. Since not every client is
+    /// interested in events, this is [`None`] until started on demand in
+    /// [`ReadySetHandle::subscribe_to_events`], which starts the client if it doesn't exist, and
+    /// then subscribes to the events channel.
+    controller_events_client: Option<ControllerEventsClient>,
 }
 
 /// Define a simple RPC request wrapper for the controller, which queries the same RPC endpoint as
@@ -438,6 +450,7 @@ impl ReadySetHandle {
             }),
             request_timeout,
             migration_timeout,
+            controller_events_client: None,
         }
     }
 
@@ -454,6 +467,7 @@ impl ReadySetHandle {
             handle: tower::util::Either::B(RawController::new(url, request_timeout)),
             request_timeout,
             migration_timeout,
+            controller_events_client: None,
         }
     }
 
@@ -495,6 +509,27 @@ impl ReadySetHandle {
         migration_timeout: Option<Duration>,
     ) -> Self {
         Self::make(authority.into(), request_timeout, migration_timeout)
+    }
+
+    fn make_events_client(&self) -> ControllerEventsClient {
+        match &self.handle {
+            tower::util::Either::A(controller) => ControllerEventsClient::with_dynamic_leader(
+                controller.authority(),
+                controller.leader_url.clone(),
+            ),
+            tower::util::Either::B(raw_controller) => {
+                ControllerEventsClient::with_fixed_leader(raw_controller.url.clone())
+            }
+        }
+    }
+
+    pub fn subscribe_to_events(&mut self) -> broadcast::Receiver<ControllerEvent> {
+        if self.controller_events_client.is_none() {
+            let client = self.make_events_client();
+            client.start();
+            self.controller_events_client = Some(client);
+        }
+        self.controller_events_client.as_ref().unwrap().subscribe()
     }
 
     /// Issues a POST request to the given path with no body.
