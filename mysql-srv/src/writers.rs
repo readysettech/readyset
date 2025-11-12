@@ -117,15 +117,19 @@ const fn lenc_int_len(n: u64) -> usize {
     }
 }
 
+/// Pre-computed constant: length of "def" as a length-encoded string
+const LENC_DEF_LEN: usize = 4; // "def" (3 bytes) + 1 length byte
+
+/// Pre-computed constant: length of empty string as a length-encoded string
+const LENC_EMPTY_LEN: usize = 1; // just the length byte (0)
+
+/// Pre-computed constant: fixed overhead for column definition
+/// This includes: "def" + 3 empty strings (schema, original table, original name) + fixed-size fields
+const COL_FIXED_OVERHEAD: usize = LENC_DEF_LEN + (3 * LENC_EMPTY_LEN) + (1 + 2 + 4 + 1 + 2 + 1 + 2);
+
 /// Compute the size of the buffer required to encode this column definition
 fn col_enc_len(c: &Column) -> usize {
-    lenc_str_len(b"def")
-        + lenc_str_len(b"")
-        + lenc_str_len(c.table.as_bytes())
-        + lenc_str_len(b"")
-        + lenc_str_len(c.column.as_bytes())
-        + lenc_str_len(b"")
-        + (1 + 2 + 4 + 1 + 2 + 1 + 2)
+    COL_FIXED_OVERHEAD + lenc_str_len(c.table.as_bytes()) + lenc_str_len(c.column.as_bytes())
 }
 
 // See https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query_response_text_resultset_column_definition.html for documentation
@@ -157,9 +161,8 @@ fn write_column_definition(c: &Column, buf: &mut Vec<u8>) {
     buf.write_u8(c.coltype as u8).unwrap();
     // Column Flags (2 bytes)
     buf.write_u16::<LittleEndian>(c.colflags.bits()).unwrap();
-    // Decimals (1 byte) - maximum shown decimal digits
-    buf.write_all(&[c.decimals]).unwrap(); // decimals
-    buf.write_all(&[0x00, 0x00]).unwrap(); // unused
+    // Decimals (1 byte) + 2 unused bytes - batched for efficiency
+    buf.write_all(&[c.decimals, 0x00, 0x00]).unwrap();
 }
 
 /// Preencode the column definitions into a buffer for future reuse
