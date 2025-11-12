@@ -4,6 +4,7 @@ use readyset_adapter::backend::{MigrationMode, QueryInfo};
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::{TestBuilder, sleep};
+use readyset_sql_parsing::ParsingPreset;
 use test_utils::tags;
 
 /// Helper that fires an `EXPLAIN LAST STATEMENT` and asserts that the last
@@ -35,6 +36,8 @@ async fn test_topk_dual_lookup() {
         // prevent plain SELECTs from creating caches.
         // Queries with no caches will fail if no fallback exists
         .migration_mode(MigrationMode::OutOfBand)
+        // TODO: This should work in sqlparser after fixing REA-6179
+        .parsing_preset(ParsingPreset::OnlyNom)
         .fallback(true)
         .set_topk(true)
         .replicate_db(db_name.to_string())

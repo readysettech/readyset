@@ -25,6 +25,7 @@ use readyset_data::Dialect;
 use readyset_server::{Builder, DurabilityMode, Handle, LocalAuthority, ReadySetHandle};
 use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
 use tokio::net::{TcpListener, TcpStream};
@@ -129,6 +130,7 @@ pub struct TestBuilder {
     replication_server_id: Option<ReplicationServerId>,
     mixed_comparisons: bool,
     topk: bool,
+    parsing_preset: ParsingPreset,
 }
 
 impl Default for TestBuilder {
@@ -156,6 +158,7 @@ impl TestBuilder {
             replication_server_id: None,
             mixed_comparisons: true,
             topk: false,
+            parsing_preset: ParsingPreset::for_tests(),
         }
     }
 
@@ -247,6 +250,11 @@ impl TestBuilder {
         self
     }
 
+    pub fn parsing_preset(mut self, parsing_preset: ParsingPreset) -> Self {
+        self.parsing_preset = parsing_preset;
+        self
+    }
+
     pub async fn build<A>(self) -> (A::ConnectionOpts, Handle, ShutdownSender)
     where
         A: Adapter + 'static,
@@ -295,6 +303,7 @@ impl TestBuilder {
         builder.set_topk(self.topk);
         builder.set_pagination(false);
         builder.set_mixed_comparisons(self.mixed_comparisons);
+        builder.set_parsing_preset(self.parsing_preset);
         builder.set_dialect(A::DIALECT);
 
         if !self.partial {
@@ -442,6 +451,7 @@ impl TestBuilder {
                     let backend = backend_builder
                         .dialect(A::DIALECT)
                         .migration_mode(self.migration_mode)
+                        .parsing_preset(self.parsing_preset)
                         .build(
                             noria,
                             fallback_upstream,
