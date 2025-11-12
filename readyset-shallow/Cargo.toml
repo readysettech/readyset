@@ -24,3 +24,4 @@ readyset-util = { path = "../readyset-util" }
 [dev-dependencies]
 assert_matches = { workspace = true }
 futures = { workspace = true }
+proptest = { workspace = true }
