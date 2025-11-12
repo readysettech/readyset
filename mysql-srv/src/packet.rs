@@ -180,12 +180,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
     }
 
     /// Push a new mysql packet to the outgoing packet list.
-    pub fn enqueue_packet(&mut self, mut packet: Vec<u8>) {
-        // Lazily shrink large buffers before processing them further, as after that they will go to
-        // the buffer pool. This would occur if the buffer was reused, and the previous use was
-        // greater than `MAX_POOL_ROW_CAPACITY`, and this use is less than `MAX_POOL_ROW_CAPACITY`.
-        packet.shrink_to(MAX_POOL_ROW_CAPACITY);
-
+    pub fn enqueue_packet(&mut self, packet: Vec<u8>) {
         if packet.len() < MAX_PACKET_CHUNK_SIZE {
             let header = self.packet_header_bytes(packet.len());
             self.queue.push(QueuedPacket::WithHeader(header, packet));
@@ -241,6 +236,24 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
     /// Clear the queued packets and return them to the pool of preallocated packets
     fn return_queued_to_pool(&mut self) {
         self.queue.retain(|p| p.poolable());
+
+        // Shrink large buffers before adding to the pool to avoid wasting memory.
+        // This would occur if the buffer was reused, and the previous use was
+        // greater than `MAX_POOL_ROW_CAPACITY`, and this use is less than `MAX_POOL_ROW_CAPACITY`.
+        for packet in &mut self.queue {
+            match packet {
+                QueuedPacket::WithHeader(_, vec)
+                | QueuedPacket::Plain(vec)
+                | QueuedPacket::LargePacket {
+                    headers: _,
+                    data: vec,
+                } => {
+                    vec.shrink_to(MAX_POOL_ROW_CAPACITY);
+                }
+                QueuedPacket::Raw(_) => {}
+            }
+        }
+
         self.preallocated.append(&mut self.queue);
         self.preallocated.sort_by_key(|p| p.len());
         self.preallocated.truncate(MAX_POOL_BUFFERS);
