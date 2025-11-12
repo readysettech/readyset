@@ -6533,9 +6533,14 @@ dependencies = [
  "anyhow",
  "bincode",
  "clap",
+ "readyset-client",
  "readyset-data",
  "rocksdb",
  "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
 ]
 
 [[package]]

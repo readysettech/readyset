@@ -14,7 +14,12 @@ bincode = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 readyset-data = { path = "../readyset-data" }
 rocksdb = { workspace = true, features = ["lz4", "jemalloc"] }
+readyset-client = { path = "../readyset-client" }
 serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+url = { workspace = true }
 
 [lints]
 workspace = true
