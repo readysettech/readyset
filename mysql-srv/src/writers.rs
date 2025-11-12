@@ -9,13 +9,34 @@ use crate::myc::io::WriteMysqlExt;
 use crate::packet::PacketConn;
 use crate::{Column, ErrorKind};
 
+/// Size of an EOF packet payload (without the 4-byte packet header)
+pub(crate) const EOF_PACKET_LEN: usize = 5;
+
+/// Total size of an EOF packet including the 4-byte header
+pub(crate) const EOF_PACKET_TOTAL_LEN: usize = 4 + EOF_PACKET_LEN;
+
+/// Write an EOF packet with its header into an existing buffer without allocating a new one.
+/// The buffer must have at least EOF_PACKET_TOTAL_LEN bytes of remaining capacity.
+pub(crate) fn write_eof_packet_inline<S: AsyncRead + AsyncWrite + Unpin>(
+    buf: &mut Vec<u8>,
+    conn: &mut PacketConn<S>,
+    s: StatusFlags,
+) -> io::Result<()> {
+    let hdr = conn.packet_header_bytes(EOF_PACKET_LEN);
+    buf.write_all(&hdr)?;
+    buf.extend([0xFE, 0x00, 0x00, s.bits() as u8, (s.bits() >> 8) as u8]);
+    Ok(())
+}
+
+/// Write an EOF packet using its own buffer allocation.
+/// Prefer `write_eof_packet_inline` when you already have a buffer to avoid extra allocation.
 pub(crate) async fn write_eof_packet<S: AsyncRead + AsyncWrite + Unpin>(
     conn: &mut PacketConn<S>,
     s: StatusFlags,
 ) -> io::Result<()> {
-    let mut buf = conn.get_buffer(5);
-    buf.extend([0xFE, 0x00, 0x00, s.bits() as u8, (s.bits() >> 8) as u8]);
-    conn.enqueue_packet(buf);
+    let mut buf = conn.get_buffer(EOF_PACKET_TOTAL_LEN);
+    write_eof_packet_inline(&mut buf, conn, s)?;
+    conn.enqueue_plain(buf);
     Ok(())
 }
 
@@ -180,9 +201,11 @@ where
         };
     }
 
-    // Calculate total buffer size needed for all column definition packets
+    // Calculate total buffer size needed for all column definition packets + EOF packet
     // Each column needs: 4 bytes for packet header + encoded column definition
-    let total_size: usize = columns.iter().map(|c| 4 + col_enc_len(c)).sum();
+    // EOF packet needs: EOF_PACKET_TOTAL_LEN
+    let columns_size: usize = columns.iter().map(|c| 4 + col_enc_len(c)).sum();
+    let total_size = columns_size + EOF_PACKET_TOTAL_LEN;
 
     // Allocate a single buffer for all packets with their headers
     let mut buf = Vec::with_capacity(total_size);
@@ -195,10 +218,12 @@ where
         write_column_definition(c, &mut buf);
     }
 
-    // Enqueue the raw buffer containing all packets
-    conn.enqueue_plain(buf);
+    // Write EOF packet inline into the same buffer
+    write_eof_packet_inline(&mut buf, conn, StatusFlags::empty())?;
 
-    write_eof_packet(conn, StatusFlags::empty()).await
+    // Enqueue the raw buffer containing all packets (column defs + EOF)
+    conn.enqueue_plain(buf);
+    Ok(())
 }
 
 pub(crate) async fn column_definitions<'a, I, S>(i: I, conn: &mut PacketConn<S>) -> io::Result<()>
@@ -226,7 +251,16 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let i = i.into_iter();
+
+    // Allocate a buffer for just the EOF packet to append after cached data
+    let mut buf = conn.get_buffer(EOF_PACKET_TOTAL_LEN);
+
+    // Enqueue the cached column definitions first
     conn.enqueue_raw(cached);
     conn.seq = conn.seq.wrapping_add((1 + i.len()) as u8);
-    write_eof_packet(conn, StatusFlags::empty()).await
+
+    // Write EOF packet inline into our buffer
+    write_eof_packet_inline(&mut buf, conn, StatusFlags::empty())?;
+    conn.enqueue_plain(buf);
+    Ok(())
 }
