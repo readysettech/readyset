@@ -732,6 +732,7 @@ impl Domain {
         dst: Destination,
         target: Target,
         dst_index: Option<&Index>,
+        context: &str,
     ) -> ReadySetResult<HashSet<Tag>> {
         let index = Index::new(IndexType::best_for_keys(keys), cols.to_vec());
         let candidate_tags = self
@@ -768,7 +769,7 @@ impl Domain {
 
         invariant!(
             !tags.is_empty(),
-            "no tag found for value {:?} in {}.{:?}{}{}",
+            "no tag found for value {:?} in {}.{:?}{}{} [context: {}]",
             Sensitive(&keys),
             dst.0,
             index,
@@ -781,7 +782,8 @@ impl Domain {
                 format!(" (from destination index {:?})", dst_idx)
             } else {
                 "".to_owned()
-            }
+            },
+            context
         );
         Ok(tags)
     }
@@ -812,7 +814,7 @@ impl Domain {
         cache_name: Relation,
         dst_index: Option<&Index>,
     ) -> ReadySetResult<()> {
-        let tags = self.find_tags(&miss_keys, miss_columns, dst, target, dst_index)?;
+        let tags = self.find_tags(&miss_keys, miss_columns, dst, target, dst_index, "upquery")?;
 
         for &tag in &tags {
             let (miss_keys, cache_name) = (miss_keys.clone(), cache_name.clone());
@@ -2607,7 +2609,14 @@ impl Domain {
             return Ok(());
         };
 
-        let tags = self.find_tags(&keys, cols, Destination(node), Target(node), None)?;
+        let tags = self.find_tags(
+            &keys,
+            cols,
+            Destination(node),
+            Target(node),
+            None,
+            "eviction",
+        )?;
 
         for tag in tags {
             if self.replay_paths[tag].trigger.is_local() {
