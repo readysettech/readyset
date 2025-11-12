@@ -55,14 +55,7 @@ impl<'a, S: AsyncRead + AsyncWrite + Unpin + 'a> StatementMetaWriter<'a, S> {
     /// parameters the client must provide when executing the prepared statement. `columns` is a
     /// second set of [`Column`](struct.Column.html) descriptors for the values that will be
     /// returned in each row then the statement is later executed.
-    pub async fn reply<PI, CI>(self, id: u32, params: PI, columns: CI) -> io::Result<()>
-    where
-        PI: IntoIterator<Item = &'a Column>,
-        CI: IntoIterator<Item = &'a Column>,
-        <PI as IntoIterator>::IntoIter: ExactSizeIterator,
-        <CI as IntoIterator>::IntoIter: ExactSizeIterator,
-    {
-        let params = params.into_iter();
+    pub async fn reply(self, id: u32, params: &[Column], columns: &[Column]) -> io::Result<()> {
         self.stmts.insert(
             id,
             StatementData {
