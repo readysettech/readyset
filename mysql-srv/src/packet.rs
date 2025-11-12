@@ -30,7 +30,7 @@ pub struct PacketConn<S: AsyncRead + AsyncWrite + Unpin> {
     // write variables
     pub seq: u8,
     queue: Vec<QueuedPacket>,
-    /// Reusable packets
+    /// Reusable packets. We sort the elements from smallest capacity to largest.
     preallocated: Vec<QueuedPacket>,
 
     pub stream: SwitchableStream<S>,
@@ -60,15 +60,15 @@ impl QueuedPacket {
         !matches!(self, QueuedPacket::Raw(_))
     }
 
-    fn len(&self) -> usize {
+    fn capacity(&self) -> usize {
         match self {
             QueuedPacket::Raw(r) => r.len(),
-            QueuedPacket::Plain(p) => p.len(),
-            QueuedPacket::WithHeader(_, p) => p.len(),
+            QueuedPacket::Plain(p) => p.capacity(),
+            QueuedPacket::WithHeader(_, p) => p.capacity(),
             QueuedPacket::LargePacket {
                 headers: _,
                 data: p,
-            } => p.len(),
+            } => p.capacity(),
         }
     }
 }
@@ -235,6 +235,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
 
     /// Clear the queued packets and return them to the pool of preallocated packets
     fn return_queued_to_pool(&mut self) {
+        // filter out any packets we don't want to reuse (i.e. Raw).
         self.queue.retain(|p| p.poolable());
 
         // Shrink large buffers before adding to the pool to avoid wasting memory.
@@ -250,19 +251,45 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
                 } => {
                     vec.shrink_to(MAX_POOL_ROW_CAPACITY);
                 }
-                QueuedPacket::Raw(_) => {}
+                QueuedPacket::Raw(_) => unreachable!("Raw packets should be filtered out"),
             }
         }
 
         self.preallocated.append(&mut self.queue);
-        self.preallocated.sort_by_key(|p| p.len());
+        self.preallocated.sort_by_key(|p| p.capacity());
         self.preallocated.truncate(MAX_POOL_BUFFERS);
     }
 
-    pub fn get_buffer(&mut self) -> Vec<u8> {
-        while let Some(p) = self.preallocated.pop() {
+    /// Get a buffer from the pool, with a size hint for capacity.
+    /// If no suitable buffer is found in the pool with the requested size,
+    /// a new buffer with that capacity will be allocated.
+    pub fn get_buffer(&mut self, size_hint: usize) -> Vec<u8> {
+        // We search forward (smallest first) since preallocated is sorted by capacity
+        if size_hint > 0 && !self.preallocated.is_empty() {
+            let idx = self
+                .preallocated
+                .partition_point(|x| x.capacity() >= size_hint);
+
+            if idx < self.preallocated.len() {
+                let p = self.preallocated.remove(idx);
+                match p {
+                    QueuedPacket::WithHeader(_, mut vec)
+                    | QueuedPacket::Plain(mut vec)
+                    | QueuedPacket::LargePacket {
+                        headers: _,
+                        data: mut vec,
+                    } => {
+                        vec.clear();
+                        return vec;
+                    }
+                    QueuedPacket::Raw(_) => unreachable!("Raw packets should be filtered out"),
+                }
+            }
+        }
+
+        // No suitable buffer found, try to get *any* buffer from the pool
+        if let Some(p) = self.preallocated.pop() {
             match p {
-                QueuedPacket::Raw(_) => {}
                 QueuedPacket::WithHeader(_, mut vec)
                 | QueuedPacket::Plain(mut vec)
                 | QueuedPacket::LargePacket {
@@ -270,11 +297,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
                     data: mut vec,
                 } => {
                     vec.clear();
+                    if size_hint > 0 && vec.capacity() < size_hint {
+                        vec.reserve(size_hint - vec.capacity());
+                    }
                     return vec;
                 }
+                QueuedPacket::Raw(_) => unreachable!("Raw packets should be filtered out"),
             }
         }
-        Vec::new()
+
+        // No buffer in pool, allocate a new one with the requested capacity
+        Vec::with_capacity(size_hint)
     }
 }
 

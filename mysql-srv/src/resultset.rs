@@ -346,13 +346,10 @@ where
         }
 
         let row_data = self.row_data.get_or_insert_with(|| {
-            let mut row_data = self.result.conn.get_buffer();
-            // We want to preallocate at least *some* capacity for the row, otherwise the
-            // incremental writes cause a whole lot of reallocations. Since Vec usually
-            // reallocates with exponential growth even small responses require at least
-            // a few reallocs unless we reserve some capacity.
-            row_data.reserve(DEFAULT_ROW_CAPACITY);
-            row_data
+            // Request a buffer with DEFAULT_ROW_CAPACITY upfront to avoid reallocations
+            // during incremental writes. The buffer pool will provide an appropriately
+            // sized buffer if available.
+            self.result.conn.get_buffer(DEFAULT_ROW_CAPACITY)
         });
 
         // set the packet header. the header is the first 4 bytes of the packet: 3 bytes for size

@@ -13,7 +13,7 @@ pub(crate) async fn write_eof_packet<S: AsyncRead + AsyncWrite + Unpin>(
     conn: &mut PacketConn<S>,
     s: StatusFlags,
 ) -> io::Result<()> {
-    let mut buf = conn.get_buffer();
+    let mut buf = conn.get_buffer(5);
     buf.extend([0xFE, 0x00, 0x00, s.bits() as u8, (s.bits() >> 8) as u8]);
     conn.enqueue_packet(buf);
     Ok(())
@@ -26,8 +26,7 @@ pub(crate) async fn write_ok_packet<S: AsyncRead + AsyncWrite + Unpin>(
     s: StatusFlags,
 ) -> io::Result<()> {
     const MAX_OK_PACKET_LEN: usize = 1 + 9 + 9 + 2 + 2;
-    let mut buf = conn.get_buffer();
-    buf.reserve(MAX_OK_PACKET_LEN);
+    let mut buf = conn.get_buffer(MAX_OK_PACKET_LEN);
     buf.write_u8(0x00)?; // OK packet type
     buf.write_lenenc_int(rows)?;
     buf.write_lenenc_int(last_insert_id)?;
@@ -42,8 +41,8 @@ pub async fn write_err<S: AsyncRead + AsyncWrite + Unpin>(
     msg: &[u8],
     conn: &mut PacketConn<S>,
 ) -> io::Result<()> {
-    let mut buf = conn.get_buffer();
-    buf.reserve(4 + 5 + msg.len());
+    let size = 4 + 5 + msg.len();
+    let mut buf = conn.get_buffer(size);
     buf.write_u8(0xFF)?;
     buf.write_u16::<LittleEndian>(err as u16)?;
     buf.write_u8(b'#')?;
@@ -72,8 +71,7 @@ where
     let ci = columns.into_iter();
 
     // first, write out COM_STMT_PREPARE_OK
-    let mut buf = conn.get_buffer();
-    buf.reserve(MAX_PREPARE_OK_PACKET_LEN);
+    let mut buf = conn.get_buffer(MAX_PREPARE_OK_PACKET_LEN);
     buf.write_u8(0x00)?;
     buf.write_u32::<LittleEndian>(id)?;
     buf.write_u16::<LittleEndian>(ci.len() as u16)?;
@@ -171,20 +169,36 @@ where
     I: IntoIterator<Item = &'a Column>,
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let mut empty = true;
-    for c in i {
-        let mut buf = conn.get_buffer();
-        buf.reserve(col_enc_len(c));
-        write_column_definition(c, &mut buf);
-        conn.enqueue_packet(buf);
-        empty = false;
+    // Collect columns to calculate total size for batch allocation
+    let columns: Vec<&Column> = i.into_iter().collect();
+
+    if columns.is_empty() {
+        return if only_eof_on_nonempty {
+            Ok(())
+        } else {
+            write_eof_packet(conn, StatusFlags::empty()).await
+        };
     }
 
-    if empty && only_eof_on_nonempty {
-        Ok(())
-    } else {
-        write_eof_packet(conn, StatusFlags::empty()).await
+    // Calculate total buffer size needed for all column definition packets
+    // Each column needs: 4 bytes for packet header + encoded column definition
+    let total_size: usize = columns.iter().map(|c| 4 + col_enc_len(c)).sum();
+
+    // Allocate a single buffer for all packets with their headers
+    let mut buf = Vec::with_capacity(total_size);
+
+    // Write all column definition packets (with headers) into the single buffer
+    for c in columns {
+        let col_len = col_enc_len(c);
+        let hdr = conn.packet_header_bytes(col_len);
+        buf.write_all(&hdr)?;
+        write_column_definition(c, &mut buf);
     }
+
+    // Enqueue the raw buffer containing all packets
+    conn.enqueue_plain(buf);
+
+    write_eof_packet(conn, StatusFlags::empty()).await
 }
 
 pub(crate) async fn column_definitions<'a, I, S>(i: I, conn: &mut PacketConn<S>) -> io::Result<()>
@@ -194,7 +208,8 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let i = i.into_iter();
-    let mut buf = conn.get_buffer();
+    let size = lenc_int_len(i.len() as u64);
+    let mut buf = conn.get_buffer(size);
     buf.write_lenenc_int(i.len() as u64)?;
     conn.enqueue_packet(buf);
     write_column_definitions(i, conn, false).await
