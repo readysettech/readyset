@@ -123,3 +123,21 @@ fn test_alter_table_rename() {
     check_rt_postgres_sqlparser!("ALTER TABLE tb1 RENAME TO tb2");
     check_rt_mysql_sqlparser!("ALTER TABLE tb1 RENAME AS tb2");
 }
+
+#[test]
+fn limit_placeholders() {
+    check_rt_mysql!("select * from users limit ?");
+    check_rt_mysql!("select * from users limit $1");
+    check_rt_postgres!("select * from users limit $1");
+    check_rt_postgres!("select * from users limit :1");
+}
+
+// TODO: Fix REA-6179
+#[test]
+#[should_panic = "nom-sql AST differs from sqlparser-rs AST"]
+fn limit_placeholders_create_cache() {
+    check_rt_mysql!("create cache from select * from users limit ?");
+    check_rt_mysql!("create cache from select * from users limit $1");
+    check_rt_postgres!("create cache from select * from users limit $1");
+    check_rt_postgres!("create cache from select * from users limit :1");
+}

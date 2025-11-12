@@ -281,6 +281,24 @@ fn limit_offset_placeholders() {
 }
 
 #[test]
+fn limit_placeholders() {
+    check_parse_mysql!("select * from users limit ?");
+    check_parse_mysql!("select * from users limit $1");
+    check_parse_postgres!("select * from users limit $1");
+    check_parse_postgres!("select * from users limit :1");
+}
+
+// TODO: Fix REA-6179
+#[test]
+#[should_panic = "nom-sql AST differs from sqlparser-rs AST"]
+fn limit_placeholders_create_cache() {
+    check_parse_mysql!("create cache from select * from users limit ?");
+    check_parse_mysql!("create cache from select * from users limit $1");
+    check_parse_postgres!("create cache from select * from users limit $1");
+    check_parse_postgres!("create cache from select * from users limit :1");
+}
+
+#[test]
 fn limit_offset_placeholders_should_fail() {
     // Should fail, but both nom-sql and sqlparser-rs are apparently pretty permissive and allow
     // dollar and colon placeholders in both MySQL and PostgreSQL:
