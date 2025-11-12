@@ -128,6 +128,19 @@ impl WindowOperation {
         })
     }
 
+    fn coerce_to_output_type(value: &DfValue, output_col_type: &DfType) -> ReadySetResult<DfValue> {
+        if value.is_none() {
+            return Ok(DfValue::None);
+        }
+
+        let inferred_type = value.infer_dataflow_type();
+        if &inferred_type == output_col_type {
+            Ok(value.clone())
+        } else {
+            value.coerce_to(output_col_type, &inferred_type)
+        }
+    }
+
     /// Optimized implementation of cumulative window functions.
     /// Only processes rows from the offset onwards,
     /// avoiding unnecessary recomputation of unchanged rows.
@@ -184,9 +197,13 @@ impl WindowOperation {
                     running_sum = partition.iter().try_fold(running_sum, |acc, r| {
                         let arg_value = r.get(*arg).unwrap();
 
-                        if acc.is_none() && !arg_value.is_none() {
-                            Ok(arg_value.clone())
-                        } else if !acc.is_none() && arg_value.is_none() {
+                        if acc.is_none() {
+                            if arg_value.is_none() {
+                                Ok(acc)
+                            } else {
+                                Self::coerce_to_output_type(arg_value, output_col_type)
+                            }
+                        } else if arg_value.is_none() {
                             &acc + &default_value
                         } else {
                             &acc + arg_value
@@ -545,9 +562,13 @@ impl WindowOperation {
                 let new_sum = diffs.iter().try_fold(old_sum, |acc, (r, is_positive)| {
                     let arg_value = r.get(*arg).unwrap();
 
-                    if acc.is_none() && !arg_value.is_none() {
-                        Ok(arg_value.clone())
-                    } else if !acc.is_none() && arg_value.is_none() {
+                    if acc.is_none() {
+                        if arg_value.is_none() || !*is_positive {
+                            Ok(acc)
+                        } else {
+                            Self::coerce_to_output_type(arg_value, output_col_type)
+                        }
+                    } else if arg_value.is_none() {
                         &acc + &default_value
                     } else if *is_positive {
                         &acc + arg_value
