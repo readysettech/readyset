@@ -11,9 +11,9 @@ Support tool to troubleshoot Readyset."""
 [dependencies]
 anyhow = { workspace = true }
 bincode = { workspace = true }
-rocksdb = { workspace = true, features = ["lz4", "jemalloc"] }
 clap = { workspace = true, features = ["derive", "env"] }
 readyset-data = { path = "../readyset-data" }
+rocksdb = { workspace = true, features = ["lz4", "jemalloc"] }
 serde_json = { workspace = true }
 
 [lints]
