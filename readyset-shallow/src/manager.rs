@@ -249,6 +249,15 @@ where
             None => CacheResult::Miss(guard),
         }
     }
+
+    pub async fn count(&self, query_id: &QueryId) -> Option<usize> {
+        Some(self.get(None, Some(query_id))?.count().await)
+    }
+
+    pub async fn run_pending_tasks(&self, query_id: &QueryId) {
+        let cache = self.get(None, Some(query_id)).unwrap();
+        cache.run_pending_tasks().await;
+    }
 }
 
 pub enum CacheResult<K, V>
@@ -273,6 +282,30 @@ where
             Self::Miss(..) => f.debug_struct("Miss").finish_non_exhaustive(),
             Self::Hit(..) => f.debug_struct("Hit").finish_non_exhaustive(),
             Self::HitAndRefresh(..) => f.debug_struct("HitAndRefresh").finish_non_exhaustive(),
+        }
+    }
+}
+
+impl<K, V> CacheResult<K, V>
+where
+    K: Hash + Eq + Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
+    pub fn is_hit(&self) -> bool {
+        matches!(self, Self::Hit(..) | Self::HitAndRefresh(..))
+    }
+
+    pub fn result(&self) -> &crate::QueryResult<V> {
+        match self {
+            Self::Hit(res, _) | Self::HitAndRefresh(res, _) => res,
+            _ => panic!("no result in a non-hit"),
+        }
+    }
+
+    pub fn guard(&mut self) -> &mut CacheInsertGuard<K, V> {
+        match self {
+            Self::NotCached => panic!("NotCached has no guard"),
+            Self::Miss(guard) | Self::Hit(_, guard) | Self::HitAndRefresh(_, guard) => guard,
         }
     }
 }
@@ -307,16 +340,39 @@ where
     K: Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
-    pub fn filled(&mut self) {
-        self.filled = true;
-    }
-
+    /// Add a row to the result set.
     pub fn push(&mut self, row: V) {
         self.results.as_mut().unwrap().push(row);
     }
 
+    /// Set the metadata for this result set.
     pub fn set_metadata(&mut self, metadata: QueryMetadata) {
         self.metadata = Some(metadata);
+    }
+
+    /// Mark the guard as fully filled and ready to be inserted.
+    ///
+    /// When the insertion actually happens can be controlled by the caller.  If in async code,
+    /// the caller may wait on the returned future, which will cause the result set to be
+    /// inserted and become immediately visible.  Otherwise, when the guard is dropped, the
+    /// insertion will be scheduled to happen asynchronously.
+    pub fn filled(&mut self) -> impl Future<Output = ()> {
+        self.filled = true;
+        async {
+            if self.filled {
+                let (metadata, cache, key, results) = self.take();
+                cache.insert(key, results, metadata).await;
+            }
+        }
+    }
+
+    fn take(&mut self) -> (QueryMetadata, Arc<Cache<K, V>>, K, Vec<V>) {
+        let metadata = self.metadata.take().expect("no metadata for result set");
+        let cache = Arc::clone(&self.cache);
+        let key = self.key.take().unwrap();
+        let results = self.results.take().unwrap();
+        self.filled = false;
+        (metadata, cache, key, results)
     }
 }
 
@@ -327,12 +383,7 @@ where
 {
     fn drop(&mut self) {
         if self.filled {
-            let Some(metadata) = self.metadata.take() else {
-                panic!("no metadata for result set")
-            };
-            let cache = Arc::clone(&self.cache);
-            let key = self.key.take().unwrap();
-            let results = self.results.take().unwrap();
+            let (metadata, cache, key, results) = self.take();
             tokio::spawn(async move {
                 cache.insert(key, results, metadata).await;
             });

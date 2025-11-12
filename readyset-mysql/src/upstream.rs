@@ -184,7 +184,7 @@ impl<'a> QueryResult<'a> {
                     cache.set_metadata(QueryMetadata::MySql(MySqlMetadata {
                         columns: Arc::clone(&columns),
                     }));
-                    cache.filled();
+                    drop(cache.filled());
                 }
 
                 Ok(())

@@ -221,7 +221,7 @@ impl Refresh for QueryResult {
                     cache.push(CacheEntry::Simple(copied));
                 }
                 cache.set_metadata(QueryMetadata::PostgreSql(Default::default()));
-                cache.filled();
+                drop(cache.filled());
                 Ok(())
             }
             x => Err(std::io::Error::new(

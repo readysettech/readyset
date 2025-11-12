@@ -74,15 +74,6 @@ impl SizeOf for QueryMetadata {
     }
 }
 
-impl QueryMetadata {
-    #[cfg(test)]
-    pub fn empty() -> Self {
-        QueryMetadata::MySql(MySqlMetadata {
-            columns: Arc::new([]),
-        })
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct QueryResult<V> {
     pub values: Arc<Vec<V>>,
@@ -93,3 +84,6 @@ pub struct QueryResult<V> {
 pub enum EvictionPolicy {
     Ttl(Duration),
 }
+
+#[cfg(test)]
+mod test;

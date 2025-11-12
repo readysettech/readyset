@@ -256,7 +256,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 if let Some(mut cache) = cache {
                     let meta = QueryMetadata::PostgreSql(Default::default());
                     cache.set_metadata(meta);
-                    cache.filled();
+                    drop(cache.filled());
                 }
                 Ok(Select {
                     schema: Vec::new(),

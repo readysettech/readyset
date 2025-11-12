@@ -101,7 +101,7 @@ impl Resultset {
                 schema,
                 types: self.project_field_types.clone(),
             }));
-            cache.filled();
+            drop(cache.filled());
         }
     }
 

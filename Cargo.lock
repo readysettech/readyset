@@ -5406,7 +5406,9 @@ dependencies = [
 name = "readyset-shallow"
 version = "0.0.1"
 dependencies = [
+ "assert_matches",
  "dashmap",
+ "futures",
  "moka",
  "mysql_async",
  "mysql_common",

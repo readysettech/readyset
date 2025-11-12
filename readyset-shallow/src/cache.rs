@@ -187,7 +187,7 @@ where
         self.inner.insert((self.id, k), entry).await;
     }
 
-    pub async fn get(&self, k: K) -> (Option<(QueryResult<V>, bool)>, K) {
+    pub(crate) async fn get(&self, k: K) -> (Option<(QueryResult<V>, bool)>, K) {
         let k = (self.id, k);
         let res = self.inner.get(&k).await.map(|entry| {
             let now = current_timestamp_ms();
@@ -235,8 +235,17 @@ where
         &self.name
     }
 
-    pub fn query_id(&self) -> &Option<QueryId> {
+    pub(crate) fn query_id(&self) -> &Option<QueryId> {
         &self.query_id
+    }
+
+    pub(crate) async fn count(&self) -> usize {
+        self.inner.run_pending_tasks().await;
+        self.inner.entry_count().try_into().unwrap_or(usize::MAX)
+    }
+
+    pub(crate) async fn run_pending_tasks(&self) {
+        self.inner.run_pending_tasks().await;
     }
 }
 
@@ -275,7 +284,7 @@ mod tests {
 
         let key = vec!["test_key"];
         let values = vec![vec!["test_value"]];
-        let metadata = QueryMetadata::empty();
+        let metadata = QueryMetadata::Test;
 
         cache.insert(key.clone(), values.clone(), metadata).await;
         let result = cache.get(key.clone()).await.0.unwrap();
@@ -291,7 +300,7 @@ mod tests {
 
         let key = vec!["test_key"];
         let values = vec![vec!["test_value"]];
-        let metadata = QueryMetadata::empty();
+        let metadata = QueryMetadata::Test;
 
         for _ in 0..4 {
             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -334,7 +343,7 @@ mod tests {
         let key = vec!["shared_key"];
         let values_0 = vec![vec!["value_from_cache_0"]];
         let values_1 = vec![vec!["value_from_cache_1"]];
-        let metadata = QueryMetadata::empty();
+        let metadata = QueryMetadata::Test;
 
         cache_0
             .insert(key.clone(), values_0.clone(), metadata.clone())
