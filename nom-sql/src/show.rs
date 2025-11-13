@@ -130,6 +130,15 @@ fn readyset_tables() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowS
     }
 }
 
+fn replay_paths() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("replay")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("paths")(i)?;
+        Ok((i, ShowStatement::ReplayPaths))
+    }
+}
+
 /// Parse rule for our custom `SHOW {ALL RLS | RLS ON <table>}` statement.
 fn show_rls(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
     move |i| {
@@ -153,6 +162,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
                 tuple((tag_no_case("readyset"), whitespace1, tag_no_case("version"))),
             ),
             readyset_tables(),
+            replay_paths(),
             map(show_tables(dialect), ShowStatement::Tables),
             value(ShowStatement::Events, tag_no_case("events")),
             value(ShowStatement::Connections, tag_no_case("connections")),
@@ -518,5 +528,21 @@ mod tests {
             .unwrap()
             .1;
         assert_eq!(res1, ShowStatement::Rls(None));
+    }
+
+    #[test]
+    fn show_replay_paths() {
+        for &dialect in Dialect::ALL {
+            let qstring1 = "SHOW REPLAY PATHS";
+            let res1 = show(dialect)(LocatedSpan::new(qstring1.as_bytes()))
+                .unwrap()
+                .1;
+            let qstring2 = "SHOW\tREPLAY\tPATHS";
+            let res2 = show(dialect)(LocatedSpan::new(qstring2.as_bytes()))
+                .unwrap()
+                .1;
+            assert_eq!(res1, ShowStatement::ReplayPaths);
+            assert_eq!(res2, ShowStatement::ReplayPaths);
+        }
     }
 }
