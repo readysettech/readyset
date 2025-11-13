@@ -258,6 +258,7 @@ mod view;
 pub mod consensus;
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
 pub mod internal;
+pub mod replay_path;
 
 use std::convert::TryFrom;
 use std::default::Default;

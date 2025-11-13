@@ -1050,7 +1050,9 @@ impl ReadySetHandle {
 
     simple_request!(
         /// List all replay paths in the graph
-        replay_paths() -> String
+        ///
+        /// Returns a flattened vector of replay path information suitable for display
+        replay_paths() -> Vec<crate::replay_path::ReplayPathInfo>
     );
 
     #[cfg(feature = "failure_injection")]
