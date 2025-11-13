@@ -180,6 +180,14 @@ fn alter_readyset() {
     check_parse_both!("ALTER READYSET ADD TABLES t1, t2;");
     check_parse_both!("ALTER READYSET ENTER MAINTENANCE MODE;");
     check_parse_both!("ALTER READYSET EXIT MAINTENANCE MODE;");
+    check_parse_both!("ALTER READYSET SET EVICTION MEMORY LIMIT 9999999999 PERIOD 1000;");
+    check_parse_both!("ALTER READYSET SET EVICTION PERIOD 1000;");
+    check_parse_both!("ALTER READYSET SET EVICTION MEMORY LIMIT 9999999999;");
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "ALTER READYSET SET EVICTION;",
+        "expected MEMORY LIMIT or PERIOD after SET EVICTION"
+    );
 }
 
 #[test]

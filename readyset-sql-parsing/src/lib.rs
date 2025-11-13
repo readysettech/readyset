@@ -6,7 +6,8 @@ use readyset_errors::ReadySetError;
 use readyset_sql::ast::{
     AddTablesStatement, AlterReadysetStatement, AlterTableStatement, CacheInner, CacheType,
     CreateCacheStatement, CreateTableStatement, CreateViewStatement, DropCacheStatement,
-    EvictionPolicy, Expr, ResnapshotTableStatement, SelectStatement, SqlQuery, SqlType, TableKey,
+    EvictionPolicy, Expr, ResnapshotTableStatement, SelectStatement, SetEviction, SqlQuery,
+    SqlType, TableKey,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -195,16 +196,20 @@ fn sqlparser_dialect_from_readyset_dialect(
 }
 
 #[expect(clippy::upper_case_acronyms, reason = "SQL keywords are capitalized")]
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy)]
 enum ReadysetKeyword {
     CACHES,
     DEEP,
     DOMAINS,
     ENTER,
+    EVICTION,
     EXIT,
     MAINTENANCE,
     MATERIALIZATIONS,
+    MEMORY,
     MIGRATION,
+    PERIOD,
     POLICY,
     PROXIED,
     QUERIES,
@@ -226,10 +231,13 @@ impl ReadysetKeyword {
             Self::DEEP => "DEEP",
             Self::DOMAINS => "DOMAINS",
             Self::ENTER => "ENTER",
+            Self::EVICTION => "EVICTION",
             Self::EXIT => "EXIT",
             Self::MAINTENANCE => "MAINTENANCE",
             Self::MATERIALIZATIONS => "MATERIALIZATIONS",
+            Self::MEMORY => "MEMORY",
             Self::MIGRATION => "MIGRATION",
+            Self::PERIOD => "PERIOD",
             Self::POLICY => "POLICY",
             Self::PROXIED => "PROXIED",
             Self::QUERIES => "QUERIES",
@@ -358,6 +366,42 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
             let directives = parser.parse_literal_string()?;
             Ok(SqlQuery::AlterReadySet(
                 AlterReadysetStatement::SetLogLevel(directives),
+            ))
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::Standard(Keyword::SET),
+                ReadysetKeyword::EVICTION,
+            ],
+        ) {
+            // Parse optional LIMIT clause
+            let limit = if parse_readyset_keywords(
+                parser,
+                &[
+                    ReadysetKeyword::MEMORY,
+                    ReadysetKeyword::Standard(Keyword::LIMIT),
+                ],
+            ) {
+                Some(parser.parse_literal_uint()?)
+            } else {
+                None
+            };
+
+            // Parse optional PERIOD clause
+            let period = if parse_readyset_keyword(parser, ReadysetKeyword::PERIOD) {
+                Some(parser.parse_literal_uint()?)
+            } else {
+                None
+            };
+
+            if limit.is_none() && period.is_none() {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "expected MEMORY LIMIT or PERIOD after SET EVICTION".into(),
+                ));
+            }
+
+            Ok(SqlQuery::AlterReadySet(
+                AlterReadysetStatement::SetEviction(SetEviction { limit, period }),
             ))
         } else {
             Err(ReadysetParsingError::ReadysetParsingError(
