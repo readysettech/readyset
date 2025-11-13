@@ -1015,7 +1015,7 @@ async fn replication_failure_ignores_table(failpoint: &str) {
 
     assert_table_ignored(&client).await;
 
-    // Check That we don't see any 'Last replication error' rows
+    // Check That we don't see any 'Last replicator error' rows
     let results = client
         .simple_query("SHOW READYSET STATUS")
         .await
@@ -1030,11 +1030,7 @@ async fn replication_failure_ignores_table(failpoint: &str) {
         })
         .collect::<Vec<String>>();
 
-    assert!(
-        results
-            .iter()
-            .all(|r| !r.contains("Last replication error"))
-    );
+    assert!(results.iter().all(|r| !r.contains("Last replicator error")));
 
     shutdown_tx.shutdown().await;
 }

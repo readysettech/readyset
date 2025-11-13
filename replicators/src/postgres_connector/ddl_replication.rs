@@ -211,6 +211,7 @@ impl DdlEvent {
                             if_not_exists: false,
                             table,
                             body: Ok(body),
+                            like: None,
                             options: Ok(vec![]),
                         },
                         pg_meta: Some(PostgresTableMetadata { oid, column_oids }),

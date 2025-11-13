@@ -70,6 +70,7 @@ mod tests {
                 ],
                 keys: None,
             }),
+            like: None,
             options: Ok(vec![]),
         };
 

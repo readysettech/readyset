@@ -397,6 +397,7 @@ impl From<TableSpec> for CreateTableStatement {
                     }]
                 }),
             }),
+            like: None,
             options: Ok(vec![]),
         }
     }

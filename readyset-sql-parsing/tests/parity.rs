@@ -1177,3 +1177,28 @@ fn constraint_deferrable_timing_column_level() {
     check_parse_postgres!("CREATE TABLE test (id INT UNIQUE INITIALLY IMMEDIATE)");
     check_parse_postgres!("CREATE TABLE test (id INT UNIQUE INITIALLY DEFERRED)");
 }
+
+#[test]
+fn create_table_like() {
+    check_parse_mysql!("CREATE TABLE a LIKE b");
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE TEMPORARY TABLE a LIKE b",
+        "NomSqlError { input: \"TEMPORARY TABLE"
+    );
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE TEMPORARY TABLE IF NOT EXISTS a LIKE b",
+        "NomSqlError { input: \"TEMPORARY TABLE"
+    );
+    check_parse_mysql!("CREATE TABLE IF NOT EXISTS a LIKE b");
+}
+
+// TODO: Fix sqlparser upstream REA-6164
+#[test]
+#[should_panic = "nom-sql AST differs from sqlparser-rs AST"]
+fn create_table_like_parenthesized() {
+    check_parse_mysql!("CREATE TABLE a(LIKE b)");
+    check_parse_mysql!("CREATE TABLE a (LIKE b)");
+    check_parse_mysql!("CREATE TABLE IF NOT EXISTS a (LIKE b)");
+}

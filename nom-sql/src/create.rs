@@ -562,9 +562,57 @@ pub fn create_table(
         let (i, _) = whitespace1(i)?;
         let (i, if_not_exists) = if_not_exists(i)?;
         let (i, table) = relation(dialect)(i)?;
-        let (i, _) = whitespace0(i)?;
 
+        let (i, plain_like) = opt(map(
+            tuple((
+                whitespace0,
+                tag_no_case("like"),
+                whitespace0,
+                relation(dialect),
+            )),
+            |(_, _, _, orig_table)| orig_table,
+        ))(i)?;
+
+        if let Some(orig_table) = plain_like {
+            return Ok((
+                i,
+                CreateTableStatement {
+                    if_not_exists,
+                    table,
+                    body: Err("LIKE with no body".to_string()),
+                    like: Some(CreateTableLike::Plain(orig_table)),
+                    options: Ok(Vec::new()),
+                },
+            ));
+        }
+
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag("(")(i)?;
+        let (i, parenthesized_like) = opt(map(
+            tuple((
+                whitespace0,
+                tag_no_case("like"),
+                whitespace0,
+                relation(dialect),
+                whitespace0,
+                tag(")"),
+            )),
+            |(_, _, _, orig_table, _, _)| orig_table,
+        ))(i)?;
+
+        if let Some(orig_table) = parenthesized_like {
+            return Ok((
+                i,
+                CreateTableStatement {
+                    if_not_exists,
+                    table,
+                    body: Err("LIKE with no body".to_string()),
+                    like: Some(CreateTableLike::Parenthesized(orig_table)),
+                    options: Ok(Vec::new()),
+                },
+            ));
+        }
+
         let (i, body) = parse_fallible(
             create_table_body(dialect),
             map(is_not(")"), |r: LocatedSpan<&[u8]>| *r),
@@ -578,6 +626,7 @@ pub fn create_table(
             if_not_exists,
             table,
             body,
+            like: None,
             options,
         };
         create_table.propagate_default_charset(dialect);
@@ -1005,6 +1054,7 @@ mod tests {
                     ],
                     keys: None,
                 }),
+                like: None,
                 options: Ok(vec![])
             }
         );
@@ -1026,6 +1076,7 @@ mod tests {
                     ),],
                     keys: None,
                 }),
+                like: None,
                 options: Ok(vec![])
             }
         );
@@ -1050,6 +1101,7 @@ mod tests {
                     ),],
                     keys: None,
                 }),
+                like: None,
                 options: Ok(vec![])
             }
         );
@@ -1083,6 +1135,7 @@ mod tests {
                         columns: vec![Column::from("id")]
                     }]),
                 }),
+                like: None,
                 options: Ok(vec![])
             }
         );
@@ -1115,6 +1168,7 @@ mod tests {
                         nulls_distinct: None,
                     },]),
                 }),
+                like: None,
                 options: Ok(vec![])
             }
         );
@@ -1201,6 +1255,7 @@ mod tests {
                         }
                     ]),
                 }),
+                like: None,
                 options: Ok(vec![CreateTableOption::AutoIncrement(1000)],)
             }
         )
@@ -1267,6 +1322,7 @@ mod tests {
                         on_update: None,
                     },]),
                 }),
+                like: None,
                 options: Ok(vec![CreateTableOption::AutoIncrement(10)],)
             }
         )
@@ -1333,6 +1389,7 @@ mod tests {
                         },
                     ]),
                 }),
+                like: None,
                 options: Ok(vec![],)
             }
         )
@@ -1379,6 +1436,7 @@ mod tests {
                     ],
                     keys: None,
                 }),
+                like: None,
                 options: Ok(vec![CreateTableOption::AutoIncrement(1001)],)
             }
         );
@@ -1410,6 +1468,7 @@ mod tests {
                         nulls_distinct: None,
                     }]),
                 }),
+                like: None,
                 options: Ok(vec![]),
             }
         );
@@ -1535,6 +1594,7 @@ mod tests {
                         }],
                         keys: None,
                     }),
+                    like: None,
                     options: Ok(vec![],)
                 }
             );
@@ -1601,6 +1661,7 @@ mod tests {
                         ],
                         keys: None,
                     }),
+                    like: None,
                     options: Ok(vec![],)
                 }
             );
@@ -1633,6 +1694,7 @@ mod tests {
                         ],
                         keys: None,
                     }),
+                    like: None,
                     options: Ok(vec![],)
                 }
             );
@@ -1928,6 +1990,7 @@ mod tests {
                             },
                         ]),
                     }),
+                    like: None,
                     options: Ok(vec![
                         CreateTableOption::Engine(Some("InnoDB".to_string())),
                         CreateTableOption::Charset(CollationName {
@@ -1975,6 +2038,7 @@ mod tests {
                         ],
                         keys: None,
                     }),
+                    like: None,
                     options: Ok(vec![CreateTableOption::Other {
                         key: "TYPE".into(),
                         value: "MyISAM".into()
@@ -2177,6 +2241,7 @@ mod tests {
                         }],
                         keys: None,
                     }),
+                    like: None,
                     options: Ok(vec![])
                 }
             );
@@ -2198,6 +2263,7 @@ mod tests {
                         ),],
                         keys: None,
                     }),
+                    like: None,
                     options: Ok(vec![])
                 }
             );
@@ -2271,6 +2337,7 @@ mod tests {
                         ],
                         keys: None,
                     }),
+                    like: None,
                     options: Ok(vec![])
                 }
             );
@@ -2303,6 +2370,7 @@ mod tests {
                         ],
                         keys: None,
                     }),
+                    like: None,
                     options: Ok(vec![]),
                 }
             );
@@ -2439,6 +2507,7 @@ mod tests {
                             },
                         ]),
                     }),
+                    like: None,
                     options: Ok(vec![
                         CreateTableOption::Engine(Some("InnoDB".to_string())),
                         CreateTableOption::Charset(CollationName {
@@ -2486,6 +2555,7 @@ mod tests {
                         ],
                         keys: None,
                     }),
+                    like: None,
                     options: Ok(vec![CreateTableOption::Other {
                         key: "TYPE".into(),
                         value: "MyISAM".into()
@@ -2678,6 +2748,7 @@ mod tests {
                         },
                     ]),
                 }),
+                like: None,
                 options: Ok(vec![
                     CreateTableOption::Engine(Some("InnoDB".to_string())),
                     CreateTableOption::Charset(CollationName {
@@ -2718,6 +2789,7 @@ mod tests {
                     ],
                     keys: None,
                 }),
+                like: None,
                 options: Ok(vec![
                     CreateTableOption::Charset(CollationName {
                         name: "utf8mb4".into(),
@@ -2829,6 +2901,7 @@ PRIMARY KEY (`id`));";
                     ),],
                     keys: None,
                 }),
+                like: None,
                 options: Ok(vec![])
             }
         );
@@ -2861,6 +2934,7 @@ PRIMARY KEY (`id`));";
                     ),],
                     keys: None,
                 }),
+                like: None,
                 options: Ok(vec![]),
             }
         )
@@ -2909,6 +2983,7 @@ PRIMARY KEY (`id`));";
                         columns: vec!["id".into()]
                     }]),
                 }),
+                like: None,
                 options: Ok(vec![
                     CreateTableOption::Engine(Some("InnoDB".to_string())),
                     CreateTableOption::Charset(CollationName {

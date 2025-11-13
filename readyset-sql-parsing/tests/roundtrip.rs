@@ -141,3 +141,18 @@ fn limit_placeholders_create_cache() {
     check_rt_postgres!("create cache from select * from users limit $1");
     check_rt_postgres!("create cache from select * from users limit :1");
 }
+
+#[test]
+fn create_table_like() {
+    check_rt_mysql!("CREATE TABLE a LIKE b");
+    check_rt_mysql!("CREATE TABLE IF NOT EXISTS a LIKE b");
+}
+
+// TODO: Fix sqlparser upstream REA-6164
+#[test]
+#[should_panic = "nom-sql AST differs from sqlparser-rs AST"]
+fn create_table_like_parenthesized() {
+    check_rt_mysql!("CREATE TABLE a(LIKE b)");
+    check_rt_mysql!("CREATE TABLE a (LIKE b)");
+    check_rt_mysql!("CREATE TABLE IF NOT EXISTS a (LIKE b)");
+}

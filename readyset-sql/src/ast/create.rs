@@ -323,6 +323,10 @@ pub struct CreateTableStatement {
     /// be parsed.
     #[strategy(any::<CreateTableBody>().prop_map(Ok))]
     pub body: Result<CreateTableBody, String>,
+    /// The table that this table is created to be like, if this is a `CREATE TABLE ... LIKE`
+    /// statement. Only really reflects the MySQL syntax, because in Postgres there could be
+    /// multiple `LIKE` clauses inside the create table body.
+    pub like: Option<CreateTableLike>,
     /// The result of parsing the options for the `CREATE TABLE` statement.
     ///
     /// If parsing succeeded, then this will be an `Ok` result with the options for the statement.
@@ -409,17 +413,29 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
             }
         }
 
-        let mut create_table = Self {
-            if_not_exists: value.if_not_exists,
-            table: value.name.try_into_dialect(dialect)?,
-            body: Ok(CreateTableBody {
+        let like = value
+            .like
+            .map(|like| like.try_into_dialect(dialect))
+            .transpose()?;
+
+        let body = if like.is_some() {
+            Err("LIKE with no body".to_string())
+        } else {
+            Ok(CreateTableBody {
                 fields: value.columns.try_into_dialect(dialect)?,
                 keys: if value.constraints.is_empty() {
                     None
                 } else {
                     Some(value.constraints.try_into_dialect(dialect)?)
                 },
-            }),
+            })
+        };
+
+        let mut create_table = Self {
+            if_not_exists: value.if_not_exists,
+            table: value.name.try_into_dialect(dialect)?,
+            body,
+            like,
             options: Ok(options),
         };
         create_table.propagate_default_charset(dialect);
@@ -434,28 +450,34 @@ impl DialectDisplay for CreateTableStatement {
             if self.if_not_exists {
                 write!(f, "IF NOT EXISTS ")?;
             }
-            write!(f, "{} (", self.table.display(dialect))?;
+            write!(f, "{}", self.table.display(dialect))?;
 
-            match &self.body {
-                Ok(body) => write!(f, "{}", body.display(dialect))?,
-                Err(unparsed) => write!(f, "{unparsed}")?,
-            }
+            if let Some(like) = &self.like {
+                write!(f, "{}", like.display(dialect))?;
+            } else {
+                write!(f, " (")?;
 
-            write!(f, ")")?;
-
-            match &self.options {
-                Ok(options) => {
-                    for (i, option) in options.iter().enumerate() {
-                        if i == 0 {
-                            write!(f, " ")?;
-                        } else {
-                            write!(f, ", ")?;
-                        }
-                        write!(f, "{option}")?;
-                    }
+                match &self.body {
+                    Ok(body) => write!(f, "{}", body.display(dialect))?,
+                    Err(unparsed) => write!(f, "{unparsed}")?,
                 }
 
-                Err(unparsed) => write!(f, "{unparsed}")?,
+                write!(f, ")")?;
+
+                match &self.options {
+                    Ok(options) => {
+                        for (i, option) in options.iter().enumerate() {
+                            if i == 0 {
+                                write!(f, " ")?;
+                            } else {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{option}")?;
+                        }
+                    }
+
+                    Err(unparsed) => write!(f, "{unparsed}")?,
+                }
             }
 
             Ok(())
@@ -575,6 +597,39 @@ impl CreateTableStatement {
                     SqlType::LongText => SqlType::LongBlob,
                     _ => unreachable!(),
                 };
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum CreateTableLike {
+    Plain(Relation),
+    Parenthesized(Relation),
+}
+
+impl TryFromDialect<sqlparser::ast::CreateTableLikeKind> for CreateTableLike {
+    fn try_from_dialect(
+        value: sqlparser::ast::CreateTableLikeKind,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        match value {
+            sqlparser::ast::CreateTableLikeKind::Plain(like) => {
+                Ok(CreateTableLike::Plain(like.name.try_into_dialect(dialect)?))
+            }
+            sqlparser::ast::CreateTableLikeKind::Parenthesized(like) => Ok(
+                CreateTableLike::Parenthesized(like.name.try_into_dialect(dialect)?),
+            ),
+        }
+    }
+}
+
+impl DialectDisplay for CreateTableLike {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        match self {
+            CreateTableLike::Plain(relation) => format!("LIKE {}", relation.display(dialect)),
+            CreateTableLike::Parenthesized(relation) => {
+                format!("(LIKE {})", relation.display(dialect))
             }
         }
     }

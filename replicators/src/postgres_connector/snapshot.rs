@@ -476,6 +476,7 @@ impl TableDescription {
                         Some(self.constraints.into_iter().map(|c| c.definition).collect())
                     },
                 }),
+                like: None,
                 options: Ok(vec![]),
             },
         })
