@@ -416,6 +416,63 @@ pub fn set_log_level_statement(
     }
 }
 
+pub fn set_eviction_statement(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("set")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("eviction")(i)?;
+
+        // Parse optional LIMIT clause
+        let (i, limit) = opt(|i| {
+            let (i, _) = whitespace1(i)?;
+            let (i, _) = tag_no_case("memory")(i)?;
+            let (i, _) = whitespace1(i)?;
+            let (i, _) = tag_no_case("limit")(i)?;
+            let (i, _) = whitespace1(i)?;
+            let (i, lit) = literal(dialect)(i)?;
+            match lit {
+                Literal::UnsignedInteger(val) => Ok((i, val)),
+                Literal::Integer(val) if val >= 0 => Ok((i, val as u64)),
+                _ => Err(nom::Err::Error(nom::error::ParseError::from_error_kind(
+                    i,
+                    nom::error::ErrorKind::Fail,
+                ))),
+            }
+        })(i)?;
+
+        // Parse optional PERIOD clause
+        let (i, period) = opt(|i| {
+            let (i, _) = whitespace1(i)?;
+            let (i, _) = tag_no_case("period")(i)?;
+            let (i, _) = whitespace1(i)?;
+            let (i, lit) = literal(dialect)(i)?;
+            match lit {
+                Literal::UnsignedInteger(val) => Ok((i, val)),
+                Literal::Integer(val) if val >= 0 => Ok((i, val as u64)),
+                _ => Err(nom::Err::Error(nom::error::ParseError::from_error_kind(
+                    i,
+                    nom::error::ErrorKind::Fail,
+                ))),
+            }
+        })(i)?;
+
+        let (i, _) = statement_terminator(i)?;
+        if limit.is_none() && period.is_none() {
+            return Err(nom::Err::Error(nom::error::ParseError::from_error_kind(
+                i,
+                nom::error::ErrorKind::Fail,
+            )));
+        }
+
+        Ok((
+            i,
+            AlterReadysetStatement::SetEviction(SetEviction { limit, period }),
+        ))
+    }
+}
+
 pub fn alter_readyset_statement(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
@@ -429,6 +486,7 @@ pub fn alter_readyset_statement(
             add_tables_statement(dialect),
             enter_maintenance_mode_statement(),
             exit_maintenance_mode_statement(),
+            set_eviction_statement(dialect),
             set_log_level_statement(dialect),
         ))(i)?;
 
@@ -1549,6 +1607,42 @@ mod tests {
             let qstring = b"ALTER READYSET EXIT MAINTENANCE MODE;";
             let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
             assert_eq!(res, AlterReadysetStatement::ExitMaintenanceMode);
+        }
+
+        #[test]
+        fn alter_readyset_set_eviction() {
+            let qstring = b"ALTER READYSET SET EVICTION MEMORY LIMIT 9999999999 PERIOD 1000;";
+            let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::SetEviction(SetEviction {
+                    limit: Some(9999999999),
+                    period: Some(1000)
+                })
+            );
+
+            let qstring = b"ALTER READYSET SET EVICTION PERIOD 1000;";
+            let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::SetEviction(SetEviction {
+                    limit: None,
+                    period: Some(1000)
+                })
+            );
+
+            let qstring = b"ALTER READYSET SET EVICTION MEMORY LIMIT 9999999999;";
+            let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::SetEviction(SetEviction {
+                    limit: Some(9999999999),
+                    period: None
+                })
+            );
+
+            let qstring = b"ALTER READYSET SET EVICTION;";
+            test_parse_expect_err!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
         }
     }
 }
