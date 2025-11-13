@@ -608,6 +608,15 @@ pub enum CreateTableLike {
     Parenthesized(Relation),
 }
 
+impl CreateTableLike {
+    pub fn as_relation_mut(&mut self) -> &mut Relation {
+        match self {
+            CreateTableLike::Plain(relation) => relation,
+            CreateTableLike::Parenthesized(relation) => relation,
+        }
+    }
+}
+
 impl TryFromDialect<sqlparser::ast::CreateTableLikeKind> for CreateTableLike {
     fn try_from_dialect(
         value: sqlparser::ast::CreateTableLikeKind,

@@ -786,12 +786,13 @@ impl<'a> NoriaAdapter<'a> {
                 let keep = self
                     .table_filter
                     .should_be_processed(schema.as_str(), statement.table.name.as_str())
-                    && statement.body.is_ok();
+                    && statement.body.is_ok()
+                    && statement.like.is_none();
                 if !keep {
                     non_replicated_tables.push(Relation {
                         schema: Some(schema.clone().into()),
                         name: statement.table.name.clone(),
-                    })
+                    });
                 }
                 keep
             }
@@ -820,14 +821,18 @@ impl<'a> NoriaAdapter<'a> {
         });
 
         // Mark all tables that were filtered as non-replicated, too
-        changelist
-            .changes_mut()
-            .extend(non_replicated_tables.into_iter().map(|relation| {
-                Change::AddNonReplicatedRelation(NonReplicatedRelation {
+        for relation in non_replicated_tables {
+            if let Some(schema) = &relation.schema {
+                self.table_filter
+                    .deny_replication(schema, relation.name.as_str());
+            }
+            changelist
+                .changes_mut()
+                .push(Change::AddNonReplicatedRelation(NonReplicatedRelation {
                     name: relation,
                     reason: NotReplicatedReason::Configuration,
-                })
-            }));
+                }));
+        }
 
         // Resolve schemas and drop renamed tables; the new names will get snapshotted when we
         // return `ResnapshotNeeded` in the next `if` block

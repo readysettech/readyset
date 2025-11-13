@@ -1130,6 +1130,94 @@ async fn mysql_rename_swap_with_ignore() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow, mysql_upstream)]
+async fn mysql_create_table_like_with_ignored() {
+    readyset_tracing::init_test_logging();
+    let url = &mysql_url();
+    let mut client = DbConnection::connect(url).await.unwrap();
+
+    // Create the initial table and populate it
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS original_table CASCADE;
+            DROP TABLE IF EXISTS like_table CASCADE;
+            CREATE TABLE original_table (id INT PRIMARY KEY, name VARCHAR(50));
+            INSERT INTO original_table VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Charlie');
+            ",
+        )
+        .await
+        .unwrap();
+
+    // Start replication to snapshot the original table
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(
+        url.to_string(),
+        None, // No special config - replicate all tables
+    )
+    .await
+    .unwrap();
+
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Verify that original_table is replicated
+    check_results!(
+        ctx,
+        "original_table",
+        "create_table_like_before",
+        &[
+            &[DfValue::Int(1), tiny(b"Alice")],
+            &[DfValue::Int(2), tiny(b"Bob")],
+            &[DfValue::Int(3), tiny(b"Charlie")]
+        ]
+    );
+
+    // Create a new table using CREATE TABLE ... LIKE
+    client
+        .query("CREATE TABLE like_table LIKE original_table")
+        .await
+        .unwrap();
+
+    // Give the replicator a moment to process the DDL change
+    sleep(Duration::from_secs(2)).await;
+
+    // Verify that like_table is NOT replicated (added to ignored tables)
+    ctx.assert_table_missing("public", "like_table").await;
+
+    // Verify that original_table is still replicated and working
+    check_results!(
+        ctx,
+        "original_table",
+        "create_table_like_after",
+        &[
+            &[DfValue::Int(1), tiny(b"Alice")],
+            &[DfValue::Int(2), tiny(b"Bob")],
+            &[DfValue::Int(3), tiny(b"Charlie")]
+        ]
+    );
+
+    assert!(!ctx.noria.tables().await.unwrap().contains_key(&Relation {
+        schema: Some("public".into()),
+        name: "like_table".into(),
+    }));
+
+    let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "like_table".into(),
+    };
+    assert!(non_replicated_rels.contains(&NonReplicatedRelation::new(relation.clone()),));
+
+    ctx.stop().await;
+    client.stop().await;
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow, mysql_upstream)]
 async fn mysql_replication_resnapshot() {
     resnapshot_inner(&mysql_url()).await.unwrap();
 }

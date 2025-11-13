@@ -31,7 +31,7 @@ use tracing::{error, info, warn};
 
 use database_utils::UpstreamConfig;
 use readyset_client::metrics::recorded;
-use readyset_client::recipe::changelist::Change;
+use readyset_client::recipe::changelist::{Change, IntoChanges as _};
 use readyset_client::recipe::ChangeList;
 use readyset_client::{Modification, ReadySetHandle, TableOperation};
 use readyset_data::{Collation as RsCollation, DfValue, Dialect, TimestampTz};
@@ -953,7 +953,9 @@ impl MySqlBinlogConnector {
     /// `COMMIT` queries are issued for writes on non-transactional storage engines such as MyISAM.
     /// We report the position after the `COMMIT` query if necessary.
     ///
-    /// TRUNCATE statements are also parsed and handled here.
+    /// `TRUNCATE` statements and `CREATE TABLE new_table LIKE existing_table` statements are also
+    /// parsed and handled here, because we fall into this path when the binlog event doesn't have
+    /// the [`binlog::consts::StatusVarKey::UpdatedDbNames`] status variable.
     ///
     /// TODO: Transactions begin with `BEGIN` queries, but we do not currently support those.
     fn try_non_ddl_action_from_query(
@@ -971,11 +973,31 @@ impl MySqlBinlogConnector {
                 // MySQL only allows one table in the statement, or we would be in trouble.
                 let mut relation = truncate.tables[0].relation.clone();
                 if relation.schema.is_none() {
-                    relation.schema = Some(SqlIdentifier::from(q_event.schema()))
+                    relation.schema = Some(q_event.schema().into())
                 }
                 Ok(ReplicationAction::TableAction {
                     table: relation,
                     actions: vec![TableOperation::Truncate],
+                })
+            }
+            Ok(SqlQuery::CreateTable(mut create)) => {
+                if let Some(like) = &mut create.like {
+                    let relation = like.as_relation_mut();
+                    if relation.schema.is_none() {
+                        relation.schema = Some(q_event.schema().into())
+                    }
+                } else {
+                    return Err(ReadySetError::ReplicationFailed(format!(
+                        "Unexpected CREATE TABLE without LIKE should have been handled earlier: {}",
+                        create.table.display_unquoted()
+                    )));
+                }
+                if create.table.schema.is_none() {
+                    create.table.schema = Some(q_event.schema().into())
+                }
+                Ok(ReplicationAction::DdlChange {
+                    schema: q_event.schema().into(),
+                    changes: create.into_changes(),
                 })
             }
             _ => Err(ReadySetError::SkipEvent),
