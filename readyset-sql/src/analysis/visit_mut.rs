@@ -1125,7 +1125,8 @@ pub fn walk_alter_readyset_statement<'a, V: VisitorMut<'a>>(
             .try_for_each(|table| visitor.visit_table(table)),
         AlterReadysetStatement::EnterMaintenanceMode
         | AlterReadysetStatement::ExitMaintenanceMode
-        | AlterReadysetStatement::SetLogLevel(_) => Ok(()),
+        | AlterReadysetStatement::SetLogLevel(_)
+        | AlterReadysetStatement::SetEviction(_) => Ok(()),
     }
 }
 

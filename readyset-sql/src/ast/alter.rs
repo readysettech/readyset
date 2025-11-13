@@ -428,12 +428,21 @@ pub struct AddTablesStatement {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct SetEviction {
+    /// The memory limit in bytes
+    pub limit: Option<u64>,
+    /// The eviction check period in milliseconds
+    pub period: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterReadysetStatement {
     ResnapshotTable(ResnapshotTableStatement),
     AddTables(AddTablesStatement),
     EnterMaintenanceMode,
     ExitMaintenanceMode,
     SetLogLevel(String),
+    SetEviction(SetEviction),
 }
 
 impl DialectDisplay for AlterReadysetStatement {
@@ -457,6 +466,16 @@ impl DialectDisplay for AlterReadysetStatement {
             }
             Self::SetLogLevel(level) => {
                 write!(f, "SET LOG LEVEL '{}'", level)
+            }
+            Self::SetEviction(stmt) => {
+                write!(f, "SET EVICTION")?;
+                if let Some(limit) = stmt.limit {
+                    write!(f, " MEMORY LIMIT {}", limit)?;
+                }
+                if let Some(period) = stmt.period {
+                    write!(f, " PERIOD {}", period)?;
+                }
+                Ok(())
             }
         })
     }
