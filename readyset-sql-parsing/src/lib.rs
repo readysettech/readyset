@@ -210,10 +210,12 @@ enum ReadysetKeyword {
     MEMORY,
     MIGRATION,
     PERIOD,
+    PATHS,
     POLICY,
     PROXIED,
     QUERIES,
     READYSET,
+    REPLAY,
     RESNAPSHOT,
     SHALLOW,
     SIMPLIFIED,
@@ -238,10 +240,12 @@ impl ReadysetKeyword {
             Self::MEMORY => "MEMORY",
             Self::MIGRATION => "MIGRATION",
             Self::PERIOD => "PERIOD",
+            Self::PATHS => "PATHS",
             Self::POLICY => "POLICY",
             Self::PROXIED => "PROXIED",
             Self::QUERIES => "QUERIES",
             Self::READYSET => "READYSET",
+            Self::REPLAY => "REPLAY",
             Self::RESNAPSHOT => "RESNAPSHOT",
             Self::SHALLOW => "SHALLOW",
             Self::SIMPLIFIED => "SIMPLIFIED",
@@ -694,6 +698,7 @@ fn parse_show_caches(
 /// SHOW
 ///     | CACHES
 ///     | PROXIED QUERIES
+///     | REPLAY PATHS
 fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keyword(parser, ReadysetKeyword::READYSET) {
         if parser.parse_keyword(Keyword::VERSION) {
@@ -773,6 +778,10 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
     } else if parse_readyset_keywords(parser, &[ReadysetKeyword::SHALLOW, ReadysetKeyword::CACHES])
     {
         parse_show_caches(parser, Some(CacheType::Shallow))
+    } else if parse_readyset_keywords(parser, &[ReadysetKeyword::REPLAY, ReadysetKeyword::PATHS]) {
+        Ok(SqlQuery::Show(
+            readyset_sql::ast::ShowStatement::ReplayPaths,
+        ))
     } else {
         Ok(parser.parse_show()?.try_into_dialect(dialect)?)
     }
