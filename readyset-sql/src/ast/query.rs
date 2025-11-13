@@ -335,7 +335,8 @@ impl SqlQuery {
                 | ShowStatement::ReadySetVersion
                 | ShowStatement::ReadySetTables(..)
                 | ShowStatement::Connections
-                | ShowStatement::Rls(_) => true,
+                | ShowStatement::Rls(_)
+                | ShowStatement::ReplayPaths => true,
             },
             SqlQuery::CreateRls(_) | SqlQuery::DropRls(_) => true,
             SqlQuery::CreateDatabase(_)

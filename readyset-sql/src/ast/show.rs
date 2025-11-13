@@ -26,6 +26,7 @@ pub enum ShowStatement {
     Connections,
     Databases,
     Rls(Option<Relation>),
+    ReplayPaths,
 }
 
 impl DialectDisplay for ShowStatement {
@@ -79,6 +80,7 @@ impl DialectDisplay for ShowStatement {
                         write!(f, "ALL RLS")
                     }
                 }
+                Self::ReplayPaths => write!(f, "REPLAY PATHS"),
             }
         })
     }

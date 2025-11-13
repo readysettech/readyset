@@ -208,7 +208,8 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
             | ShowStatement::ReadySetTables(..)
             | ShowStatement::Connections
             | ShowStatement::Databases
-            | ShowStatement::Rls(..) => {}
+            | ShowStatement::Rls(..)
+            | ShowStatement::ReplayPaths => {}
         }
         Ok(())
     }
