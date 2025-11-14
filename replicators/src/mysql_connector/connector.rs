@@ -27,7 +27,7 @@ use readyset_decimal::Decimal;
 use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
 use serde_json::Map;
 use tokio::time::timeout;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use database_utils::UpstreamConfig;
 use readyset_client::metrics::recorded;
@@ -840,7 +840,7 @@ impl MySqlBinlogConnector {
             info!(target: "replicator_statement", "{:?}", q_event);
         }
 
-        let schema = match q_event
+        let (expect_ddl, schema) = match q_event
             .status_vars()
             .get_status_var(binlog::consts::StatusVarKey::UpdatedDbNames)
             .as_ref()
@@ -851,121 +851,19 @@ impl MySqlBinlogConnector {
                 // for example `DROP TABLE db1.tbl, db2.table;` Will have `db1` and
                 // `db2` listed, however we only need the schema to filter out
                 // `CREATE TABLE` and `ALTER TABLE` and those always change only one DB.
-                names.first().unwrap().as_str().to_string()
+                (true, names.first().unwrap().as_str().to_string())
             }
-            // Even if the query does not affect the schema, it may still require a table action.
-            _ => return self.try_non_ddl_action_from_query(q_event, is_last),
+            // If MySQL couldn't determine affected schemas at binlogging time, default to the
+            // effective `USE`d schema. The event still might require handling, but we shouldn't error if it's not DDL.
+            _ => (false, q_event.schema().to_string()),
         };
 
-        let changes = match ChangeList::from_strings_with_config(
-            vec![q_event.query()],
-            Dialect::DEFAULT_MYSQL,
+        match parse_query_with_config(
             self.parsing_config,
+            Dialect::DEFAULT_MYSQL.into(),
+            q_event.query(),
         ) {
-            Ok(mut changelist) => {
-                // During replication of DDL, we don't necessarily have the default charset/collation as part of the
-                // query event.
-                let charset = q_event
-                    .status_vars()
-                    .get_status_var(binlog::consts::StatusVarKey::Charset);
-
-                if let Some(charset) = charset {
-                    let default_server_charset = match charset.get_value().unwrap() {
-                        StatusVarVal::Charset {
-                            charset_client: _,
-                            collation_connection: _,
-                            collation_server,
-                        } => collation_server,
-                        _ => unreachable!(),
-                    };
-
-                    for change in changelist.changes_mut() {
-                        match change {
-                            Change::CreateTable { statement, .. } => {
-                                let default_table_collation = statement.get_collation();
-                                if default_table_collation.is_none() {
-                                    let collation = Collation::resolve(CollationId::from(
-                                        default_server_charset,
-                                    ));
-                                    let options = match statement.options.as_mut() {
-                                        Ok(opts) => opts,
-                                        Err(_) => &mut Vec::new(),
-                                    };
-                                    options.push(CreateTableOption::Collate(CollationName {
-                                        name: SqlIdentifier::from(collation.collation()),
-                                        quote_style: None,
-                                    }));
-                                }
-                                statement.propagate_default_charset(readyset_sql::Dialect::MySQL);
-                                statement.rewrite_binary_collation_columns();
-                                if let Ok(body) = &statement.body {
-                                    self.table_schemas
-                                        .insert(statement.table.clone(), body.clone());
-                                }
-                            }
-                            Change::Drop { name, .. } => {
-                                self.table_schemas.remove(name);
-                            }
-                            Change::AlterTable(AlterTableStatement { table, .. }) => {
-                                self.table_schemas.remove(table);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                changelist.changes
-            }
-            Err(error) => {
-                match readyset_sql_parsing::parse_query_with_config(
-                    self.parsing_config,
-                    readyset_sql::Dialect::MySQL,
-                    q_event.query(),
-                ) {
-                    Ok(SqlQuery::Insert(insert)) => {
-                        self.drop_and_add_non_replicated_table(insert.table, &schema)
-                            .await
-                    }
-                    Ok(SqlQuery::Update(update)) => {
-                        self.drop_and_add_non_replicated_table(update.table, &schema)
-                            .await
-                    }
-                    Ok(SqlQuery::Delete(delete)) => {
-                        self.drop_and_add_non_replicated_table(delete.table, &schema)
-                            .await
-                    }
-                    Ok(SqlQuery::StartTransaction(_)) => {
-                        return Err(ReadySetError::SkipEvent);
-                    }
-                    _ => {
-                        warn!(%error, "Error extending recipe, DDL statement will not be used");
-                        counter!(recorded::REPLICATOR_FAILURE).increment(1u64);
-                        return Err(ReadySetError::SkipEvent);
-                    }
-                }
-            }
-        };
-
-        Ok(ReplicationAction::DdlChange { schema, changes })
-    }
-
-    /// Attempt to produce a non-DDL [`ReplicationAction`] from the give query.
-    ///
-    /// `COMMIT` queries are issued for writes on non-transactional storage engines such as MyISAM.
-    /// We report the position after the `COMMIT` query if necessary.
-    ///
-    /// `TRUNCATE` statements and `CREATE TABLE new_table LIKE existing_table` statements are also
-    /// parsed and handled here, because we fall into this path when the binlog event doesn't have
-    /// the [`binlog::consts::StatusVarKey::UpdatedDbNames`] status variable.
-    ///
-    /// TODO: Transactions begin with `BEGIN` queries, but we do not currently support those.
-    fn try_non_ddl_action_from_query(
-        &mut self,
-        q_event: binlog::events::QueryEvent<'_>,
-        is_last: bool,
-    ) -> ReadySetResult<ReplicationAction> {
-        use readyset_sql::Dialect;
-
-        match parse_query_with_config(self.parsing_config, Dialect::MySQL, q_event.query()) {
+            Ok(SqlQuery::StartTransaction(_)) => Err(ReadySetError::SkipEvent),
             Ok(SqlQuery::Commit(_)) if self.report_position_elapsed() || is_last => {
                 Ok(ReplicationAction::LogPosition)
             }
@@ -980,17 +878,12 @@ impl MySqlBinlogConnector {
                     actions: vec![TableOperation::Truncate],
                 })
             }
-            Ok(SqlQuery::CreateTable(mut create)) => {
+            Ok(SqlQuery::CreateTable(mut create)) if create.like.is_some() => {
                 if let Some(like) = &mut create.like {
                     let relation = like.as_relation_mut();
                     if relation.schema.is_none() {
                         relation.schema = Some(q_event.schema().into())
                     }
-                } else {
-                    return Err(ReadySetError::ReplicationFailed(format!(
-                        "Unexpected CREATE TABLE without LIKE should have been handled earlier: {}",
-                        create.table.display_unquoted()
-                    )));
                 }
                 if create.table.schema.is_none() {
                     create.table.schema = Some(q_event.schema().into())
@@ -1000,7 +893,103 @@ impl MySqlBinlogConnector {
                     changes: create.into_changes(),
                 })
             }
-            _ => Err(ReadySetError::SkipEvent),
+            Ok(SqlQuery::Insert(insert)) => {
+                let changes = self
+                    .drop_and_add_non_replicated_table(insert.table, &schema)
+                    .await;
+                Ok(ReplicationAction::DdlChange { schema, changes })
+            }
+            Ok(SqlQuery::Update(update)) => {
+                let changes = self
+                    .drop_and_add_non_replicated_table(update.table, &schema)
+                    .await;
+                Ok(ReplicationAction::DdlChange { schema, changes })
+            }
+            Ok(SqlQuery::Delete(delete)) => {
+                let changes = self
+                    .drop_and_add_non_replicated_table(delete.table, &schema)
+                    .await;
+                Ok(ReplicationAction::DdlChange { schema, changes })
+            }
+            Ok(query) => {
+                match ChangeList::from_queries(vec![query], Dialect::DEFAULT_MYSQL) {
+                    Ok(mut changelist) => {
+                        // During replication of DDL, we don't necessarily have the default charset/collation as part of the
+                        // query event.
+                        let charset = q_event
+                            .status_vars()
+                            .get_status_var(binlog::consts::StatusVarKey::Charset);
+
+                        if let Some(charset) = charset {
+                            let default_server_charset = match charset.get_value().unwrap() {
+                                StatusVarVal::Charset {
+                                    charset_client: _,
+                                    collation_connection: _,
+                                    collation_server,
+                                } => collation_server,
+                                _ => unreachable!(),
+                            };
+
+                            for change in changelist.changes_mut() {
+                                match change {
+                                    Change::CreateTable { statement, .. } => {
+                                        let default_table_collation = statement.get_collation();
+                                        if default_table_collation.is_none() {
+                                            let collation = Collation::resolve(CollationId::from(
+                                                default_server_charset,
+                                            ));
+                                            let options = match statement.options.as_mut() {
+                                                Ok(opts) => opts,
+                                                Err(_) => &mut Vec::new(),
+                                            };
+                                            options.push(CreateTableOption::Collate(
+                                                CollationName {
+                                                    name: SqlIdentifier::from(
+                                                        collation.collation(),
+                                                    ),
+                                                    quote_style: None,
+                                                },
+                                            ));
+                                        }
+                                        statement.propagate_default_charset(
+                                            readyset_sql::Dialect::MySQL,
+                                        );
+                                        statement.rewrite_binary_collation_columns();
+                                        if let Ok(body) = &statement.body {
+                                            self.table_schemas
+                                                .insert(statement.table.clone(), body.clone());
+                                        }
+                                    }
+                                    Change::Drop { name, .. } => {
+                                        self.table_schemas.remove(name);
+                                    }
+                                    Change::AlterTable(AlterTableStatement { table, .. }) => {
+                                        self.table_schemas.remove(table);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        Ok(ReplicationAction::DdlChange {
+                            schema,
+                            changes: changelist.changes,
+                        })
+                    }
+                    Err(error) if expect_ddl => {
+                        warn!(%error, "Error extending recipe, DDL statement will not be used");
+                        counter!(recorded::REPLICATOR_FAILURE).increment(1u64);
+                        Err(ReadySetError::SkipEvent)
+                    }
+                    Err(error) => {
+                        debug!(%error, "Skipping ChangeList error when not expecting DDL");
+                        Err(ReadySetError::SkipEvent)
+                    }
+                }
+            }
+            Err(err) => {
+                debug!(%err, raw_query = %q_event.query(), "Unable to parse statement event");
+                Err(ReadySetError::SkipEvent)
+            }
         }
     }
 

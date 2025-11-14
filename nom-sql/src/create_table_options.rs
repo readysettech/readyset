@@ -64,6 +64,13 @@ fn create_option(
                 key: "KEY_BLOCK_SIZE".to_string(),
                 value: v.display(dialect).to_string(),
             }),
+            map(
+                create_option_spaced_pair(tag_no_case("start"), tag_no_case("transaction")),
+                |_| CreateTableOption::Other {
+                    key: "START TRANSACTION".to_string(),
+                    value: "".to_string(),
+                },
+            ),
         ))(i)
     }
 }

@@ -1,0 +1,22 @@
+statement ok
+CREATE TABLE foo (x INT)
+
+statement ok
+INSERT INTO foo VALUES (1), (2), (3);
+
+query I rowsort
+SELECT * FROM foo
+----
+1
+2
+3
+
+statement ok
+CREATE TABLE bar AS SELECT * FROM foo;
+
+query I rowsort
+SELECT * FROM bar
+----
+1
+2
+3

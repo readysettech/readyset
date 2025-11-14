@@ -1202,3 +1202,8 @@ fn create_table_like_parenthesized() {
     check_parse_mysql!("CREATE TABLE a (LIKE b)");
     check_parse_mysql!("CREATE TABLE IF NOT EXISTS a (LIKE b)");
 }
+
+#[test]
+fn create_table_start_transaction() {
+    check_parse_mysql!("CREATE TABLE a (x int) START TRANSACTION");
+}

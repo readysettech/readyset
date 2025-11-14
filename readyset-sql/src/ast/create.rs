@@ -394,7 +394,6 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                             value: value.to_string(),
                         }),
                     },
-
                     SqlOption::NamedParenthesizedList(NamedParenthesizedList {
                         key, name, ..
                     }) => {
@@ -406,9 +405,19 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                     SqlOption::Comment(
                         CommentDef::WithEq(comment) | CommentDef::WithoutEq(comment),
                     ) => options.push(CreateTableOption::Comment(comment)),
-                    e => {
-                        return failed!("Unsupported table option {e}");
+                    SqlOption::Ident(ident) => options.push(CreateTableOption::Other {
+                        key: ident.to_string(),
+                        value: "".to_string(),
+                    }),
+                    SqlOption::Clustered(table_options_clustered) => {
+                        todo!("{table_options_clustered}")
                     }
+                    SqlOption::Partition {
+                        column_name,
+                        range_direction,
+                        for_values,
+                    } => todo!("{column_name:?}, {range_direction:?}, {for_values:?}"),
+                    SqlOption::TableSpace(tablespace_option) => todo!("{tablespace_option:?}"),
                 }
             }
         }

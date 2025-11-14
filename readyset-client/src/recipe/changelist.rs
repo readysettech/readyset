@@ -36,6 +36,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use dataflow_expression::Dialect;
+use itertools::Itertools;
 use readyset_data::DfType;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
@@ -172,12 +173,24 @@ impl ChangeList {
         dialect: Dialect,
         parsing_config: ParsingConfig,
     ) -> ReadySetResult<Self> {
-        let mut changes = Vec::new();
-        for query_str in queries {
-            let parsed =
-                parse_query_with_config(parsing_config, Dialect::DEFAULT_MYSQL.into(), &query_str)?;
+        Self::from_queries(
+            queries
+                .into_iter()
+                .map(|query_str| {
+                    parse_query_with_config(parsing_config, dialect.into(), &query_str)
+                })
+                .try_collect::<_, Vec<_>, _>()?,
+            dialect,
+        )
+    }
 
-            match parsed {
+    pub fn from_queries(
+        queries: impl IntoIterator<Item = SqlQuery>,
+        dialect: Dialect,
+    ) -> ReadySetResult<Self> {
+        let mut changes = Vec::new();
+        for query in queries {
+            match query {
                 SqlQuery::CreateTable(statement) => changes.push(Change::CreateTable {
                     statement,
                     pg_meta: None,
@@ -236,7 +249,7 @@ impl ChangeList {
                 }
                 _ => unsupported!(
                     "Only DDL statements supported in ChangeList (got {})",
-                    parsed.query_type()
+                    query.query_type()
                 ),
             }
         }
