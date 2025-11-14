@@ -2369,7 +2369,7 @@ where
 
         if res.is_ok() {
             self.state.query_status_cache.update_query_migration_state(
-                &ViewCreateRequest::new(stmt, Vec::new()),
+                &ViewCreateRequest::new(stmt, self.noria.schema_search_path().to_owned()),
                 MigrationState::Successful(CacheType::Shallow),
                 None,
             );
