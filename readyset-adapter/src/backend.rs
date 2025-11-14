@@ -2453,6 +2453,18 @@ where
         Ok(noria_connector::QueryResult::Meta(results))
     }
 
+    fn drop_view_request(&mut self, view_request: &ViewCreateRequest) {
+        self.state.query_status_cache.update_query_migration_state(
+            view_request,
+            MigrationState::Pending,
+            None,
+        );
+        self.state
+            .query_status_cache
+            .always_attempt_readyset(view_request, false);
+        self.invalidate_prepared_statements_cache(view_request);
+    }
+
     /// Forwards a `DROP CACHE` request to noria
     async fn drop_cached_query(
         &mut self,
@@ -2461,19 +2473,36 @@ where
         let maybe_view_request = self.noria.view_create_request_from_name(name).await;
         let result = self.noria.drop_view(name).await?;
         if let Some(view_request) = maybe_view_request {
-            self.state.query_status_cache.update_query_migration_state(
-                &view_request,
-                MigrationState::Pending,
-                None,
-            );
-            self.state
-                .query_status_cache
-                .always_attempt_readyset(&view_request, false);
-            self.invalidate_prepared_statements_cache(&view_request);
+            self.drop_view_request(&view_request);
         }
         Ok(noria_connector::QueryResult::Delete {
             num_rows_deleted: result,
         })
+    }
+
+    fn drop_shallow_cached_query(
+        &mut self,
+        name: Option<&Relation>,
+        query_id: Option<QueryId>,
+    ) -> ReadySetResult<()> {
+        let info = self
+            .shallow
+            .get(name, query_id.as_ref())
+            .map(|cache| cache.get_info());
+
+        self.shallow.drop_cache(name, query_id.as_ref())?;
+
+        if let Some(CacheInfo {
+            query,
+            schema_search_path,
+            ..
+        }) = info
+        {
+            let view_request = ViewCreateRequest::new(query, schema_search_path);
+            self.drop_view_request(&view_request);
+        };
+
+        Ok(())
     }
 
     /// Forwards a `DROP ALL CACHES` request to noria
@@ -2550,7 +2579,7 @@ where
                 statement = %Sensitive(&query.display(self.settings.dialect)),
                 "Dropping previously shallow-cached query",
             );
-            self.shallow.drop_cache(name.as_ref(), query_id.as_ref())?;
+            self.drop_shallow_cached_query(name.as_ref(), query_id)?;
         }
         Ok(())
     }
@@ -3005,7 +3034,7 @@ where
                     .await?;
                 let DropCacheStatement { name } = drop_cache;
 
-                if self.shallow.drop_cache(Some(name), None).is_ok() {
+                if self.drop_shallow_cached_query(Some(name), None).is_ok() {
                     Ok(noria_connector::QueryResult::Delete {
                         num_rows_deleted: 1,
                     })

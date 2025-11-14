@@ -195,7 +195,11 @@ where
             .collect()
     }
 
-    fn get(&self, name: Option<&Relation>, query_id: Option<&QueryId>) -> Option<Arc<Cache<K, V>>> {
+    pub fn get(
+        &self,
+        name: Option<&Relation>,
+        query_id: Option<&QueryId>,
+    ) -> Option<Arc<Cache<K, V>>> {
         let Ok(()) = Self::check_identifiers(name, query_id) else {
             return None;
         };
