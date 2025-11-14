@@ -25,6 +25,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::{ChangeList, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
+use readyset_client::replay_path::ReplayPathInfo;
 use readyset_client::status::{CurrentStatus, ReadySetControllerStatus};
 use readyset_client::{GraphvizOptions, TableStatus, ViewCreateRequest, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
@@ -625,21 +626,28 @@ impl Leader {
             }
             (&Method::GET | &Method::POST, "/replay_paths") => {
                 let ds = self.dataflow_state_handle.read().await;
-                let result = ds
-                    .replay_paths()
-                    .await?
-                    .into_iter()
-                    .map(|(di, arr)| {
-                        arr.into_cells()
-                            .into_iter()
-                            .flatten()
-                            .flatten()
-                            .map(|(tag, path)| format!("Domain {}: Tag {}: {}", di, tag, path))
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let replay_paths = ds.replay_paths().await?;
+
+                // Flatten replay paths into ReplayPathInfo structs
+                let mut result: Vec<ReplayPathInfo> = Vec::new();
+                for (domain_idx, array) in replay_paths {
+                    for paths_map in array.into_cells().into_iter().flatten() {
+                        for (tag, path) in paths_map {
+                            result.push(
+                                dataflow::ReplayPathWithContext {
+                                    domain_idx,
+                                    tag,
+                                    path,
+                                }
+                                .into(),
+                            );
+                        }
+                    }
+                }
+
+                // Sort by domain, then tag
+                result.sort_by_key(|info| (info.domain, info.tag));
+
                 return_serialized!(result)
             }
             (&Method::POST, "/evict_single") => {
