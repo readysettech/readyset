@@ -44,9 +44,11 @@ pub use dataflow_state::{
 
 pub use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender, DualTcpStream};
 use crate::domain::ReplicaAddress;
-pub use crate::domain::{Domain, DomainBuilder, DomainIndex};
+pub use crate::domain::{Domain, DomainBuilder, DomainIndex, ReplayPath, ReplayPathWithContext};
 pub use crate::node_map::NodeMap;
-pub use crate::payload::{DomainRequest, Packet, PacketDiscriminants};
+pub use crate::payload::{
+    DomainRequest, Packet, PacketDiscriminants, ReplayPathSegment, SourceSelection, TriggerEndpoint,
+};
 use crate::prelude::{Executor, Upcall};
 pub use crate::processing::LookupIndex;
 

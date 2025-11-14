@@ -59,8 +59,8 @@ use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use url::Url;
 use vec1::Vec1;
 
-pub use self::replay_paths::ReplayPath;
 use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
+pub use self::replay_paths::{ReplayPath, ReplayPathWithContext};
 use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender};
 use crate::node::special::EgressTx;
 use crate::node::{Column, NodeProcessingResult, ProcessEnv};
@@ -152,7 +152,6 @@ impl TriggerEndpoint {
     }
 
     /// Get the trigger index if applicable (for Start and Local variants)
-    #[allow(dead_code)]
     pub fn trigger_index(&self) -> Option<String> {
         match self {
             Self::Start(idx) | Self::Local(idx) => Some(idx.to_string()),
@@ -161,7 +160,6 @@ impl TriggerEndpoint {
     }
 
     /// Get the trigger source/options (for End variant)
-    #[allow(dead_code)]
     pub fn trigger_source_options(&self) -> String {
         match self {
             Self::End { source, options } => {

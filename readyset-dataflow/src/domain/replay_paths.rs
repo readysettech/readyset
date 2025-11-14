@@ -56,6 +56,34 @@ impl ReplayPath {
     }
 }
 
+/// Wrapper containing all information needed to convert a ReplayPath to ReplayPathInfo
+///
+/// Bundles domain index, tag, and the replay path itself to enable conversion to the
+/// client-facing ReplayPathInfo type.
+pub struct ReplayPathWithContext {
+    pub domain_idx: crate::DomainIndex,
+    pub tag: Tag,
+    pub path: ReplayPath,
+}
+
+impl From<ReplayPathWithContext> for readyset_client::replay_path::ReplayPathInfo {
+    fn from(ctx: ReplayPathWithContext) -> Self {
+        let path_segments: Vec<String> = ctx.path.path.iter().map(|seg| seg.to_string()).collect();
+
+        Self {
+            domain: ctx.domain_idx.index() as u32,
+            tag: ctx.tag.into(),
+            source: ctx.path.source.map(|n| n.id() as u32),
+            destination_index: ctx.path.destination_index.as_ref().map(|i| i.to_string()),
+            target_index: ctx.path.target_index.as_ref().map(|i| i.to_string()),
+            path_segments,
+            trigger_type: ctx.path.trigger.to_string(),
+            trigger_index: ctx.path.trigger.trigger_index(),
+            trigger_source_options: ctx.path.trigger.trigger_source_options(),
+        }
+    }
+}
+
 /// Newtype wrapper for [`LocalNodeIndex`] explicitly signifying that it is the *destination* (the
 /// last node) of a replay path.
 ///
