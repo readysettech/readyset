@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use moka::sync::Cache as MokaCache;
 
 use readyset_client::query::QueryId;
-use readyset_sql::ast::{Relation, SelectStatement};
+use readyset_sql::ast::{Relation, SelectStatement, SqlIdentifier};
 
 use crate::{EvictionPolicy, QueryMetadata, QueryResult};
 
@@ -32,6 +32,7 @@ pub struct CacheInfo {
     pub name: Option<Relation>,
     pub query_id: Option<QueryId>,
     pub query: SelectStatement,
+    pub schema_search_path: Vec<SqlIdentifier>,
     pub ttl_ms: Option<u64>,
 }
 
@@ -41,6 +42,7 @@ pub struct Cache<K, V> {
     name: Option<Relation>,
     query_id: Option<QueryId>,
     query: SelectStatement,
+    schema_search_path: Vec<SqlIdentifier>,
     ttl_ms: Option<u64>,
 }
 
@@ -67,6 +69,7 @@ where
         name: Option<Relation>,
         query_id: Option<QueryId>,
         query: SelectStatement,
+        schema_search_path: Vec<SqlIdentifier>,
     ) -> Self {
         let builder = MokaCache::builder();
 
@@ -80,6 +83,7 @@ where
             name,
             query_id,
             query,
+            schema_search_path,
             ttl_ms,
         }
     }
@@ -152,6 +156,7 @@ where
             name: self.name.clone(),
             query_id: self.query_id,
             query: self.query.clone(),
+            schema_search_path: self.schema_search_path.clone(),
             ttl_ms: self.ttl_ms,
         }
     }
@@ -182,6 +187,7 @@ mod tests {
             None,
             None,
             SelectStatement::default(),
+            vec![],
         );
 
         let key = vec!["test_key"];

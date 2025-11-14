@@ -2363,9 +2363,13 @@ where
         let policy = policy.ok_or_else(|| internal_err!("Policy required for shallow cache"))?;
         let policy = convert_eviction_policy(policy);
 
-        let res =
-            self.shallow
-                .create_cache(Some(name.clone()), Some(query_id), stmt.clone(), policy);
+        let res = self.shallow.create_cache(
+            Some(name.clone()),
+            Some(query_id),
+            stmt.clone(),
+            self.noria.schema_search_path().to_owned(),
+            policy,
+        );
 
         if res.is_ok() {
             self.state.query_status_cache.update_query_migration_state(
@@ -2738,6 +2742,7 @@ where
                 query_id,
                 query,
                 ttl_ms,
+                ..
             } in self.shallow.list_caches(query_id, None)
             {
                 let query_id = query_id
@@ -4310,6 +4315,12 @@ where
     let query_id = QueryId::from_select(&stmt, &req.schema_search_path);
     let name = create_cache.name.unwrap_or_else(|| query_id.into());
 
-    shallow.create_cache(Some(name), Some(query_id), stmt, policy)?;
+    shallow.create_cache(
+        Some(name),
+        Some(query_id),
+        stmt,
+        req.schema_search_path,
+        policy,
+    )?;
     Ok(())
 }
