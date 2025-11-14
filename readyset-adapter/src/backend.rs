@@ -2786,6 +2786,52 @@ where
         ))
     }
 
+    /// Responds to a `SHOW REPLAY PATHS` query
+    /// Returns replay paths data as a result set with columns and rows
+    async fn show_replay_paths(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        // Get replay paths from the controller (already flattened and sorted)
+        let replay_paths = self.noria.replay_paths().await?;
+
+        // Create schema with all columns
+        let schema = create_dummy_schema!(
+            "domain",
+            "tag",
+            "source",
+            "destination_index",
+            "target_index",
+            "path",
+            "trigger_type",
+            "trigger_index",
+            "trigger_source_options"
+        );
+
+        // Convert each ReplayPathInfo into a row
+        let rows: Vec<Vec<DfValue>> = replay_paths
+            .into_iter()
+            .map(|info| {
+                vec![
+                    info.domain.to_string().into(),
+                    info.tag.to_string().into(),
+                    info.source
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "None".to_string())
+                        .into(),
+                    info.destination_index.unwrap_or_default().into(),
+                    info.target_index.unwrap_or_default().into(),
+                    info.path_segments.join(" → ").into(),
+                    info.trigger_type.into(),
+                    info.trigger_index.unwrap_or_default().into(),
+                    info.trigger_source_options.into(),
+                ]
+            })
+            .collect();
+
+        Ok(noria_connector::QueryResult::from_owned(
+            schema,
+            vec![Results::new(rows)],
+        ))
+    }
+
     async fn query_readyset_extensions<'a>(
         &'a mut self,
         query: &'a SqlQuery,
@@ -3041,6 +3087,7 @@ where
                 )
                 .await
             }
+            SqlQuery::Show(ShowStatement::ReplayPaths) => self.show_replay_paths().await,
             SqlQuery::Show(ShowStatement::Rls(_maybe_table)) => {
                 unsupported!("SHOW RLS statement is not yet supported")
             }

@@ -899,6 +899,12 @@ impl NoriaConnector {
         Ok(QueryResult::from_owned(schema, vec![Results::new(data)]))
     }
 
+    pub(crate) async fn replay_paths(
+        &mut self,
+    ) -> ReadySetResult<Vec<readyset_client::replay_path::ReplayPathInfo>> {
+        noria_await!(self.inner, self.inner.noria.replay_paths())
+    }
+
     /// Set the schema search path
     pub fn set_schema_search_path(&mut self, search_path: Vec<SqlIdentifier>) {
         self.schema_search_path = search_path;
