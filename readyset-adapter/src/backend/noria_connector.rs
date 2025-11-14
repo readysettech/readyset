@@ -972,7 +972,7 @@ impl NoriaConnector {
         self.inner.noria.exit_maintenance_mode().await?;
         Ok(QueryResult::Empty)
     }
-    #[allow(dead_code)]
+
     pub(crate) async fn set_eviction(
         &mut self,
         period: Option<std::time::Duration>,

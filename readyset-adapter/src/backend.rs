@@ -117,7 +117,7 @@ use readyset_util::retry_with_exponential_backoff;
 use readyset_version::READYSET_VERSION;
 use slab::Slab;
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
 
 use crate::backend::noria_connector::ExecuteSelectContext;
@@ -3063,6 +3063,21 @@ where
                     Ok(()) => Ok(noria_connector::QueryResult::Empty),
                     Err(e) => Err(internal_err!("Failed to set log level: {e}")),
                 }
+            }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::SetEviction(stmt)) => {
+                use std::time::Duration;
+
+                let period = stmt.period.map(Duration::from_millis);
+                let limit = stmt.limit.map(|l| l as usize);
+
+                info!(
+                    limit_bytes = ?limit,
+                    period_ms = ?period,
+                    "Setting eviction configuration"
+                );
+
+                self.noria.set_eviction(period, limit).await?;
+                Ok(noria_connector::QueryResult::Empty)
             }
             SqlQuery::CreateRls(_create_rls) => {
                 unsupported!("CREATE RLS statement is not yet supported")
