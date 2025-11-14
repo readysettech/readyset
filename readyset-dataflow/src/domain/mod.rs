@@ -4,6 +4,7 @@ mod remapped_keys;
 pub mod replay_paths;
 
 use remapped_keys::RemappedKeys;
+use strum::IntoStaticStr;
 
 use std::borrow::Cow;
 use std::cell::RefMut;
@@ -58,7 +59,7 @@ use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use url::Url;
 use vec1::Vec1;
 
-pub(crate) use self::replay_paths::ReplayPath;
+pub use self::replay_paths::ReplayPath;
 use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
 use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender};
 use crate::node::special::EgressTx;
@@ -124,7 +125,7 @@ impl PartialEq for DomainMode {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(IntoStaticStr, Serialize, Deserialize, Clone)]
 enum TriggerEndpoint {
     None,
     Start(Index),
@@ -148,6 +149,40 @@ impl TriggerEndpoint {
     /// [`End`]: TriggerEndpoint::End
     fn is_end(&self) -> bool {
         matches!(self, Self::End { .. })
+    }
+
+    /// Get the trigger index if applicable (for Start and Local variants)
+    #[allow(dead_code)]
+    pub fn trigger_index(&self) -> Option<String> {
+        match self {
+            Self::Start(idx) | Self::Local(idx) => Some(idx.to_string()),
+            _ => None,
+        }
+    }
+
+    /// Get the trigger source/options (for End variant)
+    #[allow(dead_code)]
+    pub fn trigger_source_options(&self) -> String {
+        match self {
+            Self::End { source, options } => {
+                format!(
+                    "{:?}, options: [{}]",
+                    source,
+                    options
+                        .iter()
+                        .map(|o| format!("Domain {}", o.domain_index.index()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            _ => String::new(),
+        }
+    }
+}
+
+impl std::fmt::Display for TriggerEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.into())
     }
 }
 

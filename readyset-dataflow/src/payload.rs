@@ -51,6 +51,18 @@ pub struct ReplayPathSegment {
     pub is_target: bool,
 }
 
+impl fmt::Display for ReplayPathSegment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let target_marker = if self.is_target { "→target" } else { "" };
+        let idx_str = self
+            .partial_index
+            .as_ref()
+            .map(|i| format!(" {}", i))
+            .unwrap_or_default();
+        write!(f, "{}{}{}", self.node.id(), target_marker, idx_str)
+    }
+}
+
 /// [`Display`] wrapper struct for a list of [`ReplayPathSegment`]s, to write them using a more
 /// human-readable representation
 pub struct PrettyReplayPath<'a>(pub &'a [ReplayPathSegment]);
@@ -120,6 +132,17 @@ pub enum TriggerEndpoint {
     End(SourceSelection, DomainIndex),
     /// The replay path is contained entirely within this domain
     Local(Index),
+}
+
+impl fmt::Display for TriggerEndpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TriggerEndpoint::None => write!(f, "None"),
+            TriggerEndpoint::Start(idx) => write!(f, "Start({})", idx),
+            TriggerEndpoint::End(source, domain) => write!(f, "End({:?}, {:?})", source, domain),
+            TriggerEndpoint::Local(idx) => write!(f, "Local({})", idx),
+        }
+    }
 }
 
 /// Description for the kind of state to create for a particular node, along with the indices to
