@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::fmt;
 
 use readyset_sql::ast::BinaryOperator;
 use serde::{Deserialize, Serialize};
@@ -128,5 +129,11 @@ impl std::ops::Index<usize> for Index {
 
     fn index(&self, index: usize) -> &Self::Output {
         self.columns.get(index).unwrap()
+    }
+}
+
+impl fmt::Display for Index {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}{:?}", self.index_type, self.columns)
     }
 }
