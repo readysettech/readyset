@@ -109,7 +109,7 @@ impl PersistentStatusCacheHandle {
         }
     }
 
-    fn allow_list(&self) -> Vec<(QueryId, Arc<ViewCreateRequest>, QueryStatus)> {
+    fn cached_list(&self) -> Vec<(QueryId, Arc<ViewCreateRequest>, QueryStatus)> {
         let statuses = self.statuses.read();
         statuses
             .iter()
@@ -126,14 +126,14 @@ impl PersistentStatusCacheHandle {
             .collect::<Vec<_>>()
     }
 
-    fn deny_list(&self, style: MigrationStyle) -> Vec<DeniedQuery> {
+    fn proxied_list(&self, style: MigrationStyle) -> Vec<ProxiedQuery> {
         let statuses = self.statuses.read();
         match style {
             MigrationStyle::Async | MigrationStyle::InRequestPath => statuses
                 .iter()
                 .filter_map(|(query_id, (query, status))| {
                     if status.is_unsupported() {
-                        Some(DeniedQuery {
+                        Some(ProxiedQuery {
                             id: *query_id,
                             query: query.clone(),
                             status: status.clone(),
@@ -146,8 +146,8 @@ impl PersistentStatusCacheHandle {
             MigrationStyle::Explicit => statuses
                 .iter()
                 .filter_map(|(query_id, (query, status))| {
-                    if status.is_denied() {
-                        Some(DeniedQuery {
+                    if status.is_proxied() {
+                        Some(ProxiedQuery {
                             id: *query_id,
                             query: query.clone(),
                             status: status.clone(),
@@ -797,13 +797,13 @@ impl QueryStatusCache {
     }
 
     /// Returns a list of queries that have a state of [`QueryState::Successful`].
-    pub fn allow_list(&self) -> Vec<(QueryId, Arc<ViewCreateRequest>, QueryStatus)> {
-        self.persistent_handle.allow_list()
+    pub fn cached_list(&self) -> Vec<(QueryId, Arc<ViewCreateRequest>, QueryStatus)> {
+        self.persistent_handle.cached_list()
     }
 
-    /// Returns a list of queries that are in the deny list.
-    pub fn deny_list(&self) -> Vec<DeniedQuery> {
-        self.persistent_handle.deny_list(self.style)
+    /// Returns a list of queries that are proxied.
+    pub fn proxied_list(&self) -> Vec<ProxiedQuery> {
+        self.persistent_handle.proxied_list(self.style)
     }
 
     /// Returns a query given a query hash
@@ -1001,12 +1001,12 @@ mod tests {
             MigrationState::Pending
         );
 
-        // Explicitly updating it also lets it be returned from pending_migration(), allow_list(),
-        // and deny_list()
+        // Explicitly updating it also lets it be returned from pending_migration(), cached_list(),
+        // and proxied_list()
         cache.update_query_migration_state(&query, MigrationState::Pending, None);
         assert_eq!(cache.pending_migration().len(), 1);
-        assert_eq!(cache.allow_list().len(), 0);
-        assert_eq!(cache.deny_list().len(), 0);
+        assert_eq!(cache.cached_list().len(), 0);
+        assert_eq!(cache.proxied_list().len(), 0);
 
         cache.update_query_migration_state(
             &query,
@@ -1014,8 +1014,8 @@ mod tests {
             None,
         );
         assert_eq!(cache.pending_migration().len(), 0);
-        assert_eq!(cache.allow_list().len(), 1);
-        assert_eq!(cache.deny_list().len(), 0);
+        assert_eq!(cache.cached_list().len(), 1);
+        assert_eq!(cache.proxied_list().len(), 0);
     }
 
     #[test]
@@ -1029,13 +1029,13 @@ mod tests {
         );
         cache.update_query_migration_state(&query, MigrationState::Pending, None);
         assert_eq!(cache.pending_migration().len(), 1);
-        assert_eq!(cache.allow_list().len(), 0);
-        assert_eq!(cache.deny_list().len(), 0);
+        assert_eq!(cache.cached_list().len(), 0);
+        assert_eq!(cache.proxied_list().len(), 0);
 
         cache.update_query_migration_state(&query, MigrationState::Unsupported("".into()), None);
         assert_eq!(cache.pending_migration().len(), 0);
-        assert_eq!(cache.allow_list().len(), 0);
-        assert_eq!(cache.deny_list().len(), 1);
+        assert_eq!(cache.cached_list().len(), 0);
+        assert_eq!(cache.proxied_list().len(), 1);
     }
 
     #[test]
@@ -1049,13 +1049,13 @@ mod tests {
         );
         cache.update_query_migration_state(&query, MigrationState::Pending, None);
         assert_eq!(cache.pending_migration().len(), 1);
-        assert_eq!(cache.allow_list().len(), 0);
-        assert_eq!(cache.deny_list().len(), 1);
+        assert_eq!(cache.cached_list().len(), 0);
+        assert_eq!(cache.proxied_list().len(), 1);
 
         cache.update_query_migration_state(&query, MigrationState::Unsupported("".into()), None);
         assert_eq!(cache.pending_migration().len(), 0);
-        assert_eq!(cache.allow_list().len(), 0);
-        assert_eq!(cache.deny_list().len(), 1);
+        assert_eq!(cache.cached_list().len(), 0);
+        assert_eq!(cache.proxied_list().len(), 1);
     }
 
     #[test]
@@ -1075,10 +1075,10 @@ mod tests {
             MigrationState::Successful(CacheType::Deep),
             None,
         );
-        assert_eq!(cache.allow_list().len(), 2);
+        assert_eq!(cache.cached_list().len(), 2);
 
         cache.clear(None);
-        assert_eq!(cache.allow_list().len(), 0);
+        assert_eq!(cache.cached_list().len(), 0);
     }
 
     #[test]
@@ -1340,12 +1340,12 @@ mod tests {
             MigrationState::Unsupported("Should fail".to_string()),
             None,
         );
-        assert_eq!(cache.allow_list().len(), 2);
-        assert_eq!(cache.deny_list().len(), 2);
+        assert_eq!(cache.cached_list().len(), 2);
+        assert_eq!(cache.proxied_list().len(), 2);
 
         cache.clear_proxied_queries();
-        assert_eq!(cache.allow_list().len(), 2);
-        assert_eq!(cache.deny_list().len(), 0);
+        assert_eq!(cache.cached_list().len(), 2);
+        assert_eq!(cache.proxied_list().len(), 0);
     }
 
     #[test]
@@ -1404,13 +1404,13 @@ mod tests {
             None,
         );
 
-        assert_eq!(cache.allow_list().len(), 5);
+        assert_eq!(cache.cached_list().len(), 5);
 
         // Drop t1, should invalidate simple_t1, join_query, and complex_query
         let dropped_tables = vec![Relation::from("t1")];
         cache.invalidate_queries_referencing_tables(&dropped_tables);
 
-        let remaining_queries = cache.allow_list();
+        let remaining_queries = cache.cached_list();
 
         // simple_t2 (t2) and unaffected_query (t4) should remain
         assert_eq!(remaining_queries.len(), 2);
@@ -1434,14 +1434,14 @@ mod tests {
             MigrationState::Successful(CacheType::Deep),
             None,
         );
-        assert_eq!(cache.allow_list().len(), 3);
+        assert_eq!(cache.cached_list().len(), 3);
 
         // should only invalidate the complex query (nested reference in EXISTS)
         let dropped_tables = vec![Relation::from("t3")];
         cache.invalidate_queries_referencing_tables(&dropped_tables);
 
         // Only simple_t2 and unaffected_query remain
-        let final_queries = cache.allow_list();
+        let final_queries = cache.cached_list();
         assert_eq!(final_queries.len(), 2);
         let final_table_names: Vec<_> = final_queries
             .iter()

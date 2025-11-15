@@ -168,9 +168,9 @@ impl Query {
     }
 }
 
-/// A Query that should not be cached vy ReadySet
+/// A query proxied through Readyset (not cached).
 #[derive(Debug, Clone)]
-pub struct DeniedQuery {
+pub struct ProxiedQuery {
     /// The query id
     pub id: QueryId,
     /// The query
@@ -179,7 +179,7 @@ pub struct DeniedQuery {
     pub status: QueryStatus,
 }
 
-impl Serialize for DeniedQuery {
+impl Serialize for ProxiedQuery {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -257,9 +257,9 @@ impl QueryStatus {
         self.migration_state == MigrationState::DryRunSucceeded
     }
 
-    /// Returns true if the query should be considered "denied"
+    /// Returns true if the query should be proxied.
     #[must_use]
-    pub fn is_denied(&self) -> bool {
+    pub fn is_proxied(&self) -> bool {
         self.is_unsupported() || self.is_pending() || self.is_dry_run_succeeded()
     }
 }

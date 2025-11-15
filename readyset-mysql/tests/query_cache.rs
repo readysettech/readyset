@@ -53,8 +53,8 @@ async fn in_request_path_query_with_fallback() {
     sleep().await;
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t").await;
     res.unwrap();
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     assert_matches!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset(_)
@@ -62,16 +62,16 @@ async fn in_request_path_query_with_fallback() {
 
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t WHERE a = NOW()").await;
     res.unwrap(); // Executed successfully against fallback.
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 1);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 1);
     let info = last_query_info(&mut conn).await;
     assert_eq!(info.destination, QueryDestination::ReadysetThenUpstream);
     assert!(!info.noria_error.is_empty());
 
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t WHERE a = NOW()").await;
     res.unwrap(); // Executed successfully against fallback.
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 1);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 1);
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
@@ -102,12 +102,12 @@ async fn in_request_path_query_without_fallback() {
     sleep().await;
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t").await;
     res.unwrap();
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t WHERE a = NOW()").await;
     res.unwrap_err(); // Unable to handle this unsupported query.
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 1);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 1);
 
     shutdown_tx.shutdown().await;
 }
@@ -135,8 +135,8 @@ async fn out_of_band_query_with_fallback() {
     sleep().await;
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t").await;
     res.unwrap(); // Executed successfully against fallback.
-    assert_eq!(query_status_cache.allow_list().len(), 0);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 0);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
@@ -144,8 +144,8 @@ async fn out_of_band_query_with_fallback() {
 
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t WHERE a = NOW()").await;
     res.unwrap(); // Executed successfully against fallback.
-    assert_eq!(query_status_cache.allow_list().len(), 0);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 0);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
@@ -156,8 +156,8 @@ async fn out_of_band_query_with_fallback() {
 
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t").await;
     res.unwrap(); // Executed successfully against noria.
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     assert_matches!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset(_)
@@ -391,8 +391,8 @@ async fn in_request_path_prep_exec_with_fallback() {
     sleep().await;
     let res: Result<_> = conn.prep("SELECT * FROM t").await;
     assert!(res.is_ok());
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Both
@@ -400,8 +400,8 @@ async fn in_request_path_prep_exec_with_fallback() {
 
     let res: Result<Vec<Row>> = conn.exec(res.unwrap(), ()).await;
     res.unwrap();
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     assert_matches!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset(_)
@@ -409,8 +409,8 @@ async fn in_request_path_prep_exec_with_fallback() {
 
     let res: Result<_> = conn.prep("SELECT * FROM t WHERE a = NOW() AND b = 1").await;
     assert!(res.is_ok()); // Executed successfully against fallback.
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 1);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 1);
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Both
@@ -418,8 +418,8 @@ async fn in_request_path_prep_exec_with_fallback() {
 
     let res: Result<Vec<Row>> = conn.exec(res.unwrap(), ()).await;
     res.unwrap();
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 1);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 1);
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
@@ -429,8 +429,8 @@ async fn in_request_path_prep_exec_with_fallback() {
         .prep("SELECT * FROM t WHERE a = NOW() AND  b = 2")
         .await;
     assert!(res.is_ok()); // Executed successfully against fallback.
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 1);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 1);
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
@@ -438,8 +438,8 @@ async fn in_request_path_prep_exec_with_fallback() {
 
     let res: Result<Vec<Row>> = conn.exec(res.unwrap(), ()).await;
     res.unwrap();
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 1);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 1);
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
@@ -470,12 +470,12 @@ async fn in_request_path_prep_without_fallback() {
     sleep().await;
     let res: Result<_> = conn.prep("SELECT * FROM t").await;
     res.unwrap();
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     let res: Result<_> = conn.prep("SELECT * FROM t WHERE a = NOW()").await;
     res.unwrap_err(); // Unable to handle this unsupported query.
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 1);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 1);
 
     shutdown_tx.shutdown().await;
 }
@@ -507,13 +507,13 @@ async fn out_of_band_prep_exec_with_fallback() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Both
     );
-    assert_eq!(query_status_cache.allow_list().len(), 0);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 0);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
 
     let res: Result<Vec<Row>> = conn.exec(res.unwrap(), ()).await;
     res.unwrap();
-    assert_eq!(query_status_cache.allow_list().len(), 0);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 0);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
@@ -525,13 +525,13 @@ async fn out_of_band_prep_exec_with_fallback() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Both
     );
-    assert_eq!(query_status_cache.allow_list().len(), 0);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 0);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
 
     let res: Result<Vec<Row>> = conn.exec(res.unwrap(), ()).await;
     res.unwrap();
-    assert_eq!(query_status_cache.allow_list().len(), 0);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 0);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
@@ -546,8 +546,8 @@ async fn out_of_band_prep_exec_with_fallback() {
         .prep("SELECT * FROM t")
         .await
         .expect("Executed successfully against noria");
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     assert_matches!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset(_)
@@ -555,8 +555,8 @@ async fn out_of_band_prep_exec_with_fallback() {
 
     let res: Result<Vec<Row>> = conn.exec(&stmt, ()).await;
     res.unwrap();
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     assert_matches!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset(_)
@@ -568,8 +568,8 @@ async fn out_of_band_prep_exec_with_fallback() {
     // Should go back to fallback after we dropped the query
     let res: Result<Vec<Row>> = conn.exec(&stmt, ()).await;
     res.unwrap();
-    assert_eq!(query_status_cache.allow_list().len(), 0);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 0);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
@@ -603,12 +603,12 @@ async fn in_request_path_rewritten_query_without_fallback() {
         .query("CREATE CACHE test FROM SELECT * FROM t WHERE a = ? AND b = ?")
         .await;
     res.unwrap();
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t WHERE a = 4 AND b = 5").await;
     res.unwrap(); // Executed successfully against fallback.
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
 
     shutdown_tx.shutdown().await;
 }
@@ -638,12 +638,12 @@ async fn out_of_band_rewritten_query_without_fallback() {
         .query("CREATE CACHE test FROM SELECT * FROM t WHERE a = ? AND b = ?")
         .await;
     res.unwrap();
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t WHERE a = 4 AND b = 5").await;
     res.unwrap(); // Executed successfully against fallback.
-    assert_eq!(query_status_cache.allow_list().len(), 1);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 1);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
 
     shutdown_tx.shutdown().await;
 }
@@ -671,13 +671,13 @@ async fn drop_all_caches() {
     conn.query_drop("CREATE CACHE test_2 FROM SELECT a FROM t WHERE a = ?")
         .await
         .unwrap();
-    assert_eq!(query_status_cache.allow_list().len(), 2);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 2);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
 
     conn.query_drop("DROP ALL CACHES").await.unwrap();
 
-    assert_eq!(query_status_cache.allow_list().len(), 0);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.cached_list().len(), 0);
+    assert_eq!(query_status_cache.proxied_list().len(), 0);
 
     shutdown_tx.shutdown().await;
 }

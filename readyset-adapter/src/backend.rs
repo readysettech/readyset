@@ -2613,7 +2613,7 @@ where
         only_supported: bool,
         limit: Option<u64>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let mut queries = self.state.query_status_cache.deny_list();
+        let mut queries = self.state.query_status_cache.proxied_list();
         if let Some(q_id) = query_id {
             queries.retain(|q| &q.id.to_string() == q_id);
         }
@@ -2648,7 +2648,7 @@ where
 
         let mut data = queries
             .into_iter()
-            .map(|DeniedQuery { id, query, status }| {
+            .map(|ProxiedQuery { id, query, status }| {
                 let s = match status.migration_state {
                     MigrationState::DryRunSucceeded | MigrationState::Successful(_) => {
                         "yes".to_string()

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use readyset_client::query::{DeniedQuery, MigrationState, QueryId};
+use readyset_client::query::{MigrationState, ProxiedQuery, QueryId};
 use readyset_sql_passes::anonymize::Anonymizer;
 use readyset_telemetry_reporter::{
     PeriodicReport, ReporterResult as Result, Telemetry, TelemetryBuilder, TelemetryEvent,
@@ -30,7 +30,7 @@ impl ProxiedQueriesReporter {
     // If we have already reported the query, returns None
     pub async fn report_query(
         &self,
-        query: &mut DeniedQuery,
+        query: &mut ProxiedQuery,
     ) -> Option<(TelemetryEvent, Telemetry)> {
         debug!(?query, "reporting query");
         let mut reported_queries = self.reported_queries.lock().await;
@@ -68,9 +68,9 @@ impl ProxiedQueriesReporter {
 impl PeriodicReport for ProxiedQueriesReporter {
     async fn report(&self) -> Result<Vec<(TelemetryEvent, Telemetry)>> {
         debug!("running report for proxied queries");
-        let mut denied_queries = self.query_status_cache.deny_list();
+        let mut proxied_queries = self.query_status_cache.proxied_list();
         Ok(futures::future::join_all(
-            denied_queries
+            proxied_queries
                 .iter_mut()
                 .inspect(|q| debug!("{q:?}"))
                 .map(|q| self.report_query(q)),
@@ -101,7 +101,7 @@ mod tests {
         let proxied_queries_reporter = Arc::new(ProxiedQueriesReporter::new(query_status_cache));
 
         let query_id = QueryId::from_unparsed_select("test");
-        let mut init_q = DeniedQuery {
+        let mut init_q = ProxiedQuery {
             id: query_id,
             query: Query::ParseFailed(
                 Arc::new("this is easier than making a view create request".to_string()),
@@ -123,7 +123,7 @@ mod tests {
         };
         assert_eq!(MigrationState::Pending, status);
 
-        let mut updated_q = DeniedQuery {
+        let mut updated_q = ProxiedQuery {
             id: query_id,
             query: Query::ParseFailed(
                 Arc::new("this is easier than making a view create request".to_string()),
