@@ -2403,13 +2403,11 @@ where
         Ok(noria_connector::QueryResult::Empty)
     }
 
-    /// Forwards an `EXPLAIN CREATE CACHE` request to ReadySet. Where possible, this method performs
-    /// the dry run in the request path so we can return a result to the client immediately. If we
-    /// encounter an error we think might be transient or if the query is unsupported and we might
-    /// be able to inline some of its parameters (and parameter inlining is enabled), we will set
-    /// the status of the migration to "pending"/"inlined" and allow the migration to proceed in
-    /// the background. In these cases, it is the responsibility of the client to poll for the
-    /// final status of the query.
+    /// Process an EXPLAIN CREATE CACHE request.
+    ///
+    /// If necessary, first perform a dry run migration.  If the migration state is inlined, allow
+    /// the migration handler to advance the query's processing in the background.  A result of
+    /// pending indicates that the caller should try again later.
     async fn explain_create_cache(
         &mut self,
         id: QueryId,
@@ -2418,26 +2416,20 @@ where
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let (supported, migration_state) = match migration_state {
             Some(m @ MigrationState::Unsupported(_)) => ("no", m),
-            // If the migration state is "Inlined", we need to let the migration handler process
-            // the inlined migrations in the background until we can report whether the query is
-            // supported with certainty
-            Some(m @ MigrationState::Inlined(_)) | Some(m @ MigrationState::Pending) => {
-                ("pending", m)
-            }
+            Some(m @ MigrationState::Inlined(_)) => ("pending", m),
             Some(m @ MigrationState::Successful(CacheType::Deep)) => ("cached", m),
             Some(m @ MigrationState::Successful(CacheType::Shallow)) => ("cached", m),
             Some(m @ MigrationState::DryRunSucceeded) => ("yes", m),
-            // If we don't already have a migration state for the query, we do a dry run
-            None => {
+            Some(MigrationState::Pending) | None => {
                 match self.noria.handle_dry_run(id, &req).await {
-                    Ok(_) => ("yes", MigrationState::DryRunSucceeded),
-                    // If the root cause of the error is that the query is unsupported, we can
-                    // just convey that to the client up front
-                    Err(e) if e.caused_by_unsupported() => (
+                    Ok(()) => ("yes", MigrationState::DryRunSucceeded),
+                    Err(e) if e.is_transient() => ("pending", MigrationState::Pending),
+                    Err(e) => (
                         "no",
-                        MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
+                        MigrationState::Unsupported(
+                            e.unsupported_cause().unwrap_or_else(|| e.to_string()),
+                        ),
                     ),
-                    Err(e) => return Err(e),
                 }
             }
         };

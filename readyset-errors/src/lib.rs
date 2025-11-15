@@ -773,8 +773,8 @@ impl ReadySetError {
         matches!(self, Self::Unsupported(..))
     }
 
-    /// Returns true if the error either *is* [`Unsupported`], or was *caused by*
-    /// [`Unsupported`]
+    /// Returns true if this error was caused by our lack of support.  Note that this is not
+    /// exhaustive, and we may not offer support due to other errors not tracked here.
     pub fn caused_by_unsupported(&self) -> bool {
         self.any_cause(|e| e.is_unsupported())
     }

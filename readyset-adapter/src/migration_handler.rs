@@ -132,23 +132,11 @@ impl MigrationHandler {
                         // Remove the start time since we've successfully completed the migration.
                         self.start_time.remove(query.query());
                     }
-                    Err(e) if e.caused_by_unsupported() => {
+                    Err(e) if e.is_transient() => {
                         debug!(
                             error = %e,
                             query = %Sensitive(&query.query().statement.display(self.dialect.into())),
-                            "Select query is unsupported in Readyset"
-                        );
-                        self.query_status_cache
-                            .unsupported_inlined_migration(query.query());
-                        self.start_time.remove(query.query());
-                    }
-                    // Errors that were not caused by unsupported may be transient, do nothing
-                    // so we may retry the migration on this query.
-                    Err(e) => {
-                        debug!(
-                            error = %e,
-                            query = %Sensitive(&query.query().statement.display(self.dialect.into())),
-                            "Select query may have transiently failed"
+                            "Transient failure during inline migration"
                         );
                         if Instant::now() - *self.start_time.get(query.query()).unwrap()
                             > self.max_retry
@@ -158,6 +146,16 @@ impl MigrationHandler {
                                 .unsupported_inlined_migration(query.query());
                             self.start_time.remove(query.query());
                         }
+                    }
+                    Err(e) => {
+                        debug!(
+                            error = %e,
+                            query = %Sensitive(&query.query().statement.display(self.dialect.into())),
+                            "Query not supported by inline migration"
+                        );
+                        self.query_status_cache
+                            .unsupported_inlined_migration(query.query());
+                        self.start_time.remove(query.query());
                     }
                 }
             }
@@ -241,36 +239,36 @@ impl MigrationHandler {
                     None,
                 );
             }
-            Err(e) if e.caused_by_unsupported() => {
+            Err(e) if e.is_transient() => {
                 debug!(
                     error = %e,
                     query = %Sensitive(&view_request.statement.display(self.dialect.into())),
-                    "Select query is unsupported in Readyset"
-                );
-
-                self.start_time.remove(view_request);
-                self.query_status_cache.update_query_migration_state(
-                    view_request,
-                    MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
-                    None,
-                );
-            }
-            // Errors that were not caused by unsupported may be transient, do nothing
-            // so we may retry the migration on this query.
-            Err(e) => {
-                debug!(
-                    error = %e,
-                    query = %Sensitive(&view_request.statement.display(self.dialect.into())),
-                    "Select query may have transiently failed"
+                    "Transient failure during migration"
                 );
                 if Instant::now() - *self.start_time.get(view_request).unwrap() > self.max_retry {
                     // Query failed for long enough, it is unsupported.
                     self.query_status_cache.update_query_migration_state(
                         view_request,
-                        MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
+                        MigrationState::Unsupported("Migration timed out".to_string()),
                         None,
                     );
                 }
+            }
+            Err(e) => {
+                debug!(
+                    error = %e,
+                    query = %Sensitive(&view_request.statement.display(self.dialect.into())),
+                    "Query not supported by migration"
+                );
+
+                self.start_time.remove(view_request);
+                self.query_status_cache.update_query_migration_state(
+                    view_request,
+                    MigrationState::Unsupported(
+                        e.unsupported_cause().unwrap_or_else(|| e.to_string()),
+                    ),
+                    None,
+                );
             }
         }
     }
@@ -328,9 +326,9 @@ impl MigrationHandler {
             // We can't be certain its unsupported without attempting an actual migration, but
             // mark it unsupported anyway to avoid confusion.
             debug!(
-                "Max retry time of {:?} exceeded for dry run migration. {:?} is probably unsupported",
-                self.max_retry,
-                view_request.to_anonymized_string()
+                query = %Sensitive(&view_request.statement.display(self.dialect.into())),
+                "Max retry time of {:?} exceeded for dry run migration",
+                self.max_retry
             );
             self.query_status_cache.update_query_migration_state(
                 view_request,
@@ -366,15 +364,17 @@ impl MigrationHandler {
                         }
                     });
             }
-            Err(e) if e.caused_by_unsupported() => {
+            Err(e) if e.is_transient() => {} // Leave it as pending.
+            Err(e) => {
                 self.start_time.remove(view_request);
                 self.query_status_cache.update_query_migration_state(
                     view_request,
-                    MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
+                    MigrationState::Unsupported(
+                        e.unsupported_cause().unwrap_or_else(|| e.to_string()),
+                    ),
                     None,
                 );
             }
-            _ => {} // Leave it as pending.
         }
     }
 
