@@ -561,7 +561,7 @@ pub struct WorkerOptions {
     pub eviction_kind: dataflow::EvictionKind,
 
     /// Disable unqueries after a reader eviction
-    #[arg(long = "no-unquery", hide = true)]
+    #[arg(long = "no-unquery", env = "NO_UNQUERY", hide = true)]
     pub no_unquery: bool,
 
     /// Disable partial
