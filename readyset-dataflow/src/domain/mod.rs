@@ -49,6 +49,7 @@ use readyset_util::futures::abort_on_panic;
 use readyset_util::progress::report_progress_with;
 use readyset_util::ranges::RangeBounds;
 use readyset_util::redacted::Sensitive;
+use readyset_util::SizeOf;
 use readyset_util::{time_scope, Indices};
 use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};

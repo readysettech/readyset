@@ -77,7 +77,7 @@ use std::{fmt, fs};
 
 use bincode::Options;
 use clap::ValueEnum;
-use common::{IndexType, Record, Records, SizeOf, Tag};
+use common::{IndexType, Record, Records, Tag};
 pub use handle::PersistentStateHandle;
 use handle::{PersistentStateReadGuard, PersistentStateWriteGuard};
 use notify::Watcher;
@@ -89,6 +89,7 @@ use readyset_client::{KeyComparison, TableStatus, TABLE_STATUS_REPORT_INTERVAL};
 use readyset_data::{Bound, BoundedRange, DfValue};
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{Relation, SqlIdentifier};
+use readyset_util::SizeOf;
 use replication_offset::ReplicationOffset;
 use rocksdb::{
     self, BlockBasedOptions, ColumnFamily, ColumnFamilyDescriptor, CompactOptions, IteratorMode,

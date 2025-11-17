@@ -1,11 +1,12 @@
 use std::rc::Rc;
 
-use common::{IndexType, SizeOf};
+use common::IndexType;
 use itertools::Either;
 use rand::distr::Uniform;
 use readyset_client::internal::Index;
 use readyset_client::KeyComparison;
 use readyset_data::{Bound, DfValue, RangeBounds};
+use readyset_util::SizeOf;
 use vec1::Vec1;
 
 use crate::keyed_state::KeyedState;

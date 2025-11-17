@@ -4927,6 +4927,7 @@ dependencies = [
  "readyset-client",
  "readyset-data",
  "readyset-errors",
+ "readyset-util",
  "reqwest 0.11.27",
  "rlimit",
  "serde",

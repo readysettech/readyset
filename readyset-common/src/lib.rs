@@ -7,8 +7,6 @@ mod records;
 pub mod ulimit;
 pub mod worker;
 
-use std::mem::{size_of, size_of_val};
-
 use petgraph::prelude::*;
 pub use readyset_client::internal::{Index, IndexType};
 pub use readyset_data::DfValue;
@@ -18,59 +16,11 @@ pub use self::local::*;
 pub use self::metrics::LenMetric;
 pub use self::records::*;
 
-pub trait SizeOf {
-    fn deep_size_of(&self) -> usize;
-    fn is_empty(&self) -> bool;
-}
-
 pub trait Len {
     fn len(&self) -> usize;
 
     fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-}
-
-impl SizeOf for DfValue {
-    fn deep_size_of(&self) -> usize {
-        let inner = match self {
-            DfValue::Text(t) => size_of_val(t) + t.as_bytes().len(),
-            DfValue::BitVector(t) => size_of_val(t) + t.len().div_ceil(8),
-            DfValue::ByteArray(t) => size_of_val(t) + t.len(),
-            _ => 0,
-        };
-
-        size_of::<Self>() + inner
-    }
-
-    fn is_empty(&self) -> bool {
-        false
-    }
-}
-
-impl<T> SizeOf for Vec<T>
-where
-    T: SizeOf,
-{
-    fn deep_size_of(&self) -> usize {
-        size_of_val(self) + self.iter().map(|x| x.deep_size_of()).sum::<usize>()
-    }
-
-    fn is_empty(&self) -> bool {
-        false
-    }
-}
-
-impl<T> SizeOf for Box<[T]>
-where
-    T: SizeOf,
-{
-    fn deep_size_of(&self) -> usize {
-        size_of_val(self) + self.iter().map(|x| x.deep_size_of()).sum::<usize>() + 8
-    }
-
-    fn is_empty(&self) -> bool {
-        false
     }
 }
 
@@ -104,12 +54,15 @@ impl IndexRef {
 
 #[cfg(test)]
 mod tests {
+    use std::mem::{size_of, size_of_val};
+
+    use chrono::DateTime;
+    use readyset_util::SizeOf;
+
     use super::*;
 
     #[test]
     fn data_type_mem_size() {
-        use chrono::DateTime;
-
         let s = "this needs to be longer than 14 chars to make it be a Text";
         let txt = DfValue::from(s);
         let shrt = DfValue::Int(5);

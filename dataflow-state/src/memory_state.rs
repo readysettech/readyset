@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use common::{IndexType, Record, Records, SizeOf, Tag};
+use common::{IndexType, Record, Records, Tag};
 use hashbag::HashBag;
 use rand::{self, Rng};
 use readyset_client::debug::info::KeyCount;
@@ -9,6 +9,7 @@ use readyset_client::internal::Index;
 use readyset_client::KeyComparison;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
+use readyset_util::SizeOf;
 use replication_offset::ReplicationOffset;
 use tracing::trace;
 

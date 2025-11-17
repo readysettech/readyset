@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
+use std::mem::{size_of, size_of_val};
 use std::ops::{Add, Div, Mul, Sub};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -25,6 +26,7 @@ use readyset_sql::{DialectDisplay as _, TryFromDialect, TryIntoDialect as _};
 use readyset_util::{
     arbitrary::{arbitrary_decimal, arbitrary_duration},
     redacted::Sensitive,
+    SizeOf,
 };
 use serde_json::Value as JsonValue;
 use test_strategy::Arbitrary;
@@ -140,6 +142,23 @@ pub enum DfValue {
     // - remember to add that variant to:
     //   - The `proptest::Arbitrary` impl for `DfValue`,
     //   - The `example_row` in `src/serde.rs`
+}
+
+impl SizeOf for DfValue {
+    fn deep_size_of(&self) -> usize {
+        let inner = match self {
+            DfValue::Text(t) => size_of_val(t) + t.as_bytes().len(),
+            DfValue::BitVector(t) => size_of_val(t) + t.len().div_ceil(8),
+            DfValue::ByteArray(t) => size_of_val(t) + t.len(),
+            _ => 0,
+        };
+
+        size_of::<Self>() + inner
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
 }
 
 impl TryFrom<DfValue> for JsonValue {

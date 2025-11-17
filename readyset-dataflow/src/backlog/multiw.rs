@@ -3,6 +3,7 @@ use dataflow_expression::PreInsertion;
 use reader_map::EvictionQuantity;
 use readyset_data::Bound;
 use readyset_util::ranges::RangeBounds;
+use readyset_util::SizeOf;
 
 use super::{key_to_single, Key};
 use crate::prelude::*;

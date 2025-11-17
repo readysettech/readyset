@@ -4,6 +4,7 @@
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
+use std::mem::size_of_val;
 
 #[cfg(feature = "failure_injection")]
 pub mod failpoints;
@@ -157,5 +158,43 @@ where
             .into_iter()
             .map(|i| self.get(i).cloned().ok_or(IndexOutOfBounds(i)))
             .collect()
+    }
+}
+
+/// Trait for types that can calculate their deep memory size.
+///
+/// This trait provides methods to calculate the total memory footprint of a value,
+/// including heap-allocated data.
+pub trait SizeOf {
+    /// Returns the deep size of this value in bytes, including heap allocations.
+    fn deep_size_of(&self) -> usize;
+
+    /// Returns whether this value should be considered empty for memory tracking purposes.
+    fn is_empty(&self) -> bool;
+}
+
+impl<T> SizeOf for Vec<T>
+where
+    T: SizeOf,
+{
+    fn deep_size_of(&self) -> usize {
+        size_of_val(self) + self.iter().map(|x| x.deep_size_of()).sum::<usize>()
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+}
+
+impl<T> SizeOf for Box<[T]>
+where
+    T: SizeOf,
+{
+    fn deep_size_of(&self) -> usize {
+        size_of_val(self) + self.iter().map(|x| x.deep_size_of()).sum::<usize>() + 8
+    }
+
+    fn is_empty(&self) -> bool {
+        false
     }
 }

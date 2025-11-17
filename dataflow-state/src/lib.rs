@@ -13,7 +13,7 @@ use std::rc::Rc;
 use std::vec;
 
 use ahash::RandomState;
-use common::{Records, SizeOf, Tag};
+use common::{Records, Tag};
 use derive_more::From;
 use hashbag::HashBag;
 use itertools::Either;
@@ -24,6 +24,7 @@ use readyset_client::{KeyComparison, PersistencePoint};
 use readyset_data::{Bound, DfValue};
 use readyset_errors::ReadySetResult;
 use readyset_util::iter::eq_by;
+use readyset_util::SizeOf;
 use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
 
