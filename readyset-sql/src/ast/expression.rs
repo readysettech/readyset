@@ -1401,10 +1401,20 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             JsonAccess { value: _, path: _ } => not_yet_implemented!("JSON access"),
             Lambda(_lambda_function) => unsupported!("LAMBDA"),
             Like {
+                escape_char: Some(_),
+                ..
+            }
+            | ILike {
+                escape_char: Some(_),
+                ..
+            } => {
+                unsupported!("LIKE/ILIKE with custom ESCAPE character")
+            }
+            Like {
                 negated,
                 expr,
                 pattern,
-                escape_char: _,
+                escape_char: None,
                 any: false,
             } => Ok(Self::BinaryOp {
                 lhs: expr.try_into_dialect(dialect)?,
@@ -1420,7 +1430,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 negated,
                 expr,
                 pattern,
-                escape_char: _,
+                escape_char: None,
                 any: true,
             } => Ok(Self::OpAny {
                 lhs: expr.try_into_dialect(dialect)?,
@@ -1435,7 +1445,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 negated,
                 expr,
                 pattern,
-                escape_char: _,
+                escape_char: None,
                 any: false,
             } => Ok(Self::BinaryOp {
                 lhs: expr.try_into_dialect(dialect)?,
@@ -1451,7 +1461,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 negated,
                 expr,
                 pattern,
-                escape_char: _,
+                escape_char: None,
                 any: true,
             } => Ok(Self::OpAny {
                 lhs: expr.try_into_dialect(dialect)?,
