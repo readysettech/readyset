@@ -237,3 +237,86 @@ async fn test_topk_limit_catch_all() {
         .await
         .unwrap();
 }
+
+// TopK is one of the few nodes that require the on_eviction hook
+// This is here to make sure that the hook gets called correctly
+// and that the hook evicts as expected
+#[tokio::test]
+#[tags(serial, mysql_upstream)]
+async fn test_topk_eviction_aux_cleanup() {
+    readyset_tracing::init_test_logging();
+    let db_name = "topk_eviction_aux_cleanup";
+    mysql_helpers::recreate_database(db_name).await;
+
+    let (rs_opts, mut handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(false)
+        .set_topk(true)
+        .replicate_db(db_name.to_string())
+        .build::<MySQLAdapter>()
+        .await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+
+    upstream_conn
+        .query_drop("CREATE TABLE posts (id int PRIMARY KEY, author_id int, score int);")
+        .await
+        .unwrap();
+    upstream_conn
+        .query_drop("INSERT INTO posts (id, author_id, score) VALUES (1, 1, 200), (2, 1, 190), (3, 1, 180);")
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    rs_conn
+        .query_drop("CREATE CACHE topk_posts FROM SELECT id, score FROM posts WHERE author_id = ? ORDER BY score DESC LIMIT 3")
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let initial: Vec<(i32, i32)> = rs_conn
+        .exec(
+            "SELECT id, score FROM posts WHERE author_id = ? ORDER BY score DESC LIMIT 3",
+            (1,),
+        )
+        .await
+        .unwrap();
+    assert_eq!(initial, vec![(1, 200), (2, 190), (3, 180)]);
+
+    upstream_conn
+        .query_drop("INSERT INTO posts (id, author_id, score) VALUES (4, 1, 200);")
+        .await
+        .unwrap();
+
+    // Evict the only group (author_id = 1) to drop Readyset's local state for this key.
+    // If the hook doesn't get called, the aux state will have stale data and will give the
+    // main state duplicates.
+    //
+    // Use flush_partial (which uses Eviction::Bytes internally, same as production)
+    handle.flush_partial().await.unwrap();
+    sleep().await;
+
+    let rows_after: Vec<(i32, i32)> = rs_conn
+        .exec(
+            "SELECT id, score FROM posts WHERE author_id = ? ORDER BY score DESC LIMIT 3",
+            (1,),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        rows_after,
+        vec![(1, 200), (4, 200), (2, 190)],
+        "on_eviction hook didn't get called. Either the debug_assert in topk.rs failed or \
+        state panicked because it received a stale negative"
+    );
+
+    shutdown_tx.shutdown().await;
+    upstream_conn
+        .query_drop(format!("DROP DATABASE {db_name}"))
+        .await
+        .unwrap();
+}

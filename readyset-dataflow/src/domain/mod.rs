@@ -4133,6 +4133,19 @@ impl Domain {
         for (tag, path, keys) in
             replay_paths.downstream_dependent_paths(node, index, keys, remapped_keys)
         {
+            // Call eviction hook on the source node
+            nodes[node].borrow_mut().process_eviction(
+                node,
+                index.columns.as_slice(),
+                &keys,
+                tag,
+                shard,
+                replica,
+                reader_write_handles,
+                ex,
+                auxiliary_node_states,
+            )?;
+
             Self::walk_path(
                 &path.path[..],
                 &keys,
@@ -4154,6 +4167,7 @@ impl Domain {
                         // already evicted from in walk_path
                         continue;
                     }
+
                     if !state.contains_key(dest.node) {
                         if !not_ready.contains(&dest.node) {
                             debug!(
@@ -4329,9 +4343,8 @@ impl Domain {
 
         for (node, num_bytes) in nodes {
             let mut freed = 0;
-            let mut n = self.nodes[node].borrow_mut();
 
-            if n.is_dropped() {
+            if self.nodes[node].borrow().is_dropped() {
                 continue; // Node was dropped. Skip.
             } else if let Some(state) = self.reader_write_handles.get_mut(node) {
                 let (bytes, mut keys) = state.evict_bytes(num_bytes);
@@ -4360,26 +4373,6 @@ impl Domain {
 
                 freed += bytes_freed;
                 if !keys.is_empty() {
-                    // Call on_eviction hook for the target node for all associated tags
-                    for (tag, _, _) in self.replay_paths.downstream_dependent_paths(
-                        node,
-                        index,
-                        &keys,
-                        &mut self.remapped_keys,
-                    ) {
-                        n.process_eviction(
-                            node,
-                            &index.columns,
-                            &keys,
-                            tag,
-                            self.shard,
-                            self.replica,
-                            &mut self.reader_write_handles,
-                            ex,
-                            &mut self.auxiliary_node_states,
-                        )?;
-                    }
-
                     let index = index.clone();
                     freed += Self::trigger_downstream_evictions(
                         &index,
@@ -4402,7 +4395,7 @@ impl Domain {
                 continue;
             }
 
-            debug!(%freed, node = ?n, "evicted from node");
+            debug!(%freed, %node, "evicted from node");
             self.state_size.fetch_sub(freed, Ordering::AcqRel);
             total_freed += freed;
         }
@@ -4503,9 +4496,11 @@ impl Domain {
                 // This path terminates inside the domain. Find the destination node, evict
                 // from it, and then propagate the eviction further downstream.
                 let destination = path.last().node;
-                let mut n = self.nodes[destination].borrow_mut();
 
-                let (freed, eviction) = if n.is_dropped() {
+                // Check if node is dropped before doing any work
+                let is_dropped = self.nodes[destination].borrow().is_dropped();
+
+                let (freed, eviction) = if is_dropped {
                     // Node was dropped. Skip.
                     (0, None)
                 } else if let Some(state) = self.reader_write_handles.get_mut(destination) {
@@ -4572,19 +4567,6 @@ impl Domain {
                     let key = KeyComparison::try_from(key_evicted.clone())
                         .map_err(|_| internal_err!("Empty key evicted"))?;
 
-                    // Call on_eviction hook for the target node
-                    n.process_eviction(
-                        destination,
-                        &index.columns,
-                        std::slice::from_ref(&key),
-                        tag,
-                        self.shard,
-                        self.replica,
-                        &mut self.reader_write_handles,
-                        ex,
-                        &mut self.auxiliary_node_states,
-                    )?;
-
                     let index = index.clone();
                     let freed = Self::trigger_downstream_evictions(
                         &index,
@@ -4604,7 +4586,7 @@ impl Domain {
                     (bytes_freed + freed, Some(key_evicted))
                 };
 
-                debug!(%freed, node = ?n, "evicted from node");
+                debug!(%freed, %destination, "evicted from node");
                 self.state_size.fetch_sub(freed, Ordering::AcqRel);
                 Ok(eviction)
             }
