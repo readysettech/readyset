@@ -156,9 +156,19 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
             TinyText => Ok(Self::TinyText),
             MediumText => Ok(Self::MediumText),
             LongText => Ok(Self::LongText),
-            Character(len) | Char(len) => Ok(Self::Char(len.and_then(character_length_into_u16))),
+            Character(len) | Char(len) => {
+                let length = match len {
+                    Some(l) => character_length_into_u16(l)?,
+                    None => None,
+                };
+                Ok(Self::Char(length))
+            }
             Varchar(len) | Nvarchar(len) | CharVarying(len) | CharacterVarying(len) => {
-                Ok(Self::VarChar(len.and_then(character_length_into_u16)))
+                let length = match len {
+                    Some(l) => character_length_into_u16(l)?,
+                    None => None,
+                };
+                Ok(Self::VarChar(length))
             }
             Uuid => Ok(Self::Uuid),
             CharacterLargeObject(_) | CharLargeObject(_) | Clob(_) => {
@@ -359,12 +369,20 @@ fn exact_number_info_into_decimal(
     }
 }
 
-fn character_length_into_u16(value: sqlparser::ast::CharacterLength) -> Option<u16> {
+fn character_length_into_u16(
+    value: sqlparser::ast::CharacterLength,
+) -> Result<Option<u16>, AstConversionError> {
     match value {
-        sqlparser::ast::CharacterLength::IntegerLength { length, unit: _ } => {
-            length.try_into().ok()
+        sqlparser::ast::CharacterLength::IntegerLength {
+            unit: Some(sqlparser::ast::CharLengthUnits::Octets),
+            ..
+        } => {
+            unsupported!("Character length in OCTETS")
         }
-        sqlparser::ast::CharacterLength::Max => None,
+        sqlparser::ast::CharacterLength::IntegerLength { length, unit: _ } => {
+            Ok(length.try_into().ok())
+        }
+        sqlparser::ast::CharacterLength::Max => Ok(None),
     }
 }
 

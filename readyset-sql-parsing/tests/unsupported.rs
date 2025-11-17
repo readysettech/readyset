@@ -77,3 +77,15 @@ fn function_advanced_features_unsupported() {
         check_parse_fails!(Dialect::PostgreSQL, query, "Function with");
     }
 }
+
+#[test]
+fn character_length_octets_unsupported() {
+    // Test that character length with OCTETS is rejected
+    for query in &[
+        "CREATE TABLE t (col VARCHAR(100 OCTETS))",
+        "CREATE TABLE t (col CHAR(50 OCTETS))",
+        "CREATE TABLE t (col CHARACTER(25 OCTETS))",
+    ] {
+        check_parse_fails!(Dialect::PostgreSQL, query, "OCTETS");
+    }
+}
