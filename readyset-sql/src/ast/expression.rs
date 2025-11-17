@@ -1298,13 +1298,23 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 }
             }
             Convert {
+                target_before_value,
+                styles,
+                is_try,
                 expr,
                 data_type,
                 charset,
-                target_before_value: _,
-                styles: _,
-                is_try: _,
             } => {
+                if target_before_value {
+                    unsupported!("CONVERT with type before value")?;
+                }
+                if !styles.is_empty() {
+                    unsupported!("CONVERT with style codes")?;
+                }
+                if is_try {
+                    unsupported!("TRY_CONVERT")?;
+                }
+
                 let expr = expr.try_into_dialect(dialect)?;
                 if let Some(data_type) = data_type {
                     debug_assert!(charset.is_none());
