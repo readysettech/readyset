@@ -53,3 +53,15 @@ fn mysql_like_escape_char() {
         );
     }
 }
+
+#[test]
+fn cast_format_unsupported() {
+    for query in &[
+        "SELECT CAST(col AS STRING FORMAT 'YYYY-MM-DD') FROM t",
+        "SELECT TRY_CAST(col AS TIMESTAMP FORMAT 'MM/DD/YY') FROM t",
+        "SELECT SAFE_CAST(col AS DATE FORMAT 'YYYY') FROM t",
+        "SELECT CAST(ts AS STRING FORMAT 'TZH' AT TIME ZONE 'UTC') FROM t",
+    ] {
+        check_parse_fails!(Dialect::PostgreSQL, query, "CAST with FORMAT clause");
+    }
+}

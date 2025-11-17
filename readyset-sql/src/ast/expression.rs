@@ -1260,10 +1260,16 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 else_expr: else_result.try_into_dialect(dialect)?,
             }),
             Cast {
+                format: Some(_), // BigQuery-specific FORMAT clause (not AT TIME ZONE)
+                ..
+            } => {
+                unsupported!("CAST with FORMAT clause")
+            }
+            Cast {
                 kind,
                 expr,
                 data_type,
-                format: _, // TODO: I think this is where we would support `AT TIMEZONE` syntax
+                format: None,
             } => Ok(Self::Cast {
                 expr: expr.try_into_dialect(dialect)?,
                 ty: data_type.try_into_dialect(dialect)?,
