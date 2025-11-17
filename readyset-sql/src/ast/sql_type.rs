@@ -235,8 +235,11 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
             Boolean => Ok(Self::Bool),
             Date => Ok(Self::Date),
             Date32 => unsupported!("DATE32 type"),
-            // TODO: Should we support these options?
-            Time(_, _timezone_info) => Ok(Self::Time),
+            // TODO: Should we support precision?
+            Time(_precision, sqlparser::ast::TimezoneInfo::None) => Ok(Self::Time),
+            Time(_precision, _timezone_info) => {
+                unsupported!("TIME WITH TIME ZONE")
+            }
             Datetime(n) => Ok(Self::DateTime(n.map(|n| n as u16))),
             Datetime64(_, _) => unsupported!("DATETIME64 type"),
             // Note: We don't support precision on timestamps; and we don't differentiate

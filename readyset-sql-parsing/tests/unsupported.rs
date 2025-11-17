@@ -89,3 +89,13 @@ fn character_length_octets_unsupported() {
         check_parse_fails!(Dialect::PostgreSQL, query, "OCTETS");
     }
 }
+
+#[test]
+fn time_with_timezone_unsupported() {
+    // Test that TIME WITH TIME ZONE is rejected
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "SELECT CAST('12:00:00' AS TIME WITH TIME ZONE)",
+        "TIME WITH TIME ZONE"
+    );
+}
