@@ -65,3 +65,15 @@ fn cast_format_unsupported() {
         check_parse_fails!(Dialect::PostgreSQL, query, "CAST with FORMAT clause");
     }
 }
+
+#[test]
+fn function_advanced_features_unsupported() {
+    // Test that advanced function features are rejected
+    for query in &[
+        "SELECT COUNT(*) FILTER (WHERE x > 0) FROM t",
+        "SELECT SUM(x) WITHIN GROUP (ORDER BY y) FROM t",
+        "SELECT FIRST_VALUE(x) IGNORE NULLS OVER (ORDER BY y)",
+    ] {
+        check_parse_fails!(Dialect::PostgreSQL, query, "Function with");
+    }
+}

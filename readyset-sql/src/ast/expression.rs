@@ -1717,10 +1717,38 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             Function, FunctionArg, FunctionArgExpr, FunctionArgumentList, FunctionArguments,
         };
 
-        // TODO: handle null treatment and other stuff
+        // Check for unsupported function features
         let Function {
-            args, name, over, ..
+            args,
+            name,
+            over,
+            uses_odbc_syntax: _, // Cosmetic only, safe to ignore
+            parameters,
+            filter,
+            null_treatment,
+            within_group,
         } = value;
+
+        // Parameters: Named args, JSON clauses, etc. (ClickHouse, SQL Server, PostgreSQL)
+        if parameters != FunctionArguments::None {
+            unsupported!("Function with parameters")?;
+        }
+
+        // FILTER clause: WHERE condition in aggregates (PostgreSQL, SQL Standard)
+        if filter.is_some() {
+            unsupported!("Function with FILTER clause")?;
+        }
+
+        // NULL treatment: IGNORE NULLS / RESPECT NULLS (PostgreSQL 19+, SQL Server, Oracle)
+        if null_treatment == Some(sqlparser::ast::NullTreatment::IgnoreNulls) {
+            unsupported!("Function with IGNORE NULLS")?;
+        }
+        // RESPECT NULLS is safe to ignore (default behavior)
+
+        // WITHIN GROUP: Ordered-set aggregates (PostgreSQL, SQL Standard)
+        if !within_group.is_empty() {
+            unsupported!("Function with WITHIN GROUP clause")?;
+        }
 
         let mut ident = name
             .0
