@@ -213,29 +213,36 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
         value: sqlparser::ast::TableFactor,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
+        use sqlparser::ast::{TableAlias, TableFactor};
         match value {
-            sqlparser::ast::TableFactor::Table { name, alias, .. } => Ok(Self {
+            TableFactor::Table {
+                alias: Some(TableAlias { columns, .. }),
+                ..
+            } if !columns.is_empty() => unsupported!("Table alias with column renaming")?,
+            TableFactor::Derived {
+                alias: Some(TableAlias { columns, .. }),
+                ..
+            } if !columns.is_empty() => unsupported!("Table alias with column renaming")?,
+            TableFactor::Table { name, alias, .. } => Ok(Self {
                 inner: TableExprInner::Table(name.try_into_dialect(dialect)?),
-                alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)), // XXX we don't support [`TableAlias::columns`]
+                alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)),
             }),
-            sqlparser::ast::TableFactor::Derived {
+            TableFactor::Derived {
                 subquery,
                 alias,
                 lateral,
-            } => {
-                match subquery.try_into_dialect(dialect)? {
-                    crate::ast::SqlQuery::Select(mut subselect) => {
-                        subselect.lateral = lateral;
-                        Ok(Self {
-                            inner: TableExprInner::Subquery(Box::new(subselect)),
-                            alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)), // XXX we don't support [`TableAlias::columns`]
-                        })
-                    }
-                    _ => {
-                        failed!("unexpected non-SELECT subquery in table expression")
-                    }
+            } => match subquery.try_into_dialect(dialect)? {
+                crate::ast::SqlQuery::Select(mut subselect) => {
+                    subselect.lateral = lateral;
+                    Ok(Self {
+                        inner: TableExprInner::Subquery(Box::new(subselect)),
+                        alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)),
+                    })
                 }
-            }
+                _ => {
+                    failed!("unexpected non-SELECT subquery in table expression")
+                }
+            },
             sqlparser::ast::TableFactor::NestedJoin { .. } => unsupported!("Nested join"),
             _ => unsupported!("table expression {value:?}"),
         }
