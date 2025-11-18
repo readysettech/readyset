@@ -2573,9 +2573,12 @@ where
             ..
         } in self.shallow.list_caches(query_id, name)
         {
+            let none = || "None".to_string();
             warn!(
-                query_id = ?query_id.map(|query_id| query_id.to_string()),
-                name = ?name.as_ref().map(|name| name.display(DB::SQL_DIALECT).to_string()),
+                query_id = %query_id.map_or_else(none, |query_id| query_id.to_string()),
+                name = %name
+                    .as_ref()
+                    .map_or_else(none, |name| name.display(DB::SQL_DIALECT).to_string()),
                 statement = %Sensitive(&query.display(self.settings.dialect)),
                 "Dropping previously shallow-cached query",
             );
