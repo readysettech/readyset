@@ -13,7 +13,8 @@ use proptest::{
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
-    CommentDef, CreateTableOptions, NamedParenthesizedList, SqlOption, Value, ValueWithSpan,
+    CommentDef, CreateTableOptions, HiveDistributionStyle, NamedParenthesizedList, SqlOption,
+    Value, ValueWithSpan,
 };
 use test_strategy::Arbitrary;
 
@@ -353,77 +354,177 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
         value: sqlparser::ast::CreateTable,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        let mut options = vec![];
-        if let CreateTableOptions::Plain(opts) = value.table_options {
-            for option in opts {
-                match option {
-                    SqlOption::KeyValue { key, value } => match key.value.as_str() {
-                        "AUTO_INCREMENT" => {
-                            if let sqlparser::ast::Expr::Value(ValueWithSpan {
-                                value: Value::Number(v, _),
-                                ..
-                            }) = value
-                            {
-                                options.push(CreateTableOption::AutoIncrement(v.parse().map_err(
-                                    |_| {
-                                        AstConversionError::Failed(
-                                            "Failed to parse AUTO_INCREMENT value as u64".into(),
-                                        )
-                                    },
-                                )?))
-                            }
-                        }
-                        "DEFAULT CHARSET"
-                        | "CHARSET"
-                        | "DEFAULT CHARACTER SET"
-                        | "CHARACTER SET" => {
-                            options.push(CreateTableOption::Charset(value.try_into()?))
-                        }
-                        "COLLATE" | "DEFAULT COLLATE" => {
-                            options.push(CreateTableOption::Collate(value.try_into()?))
-                        }
-                        "DATA DIRECTORY" => match value {
-                            sqlparser::ast::Expr::Value(ValueWithSpan {
-                                value: Value::SingleQuotedString(v),
-                                ..
-                            }) => options.push(CreateTableOption::DataDirectory(v)),
-                            _ => options.push(CreateTableOption::DataDirectory(value.to_string())),
-                        },
-                        _ => options.push(CreateTableOption::Other {
-                            key: key.to_string(),
-                            value: value.to_string(),
-                        }),
-                    },
-                    SqlOption::NamedParenthesizedList(NamedParenthesizedList {
-                        key, name, ..
-                    }) => {
-                        if key.value == "ENGINE" {
-                            options
-                                .push(CreateTableOption::Engine(name.map(|n| n.value.to_string())));
-                        }
-                    }
-                    SqlOption::Comment(
-                        CommentDef::WithEq(comment) | CommentDef::WithoutEq(comment),
-                    ) => options.push(CreateTableOption::Comment(comment)),
-                    SqlOption::Ident(ident) => options.push(CreateTableOption::Other {
-                        key: ident.to_string(),
-                        value: "".to_string(),
-                    }),
-                    SqlOption::Clustered(table_options_clustered) => {
-                        todo!("{table_options_clustered}")
-                    }
-                    SqlOption::Partition {
-                        column_name,
-                        range_direction,
-                        for_values,
-                    } => todo!("{column_name:?}, {range_direction:?}, {for_values:?}"),
-                    SqlOption::TableSpace(tablespace_option) => todo!("{tablespace_option:?}"),
-                }
-            }
+        let sqlparser::ast::CreateTable {
+            name,
+            columns,
+            constraints,
+            if_not_exists,
+            like,
+            table_options,
+            transient,
+            global,
+            temporary,
+            external,
+            file_format,
+            location,
+            query,
+            without_rowid,
+            on_commit,
+            on_cluster,
+            order_by,
+            partition_by,
+            cluster_by,
+            hive_distribution,
+            hive_formats,
+            strict,
+            ..
+        } = value;
+
+        // Temporary table variants
+        if transient || temporary || global.is_some() || on_commit.is_some() {
+            return unsupported!("Temporary tables");
         }
 
-        let like = value
-            .like
+        // External table variants
+        if external || file_format.is_some() || location.is_some() {
+            return unsupported!("External tables");
+        }
+
+        // CTAS and query variants
+        if query.is_some() {
+            return unsupported!("CREATE TABLE ... AS SELECT");
+        }
+
+        // SQLite-specific variants
+        if without_rowid || strict {
+            return unsupported!("SQLite-specific table features");
+        }
+
+        // Analytics and clustering variants
+        if on_cluster.is_some()
+            || order_by.is_some()
+            || partition_by.is_some()
+            || cluster_by.is_some()
+        {
+            return unsupported!("Table clustering clauses");
+        }
+
+        // Hive-specific variants
+        if !matches!(hive_distribution, HiveDistributionStyle::NONE) {
+            return unsupported!("Hive-specific table clauses");
+        }
+        // Note: sqlparser always sets hive_formats to Some(HiveFormat::default()), so we must check
+        // individual fields rather than using is_some(). Upstream PR #2105 fixes this so we can
+        // just check `hive_formats.is_some()`:
+        // https://github.com/apache/datafusion-sqlparser-rs/pull/2105
+        if let Some(hive_format) = &hive_formats
+            && (hive_format.row_format.is_some()
+                || hive_format.serde_properties.is_some()
+                || hive_format.storage.is_some()
+                || hive_format.location.is_some())
+        {
+            return unsupported!("Hive-specific table clauses");
+        }
+
+        let mut options = vec![];
+        match table_options {
+            CreateTableOptions::Plain(opts) => {
+                for option in opts {
+                    match option {
+                        SqlOption::KeyValue { key, value } => match key.value.as_str() {
+                            "AUTO_INCREMENT" => {
+                                if let sqlparser::ast::Expr::Value(ValueWithSpan {
+                                    value: Value::Number(v, _),
+                                    ..
+                                }) = value
+                                {
+                                    options.push(CreateTableOption::AutoIncrement(
+                                        v.parse().map_err(|_| {
+                                            AstConversionError::Failed(
+                                                "Failed to parse AUTO_INCREMENT value as u64"
+                                                    .into(),
+                                            )
+                                        })?,
+                                    ))
+                                }
+                            }
+                            "DEFAULT CHARSET"
+                            | "CHARSET"
+                            | "DEFAULT CHARACTER SET"
+                            | "CHARACTER SET" => {
+                                options.push(CreateTableOption::Charset(value.try_into()?))
+                            }
+                            "COLLATE" | "DEFAULT COLLATE" => {
+                                options.push(CreateTableOption::Collate(value.try_into()?))
+                            }
+                            "DATA DIRECTORY" => match value {
+                                sqlparser::ast::Expr::Value(ValueWithSpan {
+                                    value: Value::SingleQuotedString(v),
+                                    ..
+                                }) => options.push(CreateTableOption::DataDirectory(v)),
+                                _ => options
+                                    .push(CreateTableOption::DataDirectory(value.to_string())),
+                            },
+                            _ => options.push(CreateTableOption::Other {
+                                key: key.to_string(),
+                                value: value.to_string(),
+                            }),
+                        },
+                        SqlOption::NamedParenthesizedList(NamedParenthesizedList {
+                            key,
+                            name,
+                            ..
+                        }) => {
+                            if key.value == "ENGINE" {
+                                options.push(CreateTableOption::Engine(
+                                    name.map(|n| n.value.to_string()),
+                                ));
+                            }
+                        }
+                        SqlOption::Comment(
+                            CommentDef::WithEq(comment) | CommentDef::WithoutEq(comment),
+                        ) => options.push(CreateTableOption::Comment(comment)),
+                        SqlOption::Ident(ident) => options.push(CreateTableOption::Other {
+                            key: ident.to_string(),
+                            value: "".to_string(),
+                        }),
+                        SqlOption::Clustered(table_options_clustered) => {
+                            todo!("{table_options_clustered}")
+                        }
+                        SqlOption::Partition {
+                            column_name,
+                            range_direction,
+                            for_values,
+                        } => todo!("{column_name:?}, {range_direction:?}, {for_values:?}"),
+                        SqlOption::TableSpace(tablespace_option) => {
+                            todo!("{tablespace_option:?}")
+                        }
+                    }
+                }
+            }
+            CreateTableOptions::With(_) => {
+                // XXX(mvzink): This only ever represents Postgres storage options (configuration of
+                // PG's on-disk format, e.g. autovacuum threshold) which we don't care about. Since
+                // we never render CREATE TABLE statements to the user, there would currently be no
+                // point in adding it to our AST. Since this is likely to slow down a user that has
+                // attempted optimizing their PG storage for no reason, and the fix would probably
+                // be to ignore it then, we ignore it now.
+                //
+                // [ WITH ( storage_parameter [= value] [, ... ] ) ]
+                //
+                // Storage parameters:
+                // https://www.postgresql.org/docs/current/sql-createtable.html#SQL-CREATETABLE-STORAGE-PARAMETERS
+            }
+            CreateTableOptions::Options(_) => {
+                return unsupported!("BigQuery OPTIONS() clauses are not supported");
+            }
+            CreateTableOptions::TableProperties(_) => {
+                return unsupported!("Hive TBLPROPERTIES are not supported");
+            }
+            CreateTableOptions::None => {}
+        }
+
+        let like = like
             .map(|like| like.try_into_dialect(dialect))
             .transpose()?;
 
@@ -431,18 +532,18 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
             Err("LIKE with no body".to_string())
         } else {
             Ok(CreateTableBody {
-                fields: value.columns.try_into_dialect(dialect)?,
-                keys: if value.constraints.is_empty() {
+                fields: columns.try_into_dialect(dialect)?,
+                keys: if constraints.is_empty() {
                     None
                 } else {
-                    Some(value.constraints.try_into_dialect(dialect)?)
+                    Some(constraints.try_into_dialect(dialect)?)
                 },
             })
         };
 
         let mut create_table = Self {
-            if_not_exists: value.if_not_exists,
-            table: value.name.try_into_dialect(dialect)?,
+            if_not_exists,
+            table: name.try_into_dialect(dialect)?,
             body,
             like,
             options: Ok(options),

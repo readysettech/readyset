@@ -110,3 +110,18 @@ fn table_alias_column_renaming_unsupported() {
         check_parse_fails!(Dialect::PostgreSQL, query, "column renaming");
     }
 }
+
+#[test]
+fn create_table_unsupported_clauses() {
+    // Test that unsupported CREATE TABLE clauses are rejected
+    for query in &[
+        "CREATE TEMPORARY TABLE tmp (id INT)",
+        "CREATE GLOBAL TEMPORARY TABLE tmp (id INT)",
+        "CREATE EXTERNAL TABLE ext (id INT)",
+        "CREATE TABLE new_t AS SELECT 1",
+        "CREATE TABLE ordered (id INT) ORDER BY (id)",
+        "CREATE TABLE part (id INT) PARTITION BY (id)",
+    ] {
+        check_parse_fails!(Dialect::PostgreSQL, query, "not supported");
+    }
+}
