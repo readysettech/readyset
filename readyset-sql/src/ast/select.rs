@@ -27,9 +27,26 @@ impl TryFromDialect<sqlparser::ast::GroupByExpr> for GroupByClause {
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
         match value {
-            sqlparser::ast::GroupByExpr::Expressions(exprs, _modifiers) => Ok(GroupByClause {
-                fields: exprs.try_into_dialect(dialect)?,
-            }),
+            sqlparser::ast::GroupByExpr::Expressions(exprs, modifiers) => {
+                // Check for GROUP BY modifiers (ROLLUP, CUBE, GROUPING SETS, TOTALS)
+                if !modifiers.is_empty() {
+                    return unsupported!("GROUP BY modifiers");
+                }
+
+                // Check for ROLLUP/CUBE function calls in expressions
+                for expr in &exprs {
+                    if let sqlparser::ast::Expr::Function(func) = expr {
+                        let func_name = func.name.to_string().to_lowercase();
+                        if func_name == "rollup" || func_name == "cube" {
+                            return unsupported!("GROUP BY ROLLUP/CUBE");
+                        }
+                    }
+                }
+
+                Ok(GroupByClause {
+                    fields: exprs.try_into_dialect(dialect)?,
+                })
+            }
             sqlparser::ast::GroupByExpr::All(_) => {
                 unsupported!("Snowflake/DuckDB/ClickHouse group by syntax {value:?}")
             }

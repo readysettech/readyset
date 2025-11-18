@@ -1332,7 +1332,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                     failed!("Neither type nor charset present in CONVERT")
                 }
             }
-            Cube(_vec) => not_yet_implemented!("CUBE"),
+            Cube(_vec) => unsupported!("GROUP BY CUBE"),
             Dictionary(_vec) => not_yet_implemented!("DICTIONARY"),
             Exists { subquery, negated } => {
                 if negated {
@@ -1354,7 +1354,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             })),
             Floor { expr: _, field: _ } => not_yet_implemented!("FLOOR"),
             Function(function) => function.try_into_dialect(dialect),
-            GroupingSets(_vec) => unsupported!("GROUPING SETS"),
+            GroupingSets(_vec) => unsupported!("GROUP BY GROUPING SETS"),
             Identifier(ident) => Ok(ident.try_into_dialect(dialect)?),
             InList {
                 expr,
@@ -1511,7 +1511,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 pattern: _,
                 regexp: _,
             } => unsupported!("RLIKE"),
-            Rollup(_vec) => unsupported!("ROLLUP"),
+            Rollup(_vec) => unsupported!("GROUP BY ROLLUP"),
             SimilarTo {
                 negated: _,
                 expr: _,
