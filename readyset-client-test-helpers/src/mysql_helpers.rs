@@ -39,6 +39,33 @@ pub async fn last_query_info(conn: &mut impl Queryable) -> QueryInfo {
         .unwrap()
 }
 
+/// Helper function that gets EXPLAIN MATERIALIZATIONS and ensure that nodes have a specific number of keys
+pub async fn assert_materializations_have_key(
+    conn: &mut impl Queryable,
+    skip_base_node: bool,
+    key: &str,
+) {
+    type Materialization = (usize, usize, String, String, String, usize, bool, String);
+    let materializations: Vec<Materialization> =
+        conn.query("EXPLAIN MATERIALIZATIONS").await.unwrap();
+    for (
+        _domain_index,
+        _node_index,
+        _node_name,
+        node_description,
+        keys,
+        _size_bytes,
+        _partial,
+        _indexes,
+    ) in materializations
+    {
+        if skip_base_node && node_description == "B" {
+            continue;
+        }
+        assert_eq!(keys, key);
+    }
+}
+
 pub async fn recreate_database<N>(dbname: N)
 where
     N: Display,

@@ -130,6 +130,7 @@ pub struct TestBuilder {
     replication_server_id: Option<ReplicationServerId>,
     mixed_comparisons: bool,
     topk: bool,
+    straddled_joins: bool,
     parsing_preset: ParsingPreset,
 }
 
@@ -158,6 +159,7 @@ impl TestBuilder {
             replication_server_id: None,
             mixed_comparisons: true,
             topk: false,
+            straddled_joins: false,
             parsing_preset: ParsingPreset::for_tests(),
         }
     }
@@ -250,6 +252,11 @@ impl TestBuilder {
         self
     }
 
+    pub fn set_straddled_joins(mut self, straddled_joins: bool) -> Self {
+        self.straddled_joins = straddled_joins;
+        self
+    }
+
     pub fn parsing_preset(mut self, parsing_preset: ParsingPreset) -> Self {
         self.parsing_preset = parsing_preset;
         self
@@ -301,6 +308,7 @@ impl TestBuilder {
         };
         builder.set_persistence(persistence);
         builder.set_topk(self.topk);
+        builder.set_straddled_joins(self.straddled_joins);
         builder.set_pagination(false);
         builder.set_mixed_comparisons(self.mixed_comparisons);
         builder.set_parsing_preset(self.parsing_preset);
