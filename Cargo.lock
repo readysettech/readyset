@@ -5409,6 +5409,7 @@ dependencies = [
  "assert_matches",
  "dashmap",
  "futures",
+ "metrics",
  "moka",
  "mysql_async",
  "mysql_common",

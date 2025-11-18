@@ -237,6 +237,10 @@ pub mod recorded {
     /// Counter: The number of times a query required at least a partial replay.
     pub const SERVER_VIEW_QUERY_MISS: &str = "readyset_server.view_query_result_miss";
 
+    pub const SHALLOW_HIT: &str = "readyset_shallow.shallow_result_hit";
+    pub const SHALLOW_MISS: &str = "readyset_shallow.shallow_result_miss";
+    pub const SHALLOW_REFRESH: &str = "readyset_shallow.shallow_result_refresh";
+
     /// Histogram: The amount of time in microseconds spent waiting for an upquery during a read
     /// request.
     pub const SERVER_VIEW_UPQUERY_DURATION: &str = "readyset_server.view_query_upquery_duration_us";

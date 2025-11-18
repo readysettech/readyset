@@ -3,10 +3,12 @@ use std::hash::Hash;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use metrics::counter;
 use moka::future::Cache as MokaCache;
 use papaya::HashMap;
 use tracing::info;
 
+use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_errors::{ReadySetError, ReadySetResult, internal};
 use readyset_sql::ast::{Relation, SelectStatement, SqlIdentifier};
@@ -243,10 +245,21 @@ where
         };
         let (res, key) = cache.get(key).await;
         let guard = Self::make_guard(cache, key);
+        let query = query_id.to_string();
         match res {
-            Some((res, false)) => CacheResult::Hit(res, guard),
-            Some((res, true)) => CacheResult::HitAndRefresh(res, guard),
-            None => CacheResult::Miss(guard),
+            Some((res, false)) => {
+                counter!(recorded::SHALLOW_HIT, "query" => query).increment(1);
+                CacheResult::Hit(res, guard)
+            }
+            Some((res, true)) => {
+                counter!(recorded::SHALLOW_HIT, "query" => query.clone()).increment(1);
+                counter!(recorded::SHALLOW_REFRESH, "query" => query).increment(1);
+                CacheResult::HitAndRefresh(res, guard)
+            }
+            None => {
+                counter!(recorded::SHALLOW_MISS, "query" => query).increment(1);
+                CacheResult::Miss(guard)
+            }
         }
     }
 
