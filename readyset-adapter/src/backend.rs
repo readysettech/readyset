@@ -2764,6 +2764,7 @@ where
                     h.metrics_summary(view.query_id.to_string())
                         .unwrap_or_default()
                         .sample_count
+                        .to_string()
                         .into()
                 });
 
@@ -2793,7 +2794,7 @@ where
                     }
                     properties.to_string().into()
                 };
-                let count = self.metrics_handle.as_ref().map(|_| 0.into());
+                let count = self.metrics_handle.as_ref().map(|_| 0.to_string().into());
 
                 push_row(query_id, name, query, properties, count);
             }
