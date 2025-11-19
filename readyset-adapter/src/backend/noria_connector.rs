@@ -1553,10 +1553,8 @@ impl NoriaConnector {
         )
         .await;
 
-        if let Err(e) = res.as_ref() {
-            if e.is_networking_related() || e.caused_by_view_destroyed() {
-                self.failed_views.insert(qname.clone().into_owned());
-            }
+        if res.is_err() {
+            self.failed_views.insert(qname.clone().into_owned());
         }
 
         let res = res?;
