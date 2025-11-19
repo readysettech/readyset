@@ -698,6 +698,12 @@ pub enum ReadySetError {
     /// Error dealing with PEM files
     #[error("PEM error: {0}")]
     PemError(String),
+
+    #[error("Request timeout reached")]
+    RequestTimeout,
+
+    #[error("Request timeout reached: {0}")]
+    RequestTimeoutWithContext(String),
 }
 
 impl ReadySetError {

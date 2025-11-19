@@ -114,7 +114,7 @@ async fn controller_request(
             })
         }
         Err(_) => {
-            internal!("request timeout reached!");
+            return Err(ReadySetError::RequestTimeout.into());
         }
     };
 
@@ -236,10 +236,12 @@ impl Service<ControllerRequest> for Controller {
             loop {
                 let elapsed = Instant::now().duration_since(start);
                 if elapsed >= request_timeout {
-                    internal!(
-                        "request timeout reached; last error: {}",
-                        last_error_desc.unwrap_or_else(|| "(none)".into())
-                    );
+                    if let Some(err) = last_error_desc {
+                        let msg = format!("Last error was: {err}");
+                        return Err(ReadySetError::RequestTimeoutWithContext(msg));
+                    } else {
+                        return Err(ReadySetError::RequestTimeout);
+                    }
                 }
 
                 let url_ = match &url {

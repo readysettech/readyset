@@ -18,9 +18,7 @@ use futures_util::{future, ready, Stream};
 use itertools::Either;
 use petgraph::graph::NodeIndex;
 use readyset_data::DfValue;
-use readyset_errors::{
-    internal, internal_err, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult,
-};
+use readyset_errors::{internal, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{CreateTableBody, NotReplicatedReason, Relation, SqlIdentifier};
 use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
@@ -791,7 +789,12 @@ impl Table {
     async fn request_with_timeout(&mut self, r: TableRequest) -> ReadySetResult<()> {
         tokio::time::timeout(self.request_timeout, self.request(r))
             .await
-            .map_err(|_| internal_err!("Timeout during table request"))?
+            .map_err(|_| {
+                ReadySetError::RequestTimeoutWithContext(format!(
+                    "Attempted to modify table: {}",
+                    self.table_name().display_unquoted()
+                ))
+            })?
     }
 
     /// Insert a single row of data into this base table.
