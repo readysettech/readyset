@@ -835,6 +835,10 @@ impl ReadySetError {
         })
     }
 
+    pub fn is_rpc_failure(&self) -> bool {
+        matches!(self, Self::RpcFailed { .. })
+    }
+
     /// Returns true if the error either *is* [`DfValueConversionError`], or was *caused by*
     /// [`DfValueConversionError`]
     pub fn caused_by_data_type_conversion(&self) -> bool {

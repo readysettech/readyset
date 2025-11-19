@@ -160,7 +160,7 @@ impl QueryLogger {
                 self.set_disallowed_count.increment(1);
             } else if error.caused_by_view_not_found() {
                 self.view_not_found_count.increment(1);
-            } else if error.is_networking_related() {
+            } else if error.is_rpc_failure() {
                 self.rpc_error_count.increment(1);
             }
         };
