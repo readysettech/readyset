@@ -1386,7 +1386,6 @@ async fn handle_controller_request(
 
         match resp {
             Ok(Ok(r)) => Ok(Ok(r)),
-            Ok(Err(ReadySetError::NoQuorum)) => Err(StatusCode::SERVICE_UNAVAILABLE),
             Ok(Err(ReadySetError::UnknownEndpoint)) => Err(StatusCode::NOT_FOUND),
             // something else failed:
             Err(ReadySetError::NotLeader) => Err(StatusCode::SERVICE_UNAVAILABLE),

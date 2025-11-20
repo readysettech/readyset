@@ -103,17 +103,6 @@ pub enum ReadySetError {
         statement: String,
     },
 
-    /// The adapter will return this error on any set statement that disables
-    /// MySQL autocommit.
-    #[error(
-        "Disabling autocommit is an anti-pattern for use with Readyset, as all queries would then be proxied upstream: {}",
-        Sensitive(statement)
-    )]
-    DisableAutocommit {
-        /// The set statement passed to the mysql adapter
-        statement: String,
-    },
-
     /// Could not connect to the upstream database provided
     #[error("Could not connect to the upstream database provided")]
     InvalidUpstreamDatabase,
@@ -223,10 +212,6 @@ pub enum ReadySetError {
     #[error("wrong number of columns specified: expected {0}, got {1}")]
     WrongColumnCount(usize, usize),
 
-    /// The wrong column type was returned from noria when preparing a statement.
-    #[error("wrong column type returned from noria: expected {0}, got {1}")]
-    WrongColumnType(String, String),
-
     /// The wrong number of key columns was given when modifying a row.
     #[error("wrong number of key columns used: expected {0}, got {1}")]
     WrongKeyColumnCount(usize, usize),
@@ -234,20 +219,6 @@ pub enum ReadySetError {
     /// A table operation was passed an incorrect packet data type.
     #[error("wrong packet data type")]
     WrongPacketDataType,
-
-    /// A NOT NULL column was set to [`DfValue::None`].
-    #[error("Attempted to set NOT NULL column '{col}' to DfValue::None")]
-    NonNullable {
-        /// The column in question.
-        col: String,
-    },
-
-    /// A column is declared NOT NULL, but was not provided (and has no default).
-    #[error("Column '{col}' is declared NOT NULL, has no default, and was not provided")]
-    ColumnRequired {
-        /// The column in question.
-        col: String,
-    },
 
     /// An expression appears in either the select list, HAVING condition, or ORDER BY list that is
     /// not either named in the GROUP BY clause or is functionally dependent on (uniquely
@@ -455,19 +426,6 @@ pub enum ReadySetError {
         message: String,
     },
 
-    /// Error parsing a string into a NativeDateTime.
-    #[error("Error parsing a NaiveDateTime from the string: {}", Sensitive(.0))]
-    NaiveDateTimeParseError(String),
-
-    /// Primary key is not on a primitive field.
-    #[error("Primary key must be on a primitive field")]
-    InvalidPrimaryKeyField,
-
-    /// A worker operation couldn't be completed because the worker doesn't know where the
-    /// controller is yet, or has lost track of it.
-    #[error("Worker cannot find its controller")]
-    LostController,
-
     /// An RPC request was made to a readyset-server instance that isn't the leader.
     #[error("This instance is not the leader")]
     NotLeader,
@@ -478,10 +436,6 @@ pub enum ReadySetError {
         "The leader is not ready. Either it has not finished initializing, or there is an ongoing snapshotting operation."
     )]
     LeaderNotReady,
-
-    /// An RPC request was made to a controller that doesn't have quorum.
-    #[error("A quorum of workers is not yet available")]
-    NoQuorum,
 
     /// A request was made to an API endpoint not known to the controller.
     #[error("API endpoint not found")]
@@ -501,13 +455,6 @@ pub enum ReadySetError {
         node: usize,
         /// The set of columns for the index
         columns: Vec<usize>,
-    },
-
-    /// A worker tried to check in with a heartbeat payload, but the controller is unaware of it.
-    #[error("Unknown worker at {unknown_uri} tried to check in with heartbeat")]
-    UnknownWorker {
-        /// The URI of the worker that the controller didn't recognize.
-        unknown_uri: Url,
     },
 
     /// An RPC request was attempted against a worker that has failed.
@@ -597,16 +544,6 @@ pub enum ReadySetError {
     #[error("SqlMode parse failed: {0}")]
     SqlModeParseFailed(String),
 
-    /// An attempt was made to compare replication offsets from different logs.
-    ///
-    /// See the documentation for [`ReplicationOffset`](readyset_client::ReplicationOffset) for why
-    /// this might happen
-    #[error(
-        "Cannot compare replication offsets from different logs: expected {0}, but got {1} \
-             (did the replication log name change?)"
-    )]
-    ReplicationOffsetLogDifferent(String, String),
-
     /// An error that was encountered during snapshot/binlog/wal replication process
     #[error("Error during replication: {0}")]
     ReplicationFailed(String),
@@ -664,9 +601,6 @@ pub enum ReadySetError {
     /// An unrecoverable error occurred, requiring a full resnapshot
     #[error("Fatal error requires full resnapshot")]
     FullResnapshotNeeded,
-
-    #[error("Root certificate must be a valid DER or PEM encoded certificate")]
-    InvalidRootCertificate,
 
     /// Error when a node couldn't be found in MIR.
     #[error("Could not find MIR node {index}")]
@@ -730,10 +664,6 @@ pub enum ReadySetError {
     /// Error interacting with native_tls
     #[error("TLS error: {0}")]
     NativeTlsError(String),
-
-    /// Incorrect Auxiliary node state was found
-    #[error("Incorrect Auxiliary Node State for {0} Node")]
-    IncorrectNodeState(String),
 
     /// Failed to reach the Controller
     #[error("The Readyset Controller could not be reached")]
