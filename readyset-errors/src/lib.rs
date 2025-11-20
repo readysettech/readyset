@@ -823,6 +823,28 @@ impl ReadySetError {
         self.any_cause(|e| e.is_table_not_replicated())
     }
 
+    /// Returns true if retrying the operation might succeed.
+    pub fn is_transient(&self) -> bool {
+        if self.any_cause(|e| {
+            matches!(
+                e,
+                Self::ViewNotYetAvailable
+                    | Self::UpqueryTimeout
+                    | Self::LeaderNotReady
+                    | Self::WorkerFailed { .. }
+                    | Self::ControllerUnavailable
+                    | Self::RequestTimeout
+                    | Self::RequestTimeoutWithContext(..)
+            )
+        }) {
+            return true;
+        }
+        if self.is_networking_related() {
+            return true;
+        }
+        false
+    }
+
     /// Returns `true` if the error could have been caused by a networking problem.
     pub fn is_networking_related(&self) -> bool {
         self.any_cause(|e| {
