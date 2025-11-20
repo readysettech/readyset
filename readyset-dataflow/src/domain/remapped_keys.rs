@@ -156,20 +156,31 @@ impl RemappedKeys {
         source_columns: &[usize],
         source_keys: &[KeyComparison],
     ) -> Option<Vec<KeyComparison>> {
-        let lookup_key = RemappingKey {
-            destination_node,
-            destination_columns: destination_columns.into(),
-            source_node,
-            source_columns: source_columns.into(),
-            source_keys: source_keys.into(),
-        };
+        // Try looking up each source key individually since remapped keys are inserted
+        // one at a time during upqueries
+        let mut all_destination_keys = Vec::new();
 
-        if let Some(remapping_info) = self.remappings.remove(&lookup_key) {
-            let destination_keys = remapping_info.destination_keys;
-            self.len -= destination_keys.len();
-            return Some(destination_keys);
+        for single_source_key in source_keys {
+            let lookup_key = RemappingKey {
+                destination_node,
+                destination_columns: destination_columns.into(),
+                source_node,
+                source_columns: source_columns.into(),
+                source_keys: vec![single_source_key.clone()],
+            };
+
+            if let Some(remapping_info) = self.remappings.remove(&lookup_key) {
+                let mut destination_keys = remapping_info.destination_keys;
+                self.len -= destination_keys.len();
+                all_destination_keys.append(&mut destination_keys);
+            }
         }
-        None
+
+        if !all_destination_keys.is_empty() {
+            Some(all_destination_keys)
+        } else {
+            None
+        }
     }
 }
 
@@ -552,5 +563,196 @@ mod tests {
         );
         assert!(result2.is_some());
         assert_eq!(remapped_keys.len(), 0);
+    }
+
+    #[test]
+    fn test_batch_eviction_of_individually_inserted_keys() {
+        let mut remapped_keys = RemappedKeys::default();
+
+        let destination_node = LocalNodeIndex::make(3); // e.g., a straddled join
+        let source_node = LocalNodeIndex::make(1); // e.g., a partial table
+
+        // Simulate upqueries inserting keys ONE AT A TIME (as happens in practice)
+        // Upquery 1: downstream key ["a", "x"] remapped to upstream key ["a"]
+        let upstream_miss1 = create_test_column_miss(
+            source_node,
+            vec![0],
+            vec![create_test_key_comparison(vec![DfValue::from("a")])],
+        );
+        let downstream_key1 =
+            create_test_key_comparison(vec![DfValue::from("a"), DfValue::from("x")]);
+        remapped_keys.insert(
+            destination_node,
+            vec![0, 1],
+            downstream_key1.clone(),
+            upstream_miss1,
+        );
+
+        // Upquery 2: downstream key ["b", "y"] remapped to upstream key ["b"]
+        let upstream_miss2 = create_test_column_miss(
+            source_node,
+            vec![0],
+            vec![create_test_key_comparison(vec![DfValue::from("b")])],
+        );
+        let downstream_key2 =
+            create_test_key_comparison(vec![DfValue::from("b"), DfValue::from("y")]);
+        remapped_keys.insert(
+            destination_node,
+            vec![0, 1],
+            downstream_key2.clone(),
+            upstream_miss2,
+        );
+
+        // Upquery 3: downstream key ["c", "z"] remapped to upstream key ["c"]
+        let upstream_miss3 = create_test_column_miss(
+            source_node,
+            vec![0],
+            vec![create_test_key_comparison(vec![DfValue::from("c")])],
+        );
+        let downstream_key3 =
+            create_test_key_comparison(vec![DfValue::from("c"), DfValue::from("z")]);
+        remapped_keys.insert(
+            destination_node,
+            vec![0, 1],
+            downstream_key3.clone(),
+            upstream_miss3,
+        );
+
+        assert_eq!(remapped_keys.len(), 3);
+
+        // Now simulate a BATCH eviction for keys ["a"] and ["c"] (skipping ["b"])
+        // This is the scenario that was broken before the fix - evictions come as a batch
+        let batch_source_keys = vec![
+            create_test_key_comparison(vec![DfValue::from("a")]),
+            create_test_key_comparison(vec![DfValue::from("c")]),
+        ];
+
+        let result = remapped_keys.remove(
+            destination_node,
+            &[0, 1],
+            source_node,
+            &[0],
+            &batch_source_keys,
+        );
+
+        // Should find both keys even though they were inserted individually
+        assert!(
+            result.is_some(),
+            "Batch eviction should find individually inserted keys"
+        );
+        let result = result.unwrap();
+        assert_eq!(result.len(), 2, "Should return 2 destination keys");
+        assert!(
+            result.contains(&downstream_key1),
+            "Should contain downstream_key1"
+        );
+        assert!(
+            result.contains(&downstream_key3),
+            "Should contain downstream_key3"
+        );
+
+        // Length should be decremented correctly
+        assert_eq!(
+            remapped_keys.len(),
+            1,
+            "Only one key (for 'b') should remain"
+        );
+
+        // The key for ["b"] should still be retrievable
+        let remaining = remapped_keys.remove(
+            destination_node,
+            &[0, 1],
+            source_node,
+            &[0],
+            &[create_test_key_comparison(vec![DfValue::from("b")])],
+        );
+        assert!(remaining.is_some());
+        assert_eq!(remaining.unwrap(), vec![downstream_key2]);
+        assert_eq!(remapped_keys.len(), 0);
+    }
+
+    /// Test partial batch eviction where some keys exist and some don't.
+    #[test]
+    fn test_batch_eviction_partial_matches() {
+        let mut remapped_keys = RemappedKeys::default();
+
+        let destination_node = LocalNodeIndex::make(3);
+        let source_node = LocalNodeIndex::make(1);
+
+        // Insert only one key
+        let upstream_miss = create_test_column_miss(
+            source_node,
+            vec![0],
+            vec![create_test_key_comparison(vec![DfValue::Int(1)])],
+        );
+        let downstream_key = create_test_key_comparison(vec![DfValue::Int(1), DfValue::Int(100)]);
+        remapped_keys.insert(
+            destination_node,
+            vec![0, 1],
+            downstream_key.clone(),
+            upstream_miss,
+        );
+
+        assert_eq!(remapped_keys.len(), 1);
+
+        // Try to evict a batch where only one key exists
+        let batch_source_keys = vec![
+            create_test_key_comparison(vec![DfValue::Int(1)]), // exists
+            create_test_key_comparison(vec![DfValue::Int(2)]), // doesn't exist
+            create_test_key_comparison(vec![DfValue::Int(3)]), // doesn't exist
+        ];
+
+        let result = remapped_keys.remove(
+            destination_node,
+            &[0, 1],
+            source_node,
+            &[0],
+            &batch_source_keys,
+        );
+
+        // Should find the one existing key
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], downstream_key);
+        assert_eq!(remapped_keys.len(), 0);
+    }
+
+    /// Test batch eviction where no keys match.
+    #[test]
+    fn test_batch_eviction_no_matches() {
+        let mut remapped_keys = RemappedKeys::default();
+
+        let destination_node = LocalNodeIndex::make(3);
+        let source_node = LocalNodeIndex::make(1);
+
+        // Insert a key
+        let upstream_miss = create_test_column_miss(
+            source_node,
+            vec![0],
+            vec![create_test_key_comparison(vec![DfValue::Int(1)])],
+        );
+        let downstream_key = create_test_key_comparison(vec![DfValue::Int(1), DfValue::Int(100)]);
+        remapped_keys.insert(destination_node, vec![0, 1], downstream_key, upstream_miss);
+
+        assert_eq!(remapped_keys.len(), 1);
+
+        // Try to evict keys that don't exist
+        let batch_source_keys = vec![
+            create_test_key_comparison(vec![DfValue::Int(99)]),
+            create_test_key_comparison(vec![DfValue::Int(100)]),
+        ];
+
+        let result = remapped_keys.remove(
+            destination_node,
+            &[0, 1],
+            source_node,
+            &[0],
+            &batch_source_keys,
+        );
+
+        // Should return None since no keys matched
+        assert!(result.is_none());
+        assert_eq!(remapped_keys.len(), 1); // Original key should still exist
     }
 }
