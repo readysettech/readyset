@@ -23,6 +23,7 @@ use pgsql::types::to_sql_checked;
 use readyset_data::{DfValue, TIMESTAMP_FORMAT};
 use readyset_decimal::Decimal;
 use readyset_sql::ast::{Literal, SqlQuery};
+use serde_json::Value as JsonValue;
 use thiserror::Error;
 use tokio_postgres as pgsql;
 
@@ -120,6 +121,7 @@ pub enum Type {
     TimestampTz,
     ByteArray,
     BitVec,
+    Json,
 }
 
 impl Type {
@@ -134,6 +136,21 @@ impl Type {
             Date(_, _, _, _, _, _, _) => Some(Self::Date),
             Time(_, _, _, _, _, _) => Some(Self::Time),
             NULL => None,
+        }
+    }
+
+    pub fn of_mysql_value_with_json(val: &mysql_async::Value) -> Option<Self> {
+        use mysql_async::Value::*;
+        match val {
+            Bytes(b) => {
+                let s = String::from_utf8_lossy(b);
+                if serde_json::from_str::<JsonValue>(&s).is_ok() {
+                    Some(Self::Json)
+                } else {
+                    Some(Self::Text)
+                }
+            }
+            _ => Self::of_mysql_value(val),
         }
     }
 }
@@ -151,6 +168,7 @@ impl Display for Type {
             Self::ByteArray => write!(f, "B"),
             Self::BitVec => write!(f, "BV"),
             Self::TimestampTz => write!(f, "Z"),
+            Self::Json => write!(f, "J"),
         }
     }
 }
@@ -209,6 +227,7 @@ pub enum Value {
     Numeric(Decimal),
     Null,
     BitVector(BitVec),
+    Json(JsonValue),
 }
 
 #[derive(Error, Debug)]
@@ -312,6 +331,7 @@ impl From<Value> for mysql_async::Value {
             // non-utf8 bytes.
             Value::BitVector(bv) => mysql_async::Value::Bytes(bv.to_bytes()),
             Value::ByteArray(bytes) => mysql_async::Value::Bytes(bytes),
+            Value::Json(json) => mysql_async::Value::from(json.to_string()),
             Value::TimestampTz(_) => unimplemented!("PostgreSQL-specific"),
         }
     }
@@ -335,6 +355,7 @@ impl pgsql::types::ToSql for Value {
             Value::Null => None::<i8>.to_sql(ty, out),
             Value::BitVector(b) => b.to_sql(ty, out),
             Value::TimestampTz(ts) => ts.to_sql(ty, out),
+            Value::Json(json) => json.to_string().to_sql(ty, out),
         }
     }
 
@@ -431,6 +452,9 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
                 ty, raw,
             )?)),
             Type::BIT | Type::VARBIT => Ok(Self::BitVector(BitVec::from_sql(ty, raw)?)),
+            Type::JSON | Type::JSONB | Type::JSONB_ARRAY | Type::JSON_ARRAY => {
+                Ok(Self::Json(Self::parse_json_value(str::from_utf8(raw)?)?))
+            }
             ref ty if ty.name() == "geometry" => Ok(Self::Text(format!(
                 "0x{}",
                 raw.iter().map(|b| format!("{b:02X}")).join("")
@@ -467,7 +491,11 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             | Type::TIME
             | Type::TS_VECTOR
             | Type::BIT
-            | Type::VARBIT => true,
+            | Type::VARBIT
+            | Type::JSON
+            | Type::JSONB
+            | Type::JSONB_ARRAY
+            | Type::JSON_ARRAY => true,
             ref ty if ty.name() == "citext" => true,
             ref ty if ty.name() == "geometry" => true,
             _ => false,
@@ -543,6 +571,7 @@ impl Display for Value {
                 )
             }
             Self::TimestampTz(ts) => write!(f, "{ts}"),
+            Self::Json(json) => write!(f, "{json}"),
         }
     }
 }
@@ -581,6 +610,38 @@ impl Ord for Value {
 }
 
 impl Value {
+    fn normalize_json_value(value: JsonValue) -> anyhow::Result<JsonValue> {
+        Ok(match value {
+            JsonValue::Number(n) => {
+                if n.is_i64() || n.is_u64() {
+                    JsonValue::Number(n)
+                } else if let Some(f) = n.as_f64() {
+                    JsonValue::Number(
+                        serde_json::Number::from_f64(f)
+                            .ok_or_else(|| anyhow!("Invalid float value"))?,
+                    )
+                } else {
+                    JsonValue::Number(n)
+                }
+            }
+            JsonValue::Array(vals) => JsonValue::Array(
+                vals.into_iter()
+                    .map(Self::normalize_json_value)
+                    .collect::<Result<_, _>>()?,
+            ),
+            JsonValue::Object(map) => JsonValue::Object(
+                map.into_iter()
+                    .map(|(k, v)| Self::normalize_json_value(v).map(|v| (k, v)))
+                    .collect::<Result<_, _>>()?,
+            ),
+            other => other,
+        })
+    }
+
+    fn parse_json_value(s: &str) -> anyhow::Result<JsonValue> {
+        Self::normalize_json_value(serde_json::from_str(s).map_err(|e| anyhow!("{e}"))?)
+    }
+
     pub fn typ(&self) -> Option<Type> {
         match self {
             Self::Text(_) => Some(Type::Text),
@@ -594,6 +655,7 @@ impl Value {
             Self::Null => None,
             Self::BitVector(_) => Some(Type::BitVec),
             Self::TimestampTz(_) => Some(Type::TimestampTz),
+            Self::Json(_) => Some(Type::Json),
         }
     }
 
@@ -643,6 +705,7 @@ impl Value {
                 mysql_async::Value::Bytes(b) => BitVec::from_bytes(&b),
                 _ => unimplemented!(),
             })),
+            Type::Json => Ok(Self::try_from(val)?.convert_type(typ)?.into_owned()),
             // These types are PostgreSQL specific.
             Type::ByteArray => unimplemented!(),
             Type::TimestampTz => unimplemented!(),
@@ -659,6 +722,7 @@ impl Value {
             | (Self::Time(_), Type::Time)
             | (Self::TimestampTz(_), Type::TimestampTz)
             | (Self::BitVector(_), Type::BitVec)
+            | (Self::Json(_), Type::Json)
             | (Self::Null, _) => Ok(Cow::Borrowed(self)),
             (Self::Integer(i), Type::UnsignedInteger) => {
                 Ok(Cow::Owned(Self::UnsignedInteger((*i).try_into()?)))
@@ -687,6 +751,9 @@ impl Value {
             (Self::Text(txt), Type::BitVec) => Ok(Cow::Owned(Self::BitVector(BitVec::from_bytes(
                 txt.as_bytes(),
             )))),
+            (Self::Text(txt), Type::Json) => {
+                Ok(Cow::Owned(Self::Json(Self::parse_json_value(txt)?)))
+            }
             (Self::Numeric(dec), Type::Integer) => {
                 Ok(Cow::Owned(Self::Integer(dec.try_into().unwrap())))
             }
@@ -697,13 +764,52 @@ impl Value {
                     .try_into()
                     .unwrap(),
             ))),
+            (Self::Integer(i), Type::Json) => Ok(Cow::Owned(Self::Json(JsonValue::from(*i)))),
+            (Self::UnsignedInteger(u), Type::Json) => {
+                Ok(Cow::Owned(Self::Json(JsonValue::from(*u))))
+            }
+            (Self::Real(whole, frac), Type::Json) => {
+                let sign = if *whole < 0 { -1.0 } else { 1.0 };
+                let magnitude = whole.abs() as f64 + (*frac as f64) / 1_000_000_000.0;
+                let num = serde_json::Number::from_f64(sign * magnitude)
+                    .ok_or_else(|| anyhow!("Invalid float value"))?;
+                Ok(Cow::Owned(Self::Json(JsonValue::Number(num))))
+            }
+            (Self::Numeric(dec), Type::Json) => Ok(Cow::Owned(Self::Json(Self::parse_json_value(
+                &dec.to_string(),
+            )?))),
+            (Self::Date(ndt), Type::Json) => {
+                Ok(Cow::Owned(Self::Json(JsonValue::String(ndt.to_string()))))
+            }
+            (Self::Time(time), Type::Json) => {
+                Ok(Cow::Owned(Self::Json(JsonValue::String(time.to_string()))))
+            }
+            (Self::TimestampTz(ts), Type::Json) => {
+                Ok(Cow::Owned(Self::Json(JsonValue::String(ts.to_string()))))
+            }
             (Self::Integer(i), Type::Text) => Ok(Cow::Owned(Self::Text(i.to_string()))),
             (Self::Date(ndt), Type::Text) => Ok(Cow::Owned(Self::Text(ndt.to_string()))),
             (Self::Date(ndt), Type::TimestampTz) => Ok(Cow::Owned(Self::TimestampTz(
                 FixedOffset::east_opt(0).unwrap().from_utc_datetime(ndt),
             ))),
+            (Self::Numeric(dec), Type::Text) => Ok(Cow::Owned(Self::Text(dec.to_string()))),
+            (Self::Real(whole, frac), Type::Text) => {
+                let frac_str = frac.to_string();
+                let padded_frac = if frac_str.len() < 9 {
+                    format!("{:0>9}", frac_str)
+                } else {
+                    frac_str
+                };
+                let trimmed = padded_frac.trim_end_matches('0');
+                if trimmed.is_empty() {
+                    Ok(Cow::Owned(Self::Text(format!("{}.", whole))))
+                } else {
+                    Ok(Cow::Owned(Self::Text(format!("{}.{trimmed}", whole))))
+                }
+            }
+            (Self::Json(json), Type::Text) => Ok(Cow::Owned(Self::Text(json.to_string()))),
             (v, t) => {
-                todo!("{v:?} {t:?}")
+                bail!("Conversion from {v:?} to {t:?} is not supported")
             }
         }
     }
@@ -987,5 +1093,20 @@ mod tests {
     #[test]
     fn compare_result_value() {
         assert!(Value::Integer(9) > Value::Integer(10));
+    }
+
+    #[test]
+    fn json_values_compare_equally_ignoring_formatting() {
+        let expected = Value::Text(r#"{"id": 1, "price": 10.5, "category": "books"}"#.to_string())
+            .convert_type(&Type::Json)
+            .unwrap()
+            .into_owned();
+        let actual = Value::Text(r#"{"category":"books","id":1,"price":10.50}"#.to_string())
+            .convert_type(&Type::Json)
+            .unwrap()
+            .into_owned();
+
+        assert_eq!(expected, actual);
+        assert!(actual.compare_type_insensitive(&expected));
     }
 }

@@ -128,6 +128,7 @@ fn column_type(i: &[u8]) -> IResult<&[u8], Type> {
         map(tag("M"), |_| Type::Time),
         map(tag("Z"), |_| Type::TimestampTz),
         map(tag("BV"), |_| Type::BitVec),
+        map(tag("J"), |_| Type::Json),
     ))(i)
 }
 
