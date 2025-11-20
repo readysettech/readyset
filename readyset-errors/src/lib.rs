@@ -822,8 +822,7 @@ impl ReadySetError {
         self.any_cause(|e| {
             matches!(
                 e,
-                Self::RpcFailed { .. }
-                    | Self::ClientDropped
+                Self::ClientDropped
                     | Self::TransportFull
                     | Self::Desynchronized
                     | Self::TransportSendFailed(..)
