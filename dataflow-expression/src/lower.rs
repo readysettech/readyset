@@ -282,6 +282,7 @@ impl BuiltinFunction {
                             Self::JsonBuildObject {
                                 args: exprs,
                                 allow_duplicate_keys: false,
+                                dialect,
                             },
                             DfType::Json,
                         )
@@ -307,6 +308,7 @@ impl BuiltinFunction {
                     Self::JsonBuildObject {
                         args: exprs,
                         allow_duplicate_keys: true,
+                        dialect,
                     },
                     DfType::Json,
                 )
@@ -322,6 +324,7 @@ impl BuiltinFunction {
                     Self::JsonBuildObject {
                         args: exprs,
                         allow_duplicate_keys: false,
+                        dialect,
                     },
                     DfType::Json,
                 )

@@ -269,8 +269,8 @@ impl TestScript {
             conditionals.iter().any(|s| match s {
                 Conditional::SkipIf(c) if c == "readyset" => is_readyset,
                 Conditional::OnlyIf(c) if c == "readyset" => !is_readyset,
-                Conditional::SkipIf(c) if c == &opts.database_type.to_string() => true,
-                Conditional::OnlyIf(c) if c != &opts.database_type.to_string() => true,
+                Conditional::SkipIf(c) => c == &opts.database_type.to_string(),
+                Conditional::OnlyIf(c) => c != &opts.database_type.to_string(),
                 _ => false,
             })
         };
@@ -406,7 +406,9 @@ impl TestScript {
             StatementResult::Error { ref pattern } => match res {
                 Err(e) => {
                     if let Some(pattern) = pattern {
-                        if !pattern.is_empty() && !e.to_string().contains(pattern) {
+                        if !pattern.is_empty()
+                            && !regex::Regex::new(pattern).unwrap().is_match(&e.to_string())
+                        {
                             bail!("Statement failed with unexpected error: {} (expected to match: {})", e, pattern);
                         }
                     }

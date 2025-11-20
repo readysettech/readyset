@@ -4,8 +4,8 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::{fmt, mem};
 
-use readyset_data::{Array, DfValue};
-use readyset_errors::{invalid_query_err, ReadySetError, ReadySetResult};
+use readyset_data::{dialect::SqlEngine, Array, DfType, DfValue};
+use readyset_errors::{internal, invalid_query, invalid_query_err, ReadySetError, ReadySetResult};
 use serde::Serialize;
 use serde_json::map::Entry as JsonEntry;
 use serde_json::{Number as JsonNumber, Value as JsonValue};
@@ -156,9 +156,7 @@ pub(crate) fn json_remove_path<'k>(
     keys: impl IntoIterator<Item = &'k DfValue>,
 ) -> ReadySetResult<()> {
     if !json.is_array() && !json.is_object() {
-        return Err(invalid_query_err!(
-            "Cannot delete path in non-array, non-object JSON value"
-        ));
+        invalid_query!("Cannot delete path in non-array, non-object JSON value");
     }
 
     // Nulls are not allowed as path keys. Otherwise, converting to `&str` should succeed because
@@ -252,9 +250,7 @@ pub(crate) fn json_object_from_pairs(
     match kv_pairs.num_dimensions() {
         1 => {
             if !kv_pairs.total_len().is_multiple_of(2) {
-                return Err(invalid_query_err!(
-                    "array must have even number of elements"
-                ));
+                invalid_query!("array must have even number of elements");
             }
 
             let mut kv_pairs = kv_pairs.values();
@@ -279,7 +275,7 @@ pub(crate) fn json_object_from_pairs(
                 result_kv_pairs.push((k.clone(), v.clone()));
             }
         }
-        _ => return Err(invalid_query_err!("wrong number of array dimensions")),
+        _ => invalid_query!("wrong number of array dimensions"),
     }
 
     let mut result =
@@ -303,11 +299,11 @@ pub fn json_object_from_keys_and_values(
     }
 
     if keys.num_dimensions() != 1 || values.num_dimensions() != 1 {
-        return Err(invalid_query_err!("wrong number of array dimensions"));
+        invalid_query!("wrong number of array dimensions");
     }
 
     if keys.total_len() != values.total_len() {
-        return Err(invalid_query_err!("mismatched array dimensions"));
+        invalid_query!("mismatched array dimensions");
     }
 
     let mut result =
@@ -318,6 +314,60 @@ pub fn json_object_from_keys_and_values(
     }
 
     Ok(result.to_json_string()?.into())
+}
+
+pub fn json_object_from_keys_and_values_typed(
+    keys: &Array,
+    values: &Array,
+    value_types: &[DfType],
+    engine: SqlEngine,
+    allow_duplicate_keys: bool,
+) -> ReadySetResult<DfValue> {
+    // PostgreSQL allows empty arrays of any number of dimensions.
+    if keys.is_empty() && values.is_empty() {
+        return Ok("{}".into());
+    }
+
+    if keys.num_dimensions() != 1 || values.num_dimensions() != 1 {
+        invalid_query!("wrong number of array dimensions");
+    }
+
+    if keys.total_len() != values.total_len() {
+        invalid_query!("mismatched array dimensions");
+    }
+
+    if values.total_len() != value_types.len() {
+        // This should only happen if expression lowering and evaluation get out of sync.
+        internal!("Value/type length mismatch when constructing JSON object");
+    }
+
+    let mut result =
+        EitherPairs::<&str, JsonValue>::with_capacity(keys.total_len(), allow_duplicate_keys);
+
+    for ((k, v), ty) in keys.values().zip(values.values()).zip(value_types.iter()) {
+        result.insert(
+            <&str>::try_from(k)?,
+            dfvalue_to_json_value(v.clone(), ty, engine)?,
+        );
+    }
+
+    Ok(result.to_json_string()?.into())
+}
+
+fn dfvalue_to_json_value(
+    value: DfValue,
+    ty: &DfType,
+    engine: SqlEngine,
+) -> ReadySetResult<JsonValue> {
+    if value.is_none() {
+        return Ok(JsonValue::Null);
+    }
+
+    if engine == SqlEngine::PostgreSQL && ty.is_bool() {
+        return Ok(JsonValue::Bool(bool::try_from(&value)?));
+    }
+
+    value.try_into()
 }
 
 /// Returns `true` if `parent` immediately contains all of the values in `child`.
@@ -493,9 +543,7 @@ pub(crate) fn json_insert<'k>(
     insert_after: bool,
 ) -> ReadySetResult<()> {
     if !target_json.is_array() && !target_json.is_object() {
-        return Err(invalid_query_err!(
-            "Cannot insert path in non-array, non-object JSON value"
-        ));
+        invalid_query!("Cannot insert path in non-array, non-object JSON value");
     }
 
     let key_path: Vec<&str> = key_path
@@ -532,9 +580,7 @@ pub(crate) fn json_set<'k>(
     create_if_missing: bool,
 ) -> ReadySetResult<()> {
     if !target_json.is_array() && !target_json.is_object() {
-        return Err(invalid_query_err!(
-            "Cannot set path in non-array, non-object JSON value"
-        ));
+        invalid_query!("Cannot set path in non-array, non-object JSON value");
     }
 
     let key_path: Vec<&str> = key_path

@@ -1016,9 +1016,11 @@ impl BuiltinFunction {
             BuiltinFunction::JsonBuildObject {
                 args,
                 allow_duplicate_keys,
+                dialect,
             } => {
                 let mut keys = Vec::with_capacity(args.len() / 2);
                 let mut values = Vec::with_capacity(args.len() / 2);
+                let mut value_types = Vec::with_capacity(args.len() / 2);
 
                 for (i, arg) in args.iter().enumerate() {
                     if i % 2 == 0 {
@@ -1028,12 +1030,15 @@ impl BuiltinFunction {
                         );
                     } else {
                         values.push(arg.eval(record)?);
+                        value_types.push(arg.ty().clone());
                     }
                 }
 
-                crate::eval::json::json_object_from_keys_and_values(
+                crate::eval::json::json_object_from_keys_and_values_typed(
                     &Array::from(keys),
                     &Array::from(values),
+                    &value_types,
+                    dialect.engine(),
                     *allow_duplicate_keys,
                 )
             }

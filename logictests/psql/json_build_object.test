@@ -1,0 +1,54 @@
+statement ok
+CREATE TABLE t1 (a TEXT, b FLOAT, c INT, d BOOL);
+
+statement ok
+INSERT INTO t1 VALUES ('abc', 3.14, 1, true), ('xyz', 2.71, 2, false);
+
+query J
+SELECT json_build_object(a, c) FROM t1;
+----
+{"abc":1}
+{"xyz":2}
+
+# test variadic arguments
+query J
+SELECT json_build_object(a, b, c, d) FROM t1;
+----
+{"1":true,"abc":3.14}
+{"2":false,"xyz":2.71}
+
+# Requires even number of arguments
+statement error: Incorrect parameter count|argument list must have even number of elements
+SELECT json_build_object(a, b, c) FROM t1;
+
+query J
+SELECT json_build_object(a, b, c, d) FROM t1;
+----
+{"abc":3.14,"1":true}
+{"xyz":2.71,"2":false}
+
+statement ok
+CREATE TABLE t2 (a TEXT, b FLOAT, c TEXT, d BOOL);
+
+statement ok
+INSERT INTO t2 VALUES ('abc', 3.14, 'abc', true);
+
+# TODO: Don't know why, but tokio_postgres can't deserialize the JSONB value from upstream, but can
+# deserialize ours. Probably means we're doing something wrong, but hopefully only in the test code.
+onlyif readyset
+query T
+SELECT jsonb_build_object(a, b, c, d) FROM t2;
+----
+{"abc":true}
+
+query J
+SELECT json_build_object(a, c) FROM t1;
+----
+{  "abc": 1}
+{"xyz":2 }
+
+query J
+SELECT json_build_object('name', a, 'value', c) FROM t1;
+----
+{ "value": 1, "name": "abc" }
+{ "name": "xyz", "value": 2 }

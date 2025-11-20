@@ -70,6 +70,7 @@ pub enum BuiltinFunction {
 
         /// `json_build_object` allows for duplicate keys whereas `jsonb_build_object` does not.
         allow_duplicate_keys: bool,
+        dialect: Dialect,
     },
     /// [`json[b]_array_length`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonArrayLength(Expr),

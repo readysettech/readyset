@@ -5166,6 +5166,7 @@ dependencies = [
  "readyset-sql-parsing",
  "readyset-tracing",
  "readyset-util",
+ "regex",
  "serde_json",
  "thiserror 2.0.16",
  "tokio",
