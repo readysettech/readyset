@@ -78,7 +78,7 @@ async fn test_aggregation_type_inner_postgres(
                 assert_eq!(upstream_type, rs_row.columns()[0].type_());
             }
             (None, None) => {}
-            _ => panic!("Result type mismatch between upstream and ReadySet"),
+            _ => panic!("Result type mismatch between upstream and Readyset"),
         }
 
         let rs_values: Vec<Vec<u8>> = rs_rows
@@ -152,7 +152,7 @@ async fn test_aggregation_type_inner_mysql(
                 assert_eq!(upstream_type, rs_row.columns_ref()[0].column_type());
             }
             (None, None) => {}
-            _ => panic!("Result type mismatch between upstream and ReadySet"),
+            _ => panic!("Result type mismatch between upstream and Readyset"),
         }
 
         let rs_values: Vec<mysql_async::Value> =
@@ -162,9 +162,8 @@ async fn test_aggregation_type_inner_mysql(
 
     shutdown_tx.shutdown().await;
 }
-
 macro_rules! test_aggregation_type {
-    (@inner $upstream:ident, $name:ident, $expr:expr, $coltype:expr, $values:expr, $window:expr) => {
+    ($upstream:ident, $name:ident, $expr:expr, $coltype:expr) => {
         paste::paste! {
             #[tokio::test]
             #[tags(serial, slow, [<$upstream _upstream>])]
@@ -172,41 +171,44 @@ macro_rules! test_aggregation_type {
                 [<test_aggregation_type_inner_ $upstream>](
                     $expr,
                     $coltype,
-                    $values,
-                    $window,
+                    &[],
+                    false
                 )
                 .await;
             }
         }
     };
-    ($upstream:ident, $name:ident, $expr:expr, $coltype:expr) => {
-        test_aggregation_type!(@inner $upstream, $name, $expr, $coltype, &[], false);
-    };
-    ($upstream:ident, $name:ident, $expr:expr, $coltype:expr, [$($value:expr),+ $(,)?]) => {
-        test_aggregation_type!(
-            @inner
-            $upstream,
-            $name,
-            $expr,
-            $coltype,
-            &[$($value),+],
-            false
-        );
-    };
 }
 
 macro_rules! test_window_aggregation_type {
-    ($upstream:ident, $name:ident, $expr:expr, $coltype:expr, [$($value:expr),+ $(,)?]) => {
+    (postgres, $name:ident, $expr:expr, $coltype:expr, [$($value:expr),+ $(,)?]) => {
         paste::paste! {
-            test_aggregation_type!(
-                @inner
-                $upstream,
-                [<$name _window>],
-                $expr,
-                $coltype,
-                &[$($value),+],
-                true
-            );
+            #[tokio::test]
+            #[tags(serial, slow, postgres_upstream)]
+            async fn [<$name _window_postgres>]() {
+                test_aggregation_type_inner_postgres(
+                    $expr,
+                    $coltype,
+                    &[$($value),+],
+                    true,
+                )
+                .await;
+            }
+        }
+    };
+    (mysql, $name:ident, $expr:expr, $coltype:expr, [$($value:expr),+ $(,)?]) => {
+        paste::paste! {
+            #[tokio::test]
+            #[tags(serial, slow, mysql8_upstream)]
+            async fn [<$name _window_mysql>]() {
+                test_aggregation_type_inner_mysql(
+                    $expr,
+                    $coltype,
+                    &[$($value),+],
+                    true,
+                )
+                .await;
+            }
         }
     };
 }
