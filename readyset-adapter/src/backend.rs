@@ -99,6 +99,7 @@ use readyset_client_metrics::{
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
+use readyset_server::PrometheusBuilder;
 use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
     self, AlterReadysetStatement, CacheInner, CacheType, CreateCacheStatement, DeallocateStatement,
@@ -353,7 +354,15 @@ impl Default for BackendBuilder {
             fallback_recovery_seconds: 0,
             telemetry_sender: None,
             placeholder_inlining: false,
-            metrics_handle: None,
+            metrics_handle: Some(MetricsHandle::new(
+                PrometheusBuilder::new()
+                    .with_push_gateway("http://example.com", Duration::default(), None, None)
+                    .unwrap()
+                    .build()
+                    .unwrap()
+                    .0
+                    .handle(),
+            )),
             connections: None,
             allow_cache_ddl: true,
             sampler_tx: None,
