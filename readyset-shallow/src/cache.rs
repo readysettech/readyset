@@ -388,4 +388,32 @@ mod tests {
         assert!(cache.inner.weighted_size() <= BYTES); // under limit?
         assert!(cache.inner.entry_count() < COUNT); // did we have to evict?
     }
+
+    #[test]
+    fn test_cache_debug() {
+        let inner = CacheManager::new_inner(None);
+        let relation = readyset_sql::ast::Relation {
+            schema: None,
+            name: "test_table".into(),
+        };
+        let query_id = readyset_client::query::QueryId::from_unparsed_select("SELECT * FROM test");
+
+        let cache = Cache::<String, String>::new(
+            42,
+            inner,
+            EvictionPolicy::Ttl(Duration::from_secs(60)),
+            Some(relation.clone()),
+            Some(query_id),
+            SelectStatement::default(),
+            vec![],
+        );
+
+        let debug_str = format!("{:?}", cache);
+        assert!(debug_str.contains("Cache"));
+        assert!(debug_str.contains("name"));
+        assert!(debug_str.contains("test_table"));
+        assert!(debug_str.contains("query_id"));
+        assert!(debug_str.contains("ttl_ms"));
+        assert!(debug_str.contains("60000"));
+    }
 }

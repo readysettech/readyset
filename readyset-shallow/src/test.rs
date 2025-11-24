@@ -119,6 +119,64 @@ async fn test_create_cache_with_relation() {
 }
 
 #[tokio::test]
+async fn test_list_caches_and_drop_all() {
+    let manager = CacheManager::<String, String>::new(None);
+
+    let relation1 = test_relation("table1");
+    let relation2 = test_relation("table2");
+    let query_id1 = QueryId::from_unparsed_select("SELECT * FROM test1");
+    let query_id2 = QueryId::from_unparsed_select("SELECT * FROM test2");
+
+    manager
+        .create_cache(
+            Some(relation1.clone()),
+            None,
+            test_stmt(),
+            vec![],
+            test_policy(),
+        )
+        .unwrap();
+
+    manager
+        .create_cache(None, Some(query_id1), test_stmt(), vec![], test_policy())
+        .unwrap();
+
+    manager
+        .create_cache(
+            Some(relation2.clone()),
+            Some(query_id2),
+            test_stmt(),
+            vec![],
+            test_policy(),
+        )
+        .unwrap();
+
+    let all_caches = manager.list_caches(None, None);
+    assert_eq!(all_caches.len(), 3);
+
+    let filtered = manager.list_caches(None, Some(&relation1));
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].name, Some(relation1.clone()));
+
+    let filtered = manager.list_caches(Some(query_id1), None);
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].query_id, Some(query_id1));
+
+    let filtered = manager.list_caches(Some(query_id1), Some(&relation1));
+    assert_eq!(filtered.len(), 2);
+
+    manager.drop_all_caches();
+
+    assert!(!manager.exists(Some(&relation1), None));
+    assert!(!manager.exists(Some(&relation2), None));
+    assert!(!manager.exists(None, Some(&query_id1)));
+    assert!(!manager.exists(None, Some(&query_id2)));
+
+    let caches = manager.list_caches(None, None);
+    assert_eq!(caches.len(), 0);
+}
+
+#[tokio::test]
 async fn test_create_cache_with_query_id() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -648,4 +706,60 @@ async fn test_multi_cache_capacity_sharing() {
         total_hits < 20,
         "Expected some evictions, got {total_hits} hits",
     );
+}
+
+#[tokio::test]
+async fn test_cache_result_debug() {
+    let manager = CacheManager::<String, String>::new(None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+
+    let not_cached = manager
+        .get_or_start_insert(&query_id, "key1".to_string())
+        .await;
+    let debug_str = format!("{:?}", not_cached);
+    assert!(debug_str.contains("NotCached"));
+
+    manager
+        .create_cache(None, Some(query_id), test_stmt(), vec![], test_policy())
+        .unwrap();
+
+    let miss = manager
+        .get_or_start_insert(&query_id, "key1".to_string())
+        .await;
+    let debug_str = format!("{:?}", miss);
+    assert!(debug_str.contains("Miss"));
+
+    insert_value(miss, vec!["value1".to_string()]).await;
+
+    let hit = manager
+        .get_or_start_insert(&query_id, "key1".to_string())
+        .await;
+    let debug_str = format!("{:?}", hit);
+    assert!(debug_str.contains("Hit"));
+}
+
+#[tokio::test]
+async fn test_cache_insert_guard_debug() {
+    let manager = CacheManager::<String, String>::new(None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+
+    manager
+        .create_cache(None, Some(query_id), test_stmt(), vec![], test_policy())
+        .unwrap();
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string())
+        .await;
+
+    let CacheResult::Miss(mut guard) = result else {
+        panic!("expected miss");
+    };
+
+    guard.push("value1".to_string());
+    guard.push("value2".to_string());
+
+    let debug_str = format!("{:?}", guard);
+    assert!(debug_str.contains("CacheInsertGuard"));
+    assert!(debug_str.contains("results"));
+    assert!(debug_str.contains("filled"));
 }
