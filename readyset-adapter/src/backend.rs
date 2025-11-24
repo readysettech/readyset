@@ -113,8 +113,8 @@ use readyset_sql_passes::adapter_rewrites::{
 use readyset_sql_passes::{adapter_rewrites, DetectBucketFunctions};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::{RedactedString, Sensitive};
-use readyset_util::retry_with_exponential_backoff;
 use readyset_util::SizeOf;
+use readyset_util::{logging::*, retry_with_exponential_backoff};
 use readyset_version::READYSET_VERSION;
 use slab::Slab;
 use tokio::sync::mpsc::UnboundedSender;
@@ -4091,10 +4091,12 @@ where
                 match DB::connect(upstream_config.clone(), None, None).await {
                     Ok(conn) => upstream = Some(conn),
                     Err(e) => {
-                        warn!(
-                            error = %e,
-                            "Failed to create upstream connection for shallow refresh",
-                        );
+                        rate_limit(true, ADAPTER_SHALLOW_REFRESH_OPEN, || {
+                            warn!(
+                                error = %e,
+                                "Failed to create upstream connection for shallow refresh",
+                            )
+                        });
                         continue;
                     }
                 }
@@ -4116,11 +4118,13 @@ where
             match conn.set_schema_search_path(&path).await {
                 Ok(()) => {}
                 Err(e) => {
-                    warn!(
-                        error = %e,
-                        path = ?path,
-                        "Failed to set schema path for refresh",
-                    );
+                    rate_limit(true, ADAPTER_SHALLOW_REFRESH_SET_SCHEMA, || {
+                        warn!(
+                            error = %e,
+                            path = ?path,
+                            "Failed to set schema path for refresh",
+                        )
+                    });
                     reset = true; // starting over resets all borrowing, vs setting None here
                     continue;
                 }
@@ -4134,22 +4138,26 @@ where
             let result = match result {
                 Ok(result) => result,
                 Err(e) => {
-                    warn!(
-                        error = %e,
-                        cache = %query_id,
-                        "Failed to refresh cached query",
-                    );
+                    rate_limit(true, ADAPTER_SHALLOW_REFRESH_RUN, || {
+                        warn!(
+                            error = %e,
+                            cache = %query_id,
+                            "Failed to refresh cached query",
+                        )
+                    });
                     reset = true;
                     continue;
                 }
             };
 
             if let Err(e) = Self::shallow_refresh_result(result, cache).await {
-                warn!(
-                    error = %e,
-                    cache = %query_id,
-                    "Failed to read results for cached query",
-                );
+                rate_limit(true, ADAPTER_SHALLOW_REFRESH_READ, || {
+                    warn!(
+                        error = %e,
+                        cache = %query_id,
+                        "Failed to read results for cached query",
+                    )
+                });
             }
         }
     }

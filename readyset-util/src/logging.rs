@@ -14,6 +14,15 @@ pub const TCP_CONNECTION_LOG_RECEIVED_FROM_UNKNOWN_SOURCE: &str = "TCP";
 /// Key for sampler logging.
 pub const SAMPLER_LOG_SAMPLER: &str = "SAMPLER";
 
+/// Key for shallow cache upstream connection failure.
+pub const ADAPTER_SHALLOW_REFRESH_OPEN: &str = "ADAPTER_SHALLOW_REFRESH_OPEN";
+/// Key for shallow cache set schema failure.
+pub const ADAPTER_SHALLOW_REFRESH_SET_SCHEMA: &str = "ADAPTER_SHALLOW_REFRESH_SET_SCHEMA";
+/// Key for shallow cache refresh execution failure.
+pub const ADAPTER_SHALLOW_REFRESH_RUN: &str = "ADAPTER_SHALLOW_REFRESH_RUN";
+/// Key for shallow cache refresh result set read failure.
+pub const ADAPTER_SHALLOW_REFRESH_READ: &str = "ADAPTER_SHALLOW_REFRESH_READ";
+
 fn interval_for_key(key: &str) -> Duration {
     let var_name = format!("{}_LOG_RATE_LIMIT_SECS", key.to_ascii_uppercase());
     std::env::var(var_name)
