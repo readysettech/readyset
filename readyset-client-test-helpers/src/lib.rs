@@ -6,12 +6,13 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection, ReplicationServerId};
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode, QueryDestination, QueryInfo};
+use readyset_adapter::metrics_handle::MetricsHandle;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::{
     Backend, QueryHandler, ReadySetStatusReporter, UpstreamConfig, UpstreamDatabase,
@@ -22,7 +23,9 @@ use readyset_data::upstream_system_props::{
     init_system_props, UpstreamSystemProperties, DEFAULT_TIMEZONE_NAME,
 };
 use readyset_data::Dialect;
-use readyset_server::{Builder, DurabilityMode, Handle, LocalAuthority, ReadySetHandle};
+use readyset_server::{
+    Builder, DurabilityMode, Handle, LocalAuthority, PrometheusBuilder, ReadySetHandle,
+};
 use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
 use readyset_sql_parsing::ParsingPreset;
@@ -142,6 +145,15 @@ impl Default for TestBuilder {
 
 impl TestBuilder {
     pub fn new(backend_builder: BackendBuilder) -> Self {
+        let backend_builder = backend_builder.metrics_handle(Some(MetricsHandle::new(
+            PrometheusBuilder::new()
+                .with_push_gateway("http://example.com", Duration::default(), None, None)
+                .unwrap()
+                .build()
+                .unwrap()
+                .0
+                .handle(),
+        )));
         Self {
             backend_builder,
             replicate: Default::default(),
