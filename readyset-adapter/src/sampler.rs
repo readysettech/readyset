@@ -477,6 +477,9 @@ impl Sampler {
             rate_limit(true, SAMPLER_LOG_SAMPLER, || {
                 warn!(
                     cache = get_cache_name(&entry.event),
+                    query = %entry.q,
+                    entry_search_path = ?entry.schema_search_path,
+                    current_search_path = ?self.schema_search_path,
                     rs_hash,
                     up_hash,
                     "Sampler mismatch after retries: normalized result hash differs between Readyset and upstream"
