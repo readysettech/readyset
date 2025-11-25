@@ -28,7 +28,7 @@ impl EventsHandle {
     /// the leader, and only once per election.
     pub(super) fn start(&self) {
         debug_assert!(self.events_tx.read().unwrap().is_none());
-        let (events_tx, mut events_rx) = broadcast::channel(10);
+        let (events_tx, mut events_rx) = broadcast::channel(256);
         *self.events_tx.write().unwrap() = Some(events_tx);
         // Spawn a heartbeat task to keep HTTP connections alive (arguably should live in the HTTP
         // server, not here, but I like that code not knowing anything about particular events)

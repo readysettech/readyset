@@ -1,3 +1,6 @@
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as B64;
+use readyset_errors::{ReadySetResult, internal_err};
 use readyset_sql::ast::{CreateTableBody, NonReplicatedRelation, Relation, SqlIdentifier};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -33,5 +36,37 @@ impl SchemaCatalog {
         Self {
             ..Default::default()
         }
+    }
+}
+
+/// Wrapper for schema catalog updates sent over the controller event stream.
+///
+/// The catalog is serialized via `bincode` and base64-encoded to remain JSON-safe for SSE.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SchemaCatalogUpdate {
+    pub catalog_b64: String,
+}
+
+impl TryFrom<&SchemaCatalog> for SchemaCatalogUpdate {
+    type Error = readyset_errors::ReadySetError;
+
+    fn try_from(catalog: &SchemaCatalog) -> ReadySetResult<Self> {
+        let bytes = bincode::serialize(catalog)
+            .map_err(|e| internal_err!("Failed to serialize catalog: {e}"))?;
+        Ok(Self {
+            catalog_b64: B64.encode(bytes),
+        })
+    }
+}
+
+impl TryFrom<SchemaCatalogUpdate> for SchemaCatalog {
+    type Error = readyset_errors::ReadySetError;
+
+    fn try_from(update: SchemaCatalogUpdate) -> ReadySetResult<Self> {
+        let bytes = B64
+            .decode(update.catalog_b64)
+            .map_err(|e| internal_err!("Failed to decode catalog: {e}"))?;
+        bincode::deserialize(&bytes)
+            .map_err(|e| internal_err!("Failed to deserialize catalog: {e}"))
     }
 }

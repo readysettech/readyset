@@ -21,6 +21,7 @@ use futures_util::StreamExt;
 use hyper::client::HttpConnector;
 use hyper::{Body, Client, Method, Request, StatusCode};
 use readyset_errors::{internal, internal_err, ReadySetResult};
+use schema_catalog::SchemaCatalogUpdate;
 use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
 use tokio::sync::broadcast;
@@ -45,6 +46,8 @@ pub enum ControllerEvent {
     /// (again, mostly just for debugging) to see that message on the client side instead of just
     /// the connection abruptly closing.
     LeaderLost,
+    /// A schema catalog update is available.
+    SchemaCatalogUpdate(SchemaCatalogUpdate),
     /// Test-only event variant with arbitrary string data.
     #[cfg(test)]
     TestData(String),

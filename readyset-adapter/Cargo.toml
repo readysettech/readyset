@@ -81,7 +81,7 @@ name = "hash"
 harness = false
 
 [features]
-failure_injection = ["fail/failpoints"]
+failure_injection = ["fail/failpoints", "schema-catalog/failure_injection"]
 
 [lints]
 workspace = true

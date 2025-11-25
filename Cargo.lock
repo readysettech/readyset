@@ -4773,6 +4773,7 @@ dependencies = [
  "test-strategy",
  "test-utils",
  "tokio",
+ "tokio-stream",
  "tokio-tower",
  "tournament-kway",
  "tower 0.4.13",
@@ -4982,6 +4983,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dataflow-state",
+ "fail",
  "futures",
  "itertools 0.14.0",
  "mysql_async",
@@ -4997,6 +4999,7 @@ dependencies = [
  "readyset-sql-parsing",
  "readyset-tracing",
  "readyset-util",
+ "schema-catalog",
  "test-strategy",
  "test-utils",
  "tokio",
@@ -6018,6 +6021,11 @@ name = "schema-catalog"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
+ "bincode",
+ "fail",
+ "failpoint-macros",
+ "futures-util",
  "readyset-errors",
  "readyset-sql",
  "readyset-util",

@@ -268,15 +268,19 @@ use readyset_data::{DfType, DfValue};
 use readyset_sql::ast::Relation;
 use readyset_tracing::propagation::Instrumented;
 use replication_offset::ReplicationOffset;
-use schema_catalog::{SchemaCatalog, SchemaCatalogProvider};
+use schema_catalog::{SchemaCatalog, SchemaCatalogProvider, SchemaCatalogUpdate};
 use serde::{Deserialize, Serialize};
 use tokio::task_local;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt;
 use tokio_tower::multiplex;
 
 pub use view::{
     ColumnBase, ColumnSchema, KeyColumnIdx, PlaceholderIdx, ReaderHandle, ViewPlaceholder,
     ViewSchema,
 };
+
+use crate::events::ControllerEvent;
 
 // FIXME(eta): get rid of these
 use crate::internal::*;
@@ -504,5 +508,17 @@ impl SchemaCatalogProvider for ReadySetHandle {
         &mut self,
     ) -> Result<SchemaCatalog, Box<dyn Error + Send + Sync>> {
         self.schema_catalog().await.map_err(|e| e.into())
+    }
+
+    fn schema_catalog_update_stream(
+        &mut self,
+    ) -> Pin<Box<dyn futures_util::Stream<Item = SchemaCatalogUpdate> + Send>> {
+        let events_rx = self.subscribe_to_events();
+        let stream = BroadcastStream::new(events_rx).filter_map(|evt| match evt {
+            Ok(ControllerEvent::SchemaCatalogUpdate(update)) => Some(update),
+            Ok(_) => None,
+            Err(_) => None,
+        });
+        Box::pin(stream)
     }
 }

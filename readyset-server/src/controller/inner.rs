@@ -51,6 +51,7 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use tracing::{debug, error, info, info_span, warn};
 
+use crate::controller::events::EventsHandle;
 use crate::controller::state::{DfState, DfStateHandle};
 use crate::controller::{ControllerState, Worker, WorkerIdentifier};
 use crate::worker::WorkerRequestKind;
@@ -1110,10 +1111,14 @@ impl Leader {
         controller_tx: UnboundedSender<ControllerMessage>,
         table_statuses: TableStatusState,
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
+        events_handle: EventsHandle,
     ) -> Self {
         assert_ne!(state.config.min_workers, 0);
 
-        let dataflow_state_handle = Arc::new(DfStateHandle::new(state.dataflow_state));
+        let dataflow_state_handle = Arc::new(DfStateHandle::new(
+            state.dataflow_state,
+            Some(events_handle),
+        ));
 
         Leader {
             dataflow_state_handle,

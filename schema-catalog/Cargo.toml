@@ -13,6 +13,14 @@ readyset-util = { path = "../readyset-util" }
 serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+failpoint-macros = { path = "../failpoint-macros" }
+futures-util = { workspace = true }
+base64 = { workspace = true }
+bincode = { workspace = true }
+fail = { workspace = true, optional = true }
+
+[features]
+failure_injection = ["readyset-util/failure_injection", "fail/failpoints", "fail"]
 
 [lints]
 workspace = true

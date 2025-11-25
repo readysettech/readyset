@@ -21,6 +21,7 @@ serde = { workspace = true, features = ["rc", "derive"] }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 rmp-serde = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true }
 bincode = { workspace = true }
 vec_map = { workspace = true, features = ["eders"] }
 petgraph = { workspace = true, features = ["serde-1"] }
@@ -86,7 +87,7 @@ tempfile = { workspace = true }
 test-utils = { path = "../test-utils" }
 
 [features]
-failure_injection = ["fail/failpoints"]
+failure_injection = ["fail/failpoints", "readyset-util/failure_injection"]
 
 [lints]
 workspace = true

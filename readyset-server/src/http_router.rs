@@ -16,7 +16,7 @@ use readyset_alloc::{
     print_memory_and_per_thread_stats,
 };
 use readyset_client::metrics::recorded;
-use readyset_errors::{internal, ReadySetError};
+use readyset_errors::ReadySetError;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
@@ -364,10 +364,20 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
             // SSE endpoint for schema catalog updates (or whatever events the server publishes)
             (&Method::GET, "/events/stream") => {
                 let res = if let Some(events_rx) = self.events_handle.subscribe() {
-                    let stream = BroadcastStream::new(events_rx).map(move |event| match event {
-                        Ok(event) => event.to_sse(),
-                        Err(e) => internal!("Error processing event: {e}"),
-                    });
+                    let stream =
+                        BroadcastStream::new(events_rx).filter_map(move |event| match event {
+                            Ok(event) => match event.to_sse() {
+                                Ok(s) => Some(Ok::<String, ReadySetError>(s)),
+                                Err(error) => {
+                                    warn!(%error, "Failed to serialize controller event for SSE");
+                                    None
+                                }
+                            },
+                            Err(error) => {
+                                warn!(%error, "Failed to receive controller event for SSE");
+                                None
+                            }
+                        });
                     let body = hyper::Body::wrap_stream(stream);
                     res.status(StatusCode::OK)
                         .header(CONTENT_TYPE, "text/event-stream")

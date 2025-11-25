@@ -253,14 +253,34 @@ where
             .unwrap();
 
         // Smoke test to ensure streaming replication has caught up
-        eventually!(sleep: Duration::from_millis(50), {
-            let count: usize = rs_conn
-                .exec_first("SELECT count(*) FROM encoding_table WHERE id >= ? AND id <= ?", (first_id, last_id))
-                .await
-                .unwrap()
-                .unwrap();
-            count == chunk.len()
-        });
+        eventually!(
+            sleep: Duration::from_millis(50),
+            run_test: {
+                match rs_conn
+                    .exec_first::<usize, _, _>(
+                        "SELECT count(*) FROM encoding_table WHERE id >= ? AND id <= ?",
+                        (first_id, last_id),
+                    )
+                    .await
+                {
+                    Ok(Some(count)) => Ok(count),
+                    Ok(None) => Ok(0),
+                    Err(mysql_async::Error::Server(ref e))
+                        if e.message.contains("Schema generation mismatch") =>
+                    {
+                        Ok(0)
+                    }
+                    Err(e) => Err(e.to_string()),
+                }
+            },
+            then_assert: |res| {
+                let res: Result<usize, String> = res;
+                match res {
+                    Ok(count) => assert_eq!(count, chunk.len(), "streaming catch-up count mismatch"),
+                    Err(msg) => panic!("Unexpected error while waiting for streaming catch-up: {msg}"),
+                }
+            }
+        );
 
         for character_set in CHARACTER_SETS {
             upstream_conn

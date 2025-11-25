@@ -21,6 +21,7 @@ failure_injection = [
     "dataflow/failure_injection",
     "dataflow-state/failure_injection",
     "readyset-util/failure_injection",
+    "schema-catalog/failure_injection",
     "replicators/failure_injection",
 ]
 # Redact the display of strings marked sensitive from logs and error messages

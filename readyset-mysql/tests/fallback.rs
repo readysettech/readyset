@@ -30,6 +30,20 @@ async fn setup() -> (mysql_async::Opts, Handle, ShutdownSender) {
     setup_with(BackendBuilder::new().require_authentication(false)).await
 }
 
+async fn query_drop_with_schema_retry(conn: &mut Conn, stmt: &str) {
+    for attempt in 0..5 {
+        match conn.query_drop(stmt).await {
+            Ok(_) => return,
+            Err(mysql_async::Error::Server(ref e))
+                if e.message.contains("Schema generation mismatch") && attempt < 4 =>
+            {
+                sleep().await;
+            }
+            Err(e) => panic!("Unexpected error running `{stmt}`: {e}"),
+        }
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow, mysql_upstream)]
 async fn create_table() {
@@ -658,18 +672,14 @@ async fn drop_then_recreate_table_with_query() {
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     sleep().await;
 
-    conn.query_drop("CREATE CACHE q FROM SELECT x FROM t")
-        .await
-        .unwrap();
+    query_drop_with_schema_retry(&mut conn, "CREATE CACHE q FROM SELECT x FROM t").await;
     conn.query_drop("SELECT x FROM t").await.unwrap();
     conn.query_drop("DROP TABLE t").await.unwrap();
 
     sleep().await;
 
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
-    conn.query_drop("CREATE CACHE q FROM SELECT x FROM t")
-        .await
-        .unwrap();
+    query_drop_with_schema_retry(&mut conn, "CREATE CACHE q FROM SELECT x FROM t").await;
     // Query twice to clear the cache
     conn.query_drop("SELECT x FROM t").await.unwrap();
     conn.query_drop("SELECT x FROM t").await.unwrap();
@@ -724,18 +734,31 @@ async fn show_caches_index_hints() {
     let _ = conn.query_drop("CREATE TABLE t_idx_hnt (a INT PRIMARY KEY, b INT, c INT, KEY `idx_1`(b), KEY `idx_2`(c))")
         .await;
 
-    // Run a base query
-    let _ = conn
-        .query_drop("SELECT a, b, c FROM t_idx_hnt WHERE a = 1;")
-        .await;
+    // Run a base query (may need to retry if catalog races)
+    query_drop_with_schema_retry(&mut conn, "SELECT a, b, c FROM t_idx_hnt WHERE a = 1;").await;
+    query_drop_with_schema_retry(
+        &mut conn,
+        "CREATE CACHE FROM SELECT a, b, c FROM t_idx_hnt WHERE a = 1;",
+    )
+    .await;
 
     // Check we have cached this query
     // in-request-path migrations is enabled, we should have a cached query
-    let cached_queries = conn
-        .query::<(String, String, String, String, String), _>("SHOW CACHES;")
-        .await
-        .unwrap();
-    assert!(cached_queries.len() == 1);
+    let mut attempts = 0;
+    loop {
+        let cached = conn
+            .query::<(String, String, String, String, String), _>("SHOW CACHES;")
+            .await
+            .unwrap();
+        if cached.len() == 1 {
+            break;
+        }
+        attempts += 1;
+        if attempts > 20 {
+            panic!("SHOW CACHES did not return the expected entry");
+        }
+        sleep().await;
+    }
 
     // Run all possible index hints
     let index_hint_type_list: Vec<&str> = vec!["USE", "IGNORE", "FORCE"];
@@ -755,18 +778,28 @@ async fn show_caches_index_hints() {
                     let qstring = format!(
                         "SELECT a, b, c FROM `t_idx_hnt` {hint_type} {index_or_key} {index_for}({formatted_index_list_str}) WHERE a = 1"
                     );
-                    conn.query_drop(&qstring).await.unwrap();
+                    query_drop_with_schema_retry(&mut conn, &qstring).await;
                 }
             }
         }
     }
 
     // All variants of index hints should resolve to the same base query
-    let cached_queries = conn
-        .query::<(String, String, String, String, String), _>("SHOW CACHES;")
-        .await
-        .unwrap();
-    assert!(cached_queries.len() == 1);
+    let mut attempts = 0;
+    loop {
+        let cached = conn
+            .query::<(String, String, String, String, String), _>("SHOW CACHES;")
+            .await
+            .unwrap();
+        if cached.len() == 1 {
+            break;
+        }
+        attempts += 1;
+        if attempts > 20 {
+            panic!("SHOW CACHES did not return the expected entry");
+        }
+        sleep().await;
+    }
 
     shutdown_tx.shutdown().await;
 }

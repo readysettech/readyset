@@ -566,6 +566,7 @@ impl Controller {
                     self.controller_channel.sender(),
                     self.table_statuses.clone(),
                     self.table_status_tx.clone(),
+                    self.events_handle.clone(),
                 );
                 self.leader_ready.store(false, Ordering::Release);
 

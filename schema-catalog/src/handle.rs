@@ -2,106 +2,164 @@
 //! it only possible for the synchronizer to update it.
 
 use std::error::Error;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+#[cfg(feature = "failure_injection")]
+use failpoint_macros::set_failpoint;
+use futures_util::StreamExt;
 use readyset_errors::{ReadySetResult, internal_err};
 use readyset_util::{retry_with_exponential_backoff, shutdown::ShutdownReceiver};
 use tokio::select;
 use tokio::sync::RwLock;
 use tracing::{debug, info, trace, warn};
 
-use crate::SchemaCatalog;
+use crate::{SchemaCatalog, SchemaCatalogUpdate};
 
 /// A schema catalog provider that can be used to fetch the latest version of the schema catalog.
 #[async_trait]
 pub trait SchemaCatalogProvider: Send + Sync {
+    /// Ad-hoc fetch of the current schema catalog, used for initial poll.
     async fn fetch_schema_catalog(&mut self)
     -> Result<SchemaCatalog, Box<dyn Error + Send + Sync>>;
+
+    /// Streaming source for schema catalog updates (e.g., via SSE). Returns a stream that yields
+    /// [`SchemaCatalogUpdate`] messages.
+    fn schema_catalog_update_stream(
+        &mut self,
+    ) -> Pin<Box<dyn futures_util::Stream<Item = SchemaCatalogUpdate> + Send>>;
 }
 
 #[derive(Debug)]
 pub struct SchemaCatalogSynchronizer<P: SchemaCatalogProvider> {
     /// The Readyset connector used to query the schema catalog
     controller: P,
-    /// The interval between subsequent pollings of the server for schema catalog updates
-    poll_interval: std::time::Duration,
     /// The cached schema catalog, protected by RwLock for concurrent access; only updated by the
     /// synchronizer, while read access is provided by the [`SchemaCatalogHandle`].
     handle: SchemaCatalogHandle,
 }
 
 impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
-    pub fn new(controller: P, poll_interval: std::time::Duration) -> (Self, SchemaCatalogHandle) {
+    pub fn new(controller: P, _poll_interval: std::time::Duration) -> (Self, SchemaCatalogHandle) {
         let handle = SchemaCatalogHandle::new();
         let synchronizer = SchemaCatalogSynchronizer {
             controller,
-            poll_interval,
             handle: handle.clone(),
         };
         (synchronizer, handle)
     }
 
     pub async fn run(mut self, mut shutdown_recv: ShutdownReceiver) {
-        let mut interval = tokio::time::interval(self.poll_interval);
+        let mut updates_stream = self.controller.schema_catalog_update_stream();
+        let mut initial_poll_pending = true;
 
-        // Perform an initial poll to populate the cache immediately
-        self.poll().await;
-
-        let fut = async {
-            loop {
-                interval.tick().await;
-                self.poll().await;
+        // Initial sync: accept either the first successful fetch or any stream update.
+        while !self.handle.has_catalog().await {
+            select! {
+                biased;
+                _ = shutdown_recv.recv() => {
+                    info!("Schema Catalog Synchronizer shutting down before initial sync");
+                    return;
+                }
+                update = updates_stream.next() => {
+                    match update {
+                        Some(update) => match SchemaCatalog::try_from(update) {
+                            Ok(catalog) => {
+                                self.apply_update(catalog).await;
+                                initial_poll_pending = false;
+                            }
+                            Err(error) => {
+                                warn!(%error, "Failed to decode schema catalog update during initial sync");
+                            }
+                        },
+                        None => {
+                            warn!("Schema catalog update stream ended during initial sync; re-subscribing");
+                            if initial_poll_pending {
+                                if let Err(error) = self.poll().await {
+                                    warn!(%error, "Schema catalog fetch after stream end failed during initial sync");
+                                } else {
+                                    initial_poll_pending = false;
+                                }
+                            }
+                            updates_stream = self.controller.schema_catalog_update_stream();
+                        }
+                    }
+                }
+                res = async { self.poll().await }, if initial_poll_pending => {
+                    if let Err(error) = res {
+                        warn!(%error, "Schema Catalog Synchronizer initial sync fetch failed");
+                    }
+                    initial_poll_pending = false;
+                }
             }
-        };
+        }
 
-        select! {
-            biased;
-            _ = shutdown_recv.recv() => {
-                info!("Schema Catalog Synchronizer shutting down after shutdown signal received");
+        loop {
+            select! {
+                biased;
+                _ = shutdown_recv.recv() => {
+                    info!("Schema Catalog Synchronizer shutting down after shutdown signal received");
+                    return;
+                }
+                update = updates_stream.next() => {
+                    match update {
+                        Some(update) => match SchemaCatalog::try_from(update) {
+                            Ok(catalog) => {
+                                self.apply_update(catalog).await;
+                            }
+                            Err(error) => {
+                                warn!(%error, "Failed to decode schema catalog update");
+                            }
+                        },
+                        None => {
+                            warn!("Schema catalog update stream ended; re-subscribing");
+                            if let Err(error) = self.poll().await {
+                                warn!(%error, "Schema catalog fetch after stream end failed");
+                            }
+                            updates_stream = self.controller.schema_catalog_update_stream();
+                        }
+                    }
+                }
             }
-            _ = fut => unreachable!(),
         }
     }
 
-    async fn poll(&mut self) {
-        debug!("Schema catalog synchronizer polling");
+    async fn poll(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let catalog = self.controller.fetch_schema_catalog().await?;
+        self.apply_update(catalog).await;
+        Ok(())
+    }
 
-        match self.controller.fetch_schema_catalog().await {
-            Ok(catalog) => {
-                trace!(
-                    base_tables = ?catalog.base_schemas.keys().collect::<Vec<_>>(),
-                    uncompiled_views = ?catalog.uncompiled_views,
-                    custom_types = ?catalog.custom_types.keys().collect::<Vec<_>>(),
-                    view_schemas = ?catalog.view_schemas.iter().collect::<Vec<_>>(),
-                    non_replicated_relations = ?catalog.non_replicated_relations,
-                    "Successfully retrieved schema catalog from server"
-                );
-                debug!(
-                    base_tables = catalog.base_schemas.len(),
-                    uncompiled_views = catalog.uncompiled_views.len(),
-                    custom_types = catalog.custom_types.len(),
-                    view_schemas = catalog.view_schemas.len(),
-                    non_replicated_relations = catalog.non_replicated_relations.len(),
-                    "Successfully retrieved schema catalog from server"
-                );
+    async fn apply_update(&self, catalog: SchemaCatalog) {
+        trace!(
+            base_tables = ?catalog.base_schemas.keys().collect::<Vec<_>>(),
+            uncompiled_views = ?catalog.uncompiled_views,
+            custom_types = ?catalog.custom_types.keys().collect::<Vec<_>>(),
+            view_schemas = ?catalog.view_schemas.iter().collect::<Vec<_>>(),
+            non_replicated_relations = ?catalog.non_replicated_relations,
+            "Received schema catalog from server"
+        );
 
-                // Update the cached catalog. Check with read lock first to avoid blocking readers
-                // during the comparison, then allocate outside the write lock.
-                let needs_update = {
-                    let cache = self.handle.inner.read().await;
-                    cache.as_deref() != Some(&catalog)
-                };
+        debug!(
+            base_tables = catalog.base_schemas.len(),
+            uncompiled_views = catalog.uncompiled_views.len(),
+            custom_types = catalog.custom_types.len(),
+            view_schemas = catalog.view_schemas.len(),
+            non_replicated_relations = catalog.non_replicated_relations.len(),
+            "Applying schema catalog update"
+        );
 
-                if needs_update {
-                    let new_arc = Arc::new(catalog);
-                    let mut cache = self.handle.inner.write().await;
-                    *cache = Some(new_arc);
-                }
-            }
-            Err(error) => {
-                warn!(%error, "Could not get schema catalog from server");
-            }
+        #[cfg(feature = "failure_injection")]
+        {
+            trace!("Failpoint: checking SCHEMA_CATALOG_SYNCHRONIZER_DELAY");
+            set_failpoint!(readyset_util::failpoints::SCHEMA_CATALOG_SYNCHRONIZER_DELAY);
+            trace!("Failpoint: passed SCHEMA_CATALOG_SYNCHRONIZER_DELAY");
+        }
+
+        let mut cache = self.handle.inner.write().await;
+        if cache.as_deref() != Some(&catalog) {
+            *cache = Some(Arc::new(catalog));
         }
     }
 }
@@ -176,6 +234,7 @@ impl Clone for SchemaCatalogHandle {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use futures_util::stream;
     use readyset_util::shutdown;
     use std::collections::{HashMap, HashSet};
     use std::error::Error;
@@ -212,6 +271,12 @@ mod tests {
             } else {
                 Ok(self.catalog.clone())
             }
+        }
+
+        fn schema_catalog_update_stream(
+            &mut self,
+        ) -> Pin<Box<dyn futures_util::Stream<Item = SchemaCatalogUpdate> + Send>> {
+            Box::pin(stream::empty())
         }
     }
 
@@ -254,7 +319,7 @@ mod tests {
         assert!(!handle.has_catalog().await);
 
         // Initial poll
-        synchronizer.poll().await;
+        let _ = synchronizer.poll().await;
 
         assert!(handle.has_catalog().await);
         handle.get_catalog().await.unwrap();
@@ -269,7 +334,7 @@ mod tests {
 
         assert!(!handle.has_catalog().await);
 
-        synchronizer.poll().await;
+        let _ = synchronizer.poll().await;
 
         assert!(!handle.has_catalog().await);
     }

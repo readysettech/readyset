@@ -41,6 +41,7 @@ use readyset_client::builders::{
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
+use readyset_client::events::ControllerEvent;
 use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
 use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
@@ -58,6 +59,7 @@ use readyset_sql::ast::{NonReplicatedRelation, Relation, SqlIdentifier};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
+use schema_catalog::SchemaCatalogUpdate;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -1916,16 +1918,22 @@ pub(super) struct DfStateHandle {
     /// A mutex used to ensure that writes are transactional (there's
     /// only one writer at a time holding an instance of [`DfStateWriter`]).
     write_guard: Mutex<()>,
+    /// Optional notifier for schema catalog updates.
+    schema_change_notifier: Option<crate::controller::events::EventsHandle>,
 }
 
 impl DfStateHandle {
     /// Creates a new instance of [`DfStateHandle`].
-    pub(super) fn new(dataflow_state: DfState) -> Self {
+    pub(super) fn new(
+        dataflow_state: DfState,
+        schema_change_notifier: Option<crate::controller::events::EventsHandle>,
+    ) -> Self {
         Self {
             reader: RwLock::new(DfStateReader {
                 state: dataflow_state,
             }),
             write_guard: Mutex::new(()),
+            schema_change_notifier,
         }
     }
 
@@ -2002,6 +2010,16 @@ impl DfStateHandle {
 
         let mut state_guard = self.reader.write().await;
         state_guard.replace(new_state.clone());
+        drop(state_guard);
+
+        if let Some(notifier) = &self.schema_change_notifier {
+            let catalog = new_state.recipe.schema_catalog();
+            match SchemaCatalogUpdate::try_from(&catalog) {
+                Ok(update) => notifier.send(ControllerEvent::SchemaCatalogUpdate(update)),
+                Err(error) => warn!(%error, "Failed to serialize schema catalog update"),
+            }
+        }
+
         Ok(())
     }
 }

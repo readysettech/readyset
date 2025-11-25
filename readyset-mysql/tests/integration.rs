@@ -2692,9 +2692,17 @@ async fn test_case_expr_then_expr() {
         .query_drop("INSERT INTO test_case_expr_then_expr VALUES (1, 1, 2);")
         .await
         .unwrap();
-    conn.query_drop("CREATE CACHE FROM SELECT CASE col1 WHEN 1 THEN col2 ELSE col1 END AS t FROM test_case_expr_then_expr WHERE id = ?")
-        .await
-        .unwrap();
+    for attempt in 0..3 {
+        match conn.query_drop("CREATE CACHE FROM SELECT CASE col1 WHEN 1 THEN col2 ELSE col1 END AS t FROM test_case_expr_then_expr WHERE id = ?").await {
+            Ok(_) => break,
+            Err(mysql_async::Error::Server(ref e))
+                if e.message.contains("Schema generation mismatch") && attempt < 2 =>
+            {
+                sleep().await;
+            }
+            Err(e) => panic!("Unexpected error creating cache: {e}"),
+        }
+    }
     sleep().await;
 
     let rs_rows: Vec<String> = conn

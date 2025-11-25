@@ -13,7 +13,7 @@ bit-vec = { workspace = true, features = ["serde"] }
 bytes = { workspace = true }
 chrono = { workspace = true }
 deadpool-postgres = { workspace = true }
-fail = { workspace = true }
+fail = { workspace = true, optional = true }
 futures = { workspace = true }
 hex = { workspace = true }
 itertools = { workspace = true }
@@ -78,6 +78,7 @@ test-utils = { path = "../test-utils" }
 [features]
 vertical_tests = []
 failure_injection = [
+    "fail",
     "fail/failpoints",
     "readyset-util/failure_injection",
     "readyset-server/failure_injection",

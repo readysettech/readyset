@@ -53,3 +53,5 @@ pub const IGNORE_TABLE_FAIL_DROPPING_TABLE: &str = "ignore-table-fail-dropping-t
 pub const READER_BEFORE_BLOCKING: &str = "reader-before-blocking";
 /// A failpoint at the beginning of handling a RequestReaderReplay packet
 pub const UPQUERY_START: &str = "upquery-start";
+/// Delay application of the next schema catalog update in the adapter's synchronizer
+pub const SCHEMA_CATALOG_SYNCHRONIZER_DELAY: &str = "schema-catalog-synchronizer-delay";
