@@ -424,6 +424,14 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(())
     }
 
+    async fn can_prepare<S>(&mut self, query: S) -> anyhow::Result<()>
+    where
+        S: AsRef<str> + Send + Sync,
+    {
+        self.conn.prep(query.as_ref()).await?;
+        Ok(())
+    }
+
     /// Prepares the given query using the mysql connection. Note, queries are prepared on a
     /// per connection basis. They are not universal.
     async fn prepare<'a, 'b, S>(

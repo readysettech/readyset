@@ -418,6 +418,14 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         self.version.clone()
     }
 
+    async fn can_prepare<S>(&mut self, query: S) -> anyhow::Result<()>
+    where
+        S: AsRef<str> + Send + Sync,
+    {
+        self.client.prepare(query.as_ref()).await?;
+        Ok(())
+    }
+
     async fn prepare<'a, S>(
         &'a mut self,
         query: S,

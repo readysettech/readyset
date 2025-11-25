@@ -5276,6 +5276,7 @@ dependencies = [
 name = "readyset-mysql"
 version = "0.4.0"
 dependencies = [
+ "anyhow",
  "assert_matches",
  "async-trait",
  "bincode",
@@ -5324,6 +5325,7 @@ dependencies = [
 name = "readyset-psql"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "assert_matches",
  "async-trait",
  "bit-vec 0.6.3",

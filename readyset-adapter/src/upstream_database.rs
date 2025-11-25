@@ -158,6 +158,11 @@ pub trait UpstreamDatabase: Sized + Send {
     /// connection is running via ReadySet
     fn version(&self) -> String;
 
+    /// Prepares the query for the sole purpose of checking if the prepare succeeds.
+    async fn can_prepare<S>(&mut self, query: S) -> anyhow::Result<()>
+    where
+        S: AsRef<str> + Send + Sync;
+
     /// Send a request to the upstream database to prepare the given query, returning a unique ID
     /// for that prepared statement
     ///
@@ -382,6 +387,16 @@ where
         match &self.upstream {
             Some(u) => u.version(),
             None => U::DEFAULT_DB_VERSION.into(),
+        }
+    }
+
+    async fn can_prepare<S>(&mut self, query: S) -> anyhow::Result<()>
+    where
+        S: AsRef<str> + Send + Sync,
+    {
+        match &mut self.upstream {
+            Some(upstream) => upstream.can_prepare(query).await,
+            None => Ok(()),
         }
     }
 
