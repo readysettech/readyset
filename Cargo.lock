@@ -5012,6 +5012,7 @@ dependencies = [
  "readyset-adapter",
  "readyset-client-metrics",
  "readyset-client-test-helpers",
+ "readyset-server",
  "readyset-sql",
  "readyset-sql-parsing",
  "readyset-tracing",

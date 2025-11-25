@@ -1642,6 +1642,7 @@ impl DfState {
             };
             counter!(recorded::SCHEMA_GENERATION_MISMATCH).increment(1);
             warn!(%err, ?create_cache, "Schema generation mismatch");
+            return Err(err);
         }
 
         let should_increment_schema_generation = recipe_spec

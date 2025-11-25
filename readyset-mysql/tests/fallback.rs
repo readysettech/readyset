@@ -7,7 +7,7 @@ use readyset_adapter::BackendBuilder;
 use readyset_client::query::QueryId;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
-use readyset_client_test_helpers::{self, sleep, TestBuilder};
+use readyset_client_test_helpers::{self, sleep, wait_for_schema_generation_change, TestBuilder};
 use readyset_server::Handle;
 use readyset_server::NodeIndex;
 use readyset_sql::ast::Relation;
@@ -530,17 +530,19 @@ async fn set_then_prep_and_select() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow, mysql_upstream)]
 async fn always_should_never_proxy() {
-    let (opts, _handle, shutdown_tx) = setup_with(
+    let (opts, mut handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
     )
     .await;
+    let start_generation = handle.schema_catalog().await.unwrap().generation;
     let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
+    wait_for_schema_generation_change(&mut handle, start_generation).await;
     conn.query_drop("CREATE CACHE ALWAYS FROM SELECT * FROM t")
         .await
         .unwrap();
