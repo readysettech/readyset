@@ -509,8 +509,27 @@ impl TryFromDialect<sqlparser::ast::Select> for SelectStatement {
             let (new_tables, new_joins) = from_clause
                 .into_tables_and_joins()
                 .map_err(|e| failed_err!("couldn't convert FROM clause: {e}"))?;
-            tables.extend(new_tables);
-            join.extend(new_joins);
+
+            // After we've encountered the first explicit join, all subsequent table expressions
+            // should be added as CROSS JOINs to preserve left-to-right ordering.
+            // This is important for correlated subqueries (e.g., LATERAL) that depend on
+            // earlier table expressions.
+            if join.is_empty() {
+                // No joins yet, add tables normally
+                tables.extend(new_tables);
+                join.extend(new_joins);
+            } else {
+                // We've already seen a join, so convert remaining tables to CROSS JOINs
+                debug_assert!(!tables.is_empty());
+                for table in new_tables {
+                    join.push(JoinClause {
+                        operator: JoinOperator::CrossJoin,
+                        right: JoinRightSide::Table(table),
+                        constraint: JoinConstraint::Empty,
+                    });
+                }
+                join.extend(new_joins);
+            }
         }
         Ok(SelectStatement {
             distinct: matches!(value.distinct, Some(sqlparser::ast::Distinct::Distinct)),
