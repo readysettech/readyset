@@ -732,7 +732,7 @@ async fn show_caches_index_hints() {
     // Check we have cached this query
     // in-request-path migrations is enabled, we should have a cached query
     let cached_queries = conn
-        .query::<(String, String, String, String), _>("SHOW CACHES;")
+        .query::<(String, String, String, String, String), _>("SHOW CACHES;")
         .await
         .unwrap();
     assert!(cached_queries.len() == 1);
@@ -763,7 +763,7 @@ async fn show_caches_index_hints() {
 
     // All variants of index hints should resolve to the same base query
     let cached_queries = conn
-        .query::<(String, String, String, String), _>("SHOW CACHES;")
+        .query::<(String, String, String, String, String), _>("SHOW CACHES;")
         .await
         .unwrap();
     assert!(cached_queries.len() == 1);
@@ -1011,9 +1011,9 @@ async fn show_proxied_queries_show_caches_query_text_matches() {
     conn.query_drop("SELECT id FROM t").await.unwrap();
     sleep().await;
 
-    let cached_queries: Vec<(String, String, String, String)> =
+    let cached_queries: Vec<(String, String, String, String, String)> =
         conn.query("SHOW CACHES").await.unwrap();
-    let (_, cache_name, cached_query_text, _) = cached_queries.first().unwrap();
+    let (_, cache_name, cached_query_text, _, _) = cached_queries.first().unwrap();
 
     conn.query_drop(format!("DROP CACHE {cache_name}"))
         .await
