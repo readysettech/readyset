@@ -91,3 +91,13 @@ AND t1.x = t2.x
 2
 2
 NULL
+
+# Test explicit CROSS JOIN syntax (semantically equivalent to comma join)
+query I nosort
+SELECT count(*)
+FROM t1
+CROSS JOIN t2
+WHERE t1.x = t2.x
+AND t1.x = t2.y
+----
+1

@@ -80,7 +80,10 @@ impl TryFrom<&sqlparser::ast::JoinOperator> for JoinOperator {
 
 impl JoinOperator {
     pub fn is_inner_join(&self) -> bool {
-        matches!(self, JoinOperator::Join | JoinOperator::InnerJoin)
+        matches!(
+            self,
+            JoinOperator::Join | JoinOperator::InnerJoin | JoinOperator::CrossJoin
+        )
     }
 }
 
@@ -161,5 +164,27 @@ impl DialectDisplay for JoinConstraint {
             ),
             Self::Empty => Ok(()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_inner_join() {
+        // Inner join variants should return true
+        assert!(JoinOperator::Join.is_inner_join());
+        assert!(JoinOperator::InnerJoin.is_inner_join());
+        assert!(JoinOperator::CrossJoin.is_inner_join());
+
+        // Outer join variants should return false
+        assert!(!JoinOperator::LeftJoin.is_inner_join());
+        assert!(!JoinOperator::LeftOuterJoin.is_inner_join());
+        assert!(!JoinOperator::RightJoin.is_inner_join());
+        assert!(!JoinOperator::RightOuterJoin.is_inner_join());
+
+        // MySQL-specific join should return false
+        assert!(!JoinOperator::StraightJoin.is_inner_join());
     }
 }
