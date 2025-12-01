@@ -41,7 +41,7 @@ use readyset_alloc::{StdThreadBuildWrapper, ThreadBuildWrapper};
 use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::{AuthorityControl, AuthorityType};
 use readyset_client::metrics::recorded;
-use readyset_client::ReadySetHandle;
+use readyset_client::{CacheMode, ReadySetHandle};
 use readyset_client_metrics::QueryLogMode;
 use readyset_common::ulimit::maybe_increase_nofile_limit;
 use readyset_data::upstream_system_props::{init_system_props, UpstreamSystemProperties};
@@ -480,6 +480,10 @@ pub struct Options {
     /// If set, simulates a startup verification failure.
     #[arg(long, env = "VERIFY_FAIL", hide = true)]
     pub verify_fail: bool,
+
+    /// How Readyset handles CREATE CACHE statements without explicit DEEP or SHALLOW modifiers.
+    #[arg(long, env = "CACHE_MODE", default_value_t = CacheMode::default())]
+    pub cache_mode: CacheMode,
 }
 
 impl Options {
@@ -1395,6 +1399,7 @@ where
                 .query_log_mode(Some(options.query_log_mode))
                 .unsupported_set_mode(options.unsupported_set_mode)
                 .migration_mode(migration_mode)
+                .cache_mode(options.cache_mode)
                 .query_max_failure_seconds(options.query_max_failure_seconds)
                 .telemetry_sender(telemetry_sender.clone())
                 .fallback_recovery_seconds(options.fallback_recovery_seconds)

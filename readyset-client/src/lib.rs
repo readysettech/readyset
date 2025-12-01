@@ -241,10 +241,12 @@ pub const CONNECTION_FROM_BASE: u8 = 1;
 /// connection is *not* originating from a base table domain.
 pub const CONNECTION_FROM_DOMAIN: u8 = 2;
 
+use clap::ValueEnum;
+use tokio_tower::multiplex;
+
 use readyset_sql::ast::Relation;
 use readyset_tracing::propagation::Instrumented;
 use replication_offset::ReplicationOffset;
-use tokio_tower::multiplex;
 
 mod controller;
 pub mod metrics;
@@ -262,6 +264,7 @@ pub mod replay_path;
 
 use std::convert::TryFrom;
 use std::default::Default;
+use std::fmt::Display;
 use std::future::Future;
 use std::hash::Hash;
 use std::pin::Pin;
@@ -456,5 +459,24 @@ pub fn shard_by(dt: &DfValue, shards: usize) -> usize {
             let hash = ahash::RandomState::with_seeds(0x3306, 0x6033, 0x5432, 0x6034).hash_one(dt);
             hash as usize % shards
         }
+    }
+}
+
+/// How Readyset handles CREATE CACHE statements without explicit DEEP or SHALLOW modifiers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, ValueEnum)]
+pub enum CacheMode {
+    /// Only try deep caching.
+    #[default]
+    Deep,
+    /// Only try shallow caching.
+    Shallow,
+    /// First try deep caching, and then fall back to shallow caching.
+    DeepThenShallow,
+}
+
+impl Display for CacheMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Match clap's expectations so the --help text makes sense.
+        f.write_str(self.to_possible_value().unwrap().get_name())
     }
 }

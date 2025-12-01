@@ -90,7 +90,7 @@ use readyset_client::query::*;
 use readyset_client::recipe::CacheExpr;
 use readyset_client::results::Results;
 use readyset_client::status::CacheProperties;
-use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
+use readyset_client::{CacheMode, ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{
     recorded, EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode, ReadysetExecutionEvent,
@@ -334,6 +334,7 @@ pub struct BackendBuilder {
     sampler_tx:
         Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
     db_version: Option<String>,
+    cache_mode: CacheMode,
 }
 
 impl Default for BackendBuilder {
@@ -358,6 +359,7 @@ impl Default for BackendBuilder {
             allow_cache_ddl: true,
             sampler_tx: None,
             db_version: None,
+            cache_mode: CacheMode::default(),
         }
     }
 }
@@ -419,6 +421,7 @@ impl BackendBuilder {
                 query_max_failure_duration: Duration::new(self.query_max_failure_seconds, 0),
                 fallback_recovery_duration: Duration::new(self.fallback_recovery_seconds, 0),
                 placeholder_inlining: self.placeholder_inlining,
+                _cache_mode: self.cache_mode,
             },
             telemetry_sender: self.telemetry_sender,
             authority,
@@ -538,6 +541,11 @@ impl BackendBuilder {
 
     pub fn db_version(mut self, db_version: String) -> Self {
         self.db_version = Some(db_version);
+        self
+    }
+
+    pub fn cache_mode(mut self, cache_mode: CacheMode) -> Self {
+        self.cache_mode = cache_mode;
         self
     }
 }
@@ -719,6 +727,8 @@ struct BackendSettings {
     /// Whether to automatically create inlined migrations for queries with unsupported
     /// placeholders.
     placeholder_inlining: bool,
+    /// How Readyset handles CREATE CACHE statements without explicit DEEP or SHALLOW modifiers.
+    _cache_mode: CacheMode,
 }
 
 /// QueryInfo holds information regarding the last query that was sent along this connection
