@@ -11,12 +11,17 @@ use crate::{Dialect, DialectDisplay, ast::*};
 pub struct DropTableStatement {
     pub tables: Vec<Relation>,
     pub if_exists: bool,
+    pub temporary: bool,
 }
 
 impl DialectDisplay for DropTableStatement {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
-            write!(f, "DROP TABLE ")?;
+            write!(f, "DROP")?;
+            if self.temporary {
+                write!(f, " TEMPORARY")?;
+            }
+            write!(f, " TABLE ")?;
 
             if self.if_exists {
                 write!(f, "IF EXISTS ")?;

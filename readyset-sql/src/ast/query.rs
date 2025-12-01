@@ -163,11 +163,13 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
                 object_type,
                 if_exists,
                 names,
+                temporary,
                 ..
             } => match object_type {
                 sqlparser::ast::ObjectType::Table => Ok(Self::DropTable(DropTableStatement {
                     tables: names.try_into_dialect(dialect)?,
                     if_exists,
+                    temporary,
                 })),
                 sqlparser::ast::ObjectType::View => Ok(Self::DropView(DropViewStatement {
                     views: names.try_into_dialect(dialect)?,
