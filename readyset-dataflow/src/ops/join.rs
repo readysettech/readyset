@@ -141,11 +141,19 @@ impl Join {
         }
     }
 
-    fn on_left(&self) -> Vec<usize> {
+    pub fn node_is_lhs(&self, node: LocalNodeIndex) -> bool {
+        node == *self.left
+    }
+
+    pub fn node_is_rhs(&self, node: LocalNodeIndex) -> bool {
+        node == *self.right
+    }
+
+    pub fn on_left(&self) -> Vec<usize> {
         self.on.iter().map(|(l, _)| *l).collect()
     }
 
-    fn on_right(&self) -> Vec<usize> {
+    pub fn on_right(&self) -> Vec<usize> {
         self.on.iter().map(|(_, r)| *r).collect()
     }
 

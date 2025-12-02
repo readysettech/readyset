@@ -35,7 +35,7 @@ pub enum Side {
 }
 
 impl Side {
-    fn other_side(&self) -> Self {
+    pub fn other_side(&self) -> Self {
         match self {
             Side::Left => Side::Right,
             Side::Right => Side::Left,

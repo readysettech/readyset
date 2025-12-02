@@ -63,6 +63,7 @@ use vec1::Vec1;
 use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
 pub use self::replay_paths::{ReplayPath, ReplayPathWithContext};
 use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender};
+use crate::domain::NodeOperator::Join;
 use crate::node::special::EgressTx;
 use crate::node::{Column, NodeProcessingResult, ProcessEnv};
 use crate::ops::Side;
@@ -2715,6 +2716,56 @@ impl Domain {
                             .map(|state| state.is_partial())
                             .unwrap_or(false)
                     });
+
+                    if let Some(Join(join)) = self.nodes[src].borrow_mut().as_mut_internal() {
+                        let other_side = join.side_to_trigger_upquery().other_side();
+                        missed_keys.iter_mut().for_each(|miss| {
+                            match other_side {
+                                Side::Left => {
+                                    if join.node_is_lhs(miss.node) {
+                                        // lookup the remapped key for the right side
+                                        if let Some(remapped_keys) = self.remapped_keys.get(
+                                            src,
+                                            cols,
+                                            miss.node,
+                                            &miss.column_indices,
+                                            &miss.missed_keys,
+                                        ) {
+                                            let mut column_indices = join.on_left();
+                                            column_indices.extend(miss.column_indices.clone());
+                                            miss.column_indices = column_indices;
+                                            if let Ok(remapped_keys_vec1) =
+                                                Vec1::try_from_vec(remapped_keys)
+                                            {
+                                                miss.missed_keys = remapped_keys_vec1;
+                                            }
+                                        }
+                                    }
+                                }
+                                Side::Right => {
+                                    if join.node_is_rhs(miss.node) {
+                                        // lookup the remapped key for the left side
+                                        if let Some(remapped_keys) = self.remapped_keys.get(
+                                            src,
+                                            cols,
+                                            miss.node,
+                                            &miss.column_indices,
+                                            &miss.missed_keys,
+                                        ) {
+                                            let mut column_indices = join.on_right();
+                                            column_indices.extend(miss.column_indices.clone());
+                                            miss.column_indices = column_indices;
+                                            if let Ok(remapped_keys_vec1) =
+                                                Vec1::try_from_vec(remapped_keys)
+                                            {
+                                                miss.missed_keys = remapped_keys_vec1;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
                     missed_keys
                 } else {
                     vec![m]
