@@ -84,6 +84,7 @@ pub struct CacheInfo {
     pub schema_search_path: Vec<SqlIdentifier>,
     pub ttl_ms: Option<u64>,
     pub ddl_req: CacheDDLRequest,
+    pub always: bool,
 }
 
 impl From<CacheInfo> for CreateCacheStatement {
@@ -96,7 +97,7 @@ impl From<CacheInfo> for CreateCacheStatement {
                 .map(readyset_sql::ast::EvictionPolicy::from_ttl_ms),
             inner: Ok(CacheInner::Statement(Box::new(info.query))),
             unparsed_create_cache_statement: None,
-            always: false,
+            always: info.always,
             concurrently: false,
         }
     }
@@ -112,6 +113,7 @@ pub struct Cache<K, V> {
     schema_search_path: Vec<SqlIdentifier>,
     ttl_ms: Option<u64>,
     ddl_req: CacheDDLRequest,
+    always: bool,
 }
 
 impl<K, V> Debug for Cache<K, V>
@@ -143,6 +145,7 @@ where
         query: SelectStatement,
         schema_search_path: Vec<SqlIdentifier>,
         ddl_req: CacheDDLRequest,
+        always: bool,
     ) -> Self {
         let ttl_ms = match policy {
             EvictionPolicy::Ttl(ttl) => Some(ttl.as_millis().try_into().unwrap_or(u64::MAX)),
@@ -158,6 +161,7 @@ where
             schema_search_path,
             ttl_ms,
             ddl_req,
+            always,
         }
     }
 
@@ -235,6 +239,7 @@ where
             schema_search_path: self.schema_search_path.clone(),
             ttl_ms: self.ttl_ms,
             ddl_req: self.ddl_req.clone(),
+            always: self.always,
         }
     }
 
@@ -291,6 +296,7 @@ mod tests {
             SelectStatement::default(),
             vec![],
             test_ddl_req(),
+            false,
         )
     }
 
@@ -346,6 +352,7 @@ mod tests {
             stmt.clone(),
             vec![],
             test_ddl_req(),
+            false,
         );
         let cache_1 = Cache::new(
             1,
@@ -356,6 +363,7 @@ mod tests {
             stmt.clone(),
             vec![],
             test_ddl_req(),
+            false,
         );
 
         let key = vec!["shared_key"];
@@ -425,6 +433,7 @@ mod tests {
             SelectStatement::default(),
             vec![],
             test_ddl_req(),
+            false,
         );
 
         let debug_str = format!("{:?}", cache);

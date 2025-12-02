@@ -46,7 +46,15 @@ where
     K: Hash + Eq + Send + Sync + SizeOf + 'static,
     V: SizeOf + Send + Sync + 'static,
 {
-    manager.create_cache(name, query_id, test_stmt(), vec![], policy, test_ddl_req())
+    manager.create_cache(
+        name,
+        query_id,
+        test_stmt(),
+        vec![],
+        policy,
+        test_ddl_req(),
+        false,
+    )
 }
 
 async fn insert_value<K, V>(result: CacheResult<K, V>, values: Vec<V>)

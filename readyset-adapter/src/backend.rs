@@ -2012,7 +2012,10 @@ where
                 )
                 .await
             }
-            PrepareResultInner::NoriaAndUpstream(.., uprep) if should_fallback => {
+            PrepareResultInner::NoriaAndUpstream(.., uprep)
+            | PrepareResultInner::Shallow(uprep)
+                if should_fallback =>
+            {
                 Self::execute_upstream(
                     Self::upstream_mut(upstream)?,
                     uprep,
@@ -2348,6 +2351,7 @@ where
         mut stmt: SelectStatement,
         policy: Option<ast::EvictionPolicy>,
         ddl_req: CacheDDLRequest,
+        always: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         adapter_rewrites::rewrite_equivalent(&mut stmt, self.noria.rewrite_params())?;
 
@@ -2370,13 +2374,18 @@ where
             self.noria.schema_search_path().to_owned(),
             policy,
             ddl_req.clone(),
+            always,
         );
 
         if res.is_ok() {
             self.state.query_status_cache.update_query_migration_state(
-                &ViewCreateRequest::new(stmt, self.noria.schema_search_path().to_owned()),
+                &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
                 MigrationState::Successful(CacheType::Shallow),
                 None,
+            );
+            self.state.query_status_cache.always_attempt_readyset(
+                &ViewCreateRequest::new(stmt, self.noria.schema_search_path().to_owned()),
+                always,
             );
         }
 
@@ -2787,6 +2796,7 @@ where
                 query_id,
                 query,
                 ttl_ms,
+                always,
                 ..
             } in self.shallow.list_caches(query_id, None)
             {
@@ -2802,6 +2812,7 @@ where
                     if let Some(ttl_ms) = ttl_ms {
                         properties.set_ttl(ttl_ms);
                     }
+                    properties.set_always(always);
                     properties.to_string().into()
                 };
                 let count = self.metrics_handle.as_ref().map(|_| 0.to_string().into());
@@ -3032,7 +3043,7 @@ where
                         let ddl_req = ddl_req.ok_or_else(|| {
                             internal_err!("No statement supplied to shallow cache")
                         })?;
-                        self.create_shallow_cache(name.clone(), stmt, *policy, ddl_req)
+                        self.create_shallow_cache(name.clone(), stmt, *policy, ddl_req, *always)
                             .await
                     }
                 }
@@ -3206,9 +3217,10 @@ where
         shallow: &Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
-        mut req: ViewCreateRequest,
+        req: ViewCreateRequest,
         query: &'a str,
         event: &mut QueryExecutionEvent,
+        params: QueryParameters,
         sampler_tx: Option<
             &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
         >,
@@ -3216,19 +3228,6 @@ where
             &async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
         >,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let params = match adapter_rewrites::rewrite_equivalent(
-            &mut req.statement,
-            noria.rewrite_params(),
-        ) {
-            Ok(params) => params,
-            Err(err) => {
-                if upstream.is_some() {
-                    return Self::query_fallback(upstream, query, event, None).await;
-                } else {
-                    return Err(err.into());
-                }
-            }
-        };
         let query_id = QueryId::from_select(&req.statement, noria.schema_search_path());
         event.query_id = Some(query_id).into();
         let keys = params.make_keys::<DfValue>(&[])?;
@@ -3916,7 +3915,24 @@ where
                         .map_err(Into::into)
                 }
             }
-            Ok(SqlQuery::Select(stmt)) => {
+            Ok(SqlQuery::Select(mut stmt)) => {
+                let params = match adapter_rewrites::rewrite_equivalent(
+                    &mut stmt,
+                    self.noria.rewrite_params(),
+                ) {
+                    Ok(params) => params,
+                    Err(_) if self.has_fallback() => {
+                        return Self::query_fallback(
+                            self.upstream.as_mut(),
+                            query,
+                            &mut event,
+                            None,
+                        )
+                        .await;
+                    }
+                    Err(e) => return Err(e.into()),
+                };
+
                 let view_request =
                     ViewCreateRequest::new(stmt, self.noria.schema_search_path().to_owned());
 
@@ -3931,24 +3947,36 @@ where
                 event.query_id =
                     QueryIdWrapper::Uncalculated(self.noria.schema_search_path().into());
 
-                let sampler_tx = if !self.is_internal_connection {
-                    self.sampler_tx.as_ref()
+                let should_proxy = self.state.proxy_state.should_proxy()
+                    && !self
+                        .state
+                        .query_status_cache
+                        .query_status(&view_request)
+                        .always;
+
+                if should_proxy {
+                    Self::query_fallback(self.upstream.as_mut(), query, &mut event, None).await
                 } else {
-                    None
-                };
-                Self::query_shallow(
-                    &mut self.noria,
-                    self.upstream.as_mut(),
-                    &self.shallow,
-                    &self.settings,
-                    &mut self.state,
-                    view_request,
-                    query,
-                    &mut event,
-                    sampler_tx,
-                    self.shallow_refresh_sender.as_ref(),
-                )
-                .await
+                    let sampler_tx = if !self.is_internal_connection {
+                        self.sampler_tx.as_ref()
+                    } else {
+                        None
+                    };
+                    Self::query_shallow(
+                        &mut self.noria,
+                        self.upstream.as_mut(),
+                        &self.shallow,
+                        &self.settings,
+                        &mut self.state,
+                        view_request,
+                        query,
+                        &mut event,
+                        params,
+                        sampler_tx,
+                        self.shallow_refresh_sender.as_ref(),
+                    )
+                    .await
+                }
             }
             Ok(SqlQuery::Deallocate(stmt)) => Ok(Self::handle_deallocate_statement(stmt)),
             Ok(_) if self.state.proxy_state.should_proxy() => {
@@ -4325,6 +4353,7 @@ async fn remove_ddl_on_error<T, F, Fut>(
 /// Recreate shallow caches from stored DDL requests on adapter startup.
 pub async fn recreate_shallow_caches<V>(
     shallow: Arc<CacheManager<Vec<DfValue>, V>>,
+    query_status_cache: &'static QueryStatusCache,
     ddl_requests: Vec<CacheDDLRequest>,
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,
@@ -4333,17 +4362,24 @@ where
     V: Debug + Send + Sync + SizeOf + 'static,
 {
     for req in ddl_requests {
-        if let Err(e) =
-            recreate_single_shallow_cache(&shallow, req, parsing_preset, rewrite_params).await
+        if let Err(e) = handle_shallow_cache_statement(
+            &shallow,
+            query_status_cache,
+            req,
+            parsing_preset,
+            rewrite_params,
+        )
+        .await
         {
-            warn!(error = %e, "Failed to recreate shallow cache");
+            warn!(error = %e, "Failed to handle shallow cache statement");
         }
     }
     Ok(())
 }
 
-async fn recreate_single_shallow_cache<V>(
+async fn handle_shallow_cache_statement<V>(
     shallow: &CacheManager<Vec<DfValue>, V>,
+    query_status_cache: &'static QueryStatusCache,
     req: CacheDDLRequest,
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,
@@ -4357,38 +4393,71 @@ where
         &req.unparsed_stmt,
     )?;
 
-    let SqlQuery::CreateCache(create_cache) = query else {
-        internal!("Not a CREATE CACHE statement");
-    };
+    match query {
+        SqlQuery::CreateCache(create_stmt) => {
+            recover_shallow_cache_create(
+                shallow,
+                query_status_cache,
+                create_stmt,
+                req.schema_search_path.clone(),
+                rewrite_params,
+                req,
+            )
+            .await
+        }
+        _ => internal!("Unexpected statement: {:?}", query),
+    }
+}
 
-    if !matches!(create_cache.cache_type, Some(CacheType::Shallow)) {
+async fn recover_shallow_cache_create<V>(
+    shallow: &CacheManager<Vec<DfValue>, V>,
+    query_status_cache: &'static QueryStatusCache,
+    stmt: CreateCacheStatement,
+    schema_search_path: Vec<SqlIdentifier>,
+    rewrite_params: AdapterRewriteParams,
+    ddl_req: CacheDDLRequest,
+) -> ReadySetResult<()>
+where
+    V: Debug + Send + Sync + SizeOf + 'static,
+{
+    if !matches!(stmt.cache_type, Some(CacheType::Shallow)) {
         internal!("Not a shallow cache");
     }
 
-    let policy = create_cache
-        .policy
-        .ok_or_else(|| internal_err!("Missing policy"))?;
+    let policy = stmt.policy.ok_or_else(|| internal_err!("Missing policy"))?;
 
     let policy = convert_eviction_policy(policy);
 
-    let mut stmt = match create_cache.inner {
-        Ok(CacheInner::Statement(stmt)) => *stmt,
+    let mut select_stmt = match stmt.inner {
+        Ok(CacheInner::Statement(s)) => *s,
         Ok(CacheInner::Id(_)) => internal!("Cannot recreate from query ID"),
         Err(e) => internal!("Failed to parse SELECT: {e}"),
     };
 
-    adapter_rewrites::rewrite_equivalent(&mut stmt, rewrite_params)?;
+    adapter_rewrites::rewrite_equivalent(&mut select_stmt, rewrite_params)?;
 
-    let query_id = QueryId::from_select(&stmt, &req.schema_search_path);
-    let name = create_cache.name.unwrap_or_else(|| query_id.into());
+    let query_id = QueryId::from_select(&select_stmt, &schema_search_path);
+    let name = stmt.name.unwrap_or_else(|| query_id.into());
 
     shallow.create_cache(
         Some(name),
         Some(query_id),
-        stmt,
-        req.schema_search_path.clone(),
+        select_stmt.clone(),
+        schema_search_path.clone(),
         policy,
-        req,
+        ddl_req,
+        stmt.always,
     )?;
+
+    query_status_cache.update_query_migration_state(
+        &ViewCreateRequest::new(select_stmt.clone(), schema_search_path.clone()),
+        MigrationState::Successful(CacheType::Shallow),
+        None,
+    );
+    query_status_cache.always_attempt_readyset(
+        &ViewCreateRequest::new(select_stmt, schema_search_path),
+        stmt.always,
+    );
+
     Ok(())
 }

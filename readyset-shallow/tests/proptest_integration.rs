@@ -53,7 +53,15 @@ where
     K: Hash + Eq + Send + Sync + SizeOf + 'static,
     V: SizeOf + Send + Sync + 'static,
 {
-    manager.create_cache(name, query_id, test_stmt(), vec![], policy, test_ddl_req())
+    manager.create_cache(
+        name,
+        query_id,
+        test_stmt(),
+        vec![],
+        policy,
+        test_ddl_req(),
+        false,
+    )
 }
 
 async fn run_insert_then_retrieve(keys: Vec<String>) -> Result<(), TestCaseError> {

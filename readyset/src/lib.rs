@@ -1343,6 +1343,7 @@ where
             info!("Recreating {} shallow caches", shallow_ddl_requests.len());
             if let Err(e) = rt.block_on(readyset_adapter::recreate_shallow_caches(
                 shallow.clone(),
+                query_status_cache,
                 shallow_ddl_requests,
                 parsing_preset,
                 adapter_rewrite_params,

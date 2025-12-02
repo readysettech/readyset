@@ -97,6 +97,7 @@ where
         None
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_cache(
         &self,
         name: Option<Relation>,
@@ -105,6 +106,7 @@ where
         schema_search_path: Vec<SqlIdentifier>,
         policy: EvictionPolicy,
         ddl_req: CacheDDLRequest,
+        always: bool,
     ) -> ReadySetResult<()> {
         Self::check_identifiers(name.as_ref(), query_id.as_ref())?;
         let display_name = Self::format_name(name.as_ref(), query_id.as_ref());
@@ -133,6 +135,7 @@ where
             query,
             schema_search_path,
             ddl_req,
+            always,
         ));
 
         if let Some(name) = name {
