@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use assert_matches::assert_matches;
+use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::Relation;
@@ -27,6 +28,14 @@ fn test_stmt() -> SelectStatement {
     SelectStatement::default()
 }
 
+fn test_ddl_req() -> CacheDDLRequest {
+    CacheDDLRequest {
+        unparsed_stmt: "CREATE SHALLOW CACHE test AS SELECT 1".to_string(),
+        schema_search_path: vec![],
+        dialect: readyset_sql::Dialect::PostgreSQL.into(),
+    }
+}
+
 fn create_test_cache<K, V>(
     manager: &CacheManager<K, V>,
     name: Option<Relation>,
@@ -37,7 +46,7 @@ where
     K: Hash + Eq + Send + Sync + SizeOf + 'static,
     V: SizeOf + Send + Sync + 'static,
 {
-    manager.create_cache(name, query_id, test_stmt(), vec![], policy)
+    manager.create_cache(name, query_id, test_stmt(), vec![], policy, test_ddl_req())
 }
 
 async fn insert_value<K, V>(result: CacheResult<K, V>, values: Vec<V>)

@@ -8,6 +8,7 @@ use moka::future::Cache as MokaCache;
 use papaya::HashMap;
 use tracing::info;
 
+use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_errors::{ReadySetError, ReadySetResult, internal};
@@ -103,6 +104,7 @@ where
         query: SelectStatement,
         schema_search_path: Vec<SqlIdentifier>,
         policy: EvictionPolicy,
+        ddl_req: CacheDDLRequest,
     ) -> ReadySetResult<()> {
         Self::check_identifiers(name.as_ref(), query_id.as_ref())?;
         let display_name = Self::format_name(name.as_ref(), query_id.as_ref());
@@ -130,6 +132,7 @@ where
             query_id,
             query,
             schema_search_path,
+            ddl_req,
         ));
 
         if let Some(name) = name {

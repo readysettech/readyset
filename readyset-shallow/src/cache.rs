@@ -8,6 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use moka::future::Cache as MokaCache;
 use moka::policy::Expiry;
 
+use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_sql::ast::{
     CacheInner, CacheType, CreateCacheStatement, Relation, SelectStatement, SqlIdentifier,
@@ -82,6 +83,7 @@ pub struct CacheInfo {
     pub query: SelectStatement,
     pub schema_search_path: Vec<SqlIdentifier>,
     pub ttl_ms: Option<u64>,
+    pub ddl_req: CacheDDLRequest,
 }
 
 impl From<CacheInfo> for CreateCacheStatement {
@@ -109,6 +111,7 @@ pub struct Cache<K, V> {
     query: SelectStatement,
     schema_search_path: Vec<SqlIdentifier>,
     ttl_ms: Option<u64>,
+    ddl_req: CacheDDLRequest,
 }
 
 impl<K, V> Debug for Cache<K, V>
@@ -130,6 +133,7 @@ where
     K: Eq + Hash + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         id: u64,
         inner: InnerCache<K, V>,
@@ -138,6 +142,7 @@ where
         query_id: Option<QueryId>,
         query: SelectStatement,
         schema_search_path: Vec<SqlIdentifier>,
+        ddl_req: CacheDDLRequest,
     ) -> Self {
         let ttl_ms = match policy {
             EvictionPolicy::Ttl(ttl) => Some(ttl.as_millis().try_into().unwrap_or(u64::MAX)),
@@ -152,6 +157,7 @@ where
             query,
             schema_search_path,
             ttl_ms,
+            ddl_req,
         }
     }
 
@@ -228,6 +234,7 @@ where
             query: self.query.clone(),
             schema_search_path: self.schema_search_path.clone(),
             ttl_ms: self.ttl_ms,
+            ddl_req: self.ddl_req.clone(),
         }
     }
 
@@ -261,6 +268,14 @@ mod tests {
 
     const ID: u64 = 0;
 
+    fn test_ddl_req() -> CacheDDLRequest {
+        CacheDDLRequest {
+            unparsed_stmt: "CREATE SHALLOW CACHE test AS SELECT 1".to_string(),
+            schema_search_path: vec![],
+            dialect: readyset_sql::Dialect::PostgreSQL.into(),
+        }
+    }
+
     fn new<K, V>(max_capacity: Option<u64>, policy: EvictionPolicy) -> Cache<K, V>
     where
         K: Eq + Hash + Send + Sync + SizeOf + 'static,
@@ -275,6 +290,7 @@ mod tests {
             None,
             SelectStatement::default(),
             vec![],
+            test_ddl_req(),
         )
     }
 
@@ -329,6 +345,7 @@ mod tests {
             None,
             stmt.clone(),
             vec![],
+            test_ddl_req(),
         );
         let cache_1 = Cache::new(
             1,
@@ -338,6 +355,7 @@ mod tests {
             None,
             stmt.clone(),
             vec![],
+            test_ddl_req(),
         );
 
         let key = vec!["shared_key"];
@@ -406,6 +424,7 @@ mod tests {
             Some(query_id),
             SelectStatement::default(),
             vec![],
+            test_ddl_req(),
         );
 
         let debug_str = format!("{:?}", cache);

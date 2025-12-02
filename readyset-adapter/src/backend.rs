@@ -2347,15 +2347,13 @@ where
         mut name: Option<Relation>,
         mut stmt: SelectStatement,
         policy: Option<ast::EvictionPolicy>,
-        ddl_req: Option<CacheDDLRequest>,
+        ddl_req: CacheDDLRequest,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         adapter_rewrites::rewrite_equivalent(&mut stmt, self.noria.rewrite_params())?;
 
-        if let Some(ref ddl_req) = ddl_req {
-            self.authority
-                .add_shallow_cache_ddl_request(ddl_req.clone())
-                .await?;
-        }
+        self.authority
+            .add_shallow_cache_ddl_request(ddl_req.clone())
+            .await?;
 
         let (query_id, name, requested_name) = self.make_name_and_id(&mut name, &stmt);
 
@@ -2371,6 +2369,7 @@ where
             stmt.clone(),
             self.noria.schema_search_path().to_owned(),
             policy,
+            ddl_req.clone(),
         );
 
         if res.is_ok() {
@@ -2384,7 +2383,7 @@ where
         remove_ddl_on_error(
             &res,
             &self.authority,
-            ddl_req,
+            Some(ddl_req),
             requested_name,
             "shallow",
             |auth, req| async move { auth.remove_shallow_cache_ddl_request(req).await },
@@ -2474,10 +2473,11 @@ where
         })
     }
 
-    fn drop_shallow_cached_query(
+    async fn drop_shallow_cached_query(
         &mut self,
         name: Option<&Relation>,
         query_id: Option<QueryId>,
+        ddl_req: CacheDDLRequest,
     ) -> ReadySetResult<()> {
         let info = self
             .shallow
@@ -2495,6 +2495,22 @@ where
             let view_request = ViewCreateRequest::new(query, schema_search_path);
             self.drop_view_request(&view_request);
         };
+
+        if let Err(e) = retry_with_exponential_backoff!(
+            || async {
+                self.authority
+                    .remove_shallow_cache_ddl_request(ddl_req.clone())
+                    .await
+            },
+            retries: 5,
+            delay: 1,
+            backoff: 2,
+        ) {
+            warn!(
+                error = %e,
+                "Failed to remove shallow cache DDL request"
+            );
+        }
 
         Ok(())
     }
@@ -2564,6 +2580,7 @@ where
             name,
             query_id,
             query,
+            ddl_req,
             ..
         } in self.shallow.list_caches(query_id, name)
         {
@@ -2576,7 +2593,8 @@ where
                 statement = %Sensitive(&query.display(self.settings.dialect)),
                 "Dropping previously shallow-cached query",
             );
-            self.drop_shallow_cached_query(name.as_ref(), query_id)?;
+            self.drop_shallow_cached_query(name.as_ref(), query_id, ddl_req)
+                .await?;
         }
         Ok(())
     }
@@ -3011,6 +3029,9 @@ where
                         .await
                     }
                     CacheType::Shallow => {
+                        let ddl_req = ddl_req.ok_or_else(|| {
+                            internal_err!("No statement supplied to shallow cache")
+                        })?;
                         self.create_shallow_cache(name.clone(), stmt, *policy, ddl_req)
                             .await
                     }
@@ -3032,7 +3053,11 @@ where
                     .await?;
                 let DropCacheStatement { name } = drop_cache;
 
-                if self.drop_shallow_cached_query(Some(name), None).is_ok() {
+                if self
+                    .drop_shallow_cached_query(Some(name), None, ddl_req.clone())
+                    .await
+                    .is_ok()
+                {
                     Ok(noria_connector::QueryResult::Delete {
                         num_rows_deleted: 1,
                     })
@@ -4361,8 +4386,9 @@ where
         Some(name),
         Some(query_id),
         stmt,
-        req.schema_search_path,
+        req.schema_search_path.clone(),
         policy,
+        req,
     )?;
     Ok(())
 }
