@@ -80,7 +80,7 @@ impl DataGenerator {
         let ddl = std::fs::read_to_string(benchmark_path(&self.schema)?)?;
 
         let parsed = multi_ddl(LocatedSpan::new(ddl.as_bytes()), conn.dialect())
-            .map_err(|e| anyhow!("Error parsing DDL {}", e.to_string()))?;
+            .map_err(|e| anyhow!("Error parsing DDL {e}"))?;
         // This may be a multi-line DDL, if it is semi-colons terminate the statements.
         for statement in parsed.1 {
             conn.query_drop(statement.display(conn.dialect()).to_string())
