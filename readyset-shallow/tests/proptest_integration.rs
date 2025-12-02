@@ -7,6 +7,7 @@ use proptest::prelude::*;
 use readyset_client::query::QueryId;
 use readyset_shallow::{CacheManager, CacheResult, EvictionPolicy, MySqlMetadata, QueryMetadata};
 use readyset_sql::ast::SelectStatement;
+use readyset_util::SizeOf;
 
 fn test_metadata() -> QueryMetadata {
     QueryMetadata::MySql(MySqlMetadata {
@@ -33,13 +34,24 @@ fn test_stmt() -> SelectStatement {
     SelectStatement::default()
 }
 
+fn create_test_cache<K, V>(
+    manager: &CacheManager<K, V>,
+    name: Option<readyset_sql::ast::Relation>,
+    query_id: Option<QueryId>,
+    policy: EvictionPolicy,
+) -> Result<(), readyset_errors::ReadySetError>
+where
+    K: Hash + Eq + Send + Sync + SizeOf + 'static,
+    V: SizeOf + Send + Sync + 'static,
+{
+    manager.create_cache(name, query_id, test_stmt(), vec![], policy)
+}
+
 async fn run_insert_then_retrieve(keys: Vec<String>) -> Result<(), TestCaseError> {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    manager
-        .create_cache(None, Some(query_id), test_stmt(), vec![], test_policy())
-        .unwrap();
+    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
 
     for key in &keys {
         let result = manager.get_or_start_insert(&query_id, key.clone()).await;
@@ -97,12 +109,8 @@ async fn run_cache_isolation(keys1: Vec<String>, keys2: Vec<String>) -> Result<(
     let query_id_1 = QueryId::from_unparsed_select("SELECT * FROM table1");
     let query_id_2 = QueryId::from_unparsed_select("SELECT * FROM table2");
 
-    manager
-        .create_cache(None, Some(query_id_1), test_stmt(), vec![], test_policy())
-        .unwrap();
-    manager
-        .create_cache(None, Some(query_id_2), test_stmt(), vec![], test_policy())
-        .unwrap();
+    create_test_cache(&manager, None, Some(query_id_1), test_policy()).unwrap();
+    create_test_cache(&manager, None, Some(query_id_2), test_policy()).unwrap();
 
     insert_keys(&manager, &query_id_1, &keys1, "cache1").await;
     insert_keys(&manager, &query_id_2, &keys2, "cache2").await;
@@ -117,9 +125,7 @@ async fn run_no_data_loss(keys: HashSet<String>) -> Result<(), TestCaseError> {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    manager
-        .create_cache(None, Some(query_id), test_stmt(), vec![], test_policy())
-        .unwrap();
+    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
 
     for key in &keys {
         let result = manager.get_or_start_insert(&query_id, key.clone()).await;
@@ -145,9 +151,7 @@ async fn run_idempotent_reads(key: String, reads: usize) -> Result<(), TestCaseE
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    manager
-        .create_cache(None, Some(query_id), test_stmt(), vec![], test_policy())
-        .unwrap();
+    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
 
     let result = manager.get_or_start_insert(&query_id, key.clone()).await;
     insert_value(result, vec![format!("value_{key}")], test_metadata()).await;
@@ -166,9 +170,7 @@ async fn run_memory_accounting(value_sizes: Vec<usize>) -> Result<(), TestCaseEr
     let manager = CacheManager::<String, String>::new(Some(10240));
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    manager
-        .create_cache(None, Some(query_id), test_stmt(), vec![], test_policy())
-        .unwrap();
+    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
 
     for (i, size) in value_sizes.iter().enumerate() {
         let key = format!("key_{i}");
