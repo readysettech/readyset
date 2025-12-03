@@ -1,0 +1,73 @@
+statement ok
+create table foo (
+  id int primary key,
+  bar_id int,
+  category text
+);
+
+statement ok
+create table bar (
+  id int primary key,
+  text_value text
+);
+
+statement ok
+insert into bar (id, text_value) values
+  (1, 'ok'),
+  (2, null),
+  (3, 'toolong'),
+  (4, 'short'),
+  (5, 'tiny');
+
+statement ok
+insert into foo (id, bar_id, category) values
+  (1, 1, 'other'),
+  (2, 2, 'other'),
+  (3, 3, 'other'),
+  (4, 4, 'other'),
+  (5, 5, 'something_else');
+
+# Baseline: IS NOT NULL in ON clause should still attach rows with long values.
+query IT rowsort
+SELECT
+  foo.id,
+  bar.text_value
+FROM
+  foo
+LEFT JOIN bar
+  ON bar.id = foo.bar_id
+  AND bar.text_value IS NOT NULL
+WHERE
+  foo.category = 'other'
+----
+1
+ok
+2
+NULL
+3
+toolong
+4
+short
+
+# Regression: computed predicate in ON clause should be treated as a right-local filter.
+query IT rowsort
+SELECT
+  foo.id,
+  bar.text_value
+FROM
+  foo
+LEFT JOIN bar
+  ON bar.id = foo.bar_id
+  AND bar.text_value IS NOT NULL
+  AND length(bar.text_value) <= 5
+WHERE
+  foo.category = 'other'
+----
+1
+ok
+2
+NULL
+3
+NULL
+4
+short

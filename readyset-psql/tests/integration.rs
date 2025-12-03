@@ -2119,6 +2119,77 @@ async fn trunc_in_trx() {
     shutdown_tx.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn left_join_on_computed_predicate_filters_right_side() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let conn = connect(opts).await;
+
+    conn.simple_query("CREATE TABLE foo (id INT PRIMARY KEY, bar_id INT, category TEXT);")
+        .await
+        .unwrap();
+    conn.simple_query("CREATE TABLE bar (id INT PRIMARY KEY, text_value TEXT);")
+        .await
+        .unwrap();
+
+    conn.simple_query(
+        "INSERT INTO bar (id, text_value) VALUES \
+            (1, 'ok'), \
+            (2, NULL), \
+            (3, 'toolong'), \
+            (4, 'short'), \
+            (5, 'tiny');",
+    )
+    .await
+    .unwrap();
+
+    conn.simple_query(
+        "INSERT INTO foo (id, bar_id, category) VALUES \
+            (1, 1, 'other'), \
+            (2, 2, 'other'), \
+            (3, 3, 'other'), \
+            (4, 4, 'other'), \
+            (5, 5, 'something_else');",
+    )
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let rows = conn
+        .query(
+            "SELECT \
+                foo.id, \
+                bar.text_value \
+             FROM foo \
+             LEFT JOIN bar \
+               ON bar.id = foo.bar_id \
+               AND bar.text_value IS NOT NULL \
+               AND length(bar.text_value) <= 5 \
+             WHERE foo.category = 'other' \
+             ORDER BY foo.id",
+            &[],
+        )
+        .await
+        .unwrap();
+
+    let results: Vec<(i32, Option<String>)> = rows
+        .into_iter()
+        .map(|row| (row.get(0), row.get(1)))
+        .collect();
+
+    assert_eq!(
+        results,
+        vec![
+            (1, Some("ok".to_string())),
+            (2, None),
+            (3, None),
+            (4, Some("short".to_string()))
+        ]
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
 mod http_tests {
     use super::*;
     #[tokio::test(flavor = "multi_thread")]

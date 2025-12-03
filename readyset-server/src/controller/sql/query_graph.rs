@@ -14,7 +14,7 @@ use readyset_errors::{
     unsupported, unsupported_err, ReadySetResult,
 };
 use readyset_sql::analysis::visit_mut::{walk_expr, VisitorMut};
-use readyset_sql::analysis::{is_aggregate, ReferredColumns};
+use readyset_sql::analysis::{is_aggregate, ReferredColumns, ReferredTables};
 use readyset_sql::ast::{
     self, BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
     ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, NullOrder,
@@ -690,9 +690,18 @@ fn classify_conditionals(
                         local.entry(table.clone()).or_default().push(ce.clone());
                     }
 
-                    // Comparisons between computed columns and literals: Store globally
+                    // Any other binary predicate: if it mentions exactly one table, it is a local
+                    // predicate for that table; otherwise, it is a global predicate.
                     _ => {
-                        global.push(ce.clone());
+                        let mut tables = ce.referred_tables().into_iter();
+                        match (tables.next(), tables.next()) {
+                            (Some(table), None) => {
+                                local.entry(table).or_default().push(ce.clone());
+                            }
+                            _ => {
+                                global.push(ce.clone());
+                            }
+                        }
                     }
                 }
             } else {
@@ -1833,6 +1842,45 @@ mod tests {
                 );
                 assert_eq!(*global_preds, vec![]);
                 assert_eq!(*params, vec![]);
+            }
+            QueryGraphEdge::Join { .. } => panic!("Expected left join, got {join:?}"),
+        }
+    }
+
+    #[test]
+    fn computed_right_local_predicates_in_left_join() {
+        let qg = make_query_graph(
+            "SELECT foo.id, bar.text_value \
+             FROM foo \
+             LEFT JOIN bar \
+               ON bar.id = foo.bar_id \
+               AND bar.text_value IS NOT NULL \
+               AND length(bar.text_value) <= 5 \
+             WHERE foo.category = 'other'",
+        );
+
+        let join = qg.edges.get(&("foo".into(), "bar".into())).unwrap();
+
+        match join {
+            QueryGraphEdge::LeftJoin {
+                on,
+                left_local_preds,
+                right_local_preds,
+                global_preds,
+                params,
+            } => {
+                assert_eq!(
+                    *on,
+                    vec![JoinPredicate {
+                        left: Column::from("foo.bar_id"),
+                        right: Column::from("bar.id"),
+                    }]
+                );
+                assert!(left_local_preds.is_empty());
+                // Both the IS NOT NULL and the length() predicate should be treated as right-local.
+                assert_eq!(right_local_preds.len(), 2);
+                assert!(global_preds.is_empty());
+                assert!(params.is_empty());
             }
             QueryGraphEdge::Join { .. } => panic!("Expected left join, got {join:?}"),
         }
