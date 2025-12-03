@@ -623,6 +623,15 @@ pub struct WorkerOptions {
     )]
     pub worker_request_timeout_seconds: u64,
 
+    /// Timeout in seconds for table requests issued to domains
+    #[arg(
+        long,
+        env = "TABLE_REQUEST_TIMEOUT_SECONDS",
+        default_value = "1800",
+        hide = true
+    )]
+    pub table_request_timeout_seconds: u64,
+
     /// Interval, in seconds, on which to automatically run recovery as long as there are
     /// unscheduled domains
     #[arg(
