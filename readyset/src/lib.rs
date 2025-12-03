@@ -484,6 +484,10 @@ pub struct Options {
     /// How Readyset handles CREATE CACHE statements without explicit DEEP or SHALLOW modifiers.
     #[arg(long, env = "CACHE_MODE", default_value_t = CacheMode::default())]
     pub cache_mode: CacheMode,
+
+    /// Specifies the default TTL for shallow caches when no TTL is specified.
+    #[arg(long, env = "DEFAULT_TTL_MS", default_value = "10000")]
+    pub default_ttl_ms: u64,
 }
 
 impl Options {
@@ -1355,6 +1359,7 @@ where
                 shallow_ddl_requests,
                 parsing_preset,
                 adapter_rewrite_params,
+                options.default_ttl_ms,
             )) {
                 error!("Failed to recreate shallow caches: {}", e);
             }
@@ -1400,6 +1405,7 @@ where
                 .unsupported_set_mode(options.unsupported_set_mode)
                 .migration_mode(migration_mode)
                 .cache_mode(options.cache_mode)
+                .default_ttl_ms(options.default_ttl_ms)
                 .query_max_failure_seconds(options.query_max_failure_seconds)
                 .telemetry_sender(telemetry_sender.clone())
                 .fallback_recovery_seconds(options.fallback_recovery_seconds)

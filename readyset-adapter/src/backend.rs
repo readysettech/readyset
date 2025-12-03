@@ -337,6 +337,7 @@ pub struct BackendBuilder {
         Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
     db_version: Option<String>,
     cache_mode: CacheMode,
+    default_ttl_ms: u64,
 }
 
 impl Default for BackendBuilder {
@@ -362,6 +363,7 @@ impl Default for BackendBuilder {
             sampler_tx: None,
             db_version: None,
             cache_mode: CacheMode::default(),
+            default_ttl_ms: 10_000,
         }
     }
 }
@@ -424,6 +426,7 @@ impl BackendBuilder {
                 fallback_recovery_duration: Duration::new(self.fallback_recovery_seconds, 0),
                 placeholder_inlining: self.placeholder_inlining,
                 cache_mode: self.cache_mode,
+                default_ttl_ms: self.default_ttl_ms,
             },
             telemetry_sender: self.telemetry_sender,
             authority,
@@ -548,6 +551,11 @@ impl BackendBuilder {
 
     pub fn cache_mode(mut self, cache_mode: CacheMode) -> Self {
         self.cache_mode = cache_mode;
+        self
+    }
+
+    pub fn default_ttl_ms(mut self, default_ttl_ms: u64) -> Self {
+        self.default_ttl_ms = default_ttl_ms;
         self
     }
 }
@@ -731,6 +739,8 @@ struct BackendSettings {
     placeholder_inlining: bool,
     /// How Readyset handles CREATE CACHE statements without explicit DEEP or SHALLOW modifiers.
     cache_mode: CacheMode,
+    /// Specifies the default TTL for shallow caches when no TTL is specified.
+    default_ttl_ms: u64,
 }
 
 /// QueryInfo holds information regarding the last query that was sent along this connection
@@ -2379,15 +2389,12 @@ where
         self.drop_caches_on_collision(Some(query_id), requested_name.as_ref())
             .await?;
 
-        let policy = policy.ok_or_else(|| internal_err!("Policy required for shallow cache"))?;
-        let policy = convert_eviction_policy(policy);
-
         let res = self.shallow.create_cache(
             Some(name.clone()),
             Some(query_id),
             stmt.clone(),
             self.noria.schema_search_path().to_owned(),
-            policy,
+            resolve_eviction_policy(policy, self.settings.default_ttl_ms),
             ddl_req.clone(),
             always,
             coalesce_ms,
@@ -4378,12 +4385,16 @@ fn readyset_version() -> ReadySetResult<noria_connector::QueryResult<'static>> {
     ))
 }
 
-fn convert_eviction_policy(policy: ast::EvictionPolicy) -> readyset_shallow::EvictionPolicy {
+fn resolve_eviction_policy(
+    policy: Option<ast::EvictionPolicy>,
+    default_ttl_ms: u64,
+) -> readyset_shallow::EvictionPolicy {
     match policy {
-        ast::EvictionPolicy::Ttl(duration) => readyset_shallow::EvictionPolicy::Ttl(duration),
-        ast::EvictionPolicy::TtlAndPeriod(ttl, refresh) => {
+        Some(ast::EvictionPolicy::Ttl(duration)) => readyset_shallow::EvictionPolicy::Ttl(duration),
+        Some(ast::EvictionPolicy::TtlAndPeriod(ttl, refresh)) => {
             readyset_shallow::EvictionPolicy::TtlAndPeriod(ttl, refresh)
         }
+        None => readyset_shallow::EvictionPolicy::Ttl(Duration::from_millis(default_ttl_ms)),
     }
 }
 
@@ -4443,6 +4454,7 @@ pub async fn recreate_shallow_caches<V>(
     ddl_requests: Vec<CacheDDLRequest>,
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,
+    default_ttl_ms: u64,
 ) -> ReadySetResult<()>
 where
     V: Debug + Send + Sync + SizeOf + 'static,
@@ -4454,6 +4466,7 @@ where
             req,
             parsing_preset,
             rewrite_params,
+            default_ttl_ms,
         )
         .await
         {
@@ -4469,6 +4482,7 @@ async fn handle_shallow_cache_statement<V>(
     req: CacheDDLRequest,
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,
+    default_ttl_ms: u64,
 ) -> ReadySetResult<()>
 where
     V: Debug + Send + Sync + SizeOf + 'static,
@@ -4488,6 +4502,7 @@ where
                 req.schema_search_path.clone(),
                 rewrite_params,
                 req,
+                default_ttl_ms,
             )
             .await
         }
@@ -4502,6 +4517,7 @@ async fn recover_shallow_cache_create<V>(
     schema_search_path: Vec<SqlIdentifier>,
     rewrite_params: AdapterRewriteParams,
     ddl_req: CacheDDLRequest,
+    default_ttl_ms: u64,
 ) -> ReadySetResult<()>
 where
     V: Debug + Send + Sync + SizeOf + 'static,
@@ -4509,10 +4525,6 @@ where
     if !matches!(stmt.cache_type, Some(CacheType::Shallow)) {
         internal!("Not a shallow cache");
     }
-
-    let policy = stmt.policy.ok_or_else(|| internal_err!("Missing policy"))?;
-
-    let policy = convert_eviction_policy(policy);
 
     let mut select_stmt = match stmt.inner {
         Ok(CacheInner::Statement(s)) => *s,
@@ -4530,7 +4542,7 @@ where
         Some(query_id),
         select_stmt.clone(),
         schema_search_path.clone(),
-        policy,
+        resolve_eviction_policy(stmt.policy, default_ttl_ms),
         ddl_req,
         stmt.always,
         stmt.coalesce_ms,
