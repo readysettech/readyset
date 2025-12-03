@@ -94,7 +94,7 @@ struct Options {
         env = "AUTHORITY",
         value_enum,
         default_value_if("standalone", "true", Some("standalone")),
-        default_value = "consul"
+        default_value = "standalone"
     )]
     authority: AuthorityType,
 
@@ -105,7 +105,6 @@ struct Options {
         long,
         env = "AUTHORITY_ADDRESS",
         default_value_if("authority", "standalone", Some(".")),
-        default_value_if("authority", "consul", Some("127.0.0.1:8500")),
         required = false
     )]
     authority_address: String,

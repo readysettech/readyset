@@ -1,4 +1,4 @@
-//! Trait for interacting with an conensus system (Consul, etcd) to determine
+//! Trait for interacting with an consensus system to determine
 //! which ReadySet worker acts as the controller, which ReadySet workers exist, detecting failed
 //! workers which necessitate changes, and storing cluster wide global state.
 
@@ -20,11 +20,9 @@ use serde::{Deserialize, Serialize};
 use tracing::error;
 use url::Url;
 
-mod consul;
 mod local;
 mod standalone;
 
-pub use self::consul::ConsulAuthority;
 pub use self::local::{LocalAuthority, LocalAuthorityStore};
 pub use self::standalone::StandaloneAuthority;
 use crate::debug::stats::PersistentStats;
@@ -370,7 +368,6 @@ where
 #[allow(clippy::large_enum_variant)]
 #[enum_dispatch(AuthorityControl)]
 pub enum Authority {
-    ConsulAuthority,
     LocalAuthority,
     StandaloneAuthority,
 }
@@ -378,7 +375,6 @@ pub enum Authority {
 impl Debug for Authority {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Authority::ConsulAuthority(_) => f.write_str("ConsulAuthority"),
             Authority::LocalAuthority(_) => f.write_str("LocalAuthority"),
             Authority::StandaloneAuthority(_) => f.write_str("StandaloneAuthority"),
         }
@@ -397,7 +393,6 @@ impl Authority {
 /// Enum that mirrors Authority that parses command line arguments.
 #[derive(Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub enum AuthorityType {
-    Consul,
     Local,
     Standalone,
 }
@@ -406,7 +401,6 @@ impl FromStr for AuthorityType {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "consul" => Ok(AuthorityType::Consul),
             "local" => Ok(AuthorityType::Local),
             "standalone" => Ok(AuthorityType::Standalone),
             other => Err(anyhow!("Invalid authority type: {}", other)),
@@ -417,7 +411,6 @@ impl FromStr for AuthorityType {
 impl Display for AuthorityType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
-            AuthorityType::Consul => write!(f, "consul"),
             AuthorityType::Local => write!(f, "local"),
             AuthorityType::Standalone => write!(f, "standalone"),
         }
@@ -427,31 +420,10 @@ impl Display for AuthorityType {
 impl AuthorityType {
     pub fn to_authority(&self, addr: &str, deployment: &str) -> Authority {
         match self {
-            AuthorityType::Consul => Authority::from(
-                ConsulAuthority::new(&format!("http://{addr}/{deployment}")).unwrap(),
-            ),
             AuthorityType::Local => Authority::from(LocalAuthority::new()),
             AuthorityType::Standalone => {
                 Authority::from(StandaloneAuthority::new(addr, deployment).unwrap())
             }
         }
-    }
-}
-
-/// A wrapper around a gzip compressor
-pub(crate) struct Compressor(cloudflare_zlib::Deflate);
-
-impl Compressor {
-    fn new() -> Self {
-        Compressor(
-            cloudflare_zlib::Deflate::new(6, cloudflare_zlib::Z_DEFAULT_STRATEGY, 15)
-                .expect("Can't fail with valid params"),
-        )
-    }
-
-    pub(crate) fn compress(data: &[u8]) -> Vec<u8> {
-        let mut comp = Self::new();
-        comp.0.compress(data).expect("Can't fail");
-        comp.0.finish().expect("Can't fail")
     }
 }

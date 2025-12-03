@@ -46,7 +46,6 @@ derive_more = { workspace = true }
 url = { workspace = true, features = ["serde"] }
 rand = { workspace = true }
 parking_lot = { workspace = true }
-cloudflare-zlib = { workspace = true, features = ["arm-always"] }
 smallvec = { workspace = true }
 rocksdb.workspace = true
 metrics = { workspace = true }
@@ -61,7 +60,6 @@ deadpool = { workspace = true }
 # consensus/
 enum_dispatch = { workspace = true }
 async-trait = { workspace = true }
-consulrs = { workspace = true }
 
 # metrics/
 reqwest = { workspace = true, features = ["json"] }

@@ -645,10 +645,6 @@ pub enum ReadySetError {
     #[error("Unknown migration: {0}")]
     UnknownMigration(u64),
 
-    /// Error interacting with a Consul server
-    #[error("Consul error: {0}")]
-    ConsulError(String),
-
     /// A query contains placeholders in positions that are unsupported by ReadySet.
     #[error("Query contains placeholders in unsupported positions")]
     UnsupportedPlaceholders {
@@ -1205,7 +1201,6 @@ impl_from_to_string!(deadpool_postgres::CreatePoolError, ReplicationFailed);
 impl_from_to_string!(deadpool_postgres::BuildError, ReplicationFailed);
 impl_from_to_string!(io::Error, IOError);
 impl_from_to_string!(tikv_jemalloc_ctl::Error, JemallocCtlError);
-impl_from_to_string!(consulrs::error::ClientError, ConsulError);
 impl_from_to_string!(tokio_native_tls::native_tls::Error, NativeTlsError);
 impl_from_to_string!(hyper::Error, HttpError);
 impl_from_to_string!(readyset_decimal::ReadysetDecimalError, DecimalError);

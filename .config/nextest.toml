@@ -5,12 +5,10 @@
 #
 # - `test_large_packet_write` is absurdly long locally even compared to other tests marked slow, and
 #   not very valuable unless you're working on related code.
-# - `clustertests` are slow, unreliable, and require building their own copy of readyset.
-default-filter = 'not test(test_large_packet_write) and not package(readyset-clustertest)'
+default-filter = 'not test(test_large_packet_write)'
 slow-timeout = { period = "180s", terminate-after = 1, grace-period = "20s" }
 
 [profile.ci]
-default-filter = 'not package(readyset-clustertest)'
 fail-fast = false
 retries = 1
 failure-output = "immediate-final"

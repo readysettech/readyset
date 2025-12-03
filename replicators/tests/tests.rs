@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use database_utils::{DatabaseURL, ReplicationServerId, UpstreamConfig as Config};
+#[cfg(feature = "failure_injection")]
 use fail::FailScenario;
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;
@@ -13,7 +14,9 @@ use rand::distr::Alphanumeric;
 use rand::{Rng, SeedableRng};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
-use readyset_client::{ReadySetHandle, TableStatus};
+use readyset_client::ReadySetHandle;
+#[cfg(feature = "failure_injection")]
+use readyset_client::TableStatus;
 use readyset_data::{Collation, DfValue, Dialect, TimestampTz, TinyText};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_server::Builder;
@@ -21,8 +24,10 @@ use readyset_server::NodeIndex;
 use readyset_sql::ast::{NonReplicatedRelation, Relation};
 use readyset_sql_parsing::{parse_select, ParsingPreset};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use readyset_util::shutdown::ShutdownSender;
-use readyset_util::{eventually, failpoints, retry_with_exponential_backoff};
+use readyset_util::{eventually, retry_with_exponential_backoff};
 use replicators::db_util::error_is_slot_not_found;
 use replicators::table_filter::TableFilter;
 use replicators::{
@@ -32,7 +37,9 @@ use test_utils::tags;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::sleep;
 use tokio_postgres::error::SqlState;
-use tracing::{debug, error, info, trace};
+#[cfg(feature = "failure_injection")]
+use tracing::info;
+use tracing::{debug, error, trace};
 
 const MAX_ATTEMPTS: usize = 40;
 
@@ -767,12 +774,14 @@ async fn pgsql_snapshot_compaction_timeout_marks_table_not_replicated_table_time
     pgsql_snapshot_compaction_timeout_inner("table-timeout", 30, 5).await;
 }
 
+#[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow, postgres_upstream)]
 async fn pgsql_snapshot_compaction_timeout_marks_table_not_replicated_worker_timeout() {
     pgsql_snapshot_compaction_timeout_inner("worker-timeout", 5, 30).await;
 }
 
+#[cfg(feature = "failure_injection")]
 async fn pgsql_snapshot_compaction_timeout_inner(
     label: &str,
     worker_timeout_secs: u64,

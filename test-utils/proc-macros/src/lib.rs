@@ -78,7 +78,6 @@ pub fn skip_flaky_finder(_args: TokenStream, item: TokenStream) -> TokenStream {
 /// List of valid test that can be used with the `tags` attribute. See descriptions in [`tags`].
 const VALID_TAGS: &[&str] = &[
     "serial",
-    "consul",
     "no_retry",
     "slow",
     "mysql_upstream",
@@ -134,7 +133,6 @@ const VALID_TAGS: &[&str] = &[
 ///
 /// - `serial`: Indicates that tests must be run serially (not in parallel with other serial tests for
 ///   the same upstream; see .config/nextest.toml for test groups)
-/// - `consul`: Requires a Consul server
 /// - `no_retry`: For generative tests such as proptests which should not be retried if they fail
 /// - `slow`: For tests that are expected to take a long time to run. See [`slow`]
 /// - `mysql_upstream`: For tests that can run against any supported MySQL version

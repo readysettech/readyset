@@ -13,7 +13,7 @@ struct ControllerRequest {
     #[arg(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:8500"))]
     authority_address: String,
 
-    #[arg(long, env("AUTHORITY"), default_value("consul"), value_parser = ["consul"])]
+    #[arg(long, env("AUTHORITY"), default_value("standalone"), value_parser = ["standalone"])]
     authority: AuthorityType,
 
     #[arg(short, long, env("DEPLOYMENT"))]

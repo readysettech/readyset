@@ -8,7 +8,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{format_err, Context};
 use dataflow::node::{self, Column};
 use dataflow::prelude::ChannelCoordinator;
-use failpoint_macros::set_failpoint;
 use futures::future::Either;
 use hyper::http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
@@ -25,8 +24,6 @@ use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::Relation;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::TelemetrySender;
-#[cfg(feature = "failure_injection")]
-use readyset_util::failpoints;
 use readyset_util::retry_with_exponential_backoff;
 use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -689,7 +686,6 @@ impl Controller {
                     }
                 }
                 req = authority_rx.recv() => {
-                    set_failpoint!(failpoints::AUTHORITY);
                     match req {
                         Some(req) => match self.handle_authority_update(req).await {
                             Ok(()) => {},
@@ -1277,13 +1273,12 @@ async fn authority_inner(
 
     let mut last_leader_state = false;
     loop {
-        set_failpoint!(failpoints::AUTHORITY);
         leader_election_state
             .update_leader_state()
             .await
             .context("Updating leader state")?;
         if let AuthorityWorkerHeartbeatResponse::Failed = worker_state.heartbeat().await? {
-            anyhow::bail!("This node is considered failed by consul");
+            anyhow::bail!("This node is considered failed");
         }
 
         let is_leader = leader_election_state.is_leader();

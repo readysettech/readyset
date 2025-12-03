@@ -7,7 +7,6 @@ edition = "2024"
 
 [dependencies]
 anyhow = { workspace = true }
-consulrs = { workspace = true }
 futures = { workspace = true }
 hyper = { workspace = true }
 pem = { workspace = true }

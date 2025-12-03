@@ -37,8 +37,6 @@ services:
         # Needed for the installer to send commands to the host when run via expect_test.rs:
       - "/var/run/docker.sock:/var/run/docker.sock"
     environment:
-      - AUTHORITY_ADDRESS=consul-server:8500
-      - AUTHORITY=consul
       - REDIS_URL=redis://redis:6379/
       - MYSQL_HOST=mysql
       - POSTGRESQL_HOST=postgres

@@ -116,7 +116,7 @@
 //!    `dataflow/src/ops/`, though some are in `dataflow/src/node/special/`.
 //!
 //! This crate also provides `LocalAuthority`, which allows you to _embed_ a `noriad` worker, and
-//! not bother with setting up Consul or multiple workers. This provides no fault-tolerance and
+//! not bother with setting up multiple workers. This provides no fault-tolerance and
 //! no multi-machine operations, but can be a convenient way to set things up for development and
 //! testing. See `Builder::build_local` or the `basic-recipe` example for details.
 //!
@@ -225,9 +225,9 @@
 //! # #[tokio::main]
 //! # async fn main() {
 //! # use std::convert::TryInto;
-//! # use readyset_server::consensus::{Authority, ConsulAuthority};
-//! let consul_auth = Authority::from(ConsulAuthority::new("127.0.0.1:8500/quickstart").unwrap());
-//! let mut db = readyset_server::ReadySetHandle::new(consul_auth).await;
+//! # use readyset_server::consensus::{Authority, StandaloneAuthority};
+//! let auth = Authority::from(StandaloneAuthority::new("/path", "deployment").unwrap());
+//! let mut db = readyset_server::ReadySetHandle::new(auth).await;
 //! let mut article = db.table("article").await.unwrap();
 //! article
 //!     .insert(vec![
@@ -289,9 +289,9 @@
 //! ```no_run
 //! # #[tokio::main]
 //! # async fn main() {
-//! # use readyset_server::consensus::{Authority, ConsulAuthority};
-//! let consul_auth = Authority::from(ConsulAuthority::new("127.0.0.1:8500/quickstart").unwrap());
-//! let mut db = readyset_server::ReadySetHandle::new(consul_auth).await;
+//! # use readyset_server::consensus::{Authority, StandaloneAuthority};
+//! let auth = Authority::from(StandaloneAuthority::new("/path", "deployment").unwrap());
+//! let mut db = readyset_server::ReadySetHandle::new(auth).await;
 //! let mut vote = db.table("vote").await.unwrap();
 //! vote.insert(vec![readyset_data::DfValue::from(1000), 1.into()])
 //!     .await

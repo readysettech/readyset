@@ -36,7 +36,6 @@ members = [
     "readyset-client",
     "readyset-client-metrics",
     "readyset-client-test-helpers",
-    "readyset-clustertest",
     "readyset-common",
     "readyset-data",
     "readyset-dataflow",
@@ -73,9 +72,6 @@ resolver = "2"
 ########################
 # FORKED DEPENDENCIES
 ########################
-
-# will probably delete someday, not worth messing with
-consulrs = { git = "https://github.com/readysettech/consulrs.git", branch = "allow-disabling-rustls-tls-2" }
 
 # overridden in the patch section above
 mysql_async = { version = "0.36.1", features = ["native-tls-tls"] }
@@ -117,7 +113,6 @@ chrono = "0.4.38"
 chrono-tz = "0.10.4"
 cidr = "0.2.2"
 clap = "4.5"
-cloudflare-zlib = "0.2.10"
 console = "0.16.0"
 const-str = "0.6"
 criterion = "0.5"

@@ -14,4 +14,4 @@ current leader.
 
 Many of these tools take in an authority, authority-address, and deployment
 as parameters. Below is an example of how to pass these parameters:
-`./controller_request --authority consul --authority-address 127.0.0.1:8500 --deployment noria --endpoint /healthy_workers`
+`./controller_request --authority standalone --authority-address /path --deployment noria --endpoint /healthy_workers`

@@ -16,8 +16,6 @@
 //! (potentially distributed) server. The server in this case is the `readyset-server`
 //! binary, and must be started before clients can connect. See `readyset-server --help` for details
 //! and the [ReadySet repository README](https://github.com/readysettech/readyset/) for details.
-//! ReadySet uses [HasiCorp Consul](https://www.consul.io/) to announce the location of its
-//! servers, so Consul must also be running.
 //!
 //! # Quickstart example
 //!
@@ -26,15 +24,15 @@
 //!
 //! ```no_run
 //! # use readyset_client::*;
-//! # use readyset_client::consensus::{Authority, ConsulAuthority};
+//! # use readyset_client::consensus::{Authority, StandaloneAuthority};
 //! # use readyset_data::{DfValue, Dialect};
 //! # use readyset_client::recipe::ChangeList;
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let consul_auth =
-//!         Authority::from(ConsulAuthority::new("127.0.0.1:8500/quickstart").unwrap());
-//!     let mut db = ReadySetHandle::new(consul_auth).await;
+//!     let auth =
+//!         Authority::from(StandaloneAuthority::new("/path/to/data", "deployment").unwrap());
+//!     let mut db = ReadySetHandle::new(auth).await;
 //!
 //!     // if this is the first time we interact with ReadySet, we must give it the schema
 //!     db.extend_recipe(
@@ -270,7 +268,6 @@ use std::hash::Hash;
 use std::pin::Pin;
 
 use readyset_data::{DfType, DfValue};
-use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use tokio::task_local;
 pub use view::{

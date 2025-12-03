@@ -11,6 +11,4 @@ services:
     depends_on:
       - consul-server
     environment:
-      - AUTHORITY_ADDRESS=consul-server:8500
-      - AUTHORITY=consul
       - ALLOW_UNAUTHENTICATED_CONNECTIONS=true

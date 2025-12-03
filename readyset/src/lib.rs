@@ -183,7 +183,7 @@ pub struct Options {
         long,
         env = "AUTHORITY",
         default_value_if("deployment_mode", "standalone", Some("standalone")),
-        default_value = "consul",
+        default_value = "standalone",
         hide = true
     )]
     authority: AuthorityType,
@@ -195,7 +195,6 @@ pub struct Options {
         long,
         env = "AUTHORITY_ADDRESS",
         default_value_if("authority", "standalone", Some(".")),
-        default_value_if("authority", "consul", Some("127.0.0.1:8500")),
         required = false,
         hide = true
     )]
@@ -1624,7 +1623,7 @@ mod tests {
             "--address",
             "0.0.0.0:3306",
             "--authority-address",
-            "consul:8500",
+            ".",
             "--allow-unauthenticated-connections",
         ]);
 
@@ -1642,7 +1641,7 @@ mod tests {
             "--address",
             "0.0.0.0:3306",
             "--authority-address",
-            "consul:8500",
+            ".",
             "--allow-unauthenticated-connections",
             "--upstream-db-url",
             "mysql://root:password@mysql:3306/readyset",
@@ -1662,7 +1661,7 @@ mod tests {
             "--address",
             "0.0.0.0:3306",
             "--authority-address",
-            "consul:8500",
+            ".",
             "--allow-unauthenticated-connections",
             "--upstream-db-url",
             "mysql://root:password@mysql:3306/readyset",

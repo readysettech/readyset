@@ -4,10 +4,6 @@
 //!
 //! See **[Failure Injection](../docs/src/failure_injection.md)** for much more details.
 
-/// All requests to the authority will behave as if the Authority is down
-///
-/// Currently only supports consul.
-pub const AUTHORITY: &str = "authority";
 /// Injects an error in crate::worker::readers::listen()
 pub const READ_QUERY: &str = "read-query";
 /// Imitates traffic being dropped from upstream
