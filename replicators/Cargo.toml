@@ -76,7 +76,11 @@ test-utils = { path = "../test-utils" }
 
 [features]
 vertical_tests = []
-failure_injection = ["fail/failpoints", "readyset-util/failure_injection"]
+failure_injection = [
+    "fail/failpoints",
+    "readyset-util/failure_injection",
+    "readyset-server/failure_injection",
+]
 
 [lints]
 workspace = true

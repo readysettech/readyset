@@ -1224,6 +1224,8 @@ dependencies = [
  "clap",
  "criterion",
  "derive_more",
+ "fail",
+ "failpoint-macros",
  "hashbag",
  "indexmap 2.10.0",
  "itertools 0.14.0",

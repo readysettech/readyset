@@ -19,6 +19,7 @@ bench = ["dataflow/bench"]
 failure_injection = [
     "fail/failpoints",
     "dataflow/failure_injection",
+    "dataflow-state/failure_injection",
     "readyset-util/failure_injection",
     "replicators/failure_injection",
 ]

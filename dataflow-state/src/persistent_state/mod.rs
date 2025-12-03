@@ -78,6 +78,8 @@ use std::{fmt, fs};
 use bincode::Options;
 use clap::ValueEnum;
 use common::{IndexType, Record, Records, Tag};
+#[cfg(feature = "failure_injection")]
+use failpoint_macros::set_failpoint;
 pub use handle::PersistentStateHandle;
 use handle::{PersistentStateReadGuard, PersistentStateWriteGuard};
 use notify::Watcher;
@@ -1496,6 +1498,8 @@ fn compact_cf(name: &str, db: &DB, index: &PersistentIndex, opts: &CompactOption
     };
 
     info!(table = %name, cf = %index.column_family, "Compaction starting");
+    #[cfg(feature = "failure_injection")]
+    set_failpoint!(readyset_util::failpoints::PERSISTENT_STATE_COMPACTION);
     db.compact_range_cf_opt(cf, Option::<&[u8]>::None, Option::<&[u8]>::None, opts);
     info!(table = %name, cf = %index.column_family, "Compaction finished");
 

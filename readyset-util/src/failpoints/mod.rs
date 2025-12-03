@@ -41,6 +41,8 @@ pub const CONTROLLER_REQUEST: &str = "controller-request";
 pub const HANDLE_PACKET: &str = "handle-packet";
 /// A failpoint at the beginning of the reader's packet handling
 pub const READER_HANDLE_PACKET: &str = "reader-handle-packet";
+/// A failpoint at the beginning of manual compaction for persistent state
+pub const PERSISTENT_STATE_COMPACTION: &str = "persistent-state-compaction";
 /// A failpoint at the beginning of starting the controller
 pub const START_CONTROLLER: &str = "start-controller";
 /// A failpoint at the beginning of starting the worker

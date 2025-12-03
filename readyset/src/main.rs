@@ -3,6 +3,8 @@ use std::process::exit;
 
 use clap::Parser;
 use database_utils::DatabaseType;
+#[cfg(feature = "failure_injection")]
+use fail::FailScenario;
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
 use readyset::verify::verify;
@@ -10,6 +12,9 @@ use readyset::{init_adapter_runtime, init_adapter_tracing, NoriaAdapter, Options
 use tracing::{error, info};
 
 fn main() -> anyhow::Result<()> {
+    #[cfg(feature = "failure_injection")]
+    let _fail_scenario = FailScenario::setup();
+
     let options = Options::parse();
     let rt = init_adapter_runtime()?;
     let maybe_tracing_guard = match options.verify {

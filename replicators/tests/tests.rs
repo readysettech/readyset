@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use database_utils::{DatabaseURL, ReplicationServerId, UpstreamConfig as Config};
+use fail::FailScenario;
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use mysql_time::MySqlTime;
@@ -12,16 +13,16 @@ use rand::distr::Alphanumeric;
 use rand::{Rng, SeedableRng};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
-use readyset_client::ReadySetHandle;
+use readyset_client::{ReadySetHandle, TableStatus};
 use readyset_data::{Collation, DfValue, Dialect, TimestampTz, TinyText};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_server::Builder;
 use readyset_server::NodeIndex;
-use readyset_sql::ast::{NonReplicatedRelation, Relation};
+use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_sql_parsing::{parse_select, ParsingPreset};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 use readyset_util::shutdown::ShutdownSender;
-use readyset_util::{eventually, retry_with_exponential_backoff};
+use readyset_util::{eventually, failpoints, retry_with_exponential_backoff};
 use replicators::db_util::error_is_slot_not_found;
 use replicators::table_filter::TableFilter;
 use replicators::{
@@ -31,7 +32,7 @@ use test_utils::tags;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::sleep;
 use tokio_postgres::error::SqlState;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 const MAX_ATTEMPTS: usize = 40;
 
@@ -757,6 +758,116 @@ async fn mysql_replication_many_tables() {
 #[tags(serial, slow, postgres_upstream)]
 async fn pgsql_replication_big_tables() {
     replication_big_tables_inner(&pgsql_url()).await.unwrap()
+}
+
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow, postgres_upstream)]
+async fn pgsql_snapshot_compaction_timeout_marks_table_not_replicated_table_timeout() {
+    pgsql_snapshot_compaction_timeout_inner("table-timeout", 30, 5, true).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow, postgres_upstream)]
+async fn pgsql_snapshot_compaction_timeout_marks_table_not_replicated_worker_timeout() {
+    pgsql_snapshot_compaction_timeout_inner("worker-timeout", 5, 30, false).await;
+}
+
+async fn pgsql_snapshot_compaction_timeout_inner(
+    label: &str,
+    worker_timeout_secs: u64,
+    table_timeout_secs: u64,
+    expect_not_replicated: bool,
+) {
+    readyset_tracing::init_test_logging();
+    let _fail_scenario = FailScenario::setup();
+    let url = pgsql_url();
+
+    info!(
+        %label,
+        worker_timeout_secs,
+        table_timeout_secs,
+        "Starting compaction timeout scenario"
+    );
+
+    let mut client = DbConnection::connect(&url).await.unwrap();
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS compaction_timeout CASCADE;
+            CREATE TABLE compaction_timeout (
+                id INT PRIMARY KEY,
+                val INT
+            );
+            INSERT INTO compaction_timeout VALUES (1, 10), (2, 20), (3, 30);
+        ",
+        )
+        .await
+        .unwrap();
+
+    fail::cfg(failpoints::PERSISTENT_STATE_COMPACTION, "sleep(10000)").unwrap();
+
+    let mut builder = Builder::for_tests();
+    builder.set_dialect(sql_dialect_from_url(&url));
+    builder.set_worker_timeout(Duration::from_secs(worker_timeout_secs));
+    builder.set_table_request_timeout(Duration::from_secs(table_timeout_secs));
+
+    let (mut ctx, shutdown_tx) =
+        TestHandle::start_noria_with_builder(url.to_string(), None, builder)
+            .await
+            .unwrap();
+
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    let relation = Relation {
+        schema: Some("public".into()),
+        name: "compaction_timeout".into(),
+    };
+
+    let mut controller = ctx.controller().await;
+    if expect_not_replicated {
+        let reason: NotReplicatedReason = eventually!(
+            run_test: {
+                controller.table_statuses(true).await.unwrap()
+            },
+            then_assert: |statuses| {
+                match statuses.get(&relation) {
+                    Some(TableStatus::NotReplicated(r)) => r.clone(),
+                    Some(other) => panic!("expected NotReplicated, got {other:?}"),
+                    None => panic!("table status missing"),
+                }
+            }
+        );
+
+        info!(%label, ?reason, "Observed table status");
+        match &reason {
+            NotReplicatedReason::OtherError(msg) => assert!(
+                msg.contains("Attempted to modify table"),
+                "unexpected not-replicated reason: {msg}"
+            ),
+            other => panic!("unexpected reason: {other:?}"),
+        }
+    } else {
+        let statuses = controller.table_statuses(true).await.unwrap();
+        match statuses.get(&relation) {
+            Some(TableStatus::Online) => {
+                info!(%label, "Table stayed online under worker-timeout scenario");
+            }
+            Some(other) => {
+                panic!("expected Online when not timing out table requests, got {other:?}")
+            }
+            None => panic!("table status missing"),
+        }
+    }
+
+    client.stop().await;
+    ctx.stop().await;
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
