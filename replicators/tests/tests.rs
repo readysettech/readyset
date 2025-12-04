@@ -18,7 +18,7 @@ use readyset_data::{Collation, DfValue, Dialect, TimestampTz, TinyText};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_server::Builder;
 use readyset_server::NodeIndex;
-use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
+use readyset_sql::ast::{NonReplicatedRelation, Relation};
 use readyset_sql_parsing::{parse_select, ParsingPreset};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 use readyset_util::shutdown::ShutdownSender;
@@ -764,20 +764,19 @@ async fn pgsql_replication_big_tables() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow, postgres_upstream)]
 async fn pgsql_snapshot_compaction_timeout_marks_table_not_replicated_table_timeout() {
-    pgsql_snapshot_compaction_timeout_inner("table-timeout", 30, 5, true).await;
+    pgsql_snapshot_compaction_timeout_inner("table-timeout", 30, 5).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow, postgres_upstream)]
 async fn pgsql_snapshot_compaction_timeout_marks_table_not_replicated_worker_timeout() {
-    pgsql_snapshot_compaction_timeout_inner("worker-timeout", 5, 30, false).await;
+    pgsql_snapshot_compaction_timeout_inner("worker-timeout", 5, 30).await;
 }
 
 async fn pgsql_snapshot_compaction_timeout_inner(
     label: &str,
     worker_timeout_secs: u64,
     table_timeout_secs: u64,
-    expect_not_replicated: bool,
 ) {
     readyset_tracing::init_test_logging();
     let _fail_scenario = FailScenario::setup();
@@ -830,39 +829,13 @@ async fn pgsql_snapshot_compaction_timeout_inner(
     };
 
     let mut controller = ctx.controller().await;
-    if expect_not_replicated {
-        let reason: NotReplicatedReason = eventually!(
-            run_test: {
-                controller.table_statuses(true).await.unwrap()
-            },
-            then_assert: |statuses| {
-                match statuses.get(&relation) {
-                    Some(TableStatus::NotReplicated(r)) => r.clone(),
-                    Some(other) => panic!("expected NotReplicated, got {other:?}"),
-                    None => panic!("table status missing"),
-                }
-            }
-        );
-
-        info!(%label, ?reason, "Observed table status");
-        match &reason {
-            NotReplicatedReason::OtherError(msg) => assert!(
-                msg.contains("Attempted to modify table"),
-                "unexpected not-replicated reason: {msg}"
-            ),
-            other => panic!("unexpected reason: {other:?}"),
+    let statuses = controller.table_statuses(true).await.unwrap();
+    match statuses.get(&relation) {
+        Some(TableStatus::Online) => {
+            info!(%label, "Table stayed online despite compaction delay");
         }
-    } else {
-        let statuses = controller.table_statuses(true).await.unwrap();
-        match statuses.get(&relation) {
-            Some(TableStatus::Online) => {
-                info!(%label, "Table stayed online under worker-timeout scenario");
-            }
-            Some(other) => {
-                panic!("expected Online when not timing out table requests, got {other:?}")
-            }
-            None => panic!("table status missing"),
-        }
+        Some(other) => panic!("expected Online, got {other:?}"),
+        None => panic!("table status missing"),
     }
 
     client.stop().await;

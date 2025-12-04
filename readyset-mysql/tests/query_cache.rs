@@ -914,7 +914,8 @@ async fn resnapshot_table(table: Relation, handle: &mut Handle, conn: &mut Conn)
         let new_tables = handle.tables().await.unwrap();
         let new_table_id = new_tables.get(&table);
         new_table_id.is_some() && new_table_id.unwrap() != current_table_id
-    )
+    );
+    eventually!(handle.leader_ready().await.unwrap());
 }
 
 async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_lower: &str) {

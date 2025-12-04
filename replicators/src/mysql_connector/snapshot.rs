@@ -581,6 +581,8 @@ impl MySqlReplicator<'_> {
 
         // Wait for all connections to finish, not strictly necessary
         self.pool.disconnect().await?;
+
+        noria.wait_for_all_tables_to_compact().await?;
         result
     }
 

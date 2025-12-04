@@ -2285,7 +2285,6 @@ impl PersistentState {
             let thr = self.compact_index(index, compaction_guard.clone());
             self.push_compaction_thread(thr);
         }
-        self.wait_for_compaction();
     }
 
     pub fn set_replay_done(&mut self, replay_done: bool) {
