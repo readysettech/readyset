@@ -2796,6 +2796,7 @@ where
                 query_id,
                 query,
                 ttl_ms,
+                refresh_ms,
                 always,
                 ..
             } in self.shallow.list_caches(query_id, None)
@@ -2811,6 +2812,9 @@ where
                     let mut properties = CacheProperties::new(CacheType::Shallow);
                     if let Some(ttl_ms) = ttl_ms {
                         properties.set_ttl(ttl_ms);
+                    }
+                    if let Some(refresh_ms) = refresh_ms {
+                        properties.set_refresh(refresh_ms);
                     }
                     properties.set_always(always);
                     properties.to_string().into()
@@ -4298,6 +4302,9 @@ fn readyset_version() -> ReadySetResult<noria_connector::QueryResult<'static>> {
 fn convert_eviction_policy(policy: ast::EvictionPolicy) -> readyset_shallow::EvictionPolicy {
     match policy {
         ast::EvictionPolicy::Ttl(duration) => readyset_shallow::EvictionPolicy::Ttl(duration),
+        ast::EvictionPolicy::TtlAndPeriod(ttl, refresh) => {
+            readyset_shallow::EvictionPolicy::TtlAndPeriod(ttl, refresh)
+        }
     }
 }
 

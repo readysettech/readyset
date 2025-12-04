@@ -90,6 +90,7 @@ impl Display for CurrentStatus {
 pub struct CacheProperties {
     cache_type: CacheType,
     ttl_ms: Option<u64>,
+    refresh_ms: Option<u64>,
     always: bool,
 }
 
@@ -103,6 +104,9 @@ impl Display for CacheProperties {
         if let Some(ttl_ms) = self.ttl_ms {
             properties.push(Cow::Owned(format!("ttl {ttl_ms} ms")));
         }
+        if let Some(refresh_ms) = self.refresh_ms {
+            properties.push(Cow::Owned(format!("refresh {refresh_ms} ms")));
+        }
         write!(f, "{}", properties.join(", "))
     }
 }
@@ -112,6 +116,7 @@ impl CacheProperties {
         Self {
             cache_type,
             ttl_ms: None,
+            refresh_ms: None,
             always: false,
         }
     }
@@ -122,5 +127,9 @@ impl CacheProperties {
 
     pub fn set_ttl(&mut self, ttl_ms: u64) {
         self.ttl_ms = Some(ttl_ms);
+    }
+
+    pub fn set_refresh(&mut self, refresh_ms: u64) {
+        self.refresh_ms = Some(refresh_ms);
     }
 }

@@ -923,9 +923,27 @@ fn cached_query_options(
                 whitespace1,
                 tag_no_case("seconds"),
                 whitespace1,
+                opt(tuple((
+                    tag_no_case("refresh"),
+                    whitespace1,
+                    map_res(
+                        map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
+                        u64::from_str,
+                    ),
+                    whitespace1,
+                    tag_no_case("seconds"),
+                    whitespace1,
+                ))),
             )),
-            |(_, _, _, _, duration_secs, _, _, _)| {
-                Option::Policy(EvictionPolicy::Ttl(Duration::from_secs(duration_secs)))
+            |(_, _, _, _, ttl_secs, _, _, _, refresh_opt)| {
+                if let Some((_, _, refresh_secs, _, _, _)) = refresh_opt {
+                    Option::Policy(EvictionPolicy::TtlAndPeriod(
+                        Duration::from_secs(ttl_secs),
+                        Duration::from_secs(refresh_secs),
+                    ))
+                } else {
+                    Option::Policy(EvictionPolicy::Ttl(Duration::from_secs(ttl_secs)))
+                }
             },
         ),
     ))(i)

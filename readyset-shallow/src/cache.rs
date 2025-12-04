@@ -83,18 +83,28 @@ pub struct CacheInfo {
     pub query: SelectStatement,
     pub schema_search_path: Vec<SqlIdentifier>,
     pub ttl_ms: Option<u64>,
+    pub refresh_ms: Option<u64>,
     pub ddl_req: CacheDDLRequest,
     pub always: bool,
 }
 
 impl From<CacheInfo> for CreateCacheStatement {
     fn from(info: CacheInfo) -> Self {
+        let policy = match (info.ttl_ms, info.refresh_ms) {
+            (Some(ttl_ms), Some(refresh_ms)) if refresh_ms != ttl_ms / 2 => {
+                Some(readyset_sql::ast::EvictionPolicy::TtlAndPeriod(
+                    Duration::from_millis(ttl_ms),
+                    Duration::from_millis(refresh_ms),
+                ))
+            }
+            (Some(ttl_ms), _) => Some(readyset_sql::ast::EvictionPolicy::from_ttl_ms(ttl_ms)),
+            _ => None,
+        };
+
         Self {
             name: info.name,
             cache_type: Some(CacheType::Shallow),
-            policy: info
-                .ttl_ms
-                .map(readyset_sql::ast::EvictionPolicy::from_ttl_ms),
+            policy,
             inner: Ok(CacheInner::Statement(Box::new(info.query))),
             unparsed_create_cache_statement: None,
             always: info.always,
@@ -112,6 +122,7 @@ pub struct Cache<K, V> {
     query: SelectStatement,
     schema_search_path: Vec<SqlIdentifier>,
     ttl_ms: Option<u64>,
+    refresh_ms: Option<u64>,
     ddl_req: CacheDDLRequest,
     always: bool,
 }
@@ -126,6 +137,7 @@ where
             .field("name", &self.name)
             .field("query_id", &self.query_id)
             .field("ttl_ms", &self.ttl_ms)
+            .field("refresh_ms", &self.refresh_ms)
             .finish_non_exhaustive()
     }
 }
@@ -147,8 +159,16 @@ where
         ddl_req: CacheDDLRequest,
         always: bool,
     ) -> Self {
-        let ttl_ms = match policy {
-            EvictionPolicy::Ttl(ttl) => Some(ttl.as_millis().try_into().unwrap_or(u64::MAX)),
+        let (ttl_ms, refresh_ms) = match policy {
+            EvictionPolicy::Ttl(ttl) => {
+                let ttl_ms = ttl.as_millis().try_into().unwrap_or(u64::MAX);
+                (Some(ttl_ms), Some(ttl_ms / 2))
+            }
+            EvictionPolicy::TtlAndPeriod(ttl, refresh) => {
+                let ttl_ms = ttl.as_millis().try_into().unwrap_or(u64::MAX);
+                let refresh_ms = refresh.as_millis().try_into().unwrap_or(u64::MAX);
+                (Some(ttl_ms), Some(refresh_ms))
+            }
         };
 
         Self {
@@ -160,6 +180,7 @@ where
             query,
             schema_search_path,
             ttl_ms,
+            refresh_ms,
             ddl_req,
             always,
         }
@@ -202,8 +223,8 @@ where
         let res = self.inner.get(&k).await.map(|entry| {
             let now = current_timestamp_ms();
             entry.accessed_ms.store(now, Ordering::Relaxed);
-            let refresh = if let Some(ttl_ms) = self.ttl_ms
-                && now.saturating_sub(entry.refreshed_ms.load(Ordering::Relaxed)) >= ttl_ms / 2
+            let refresh = if let Some(refresh_ms) = self.refresh_ms
+                && now.saturating_sub(entry.refreshed_ms.load(Ordering::Relaxed)) >= refresh_ms
                 && entry
                     .refreshing
                     .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -238,6 +259,7 @@ where
             query: self.query.clone(),
             schema_search_path: self.schema_search_path.clone(),
             ttl_ms: self.ttl_ms,
+            refresh_ms: self.refresh_ms,
             ddl_req: self.ddl_req.clone(),
             always: self.always,
         }

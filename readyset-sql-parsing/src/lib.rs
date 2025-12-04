@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::num::ParseIntError;
+use std::time::Duration;
 
 use clap::ValueEnum;
 use readyset_errors::ReadySetError;
@@ -215,6 +216,7 @@ enum ReadysetKeyword {
     PROXIED,
     QUERIES,
     READYSET,
+    REFRESH,
     REPLAY,
     RESNAPSHOT,
     SHALLOW,
@@ -245,6 +247,7 @@ impl ReadysetKeyword {
             Self::PROXIED => "PROXIED",
             Self::QUERIES => "QUERIES",
             Self::READYSET => "READYSET",
+            Self::REFRESH => "REFRESH",
             Self::REPLAY => "REPLAY",
             Self::RESNAPSHOT => "RESNAPSHOT",
             Self::SHALLOW => "SHALLOW",
@@ -421,7 +424,7 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
 /// statement. Will simply error if it fails, since there's no relevant standard SQL to fall back to.
 ///
 /// CREATE [type] CACHE
-///     [POLICY TTL <num> SECONDS]
+///     [POLICY TTL <num> SECONDS [REFRESH <num> SECONDS]]
 ///     [cache_option [, cache_option] ...]
 ///     [<name>]
 ///     FROM
@@ -444,7 +447,7 @@ fn parse_create_cache(
 ) -> Result<SqlQuery, ReadysetParsingError> {
     let cache_type = parse_create_cache_keywords(parser)?;
 
-    // Parse optional policy (POLICY TTL N SECONDS)
+    // Parse optional policy (POLICY TTL N SECONDS [REFRESH M SECONDS])
     let policy = if parse_readyset_keyword(parser, ReadysetKeyword::POLICY) {
         if cache_type != Some(CacheType::Shallow) {
             return Err(ReadysetParsingError::ReadysetParsingError(
@@ -456,7 +459,7 @@ fn parse_create_cache(
                 "Expected TTL after POLICY".into(),
             ));
         }
-        let duration_secs = parser.parse_literal_uint().map_err(|_| {
+        let ttl_secs = parser.parse_literal_uint().map_err(|_| {
             ReadysetParsingError::ReadysetParsingError("couldn't parse TTL duration".into())
         })?;
         if !parser.parse_keyword(Keyword::SECONDS) {
@@ -464,9 +467,31 @@ fn parse_create_cache(
                 "Expected SECONDS after TTL duration".into(),
             ));
         }
-        Some(EvictionPolicy::Ttl(std::time::Duration::from_secs(
-            duration_secs,
-        )))
+
+        let policy = if parse_readyset_keyword(parser, ReadysetKeyword::REFRESH) {
+            match parser.parse_literal_uint() {
+                Ok(refresh_secs) if parser.parse_keyword(Keyword::SECONDS) => {
+                    if refresh_secs >= ttl_secs {
+                        return Err(ReadysetParsingError::ReadysetParsingError(
+                            "REFRESH period must be less than TTL".into(),
+                        ));
+                    }
+
+                    EvictionPolicy::TtlAndPeriod(
+                        Duration::from_secs(ttl_secs),
+                        Duration::from_secs(refresh_secs),
+                    )
+                }
+                _ => {
+                    parser.prev_token();
+                    EvictionPolicy::Ttl(Duration::from_secs(ttl_secs))
+                }
+            }
+        } else {
+            EvictionPolicy::Ttl(Duration::from_secs(ttl_secs))
+        };
+
+        Some(policy)
     } else {
         None
     };

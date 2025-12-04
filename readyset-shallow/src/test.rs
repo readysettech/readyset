@@ -704,3 +704,34 @@ async fn test_cache_insert_guard_debug() {
     assert!(debug_str.contains("results"));
     assert!(debug_str.contains("filled"));
 }
+
+#[tokio::test]
+async fn test_ttl_and_period_refresh() {
+    let manager = CacheManager::<String, String>::new(None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+
+    create_test_cache(
+        &manager,
+        None,
+        Some(query_id),
+        EvictionPolicy::TtlAndPeriod(Duration::from_secs(10), Duration::from_secs(2)),
+    )
+    .unwrap();
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string())
+        .await;
+    insert_value(result, vec!["value1".to_string()]).await;
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string())
+        .await;
+    assert_matches!(result, CacheResult::Hit(..));
+
+    sleep(Duration::from_millis(2100)).await;
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string())
+        .await;
+    assert_matches!(result, CacheResult::HitAndRefresh(..));
+}
