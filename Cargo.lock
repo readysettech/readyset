@@ -4626,7 +4626,7 @@ dependencies = [
 
 [[package]]
 name = "readyset"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "antithesis_sdk",
  "anyhow",
