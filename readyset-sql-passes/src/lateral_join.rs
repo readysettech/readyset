@@ -4,10 +4,11 @@ use crate::rewrite_utils::{
     analyse_lone_aggregates_subquery_fields, and_predicates_skip_true, as_sub_query_with_alias,
     as_sub_query_with_alias_mut, collect_local_from_items, collect_outermost_columns_mut,
     columns_iter, columns_iter_mut, contain_subqueries_with_limit_clause,
-    default_alias_for_select_item_expression, expect_field_as_expr_mut,
-    expect_sub_query_with_alias_mut, get_from_item_reference_name, is_filter_pushable_from_item,
+    default_alias_for_select_item_expression, expect_field_as_expr, expect_field_as_expr_mut,
+    expect_sub_query_with_alias_mut, extract_aggregate_fallback_for_expr,
+    get_from_item_reference_name, is_filter_pushable_from_item,
     move_correlated_constraints_from_join_to_where, project_columns_if,
-    split_correlated_constraint, split_correlated_expression, split_expr,
+    split_correlated_constraint, split_correlated_expression,
 };
 use crate::unnest_subqueries::{
     AggNoGbyCardinality, UnnestContext, agg_only_no_gby_cardinality, force_empty_select,
@@ -16,9 +17,10 @@ use crate::unnest_subqueries::{
 };
 use itertools::Either;
 use readyset_errors::{ReadySetResult, unsupported};
+use readyset_sql::ast::JoinOperator::InnerJoin;
 use readyset_sql::ast::{
-    Column, Expr, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal, Relation,
-    SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+    Column, Expr, FunctionExpr, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
+    Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use std::collections::{HashMap, HashSet};
@@ -291,95 +293,110 @@ fn try_resolve_as_lateral_subquery(
     }
 }
 
+/// Populate COUNT→COALESCE mappings for wrapper SELECT lists by recursively chasing
+/// projection-only wrappers down to a base expression that can yield a zero substitute.
+/// Adds mappings for *outer* columns (qualified by `stmt_alias`).
+fn build_select_count_zero_mappings_recursive(
+    stmt: &SelectStatement,
+    stmt_alias: SqlIdentifier,
+    out_map: &mut HashMap<Column, ReadySetResult<Expr>>,
+) -> ReadySetResult<()> {
+    // Keep existing behavior for direct COUNT-like fields at this level
+    analyse_lone_aggregates_subquery_fields(stmt, stmt_alias.clone(), out_map)?;
+
+    // Supplement for wrapper-by-projection cases
+    for f in &stmt.fields {
+        let (expr, alias) = expect_field_as_expr(f);
+        if let Some(zero_expr) = extract_aggregate_fallback_for_expr(expr, stmt)? {
+            // OUTER column: this stmt’s alias + effective name
+            let eff_name = alias
+                .clone()
+                .unwrap_or_else(|| default_alias_for_select_item_expression(expr));
+            let out_col = Column {
+                table: Some(stmt_alias.clone().into()),
+                name: eff_name,
+            };
+            // COALESCE(out_col, zero_expr)
+            let mapped = Expr::Call(FunctionExpr::Call {
+                name: "coalesce".into(),
+                arguments: Some(vec![Expr::Column(out_col.clone()), zero_expr]),
+            });
+            out_map.entry(out_col).or_insert(Ok(mapped));
+        }
+    }
+    Ok(())
+}
+
 /// Selects the join operator for a rewritten LATERAL subquery.
-///
-/// **Policy summary**
-/// - If the RHS is **aggregate-only without GROUP BY** and classified as **`ExactlyOne`**:
-///   - With `JoinConstraint::Empty` or `ON TRUE` (i.e., CROSS/comma or ON TRUE):
-///     * populate `fields_map` with COALESCE mappings for the COUNT family, and
-///     * return `LeftOuterJoin`.
-///     * This preserves “one scalar per outer row” after correlation hoist; absent keys yield
-///     * NULL on the RHS which the SELECT‑list later turns into `0` for COUNT via `coalesce_fields_references`.
-///   - With a **non‑trivial ON**: return the caller’s operator (INNER/LEFT/etc.) and **do not**
-///     * populate `fields_map`.
-/// - Otherwise (not agg‑only/ExactlyOne):
-///   - Preserve explicit `LeftJoin` / `LeftOuterJoin` / `RightJoin` / `RightOuterJoin` as given;
-///   - Default to `InnerJoin` in all other cases.
-///
-/// **Notes**
-/// - The ON normalizer may push ON atoms to WHERE **only** for INNER joins; for LEFT this is
-///   * forbidden and will error if required, so the choice here has semantic implications.
-/// - RIGHT joins are passed through here; downstream may reject them if unsupported by the engine.
-///
-/// # Arguments
-/// * `tab_expr`       – table expression for the LATERAL subquery.
-/// * `join_operator`  – operator from the original query context.
-/// * `join_constraint`– ON condition or empty constraint associated with the join.
-/// * `fields_map`     – populated only for the COUNT mapping in the `ExactlyOne` + (Empty|ON TRUE) case.
-///
-/// # Returns
-/// Operator to use for the rewritten join, per the policy above.
 fn get_join_operator_for_lateral(
     tab_expr: &TableExpr,
     join_operator: JoinOperator,
     join_constraint: &JoinConstraint,
+    ctx: &UnnestContext,
     fields_map: &mut HashMap<Column, ReadySetResult<Expr>>,
 ) -> ReadySetResult<JoinOperator> {
-    if let Some((stmt, stmt_alis)) = as_sub_query_with_alias(tab_expr) {
-        let agg_card_shape = agg_only_no_gby_cardinality(stmt)?;
-        if matches!(agg_card_shape, Some(AggNoGbyCardinality::ExactlyOne)) {
-            // Collect subquery fields requiring COALESCE injection
-            let mut local_fields_map = HashMap::new();
-            analyse_lone_aggregates_subquery_fields(
-                stmt,
-                stmt_alis.clone(),
-                &mut local_fields_map,
-            )?;
-            let emit_join_op = match join_constraint {
-                JoinConstraint::Empty
-                | JoinConstraint::On(Expr::Literal(Literal::Boolean(true))) => {
-                    // ** cross-join/empty ON/ON TRUE ** - always emit LEFT JOIN to preserve
-                    JoinOperator::LeftOuterJoin
-                }
-                JoinConstraint::On(join_expr) => {
-                    // We reject any ON conjunct referencing COUNT that would be coalesced;
-                    // this mirrors `coalesce_fields_references` which forbids mapping outside the SELECT list.
-                    let mut move_to_where = Vec::new();
-                    let _join_expr_remainder = split_expr(
-                        join_expr,
-                        &|conjunct| {
-                            columns_iter(conjunct)
-                                .into_iter()
-                                .any(|col| local_fields_map.contains_key(col))
-                        },
-                        &mut move_to_where,
-                    );
-                    if !move_to_where.is_empty() {
-                        // TODO: if join_operator.is_inner_join() - Handle moving affected join conjuncts to WHERE,
-                        //       once de-correlation pass is done before the auto-parametrization.
-                        unsupported!(
-                            "LATERAL join condition references a column requiring mapping to COALESCE"
-                        )
-                    }
-                    join_operator
-                }
-                JoinConstraint::Using(_) => {
-                    unreachable!("USING should have been desugared earlier")
-                }
-            };
-            fields_map.extend(local_fields_map);
-            return Ok(emit_join_op);
-        } else if matches!(
-            join_operator,
-            JoinOperator::LeftJoin
-                | JoinOperator::LeftOuterJoin
-                | JoinOperator::RightJoin
-                | JoinOperator::RightOuterJoin
-        ) {
-            return Ok(join_operator);
-        }
+    let Some((stmt, alias)) = as_sub_query_with_alias(tab_expr) else {
+        return Ok(InnerJoin);
+    };
+
+    let rel: Relation = alias.clone().into();
+    let have_prehoist_effective_one = ctx.pre_hoist_lateral_exactly_one.contains(&rel);
+    let prehoist_on_trivial = ctx.lateral_trivial_on.contains(&rel);
+
+    // Classify local agg-only/no-GBY cardinality.
+    let is_local_exactly_one = matches!(
+        agg_only_no_gby_cardinality(stmt)?,
+        Some(AggNoGbyCardinality::ExactlyOne)
+    );
+
+    // Build COUNT→COALESCE projection mappings **unconditionally** so wrappers like
+    // `SELECT inner.cn + 15 AS cn` can be recognized even when this level is not
+    // aggregate-only. Application of the map still depends on effective ExactlyOne
+    // and join constraint shape (see below).
+    let mut prehoist_fields_map = HashMap::new();
+    build_select_count_zero_mappings_recursive(stmt, alias.clone(), &mut prehoist_fields_map)?;
+
+    if have_prehoist_effective_one && prehoist_on_trivial {
+        fields_map.extend(prehoist_fields_map);
+        return Ok(JoinOperator::LeftOuterJoin);
     }
-    Ok(JoinOperator::InnerJoin)
+
+    // Reject only when ON references a mapped COUNT field **and** the RHS is
+    // effectively ExactlyOne (pre-hoist hint or local classification).
+    // For AtMostOne (e.g., HAVING present), no mapping is applied and ON over the field is legitimate.
+    if (have_prehoist_effective_one || is_local_exactly_one)
+        && !prehoist_fields_map.is_empty()
+        && let JoinConstraint::On(join_expr) = join_constraint
+        && columns_iter(join_expr)
+            .into_iter()
+            .any(|c| prehoist_fields_map.contains_key(c))
+    {
+        unsupported!("LATERAL join condition references a column requiring mapping to COALESCE")
+    }
+
+    if is_local_exactly_one {
+        return Ok(match join_constraint {
+            JoinConstraint::Empty | JoinConstraint::On(Expr::Literal(Literal::Boolean(true))) => {
+                fields_map.extend(prehoist_fields_map);
+                // ** cross-join/empty ON/ON TRUE ** - always emit LEFT JOIN to preserve
+                JoinOperator::LeftOuterJoin
+            }
+            JoinConstraint::On(_) => {
+                // Early guard above rejects ON when it references mapped COUNT fields under effective ExactlyOne.
+                // Preserve caller's operator.
+                join_operator
+            }
+            JoinConstraint::Using(_) => {
+                unreachable!("USING should have been desugared earlier")
+            }
+        });
+    }
+
+    if !join_operator.is_inner_join() {
+        return Ok(join_operator);
+    }
+
+    Ok(InnerJoin)
 }
 
 /// Replace select-list columns with coalesced expressions from `fields_map`.
@@ -572,6 +589,7 @@ fn resolve_lateral_subqueries(
             stmt_from_item,
             JoinOperator::CrossJoin,
             &JoinConstraint::Empty,
+            ctx,
             &mut fields_map,
         );
 
@@ -653,6 +671,7 @@ fn resolve_lateral_subqueries(
                 } else {
                     &JoinConstraint::Empty
                 },
+                ctx,
                 &mut fields_map,
             );
 
@@ -809,6 +828,8 @@ mod tests {
             &mut UnnestContext {
                 schema: &NonNullSchemaMoke {},
                 probes: ProbeRegistry::new(),
+                pre_hoist_lateral_exactly_one: HashSet::new(),
+                lateral_trivial_on: HashSet::new(),
             },
         ) {
             Ok(_) => {
@@ -1255,5 +1276,104 @@ FROM
         ORDER BY DataTypes.RowNum;"#;
         let expect_stmt = r#""#;
         test_it("test22", original_stmt, expect_stmt);
+    }
+
+    // LATERAL (correlated COUNT) + LEFT join with a non-trivial ON (extra RHS-only filter):
+    // Expect: NO COALESCE injection anywhere; ON keeps both the key equality and l.cnt > 0.
+    #[test]
+    fn test23() {
+        let original_text = r#"
+        SELECT s.sn
+        FROM s AS s
+        LEFT JOIN LATERAL (
+          SELECT i.cnt, i.sn
+          FROM (
+            SELECT COUNT(j.city) AS cnt, j.sn
+            FROM j AS j
+            WHERE j.sn = s.sn
+            GROUP BY j.sn
+          ) AS i
+        ) AS l ON l.sn = s.sn AND l.cnt > 0;
+        "#;
+        let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" LEFT JOIN (SELECT "i"."cnt", "i"."sn" FROM
+        (SELECT count("j"."city") AS "cnt", "j"."sn" FROM "j" AS "j" GROUP BY "j"."sn") AS "i") AS "l"
+        ON (("l"."sn" = "s"."sn") AND ("l"."cnt" > 0))"#;
+        test_it("test23", original_text, expected_text);
+    }
+
+    // LATERAL (correlated COUNT) + INNER join with a non-trivial ON (BETWEEN on RHS field):
+    // Expect: NO COALESCE injection; ON holds key equality and range filter over l.cnt.
+    #[test]
+    fn test24() {
+        let original_text = r#"
+        SELECT s.sn
+        FROM s AS s
+        JOIN LATERAL (
+          SELECT i.cnt, i.sn
+          FROM (
+            SELECT COUNT(j.city) AS cnt, j.sn
+            FROM j AS j
+            WHERE j.sn = s.sn
+            GROUP BY j.sn
+          ) AS i
+        ) AS l ON l.sn = s.sn AND l.cnt BETWEEN 1 AND 5;
+        "#;
+        let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" INNER JOIN (SELECT "i"."cnt", "i"."sn" FROM
+        (SELECT count("j"."city") AS "cnt", "j"."sn" FROM "j" AS "j" GROUP BY "j"."sn") AS "i") AS "l"
+        ON (("l"."sn" = "s"."sn") AND ("l"."cnt" BETWEEN 1 AND 5))"#;
+        test_it("test24", original_text, expected_text);
+    }
+
+    // LATERAL (correlated COUNT) with a non-linear wrapper in the projection (cnt + 1 = cn),
+    // LEFT join and an extra RHS-only filter in ON over that wrapped field:
+    // Expect: NO COALESCE injection; ON keeps l.cn < 100 alongside the key equality.
+    #[test]
+    fn test25() {
+        let original_text = r#"
+        SELECT s.sn
+        FROM s AS s
+        LEFT JOIN LATERAL (
+          SELECT i.cnt + 1 AS cn, i.sn
+          FROM (
+            SELECT COUNT(j.city) AS cnt, j.sn
+            FROM j AS j
+            WHERE j.sn = s.sn
+            GROUP BY j.sn
+          ) AS i
+        ) AS l ON l.sn = s.sn AND l.cn < 100;
+        "#;
+        let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" LEFT JOIN (SELECT ("i"."cnt" + 1) AS "cn", "i"."sn"
+        FROM (SELECT count("j"."city") AS "cnt", "j"."sn" FROM "j" AS "j" GROUP BY "j"."sn") AS "i") AS "l"
+        ON (("l"."sn" = "s"."sn") AND ("l"."cn" < 100))"#;
+        test_it("test25", original_text, expected_text);
+    }
+
+    // Wrapper over COUNT in a LATERAL, ON TRUE: must inject COALESCE in projection.
+    #[test]
+    fn test26() {
+        let original_text = r#"
+        SELECT
+            u.sn,
+            l.cn
+        FROM
+            qa.s AS u
+            JOIN LATERAL (
+                SELECT
+                    "inner".cn + 15 AS cn
+                FROM (
+                    SELECT
+                        COUNT(j.city) + 100 AS cn
+                    FROM
+                        qa.j AS j
+                    WHERE
+                        j.sn = u.sn
+                ) AS "inner"
+            ) AS l ON TRUE;
+        "#;
+        let expected_text = r#"SELECT "u"."sn", coalesce("l"."cn", 115) FROM "qa"."s" AS "u" LEFT OUTER JOIN
+        (SELECT ("inner"."cn" + 15) AS "cn", "inner"."sn" AS "sn" FROM
+        (SELECT (count("j"."city") + 100) AS "cn", "j"."sn" AS "sn" FROM "qa"."j" AS "j" GROUP BY "j"."sn") AS "inner") AS "l"
+        ON ("l"."sn" = "u"."sn")"#;
+        test_it("test26", original_text, expected_text);
     }
 }

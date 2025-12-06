@@ -1237,6 +1237,131 @@ pub(crate) fn analyse_lone_aggregates_subquery_fields(
     Ok(())
 }
 
+/// **IMPORTANT**: this function is safe to call only if structural verification for `current_stmt` returned ExactlyOne.
+/// See: `unnest_subqueries::agg_only_no_gby_cardinality()`
+///
+/// Extracts the fallback value for aggregate expressions when operating on empty result sets.
+///
+/// Analyzes an expression in a SELECT that wraps a subquery containing aggregates, attempting
+/// to determine what constant value the expression evaluates to if the aggregate operated on
+/// zero rows (e.g., `COUNT(*) + 5` → `5`, `COALESCE(SUM(x), 0)` → `0`).
+///
+/// Returns `Some(literal)` if the expression simplifies to a constant, `None` otherwise.
+pub(crate) fn extract_aggregate_fallback_for_expr(
+    expr: &Expr,
+    current_stmt: &SelectStatement,
+) -> ReadySetResult<Option<Expr>> {
+    // If this SELECT is a single projecting wrapper over a subquery, get its inner.
+    let inner = expect_only_subquery_from_with_alias(current_stmt).ok();
+
+    // Helper to check if a column belongs to the inner alias.
+    let mut inner_rel: Option<Relation> = None;
+    let mut inner_stmt_opt: Option<&SelectStatement> = None;
+    let mut inner_alias_opt: Option<SqlIdentifier> = None;
+    if let Some((inner_stmt, inner_alias)) = inner {
+        inner_rel = Some(inner_alias.clone().into());
+        inner_stmt_opt = Some(inner_stmt);
+        inner_alias_opt = Some(inner_alias);
+    }
+
+    // Build a map from inner subquery columns (that contain aggregates) to their fallback values.
+    // For example, if the inner projects `COALESCE(COUNT(*), 0)`, we extract the `0` as the fallback.
+    let inner_zero_map: HashMap<Column, Expr> = if let (Some(inner_stmt), Some(inner_alias)) =
+        (inner_stmt_opt, inner_alias_opt.as_ref())
+    {
+        let mut map = HashMap::new();
+        analyse_lone_aggregates_subquery_fields(inner_stmt, inner_alias.clone(), &mut map)?;
+
+        let inner_rel_for_extract: Relation = inner_alias.clone().into();
+        map.into_iter().filter_map(|(k, v)| match v {
+            Ok(mapped_expr) => {
+                if let Expr::Call(FunctionExpr::Call {
+                                      name,
+                                      arguments: Some(args),
+                                  }) = mapped_expr
+                    && name.as_str().eq_ignore_ascii_case("coalesce")
+                    && args.len() == 2
+                    && matches!(&args[0], Expr::Column(c0) if c0.name == k.name && is_column_of!(c0, inner_rel_for_extract))
+                {
+                    return Some((k, args[1].clone()));
+                }
+                None
+            }
+            Err(_) => None,
+        }).collect()
+    } else {
+        return Ok(None);
+    };
+
+    struct ForEachVisitor<'ast> {
+        stmt: Option<&'ast SelectStatement>,
+        stmt_rel: &'ast Option<Relation>,
+        fallback_map: &'ast HashMap<Column, Expr>,
+    }
+
+    impl<'ast> VisitorMut<'ast> for ForEachVisitor<'ast> {
+        type Error = ReadySetError;
+
+        fn visit_expr(&mut self, expr: &'ast mut Expr) -> ReadySetResult<()> {
+            if let Expr::Column(column) = expr
+                && let Some(rel) = self.stmt_rel.as_ref()
+                && column.table.as_ref() == Some(rel)
+            {
+                if let Some(zero_expr) = self.fallback_map.get(column) {
+                    let _ = mem::replace(expr, zero_expr.clone());
+                } else if let Some(inner_stmt) = self.stmt
+                    && let Some(inner_expr) = resolve_field_expr_by_alias(inner_stmt, &column.name)
+                    && let Ok(Some(zero_expr)) =
+                        extract_aggregate_fallback_for_expr(inner_expr, inner_stmt)
+                {
+                    let _ = mem::replace(expr, zero_expr);
+                }
+                Ok(())
+            } else {
+                walk_expr(self, expr)
+            }
+        }
+
+        fn visit_select_statement(&mut self, _: &'ast mut SelectStatement) -> ReadySetResult<()> {
+            Ok(())
+        }
+    }
+
+    let mut expr = expr.clone();
+    ForEachVisitor {
+        stmt: inner_stmt_opt,
+        stmt_rel: &inner_rel,
+        fallback_map: &inner_zero_map,
+    }
+    .visit_expr(&mut expr)?;
+
+    constant_fold_expr(&mut expr, dialect::Dialect::DEFAULT_POSTGRESQL);
+
+    Ok(if matches!(expr, Expr::Literal(_)) {
+        Some(expr)
+    } else {
+        None
+    })
+}
+
+pub(crate) fn resolve_field_expr_by_alias<'a>(
+    stmt: &'a SelectStatement,
+    alias_name: &SqlIdentifier,
+) -> Option<&'a Expr> {
+    // Match the projected field by its explicit alias when present;
+    // otherwise, compute the *default* alias for the expression and match on that.
+    // This keeps consistency with `make_first_field_ref_name` /
+    // `as_joinable_derived_table_with_opts`, which assign the same default later.
+    stmt.fields.iter().find_map(|f| match f {
+        FieldDefinitionExpr::Expr { expr, alias } => match alias {
+            Some(a) if a == alias_name => Some(expr),
+            None if default_alias_for_select_item_expression(expr) == alias_name => Some(expr),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
 pub(crate) fn construct_is_not_null_expr(rhs: Expr, negated: bool) -> Expr {
     Expr::BinaryOp {
         lhs: Box::new(rhs),
@@ -1297,9 +1422,11 @@ pub(crate) fn make_first_field_ref_name(
     stmt: &SelectStatement,
     stmt_alias: SqlIdentifier,
 ) -> ReadySetResult<Expr> {
-    if let Some((_, Some(field_alias))) = stmt.fields.first().map(expect_field_as_expr) {
+    if let Some((field_expr, field_alias)) = stmt.fields.first().map(expect_field_as_expr) {
         Ok(Expr::Column(Column {
-            name: field_alias.clone(),
+            name: field_alias
+                .clone()
+                .unwrap_or_else(|| default_alias_for_select_item_expression(field_expr)),
             table: Some(stmt_alias.into()),
         }))
     } else {

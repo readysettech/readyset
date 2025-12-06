@@ -3,17 +3,19 @@ use crate::lateral_join::unnest_lateral_subqueries;
 use crate::rewrite_utils::{
     NO_REWRITES_STATUS, OnAtom, RewriteStatus, SINGLE_REWRITE_STATUS,
     align_group_by_and_windows_with_correlation, analyse_lone_aggregates_subquery_fields,
-    and_predicates_skip_true, as_sub_query_with_alias_mut, bubble_alias_to_anchor_top,
-    classify_on_atom, collect_local_from_items, columns_iter, construct_is_not_null_expr,
-    construct_projecting_wrapper, construct_scalar_expr, contains_select, decompose_conjuncts,
-    default_alias_for_select_item_expression, ensure_first_field_alias, expect_field_as_expr,
-    expect_field_as_expr_mut, expect_only_subquery_from_with_alias,
-    expect_only_subquery_from_with_alias_mut, expect_sub_query_with_alias,
-    expect_sub_query_with_alias_mut, find_group_by_key, find_rhs_join_clause, for_each_aggregate,
-    get_from_item_reference_name, get_unique_alias, has_alias, is_aggregate_only_without_group_by,
-    is_aggregated_expr, is_aggregated_select, make_first_field_ref_name,
-    move_correlated_constraints_from_join_to_where, project_statement_columns_if,
-    rewrite_top_k_in_place, rewrite_top_k_in_place_with_partition, split_correlated_constraint,
+    and_predicates_skip_true, as_sub_query_with_alias, as_sub_query_with_alias_mut,
+    bubble_alias_to_anchor_top, classify_on_atom, collect_local_from_items, columns_iter,
+    construct_is_not_null_expr, construct_projecting_wrapper, construct_scalar_expr,
+    contains_select, decompose_conjuncts, default_alias_for_select_item_expression,
+    ensure_first_field_alias, expect_field_as_expr, expect_field_as_expr_mut,
+    expect_only_subquery_from_with_alias, expect_only_subquery_from_with_alias_mut,
+    expect_sub_query_with_alias, expect_sub_query_with_alias_mut,
+    extract_aggregate_fallback_for_expr, find_group_by_key, find_rhs_join_clause,
+    for_each_aggregate, get_from_item_reference_name, get_unique_alias, has_alias,
+    is_aggregate_only_without_group_by, is_aggregated_expr, is_aggregated_select,
+    make_first_field_ref_name, move_correlated_constraints_from_join_to_where,
+    project_statement_columns_if, resolve_field_expr_by_alias, rewrite_top_k_in_place,
+    rewrite_top_k_in_place_with_partition, split_correlated_constraint,
     split_correlated_expression, split_expr_mut,
 };
 use crate::unnest_subqueries_3vl::{
@@ -108,6 +110,9 @@ pub(crate) trait NonNullSchema {
 pub(crate) struct UnnestContext<'a> {
     pub(crate) schema: &'a dyn NonNullSchema,
     pub(crate) probes: ProbeRegistry,
+    // Pre-hoist hints keyed by LATERAL alias (as Relations)
+    pub(crate) pre_hoist_lateral_exactly_one: HashSet<Relation>,
+    pub(crate) lateral_trivial_on: HashSet<Relation>,
 }
 
 pub trait UnnestSubqueries: Sized {
@@ -137,11 +142,16 @@ pub(crate) fn unnest_subqueries_main(
     let mut ctx = UnnestContext {
         schema,
         probes: ProbeRegistry::new(),
+        pre_hoist_lateral_exactly_one: HashSet::new(),
+        lateral_trivial_on: HashSet::new(),
     };
 
     let mut rewrite_status = RewriteStatus::default();
 
-    // NEW: run the hoister first; it now also handles TOP-K in all nested derived tables
+    // Collect pre-hoist LATERAL hints (ExactlyOne + original ON triviality) before any reshaping
+    collect_pre_hoist_lateral_hints(&*stmt, &mut ctx)?;
+
+    // Run the hoister; it also handles TOP-K in nested derived tables
     if hoist_correlated_from_nested_and_rewrite_top_k(stmt)? {
         rewrite_status.rewrite();
     }
@@ -409,10 +419,12 @@ pub(crate) fn force_empty_select(stmt: &mut SelectStatement) {
 /// as a conservative fallback). Returns true if it made a change.
 fn scrub_empty_agg_no_gby(stmt: &mut SelectStatement) -> ReadySetResult<bool> {
     Ok(
-        if matches!(
-            agg_only_no_gby_cardinality(stmt)?,
-            Some(AggNoGbyCardinality::ExactlyZero)
-        ) {
+        if is_aggregate_only_without_group_by(stmt)?
+            && matches!(
+                agg_only_no_gby_cardinality(stmt)?,
+                Some(AggNoGbyCardinality::ExactlyZero)
+            )
+        {
             // Clear LIMIT/OFFSET and ORDER at this level only; no deep descent here.
             stmt.limit_clause = Default::default();
             stmt.order = None;
@@ -653,16 +665,73 @@ pub(crate) enum AggNoGbyCardinality {
 pub(crate) fn agg_only_no_gby_cardinality(
     stmt: &SelectStatement,
 ) -> ReadySetResult<Option<AggNoGbyCardinality>> {
-    if !is_aggregate_only_without_group_by(stmt)? {
-        return Ok(None);
+    // 1) This-level: classic aggregate-only without GROUP BY
+    if is_aggregate_only_without_group_by(stmt)? {
+        // Aggregate-only SELECT produce at most one row. Any OFFSET > 0 or LIMIT 0
+        // eliminates that single row, so the cardinality is ExactlyZero.
+        if matches!(stmt.limit_clause.limit(), Some(Literal::Integer(0))) {
+            return Ok(Some(AggNoGbyCardinality::ExactlyZero));
+        }
+        if matches!(stmt.limit_clause.offset(), Some(Literal::Integer(n)) if *n > 0) {
+            return Ok(Some(AggNoGbyCardinality::ExactlyZero));
+        }
+        return Ok(match &stmt.having {
+            None => Some(AggNoGbyCardinality::ExactlyOne),
+            Some(Expr::Literal(Literal::Boolean(true))) => Some(AggNoGbyCardinality::ExactlyOne),
+            Some(Expr::Literal(Literal::Boolean(false))) => Some(AggNoGbyCardinality::ExactlyZero),
+            // Any non-literal-boolean HAVING may filter or not ⇒ 0 or 1 rows.
+            Some(_) => Some(AggNoGbyCardinality::AtMostOne),
+        });
     }
-    Ok(match &stmt.having {
-        None => Some(AggNoGbyCardinality::ExactlyOne),
-        Some(Expr::Literal(Literal::Boolean(true))) => Some(AggNoGbyCardinality::ExactlyOne),
-        Some(Expr::Literal(Literal::Boolean(false))) => Some(AggNoGbyCardinality::ExactlyZero),
-        // Any non-literal-boolean HAVING may filter or not ⇒ 0 or 1 rows.
-        Some(_) => Some(AggNoGbyCardinality::AtMostOne),
-    })
+
+    // 2) Wrapper pass-through: if this SELECT is a projection-only wrapper over a single
+    //    subquery FROM item (no GROUP BY at this level), try to inherit the inner
+    //    aggregate-only/no-GBY cardinality, provided the wrapper cannot *increase* cardinality.
+    //
+    //    Safe wrapper shapes:
+    //      - no GROUP BY (already ensured)
+    //      - WHERE absent or literal TRUE  → preserves inner cardinality
+    //      - WHERE literal FALSE            → forces ExactlyZero
+    //      - LIMIT 0 or OFFSET > 0          → forces ExactlyZero (only one inner row at most)
+    //      - LIMIT 1 / ORDER / DISTINCT     → do not increase cardinality; preserve inner
+    //
+    //    If there is a non-trivial WHERE (not a literal), the wrapper can only *reduce*
+    //    the inner 0/1 row to 0, so we conservatively degrade ExactlyOne→AtMostOne.
+    if stmt.group_by.is_none()
+        && let Ok((inner, _alias)) = expect_only_subquery_from_with_alias(stmt)
+    {
+        // This-level LIMIT/OFFSET checks for quick zero-row outcome.
+        if matches!(stmt.limit_clause.limit(), Some(Literal::Integer(0))) {
+            return Ok(Some(AggNoGbyCardinality::ExactlyZero));
+        }
+        if matches!(stmt.limit_clause.offset(), Some(Literal::Integer(n)) if *n > 0) {
+            return Ok(Some(AggNoGbyCardinality::ExactlyZero));
+        }
+
+        // Classify the inner; if it's not agg-only/no-GBY, we can't help here.
+        let inner_card = agg_only_no_gby_cardinality(inner)?;
+        if let Some(mut card) = inner_card {
+            // Wrapper WHERE effects
+            match &stmt.where_clause {
+                None => { /* preserve inner card */ }
+                Some(Expr::Literal(Literal::Boolean(true))) => { /* preserve */ }
+                Some(Expr::Literal(Literal::Boolean(false))) => {
+                    return Ok(Some(AggNoGbyCardinality::ExactlyZero));
+                }
+                Some(_) => {
+                    // Non-trivial filter: inner ExactlyOne/AtMostOne becomes AtMostOne;
+                    // inner ExactlyZero stays ExactlyZero.
+                    if matches!(card, AggNoGbyCardinality::ExactlyOne) {
+                        card = AggNoGbyCardinality::AtMostOne;
+                    }
+                }
+            }
+            return Ok(Some(card));
+        }
+    }
+
+    // Not an agg-only/no-GBY at this level, and no safe wrapper to inherit from.
+    Ok(None)
 }
 
 fn has_limit_one_deep(stmt: &SelectStatement) -> bool {
@@ -682,6 +751,15 @@ fn has_limit_one_deep(stmt: &SelectStatement) -> bool {
             }
             Err(_) => return false,
         }
+    }
+}
+
+/// Returns true if the subquery WHERE clause contains correlation to outer columns.
+#[inline]
+fn subquery_has_correlation(stmt: &SelectStatement, locals: &HashSet<Relation>) -> bool {
+    match &stmt.where_clause {
+        Some(expr) => contains_outer_columns(expr, locals),
+        None => false,
     }
 }
 
@@ -836,6 +914,17 @@ pub(crate) fn as_joinable_derived_table_with_opts(
             }
         }
         SubqueryContext::Scalar | SubqueryContext::In => {
+            // Single-valued acceptance for Scalar by shape only; correlation is deferred
+            // and verified post-hoist via grouping alignment (see callbacks below).
+            let is_single_by_shape = matches!(ctx, SubqueryContext::Scalar)
+                && matches!(
+                    agg_only_no_gby_cardinality(stmt)?,
+                    Some(AggNoGbyCardinality::ExactlyOne)
+                );
+            // If the subquery WHERE is correlated, hoisting may align GROUP BY with the correlated keys,
+            // yielding "exactly one row per outer row" even when the top-level field is not an aggregate
+            // and there's no explicit LIMIT 1. Defer rejection to the post-hoist checks in that case.
+            let may_be_single_via_corr = subquery_has_correlation(stmt, &local_from_items);
             // Scalar validation and WHERE-correlation/top-k handling
             let (field_expr, field_expr_alias) = expect_field_as_expr_mut(
                 stmt.fields
@@ -847,10 +936,23 @@ pub(crate) fn as_joinable_derived_table_with_opts(
                 *field_expr_alias = Some(default_alias_for_select_item_expression(field_expr));
             }
             if matches!(ctx, SubqueryContext::Scalar) {
-                if !is_aggregated_expr(field_expr)? && !has_limit_one {
+                // Accept three ways to be single-valued for Scalar:
+                //  (a) the projected field is an aggregated expression, OR
+                //  (b) there is an explicit LIMIT 1 (possibly under wrappers), OR
+                //  (c) the subquery is aggregate-only without GROUP BY and HAVING is TRUE/absent
+                //      (wrapper-aware via agg_only_no_gby_cardinality).
+                if !is_aggregated_expr(field_expr)?
+                    && !has_limit_one
+                    && !is_single_by_shape
+                    && !may_be_single_via_corr
+                {
                     invalid_query!("Subquery should be aggregated or have LIMIT 1");
                 }
-                if !stmt.limit_clause.is_empty() && !has_limit_one {
+                if !stmt.limit_clause.is_empty()
+                    && !has_limit_one
+                    && !is_single_by_shape
+                    && !may_be_single_via_corr
+                {
                     invalid_query!("Subquery returns more than 1 row");
                 }
             }
@@ -1203,21 +1305,40 @@ fn build_rhs_expr_for_aggregate_only_derived_table(
     derived_table_alias: SqlIdentifier,
     first_field_ref: &Expr,
 ) -> ReadySetResult<Option<Expr>> {
-    let mut fields_map = HashMap::default();
+    // Get the RHS first field column
+    let Expr::Column(rhs_col) = &first_field_ref else {
+        internal!("Subquery select field reference should be a column")
+    };
+
+    // Fast path: direct mapping for the *derived* first-field column via aggregate analysis.
+    let mut fields_map = HashMap::new();
     analyse_lone_aggregates_subquery_fields(
         derived_table_stmt,
-        derived_table_alias,
+        derived_table_alias.clone(),
         &mut fields_map,
     )?;
-    if let Expr::Column(rhs_col) = &first_field_ref {
-        match fields_map.remove(rhs_col) {
-            Some(Err(err)) => Err(err.clone()),
-            Some(Ok(mapped_expr)) => Ok(Some(mapped_expr)),
-            None => Ok(None),
-        }
-    } else {
-        unreachable!("Subquery select field reference should be a column")
+
+    match fields_map.remove(rhs_col) {
+        Some(Err(err)) => return Err(err.clone()),
+        Some(Ok(mapped_expr)) => return Ok(Some(mapped_expr)),
+        None => { /* fall through to wrapper/descend path */ }
     }
+
+    // Locate the first-field expression by its alias (the column name of `first_field_ref`).
+    let Some(ff_expr) = resolve_field_expr_by_alias(derived_table_stmt, &rhs_col.name) else {
+        return Ok(None);
+    };
+
+    // Try to compute a zero-argument substitute for the first-field expression
+    // by peeling allowed wrappers and/or descending through single-child wrappers.
+    if let Some(f_zero) = extract_aggregate_fallback_for_expr(ff_expr, derived_table_stmt)? {
+        return Ok(Some(Expr::Call(FunctionExpr::Call {
+            name: "coalesce".into(),
+            arguments: Some(vec![first_field_ref.clone(), f_zero]),
+        })));
+    }
+
+    Ok(None)
 }
 
 pub(crate) fn is_supported_join_condition(join_expr: &Expr) -> bool {
@@ -1696,7 +1817,6 @@ fn unnest_subqueries_in_where(
             subquery_desc.ctx = SubqueryContext::Scalar;
         }
 
-        // **IMPORTANT**: Preserve the agg-only-no_GBY property before un-nesting inside the subquery
         let is_exactly_one = matches!(agg_card_shape, Some(AggNoGbyCardinality::ExactlyOne));
 
         if unnest_all_subqueries(&mut subquery_desc.stmt, ctx)?.has_rollbacks() {
@@ -1756,20 +1876,22 @@ fn unnest_subqueries_in_where(
         //   • We never move ON → WHERE for OUTER joins except in this controlled LEFT+COALESCE path.
         //   • EXISTS/NOT EXISTS and NOT IN 3VL are handled elsewhere.
         if is_exactly_one && lhs_and_op.is_some() && join_on.is_some() && !subquery_desc.negated {
+            // Attempt COUNT-aware RHS mapping directly; if it succeeds, flip to LEFT and
+            // move the comparison to the outer WHERE. This decouples the decision from
+            // pre-hoist hinting and relies solely on structural ExactlyOne + successful mapping.
             let first_field =
                 make_first_field_ref_name(subquery_stmt, subquery_stmt_alias.clone())?;
-
             if let Some(rhs_for_where) = build_rhs_expr_for_aggregate_only_derived_table(
                 subquery_stmt,
                 subquery_stmt_alias.clone(),
                 &first_field,
             )? {
-                join_op = LeftOuterJoin; // mapped COUNT needs LEFT; COALESCE avoids null‑reject
+                join_op = LeftOuterJoin; // avoid null-reject; preserve zero-on-empty
                 let (lhs, op) = mem::take(&mut lhs_and_op).unwrap();
                 add_to_where = and_predicates_skip_true(
                     add_to_where,
                     construct_scalar_expr(lhs, op, rhs_for_where),
-                ); // enforce original WHERE truth using the mapped RHS
+                );
             }
         }
 
@@ -1937,13 +2059,12 @@ fn unnest_subqueries_in_fields(
                     }
                 }
                 Some(AggNoGbyCardinality::AtMostOne) => { /* no single-row constant transforms */ }
-                Some(AggNoGbyCardinality::ExactlyZero) => { /* handled earlier by emptiness short-circuit */
+                Some(AggNoGbyCardinality::ExactlyZero) => {
+                    /* handled earlier by emptiness short-circuit */
                 }
                 None => { /* not aggregate-only/no-GBY: no shape-based folds here */ }
             }
 
-            // Exactly-one per outer row (agg-only/no-GBY) lets IN reduce to scalar compare in SELECT-list
-            // without 3VL probes; use shape to drive this, not correlation.
             let is_exactly_one = matches!(agg_card_shape, Some(AggNoGbyCardinality::ExactlyOne));
 
             if unnest_all_subqueries(&mut subquery_desc.stmt, ctx)?.has_rollbacks() {
@@ -1974,10 +2095,6 @@ fn unnest_subqueries_in_fields(
             let first_field =
                 make_first_field_ref_name(subquery_stmt, subquery_stmt_alias.clone())?;
 
-            // NOTE: Only apply COALESCE-style mapping in SELECT-list when the subquery is
-            // aggregate-only/no-GBY **and** classified as ExactlyOne. For AtMostOne (HAVING
-            // may filter the group out) we must preserve NULL (no mapping). Also skip mapping
-            // entirely when uncorrelated (join_on.is_none()).
             let rhs = if is_exactly_one && join_on.is_some() {
                 build_rhs_expr_for_aggregate_only_derived_table(
                     subquery_stmt,
@@ -2095,4 +2212,42 @@ pub(crate) fn unnest_all_subqueries(
     let status2 = unnest_subqueries_in_fields(stmt, ctx)?;
     let status3 = unnest_lateral_subqueries(stmt, ctx)?;
     Ok(status1.combine(status2).combine(status3))
+}
+
+/// Walk the statement and collect, for each LATERAL subquery, two pre-hoist hints:
+///  (1) whether its body is agg-only/no-GBY and **ExactlyOne** (wrapper-aware), and
+///  (2) whether its original ON was trivial (Empty / ON TRUE / comma segment).
+fn collect_pre_hoist_lateral_hints(
+    stmt: &SelectStatement,
+    ctx: &mut UnnestContext,
+) -> ReadySetResult<()> {
+    for (tab_expr_idx, tab_expr) in get_local_from_items_iter!(stmt).enumerate() {
+        if let Some((inner, alias)) = as_sub_query_with_alias(tab_expr) {
+            // Recurse first to collect nested hints
+            collect_pre_hoist_lateral_hints(inner, ctx)?;
+
+            if inner.lateral {
+                if matches!(
+                    agg_only_no_gby_cardinality(inner)?,
+                    Some(AggNoGbyCardinality::ExactlyOne)
+                ) {
+                    ctx.pre_hoist_lateral_exactly_one
+                        .insert(alias.clone().into());
+                }
+                let trivial = if let Some((jc_idx, _)) = find_rhs_join_clause(stmt, tab_expr_idx) {
+                    matches!(
+                        stmt.join[jc_idx].constraint,
+                        JoinConstraint::Empty
+                            | JoinConstraint::On(Expr::Literal(Literal::Boolean(true)))
+                    )
+                } else {
+                    true // comma/CROSS segment behaves like ON TRUE
+                };
+                if trivial {
+                    ctx.lateral_trivial_on.insert(alias.clone().into());
+                }
+            }
+        }
+    }
+    Ok(())
 }

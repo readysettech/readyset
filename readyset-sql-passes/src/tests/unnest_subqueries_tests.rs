@@ -5588,3 +5588,680 @@ FROM s;"#;
         (SELECT sum("p"."weight") AS "sum(weight)" FROM "p" HAVING (sum("p"."weight") > 0)) AS "GNL""#;
     test_it("test207", original_text, expected_text);
 }
+
+#[test]
+fn test208() {
+    let original_text = r#"
+SELECT
+    "EnvironmentDraftEntry".sn
+FROM
+    s AS "inner" LEFT JOIN p AS "EnvironmentDraftEntry" ON "inner"."pn" = "EnvironmentDraftEntry"."pn"
+    join LATERAL (
+        SELECT
+            coalesce("array_subq"."agg_result", ARRAY []::text[]) AS "foo"
+        FROM
+            (
+                SELECT
+                    array_agg("inner_subq"."external_tag_id") AS "agg_result"
+                FROM
+                    (
+                        SELECT
+                            "tags_for_entities"."external_tag_id"
+                        FROM
+                            (
+                                SELECT
+                                    "tags_for_model_0".jn as "external_tag_id"
+                                FROM
+                                    j AS "tags_for_model_0"
+                                WHERE
+                                    (
+                                        "EnvironmentDraftEntry"."city" = "tags_for_model_0"."city"
+                                    )
+                            ) AS "tags_for_entities"
+                    ) AS "inner_subq"
+            ) AS "array_subq"
+    ) AS "tags" on TRUE;
+"#;
+    let expected_text = r#"SELECT "EnvironmentDraftEntry"."sn" FROM "s" AS "inner" LEFT JOIN "p" AS "EnvironmentDraftEntry"
+    ON ("inner"."pn" = "EnvironmentDraftEntry"."pn") LEFT OUTER JOIN (SELECT coalesce("array_subq"."agg_result",
+    (ARRAY[]::TEXT[])) AS "foo", "array_subq"."city" AS "city" FROM (SELECT array_agg("inner_subq"."external_tag_id")
+    AS "agg_result", "inner_subq"."city" AS "city" FROM (SELECT "tags_for_entities"."external_tag_id",
+    "tags_for_entities"."city" AS "city" FROM (SELECT "tags_for_model_0"."jn" AS "external_tag_id",
+    "tags_for_model_0"."city" AS "city" FROM "j" AS "tags_for_model_0") AS "tags_for_entities") AS "inner_subq"
+    GROUP BY "inner_subq"."city") AS "array_subq") AS "tags" ON ("EnvironmentDraftEntry"."city" = "tags"."city")"#;
+    test_it("test208", original_text, expected_text);
+}
+
+#[test]
+fn test209() {
+    let original_text = r#"
+SELECT
+    s.city, p.city
+from
+    s left join p on s.pn = p.pn
+where
+    p.status in (
+       select "inner".cn from (
+          SELECT count(j.city) cn FROM j WHERE p.sn = j.sn
+       ) "inner"
+    );
+"#;
+    let expected_text = r#"SELECT "s"."city", "p"."city" FROM "s" LEFT JOIN "p" ON ("s"."pn" = "p"."pn")
+    LEFT OUTER JOIN (SELECT DISTINCT "inner"."cn" AS "cn", "inner"."sn" AS "sn" FROM
+    (SELECT count("j"."city") AS "cn", "j"."sn" AS "sn" FROM "j" GROUP BY "j"."sn") AS "inner") AS "GNL"
+    ON ("p"."sn" = "GNL"."sn") WHERE ("p"."status" = coalesce("GNL"."cn", 0))"#;
+    test_it("test209", original_text, expected_text);
+}
+
+#[test]
+fn test210() {
+    let original_text = r#"
+SELECT
+    s.city, p.city
+from
+    s left join p on s.pn = p.pn
+where
+    p.status in (
+       select round("inner".cn) + 100 from (
+           select coalesce("inner".cn, - 1) + 100 cn from (
+              SELECT count(j.city) + 99 cn FROM j WHERE p.sn = j.sn
+           ) "inner"
+       ) "inner"
+    );
+"#;
+    let expected_text = r#"SELECT "s"."city", "p"."city" FROM "s" LEFT JOIN "p" ON ("s"."pn" = "p"."pn")
+    LEFT OUTER JOIN (SELECT DISTINCT (round("inner"."cn") + 100) AS "round(cn) + 100", "inner"."sn" AS "sn" FROM
+    (SELECT (coalesce("inner"."cn", -1) + 100) AS "cn", "inner"."sn" AS "sn" FROM
+    (SELECT (count("j"."city") + 99) AS "cn", "j"."sn" AS "sn" FROM "j" GROUP BY "j"."sn") AS "inner") AS "inner") AS "GNL"
+    ON ("p"."sn" = "GNL"."sn") WHERE ("p"."status" = coalesce("GNL"."round(cn) + 100", 299))"#;
+    test_it("test210", original_text, expected_text);
+}
+
+#[test]
+fn test211() {
+    let original_text = r#"
+SELECT
+    s.city, p.city
+from
+    s left join p on s.pn = p.pn
+    join lateral (
+       select round("inner".cn) + 100 from (
+           select coalesce("inner".cn, -1) + 100 cn from (
+              SELECT count(j.city) + 99 cn FROM j WHERE p.sn = j.sn
+           ) "inner"
+       ) "inner"
+    ) "inner" on TRUE;
+"#;
+    let expected_text = r#"SELECT "s"."city", "p"."city" FROM "s" LEFT JOIN "p" ON ("s"."pn" = "p"."pn")
+    LEFT OUTER JOIN (SELECT (round("inner"."cn") + 100), "inner"."sn" AS "sn" FROM
+    (SELECT (coalesce("inner"."cn", -1) + 100) AS "cn", "inner"."sn" AS "sn" FROM
+    (SELECT (count("j"."city") + 99) AS "cn", "j"."sn" AS "sn" FROM "j" GROUP BY "j"."sn") AS "inner") AS "inner") AS "inner"
+    ON ("p"."sn" = "inner"."sn")"#;
+    test_it("test211", original_text, expected_text);
+}
+
+#[test]
+fn test212() {
+    let original_text = r#"
+SELECT
+    s.city, p.city, "inner".cn
+from
+    s left join p on s.pn = p.pn
+    join lateral (
+       select (round("inner".cn) / "inner".cn) cn from (
+           select "inner".cn + 20 cn from (
+              SELECT count(*) + 100 cn FROM j WHERE p.sn = j.sn
+           ) "inner"
+       ) "inner"
+    ) "inner" on TRUE;
+"#;
+    let expected_text = r#"SELECT "s"."city", "p"."city", coalesce("inner"."cn", 1) FROM "s"
+    LEFT JOIN "p" ON ("s"."pn" = "p"."pn") LEFT OUTER JOIN (SELECT (round("inner"."cn") / "inner"."cn") AS "cn",
+    "inner"."sn" AS "sn" FROM (SELECT ("inner"."cn" + 20) AS "cn", "inner"."sn" AS "sn" FROM
+    (SELECT (count(*) + 100) AS "cn", "j"."sn" AS "sn" FROM "j" GROUP BY "j"."sn") AS "inner") AS "inner") AS "inner"
+    ON ("p"."sn" = "inner"."sn")"#;
+    test_it("test212", original_text, expected_text);
+}
+
+#[test]
+fn test213() {
+    let original_text = r#"
+SELECT
+    s.city, p.city, "inner".cn
+from
+    s left join p on s.pn = p.pn
+    join lateral (
+           select max("inner".cn) + 20 cn from (
+              SELECT count(*) + 100 cn FROM j WHERE p.sn = j.sn
+           ) "inner"
+           where "inner".cn = 3
+    ) "inner" on TRUE;
+"#;
+    let expected_text = r#"SELECT "s"."city", "p"."city", "inner"."cn" FROM "s" LEFT JOIN "p" ON ("s"."pn" = "p"."pn")
+    LEFT OUTER JOIN (SELECT (max("inner"."cn") + 20) AS "cn", "inner"."sn" AS "sn" FROM
+    (SELECT (count(*) + 100) AS "cn", "j"."sn" AS "sn" FROM "j" GROUP BY "j"."sn") AS "inner" WHERE ("inner"."cn" = 3)
+    GROUP BY "inner"."sn") AS "inner" ON ("p"."sn" = "inner"."sn")"#;
+    test_it("test213", original_text, expected_text);
+}
+
+#[test]
+fn test214() {
+    let original_text = r#"
+SELECT u.sn, l.cn
+FROM qa.s AS u
+JOIN LATERAL (
+  SELECT inner.cn + 15 cn
+  FROM (
+    SELECT COUNT(j.city) + 100 AS cn
+    FROM qa.j AS j
+    WHERE j.sn = u.sn
+  ) AS inner
+) AS l ON TRUE;
+"#;
+    let expected_text = r#"SELECT "u"."sn", coalesce("l"."cn", 115) FROM "qa"."s" AS "u" LEFT OUTER JOIN
+    (SELECT ("inner"."cn" + 15) AS "cn", "inner"."sn" AS "sn" FROM (SELECT (count("j"."city") + 100) AS "cn", "j"."sn" AS "sn"
+    FROM "qa"."j" AS "j" GROUP BY "j"."sn") AS "inner") AS "l" ON ("l"."sn" = "u"."sn")"#;
+    test_it("test214", original_text, expected_text);
+}
+
+#[test]
+fn test215() {
+    let original_text = r#"
+-- Deep wrapper over agg-only/no-GBY COUNT (three layers)
+SELECT u.sn, l.cn
+FROM qa.s AS u
+JOIN LATERAL (
+  SELECT round(i1.cn) + 100 AS cn          -- wrapper #2
+  FROM (
+    SELECT coalesce(i0.cn, -1) + 100 AS cn  -- wrapper #1
+    FROM (
+      SELECT COUNT(j.city) + 99 AS cn       -- agg-only/no-GBY core (ExactlyOne per outer u)
+      FROM qa.j AS j
+      WHERE j.sn = u.sn
+    ) AS i0
+  ) AS i1
+) AS l ON TRUE;
+"#;
+    let expected_text = r#"SELECT "u"."sn", coalesce("l"."cn", 299) FROM "qa"."s" AS "u" LEFT OUTER JOIN
+    (SELECT (round("i1"."cn") + 100) AS "cn", "i1"."sn" AS "sn" FROM (SELECT (coalesce("i0"."cn", -1) + 100) AS "cn",
+    "i0"."sn" AS "sn" FROM (SELECT (count("j"."city") + 99) AS "cn", "j"."sn" AS "sn" FROM "qa"."j" AS "j"
+    GROUP BY "j"."sn") AS "i0") AS "i1") AS "l" ON ("l"."sn" = "u"."sn")"#;
+    test_it("test215", original_text, expected_text);
+}
+
+#[test]
+fn test216() {
+    let original_text = r#"
+SELECT
+  s.city, p.city
+FROM s
+LEFT JOIN p ON s.pn = p.pn
+WHERE p.status IN (
+  SELECT (ROUND(i1.cn) + 100)::int
+  FROM (
+    SELECT COALESCE(i0.cn, -1) + 100 AS cn
+    FROM (
+      SELECT COUNT(j.city) + 99 AS cn
+      FROM j
+      WHERE j.sn = p.sn                -- correlation
+    ) AS i0
+  ) AS i1
+);
+"#;
+    let expected_text = r#"SELECT "s"."city", "p"."city" FROM "s" LEFT JOIN "p" ON ("s"."pn" = "p"."pn")
+    LEFT OUTER JOIN (SELECT DISTINCT ((round("i1"."cn") + 100)::INT) AS "((round(""i1"".""cn"") + 100)::INT)",
+    "i1"."sn" AS "sn" FROM (SELECT (coalesce("i0"."cn", -1) + 100) AS "cn", "i0"."sn" AS "sn" FROM
+    (SELECT (count("j"."city") + 99) AS "cn", "j"."sn" AS "sn" FROM "j" GROUP BY "j"."sn") AS "i0") AS "i1") AS "GNL" ON
+    ("GNL"."sn" = "p"."sn") WHERE ("p"."status" = coalesce("GNL"."((round(""i1"".""cn"") + 100)::INT)", 299))"#;
+    test_it("test216", original_text, expected_text);
+}
+
+#[test]
+fn test217() {
+    let original_text = r#"
+SELECT u.sn, l.cn
+FROM qa.s AS u
+JOIN LATERAL (
+  SELECT (ROUND(i1.cn) + 100)::int AS cn
+  FROM (
+    SELECT COALESCE(i0.cn, -1) + 100 AS cn
+    FROM (
+      SELECT COUNT(j.city) + 99 AS cn, j.sn
+      FROM qa.j AS j
+      WHERE j.sn = u.sn                 -- correlation
+      GROUP BY j.sn
+    ) AS i0
+  ) AS i1
+) AS l ON TRUE;
+"#;
+    let expected_text = r#"SELECT "u"."sn", "l"."cn" FROM "qa"."s" AS "u" INNER JOIN
+    (SELECT ((round("i1"."cn") + 100)::INT) AS "cn", "i1"."sn" AS "sn" FROM
+    (SELECT (coalesce("i0"."cn", -1) + 100) AS "cn", "i0"."sn" AS "sn" FROM
+    (SELECT (count("j"."city") + 99) AS "cn", "j"."sn" FROM "qa"."j" AS "j" GROUP BY "j"."sn") AS "i0") AS "i1") AS "l"
+    ON ("l"."sn" = "u"."sn")"#;
+    test_it("test217", original_text, expected_text);
+}
+
+// LATERAL + TOP-1 (correlated) with wrapper that *includes* COALESCE:
+// fallback = COALESCE(NULL, 7) + 3 = 10 → project coalesce(l.cn, 10)
+#[test]
+fn test218() {
+    let original_text = r#"
+SELECT u.sn, l.cn
+FROM qa.s AS u
+JOIN LATERAL (
+  SELECT COALESCE(i.qty, 7) + 3 AS cn
+  FROM (
+    SELECT t.qty
+    FROM qa.spj AS t
+    WHERE t.sn = u.sn
+    ORDER BY t.qty DESC
+    LIMIT 1
+  ) AS i
+) AS l ON TRUE;
+"#;
+    let expected_text = r#"SELECT "u"."sn", "l"."cn" FROM "qa"."s" AS "u" INNER JOIN
+    (SELECT (coalesce("i"."qty", 7) + 3) AS "cn", "i"."sn" AS "sn" FROM
+    (SELECT "INNER"."qty" AS "qty", "INNER"."sn" AS "sn" FROM (SELECT "t"."qty" AS "qty", "t"."sn" AS "sn",
+    ROW_NUMBER() OVER(PARTITION BY "t"."sn" ORDER BY "t"."qty" DESC NULLS FIRST) AS "__rn" FROM "qa"."spj" AS "t") AS "INNER"
+    WHERE ("INNER"."__rn" <= 1)) AS "i") AS "l" ON ("l"."sn" = "u"."sn")"#;
+    test_it("test218", original_text, expected_text);
+}
+
+// WHERE scalar + TOP-1 (correlated) with wrapper that *includes* COALESCE:
+// we materialize RN<=1 per pn and compare the wrapped RHS; INNER is correct (no-row ⇒ scalar=10 ⇒ WHERE FALSE).
+#[test]
+fn test219() {
+    let original_text = r#"
+SELECT s.sn
+FROM s AS s
+WHERE (
+  SELECT COALESCE(i.weight, 7) + 3
+  FROM (
+    SELECT p.weight
+    FROM p AS p
+    WHERE p.pn = s.pn
+    ORDER BY p.weight DESC
+    LIMIT 1
+  ) AS i
+) >= 100;
+"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" INNER JOIN
+    (SELECT (coalesce("i"."weight", 7) + 3) AS "coalesce(weight, 7) + 3", "i"."pn" AS "pn" FROM
+    (SELECT "INNER"."weight" AS "weight", "INNER"."pn" AS "pn" FROM (SELECT "p"."weight" AS "weight", "p"."pn" AS "pn",
+    ROW_NUMBER() OVER(PARTITION BY "p"."pn" ORDER BY "p"."weight" DESC NULLS FIRST) AS "__rn" FROM "p" AS "p") AS "INNER"
+    WHERE ("INNER"."__rn" <= 1)) AS "i") AS "GNL" ON ("GNL"."pn" = "s"."pn")
+    WHERE ("GNL"."coalesce(weight, 7) + 3" >= 100)"#;
+    test_it("test219", original_text, expected_text);
+}
+
+// LATERAL + TOP-1 (correlated) with *non-linear* wrapper and *no* COALESCE:
+// fallback must be NULL (do NOT inject a constant or 1); ensure we *don’t* coalesce.
+#[test]
+fn test220() {
+    let original_text = r#"
+SELECT u.sn, l.r
+FROM qa.s AS u
+LEFT JOIN LATERAL (
+  SELECT ROUND(i.qty) / i.qty AS r
+  FROM (
+    SELECT t.qty
+    FROM qa.spj AS t
+    WHERE t.sn = u.sn
+    ORDER BY t.qty DESC
+    LIMIT 1
+  ) AS i
+) AS l ON TRUE;
+"#;
+    let expected_text = r#"SELECT "u"."sn", "l"."r" FROM "qa"."s" AS "u" LEFT JOIN
+    (SELECT (round("i"."qty") / "i"."qty") AS "r", "i"."sn" AS "sn" FROM
+    (SELECT "INNER"."qty" AS "qty", "INNER"."sn" AS "sn" FROM
+     (SELECT "t"."qty" AS "qty", "t"."sn" AS "sn",
+     ROW_NUMBER() OVER(PARTITION BY "t"."sn" ORDER BY "t"."qty" DESC NULLS FIRST) AS "__rn"
+     FROM "qa"."spj" AS "t") AS "INNER" WHERE ("INNER"."__rn" <= 1)) AS "i") AS "l" ON ("l"."sn" = "u"."sn")"#;
+    test_it("test220", original_text, expected_text);
+}
+
+// WHERE IN → scalar "=" relaxation with TOP-1 (correlated) *and* wrapper that includes COALESCE:
+// equality against the wrapped RHS; no NP/EP needed because the scalar is totalized by COALESCE.
+#[test]
+fn test221() {
+    let original_text = r#"
+SELECT spj.sn
+FROM spj
+WHERE spj.qty IN (
+  SELECT COALESCE(i.weight, 7) + 3
+  FROM (
+    SELECT p.weight
+    FROM p AS p
+    WHERE p.pn = spj.pn
+    ORDER BY p.weight DESC
+    LIMIT 1
+  ) AS i
+);
+"#;
+    let expected_text = r#"SELECT "spj"."sn" FROM "spj" INNER JOIN
+    (SELECT (coalesce("i"."weight", 7) + 3) AS "coalesce(weight, 7) + 3", "i"."pn" AS "pn" FROM
+    (SELECT "INNER"."weight" AS "weight", "INNER"."pn" AS "pn" FROM
+    (SELECT "p"."weight" AS "weight", "p"."pn" AS "pn", ROW_NUMBER() OVER(PARTITION BY "p"."pn" ORDER BY "p"."weight" DESC NULLS FIRST) AS "__rn"
+    FROM "p" AS "p") AS "INNER" WHERE ("INNER"."__rn" <= 1)) AS "i") AS "GNL" ON
+    (("GNL"."pn" = "spj"."pn") AND ("spj"."qty" = "GNL"."coalesce(weight, 7) + 3"))"#;
+    test_it("test221", original_text, expected_text);
+}
+
+// OFFSET>0 — WHERE scalar (uncorrelated) ⇒ NULL ⇒ WHERE FALSE
+#[test]
+fn test222() {
+    let original_text = r#"
+SELECT s.sn
+FROM s AS s
+WHERE (
+  SELECT SUM(p.weight)
+  FROM p
+  LIMIT 1 OFFSET 1
+) >= 100;
+"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" WHERE FALSE"#;
+    test_it("test222", original_text, expected_text);
+}
+
+// OFFSET>0 — WHERE scalar (correlated) ⇒ per-outer-row NULL ⇒ WHERE FALSE
+#[test]
+fn test223() {
+    let original_text = r#"
+SELECT s.sn
+FROM s AS s
+WHERE (
+  SELECT SUM(t.qty)
+  FROM spj AS t
+  WHERE t.sn = s.sn
+  LIMIT 1 OFFSET 1
+) >= 100;
+"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" WHERE FALSE"#;
+    test_it("test223", original_text, expected_text);
+}
+
+// OFFSET>0 — SELECT-list scalar (uncorrelated) ⇒ NULL literal
+#[test]
+fn test224() {
+    let original_text = r#"
+SELECT
+  (SELECT SUM(p.weight) FROM p LIMIT 1 OFFSET 1) AS total_w
+FROM s;
+"#;
+    let expected_text = r#"SELECT NULL AS "total_w" FROM "s""#;
+    test_it("test224", original_text, expected_text);
+}
+
+// WHERE IN with non-linear wrapper (no COALESCE):
+// Confirm equality remains in ON (we don't move it to WHERE).
+#[test]
+fn test225() {
+    let original_text = r#"
+SELECT spj.sn
+FROM spj
+WHERE spj.qty IN (
+  SELECT ROUND(i.qty) / i.qty
+  FROM (
+    SELECT t.status qty, t.pn
+    FROM s AS t
+    WHERE t.pn = spj.pn
+    ORDER BY t.status DESC
+    LIMIT 1
+  ) AS i
+);
+"#;
+    let expected_text = r#"SELECT "spj"."sn" FROM "spj" INNER JOIN (SELECT (round("i"."qty") / "i"."qty") AS "round(qty) / qty",
+    "i"."pn" AS "pn" FROM (SELECT "INNER"."qty" AS "qty", "INNER"."pn" AS "pn" FROM
+    (SELECT "t"."status" AS "qty", "t"."pn" AS "pn", ROW_NUMBER() OVER(PARTITION BY "t"."pn" ORDER BY "t"."status" DESC NULLS FIRST) AS "__rn"
+    FROM "s" AS "t") AS "INNER"
+    WHERE ("INNER"."__rn" <= 1)) AS "i") AS "GNL" ON (("GNL"."pn" = "spj"."pn") AND ("spj"."qty" = "GNL"."round(qty) / qty"))"#;
+    test_it("test225", original_text, expected_text);
+}
+
+// Correlated IN with wrapper — regression: DISTINCT must include the key
+// to dedupe per correlated partition.
+#[test]
+fn test226() {
+    let original_text = r#"
+SELECT spj.sn
+FROM spj
+WHERE spj.qty IN (
+  SELECT ROUND(i0.mx) + 100
+  FROM (
+    SELECT MAX(p.weight) AS mx
+    FROM p
+    WHERE p.pn = spj.pn
+    GROUP BY p.pn
+  ) AS i0
+);
+"#;
+    let expected_text = r#"SELECT "spj"."sn" FROM "spj" INNER JOIN
+    (SELECT DISTINCT (round("i0"."mx") + 100) AS "round(mx) + 100", "i0"."pn" AS "pn" FROM
+    (SELECT max("p"."weight") AS "mx", "p"."pn" AS "pn" FROM "p" GROUP BY "p"."pn") AS "i0") AS "GNL"
+    ON (("GNL"."pn" = "spj"."pn") AND ("spj"."qty" = "GNL"."round(mx) + 100"))"#;
+    test_it("test226", original_text, expected_text);
+}
+
+#[test]
+fn test227() {
+    let original_text = r#"
+SELECT spj.sn
+FROM spj
+WHERE spj.qty IN (
+  SELECT ROUND(i0.mx) + 100
+  FROM (
+    SELECT COUNT(p.weight) AS mx
+    FROM p
+    WHERE p.pn = spj.pn
+    GROUP BY p.pn
+  ) AS i0
+);
+"#;
+    let expected_text = r#"SELECT "spj"."sn" FROM "spj" INNER JOIN
+    (SELECT DISTINCT (round("i0"."mx") + 100) AS "round(mx) + 100", "i0"."pn" AS "pn" FROM
+    (SELECT count("p"."weight") AS "mx", "p"."pn" AS "pn" FROM "p" GROUP BY "p"."pn") AS "i0") AS "GNL" ON
+    (("GNL"."pn" = "spj"."pn") AND ("spj"."qty" = "GNL"."round(mx) + 100"))"#;
+    test_it("test227", original_text, expected_text);
+}
+
+#[test]
+fn test228() {
+    let original_text = r#"
+SELECT u.sn
+FROM qa.s AS u
+where u.status in (
+  SELECT ROUND(i0.mx) + 100
+  FROM (
+    SELECT COUNT(p.weight) AS mx
+    FROM p
+    WHERE p.pn = u.pn
+    GROUP BY p.pn
+  ) AS i0
+);
+"#;
+    let expected_text = r#"SELECT "u"."sn" FROM "qa"."s" AS "u" INNER JOIN
+    (SELECT DISTINCT (round("i0"."mx") + 100) AS "round(mx) + 100", "i0"."pn" AS "pn" FROM
+    (SELECT count("p"."weight") AS "mx", "p"."pn" AS "pn" FROM "p" GROUP BY "p"."pn") AS "i0") AS "GNL"
+    ON (("GNL"."pn" = "u"."pn") AND ("u"."status" = "GNL"."round(mx) + 100"))"#;
+    test_it("test228", original_text, expected_text);
+}
+
+// WHERE scalar "="; correlated; deep wrappers over agg-only/no-GBY COUNT;
+// outer-aware ExactlyOne detection; LEFT OUTER JOIN + equality against COALESCE(...) in WHERE.
+#[test]
+fn test229() {
+    let original_text = r#"
+SELECT
+    s.city, p.city
+FROM s
+LEFT JOIN p ON s.pn = p.pn
+WHERE p.status = (
+  SELECT (ROUND(i1.cn) + 100)::int
+  FROM (
+    SELECT COALESCE(i0.cn, -1) + 100 AS cn
+    FROM (
+      SELECT COUNT(j.city) + 99 AS cn
+      FROM j
+      WHERE j.sn = p.sn
+    ) AS i0
+  ) AS i1
+);
+"#;
+    let expected_text = r#"SELECT "s"."city", "p"."city" FROM "s" LEFT JOIN "p" ON ("s"."pn" = "p"."pn")
+    LEFT OUTER JOIN (SELECT DISTINCT ((round("i1"."cn") + 100)::INT) AS "((round(""i1"".""cn"") + 100)::INT)", "i1"."sn" AS "sn" FROM
+    (SELECT (coalesce("i0"."cn", -1) + 100) AS "cn", "i0"."sn" AS "sn" FROM
+    (SELECT (count("j"."city") + 99) AS "cn", "j"."sn" AS "sn" FROM "j" GROUP BY "j"."sn") AS "i0") AS "i1") AS "GNL"
+    ON ("GNL"."sn" = "p"."sn") WHERE ("p"."status" = coalesce("GNL"."((round(""i1"".""cn"") + 100)::INT)", 299))"#;
+    test_it("test229", original_text, expected_text);
+}
+
+// SELECT-list scalar; correlated; deep wrappers over agg-only/no-GBY COUNT;
+// outer-aware ExactlyOne detection; LEFT OUTER JOIN; projection coalesced to wrapper's fallback.
+#[test]
+fn test230() {
+    let original_text = r#"
+SELECT
+  s.sn,
+  (
+    SELECT (ROUND(i1.cn) + 100)::int
+    FROM (
+      SELECT COALESCE(i0.cn, -1) + 100 AS cn
+      FROM (
+        SELECT COUNT(j.city) + 99 AS cn
+        FROM j
+        WHERE j.sn = s.sn
+      ) AS i0
+    ) AS i1
+  ) AS wrapped_val
+FROM s;
+"#;
+    let expected_text = r#"SELECT "s"."sn", coalesce("GNL"."((round(""i1"".""cn"") + 100)::INT)", 299) AS "wrapped_val"
+    FROM "s" LEFT OUTER JOIN (SELECT DISTINCT ((round("i1"."cn") + 100)::INT) AS "((round(""i1"".""cn"") + 100)::INT)",
+    "i1"."sn" AS "sn" FROM (SELECT (coalesce("i0"."cn", -1) + 100) AS "cn", "i0"."sn" AS "sn"
+    FROM (SELECT (count("j"."city") + 99) AS "cn", "j"."sn" AS "sn" FROM "j" GROUP BY "j"."sn") AS "i0") AS "i1") AS "GNL"
+    ON ("GNL"."sn" = "s"."sn")"#;
+    test_it("test230", original_text, expected_text);
+}
+
+// SELECT-list scalar; correlated; wrapper over SUM (no COALESCE in wrapper):
+// LEFT OUTER JOIN; projection must NOT be coalesced (fallback is NULL when no row).
+#[test]
+fn test231() {
+    let original_text = r#"
+SELECT
+  s.sn,
+  (
+    SELECT ROUND(z.sm) + 5
+    FROM (
+      SELECT SUM(t.qty) AS sm, t.sn
+      FROM spj AS t
+      WHERE t.sn = s.sn
+      GROUP BY t.sn
+    ) AS z
+  ) AS rounded_sum_plus_5
+FROM s;
+"#;
+    let expected_text = r#"SELECT "s"."sn", "GNL"."round(sm) + 5" AS "rounded_sum_plus_5" FROM "s" LEFT OUTER JOIN
+    (SELECT DISTINCT (round("z"."sm") + 5) AS "round(sm) + 5", "z"."sn" AS "sn" FROM
+    (SELECT sum("t"."qty") AS "sm", "t"."sn" FROM "spj" AS "t" GROUP BY "t"."sn") AS "z") AS "GNL"
+    ON ("GNL"."sn" = "s"."sn")"#;
+    test_it("test231", original_text, expected_text);
+}
+
+// SELECT-list scalar; correlated; wrapper without COALESCE (no totalization).
+// Expect LEFT OUTER JOIN; projection is NOT coalesced.
+#[test]
+fn test232() {
+    let original_text = r#"
+SELECT
+  s.sn,
+  (
+    SELECT ROUND(z.sm) * 2
+    FROM (
+      SELECT SUM(t.qty) AS sm, t.sn
+      FROM spj AS t
+      WHERE t.sn = s.sn
+      GROUP BY t.sn
+    ) AS z
+  ) AS doubled
+FROM s;
+"#;
+    let expected_text = r#"SELECT "s"."sn", "GNL"."round(sm) * 2" AS "doubled" FROM "s" LEFT OUTER JOIN
+    (SELECT DISTINCT (round("z"."sm") * 2) AS "round(sm) * 2", "z"."sn" AS "sn" FROM
+    (SELECT sum("t"."qty") AS "sm", "t"."sn" FROM "spj" AS "t" GROUP BY "t"."sn") AS "z") AS "GNL"
+    ON ("GNL"."sn" = "s"."sn")"#;
+    test_it("test232", original_text, expected_text);
+}
+
+// SELECT-list scalar; correlated; wrapper WITH COALESCE (totalized).
+// Expect LEFT OUTER JOIN; projection coalesced to wrapper's fallback (5 + 10 = 15).
+#[test]
+fn test233() {
+    let original_text = r#"
+SELECT
+  s.sn,
+  (
+    SELECT COALESCE(z.sm, 5) + 10
+    FROM (
+      SELECT SUM(t.qty) AS sm, t.sn
+      FROM spj AS t
+      WHERE t.sn = s.sn
+      GROUP BY t.sn
+    ) AS z
+  ) AS val
+FROM s;
+"#;
+    let expected_text = r#"SELECT "s"."sn", "GNL"."coalesce(sm, 5) + 10" AS "val" FROM "s" LEFT OUTER JOIN
+    (SELECT DISTINCT (coalesce("z"."sm", 5) + 10) AS "coalesce(sm, 5) + 10", "z"."sn" AS "sn" FROM
+    (SELECT sum("t"."qty") AS "sm", "t"."sn" FROM "spj" AS "t" GROUP BY "t"."sn") AS "z") AS "GNL"
+    ON ("GNL"."sn" = "s"."sn")"#;
+    test_it("test233", original_text, expected_text);
+}
+
+// SELECT-list scalar; correlated; COUNT with COALESCE in wrapper (totalized).
+// Expect LEFT OUTER JOIN; projection coalesced to wrapper's fallback (0 + 1 = 1).
+#[test]
+fn test234() {
+    let original_text = r#"
+SELECT
+  s.sn,
+  (
+    SELECT COALESCE(c.cnt, 0) + 1
+    FROM (
+      SELECT COUNT(j.city) AS cnt, j.sn
+      FROM j AS j
+      WHERE j.sn = s.sn
+      GROUP BY j.sn
+    ) AS c
+  ) AS cnt_plus1
+FROM s;
+"#;
+    let expected_text = r#"SELECT "s"."sn", "GNL"."coalesce(cnt, 0) + 1" AS "cnt_plus1" FROM "s" LEFT OUTER JOIN
+    (SELECT DISTINCT (coalesce("c"."cnt", 0) + 1) AS "coalesce(cnt, 0) + 1", "c"."sn" AS "sn" FROM
+    (SELECT count("j"."city") AS "cnt", "j"."sn" FROM "j" AS "j" GROUP BY "j"."sn") AS "c") AS "GNL"
+    ON ("GNL"."sn" = "s"."sn")"#;
+    test_it("test234", original_text, expected_text);
+}
+
+// SELECT-list scalar; correlated; simple aggregate (MIN) with no wrapper.
+// Expect LEFT OUTER JOIN; projection not coalesced (fallback is NULL when no row).
+#[test]
+fn test235() {
+    let original_text = r#"
+SELECT
+  s.sn,
+  (
+    SELECT MIN(t.qty)
+    FROM spj AS t
+    WHERE t.sn = s.sn
+    GROUP BY t.sn
+  ) AS mn
+FROM s;
+"#;
+    let expected_text = r#"SELECT "s"."sn", "GNL"."min(qty)" AS "mn" FROM "s" LEFT OUTER JOIN
+    (SELECT min("t"."qty") AS "min(qty)", "t"."sn" AS "sn" FROM "spj" AS "t" GROUP BY "t"."sn") AS "GNL"
+    ON ("GNL"."sn" = "s"."sn")"#;
+    test_it("test235", original_text, expected_text);
+}
