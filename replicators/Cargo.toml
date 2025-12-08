@@ -56,6 +56,7 @@ readyset-tracing = { path = "../readyset-tracing" }
 readyset-util = { path = "../readyset-util" }
 readyset-decimal = { path = "../readyset-decimal" }
 replication-offset = { path = "../replication-offset" }
+uuid = { workspace = true, features = ["v4", "serde"] }
 
 [dev-dependencies]
 assert_matches = { workspace = true }

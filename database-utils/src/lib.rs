@@ -13,6 +13,7 @@ use error::DatabaseTypeParseError;
 use mysql_async::OptsBuilder;
 use pem::Pem;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::{Dialect, ast::SqlIdentifier};
@@ -96,6 +97,12 @@ pub struct UpstreamConfig {
     #[arg(long, env = "REPLICATION_SERVER_ID", value_parser = parse_repl_server_id)]
     #[serde(default)]
     pub replication_server_id: Option<ReplicationServerId>,
+
+    /// UUID to report when registering as a replica with the upstream database (MySQL only).
+    /// If not set, a random UUID will be reported.
+    #[arg(long, env = "REPLICATION_SERVER_UUID", value_parser = parse_repl_uuid)]
+    #[serde(default)]
+    pub replication_server_uuid: Option<Uuid>,
 
     /// Hostname to report when registering as a replica with the upstream database (MySQL only).
     /// If not set, no hostname will be reported.
@@ -278,6 +285,10 @@ impl UpstreamConfig {
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct ReplicationServerId(pub String);
 
+fn parse_repl_uuid(s: &str) -> Result<Uuid, String> {
+    Uuid::parse_str(s).map_err(|e| e.to_string())
+}
+
 impl Display for ReplicationServerId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0[..])
@@ -341,6 +352,7 @@ impl Default for UpstreamConfig {
             disable_setup_ddl_replication: false,
             disable_create_publication: false,
             replication_server_id: Default::default(),
+            replication_server_uuid: Default::default(),
             replica_report_host: Default::default(),
             replica_report_port: Default::default(),
             replica_report_user: Default::default(),

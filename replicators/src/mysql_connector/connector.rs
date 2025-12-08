@@ -42,6 +42,7 @@ use readyset_sql::ast::{
 };
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::ReplicationOffset;
+use uuid::Uuid;
 
 use crate::mysql_connector::utils::{mysql_pad_binary_column, mysql_pad_char_column};
 use crate::noria_adapter::{Connector, ReplicationAction};
@@ -132,6 +133,9 @@ pub(crate) struct MySqlBinlogConnector {
     /// The binlog "slave" must be assigned a unique `server_id` in the replica topology
     /// if one is not assigned we will use (u32::MAX - 55)
     server_id: Option<u32>,
+    /// The binlog "slave" must be assigned a unique `server_uuid` in the replica topology
+    /// if one is not assigned we will use a random UUID
+    server_uuid: Option<Uuid>,
     /// If we just want to continue reading the binlog from a previous point
     next_position: MySqlPosition,
     /// The GTID of the current transaction. Table modification events will have
@@ -157,6 +161,12 @@ impl MySqlBinlogConnector {
     /// if one is not assigned we will use (u32::MAX - 55)
     fn server_id(&self) -> u32 {
         self.server_id.unwrap_or(DEFAULT_SERVER_ID)
+    }
+
+    /// The binlog replica must be assigned a unique `server_uuid` in the replica topology
+    /// if one is not assigned we will use a random UUID
+    fn server_uuid(&self) -> Uuid {
+        self.server_uuid.unwrap_or_else(Uuid::new_v4)
     }
 
     async fn set_parameters(&mut self) -> mysql::Result<()> {
@@ -186,10 +196,16 @@ impl MySqlBinlogConnector {
             Ok(version) => {
                 if version >= 80400 {
                     // MySQL 8.4.0 and above
-                    "SET @source_binlog_checksum='CRC32'"
+                    format!(
+                        "SET @source_binlog_checksum='CRC32', @replica_uuid='{}'",
+                        self.server_uuid()
+                    )
                 } else {
                     // MySQL 8.3.0 and below
-                    "SET @master_binlog_checksum='CRC32'"
+                    format!(
+                        "SET @master_binlog_checksum='CRC32', @slave_uuid='{}'",
+                        self.server_uuid()
+                    )
                 }
             }
             Err(err) => {
@@ -289,6 +305,7 @@ impl MySqlBinlogConnector {
             connection: mysql::Conn::new(mysql_opts).await?,
             reader: binlog::EventStreamReader::new(binlog::consts::BinlogVersion::Version4),
             server_id,
+            server_uuid: config.replication_server_uuid,
             next_position,
             current_gtid: None,
             enable_statement_logging,

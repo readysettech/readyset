@@ -1171,6 +1171,7 @@ dependencies = [
  "thiserror 2.0.16",
  "tokio",
  "tokio-postgres",
+ "uuid 0.8.2",
  "yore",
 ]
 
@@ -5752,6 +5753,7 @@ dependencies = [
  "tokio-postgres",
  "tracing",
  "tracing-futures",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -7528,6 +7530,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
 dependencies = [
  "getrandom 0.2.16",
+ "serde",
 ]
 
 [[package]]
