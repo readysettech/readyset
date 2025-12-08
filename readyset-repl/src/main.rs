@@ -8,7 +8,7 @@ use database_utils::{
     DatabaseConnection, DatabaseStatement, DatabaseType, DatabaseURL, QueryableConnection,
 };
 use postgres_types::Type;
-use prettytable::Table;
+use prettytable::{Cell, Row, Table};
 use readyset_data::DfValue;
 use rustyline::Editor;
 use rustyline::error::ReadlineError;
@@ -248,9 +248,25 @@ fn print_result(rows: Vec<Vec<DfValue>>) {
     let mut table = Table::new();
     table.set_format(*prettytable::format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     for row in rows {
-        table.add_row(row.into());
+        let cells = row
+            .iter()
+            .map(|value| Cell::new(&format_df_value(value)))
+            .collect();
+        table.add_row(Row::new(cells));
     }
     print!("\n{table}");
+}
+
+/// Pretty-print [`DfValue`]s for the REPL.
+fn format_df_value(value: &DfValue) -> String {
+    match value {
+        // Try to render byte arrays as UTF-8 for friendlier output when the contents are text.
+        DfValue::ByteArray(bytes) => match std::str::from_utf8(bytes) {
+            Ok(text) => text.to_string(),
+            Err(_) => value.to_string(),
+        },
+        _ => value.to_string(),
+    }
 }
 
 #[derive(Completer, Hinter, Helper, Highlighter)]
