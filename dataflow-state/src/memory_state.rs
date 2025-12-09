@@ -86,7 +86,7 @@ impl State for MemoryState {
                 assert!(!old[0].partial());
                 for rs in old[0].values() {
                     for r in rs {
-                        new.insert_row(Row::from(r.0.clone()));
+                        new.insert_row(Row::from(r.data.clone()));
                     }
                 }
             }
@@ -471,7 +471,7 @@ impl MemoryState {
         let mut hit = false;
         for s in &mut self.state {
             if let Some(row) = s.remove_row(r, &mut hit) {
-                if Rc::strong_count(&row.0) == 1 {
+                if Rc::strong_count(&row.data) == 1 {
                     self.mem_size = self.mem_size.saturating_sub(row.deep_size_of());
                 }
             }
@@ -497,7 +497,7 @@ impl MemoryState {
 
         // Only count strong references after we removed a row from `weak_indices`
         // otherwise if it is there, it will never have a reference count of 1
-        if Rc::strong_count(&row.0) == 1 {
+        if Rc::strong_count(&row.data) == 1 {
             row.deep_size_of()
         } else {
             0

@@ -7,6 +7,7 @@ mod single_state;
 
 use std::borrow::Cow;
 use std::fmt::{self, Debug};
+use std::hash::Hash;
 use std::iter::FromIterator;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -27,6 +28,10 @@ use readyset_util::iter::eq_by;
 use readyset_util::SizeOf;
 use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
+
+/// A global RandomState instance used for all Row hashing operations.
+static STATE: OnceLock<RandomState> = OnceLock::new();
 
 pub use crate::key::{PointKey, RangeKey};
 pub use crate::memory_state::MemoryState;
@@ -569,16 +574,66 @@ impl<'a> AllRecordsGuard<'a> {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq)]
-pub struct Row(Rc<Vec<DfValue>>);
+/// Returns the global RandomState used for all Row hashing operations.
+/// This ensures that Row's cached_hash and HashBag's hashing use the same hasher,
+/// allowing efficient lookups by &[DfValue].
+fn global_random_state() -> &'static RandomState {
+    STATE.get_or_init(RandomState::new)
+}
 
-pub type Rows = HashBag<Row, RandomState>;
+/// A BuildHasher that uses the global RandomState instance.
+#[derive(Clone, Default)]
+pub struct GlobalRandomState;
+
+impl std::hash::BuildHasher for GlobalRandomState {
+    type Hasher = <RandomState as std::hash::BuildHasher>::Hasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        global_random_state().build_hasher()
+    }
+}
+
+/// A row with cached hash for O(1) hashing operations.
+///
+/// The hash is computed once when the Row is created using a global RandomState,
+/// and reused for all subsequent operations. This is especially beneficial when
+/// rows are inserted into multiple indices.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Row {
+    data: Rc<Vec<DfValue>>,
+    cached_hash: u64,
+}
+
+pub type Rows = HashBag<Row, GlobalRandomState>;
 
 // SAFETY: All references to the same row always belong to the same `State`, so won't be cloned
 // across threads (which would be UB). See [`Row:clone`].
 unsafe impl Send for Row {}
 
+impl Hash for Row {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Use cached hash - O(1) instead of O(columns)
+        self.cached_hash.hash(state);
+    }
+}
+
+// Implement PartialEq<&[DfValue]> to allow HashBag lookups by slice
+impl PartialEq<[DfValue]> for Row {
+    fn eq(&self, other: &[DfValue]) -> bool {
+        &**self.data == other
+    }
+}
+
 impl Row {
+    /// Create a new Row with computed hash
+    fn new(data: Vec<DfValue>) -> Self {
+        let cached_hash = global_random_state().hash_one(&data);
+        Row {
+            data: Rc::new(data),
+            cached_hash,
+        }
+    }
+
     /// Clone a row with a `State` and its original thread.
     ///
     /// # Safety
@@ -588,31 +643,38 @@ impl Row {
     /// to undefined behaviour. In the context of `State` it is only safe because all references
     /// to the same row always belong to the same state, which lives on a single thread.
     pub(crate) unsafe fn clone(&self) -> Self {
-        Row(Rc::clone(&self.0))
+        Row {
+            data: Rc::clone(&self.data),
+            cached_hash: self.cached_hash,
+        }
     }
 }
 
 impl From<Vec<DfValue>> for Row {
     fn from(r: Vec<DfValue>) -> Self {
-        Self(Rc::new(r))
+        Self::new(r)
     }
 }
 
 impl From<Rc<Vec<DfValue>>> for Row {
     fn from(r: Rc<Vec<DfValue>>) -> Self {
-        Self(r)
+        let cached_hash = global_random_state().hash_one(&*r);
+        Row {
+            data: r,
+            cached_hash,
+        }
     }
 }
 
 impl AsRef<[DfValue]> for Row {
     fn as_ref(&self) -> &[DfValue] {
-        &self.0
+        &self.data
     }
 }
 
 impl std::borrow::Borrow<[DfValue]> for Row {
     fn borrow(&self) -> &[DfValue] {
-        &self.0
+        &self.data
     }
 }
 
@@ -620,13 +682,14 @@ impl Deref for Row {
     type Target = Vec<DfValue>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.data
     }
 }
 
 impl SizeOf for Row {
     fn deep_size_of(&self) -> usize {
-        (*self.0).deep_size_of()
+        // Include the size of cached_hash (8 bytes) + data
+        std::mem::size_of::<u64>() + (*self.data).deep_size_of()
     }
 
     fn is_empty(&self) -> bool {
@@ -637,7 +700,7 @@ impl SizeOf for Row {
 /// An std::borrow::Cow-like wrapper around a collection of rows.
 #[derive(From)]
 pub enum RecordResult<'a> {
-    Borrowed(&'a HashBag<Row, RandomState>),
+    Borrowed(&'a HashBag<Row, GlobalRandomState>),
     #[from(ignore)]
     References(Vec<&'a Row>),
     Owned(Vec<Vec<DfValue>>),

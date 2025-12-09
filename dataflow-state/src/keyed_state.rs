@@ -235,6 +235,9 @@ impl KeyedState {
         row: &[DfValue],
         hit: Option<&mut bool>,
     ) -> Option<Row> {
+        // Create a Row from the slice for HashBag lookup - uses global hasher so hash will match
+        let lookup_row = Row::from(row.to_vec());
+
         let do_remove = |rs: &mut Rows| -> Option<Row> {
             if let Some(hit) = hit {
                 *hit = true;
@@ -247,7 +250,7 @@ impl KeyedState {
                 debug_assert_eq!(&left.0[..], row);
                 Some(left.0)
             } else {
-                match rs.try_take(row) {
+                match rs.try_take(&lookup_row) {
                     Ok(row) => Some(row),
                     Err(None) => None,
                     Err(Some((row, _))) => {
