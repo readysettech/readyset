@@ -342,16 +342,30 @@ impl WindowOperation {
                     DfValue::None
                 };
 
-                for row in partition[offset..].iter_mut() {
-                    let val = &row[*arg];
+                // chunk the partition by the order cols, starting from offset
+                // rows that have the same order cols will be assigned the same value
+                let partitions = partition[offset..].chunk_by_mut(|a, b| {
+                    a.iter()
+                        .zip(b.iter())
+                        .enumerate()
+                        .filter(|(i, _)| order_by.contains(i))
+                        .all(|(_, (a, b))| a == b)
+                });
 
-                    if running_min.is_none() && !val.is_none()
-                        || (!val.is_none() && val < &running_min)
-                    {
-                        running_min = val.clone();
+                for partition in partitions {
+                    for row in partition.iter() {
+                        let val = &row[*arg];
+
+                        if running_min.is_none() && !val.is_none()
+                            || (!val.is_none() && val < &running_min)
+                        {
+                            running_min = val.clone();
+                        }
                     }
 
-                    row.to_mut()[col_index] = running_min.clone();
+                    for row in partition.iter_mut() {
+                        row.to_mut()[col_index] = running_min.clone();
+                    }
                 }
                 Ok(())
             }
@@ -363,14 +377,28 @@ impl WindowOperation {
                     DfValue::None
                 };
 
-                for row in partition[offset..].iter_mut() {
-                    let val = &row[*arg];
+                // chunk the partition by the order cols, starting from offset
+                // rows that have the same order cols will be assigned the same value
+                let partitions = partition[offset..].chunk_by_mut(|a, b| {
+                    a.iter()
+                        .zip(b.iter())
+                        .enumerate()
+                        .filter(|(i, _)| order_by.contains(i))
+                        .all(|(_, (a, b))| a == b)
+                });
 
-                    if val > &running_max {
-                        running_max = val.clone();
+                for partition in partitions {
+                    for row in partition.iter() {
+                        let val = &row[*arg];
+
+                        if val > &running_max {
+                            running_max = val.clone();
+                        }
                     }
 
-                    row.to_mut()[col_index] = running_max.clone();
+                    for row in partition.iter_mut() {
+                        row.to_mut()[col_index] = running_max.clone();
+                    }
                 }
                 Ok(())
             }
@@ -1015,6 +1043,38 @@ fn apply_diffs_to_partition<'a>(
     Ok(())
 }
 
+/// Rewinds an offset to the start of the peer group (rows with the same ORDER BY values),
+/// and emits negatives for all rows in the peer group.
+///
+/// When a row is deleted from within a peer group, the changes_offset might point to
+/// the deleted row or later in the group. This function ensures we rewind to the start
+/// of that peer group so all peers get recomputed correctly.
+fn rewind_to_peer_group_start(
+    partition: &[Cow<[DfValue]>],
+    offset: usize,
+    order: &Order,
+    row: &[DfValue],
+    out: &mut Vec<Record>,
+) -> usize {
+    if partition.is_empty() || offset == 0 {
+        return 0;
+    }
+
+    let mut start = offset;
+    while start > 0 {
+        let prev_row = &partition[start - 1];
+
+        if order.cmp(prev_row, row) == Ordering::Equal {
+            start -= 1;
+            out.push(Record::Negative((**prev_row).to_vec()));
+        } else {
+            break;
+        }
+    }
+
+    start
+}
+
 /// Applies a set of diffs (insertions and deletions) to a sorted partition,
 /// maintaining order and tracking the first change.
 ///
@@ -1039,6 +1099,7 @@ fn apply_diffs_to_ordered_partition<'a>(
     out: &mut Vec<Record>,
 ) -> ReadySetResult<Option<usize>> {
     let mut earliest = usize::MAX;
+    let mut earliest_deleted_row = None;
 
     let (mut positives, mut negatives): (Vec<_>, HashSet<_>) =
         diffs.into_iter().partition_map(|(r, is_positive)| {
@@ -1079,8 +1140,9 @@ fn apply_diffs_to_ordered_partition<'a>(
 
                 if !negatives.remove(&val[..col_index]) {
                     sorted.push(val.clone());
-                } else {
-                    earliest = earliest.min(idx);
+                } else if idx < earliest {
+                    earliest = idx;
+                    earliest_deleted_row = Some(val.clone());
                 }
 
                 // an earlier row changed, this row will have
@@ -1096,8 +1158,9 @@ fn apply_diffs_to_ordered_partition<'a>(
 
                 if !negatives.remove(&val[..col_index]) {
                     sorted.push(val.clone());
-                } else {
-                    earliest = earliest.min(idx);
+                } else if idx < earliest {
+                    earliest = idx;
+                    earliest_deleted_row = Some(val.clone());
                 }
 
                 // an earlier row changed, this row will have
@@ -1126,6 +1189,10 @@ fn apply_diffs_to_ordered_partition<'a>(
     Ok(if earliest == usize::MAX {
         None
     } else {
+        if let Some(row) = earliest_deleted_row {
+            earliest = rewind_to_peer_group_start(partition, earliest, order, &row, out);
+        }
+
         Some(earliest)
     })
 }

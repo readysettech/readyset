@@ -2131,19 +2131,29 @@ impl SqlToMirConverter {
 
         let partition_by = partition_by
             .iter()
-            .map(|e| e.alias(dialect).unwrap())
-            .map(|e| Column::named(e))
+            .map(|e| match e {
+                Expr::Column(c) => Column::from(c.clone()),
+                _ => Column::named(e.alias(dialect).unwrap()),
+            })
             .collect();
 
         let order_by = order_by
             .into_iter()
-            .map(|(e, order, no)| (Column::named(e.alias(dialect).unwrap()), order, no))
+            .map(|(e, order, no)| {
+                let col = match e {
+                    Expr::Column(c) => Column::from(c),
+                    _ => Column::named(e.alias(dialect).unwrap()),
+                };
+                (col, order, no)
+            })
             .collect();
 
         let args = arguments
             .iter()
-            .map(|e| e.alias(dialect).unwrap())
-            .map(|e| Column::named(e))
+            .map(|e| match e {
+                Expr::Column(c) => Column::from(c.clone()),
+                _ => Column::named(e.alias(dialect).unwrap()),
+            })
             .collect();
 
         let node_name = format!(

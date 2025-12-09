@@ -1,0 +1,83 @@
+# Tests for window function column resolution with ambiguous column names
+# These tests verify that window functions correctly resolve columns when
+# multiple tables have columns with the same name (e.g., in JOINs).
+
+statement ok
+CREATE TABLE s (sn VARCHAR(50), jn VARCHAR(50), city VARCHAR(50), value INT, partition_col INT, max_arg INT, order_col INT, join_key INT);
+
+statement ok
+CREATE TABLE j (jn VARCHAR(50), city VARCHAR(50), value INT, partition_col INT, order_col INT, join_key INT);
+
+statement ok
+INSERT INTO s VALUES ('S11111', 'A', 'CityA', 10, 100, 50, 100, 1), ('S22222', 'C', 'CityB', 20, 200, 30, 200, 2), ('S33333', 'D', 'CityB', 30, 100, 70, 50, 3);
+
+statement ok
+INSERT INTO j VALUES ('J11111', 'CityB', 5, 1, 5, 1), ('J33333', 'CityC', 15, 1, 15, 2), ('J44444', 'CityC', 25, 2, 25, 3);
+
+# Test 1: MAX with ambiguous column in JOIN
+# Verify MAX uses s.value but ORDER BY uses j.value
+query TTI rowsort
+SELECT s.sn AS sid, j.jn AS jid, max(s.value) OVER (ORDER BY j.value) AS max_val
+FROM s JOIN j ON s.join_key = j.join_key
+ORDER BY j.value, s.sn;
+----
+S11111
+J11111
+10
+S22222
+J33333
+20
+S33333
+J44444
+30
+
+# Test 2: ROW_NUMBER with ambiguous ORDER BY column
+# Verify ROW_NUMBER is based on j.order_col, not s.order_col
+query TTI rowsort
+SELECT s.sn AS sid, j.jn AS jid, row_number() OVER (ORDER BY j.order_col) AS rn
+FROM s JOIN j ON s.join_key = j.join_key
+ORDER BY j.order_col, s.sn;
+----
+S11111
+J11111
+1
+S22222
+J33333
+2
+S33333
+J44444
+3
+
+# Test 3: PARTITION BY with ambiguous column
+# Verify partition_by uses j.partition_col, not s.partition_col
+query TTI rowsort
+SELECT s.sn AS sid, j.jn AS jid, sum(s.value) OVER (PARTITION BY j.partition_col) AS sum_val
+FROM s JOIN j ON s.join_key = j.join_key
+ORDER BY j.partition_col, s.sn;
+----
+S11111
+J11111
+30
+S22222
+J33333
+30
+S33333
+J44444
+30
+
+# Test 4: Cumulative MAX with ambiguous columns
+# Verify MAX uses s.max_arg but ORDER BY uses j.order_col
+query TTI rowsort
+SELECT s.sn AS sid, j.jn AS jid, max(s.max_arg) OVER (ORDER BY j.order_col) AS max_val
+FROM s JOIN j ON s.join_key = j.join_key
+ORDER BY j.order_col, s.sn;
+----
+S11111
+J11111
+50
+S22222
+J33333
+50
+S33333
+J44444
+70

@@ -1087,6 +1087,10 @@ pub enum Expr {
 }
 
 impl Expr {
+    /// Get the alias for this expression
+    /// Because this is meant to be used in outputs and displays, it strips
+    /// the table name from Expr::Column variants.
+    /// It also truncates the alias to 64 characters.
     pub fn alias(&self, dialect: Dialect) -> Option<SqlIdentifier> {
         // TODO: Match upstream naming (unquoted identifiers, function name without args, etc ..)
         let mut alias = match self {
