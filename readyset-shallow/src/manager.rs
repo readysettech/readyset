@@ -39,7 +39,7 @@ pub struct CacheManager<K, V> {
 
 impl<K, V> CacheManager<K, V>
 where
-    K: Hash + Eq + Send + Sync + SizeOf + 'static,
+    K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
     V: Send + Sync + SizeOf + 'static,
 {
     pub(crate) fn new_inner(max_capacity: Option<u64>) -> InnerCache<K, V> {
@@ -281,7 +281,7 @@ where
 
 pub enum CacheResult<K, V>
 where
-    K: Hash + Eq + Send + Sync + 'static,
+    K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
     NotCached,
@@ -292,7 +292,7 @@ where
 
 impl<K, V> Debug for CacheResult<K, V>
 where
-    K: Hash + Eq + Send + Sync + 'static,
+    K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -307,7 +307,7 @@ where
 
 impl<K, V> CacheResult<K, V>
 where
-    K: Hash + Eq + Send + Sync + 'static,
+    K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
     pub fn is_hit(&self) -> bool {
@@ -331,7 +331,7 @@ where
 
 pub struct CacheInsertGuard<K, V>
 where
-    K: Hash + Eq + Send + Sync + 'static,
+    K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
     cache: Arc<Cache<K, V>>,
@@ -343,7 +343,7 @@ where
 
 impl<K, V> Debug for CacheInsertGuard<K, V>
 where
-    K: Hash + Eq + Send + Sync + 'static,
+    K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -356,7 +356,7 @@ where
 
 impl<K, V> CacheInsertGuard<K, V>
 where
-    K: Hash + Eq + Send + Sync + 'static,
+    K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
     /// Add a row to the result set.
@@ -397,7 +397,7 @@ where
 
 impl<K, V> Drop for CacheInsertGuard<K, V>
 where
-    K: Hash + Eq + Send + Sync + 'static,
+    K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
     fn drop(&mut self) {

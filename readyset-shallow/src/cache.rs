@@ -157,7 +157,7 @@ where
 
 impl<K, V> Cache<K, V>
 where
-    K: Eq + Hash + Send + Sync + 'static,
+    K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
     #[allow(clippy::too_many_arguments)]
@@ -320,7 +320,7 @@ mod tests {
 
     fn new<K, V>(max_capacity: Option<u64>, policy: EvictionPolicy) -> Cache<K, V>
     where
-        K: Eq + Hash + Send + Sync + SizeOf + 'static,
+        K: Clone + Eq + Hash + Send + Sync + SizeOf + 'static,
         V: Send + Sync + SizeOf + 'static,
     {
         let inner = CacheManager::new_inner(max_capacity);

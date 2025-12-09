@@ -43,7 +43,7 @@ fn create_test_cache<K, V>(
     policy: EvictionPolicy,
 ) -> Result<(), ReadySetError>
 where
-    K: Hash + Eq + Send + Sync + SizeOf + 'static,
+    K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
     V: SizeOf + Send + Sync + 'static,
 {
     manager.create_cache(
@@ -59,7 +59,7 @@ where
 
 async fn insert_value<K, V>(result: CacheResult<K, V>, values: Vec<V>)
 where
-    K: Hash + Eq + Send + Sync + 'static,
+    K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
     let CacheResult::Miss(mut guard) = result else {
@@ -76,7 +76,7 @@ fn keys_iter(count: usize) -> impl Iterator<Item = String> {
 
 async fn check_miss<K, V>(manager: &CacheManager<K, V>, query_id: &QueryId, key: K)
 where
-    K: Hash + Eq + Send + Sync + SizeOf + 'static,
+    K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
     V: Send + Sync + SizeOf + 'static,
 {
     let result = manager.get_or_start_insert(query_id, key).await;
@@ -85,7 +85,7 @@ where
 
 async fn check_hit<K, V>(manager: &CacheManager<K, V>, query_id: &QueryId, key: K)
 where
-    K: Hash + Eq + Send + Sync + SizeOf + 'static,
+    K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
     V: Send + Sync + SizeOf + 'static,
 {
     let result = manager.get_or_start_insert(query_id, key).await;
@@ -101,7 +101,7 @@ async fn check_hit_value<K, V>(
     key: K,
     expected: Vec<V>,
 ) where
-    K: Hash + Eq + Send + Sync + SizeOf + 'static,
+    K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
     V: Send + Sync + SizeOf + PartialEq + std::fmt::Debug + 'static,
 {
     let result = manager.get_or_start_insert(query_id, key).await;

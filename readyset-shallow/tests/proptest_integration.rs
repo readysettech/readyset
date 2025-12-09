@@ -18,7 +18,7 @@ fn test_metadata() -> QueryMetadata {
 
 async fn insert_value<K, V>(mut result: CacheResult<K, V>, values: Vec<V>, metadata: QueryMetadata)
 where
-    K: Hash + Eq + Send + Sync + 'static,
+    K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
     let guard = result.guard();
@@ -50,7 +50,7 @@ fn create_test_cache<K, V>(
     policy: EvictionPolicy,
 ) -> Result<(), readyset_errors::ReadySetError>
 where
-    K: Hash + Eq + Send + Sync + SizeOf + 'static,
+    K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
     V: SizeOf + Send + Sync + 'static,
 {
     manager.create_cache(
