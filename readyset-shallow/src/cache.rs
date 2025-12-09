@@ -27,7 +27,7 @@ fn current_timestamp_ms() -> u64 {
 }
 
 #[derive(Debug)]
-pub(crate) struct CacheEntry<V> {
+pub(crate) struct CacheValues<V> {
     values: Arc<Vec<V>>,
     metadata: Option<Arc<QueryMetadata>>,
     accessed_ms: AtomicU64,
@@ -36,16 +36,25 @@ pub(crate) struct CacheEntry<V> {
     ttl_ms: Option<u64>,
 }
 
+#[derive(Debug)]
+pub(crate) enum CacheEntry<V> {
+    Present(CacheValues<V>),
+}
+
 impl<V> SizeOf for CacheEntry<V>
 where
     V: SizeOf,
 {
     fn deep_size_of(&self) -> usize {
-        let mut sz = size_of::<Self>() + self.values.deep_size_of();
-        if let Some(ref meta) = self.metadata {
-            sz += meta.deep_size_of();
+        match self {
+            CacheEntry::Present(values) => {
+                let mut sz = size_of::<Self>() + values.values.deep_size_of();
+                if let Some(ref meta) = values.metadata {
+                    sz += meta.deep_size_of();
+                }
+                sz
+            }
         }
-        sz
     }
 
     fn is_empty(&self) -> bool {
@@ -62,7 +71,9 @@ impl<K, V> Expiry<K, Arc<CacheEntry<V>>> for CacheExpiration {
         value: &Arc<CacheEntry<V>>,
         _created: Instant,
     ) -> Option<Duration> {
-        value.ttl_ms.map(Duration::from_millis)
+        match value.as_ref() {
+            CacheEntry::Present(values) => values.ttl_ms.map(Duration::from_millis),
+        }
     }
 
     fn expire_after_update(
@@ -72,7 +83,9 @@ impl<K, V> Expiry<K, Arc<CacheEntry<V>>> for CacheExpiration {
         _updated: Instant,
         _left: Option<Duration>,
     ) -> Option<Duration> {
-        value.ttl_ms.map(Duration::from_millis)
+        match value.as_ref() {
+            CacheEntry::Present(values) => values.ttl_ms.map(Duration::from_millis),
+        }
     }
 }
 
@@ -207,47 +220,49 @@ where
         };
 
         let now = current_timestamp_ms();
-        let entry = Arc::new(CacheEntry {
+        let entry = Arc::new(CacheEntry::Present(CacheValues {
             values: Arc::new(v),
             metadata,
             accessed_ms: now.into(),
             refreshed_ms: now.into(),
             refreshing: false.into(),
             ttl_ms: self.ttl_ms,
-        });
+        }));
         self.inner.insert((self.id, k), entry).await;
     }
 
     pub(crate) async fn get(&self, k: K) -> (Option<(QueryResult<V>, bool)>, K) {
         let k = (self.id, k);
-        let res = self.inner.get(&k).await.map(|entry| {
-            let now = current_timestamp_ms();
-            entry.accessed_ms.store(now, Ordering::Relaxed);
-            let refresh = if let Some(refresh_ms) = self.refresh_ms
-                && now.saturating_sub(entry.refreshed_ms.load(Ordering::Relaxed)) >= refresh_ms
-                && entry
-                    .refreshing
-                    .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                    .is_ok()
-            {
-                true
-            } else {
-                false
-            };
+        let res = self.inner.get(&k).await.map(|entry| match entry.as_ref() {
+            CacheEntry::Present(values) => {
+                let now = current_timestamp_ms();
+                values.accessed_ms.store(now, Ordering::Relaxed);
+                let refresh = if let Some(refresh_ms) = self.refresh_ms
+                    && now.saturating_sub(values.refreshed_ms.load(Ordering::Relaxed)) >= refresh_ms
+                    && values
+                        .refreshing
+                        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                        .is_ok()
+                {
+                    true
+                } else {
+                    false
+                };
 
-            let metadata = entry
-                .metadata
-                .as_ref()
-                .or_else(|| self.cache_metadata.get())
-                .expect("No metadata available for cached result");
+                let metadata = values
+                    .metadata
+                    .as_ref()
+                    .or_else(|| self.cache_metadata.get())
+                    .expect("No metadata available for cached result");
 
-            (
-                QueryResult {
-                    values: Arc::clone(&entry.values),
-                    metadata: Arc::clone(metadata),
-                },
-                refresh,
-            )
+                (
+                    QueryResult {
+                        values: Arc::clone(&values.values),
+                        metadata: Arc::clone(metadata),
+                    },
+                    refresh,
+                )
+            }
         });
         (res, k.1)
     }
@@ -410,14 +425,14 @@ mod tests {
     #[test]
     fn test_size_of() {
         let now = current_timestamp_ms();
-        let entry = CacheEntry {
+        let entry = CacheEntry::Present(CacheValues {
             values: Arc::new(vec![1u64, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
             metadata: Some(Arc::new(QueryMetadata::Test)),
             accessed_ms: now.into(),
             refreshed_ms: now.into(),
             refreshing: false.into(),
             ttl_ms: None,
-        };
+        });
         assert!(entry.deep_size_of() > 10 * 0u64.deep_size_of());
     }
 
