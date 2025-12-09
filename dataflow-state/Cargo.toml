@@ -20,6 +20,7 @@ num_cpus = { workspace = true }
 parking_lot = { workspace = true }
 proptest = { workspace = true }
 rand = { workspace = true }
+rayon = { workspace = true }
 rocksdb.workspace = true
 serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true }

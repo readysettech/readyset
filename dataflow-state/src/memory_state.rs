@@ -86,7 +86,7 @@ impl State for MemoryState {
                 assert!(!old[0].partial());
                 for rs in old[0].values() {
                     for r in rs {
-                        new.insert_row(Row::from(r.data.clone()));
+                        new.insert_row(Row::from(r.data.as_ref().clone()));
                     }
                 }
             }
@@ -111,7 +111,88 @@ impl State for MemoryState {
         partial_tag: Option<Tag>,
         replication_offset: Option<ReplicationOffset>,
     ) -> ReadySetResult<()> {
-        if self.is_partial() {
+        let num_records = records.len();
+
+        // OPTIMIZATION: For large batches, create rows in parallel
+        let use_parallel_creation = num_records > 1000;
+        let is_partial = self.is_partial();
+        let insert_tag = if is_partial { partial_tag } else { None };
+
+        if use_parallel_creation {
+            // Parallel path: batch-create all positive rows, then insert/remove as needed.
+            let mut positive_data = Vec::with_capacity(num_records);
+
+            if is_partial {
+                for r in records.iter() {
+                    if let Record::Positive(ref r) = *r {
+                        positive_data.push(r.clone());
+                    }
+                }
+            } else {
+                for r in records.iter() {
+                    match *r {
+                        Record::Positive(ref r) => {
+                            positive_data.push(r.clone());
+                        }
+                        Record::Negative(ref r) => {
+                            // Apply negatives immediately to avoid a later pass and extra indexing.
+                            let hit = self.remove(r);
+                            debug_assert!(hit);
+                        }
+                    }
+                }
+            }
+
+            let mut rows_iter = if !positive_data.is_empty() {
+                Row::batch_new_parallel(positive_data).into_iter()
+            } else {
+                Vec::new().into_iter()
+            };
+
+            if is_partial {
+                // we need to check that we're not erroneously filling any holes
+                // there are two cases here:
+                //
+                //  - if the incoming record is a partial replay (i.e., partial_tag.is_some()), then
+                //    we *know* that we are the target of the replay, and therefore we *know* that
+                //    the materialization must already have marked the given key as "not a hole".
+                //  - if the incoming record is a normal message (i.e., partial_tag.is_none()), then
+                //    we need to be careful. since this materialization is partial, it may be that
+                //    we haven't yet replayed this `r`'s key, in which case we shouldn't forward
+                //    that record! if all of our indices have holes for this record, there's no need
+                //    for us to forward it. it would just be wasted work.
+                //
+                //    XXX: we could potentially save come computation here in joins by not forcing
+                //    `right` to backfill the lookup key only to then throw the record away
+                let mut results = Vec::with_capacity(num_records);
+
+                for r in records.iter() {
+                    let keep = match *r {
+                        Record::Positive(_) => {
+                            let row = rows_iter
+                                .next()
+                                .expect("positive row count should match record count");
+                            self.insert_row(row, insert_tag)
+                        }
+                        Record::Negative(ref r) => self.remove(r),
+                    };
+                    results.push(keep);
+                }
+
+                let mut result_idx = 0;
+                records.retain(|_| {
+                    let keep = results[result_idx];
+                    result_idx += 1;
+                    keep
+                });
+            } else {
+                for row in rows_iter {
+                    let hit = self.insert_row(row, None);
+                    debug_assert!(hit);
+                }
+            }
+        } else if is_partial {
+            // Sequential path for partial state
             records.retain(|r| {
                 // we need to check that we're not erroneously filling any holes
                 // there are two cases here:
@@ -128,11 +209,12 @@ impl State for MemoryState {
                 //    XXX: we could potentially save come computation here in joins by not forcing
                 //    `right` to backfill the lookup key only to then throw the record away
                 match *r {
-                    Record::Positive(ref r) => self.insert(r.clone(), partial_tag),
+                    Record::Positive(ref r) => self.insert(r.clone(), insert_tag),
                     Record::Negative(ref r) => self.remove(r),
                 }
             });
         } else {
+            // Sequential path for small batches
             for r in records.iter() {
                 match *r {
                     Record::Positive(ref r) => {
@@ -428,10 +510,12 @@ impl MemoryState {
             .iter()
             .position(|s| s.columns() == cols && s.index_type() == index_type)
     }
-
     fn insert(&mut self, r: Vec<DfValue>, partial_tag: Option<Tag>) -> bool {
         let r = Row::from(r);
+        self.insert_row(r, partial_tag)
+    }
 
+    fn insert_row(&mut self, r: Row, partial_tag: Option<Tag>) -> bool {
         let hit = if let Some(tag) = partial_tag {
             let i = match self.by_tag.get(&tag) {
                 Some(i) => *i,

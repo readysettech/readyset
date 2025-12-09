@@ -6,6 +6,7 @@ use std::time::Duration;
 use clap::builder::NonEmptyStringValueParser;
 use clap::Parser;
 use common::ulimit::maybe_increase_nofile_limit;
+use dataflow_state::init_parallel_row_pool;
 use futures_util::future::{self, Either};
 use readyset_alloc::ThreadBuildWrapper;
 use readyset_client::metrics::recorded;
@@ -150,6 +151,7 @@ struct Options {
 
 fn main() -> anyhow::Result<()> {
     let opts: Options = Options::parse();
+    init_parallel_row_pool();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .with_sys_hooks()
         .enable_all()

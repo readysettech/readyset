@@ -19,6 +19,7 @@ use derive_more::From;
 use hashbag::HashBag;
 use itertools::Either;
 pub use partial_map::PartialMap;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
 use readyset_client::{KeyComparison, PersistencePoint};
@@ -39,6 +40,15 @@ pub use crate::persistent_state::{
     clean_working_dir, DurabilityMode, PersistenceParameters, PersistenceType, PersistentState,
     PersistentStateHandle, SnapshotMode,
 };
+
+pub fn init_parallel_row_pool() {
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        if let Err(err) = rayon::ThreadPoolBuilder::new().build_global() {
+            tracing::debug!(%err, "Rayon global thread pool already initialized");
+        }
+    });
+}
 
 /// Information about state evicted via a call to [`State::evict_bytes`]
 pub struct EvictBytesResult<'a> {
@@ -632,6 +642,12 @@ impl Row {
             data: Rc::new(data),
             cached_hash,
         }
+    }
+
+    /// Create multiple rows in parallel, computing hashes concurrently.
+    /// Uses rayon to parallelize hash computation across all available CPU cores.
+    pub(crate) fn batch_new_parallel(data_vec: Vec<Vec<DfValue>>) -> Vec<Self> {
+        data_vec.into_par_iter().map(Self::new).collect()
     }
 
     /// Clone a row with a `State` and its original thread.
