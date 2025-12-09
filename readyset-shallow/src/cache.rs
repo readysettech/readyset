@@ -1,4 +1,5 @@
 use std::fmt::{Debug, Formatter};
+use std::future;
 use std::hash::Hash;
 use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -6,7 +7,10 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use moka::future::Cache as MokaCache;
+use moka::ops::compute::Op;
 use moka::policy::Expiry;
+use tokio::sync::{Mutex, oneshot};
+use tokio::time::timeout;
 
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
@@ -36,9 +40,55 @@ pub(crate) struct CacheValues<V> {
     ttl_ms: Option<u64>,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct CacheStubInner {
+    loaded: bool,
+    waiters: Vec<oneshot::Sender<()>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct CacheStub {
+    inserted: Instant,
+    inner: Arc<Mutex<CacheStubInner>>,
+}
+
+impl Default for CacheStub {
+    fn default() -> Self {
+        Self {
+            inserted: Instant::now(),
+            inner: Default::default(),
+        }
+    }
+}
+
+impl CacheStub {
+    async fn coalesce(&self, coalesce_ms: u64) {
+        let wait = Duration::from_millis(coalesce_ms).saturating_sub(self.inserted.elapsed());
+        if wait.is_zero() {
+            return; // stub is stale, maybe previous load failed, return a miss
+        }
+
+        let mut inner = self.inner.lock().await;
+        if inner.loaded {
+            return;
+        }
+        let (tx, rx) = oneshot::channel();
+        inner.waiters.push(tx);
+        drop(inner);
+        let _ = timeout(wait, rx).await;
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum CacheEntry<V> {
     Present(CacheValues<V>),
+    Loading(CacheStub),
+}
+
+impl<V> Default for CacheEntry<V> {
+    fn default() -> Self {
+        Self::Loading(Default::default())
+    }
 }
 
 impl<V> SizeOf for CacheEntry<V>
@@ -54,6 +104,7 @@ where
                 }
                 sz
             }
+            CacheEntry::Loading(_) => 0,
         }
     }
 
@@ -73,6 +124,7 @@ impl<K, V> Expiry<K, Arc<CacheEntry<V>>> for CacheExpiration {
     ) -> Option<Duration> {
         match value.as_ref() {
             CacheEntry::Present(values) => values.ttl_ms.map(Duration::from_millis),
+            CacheEntry::Loading(_) => None,
         }
     }
 
@@ -85,6 +137,7 @@ impl<K, V> Expiry<K, Arc<CacheEntry<V>>> for CacheExpiration {
     ) -> Option<Duration> {
         match value.as_ref() {
             CacheEntry::Present(values) => values.ttl_ms.map(Duration::from_millis),
+            CacheEntry::Loading(_) => None,
         }
     }
 }
@@ -136,6 +189,7 @@ pub struct Cache<K, V> {
     schema_search_path: Vec<SqlIdentifier>,
     ttl_ms: Option<u64>,
     refresh_ms: Option<u64>,
+    coalesce_ms: Option<u64>,
     ddl_req: CacheDDLRequest,
     always: bool,
 }
@@ -194,6 +248,7 @@ where
             schema_search_path,
             ttl_ms,
             refresh_ms,
+            coalesce_ms: None,
             ddl_req,
             always,
         }
@@ -228,43 +283,80 @@ where
             refreshing: false.into(),
             ttl_ms: self.ttl_ms,
         }));
-        self.inner.insert((self.id, k), entry).await;
+
+        let mut waiters = None;
+        self.inner
+            .entry((self.id, k))
+            .and_compute_with(|e| {
+                if let Some(e) = e
+                    && let CacheEntry::Loading(stub) = &**e.value()
+                {
+                    waiters = Some(Arc::clone(&stub.inner));
+                }
+                future::ready(Op::Put(entry))
+            })
+            .await;
+
+        if let Some(inner) = waiters {
+            let mut inner = inner.lock().await;
+            inner.loaded = true;
+            for tx in inner.waiters.drain(..) {
+                let _ = tx.send(());
+            }
+        }
     }
 
-    pub(crate) async fn get(&self, k: K) -> (Option<(QueryResult<V>, bool)>, K) {
+    fn get_hit(&self, values: &CacheValues<V>) -> Option<(QueryResult<V>, bool)> {
+        let now = current_timestamp_ms();
+        values.accessed_ms.store(now, Ordering::Relaxed);
+        let refresh = if let Some(refresh_ms) = self.refresh_ms
+            && now.saturating_sub(values.refreshed_ms.load(Ordering::Relaxed)) >= refresh_ms
+            && values
+                .refreshing
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+        {
+            true
+        } else {
+            false
+        };
+
+        let metadata = values
+            .metadata
+            .as_ref()
+            .or_else(|| self.cache_metadata.get())
+            .expect("No metadata available for cached result");
+
+        Some((
+            QueryResult {
+                values: Arc::clone(&values.values),
+                metadata: Arc::clone(metadata),
+            },
+            refresh,
+        ))
+    }
+
+    pub(crate) async fn get(&self, k: K) -> Option<(QueryResult<V>, bool)> {
+        const MAX_RETRIES: usize = 1;
+
         let k = (self.id, k);
-        let res = self.inner.get(&k).await.map(|entry| match entry.as_ref() {
-            CacheEntry::Present(values) => {
-                let now = current_timestamp_ms();
-                values.accessed_ms.store(now, Ordering::Relaxed);
-                let refresh = if let Some(refresh_ms) = self.refresh_ms
-                    && now.saturating_sub(values.refreshed_ms.load(Ordering::Relaxed)) >= refresh_ms
-                    && values
-                        .refreshing
-                        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                        .is_ok()
-                {
-                    true
-                } else {
-                    false
-                };
-
-                let metadata = values
-                    .metadata
-                    .as_ref()
-                    .or_else(|| self.cache_metadata.get())
-                    .expect("No metadata available for cached result");
-
-                (
-                    QueryResult {
-                        values: Arc::clone(&values.values),
-                        metadata: Arc::clone(metadata),
-                    },
-                    refresh,
-                )
+        if let Some(coalesce_ms) = self.coalesce_ms {
+            for i in 0..=MAX_RETRIES {
+                let e = self.inner.entry(k.clone()).or_default().await;
+                match &**e.value() {
+                    CacheEntry::Loading(_) if i == MAX_RETRIES => break, // bad luck?
+                    CacheEntry::Loading(_) if e.is_fresh() => break,     // first miss
+                    CacheEntry::Loading(stub) => stub.coalesce(coalesce_ms).await,
+                    CacheEntry::Present(values) => return self.get_hit(values),
+                }
             }
-        });
-        (res, k.1)
+            None
+        } else {
+            self.inner.get(&k).await.map(|entry| match entry.as_ref() {
+                CacheEntry::Present(values) => self.get_hit(values),
+                CacheEntry::Loading(_) => None, // unreachable, but ignore and return miss
+            })?
+        }
     }
 
     pub fn get_info(&self) -> CacheInfo {
@@ -346,11 +438,11 @@ mod tests {
         let metadata = QueryMetadata::Test;
 
         cache.insert(key.clone(), values.clone(), metadata).await;
-        let result = cache.get(key.clone()).await.0.unwrap();
+        let result = cache.get(key.clone()).await.unwrap();
         assert_eq!(result.0.values.as_ref(), &values);
 
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert!(cache.get(key).await.0.is_none());
+        assert!(cache.get(key).await.is_none());
     }
 
     #[tokio::test]
@@ -366,12 +458,12 @@ mod tests {
             cache
                 .insert(key.clone(), values.clone(), metadata.clone())
                 .await;
-            let result = cache.get(key.clone()).await.0.unwrap();
+            let result = cache.get(key.clone()).await.unwrap();
             assert_eq!(result.0.values.as_ref(), &values);
         }
 
         tokio::time::sleep(Duration::from_secs(3)).await;
-        assert!(cache.get(key).await.0.is_none());
+        assert!(cache.get(key).await.is_none());
     }
 
     #[tokio::test]
@@ -415,10 +507,10 @@ mod tests {
             .insert(key.clone(), values_1.clone(), metadata.clone())
             .await;
 
-        let result_0 = cache_0.get(key.clone()).await.0.unwrap();
+        let result_0 = cache_0.get(key.clone()).await.unwrap();
         assert_eq!(result_0.0.values.as_ref(), &values_0);
 
-        let result_1 = cache_1.get(key.clone()).await.0.unwrap();
+        let result_1 = cache_1.get(key.clone()).await.unwrap();
         assert_eq!(result_1.0.values.as_ref(), &values_1);
     }
 

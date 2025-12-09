@@ -249,7 +249,7 @@ where
         let Some(cache) = self.get(None, Some(query_id)) else {
             return CacheResult::NotCached;
         };
-        let (res, key) = cache.get(key).await;
+        let res = cache.get(key.clone()).await;
         let guard = Self::make_guard(cache, key);
         let query = query_id.to_string();
         match res {
