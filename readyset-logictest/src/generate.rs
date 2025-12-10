@@ -52,6 +52,9 @@ async fn run_queries(
             .with_context(|| format!("Running query {}", q.query))?
             .try_into()?;
 
+        // Infer column types from the results before flattening
+        let column_types = infer_column_types(&results);
+
         let values: Vec<_> = match q.sort_mode.unwrap_or_default() {
             SortMode::NoSort => results.into_iter().flatten().collect(),
             SortMode::RowSort => {
@@ -72,12 +75,38 @@ async fn run_queries(
         };
 
         ret.push(Record::Query(Query {
+            column_types,
             results: query_results,
             ..q.clone()
         }))
     }
 
     Ok(ret)
+}
+
+/// Infer column types from query results by examining the first non-null value in each column
+fn infer_column_types(results: &[Vec<Value>]) -> Option<Vec<crate::ast::Type>> {
+    // Get the number of columns from the first row
+    let num_columns = results.first()?.len();
+    if num_columns == 0 {
+        return None;
+    }
+
+    let mut column_types = Vec::with_capacity(num_columns);
+
+    // For each column, find the first non-null value to determine its type
+    for col_idx in 0..num_columns {
+        let typ = results
+            .iter()
+            .filter_map(|row| row.get(col_idx))
+            .find_map(|value| value.typ());
+
+        // If we couldn't determine a type for this column (all values are NULL),
+        // default to Text
+        column_types.push(typ.unwrap_or(crate::ast::Type::Text));
+    }
+
+    Some(column_types)
 }
 
 impl Seed {
