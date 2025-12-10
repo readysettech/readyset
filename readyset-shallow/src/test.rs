@@ -736,3 +736,73 @@ async fn test_ttl_and_period_refresh() {
         .await;
     assert_matches!(result, CacheResult::HitAndRefresh(..));
 }
+
+#[tokio::test]
+async fn test_coalesce_concurrent_requests() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Instant;
+
+    let manager = Arc::new(CacheManager::<String, String>::new(None));
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+
+    manager
+        .create_cache(
+            None,
+            Some(query_id),
+            test_stmt(),
+            vec![],
+            test_policy(),
+            test_ddl_req(),
+            false,
+            Some(Duration::from_millis(5000)),
+        )
+        .unwrap();
+
+    let end_time_1 = Arc::new(AtomicU64::new(0));
+    let end_time_2 = Arc::new(AtomicU64::new(0));
+
+    let m = Arc::clone(&manager);
+    let end = Arc::clone(&end_time_1);
+    let handle_1 = tokio::spawn(async move {
+        let start = Instant::now();
+
+        let result = m.get_or_start_insert(&query_id, "key1".to_string()).await;
+        let CacheResult::Miss(mut guard) = result else {
+            panic!("should miss");
+        };
+
+        guard.push("value1".to_string());
+        guard.set_metadata(QueryMetadata::Test);
+        sleep(Duration::from_millis(2000)).await;
+        guard.filled().await;
+
+        end.store(start.elapsed().as_millis() as u64, Ordering::SeqCst);
+    });
+
+    let m = Arc::clone(&manager);
+    let end = Arc::clone(&end_time_2);
+    let handle_2 = tokio::spawn(async move {
+        let start = Instant::now();
+
+        sleep(Duration::from_millis(1000)).await;
+        let result = m.get_or_start_insert(&query_id, "key1".to_string()).await;
+
+        let CacheResult::Hit(..) = result else {
+            panic!("should hit");
+        };
+
+        end.store(start.elapsed().as_millis() as u64, Ordering::SeqCst);
+    });
+
+    let _ = tokio::join!(handle_1, handle_2);
+
+    let end_1_ms = end_time_1.load(Ordering::SeqCst);
+    let end_2_ms = end_time_2.load(Ordering::SeqCst);
+    let (end_1_ms, end_2_ms) = (end_1_ms.min(end_2_ms), end_1_ms.max(end_2_ms));
+    let diff = end_2_ms - end_1_ms;
+
+    assert!(
+        diff < 500,
+        "Expected completion within 500 ms, but got {diff} ms"
+    );
+}
