@@ -156,3 +156,9 @@ fn create_table_like_parenthesized() {
     check_rt_mysql!("CREATE TABLE a (LIKE b)");
     check_rt_mysql!("CREATE TABLE IF NOT EXISTS a (LIKE b)");
 }
+
+#[test]
+fn time_without_time_zone_type() {
+    check_rt_postgres!("CREATE TABLE t_time (c TIME)");
+    check_rt_postgres!("CREATE TABLE t_time (c TIME WITHOUT TIME ZONE)");
+}
