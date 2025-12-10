@@ -898,6 +898,7 @@ fn cached_query_options(
         Always,
         Concurrently,
         Policy(EvictionPolicy),
+        Coalesce(Duration),
     }
 
     let mut opts = CreateCacheOptions::default();
@@ -946,6 +947,20 @@ fn cached_query_options(
                 }
             },
         ),
+        map(
+            tuple((
+                tag_no_case("coalesce"),
+                whitespace1,
+                map_res(
+                    map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
+                    u64::from_str,
+                ),
+                whitespace1,
+                tag_no_case("seconds"),
+                whitespace1,
+            )),
+            |(_, _, secs, _, _, _)| Option::Coalesce(Duration::from_secs(secs)),
+        ),
     ))(i)
     {
         // Error if the same option appears twice.
@@ -962,6 +977,14 @@ fn cached_query_options(
             }
             Option::Policy(policy) => {
                 if opts.policy.replace(policy).is_some() {
+                    return Err(error(i));
+                }
+                if cache_type != Some(CacheType::Shallow) {
+                    return Err(error(i));
+                }
+            }
+            Option::Coalesce(duration) => {
+                if opts.coalesce_ms.replace(duration).is_some() {
                     return Err(error(i));
                 }
                 if cache_type != Some(CacheType::Shallow) {
@@ -1019,6 +1042,7 @@ pub fn create_cached_query(
                 name,
                 cache_type,
                 policy: opts.policy,
+                coalesce_ms: opts.coalesce_ms,
                 inner,
                 unparsed_create_cache_statement,
                 always: opts.always,

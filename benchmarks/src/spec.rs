@@ -295,6 +295,7 @@ impl WorkloadSpec {
                     name: None,
                     cache_type: None,
                     policy: None,
+                    coalesce_ms: None,
                     inner: Ok(CacheInner::Statement(Box::new(stmt))),
                     unparsed_create_cache_statement: None,
                     always: false,

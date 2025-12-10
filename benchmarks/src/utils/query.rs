@@ -220,6 +220,7 @@ impl ArbitraryQueryParameters {
             name: Some("q".into()),
             cache_type: None,
             policy: None,
+            coalesce_ms: None,
             inner: Ok(CacheInner::Statement(Box::new(stmt))),
             always: false,
             concurrently: false,

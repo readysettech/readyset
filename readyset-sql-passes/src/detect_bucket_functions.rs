@@ -142,6 +142,7 @@ mod tests {
             }),
             cache_type: None,
             policy: None,
+            coalesce_ms: None,
             inner: Ok(CacheInner::Statement(Box::new(select_stmt))),
             unparsed_create_cache_statement: None,
             always: false, // should cause error
@@ -196,6 +197,7 @@ mod tests {
             }),
             cache_type: None,
             policy: None,
+            coalesce_ms: None,
             inner: Ok(CacheInner::Statement(Box::new(select_stmt))),
             unparsed_create_cache_statement: None,
             always: true, // should succeed
@@ -238,6 +240,7 @@ mod tests {
             }),
             cache_type: None,
             policy: None,
+            coalesce_ms: None,
             inner: Ok(CacheInner::Statement(Box::new(select_stmt))),
             unparsed_create_cache_statement: None,
             always: false,

@@ -424,7 +424,7 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
 /// statement. Will simply error if it fails, since there's no relevant standard SQL to fall back to.
 ///
 /// CREATE [type] CACHE
-///     [POLICY TTL <num> SECONDS [REFRESH <num> SECONDS]]
+///     [POLICY TTL <num> SECONDS [REFRESH <num> SECONDS] [COALESCE <num> SECONDS]
 ///     [cache_option [, cache_option] ...]
 ///     [<name>]
 ///     FROM
@@ -496,6 +496,25 @@ fn parse_create_cache(
         None
     };
 
+    let coalesce_ms = if parser.parse_keyword(Keyword::COALESCE) {
+        if cache_type != Some(CacheType::Shallow) {
+            return Err(ReadysetParsingError::ReadysetParsingError(
+                "COALESCE is only supported for SHALLOW caches".into(),
+            ));
+        }
+        let coalesce_secs = parser.parse_literal_uint().map_err(|_| {
+            ReadysetParsingError::ReadysetParsingError("Expected number after COALESCE".into())
+        })?;
+        if !parser.parse_keyword(Keyword::SECONDS) {
+            return Err(ReadysetParsingError::ReadysetParsingError(
+                "Expected SECONDS after COALESCE duration".into(),
+            ));
+        }
+        Some(Duration::from_secs(coalesce_secs))
+    } else {
+        None
+    };
+
     let mut always = false;
     let mut concurrently = false;
     match parser.parse_one_of_keywords(&[Keyword::ALWAYS, Keyword::CONCURRENTLY]) {
@@ -542,6 +561,7 @@ fn parse_create_cache(
         name,
         cache_type,
         policy,
+        coalesce_ms,
         inner: query.map_err(|_| remaining_query),
         unparsed_create_cache_statement: Some(input.as_ref().trim().to_string()),
         always,

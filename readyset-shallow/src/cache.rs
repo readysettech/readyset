@@ -150,6 +150,7 @@ pub struct CacheInfo {
     pub schema_search_path: Vec<SqlIdentifier>,
     pub ttl_ms: Option<u64>,
     pub refresh_ms: Option<u64>,
+    pub coalesce_ms: Option<u64>,
     pub ddl_req: CacheDDLRequest,
     pub always: bool,
 }
@@ -171,6 +172,7 @@ impl From<CacheInfo> for CreateCacheStatement {
             name: info.name,
             cache_type: Some(CacheType::Shallow),
             policy,
+            coalesce_ms: info.coalesce_ms.map(Duration::from_millis),
             inner: Ok(CacheInner::Statement(Box::new(info.query))),
             unparsed_create_cache_statement: None,
             always: info.always,
@@ -225,6 +227,7 @@ where
         schema_search_path: Vec<SqlIdentifier>,
         ddl_req: CacheDDLRequest,
         always: bool,
+        coalesce_ms: Option<Duration>,
     ) -> Self {
         let (ttl_ms, refresh_ms) = match policy {
             EvictionPolicy::Ttl(ttl) => {
@@ -248,7 +251,7 @@ where
             schema_search_path,
             ttl_ms,
             refresh_ms,
-            coalesce_ms: None,
+            coalesce_ms: coalesce_ms.map(|d| d.as_millis().try_into().unwrap_or_default()),
             ddl_req,
             always,
         }
@@ -367,6 +370,7 @@ where
             schema_search_path: self.schema_search_path.clone(),
             ttl_ms: self.ttl_ms,
             refresh_ms: self.refresh_ms,
+            coalesce_ms: self.coalesce_ms,
             ddl_req: self.ddl_req.clone(),
             always: self.always,
         }
@@ -426,6 +430,7 @@ mod tests {
             vec![],
             test_ddl_req(),
             false,
+            None,
         )
     }
 
@@ -482,6 +487,7 @@ mod tests {
             vec![],
             test_ddl_req(),
             false,
+            None,
         );
         let cache_1 = Cache::new(
             1,
@@ -493,6 +499,7 @@ mod tests {
             vec![],
             test_ddl_req(),
             false,
+            None,
         );
 
         let key = vec!["shared_key"];
@@ -563,6 +570,7 @@ mod tests {
             vec![],
             test_ddl_req(),
             false,
+            None,
         );
 
         let debug_str = format!("{:?}", cache);

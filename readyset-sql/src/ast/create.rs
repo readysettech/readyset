@@ -947,6 +947,7 @@ pub struct CreateCacheOptions {
     pub concurrently: bool,
     pub cache_type: Option<CacheType>,
     pub policy: Option<EvictionPolicy>,
+    pub coalesce_ms: Option<Duration>,
 }
 
 /// `CREATE [DEEP|SHALLOW] CACHE [POLICY TTL N SECONDS] [CONCURRENTLY] [ALWAYS] [<name>] FROM ...`
@@ -962,6 +963,9 @@ pub struct CreateCacheStatement {
     /// The eviction policy for the cache (only for shallow caches)
     #[strategy(any::<Option<EvictionPolicy>>())]
     pub policy: Option<EvictionPolicy>,
+    /// The coalesce window for request deduplication (only for shallow caches)
+    #[strategy(any::<Option<Duration>>())]
+    pub coalesce_ms: Option<Duration>,
     /// The result of parsing the inner statement or query ID for the `CREATE CACHE` statement.
     ///
     /// If parsing succeeded, then this will be an `Ok` result with the definition of the
@@ -989,6 +993,7 @@ impl PartialEq for CreateCacheStatement {
         self.name == other.name
             && self.cache_type == other.cache_type
             && self.policy == other.policy
+            && self.coalesce_ms == other.coalesce_ms
             && self.inner == other.inner
             && self.always == other.always
             && self.concurrently == other.concurrently
@@ -1002,6 +1007,7 @@ impl Hash for CreateCacheStatement {
         self.name.hash(state);
         self.cache_type.hash(state);
         self.policy.hash(state);
+        self.coalesce_ms.hash(state);
         self.inner.hash(state);
         self.always.hash(state);
         self.concurrently.hash(state);
@@ -1019,6 +1025,9 @@ impl DialectDisplay for CreateCacheStatement {
             write!(f, "CACHE ")?;
             if let Some(policy) = &self.policy {
                 write!(f, "{} ", policy.display(dialect))?;
+            }
+            if let Some(duration) = &self.coalesce_ms {
+                write!(f, "COALESCE {} SECONDS ", duration.as_secs())?;
             }
             if self.concurrently {
                 write!(f, "CONCURRENTLY ")?;

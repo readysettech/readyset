@@ -2,6 +2,7 @@ use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use metrics::counter;
 use moka::future::Cache as MokaCache;
@@ -107,6 +108,7 @@ where
         policy: EvictionPolicy,
         ddl_req: CacheDDLRequest,
         always: bool,
+        coalesce_ms: Option<Duration>,
     ) -> ReadySetResult<()> {
         Self::check_identifiers(name.as_ref(), query_id.as_ref())?;
         let display_name = Self::format_name(name.as_ref(), query_id.as_ref());
@@ -136,6 +138,7 @@ where
             schema_search_path,
             ddl_req,
             always,
+            coalesce_ms,
         ));
 
         if let Some(name) = name {

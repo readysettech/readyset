@@ -2354,6 +2354,7 @@ where
         policy: Option<ast::EvictionPolicy>,
         ddl_req: CacheDDLRequest,
         always: bool,
+        coalesce_ms: Option<Duration>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         adapter_rewrites::rewrite_equivalent(&mut stmt, self.noria.rewrite_params())?;
 
@@ -2377,6 +2378,7 @@ where
             policy,
             ddl_req.clone(),
             always,
+            coalesce_ms,
         );
 
         if res.is_ok() {
@@ -2987,6 +2989,7 @@ where
                     name,
                     cache_type,
                     policy,
+                    coalesce_ms,
                     inner,
                     always,
                     concurrently,
@@ -3049,8 +3052,15 @@ where
                         let ddl_req = ddl_req.ok_or_else(|| {
                             internal_err!("No statement supplied to shallow cache")
                         })?;
-                        self.create_shallow_cache(name.clone(), stmt, *policy, ddl_req, *always)
-                            .await
+                        self.create_shallow_cache(
+                            name.clone(),
+                            stmt,
+                            *policy,
+                            ddl_req,
+                            *always,
+                            *coalesce_ms,
+                        )
+                        .await
                     }
                 }
             }
@@ -4456,6 +4466,7 @@ where
         policy,
         ddl_req,
         stmt.always,
+        stmt.coalesce_ms,
     )?;
 
     query_status_cache.update_query_migration_state(
