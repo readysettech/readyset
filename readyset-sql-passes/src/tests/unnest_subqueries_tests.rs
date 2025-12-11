@@ -1,5 +1,8 @@
+use crate::ArrayConstructorRewrite;
+use crate::drop_redundant_join::{UniqueColumnsSchema, drop_redundant_self_joins_main};
 use crate::unnest_subqueries::{NonNullSchema, unnest_subqueries_main};
-use readyset_sql::ast::{Column, Relation};
+use readyset_errors::ReadySetResult;
+use readyset_sql::ast::{Column, Relation, SelectStatement};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
 use std::collections::{HashMap, HashSet};
@@ -33,6 +36,18 @@ impl SpjNonNullSchema {
                     "datatypes1".into(),
                     HashSet::from([mk_col("datatypes1", "rownum")]),
                 ),
+                (
+                    "rsdatatypes".into(),
+                    HashSet::from([mk_col("rsdatatypes", "rownum")]),
+                ),
+                (
+                    "rsdatatypesnull".into(),
+                    HashSet::from([mk_col("rsdatatypesnull", "rownum")]),
+                ),
+                (
+                    "rsdatatypesmm".into(),
+                    HashSet::from([mk_col("rsdatatypesmm", "rownum")]),
+                ),
             ]),
         }
     }
@@ -44,6 +59,45 @@ impl NonNullSchema for SpjNonNullSchema {
             non_null_cols.clone()
         } else {
             HashSet::new()
+        }
+    }
+}
+
+struct SpjUniqueSchema {
+    schema: HashMap<Relation, HashSet<Column>>,
+}
+
+impl UniqueColumnsSchema for SpjUniqueSchema {
+    fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+        self.schema.get(rel).cloned()
+    }
+}
+
+impl SpjUniqueSchema {
+    fn default() -> Self {
+        Self {
+            schema: HashMap::from([
+                (
+                    "datatypes".into(),
+                    HashSet::from([mk_col("datatypes", "rownum")]),
+                ),
+                (
+                    "datatypes1".into(),
+                    HashSet::from([mk_col("datatypes1", "rownum")]),
+                ),
+                (
+                    "rsdatatypes".into(),
+                    HashSet::from([mk_col("rsdatatypes", "rownum")]),
+                ),
+                (
+                    "rsdatatypesnull".into(),
+                    HashSet::from([mk_col("rsdatatypesnull", "rownum")]),
+                ),
+                (
+                    "rsdatatypesmm".into(),
+                    HashSet::from([mk_col("rsdatatypesmm", "rownum")]),
+                ),
+            ]),
         }
     }
 }
@@ -60,16 +114,27 @@ fn get_schema_guard() -> RwLockWriteGuard<'static, SpjNonNullSchema> {
     global_schema().write().unwrap()
 }
 
+fn rewrite_statement(
+    sql_text: &str,
+    schema_guard: RwLockWriteGuard<SpjNonNullSchema>,
+) -> ReadySetResult<SelectStatement> {
+    let mut stmt = parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, sql_text)?;
+
+    stmt.rewrite_array_constructors()?;
+    drop_redundant_self_joins_main(&mut stmt, &SpjUniqueSchema::default())?;
+    unnest_subqueries_main(&mut stmt, &*schema_guard)?;
+
+    Ok(stmt)
+}
+
 fn rewrite(
     _test_name: &str,
     sql: &str,
     schema_guard: RwLockWriteGuard<SpjNonNullSchema>,
 ) -> String {
-    let mut stmt =
-        parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, sql).expect("parse");
-
-    let _ = unnest_subqueries_main(&mut stmt, &*schema_guard).expect("rewrite");
-
+    let Ok(stmt) = rewrite_statement(sql, schema_guard) else {
+        panic!("Failed to rewrite statement");
+    };
     let f = stmt.display(Dialect::PostgreSQL);
     f.to_string()
 }
@@ -115,27 +180,18 @@ fn make_col_nullable(
 }
 
 fn test_it(test_name: &str, original_text: &str, expect_text: &str) {
-    let rewritten_stmt =
-        match parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, original_text) {
-            Ok(mut stmt) => match unnest_subqueries_main(&mut stmt, &*get_schema_guard()) {
-                Ok(_) => {
-                    println!(">>>>>> Unnested: {}", stmt.display(Dialect::PostgreSQL));
-                    Ok(stmt.clone())
-                }
-                Err(err) => Err(err),
-            },
-            Err(e) => panic!("> {test_name}: ORIGINAL STATEMENT PARSE ERROR: {e}"),
-        };
-
-    match rewritten_stmt {
-        Ok(expect_stmt) => {
-            assert_eq!(
-                expect_stmt,
+    match rewrite_statement(original_text, get_schema_guard()) {
+        Ok(rewritten_stmt) => {
+            println!(
+                ">>>>>> Unnested: {}",
+                rewritten_stmt.display(Dialect::PostgreSQL)
+            );
+            let expected_stmt =
                 match parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, expect_text) {
                     Ok(stmt) => stmt,
                     Err(e) => panic!("> {test_name}: REWRITTEN STATEMENT PARSE ERROR: {e}"),
-                }
-            );
+                };
+            assert_eq!(rewritten_stmt, expected_stmt);
         }
         Err(e) => {
             println!("> {test_name}: REWRITE ERROR: {e}");
@@ -6264,4 +6320,177 @@ FROM s;
     (SELECT min("t"."qty") AS "min(qty)", "t"."sn" AS "sn" FROM "spj" AS "t" GROUP BY "t"."sn") AS "GNL"
     ON ("GNL"."sn" = "s"."sn")"#;
     test_it("test235", original_text, expected_text);
+}
+
+// Expected to drop the LEFT JOIN as redundant
+#[test]
+fn test236() {
+    let original_text = r#"
+SELECT
+    "EDE"."rownum" AS "id",
+    "EDE"."rs_integer" AS "rs_integer",
+    "EDE"."rs_text" AS "e_ext_id",
+    "EDE"."rs_string" AS "env_id",
+    "EDE"."rs_date" AS "arch_at",
+    "EDE"."rs_timestamp" AS "upd_at",
+    "tags"."tags",
+    "cnc"."cnc"
+FROM
+    (
+        SELECT
+            "EDE"."rownum" as "id",
+            "_om0"."rs_string" AS "_o0",
+            "EDE"."rs_text" AS "_o1"
+        FROM
+            "rsdatatypes" AS "EDE"
+            LEFT JOIN "rsdatatypesmm" AS "_om0" ON "_om0"."rs_integer" = "EDE"."rs_integer"
+            AND "_om0"."rs_text" = 'en-US'
+            AND length("_om0"."rs_text") <= 256
+        WHERE
+            "EDE"."rs_text" = 'asset_redirect'
+            AND "EDE"."rs_string" = '8155b6bf-c60a-431c-8741-7c439b25d8f2'
+        ORDER BY
+            "_o0" ASC NULLS LAST,
+            "_o1" ASC NULLS LAST
+        LIMIT
+            41
+    ) AS "inner"
+    LEFT JOIN "rsdatatypes" AS "EDE" ON "EDE"."rownum" = "inner"."id",
+    LATERAL (
+        SELECT
+            ARRAY(
+                SELECT
+                    "TFE"."ext_tg_id"
+                FROM
+                    (
+                        SELECT
+                            "TFM_0"."pn" AS "tag_id",
+                            "TFM_0"."pname" AS "ext_tg_id"
+                        FROM
+                            "p" AS "TFM_0"
+                        WHERE
+                            "EDE"."rs_text" = "TFM_0"."jn"
+                            AND "EDE"."rs_string" = "TFM_0"."pn"
+                    ) AS "TFE"
+                ORDER BY
+                    "TFE"."ext_tg_id" ASC
+            ) AS "tags"
+    ) AS "tags",
+    LATERAL (
+        SELECT
+            ARRAY(
+                SELECT
+                    "CFE"."cnc_ext_id"
+                FROM
+                    (
+                        SELECT
+                            "CFM_0"."jname" AS "cnc_ext_id"
+                        FROM
+                            "j" AS "CFM_0"
+                        WHERE
+                            "EDE"."rs_text" = "CFM_0"."jn"
+                            AND "EDE"."rs_string" = "CFM_0"."pn"
+                    ) AS "CFE"
+                ORDER BY
+                    "CFE"."cnc_ext_id" ASC
+            ) AS "cnc"
+    ) AS "cnc"
+WHERE
+    "cnc"."cnc" in (
+       select spj.pn from spj where spj.jn = "EDE".rs_text
+    )
+ORDER BY
+    "inner"."_o0" ASC NULLS LAST,
+    "inner"."_o1" ASC NULLS LAST;
+"#;
+    let expected_text = r#"SELECT "inner"."id" AS "id", "inner"."rs_integer" AS "rs_integer", "inner"."_o1" AS "e_ext_id",
+    "inner"."rs_string" AS "env_id", "inner"."rs_date" AS "arch_at", "inner"."rs_timestamp" AS "upd_at", "tags"."tags",
+    "cnc"."cnc" FROM (SELECT "INNER"."id" AS "id", "INNER"."_o0" AS "_o0", "INNER"."_o1" AS "_o1", "INNER"."rs_date" AS "rs_date",
+    "INNER"."rs_integer" AS "rs_integer", "INNER"."rs_string" AS "rs_string", "INNER"."rs_timestamp" AS "rs_timestamp"
+    FROM (SELECT "EDE"."rownum" AS "id", "_om0"."rs_string" AS "_o0", "EDE"."rs_text" AS "_o1", "EDE"."rs_date" AS "rs_date",
+    "EDE"."rs_integer" AS "rs_integer", "EDE"."rs_string" AS "rs_string", "EDE"."rs_timestamp" AS "rs_timestamp",
+    ROW_NUMBER() OVER(ORDER BY "_om0"."rs_string" ASC NULLS LAST, "EDE"."rs_text" ASC NULLS LAST) AS "__rn"
+    FROM "rsdatatypes" AS "EDE" LEFT JOIN "rsdatatypesmm" AS "_om0" ON ((("_om0"."rs_integer" = "EDE"."rs_integer")
+    AND ("_om0"."rs_text" = 'en-US')) AND (length("_om0"."rs_text") <= 256)) WHERE (("EDE"."rs_text" = 'asset_redirect')
+    AND ("EDE"."rs_string" = '8155b6bf-c60a-431c-8741-7c439b25d8f2'))) AS "INNER" WHERE ("INNER"."__rn" <= 41)) AS "inner"
+    LEFT OUTER JOIN (SELECT coalesce("array_subq"."agg_result", ARRAY[]) AS "tags", "array_subq"."tag_id" AS "tag_id",
+    "array_subq"."jn" AS "jn" FROM (SELECT array_agg("inner_subq"."ext_tg_id" ORDER BY "inner_subq"."ext_tg_id" ASC NULLS LAST) AS "agg_result",
+    "inner_subq"."tag_id" AS "tag_id", "inner_subq"."jn" AS "jn" FROM (SELECT "TFE"."ext_tg_id", "TFE"."tag_id" AS "tag_id",
+    "TFE"."jn" AS "jn" FROM (SELECT "TFM_0"."pn" AS "tag_id", "TFM_0"."pname" AS "ext_tg_id", "TFM_0"."jn" AS "jn" FROM "p" AS "TFM_0") AS "TFE"
+    ORDER BY "TFE"."ext_tg_id" ASC NULLS LAST) AS "inner_subq" GROUP BY "inner_subq"."tag_id", "inner_subq"."jn") AS "array_subq") AS "tags"
+    ON (("inner"."_o1" = "tags"."jn") AND ("inner"."rs_string" = "tags"."tag_id")) LEFT OUTER JOIN
+    (SELECT coalesce("array_subq"."agg_result", ARRAY[]) AS "cnc", "array_subq"."pn" AS "pn", "array_subq"."jn" AS "jn"
+    FROM (SELECT array_agg("inner_subq"."cnc_ext_id" ORDER BY "inner_subq"."cnc_ext_id" ASC NULLS LAST) AS "agg_result",
+    "inner_subq"."pn" AS "pn", "inner_subq"."jn" AS "jn" FROM (SELECT "CFE"."cnc_ext_id", "CFE"."pn" AS "pn", "CFE"."jn" AS "jn"
+    FROM (SELECT "CFM_0"."jname" AS "cnc_ext_id", "CFM_0"."pn" AS "pn", "CFM_0"."jn" AS "jn" FROM "j" AS "CFM_0") AS "CFE"
+    ORDER BY "CFE"."cnc_ext_id" ASC NULLS LAST) AS "inner_subq" GROUP BY "inner_subq"."pn", "inner_subq"."jn") AS "array_subq") AS "cnc"
+    ON (("inner"."_o1" = "cnc"."jn") AND ("inner"."rs_string" = "cnc"."pn")) INNER JOIN
+    (SELECT DISTINCT "spj"."pn" AS "pn", "spj"."jn" AS "jn" FROM "spj") AS "GNL" ON ("cnc"."cnc" = "GNL"."pn")
+    WHERE ("GNL"."jn" = "inner"."_o1") ORDER BY "inner"."_o0" ASC NULLS LAST, "inner"."_o1" ASC NULLS LAST"#;
+    test_it("test236", original_text, expected_text);
+}
+
+#[test]
+fn test237() {
+    // Redundant LEFT JOIN with correlated subquery in WHERE referencing the RHS alias.
+    // Guard that:
+    //  - the redundant LEFT JOIN is dropped, and
+    //  - correlated references to the RHS alias inside the WHERE subquery are rebound
+    //    away from "EDE" (no dangling RHS alias).
+    let original_text = r#"
+SELECT
+    "inner"."id"
+FROM
+    (
+        SELECT
+            "EDE"."rownum" AS "id",
+            "EDE"."rs_text" AS "rs_text"
+        FROM
+            "rsdatatypes" AS "EDE"
+    ) AS "inner"
+    LEFT JOIN "rsdatatypes" AS "EDE" ON "EDE"."rownum" = "inner"."id"
+WHERE EXISTS (
+    SELECT 1
+    FROM "p"
+    WHERE "p"."pname" = "EDE"."rs_text"
+);
+ "#;
+    let expected_text = r#"SELECT "inner"."id" FROM (SELECT "EDE"."rownum" AS "id",
+    "EDE"."rs_text" AS "rs_text" FROM "rsdatatypes" AS "EDE") AS "inner"
+    INNER JOIN (SELECT DISTINCT 1 AS "present_", "p"."pname" AS "pname" FROM "p") AS "GNL"
+    ON ("GNL"."pname" = "inner"."rs_text")"#;
+    test_it("test237", original_text, expected_text);
+}
+
+#[test]
+fn test238() {
+    // Redundant LEFT JOIN where an inner subquery *shadows* the RHS alias "EDE".
+    // The new pass must:
+    //  - still drop the redundant LEFT JOIN, and
+    //  - *not* rewrite columns inside the shadowing subquery (scope safety via shadows_rhs_alias).
+    let original_text = r#"
+SELECT
+    "inner"."id"
+FROM
+    (
+        SELECT
+            "EDE"."rownum" AS "id"
+        FROM
+            "rsdatatypes" AS "EDE"
+    ) AS "inner"
+    LEFT JOIN "rsdatatypes" AS "EDE" ON "EDE"."rownum" = "inner"."id"
+WHERE EXISTS (
+    SELECT 1
+    FROM (
+        SELECT "EDE"."rownum"
+        FROM "rsdatatypes" AS "EDE"
+    ) AS "shadow"
+    WHERE "shadow"."rownum" > 0
+);
+ "#;
+    let expected_text = r#"SELECT "inner"."id" FROM (SELECT "EDE"."rownum" AS "id"
+    FROM "rsdatatypes" AS "EDE") AS "inner" INNER JOIN (SELECT DISTINCT 1 AS "present_"
+    FROM (SELECT "EDE"."rownum" FROM "rsdatatypes" AS "EDE") AS "shadow"
+    WHERE ("shadow"."rownum" > 0)) AS "GNL""#;
+    test_it("test238", original_text, expected_text);
 }
