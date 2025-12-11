@@ -180,7 +180,7 @@ async fn connect_rs(config: &UpstreamConfig, rs_addr: SocketAddr) -> Option<Data
 
 async fn connect_upstream(config: &UpstreamConfig) -> Option<DatabaseConnection> {
     debug!("Connecting to upstream");
-    let url: DatabaseURL = if let Some(url) = &config.upstream_db_url {
+    let mut url: DatabaseURL = if let Some(url) = &config.upstream_db_url {
         match url.parse() {
             Ok(url) => url,
             Err(error) => {
@@ -191,6 +191,7 @@ async fn connect_upstream(config: &UpstreamConfig) -> Option<DatabaseConnection>
     } else {
         return None;
     };
+    url.set_program_or_application_name(READYSET_QUERY_SAMPLER.to_string());
     let verification = match ServerCertVerification::from(config).await {
         Ok(verification) => verification,
         Err(error) => {
@@ -299,6 +300,7 @@ impl Sampler {
         timeout: Duration,
         conn: &mut Option<DatabaseConnection>,
         q: &str,
+        name: String,
     ) -> Result<QueryResults, DatabaseError> {
         let fut = async {
             match conn.as_mut() {
@@ -310,7 +312,7 @@ impl Sampler {
             Ok(res) => res,
             Err(_) => {
                 rate_limit(true, SAMPLER_LOG_SAMPLER, || {
-                    warn!("Sampler upstream read timeout");
+                    debug!(?name, "Sampler upstream read timeout");
                 });
                 Err(DatabaseError::UpstreamQueryTimeout)
             }
@@ -348,9 +350,13 @@ impl Sampler {
         );
 
         // Readyset execution (materialize rows for optional tracing on mismatch)
-        let rs_res =
-            Self::query_with_timeout(self.config.upstream_timeout, &mut self.rs_conn, &entry.q)
-                .await;
+        let rs_res = Self::query_with_timeout(
+            self.config.upstream_timeout,
+            &mut self.rs_conn,
+            &entry.q,
+            get_cache_name(&entry.event),
+        )
+        .await;
         let (rs_hash_opt, rs_rows_opt) = match rs_res {
             Ok(rs_rows) => {
                 let mut rows_vec: Vec<Vec<DfValue>> = match <Vec<Vec<DfValue>>>::try_from(rs_rows) {
@@ -362,6 +368,12 @@ impl Sampler {
                 };
                 let hash = Some(normalize_and_hash(&mut rows_vec, has_order_by));
                 (hash, Some(rows_vec))
+            }
+            Err(DatabaseError::UpstreamQueryTimeout) => {
+                rate_limit(true, SAMPLER_LOG_SAMPLER, || {
+                    debug!("Sampler readyset query timed out; discarding sample");
+                });
+                return;
             }
             Err(e) => {
                 debug!(error = %e, "Sampler readyset error");
@@ -384,6 +396,7 @@ impl Sampler {
             self.config.upstream_timeout,
             &mut self.upstream_conn,
             &entry.q,
+            get_cache_name(&entry.event),
         )
         .await;
         let (up_hash_opt, up_rows_opt) = match up_res {
@@ -397,6 +410,12 @@ impl Sampler {
                 };
                 let hash = Some(normalize_and_hash(&mut rows_vec, has_order_by));
                 (hash, Some(rows_vec))
+            }
+            Err(DatabaseError::UpstreamQueryTimeout) => {
+                rate_limit(true, SAMPLER_LOG_SAMPLER, || {
+                    debug!("Sampler upstream query timed out; discarding sample");
+                });
+                return;
             }
             Err(e) => {
                 debug!(error = %e, "Sampler upstream error");

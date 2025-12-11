@@ -458,6 +458,10 @@ pub struct Options {
     #[arg(long, env = "SAMPLER_MAX_QUERIES_PER_SECOND", default_value = "100")]
     sampler_max_queries_per_second: u64,
 
+    /// Specifies the timeout for sampler queries.
+    #[arg(long, env = "SAMPLER_QUERY_TIMEOUT_MS", default_value = "1000")]
+    sampler_query_timeout_ms: u64,
+
     /// If set, Readyset will only verify if the current configuration is valid and then exit.
     ///
     /// On success, the exit code will be zero with a message printed to stdout.  On failure, the
@@ -1301,7 +1305,7 @@ where
             readyset_adapter::sampler::SamplerConfig {
                 sample_rate: options.sampler_sample_rate,
                 queue_capacity: options.sampler_queue_capacity,
-                upstream_timeout: Duration::from_secs(1),
+                upstream_timeout: Duration::from_millis(options.sampler_query_timeout_ms),
                 max_retry_attempts: options.sampler_max_retries,
                 retry_delay: Duration::from_millis(options.sampler_retry_delay_ms),
                 max_qps: options.sampler_max_queries_per_second,
