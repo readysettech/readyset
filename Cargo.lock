@@ -5399,6 +5399,7 @@ dependencies = [
  "anyhow",
  "array2",
  "assert_approx_eq",
+ "assert_matches",
  "async-bincode",
  "base64 0.22.1",
  "bimap",

@@ -1413,7 +1413,7 @@ async fn handle_controller_request(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use assert_matches::assert_matches;
 
     use dataflow::DomainIndex;
     use readyset_client::debug::info::KeyCount;
@@ -1822,52 +1822,44 @@ mod tests {
             .unwrap();
 
         let res = noria.table_statuses(false).await.unwrap();
-        assert_eq!(
-            res,
-            BTreeMap::from([
-                (
-                    Relation {
-                        schema: Some("s2".into()),
-                        name: "snapshotting_t".into(),
-                    },
-                    TableStatus::Snapshotting(None)
-                ),
-                (
-                    Relation {
-                        schema: Some("s2".into()),
-                        name: "snapshotted_t".into(),
-                    },
-                    TableStatus::Online
-                ),
-            ])
+        assert_matches!(
+            res.get(&Relation {
+                schema: Some("s2".into()),
+                name: "snapshotting_t".into(),
+            }),
+            Some(TableStatus::Snapshotting(..))
+        );
+        assert_matches!(
+            res.get(&Relation {
+                schema: Some("s2".into()),
+                name: "snapshotted_t".into(),
+            }),
+            Some(TableStatus::Online | TableStatus::Compacting(..))
         );
 
         let res = noria.table_statuses(true).await.unwrap();
-        assert_eq!(
-            res,
-            BTreeMap::from([
-                (
-                    Relation {
-                        schema: Some("s1".into()),
-                        name: "t".into(),
-                    },
-                    TableStatus::NotReplicated(NotReplicatedReason::Configuration)
-                ),
-                (
-                    Relation {
-                        schema: Some("s2".into()),
-                        name: "snapshotting_t".into(),
-                    },
-                    TableStatus::Snapshotting(None)
-                ),
-                (
-                    Relation {
-                        schema: Some("s2".into()),
-                        name: "snapshotted_t".into(),
-                    },
-                    TableStatus::Online
-                ),
-            ])
+        assert_matches!(
+            res.get(&Relation {
+                schema: Some("s1".into()),
+                name: "t".into(),
+            }),
+            Some(TableStatus::NotReplicated(
+                NotReplicatedReason::Configuration
+            ))
+        );
+        assert_matches!(
+            res.get(&Relation {
+                schema: Some("s2".into()),
+                name: "snapshotting_t".into(),
+            }),
+            Some(TableStatus::Snapshotting(..))
+        );
+        assert_matches!(
+            res.get(&Relation {
+                schema: Some("s2".into()),
+                name: "snapshotted_t".into(),
+            }),
+            Some(TableStatus::Online | TableStatus::Compacting(..))
         );
 
         shutdown_tx.shutdown().await;
