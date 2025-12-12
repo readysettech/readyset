@@ -2335,6 +2335,7 @@ where
         Ok(noria_connector::QueryResult::Empty)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn create_deep_cache(
         &mut self,
         mut name: Option<Relation>,
@@ -2343,6 +2344,7 @@ where
         always: bool,
         concurrently: bool,
         ddl_req: Option<CacheDDLRequest>,
+        quiet: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         adapter_rewrites::rewrite_query(&mut stmt, self.noria.rewrite_params())?;
 
@@ -2363,6 +2365,7 @@ where
             name,
             "deep",
             |auth, req| async move { auth.remove_cache_ddl_request(req).await },
+            quiet,
         )
         .await;
 
@@ -2374,10 +2377,13 @@ where
         mut name: Option<Relation>,
         mut stmt: SelectStatement,
         policy: Option<ast::EvictionPolicy>,
-        ddl_req: CacheDDLRequest,
+        ddl_req: Option<CacheDDLRequest>,
         always: bool,
         coalesce_ms: Option<Duration>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let ddl_req =
+            ddl_req.ok_or_else(|| internal_err!("No statement supplied to shallow cache"))?;
+
         adapter_rewrites::rewrite_equivalent(&mut stmt, self.noria.rewrite_params())?;
 
         let req = ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned());
@@ -2423,6 +2429,7 @@ where
             requested_name,
             "shallow",
             |auth, req| async move { auth.remove_shallow_cache_ddl_request(req).await },
+            false,
         )
         .await;
 
@@ -3114,31 +3121,66 @@ where
                     None
                 };
 
-                match cache_type.unwrap_or_default() {
-                    CacheType::Deep => {
-                        self.create_deep_cache(
+                let cache_mode = self.settings.cache_mode;
+                let deep_requested = *cache_type == Some(CacheType::Deep);
+                let shallow_requested = *cache_type == Some(CacheType::Shallow);
+
+                if deep_requested || (cache_mode.is_deep() && !shallow_requested) {
+                    self.create_deep_cache(
+                        name.clone(),
+                        stmt,
+                        search_path,
+                        *always,
+                        *concurrently,
+                        ddl_req,
+                        false,
+                    )
+                    .await
+                } else if shallow_requested || (cache_mode.is_shallow() && !deep_requested) {
+                    self.create_shallow_cache(
+                        name.clone(),
+                        stmt,
+                        *policy,
+                        ddl_req,
+                        *always,
+                        *coalesce_ms,
+                    )
+                    .await
+                } else {
+                    let deep = self
+                        .create_deep_cache(
                             name.clone(),
-                            stmt,
+                            stmt.clone(),
                             search_path,
                             *always,
                             *concurrently,
-                            ddl_req,
+                            ddl_req.clone(),
+                            true,
                         )
-                        .await
-                    }
-                    CacheType::Shallow => {
-                        let ddl_req = ddl_req.ok_or_else(|| {
-                            internal_err!("No statement supplied to shallow cache")
-                        })?;
-                        self.create_shallow_cache(
-                            name.clone(),
-                            stmt,
-                            *policy,
-                            ddl_req,
-                            *always,
-                            *coalesce_ms,
-                        )
-                        .await
+                        .await;
+                    match deep {
+                        Ok(deep) => Ok(deep),
+                        Err(error) if error.is_transient() => {
+                            info!(%error, "Skipping CREATE CACHE due to transient error");
+                            Err(ReadySetError::CreateCacheError(format!(
+                                "Please retry due to transient error: {error}"
+                            )))
+                        }
+                        Err(error) => {
+                            info!(
+                                %error,
+                                "Deep cache creation failed; falling back to shallow cache"
+                            );
+                            self.create_shallow_cache(
+                                name.clone(),
+                                stmt,
+                                *policy,
+                                ddl_req,
+                                *always,
+                                *coalesce_ms,
+                            )
+                            .await
+                        }
                     }
                 }
             }
@@ -4415,6 +4457,7 @@ async fn remove_ddl_on_error<T, F, Fut>(
     name: Option<Relation>,
     cache_type: &str,
     remove: F,
+    quiet: bool,
 ) where
     F: Fn(Arc<Authority>, CacheDDLRequest) -> Fut,
     Fut: Future<Output = ReadySetResult<()>>,
@@ -4444,10 +4487,12 @@ async fn remove_ddl_on_error<T, F, Fut>(
     }
 
     if let Err(ref e) = res {
-        error!(
-            name = %name.unwrap_or("".into()).display_unquoted(),
-            "Failed to create {cache_type} cache: {e}",
-        );
+        if !quiet {
+            error!(
+                name = %name.unwrap_or("".into()).display_unquoted(),
+                "Failed to create {cache_type} cache: {e}",
+            );
+        }
     }
 }
 
