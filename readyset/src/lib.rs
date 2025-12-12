@@ -59,6 +59,7 @@ use readyset_tracing::TracingGuard;
 use readyset_util::failpoints;
 use readyset_util::futures::abort_on_panic;
 use readyset_util::redacted::RedactedString;
+use readyset_util::retry_with_exponential_backoff;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown;
 use readyset_version::*;
@@ -74,9 +75,6 @@ use tokio_native_tls::{native_tls, TlsAcceptor};
 
 // readyset_alloc initializes the global allocator
 extern crate readyset_alloc;
-
-/// Timeout to use when connecting to the upstream database
-const UPSTREAM_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Retry interval to use when attempting to connect to the upstream database
 const UPSTREAM_CONNECTION_RETRY_INTERVAL: Duration = Duration::from_secs(1);
@@ -721,15 +719,33 @@ where
 {
     if upstream_config.upstream_db_url.is_some() && !no_upstream_connections {
         set_failpoint!(failpoints::UPSTREAM);
-        timeout(
-            UPSTREAM_CONNECTION_TIMEOUT,
-            U::connect(upstream_config, None, None),
+
+        // Upstream services can start accepting connections slightly after the adapter/server
+        // starts. Connection attempts may fail quickly (eg connection refused) or hang (eg SYN
+        // packets dropped), so we use a per-attempt timeout and retry within a fixed retry count.
+        retry_with_exponential_backoff!(
+            {
+                match timeout(
+                    UPSTREAM_CONNECTION_RETRY_INTERVAL,
+                    U::connect(upstream_config.clone(), None, None),
+                )
+                .await
+                {
+                    Ok(Ok(conn)) => Ok(Some(conn)),
+                    Ok(Err(e)) => {
+                        warn!(error = %e, "Upstream connection error, retrying");
+                        Err(e)
+                    }
+                    Err(_) => {
+                        warn!("Upstream connection attempt timed out, retrying");
+                        Err(internal_err!("Connection attempt timed out").into())
+                    }
+                }
+            },
+            retries: 8,
+            delay: 50,
+            backoff: 2,
         )
-        .instrument(debug_span!("Connecting to upstream database"))
-        .await
-        .map_err(|_| internal_err!("Connection timed out").into())
-        .and_then(|r| r)
-        .map(Some)
     } else {
         Ok(None)
     }
