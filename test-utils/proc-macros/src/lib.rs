@@ -13,7 +13,7 @@ use syn::{Error, Ident, ItemFn, parse_macro_input, parse_quote};
 ///
 /// The following test will only be run if the `RUN_SLOW_TESTS` environment variable is set:
 ///
-/// ```
+/// ```no_run
 /// # use test_utils_proc_macros::slow;
 /// #[test]
 /// #[slow]
@@ -48,7 +48,7 @@ pub fn slow(_args: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// The following test will not be run if the `FLAKY_FINDER` environment variable is set:
 ///
-/// ```
+/// ```no_run
 /// # use test_utils_proc_macros::skip_flaky_finder;
 /// #[test]
 /// #[skip_flaky_finder]

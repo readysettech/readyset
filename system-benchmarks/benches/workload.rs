@@ -272,8 +272,8 @@ impl Benchmark {
         group.confidence_level(0.995);
         group.measurement_time(WORKLOAD_DURATION);
         group.throughput(Throughput::Elements(BENCH_BATCH_SIZE));
-        if args.sample_size.is_some() {
-            group.sample_size(args.sample_size.unwrap()); //just checked
+        if let Some(sample_size) = args.sample_size {
+            group.sample_size(sample_size);
         }
 
         for workload in self.workloads.iter() {

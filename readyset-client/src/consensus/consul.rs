@@ -691,8 +691,8 @@ impl AuthorityControl for ConsulAuthority {
             {
                 Ok(r) => {
                     if let Ok(kv_pair) = get_kv_pair(r) {
-                        if kv_pair.session.is_some() && kv_pair.value.is_some() {
-                            let bytes: Vec<u8> = kv_pair.value.unwrap().try_into()?;
+                        if let (Some(_), Some(value)) = (kv_pair.session, kv_pair.value) {
+                            let bytes: Vec<u8> = value.try_into()?;
                             return Ok(serde_json::from_slice(&bytes)?);
                         }
                     }

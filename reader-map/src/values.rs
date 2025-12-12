@@ -34,9 +34,9 @@ impl Metrics {
     // The amount of time between the last two updates.
     #[allow(dead_code)]
     pub(crate) fn last_update_interval(&self) -> Option<Duration> {
-        if self.prev_updated.is_some() {
+        if let Some(prev_updated) = self.prev_updated {
             // just checked `prev_updated`, and it's only set when `updated` has a value
-            return Some(self.updated.unwrap() - self.prev_updated.unwrap());
+            return Some(self.updated.unwrap() - prev_updated);
         }
         None
     }

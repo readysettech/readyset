@@ -1246,8 +1246,10 @@ where
             stmt,
             event,
         )?;
-        let res = if self.state.proxy_state.should_proxy() && self.upstream.is_some() {
-            let upstream = self.upstream.as_mut().unwrap(); // just checked
+        let res = if let (true, Some(upstream)) = (
+            self.state.proxy_state.should_proxy(),
+            self.upstream.as_mut(),
+        ) {
             let prep = upstream.prepare(query, data, statement_type).await?;
             PrepareResultInner::Upstream(prep)
         } else {
