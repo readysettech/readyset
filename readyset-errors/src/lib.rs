@@ -704,6 +704,9 @@ pub enum ReadySetError {
 
     #[error("Request timeout reached: {0}")]
     RequestTimeoutWithContext(String),
+
+    #[error("CREATE CACHE failed: {0}")]
+    CreateCacheError(String),
 }
 
 impl ReadySetError {

@@ -2380,6 +2380,11 @@ where
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         adapter_rewrites::rewrite_equivalent(&mut stmt, self.noria.rewrite_params())?;
 
+        let req = ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned());
+        if let Err(e) = self.upstream_supports(&req).await {
+            return Err(ReadySetError::CreateCacheError(e.to_string()));
+        }
+
         self.authority
             .add_shallow_cache_ddl_request(ddl_req.clone())
             .await?;
@@ -2392,7 +2397,7 @@ where
         let res = self.shallow.create_cache(
             Some(name.clone()),
             Some(query_id),
-            stmt.clone(),
+            stmt,
             self.noria.schema_search_path().to_owned(),
             resolve_eviction_policy(policy, self.settings.default_ttl_ms),
             ddl_req.clone(),
@@ -2402,14 +2407,13 @@ where
 
         if res.is_ok() {
             self.state.query_status_cache.update_query_migration_state(
-                &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
+                &req,
                 MigrationState::Successful(CacheType::Shallow),
                 None,
             );
-            self.state.query_status_cache.always_attempt_readyset(
-                &ViewCreateRequest::new(stmt, self.noria.schema_search_path().to_owned()),
-                always,
-            );
+            self.state
+                .query_status_cache
+                .always_attempt_readyset(&req, always);
         }
 
         remove_ddl_on_error(
