@@ -6,10 +6,9 @@ use readyset_adapter::query_status_cache::QueryStatusCache;
 use readyset_adapter::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
-use readyset_client_test_helpers::{sleep, TestBuilder};
+use readyset_client_test_helpers::{sleep, wait_for_table_id_change_and_leader_ready, TestBuilder};
 use readyset_server::Handle;
 use readyset_sql::ast::Relation;
-use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use test_utils::tags;
 
@@ -901,21 +900,14 @@ async fn test_binary_padding_lookup() {
 }
 
 async fn resnapshot_table(table: Relation, handle: &mut Handle, conn: &mut Conn) {
-    let tables = handle.tables().await.unwrap();
-    let current_table_id = tables.get(&table).unwrap();
+    let old_table_id = handle.tables().await.unwrap().get(&table).unwrap().index();
     conn.query_drop(format!(
         "ALTER READYSET RESNAPSHOT TABLE {}",
         table.display_unquoted()
     ))
     .await
     .unwrap();
-    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-    eventually!(
-        let new_tables = handle.tables().await.unwrap();
-        let new_table_id = new_tables.get(&table);
-        new_table_id.is_some() && new_table_id.unwrap() != current_table_id
-    );
-    eventually!(handle.leader_ready().await.unwrap());
+    wait_for_table_id_change_and_leader_ready(handle, &table, old_table_id).await;
 }
 
 async fn test_sensitiveness_lookup_inner(conn: &mut Conn, key_upper: &str, key_lower: &str) {

@@ -29,6 +29,7 @@ use readyset_server::{
 use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
 use readyset_sql_parsing::ParsingPreset;
+use readyset_util::eventually;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
 use tokio::net::{TcpListener, TcpStream};
@@ -40,6 +41,42 @@ pub mod psql_helpers;
 pub use readyset_server::sleep;
 
 static UNIQUE_SERVER_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+/// Wait for a table to be rebuilt (as indicated by a change in its dataflow node id), and for the
+/// leader to report it is ready.
+///
+/// This is used for operations like resnapshot that don't change the schema generation but do
+/// rebuild the table in the dataflow graph.
+pub async fn wait_for_table_id_change_and_leader_ready(
+    handle: &mut ReadySetHandle,
+    table: &Relation,
+    old_table_id: usize,
+) -> usize {
+    let poll_interval = Duration::from_millis(100);
+
+    let new_table_id = eventually!(
+        sleep: poll_interval,
+        run_test: {
+            handle
+                .tables()
+                .await
+                .unwrap()
+                .get(table)
+                .map(|id| id.index())
+        },
+        then_assert: |result| {
+            let table_id = result.expect("table should exist");
+            assert_ne!(table_id, old_table_id, "table id should have changed");
+            table_id
+        }
+    );
+
+    eventually!(sleep: poll_interval, message: "leader did not become ready".to_string(), {
+        handle.leader_ready().await.unwrap()
+    });
+
+    new_table_id
+}
 
 /// Generate a unique server ID for this replica to connect to the upstream with. It should be
 /// "unique" in the sense that running tests in parallel will not cause conflicts.
