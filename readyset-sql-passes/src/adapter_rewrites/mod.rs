@@ -803,6 +803,24 @@ pub fn number_placeholders(query: &mut SelectStatement) -> ReadySetResult<()> {
     Ok(())
 }
 
+struct QuestionMarkPlaceholdersVisitor;
+
+impl<'ast> VisitorMut<'ast> for QuestionMarkPlaceholdersVisitor {
+    type Error = ReadySetError;
+
+    fn visit_literal(&mut self, literal: &mut Literal) -> Result<(), Self::Error> {
+        if let Literal::Placeholder(item) = literal {
+            *item = ItemPlaceholder::QuestionMark;
+        }
+        Ok(())
+    }
+}
+
+pub fn convert_placeholders_to_question_marks(stmt: &mut SelectStatement) -> ReadySetResult<()> {
+    let mut visitor = QuestionMarkPlaceholdersVisitor;
+    visitor.visit_select_statement(stmt)
+}
+
 /// Splice the given list of extracted parameters, which should be a tuple of (placeholder position,
 /// value) as returned by [`auto_parameterize_query`] into the given list of parameters supplied by
 /// the user, by interleaving them into the params based on the placeholder position.

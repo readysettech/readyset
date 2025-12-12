@@ -78,6 +78,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use anyhow::bail;
 use clap::ValueEnum;
 use crossbeam_skiplist::SkipSet;
 use database_utils::UpstreamConfig;
@@ -108,7 +109,8 @@ use readyset_sql::ast::{
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::{
-    AdapterRewriteParams, DfQueryParameters, QueryParameters,
+    convert_placeholders_to_question_marks, AdapterRewriteParams, DfQueryParameters,
+    QueryParameters,
 };
 use readyset_sql_passes::{adapter_rewrites, DetectBucketFunctions};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -421,7 +423,7 @@ impl BackendBuilder {
                 query_max_failure_duration: Duration::new(self.query_max_failure_seconds, 0),
                 fallback_recovery_duration: Duration::new(self.fallback_recovery_seconds, 0),
                 placeholder_inlining: self.placeholder_inlining,
-                _cache_mode: self.cache_mode,
+                cache_mode: self.cache_mode,
             },
             telemetry_sender: self.telemetry_sender,
             authority,
@@ -728,7 +730,7 @@ struct BackendSettings {
     /// placeholders.
     placeholder_inlining: bool,
     /// How Readyset handles CREATE CACHE statements without explicit DEEP or SHALLOW modifiers.
-    _cache_mode: CacheMode,
+    cache_mode: CacheMode,
 }
 
 /// QueryInfo holds information regarding the last query that was sent along this connection
@@ -2416,6 +2418,24 @@ where
         Ok(noria_connector::QueryResult::Empty)
     }
 
+    /// Determines via running PREPARE if the upstream can support this query.
+    async fn upstream_supports(&mut self, req: &ViewCreateRequest) -> anyhow::Result<()> {
+        let Some(upstream) = self.upstream.as_mut() else {
+            bail!("No upstream database found");
+        };
+
+        let query = if matches!(DB::SQL_DIALECT, Dialect::MySQL) {
+            let mut stmt = req.statement.clone();
+            convert_placeholders_to_question_marks(&mut stmt)?;
+            let query = stmt.display(DB::SQL_DIALECT).to_string();
+            query
+        } else {
+            req.statement.display(DB::SQL_DIALECT).to_string()
+        };
+
+        upstream.can_prepare(&query).await
+    }
+
     /// Process an EXPLAIN CREATE CACHE request.
     ///
     /// If necessary, first perform a dry run migration.  If the migration state is inlined, allow
@@ -2426,28 +2446,69 @@ where
         id: QueryId,
         req: ViewCreateRequest,
         migration_state: Option<MigrationState>,
+        cache_type: Option<CacheType>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let (supported, migration_state) = match migration_state {
-            Some(m @ MigrationState::Unsupported(_)) => ("no", m),
-            Some(m @ MigrationState::Inlined(_)) => ("pending", m),
-            Some(m @ MigrationState::Successful(CacheType::Deep)) => ("cached", m),
-            Some(m @ MigrationState::Successful(CacheType::Shallow)) => ("cached", m),
-            Some(m @ MigrationState::DryRunSucceeded) => ("yes", m),
-            Some(MigrationState::Pending) | None => {
+        use MigrationState::*;
+
+        let cache_mode = self.settings.cache_mode;
+        let shallow_requested = cache_type == Some(CacheType::Shallow);
+        let migration_unknown = matches!(migration_state, Some(Pending) | None);
+
+        // Perform a dry run migration if necessary to determine support.
+        let migration_state =
+            if migration_unknown && cache_mode.defaults_deep() && !shallow_requested {
                 match self.noria.handle_dry_run(id, &req).await {
-                    Ok(()) => ("yes", MigrationState::DryRunSucceeded),
-                    Err(e) if e.is_transient() => ("pending", MigrationState::Pending),
-                    Err(e) => (
-                        "no",
-                        MigrationState::Unsupported(
-                            e.unsupported_cause().unwrap_or_else(|| e.to_string()),
-                        ),
-                    ),
+                    Ok(()) => Some(DryRunSucceeded),
+                    Err(e) if e.is_transient() => Some(Pending),
+                    Err(e) => Some(Unsupported(
+                        e.unsupported_cause().unwrap_or_else(|| e.to_string()),
+                    )),
+                }
+            } else {
+                migration_state
+            };
+
+        // Determine support.
+        let supported = match cache_type {
+            Some(CacheType::Deep) => match migration_state {
+                Some(Successful(_)) => "cached",
+                Some(DryRunSucceeded) => "yes",
+                Some(Unsupported(ref e)) => &format!("no: {e}"),
+                Some(Inlined(_) | Pending) | None => "pending",
+            },
+            Some(CacheType::Shallow) => {
+                if matches!(migration_state, Some(Successful(_))) {
+                    "cached"
+                } else if let Err(e) = self.upstream_supports(&req).await {
+                    &format!("no: {e}")
+                } else {
+                    "yes"
                 }
             }
+            None => match migration_state {
+                Some(Successful(_)) => "cached",
+                Some(Inlined(_) | Pending) if cache_mode.defaults_deep() => "pending",
+                Some(DryRunSucceeded) if cache_mode.defaults_deep() => "yes",
+                Some(Unsupported(ref e)) if cache_mode.is_deep() => &format!("no: {e}"),
+                Some(Inlined(_) | Pending | DryRunSucceeded | Unsupported(_)) | None => {
+                    if let Err(e) = self.upstream_supports(&req).await {
+                        &format!("no: {e}")
+                    } else {
+                        "yes"
+                    }
+                }
+            },
         };
 
-        let results = vec![
+        // Potentially update query status cache.
+        if let Some(migration_state) = migration_state {
+            self.state
+                .query_status_cache
+                .update_query_migration_state(&req, migration_state, None);
+        }
+
+        // Output result.
+        Ok(noria_connector::QueryResult::Meta(vec![
             MetaVariable {
                 name: "query id".into(),
                 value: id.to_string(),
@@ -2460,13 +2521,7 @@ where
                 name: "readyset supported".into(),
                 value: supported.into(),
             },
-        ];
-
-        self.state
-            .query_status_cache
-            .update_query_migration_state(&req, migration_state, None);
-
-        Ok(noria_connector::QueryResult::Meta(results))
+        ]))
     }
 
     fn drop_view_request(&mut self, view_request: &ViewCreateRequest) {
@@ -2932,7 +2987,9 @@ where
             SqlQuery::Explain(ExplainStatement::Materializations) => {
                 self.noria.explain_materializations().await
             }
-            SqlQuery::Explain(ExplainStatement::CreateCache { inner, .. }) => {
+            SqlQuery::Explain(ExplainStatement::CreateCache {
+                inner, cache_type, ..
+            }) => {
                 match inner {
                     Ok(inner) => {
                         let view_request = match inner {
@@ -2982,7 +3039,7 @@ where
                             migration_state = Some(MigrationState::Successful(CacheType::Deep));
                         }
 
-                        self.explain_create_cache(id, view_request, migration_state)
+                        self.explain_create_cache(id, view_request, migration_state, *cache_type)
                             .await
                     }
                     Err(err) => Err(ReadySetError::UnparseableQuery(err.clone())),

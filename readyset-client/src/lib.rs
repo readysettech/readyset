@@ -480,3 +480,20 @@ impl Display for CacheMode {
         f.write_str(self.to_possible_value().unwrap().get_name())
     }
 }
+
+impl CacheMode {
+    pub fn defaults_deep(&self) -> bool {
+        match self {
+            Self::Deep | Self::DeepThenShallow => true,
+            Self::Shallow => false,
+        }
+    }
+
+    pub fn is_deep(&self) -> bool {
+        *self == Self::Deep
+    }
+
+    pub fn is_shallow(&self) -> bool {
+        *self == Self::Shallow
+    }
+}
