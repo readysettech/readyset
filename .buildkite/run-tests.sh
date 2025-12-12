@@ -64,7 +64,7 @@ NEXTEST_FILTER=()
 # won't have need for nextest mutual exclusion groups (for all tests); for this reason, we don't
 # here use the ':serial:` tag, even though it's used in the groups.
 case "$UPSTREAM_CONFIG" in
-  "none")
+  "none"|"default")
     NEXTEST_FILTER+=("not test(/:(\w+)_upstream:/)") ;;
   mysql8*)
     # If we ever add a `mysql57_upstream` test, this will filter it out, and it can be added in the next case.
@@ -97,16 +97,20 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
 
     echo "+++ :rust: Run tests (nextest $UPSTREAM_CONFIG, MRBR $MYSQL_MRBR)"
 
+    set -x   # print the cargo command
     cargo --locked nextest run --profile ci --hide-progress-bar \
         --workspace --features failure_injection \
         --filterset "${NEXTEST_FILTER[@]}" \
         || upload_artifacts
+    set +x
 elif [[ "$TEST_CATEGORY" == "doctest" ]]; then
     # Run doctests, because at this time nextest does not support doctests
     echo "+++ :rust: Run tests (doctest)"
+    set -x   # print the cargo command
     cargo --locked test --doc \
         --workspace --features failure_injection \
         || upload_artifacts
+    set +x
 else
     echo "No test defined for TEST_CATEGORY=${TEST_CATEGORY}."
     exit 1
