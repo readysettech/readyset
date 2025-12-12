@@ -43,7 +43,11 @@ use crate::{
 mod rpc;
 
 const EXTEND_RECIPE_POLL_INTERVAL: Duration = Duration::from_secs(1);
-const WAIT_FOR_ALL_TABLES_TO_COMPACT_POLL_INTERVAL: Duration = Duration::from_secs(5);
+// This is used while waiting for background compactions to complete after snapshotting.
+// A shorter initial poll interval prevents an unconditional ~5s delay in the common case
+// where compactions finish just after we poll.
+const WAIT_FOR_ALL_TABLES_TO_COMPACT_MIN_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const WAIT_FOR_ALL_TABLES_TO_COMPACT_MAX_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Describes a running controller instance.
 ///
@@ -994,12 +998,20 @@ impl ReadySetHandle {
 
     /// Poll in a loop to wait for all tables to finish compacting
     pub async fn wait_for_all_tables_to_compact(&mut self) -> ReadySetResult<()> {
+        let mut poll_interval = WAIT_FOR_ALL_TABLES_TO_COMPACT_MIN_POLL_INTERVAL;
         while !self
             .rpc("all_tables_compacted", (), self.request_timeout)
             .await?
         {
-            debug!("Waiting for all tables to compact");
-            tokio::time::sleep(WAIT_FOR_ALL_TABLES_TO_COMPACT_POLL_INTERVAL).await;
+            debug!(
+                "Waiting for all tables to compact (sleeping {:?})",
+                poll_interval
+            );
+            tokio::time::sleep(poll_interval).await;
+            poll_interval = std::cmp::min(
+                poll_interval.saturating_mul(2),
+                WAIT_FOR_ALL_TABLES_TO_COMPACT_MAX_POLL_INTERVAL,
+            );
         }
 
         Ok(())
