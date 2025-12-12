@@ -1413,6 +1413,10 @@ impl SqlIncorporator {
         trace!(table_name = %table_name.display_unquoted(), "removing base table");
         let mut mir_removal_result = self.mir_converter.remove_base(table_name)?;
         self.process_removal(&mut mir_removal_result, mig);
+
+        // Keep schema state in sync with MIR/dataflow removal; otherwise schema catalog updates
+        // will continue to advertise dropped bases as queryable.
+        self.base_schemas.remove(table_name);
         Ok(mir_removal_result)
     }
 
