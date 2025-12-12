@@ -842,7 +842,6 @@ async fn insert_array_of_enum_value_appended_after_create_table() {
     shutdown_tx.shutdown().await;
 }
 
-#[allow(dead_code)]
 async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> (bool, String) {
     match &client
         .simple_query("EXPLAIN LAST STATEMENT")
@@ -856,7 +855,7 @@ async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> (b
                 return (
                     false,
                     format!(
-                        r#"dest column was expected to contain "{dest}", but was: "{dest_col}""#
+                        r#"dest column was expected to contain "{dest}", but was: "{dest_col}" (status: "{status_col}")"#
                     ),
                 );
             }
@@ -864,7 +863,7 @@ async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> (b
                 return (
                     false,
                     format!(
-                        r#"status column was expected to contain "{status}", but was: "{status_col}""#
+                        r#"status column was expected to contain "{status}", but was: "{status_col}" (dest: "{dest_col}")"#
                     ),
                 );
             }
