@@ -2859,6 +2859,104 @@ impl<'a> IntoIterator for &'a Operations {
     }
 }
 
+/// Prune a randomly generated set of query operations to avoid combinations we don't support (or
+/// that are too expensive) in fuzz-generated queries.
+fn prune_query_operations(ops: &mut Vec<QueryOperation>) {
+    // Don't generate an aggregate with distinct keyword or a plain distinct in the same query as a
+    // WHERE IN clause, since we don't support those queries (ENG-2942)
+    let mut distinct_found = false;
+    let mut in_parameter_found = false;
+
+    // Don't generate an OR filter in the same query as a parameter of any kind, since
+    // we don't support those queries (ENG-2976)
+    let mut parameter_found = false;
+    let mut or_filter_found = false;
+
+    // Only allow one window function per query
+    // Window functions can't be used with: ranges, aggregates, or group by
+    let mut window_function_found = false;
+    let mut range_parameter_found = false;
+    let mut aggregate_found = false;
+
+    ops.retain(|op| match op {
+        QueryOperation::ColumnAggregate(agg) if agg.is_distinct() => {
+            if in_parameter_found || window_function_found {
+                false
+            } else {
+                distinct_found = true;
+                aggregate_found = true;
+                true
+            }
+        }
+        QueryOperation::Distinct => {
+            if in_parameter_found {
+                false
+            } else {
+                distinct_found = true;
+                true
+            }
+        }
+        QueryOperation::InParameter { .. } => {
+            if distinct_found || or_filter_found || window_function_found || in_parameter_found {
+                false
+            } else {
+                in_parameter_found = true;
+                parameter_found = true;
+                true
+            }
+        }
+        QueryOperation::SingleParameter | QueryOperation::MultipleParameters => {
+            if or_filter_found {
+                false
+            } else {
+                parameter_found = true;
+                true
+            }
+        }
+        QueryOperation::RangeParameter | QueryOperation::MultipleRangeParameters => {
+            if window_function_found || or_filter_found {
+                false
+            } else {
+                range_parameter_found = true;
+                parameter_found = true;
+                true
+            }
+        }
+        QueryOperation::Filter(Filter {
+            extend_where_with: LogicalOp::Or,
+            ..
+        }) => {
+            if parameter_found {
+                false
+            } else {
+                or_filter_found = true;
+                true
+            }
+        }
+        QueryOperation::ColumnAggregate(_) => {
+            if window_function_found {
+                false
+            } else {
+                aggregate_found = true;
+                true
+            }
+        }
+        QueryOperation::WindowFunction(_) => {
+            if window_function_found
+                || range_parameter_found
+                || aggregate_found
+                || in_parameter_found
+            {
+                false
+            } else {
+                window_function_found = true;
+                true
+            }
+        }
+        _ => true,
+    });
+}
+
 impl Arbitrary for Operations {
     type Parameters = <Vec<QueryOperation> as Arbitrary>::Parameters;
 
@@ -2867,101 +2965,7 @@ impl Arbitrary for Operations {
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
         any_with::<Vec<QueryOperation>>(args)
             .prop_map(|mut ops| {
-                // Don't generate an aggregate with distinct keyword or a plain distinct
-                // in the same query as a WHERE IN clause,
-                // since we don't support those queries (ENG-2942)
-                let mut distinct_found = false;
-                let mut in_parameter_found = false;
-
-                // Don't generate an OR filter in the same query as a parameter of any kind, since
-                // we don't support those queries (ENG-2976)
-                let mut parameter_found = false;
-                let mut or_filter_found = false;
-
-                // Only allow one window function per query
-                // Window functions can't be used with: ranges, aggregates, or group by
-                let mut window_function_found = false;
-                let mut range_parameter_found = false;
-                let mut aggregate_found = false;
-
-                ops.retain(|op| match op {
-                    QueryOperation::ColumnAggregate(agg) if agg.is_distinct() => {
-                        if in_parameter_found || window_function_found {
-                            false
-                        } else {
-                            distinct_found = true;
-                            aggregate_found = true;
-                            true
-                        }
-                    }
-                    QueryOperation::Distinct => {
-                        if in_parameter_found {
-                            false
-                        } else {
-                            distinct_found = true;
-                            true
-                        }
-                    }
-                    QueryOperation::InParameter { .. } => {
-                        if distinct_found || or_filter_found || window_function_found {
-                            false
-                        } else {
-                            in_parameter_found = true;
-                            parameter_found = true;
-                            true
-                        }
-                    }
-                    QueryOperation::SingleParameter | QueryOperation::MultipleParameters => {
-                        if or_filter_found {
-                            false
-                        } else {
-                            parameter_found = true;
-                            true
-                        }
-                    }
-                    QueryOperation::RangeParameter | QueryOperation::MultipleRangeParameters => {
-                        if window_function_found || or_filter_found {
-                            false
-                        } else {
-                            range_parameter_found = true;
-                            parameter_found = true;
-                            true
-                        }
-                    }
-                    QueryOperation::Filter(Filter {
-                        extend_where_with: LogicalOp::Or,
-                        ..
-                    }) => {
-                        if parameter_found {
-                            false
-                        } else {
-                            or_filter_found = true;
-                            true
-                        }
-                    }
-                    QueryOperation::ColumnAggregate(_) => {
-                        if window_function_found {
-                            false
-                        } else {
-                            aggregate_found = true;
-                            true
-                        }
-                    }
-                    QueryOperation::WindowFunction(_) => {
-                        if window_function_found
-                            || range_parameter_found
-                            || aggregate_found
-                            || in_parameter_found
-                        {
-                            false
-                        } else {
-                            window_function_found = true;
-                            true
-                        }
-                    }
-                    _ => true,
-                });
-
+                prune_query_operations(&mut ops);
                 Operations(ops)
             })
             .boxed()
@@ -3571,6 +3575,24 @@ mod tests {
             }
             constraint => unreachable!("Unexpected constraint: {:?}", constraint),
         }
+    }
+
+    #[test]
+    fn prunes_extra_in_parameters() {
+        let mut ops = vec![
+            QueryOperation::InParameter { num_values: 2 },
+            QueryOperation::InParameter { num_values: 3 },
+            QueryOperation::SingleParameter,
+        ];
+
+        prune_query_operations(&mut ops);
+
+        assert_eq!(
+            ops.into_iter()
+                .filter(|op| matches!(op, QueryOperation::InParameter { .. }))
+                .count(),
+            1
+        );
     }
 
     mod parse_num_operations {
