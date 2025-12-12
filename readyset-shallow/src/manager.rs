@@ -2,7 +2,7 @@ use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use metrics::counter;
 use moka::future::Cache as MokaCache;
@@ -251,6 +251,7 @@ where
             results: Some(Vec::new()),
             metadata: None,
             filled: false,
+            requested: Instant::now(),
         }
     }
 
@@ -348,6 +349,7 @@ where
     results: Option<Vec<V>>,
     metadata: Option<QueryMetadata>,
     filled: bool,
+    requested: Instant,
 }
 
 impl<K, V> Debug for CacheInsertGuard<K, V>
@@ -388,19 +390,19 @@ where
         self.filled = true;
         async {
             if self.filled {
-                let (metadata, cache, key, results) = self.take();
-                cache.insert(key, results, metadata).await;
+                let (metadata, cache, key, results, execution) = self.take();
+                cache.insert(key, results, metadata, execution).await;
             }
         }
     }
 
-    fn take(&mut self) -> (QueryMetadata, Arc<Cache<K, V>>, K, Vec<V>) {
+    fn take(&mut self) -> (QueryMetadata, Arc<Cache<K, V>>, K, Vec<V>, Duration) {
         let metadata = self.metadata.take().expect("no metadata for result set");
         let cache = Arc::clone(&self.cache);
         let key = self.key.take().unwrap();
         let results = self.results.take().unwrap();
         self.filled = false;
-        (metadata, cache, key, results)
+        (metadata, cache, key, results, self.requested.elapsed())
     }
 }
 
@@ -411,9 +413,9 @@ where
 {
     fn drop(&mut self) {
         if self.filled {
-            let (metadata, cache, key, results) = self.take();
+            let (metadata, cache, key, results, execution) = self.take();
             tokio::spawn(async move {
-                cache.insert(key, results, metadata).await;
+                cache.insert(key, results, metadata, execution).await;
             });
         }
     }

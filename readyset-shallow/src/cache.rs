@@ -35,9 +35,10 @@ pub(crate) struct CacheValues<V> {
     values: Arc<Vec<V>>,
     metadata: Option<Arc<QueryMetadata>>,
     accessed_ms: AtomicU64,
-    refreshed_ms: AtomicU64,
+    refreshed_ms: u64,
     refreshing: AtomicBool,
     ttl_ms: Option<u64>,
+    execution_ms: u64,
 }
 
 #[derive(Debug, Default)]
@@ -257,7 +258,13 @@ where
         }
     }
 
-    pub(crate) async fn insert(&self, k: K, v: Vec<V>, metadata: QueryMetadata) {
+    pub(crate) async fn insert(
+        &self,
+        k: K,
+        v: Vec<V>,
+        metadata: QueryMetadata,
+        execution: Duration,
+    ) {
         let metadata = if let Some(existing) = self.cache_metadata.get() {
             if existing.as_ref() == &metadata {
                 None
@@ -278,13 +285,15 @@ where
         };
 
         let now = current_timestamp_ms();
+        let execution_ms = execution.as_millis().try_into().unwrap_or_default();
         let entry = Arc::new(CacheEntry::Present(CacheValues {
             values: Arc::new(v),
             metadata,
             accessed_ms: now.into(),
-            refreshed_ms: now.into(),
+            refreshed_ms: now,
             refreshing: false.into(),
-            ttl_ms: self.ttl_ms,
+            ttl_ms: self.ttl_ms.map(|ttl| ttl.saturating_sub(execution_ms)),
+            execution_ms,
         }));
 
         let mut waiters = None;
@@ -313,7 +322,7 @@ where
         let now = current_timestamp_ms();
         values.accessed_ms.store(now, Ordering::Relaxed);
         let refresh = if let Some(refresh_ms) = self.refresh_ms
-            && now.saturating_sub(values.refreshed_ms.load(Ordering::Relaxed)) >= refresh_ms
+            && now.saturating_sub(values.refreshed_ms + values.execution_ms) >= refresh_ms
             && values
                 .refreshing
                 .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -405,6 +414,7 @@ mod tests {
     use super::*;
 
     const ID: u64 = 0;
+    const ZERO_DURATION: Duration = Duration::from_secs(0);
 
     fn test_ddl_req() -> CacheDDLRequest {
         CacheDDLRequest {
@@ -442,7 +452,9 @@ mod tests {
         let values = vec![vec!["test_value"]];
         let metadata = QueryMetadata::Test;
 
-        cache.insert(key.clone(), values.clone(), metadata).await;
+        cache
+            .insert(key.clone(), values.clone(), metadata, ZERO_DURATION)
+            .await;
         let result = cache.get(key.clone()).await.unwrap();
         assert_eq!(result.0.values.as_ref(), &values);
 
@@ -461,7 +473,7 @@ mod tests {
         for _ in 0..4 {
             tokio::time::sleep(Duration::from_secs(1)).await;
             cache
-                .insert(key.clone(), values.clone(), metadata.clone())
+                .insert(key.clone(), values.clone(), metadata.clone(), ZERO_DURATION)
                 .await;
             let result = cache.get(key.clone()).await.unwrap();
             assert_eq!(result.0.values.as_ref(), &values);
@@ -508,10 +520,20 @@ mod tests {
         let metadata = QueryMetadata::Test;
 
         cache_0
-            .insert(key.clone(), values_0.clone(), metadata.clone())
+            .insert(
+                key.clone(),
+                values_0.clone(),
+                metadata.clone(),
+                ZERO_DURATION,
+            )
             .await;
         cache_1
-            .insert(key.clone(), values_1.clone(), metadata.clone())
+            .insert(
+                key.clone(),
+                values_1.clone(),
+                metadata.clone(),
+                ZERO_DURATION,
+            )
             .await;
 
         let result_0 = cache_0.get(key.clone()).await.unwrap();
@@ -528,9 +550,10 @@ mod tests {
             values: Arc::new(vec![1u64, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
             metadata: Some(Arc::new(QueryMetadata::Test)),
             accessed_ms: now.into(),
-            refreshed_ms: now.into(),
+            refreshed_ms: now,
             refreshing: false.into(),
             ttl_ms: None,
+            execution_ms: 0,
         });
         assert!(entry.deep_size_of() > 10 * 0u64.deep_size_of());
     }
@@ -543,7 +566,7 @@ mod tests {
         let cache = new(Some(BYTES), EvictionPolicy::Ttl(Duration::from_secs(1)));
         for i in 0..COUNT {
             let v = vec!["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string()];
-            cache.insert(i, v, QueryMetadata::Test).await;
+            cache.insert(i, v, QueryMetadata::Test, ZERO_DURATION).await;
         }
         cache.inner.run_pending_tasks().await;
 
