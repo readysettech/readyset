@@ -3396,7 +3396,6 @@ impl GenerateOpts {
                 Box::new(
                     subqueries
                         .iter()
-                        .cloned()
                         .map(|position| {
                             if available_ops.is_empty() {
                                 Box::new(Either::Left(make_seeds(

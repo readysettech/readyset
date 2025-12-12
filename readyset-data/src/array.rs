@@ -7,7 +7,6 @@ use nom_locate::LocatedSpan;
 use nom_sql::NomSqlError;
 use postgres_protocol::types::ArrayDimension;
 use proptest::arbitrary::Arbitrary;
-use proptest::prop_oneof;
 use readyset_errors::{invalid_query_err, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};

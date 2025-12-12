@@ -391,8 +391,6 @@ mod tests {
     use std::time::Instant;
     use tokio::time::Duration;
 
-    use crate::retry_with_exponential_backoff;
-
     #[tokio::test]
     async fn test_retry_success_first_try() {
         let result = retry_with_exponential_backoff!(

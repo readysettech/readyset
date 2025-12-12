@@ -1707,10 +1707,10 @@ impl SqlToMirConverter {
             visitor.visit_expr(where_clause).expect("Just checked");
         }
 
-        if visitor.result.is_ok() {
-            Ok(visitor.local_columns)
+        if let Err(e) = visitor.result {
+            Err(e)
         } else {
-            Err(visitor.result.unwrap_err())
+            Ok(visitor.local_columns)
         }
     }
 

@@ -72,63 +72,7 @@ impl OutputColumn {
     }
 }
 
-impl Ord for OutputColumn {
-    fn cmp(&self, other: &OutputColumn) -> Ordering {
-        match *self {
-            OutputColumn::Expr(ExprColumn {
-                ref name,
-                ref table,
-                ..
-            })
-            | OutputColumn::Data {
-                column:
-                    Column {
-                        ref name,
-                        ref table,
-                        ..
-                    },
-                ..
-            }
-            | OutputColumn::Literal(LiteralColumn {
-                ref name,
-                ref table,
-                ..
-            }) => match *other {
-                OutputColumn::Expr(ExprColumn {
-                    name: ref other_name,
-                    table: ref other_table,
-                    ..
-                })
-                | OutputColumn::Data {
-                    column:
-                        Column {
-                            name: ref other_name,
-                            table: ref other_table,
-                            ..
-                        },
-                    ..
-                }
-                | OutputColumn::Literal(LiteralColumn {
-                    name: ref other_name,
-                    table: ref other_table,
-                    ..
-                }) => {
-                    if table.is_some() && other_table.is_some() {
-                        match table.cmp(other_table) {
-                            Ordering::Equal => name.cmp(other_name),
-                            x => x,
-                        }
-                    } else {
-                        name.cmp(other_name)
-                    }
-                }
-            },
-        }
-    }
-}
-
 impl PartialOrd for OutputColumn {
-    #[allow(clippy::non_canonical_partial_ord_impl)]
     fn partial_cmp(&self, other: &OutputColumn) -> Option<Ordering> {
         match *self {
             OutputColumn::Expr(ExprColumn {

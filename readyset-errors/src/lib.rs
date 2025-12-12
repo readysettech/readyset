@@ -1249,7 +1249,7 @@ macro_rules! set_failpoint_return_err {
 
 #[cfg(test)]
 mod test {
-    use crate::{ReadySetError, ReadySetResult, internal};
+    use crate::{ReadySetError, ReadySetResult};
 
     #[test]
     #[should_panic(expected = "errors/src/lib.rs")]

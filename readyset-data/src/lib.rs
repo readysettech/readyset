@@ -50,7 +50,6 @@ pub mod upstream_system_props;
 
 pub use ndarray::{ArrayD, IxDyn};
 use proptest::arbitrary::Arbitrary;
-use proptest::prelude::*;
 
 pub use crate::array::Array;
 pub use crate::collation::Collation;
@@ -2443,6 +2442,7 @@ mod arbitrary {
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
+    use proptest::prelude::*;
     use readyset_util::{eq_laws, hash_laws, ord_laws};
     use test_strategy::proptest;
     use test_utils::tags;

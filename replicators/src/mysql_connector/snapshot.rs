@@ -487,16 +487,18 @@ impl MySqlReplicator<'_> {
             // End of MySQL stream/batch. We should query the next batch. If the new row is None, we
             // have reached the end of the table and will break out of the loop after getting
             // and empty df row at mysql_row_to_noria_row.
-            if row.is_none() && snapshot_type.is_key_based() && prev_row.is_some() {
+            if let (true, true, Some(prev_row)) = (
+                row.is_none(),
+                snapshot_type.is_key_based(),
+                prev_row.as_ref(),
+            ) {
                 // Last row from batch. Get the next batch lower bound with prev row.
                 // It's safe to unwrap here because we will break out of the loop at
                 // mysql_row_to_noria_row if row was None.
                 row_stream = trx
                     .exec_iter(
                         &bound_base_query,
-                        mysql::Params::Positional(
-                            snapshot_type.get_lower_bound(prev_row.as_ref().unwrap())?,
-                        ),
+                        mysql::Params::Positional(snapshot_type.get_lower_bound(prev_row)?),
                     )
                     .await
                     .map_err(log_err)?;
