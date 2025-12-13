@@ -79,13 +79,13 @@ storage.
    **Run against Postgres:**
 
    ```bash
-   cargo run --bin readyset --release -- --database-type=postgresql --upstream-db-url=postgresql://postgres:readyset@127.0.0.1:5432/testdb --username=postgres --password=readyset --address=0.0.0.0:5433 --deployment=<deployment name> --prometheus-metrics
+   cargo run --bin readyset --release -- --database-type=postgresql --upstream-db-url=postgresql://postgres:readyset@127.0.0.1:5432/testdb  --address=0.0.0.0:5433 --deployment=<deployment name> --prometheus-metrics
    ```
 
    **Run against MySQL:**
 
    ```bash
-   cargo run --bin readyset --release -- --database-type=mysql --upstream-db-url=mysql://root:readyset@127.0.0.1:3306/testdb --username=root --password=readyset --address=0.0.0.0:3307 --deployment=<deployment name> --prometheus-metrics
+   cargo run --bin readyset --release -- --database-type=mysql --upstream-db-url=mysql://root:readyset@127.0.0.1:3306/testdb --address=0.0.0.0:3307 --deployment=<deployment name> --prometheus-metrics
    ```
 
    This runs the Readyset Server and Adapter as a single process, a simple, standard way to run Readyset that is also the easiest approach when developing. For production deployments, however, it is possible to run the Server and Adapter as separate processes. See the [scale out deployment pattern](https://docs.readyset.io/guides/deploy/production-notes/#scale-out) in the docs.
