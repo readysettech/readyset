@@ -7,6 +7,7 @@
 #   not very valuable unless you're working on related code.
 # - `clustertests` are slow, unreliable, and require building their own copy of readyset.
 default-filter = 'not test(test_large_packet_write) and not package(readyset-clustertest)'
+slow-timeout = { period = "180s", terminate-after = 1, grace-period = "20s" }
 
 [profile.ci]
 default-filter = 'not package(readyset-clustertest)'
