@@ -10,8 +10,8 @@ use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
 use readyset_shallow::CacheInsertGuard;
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
-use readyset_util::redacted::RedactedString;
 use readyset_util::SizeOf;
+use readyset_util::redacted::RedactedString;
 use tracing::debug;
 
 pub type UpstreamStatementId = u32;

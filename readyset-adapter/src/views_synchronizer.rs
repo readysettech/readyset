@@ -2,14 +2,14 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use dataflow_expression::Dialect;
-use metrics::{counter, Counter};
-use metrics::{gauge, Gauge};
+use metrics::{Counter, counter};
+use metrics::{Gauge, gauge};
 use readyset_client::query::MigrationState;
 use readyset_client::recipe::{CacheInfo, ExprInfo};
 use readyset_client::{ReadySetHandle, ViewCreateRequest};
 use readyset_client_metrics::recorded;
 use readyset_sql::ast::CacheType;
-use readyset_sql::{ast::Relation, DialectDisplay};
+use readyset_sql::{DialectDisplay, ast::Relation};
 use readyset_util::shared_cache::LocalCache;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;

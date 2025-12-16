@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use lru::LruCache;
-use readyset_client::query::Query;
 use readyset_client::ViewCreateRequest;
+use readyset_client::query::Query;
 use readyset_sql_parsing::parse_select;
 use xxhash_rust::xxh3;
 

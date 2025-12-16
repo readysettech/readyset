@@ -3,18 +3,18 @@ use std::sync::Arc;
 
 use crossbeam_skiplist::SkipSet;
 use database_utils::UpstreamConfig;
+use readyset_client::ReadySetHandle;
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
 use readyset_client::status::ReadySetControllerStatus;
-use readyset_client::ReadySetHandle;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::warn;
 
+use crate::UpstreamDatabase;
 use crate::backend::noria_connector::{MetaVariable, QueryResult};
 use crate::upstream_database::LazyUpstream;
 use crate::utils::time_or_null;
-use crate::UpstreamDatabase;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReadySetStatus {
@@ -183,14 +183,13 @@ where
         // Our connection may have been broken.
         // Attempt to reconnect once to confirm reachability.
         match self.upstream.connect().await {
-            Ok(_) => {
-                if let Ok(is_connected) = self.upstream.is_connected().await {
-                    Some(is_connected)
-                } else {
+            Ok(_) => match self.upstream.is_connected().await {
+                Ok(is_connected) => Some(is_connected),
+                _ => {
                     warn!("Unable to re-establish connection to Upstream");
                     None
                 }
-            }
+            },
             Err(e) => {
                 warn!("Unable to re-establish connection to Upstream: {}", e);
                 None

@@ -25,8 +25,8 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
 use tracing::info;
 
-use crate::status_reporter::ReadySetStatusReporter;
 use crate::UpstreamDatabase;
+use crate::status_reporter::ReadySetStatusReporter;
 
 /// Routes requests from an HTTP server to expose metrics data from the adapter.
 /// To see the supported http requests and their respective routing, see

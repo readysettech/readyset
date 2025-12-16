@@ -9,16 +9,16 @@ use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use clap::ValueEnum;
-use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use lru::LruCache;
 use metrics::gauge;
 use parking_lot::RwLock;
 use tracing::{error, warn};
 
+use readyset_client::ViewCreateRequest;
 use readyset_client::metrics::recorded;
 use readyset_client::query::*;
-use readyset_client::ViewCreateRequest;
 use readyset_data::DfValue;
 use readyset_sql::ast::{CacheType, Relation};
 
@@ -332,7 +332,9 @@ impl QueryStatusCache {
             Query::ParseFailed(_, ref reason) => {
                 let mut status = status;
                 if !matches!(status.migration_state, MigrationState::Unsupported(_)) {
-                    error!("Cannot set migration state to anything other than Unsupported for a Query::ParseFailed");
+                    error!(
+                        "Cannot set migration state to anything other than Unsupported for a Query::ParseFailed"
+                    );
                     status.migration_state = MigrationState::Unsupported(reason.clone());
                 }
                 status
@@ -394,10 +396,10 @@ impl QueryStatusCache {
         Q: QueryStatusKey,
     {
         q.with_mut_status(self, |s| {
-            if let Some(s) = s {
-                if let Some(ref mut info) = s.execution_info {
-                    info.last_transition_time = *transition;
-                }
+            if let Some(s) = s
+                && let Some(ref mut info) = s.execution_info
+            {
+                info.last_transition_time = *transition;
             }
         })
     }
@@ -405,10 +407,10 @@ impl QueryStatusCache {
     /// Resets the internal transition time to now. This should be used with extreme caution.
     pub fn reset_transition_time(&self, q: &Query) {
         q.with_mut_status(self, |s| {
-            if let Some(s) = s {
-                if let Some(ref mut info) = s.execution_info {
-                    info.last_transition_time = Instant::now()
-                }
+            if let Some(s) = s
+                && let Some(ref mut info) = s.execution_info
+            {
+                info.last_transition_time = Instant::now()
             }
         })
     }
@@ -469,10 +471,10 @@ impl QueryStatusCache {
     /// it will return false.
     pub fn execute_network_failure_exceeded(&self, q: &Query, duration: Duration) -> bool {
         q.with_mut_status(self, |s| {
-            if let Some(s) = s {
-                if let Some(ref info) = s.execution_info {
-                    return info.execute_network_failure_exceeded(duration);
-                }
+            if let Some(s) = s
+                && let Some(ref info) = s.execution_info
+            {
+                return info.execute_network_failure_exceeded(duration);
             }
 
             false
@@ -661,7 +663,7 @@ impl QueryStatusCache {
         statuses
             .iter_mut()
             .filter(|(_query_id, (_query, status))| status.is_successful(cache_type))
-            .for_each(|(_query_id, (_query, ref mut status))| {
+            .for_each(|(_query_id, (_query, status))| {
                 status.migration_state = MigrationState::Pending;
                 status.always = false;
             });
@@ -722,7 +724,7 @@ impl QueryStatusCache {
         // Then update the inlined state epoch for the query
         query.with_mut_status(self, |s| {
             if let Some(QueryStatus {
-                migration_state: MigrationState::Inlined(ref mut state),
+                migration_state: MigrationState::Inlined(state),
                 ..
             }) = s
             {
@@ -823,8 +825,8 @@ impl QueryStatusCache {
         let mut to_remove = Vec::new();
 
         for (query_id, (query, _status)) in statuses.iter() {
-            if let Some(referenced_tables) = extract_referenced_tables(query) {
-                if referenced_tables.iter().any(|table| {
+            if let Some(referenced_tables) = extract_referenced_tables(query)
+                && referenced_tables.iter().any(|table| {
                     dropped_tables.iter().any(|dropped| {
                         match (&table.schema, &dropped.schema) {
                             (Some(t_schema), Some(d_schema)) => {
@@ -840,9 +842,9 @@ impl QueryStatusCache {
                             _ => false,
                         }
                     })
-                }) {
-                    to_remove.push(*query_id);
-                }
+                })
+            {
+                to_remove.push(*query_id);
             }
         }
 
@@ -933,10 +935,12 @@ mod tests {
         cache.insert(q1.clone());
 
         let mut statuses = cache.persistent_handle.statuses.write();
-        assert!(statuses
-            .iter()
-            .map(|(_, (q, _))| q.clone())
-            .any(|q| q == q1.clone().into()));
+        assert!(
+            statuses
+                .iter()
+                .map(|(_, (q, _))| q.clone())
+                .any(|q| q == q1.clone().into())
+        );
 
         assert!(statuses.put(id, (q1.into(), status.clone())).is_some());
 
@@ -956,10 +960,12 @@ mod tests {
         cache.insert(q1.clone());
 
         let mut statuses = cache.persistent_handle.statuses.write();
-        assert!(statuses
-            .iter()
-            .map(|(_, (q, _))| q.clone())
-            .any(|q| q == q1.clone().into()));
+        assert!(
+            statuses
+                .iter()
+                .map(|(_, (q, _))| q.clone())
+                .any(|q| q == q1.clone().into())
+        );
 
         assert!(statuses.put(id, (q1.into(), status.clone())).is_some());
 
@@ -1214,10 +1220,12 @@ mod tests {
 
         cache.unsupported_inlined_migration(&q);
 
-        assert!(cache
-            .persistent_handle
-            .pending_inlined_migrations
-            .is_empty());
+        assert!(
+            cache
+                .persistent_handle
+                .pending_inlined_migrations
+                .is_empty()
+        );
         assert_eq!(
             cache.query_migration_state(&q).1,
             MigrationState::Unsupported("Inlined migration not supported".to_string())
@@ -1259,13 +1267,15 @@ mod tests {
                 .len(),
             1
         );
-        assert!(cache
-            .persistent_handle
-            .pending_inlined_migrations
-            .get(&q)
-            .unwrap()
-            .value()
-            .contains(&vec![DfValue::Max]))
+        assert!(
+            cache
+                .persistent_handle
+                .pending_inlined_migrations
+                .get(&q)
+                .unwrap()
+                .value()
+                .contains(&vec![DfValue::Max])
+        )
     }
 
     #[test]

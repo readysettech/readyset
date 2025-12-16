@@ -94,12 +94,12 @@ use readyset_client::status::CacheProperties;
 use readyset_client::{CacheMode, ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{
-    recorded, EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode, ReadysetExecutionEvent,
-    SqlQueryType,
+    EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode, ReadysetExecutionEvent,
+    SqlQueryType, recorded,
 };
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
-use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
+use readyset_errors::{ReadySetResult, internal, internal_err, unsupported, unsupported_err};
 use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
     self, AlterReadysetStatement, CacheInner, CacheType, CreateCacheStatement, DeallocateStatement,
@@ -109,13 +109,13 @@ use readyset_sql::ast::{
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::{
-    convert_placeholders_to_question_marks, AdapterRewriteParams, DfQueryParameters,
-    QueryParameters,
+    AdapterRewriteParams, DfQueryParameters, QueryParameters,
+    convert_placeholders_to_question_marks,
 };
-use readyset_sql_passes::{adapter_rewrites, DetectBucketFunctions};
+use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
-use readyset_util::redacted::{RedactedString, Sensitive};
 use readyset_util::SizeOf;
+use readyset_util::redacted::{RedactedString, Sensitive};
 use readyset_util::{logging::*, retry_with_exponential_backoff};
 use readyset_version::READYSET_VERSION;
 use slab::Slab;
@@ -131,7 +131,7 @@ use crate::status_reporter::ReadySetStatusReporter;
 use crate::upstream_database::Refresh;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::utils::{create_dummy_column, time_or_null};
-use crate::{create_dummy_schema, QueryHandler, UpstreamDatabase, UpstreamDestination};
+use crate::{QueryHandler, UpstreamDatabase, UpstreamDestination, create_dummy_schema};
 
 pub mod noria_connector;
 
@@ -1946,43 +1946,39 @@ where
             if matches!(new_migration_state, MigrationState::Successful(_)) {
                 // Attempt to prepare on ReadySet
                 let _ = Self::update_noria_prepare(noria, cached_statement).await;
-            } else if let MigrationState::Inlined(new_state) = new_migration_state {
-                if let MigrationState::Inlined(ref old_state) = cached_statement.migration_state {
-                    // if the epoch has advanced, then we've made changes to the inlined caches so
-                    // we should refresh the view cache and prepare if necessary.
-                    if new_state.epoch > old_state.epoch {
-                        let view_request = cached_statement.as_view_request()?;
-                        // Request a new view from ReadySet.
-                        let updated_view_cache = noria
-                            .update_view_cache(
-                                &view_request.statement,
-                                Some(view_request.schema_search_path.clone()),
-                                false, // create_if_not_exists
-                                true,  // is_prepared
-                            )
+            } else if let MigrationState::Inlined(new_state) = new_migration_state
+                && let MigrationState::Inlined(ref old_state) = cached_statement.migration_state
+            {
+                // if the epoch has advanced, then we've made changes to the inlined caches so
+                // we should refresh the view cache and prepare if necessary.
+                if new_state.epoch > old_state.epoch {
+                    let view_request = cached_statement.as_view_request()?;
+                    // Request a new view from ReadySet.
+                    let updated_view_cache = noria
+                        .update_view_cache(
+                            &view_request.statement,
+                            Some(view_request.schema_search_path.clone()),
+                            false, // create_if_not_exists
+                            true,  // is_prepared
+                        )
+                        .await
+                        .is_ok();
+                    // If we got a new view from ReadySet and we have only prepared against
+                    // upstream, prepare the statement against ReadySet.
+                    //
+                    // Update the migration state if we updated the view_cache and, if
+                    // necessary, the PrepareResult.
+                    if updated_view_cache
+                        && matches!(cached_statement.prep.inner, PrepareResultInner::Upstream(_))
+                    {
+                        if Self::update_noria_prepare(noria, cached_statement)
                             .await
-                            .is_ok();
-                        // If we got a new view from ReadySet and we have only prepared against
-                        // upstream, prepare the statement against ReadySet.
-                        //
-                        // Update the migration state if we updated the view_cache and, if
-                        // necessary, the PrepareResult.
-                        if updated_view_cache
-                            && matches!(
-                                cached_statement.prep.inner,
-                                PrepareResultInner::Upstream(_)
-                            )
+                            .is_ok()
                         {
-                            if Self::update_noria_prepare(noria, cached_statement)
-                                .await
-                                .is_ok()
-                            {
-                                cached_statement.migration_state =
-                                    MigrationState::Inlined(new_state);
-                            }
-                        } else if updated_view_cache {
                             cached_statement.migration_state = MigrationState::Inlined(new_state);
                         }
+                    } else if updated_view_cache {
+                        cached_statement.migration_state = MigrationState::Inlined(new_state);
                     }
                 }
             }
@@ -2148,12 +2144,15 @@ where
         match deallocate_id {
             DeallocateId::Numeric(id) => {
                 if let Some(statement) = self.state.prepared_statements.try_remove(id as usize) {
-                    if let Some(ur) = statement.prep.into_upstream() {
-                        dealloc_id = DeallocateId::Numeric(ur.statement_id);
-                    } else {
-                        // this is the case where a prepared statement was created for readyset
-                        // use, and not prepared/executed on the upstream.
-                        return Ok(());
+                    match statement.prep.into_upstream() {
+                        Some(ur) => {
+                            dealloc_id = DeallocateId::Numeric(ur.statement_id);
+                        }
+                        _ => {
+                            // this is the case where a prepared statement was created for readyset
+                            // use, and not prepared/executed on the upstream.
+                            return Ok(());
+                        }
                     }
                 }
             }
@@ -2296,11 +2295,9 @@ where
         {
             Ok(None) => MigrationState::Successful(CacheType::Deep),
             Ok(Some(id)) => {
-                return Ok(noria_connector::QueryResult::Meta(vec![(
-                    "Migration Id".to_string(),
-                    id.to_string(),
-                )
-                    .into()]))
+                return Ok(noria_connector::QueryResult::Meta(vec![
+                    ("Migration Id".to_string(), id.to_string()).into(),
+                ]));
             }
             // If the query fails because it contains unsupported placeholders, then mark it as an
             // inlined query in the query status cache.
@@ -2445,8 +2442,7 @@ where
         let query = if matches!(DB::SQL_DIALECT, Dialect::MySQL) {
             let mut stmt = req.statement.clone();
             convert_placeholders_to_question_marks(&mut stmt)?;
-            let query = stmt.display(DB::SQL_DIALECT).to_string();
-            query
+            stmt.display(DB::SQL_DIALECT).to_string()
         } else {
             req.statement.display(DB::SQL_DIALECT).to_string()
         };
@@ -3034,7 +3030,7 @@ where
                                     None => {
                                         return Err(ReadySetError::NoQueryForId {
                                             id: id.to_string(),
-                                        })
+                                        });
                                     }
                                 }
                             }
@@ -3229,7 +3225,9 @@ where
                             backoff: 2,
                         );
                         if remove_res.is_err() {
-                            error!("Failed to remove stored 'drop cache' request. It will be re-run if there is a backwards incompatible upgrade");
+                            error!(
+                                "Failed to remove stored 'drop cache' request. It will be re-run if there is a backwards incompatible upgrade"
+                            );
                         }
                     }
                     res
@@ -3826,7 +3824,7 @@ where
             _ => (),
         }
 
-        let res = {
+        {
             // Upstream reads are tried when noria reads produce an error. Upstream writes are done
             // by default when the upstream connector is present.
             if let Some(upstream) = upstream {
@@ -3927,9 +3925,7 @@ where
                 event.noria_error = res.as_ref().err().cloned();
                 Ok(QueryResult::Noria(res?))
             }
-        };
-
-        res
+        }
     }
 
     fn handle_deallocate_statement<'a>(stmt: DeallocateStatement) -> QueryResult<'a, DB> {
@@ -4130,12 +4126,12 @@ where
                 )
                 .await;
 
-                if let SqlQuery::DropTable(drop_stmt) = &parsed_query {
-                    if result.is_ok() {
-                        self.state
-                            .query_status_cache
-                            .invalidate_queries_referencing_tables(&drop_stmt.tables);
-                    }
+                if let SqlQuery::DropTable(drop_stmt) = &parsed_query
+                    && result.is_ok()
+                {
+                    self.state
+                        .query_status_cache
+                        .invalidate_queries_referencing_tables(&drop_stmt.tables);
                 }
 
                 result
@@ -4403,15 +4399,14 @@ fn log_query(
     if slowlog
         && (event.upstream_duration.unwrap_or_default() > SLOW_DURATION
             || readyset_duration > SLOW_DURATION)
+        && let Some(query) = &event.query
     {
-        if let Some(query) = &event.query {
-            warn!(
-                query = %Sensitive(&query.display(dialect)),
-                readyset_time = ?readyset_duration,
-                upstream_time = ?event.upstream_duration,
-                "slow query"
-            );
-        }
+        warn!(
+            query = %Sensitive(&query.display(dialect)),
+            readyset_time = ?readyset_duration,
+            upstream_time = ?event.upstream_duration,
+            "slow query"
+        );
     }
 
     if let Some(sender) = sender {
@@ -4486,13 +4481,13 @@ async fn remove_ddl_on_error<T, F, Fut>(
         );
     }
 
-    if let Err(ref e) = res {
-        if !quiet {
-            error!(
-                name = %name.unwrap_or("".into()).display_unquoted(),
-                "Failed to create {cache_type} cache: {e}",
-            );
-        }
+    if let Err(e) = res
+        && !quiet
+    {
+        error!(
+            name = %name.unwrap_or("".into()).display_unquoted(),
+            "Failed to create {cache_type} cache: {e}",
+        );
     }
 }
 

@@ -5,9 +5,9 @@
 
 use std::collections::HashSet;
 
-use readyset_client::query::Query;
 use readyset_client::ViewCreateRequest;
-use readyset_sql::analysis::visit::{walk_select_statement, Visitor};
+use readyset_client::query::Query;
+use readyset_sql::analysis::visit::{Visitor, walk_select_statement};
 use readyset_sql::ast::{Relation, TableExpr};
 
 /// Visitor to collect all table references in a query, including nested ones
@@ -78,8 +78,8 @@ pub fn extract_from_view_create_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use readyset_sql::ast::SelectStatement;
     use readyset_sql::Dialect;
+    use readyset_sql::ast::SelectStatement;
     use readyset_sql_parsing::parse_select;
 
     fn select_statement(q: &str) -> Option<SelectStatement> {

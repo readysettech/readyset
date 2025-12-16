@@ -9,15 +9,15 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use dataflow_expression::Dialect;
-use metrics::{counter, Counter};
+use metrics::{Counter, counter};
 use readyset_client::query::{MigrationState, Query, QueryId};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{PlaceholderIdx, ReadySetHandle, ViewCreateRequest};
 use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
-use readyset_errors::{internal_err, ReadySetResult};
+use readyset_errors::{ReadySetResult, internal_err};
 use readyset_sql::ast::CacheType;
-use readyset_sql::{ast::Literal, DialectDisplay};
+use readyset_sql::{DialectDisplay, ast::Literal};
 use readyset_sql_passes::InlineLiterals;
 use readyset_util::redacted::Sensitive;
 use readyset_util::shutdown::ShutdownReceiver;

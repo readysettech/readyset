@@ -4,8 +4,8 @@ use itertools::Itertools;
 use readyset_client::{ColumnSchema, Modification, Operation};
 use readyset_data::{Collation, DfType, DfValue, Dialect, TimestampTz};
 use readyset_errors::{
-    bad_request_err, invalid_query, invalid_query_err, invariant, invariant_eq, unsupported,
-    unsupported_err, ReadySetResult,
+    ReadySetResult, bad_request_err, invalid_query, invalid_query_err, invariant, invariant_eq,
+    unsupported, unsupported_err,
 };
 use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::ast::{
@@ -79,14 +79,14 @@ fn do_flatten_conditional(
 ) -> ReadySetResult<bool> {
     Ok(match cond {
         Expr::BinaryOp { lhs, rhs, op } => match (lhs.as_ref(), op, rhs.as_ref()) {
-            (Expr::Literal(ref l), BinaryOperator::Equal, Expr::Column(ref c))
-            | (Expr::Column(ref c), BinaryOperator::Equal, Expr::Literal(ref l))
+            (Expr::Literal(l), BinaryOperator::Equal, Expr::Column(c))
+            | (Expr::Column(c), BinaryOperator::Equal, Expr::Literal(l))
             | (
-                Expr::Column(ref c),
+                Expr::Column(c),
                 BinaryOperator::Is,
-                Expr::Literal(ref l @ Literal::Null | ref l @ Literal::Boolean(_)),
+                Expr::Literal(l @ Literal::Null | l @ Literal::Boolean(_)),
             ) => flatten_column_literal(dialect, pkey, flattened, c, l)?,
-            (Expr::Literal(ref l), BinaryOperator::Equal, Expr::Literal(ref r)) => l == r,
+            (Expr::Literal(l), BinaryOperator::Equal, Expr::Literal(r)) => l == r,
             (lhs, BinaryOperator::And, rhs) => {
                 // When checking ANDs we want to make sure that both sides refer to the same key,
                 // e.g. WHERE A.a = 1 AND A.a = 1
@@ -199,11 +199,11 @@ impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
                 rhs,
                 op: binop,
             } => match (lhs.as_ref(), rhs.as_ref()) {
-                (Expr::Column(ref c), Expr::Literal(Literal::Placeholder(_))) => {
+                (Expr::Column(c), Expr::Literal(Literal::Placeholder(_))) => {
                     self.parameter_cols.push((c, *binop));
                     return Ok(());
                 }
-                (Expr::Literal(Literal::Placeholder(_)), Expr::Column(ref c)) => {
+                (Expr::Literal(Literal::Placeholder(_)), Expr::Column(c)) => {
                     self.parameter_cols
                         .push((c, binop.flip_ordering_comparison().unwrap_or(*binop)));
                     return Ok(());
@@ -212,13 +212,13 @@ impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
             },
             Expr::In {
                 lhs,
-                rhs: InValue::List(ref exprs),
+                rhs: InValue::List(exprs),
                 negated,
             } if exprs
                 .iter()
                 .all(|expr| matches!(expr, Expr::Literal(Literal::Placeholder(_)))) =>
             {
-                if let Expr::Column(ref c) = lhs.as_ref() {
+                if let Expr::Column(c) = lhs.as_ref() {
                     let op = if *negated {
                         BinaryOperator::NotEqual
                     } else {
@@ -237,7 +237,7 @@ impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
                 ..
             } => match (operand.as_ref(), min.as_ref(), max.as_ref(), negated) {
                 (
-                    Expr::Column(ref col),
+                    Expr::Column(col),
                     Expr::Literal(Literal::Placeholder(_)),
                     Expr::Literal(Literal::Placeholder(_)),
                     _,
@@ -248,14 +248,14 @@ impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
                     ]);
                     return Ok(());
                 }
-                (Expr::Column(ref col), Expr::Literal(Literal::Placeholder(_)), _, false)
-                | (Expr::Column(ref col), _, Expr::Literal(Literal::Placeholder(_)), true) => {
+                (Expr::Column(col), Expr::Literal(Literal::Placeholder(_)), _, false)
+                | (Expr::Column(col), _, Expr::Literal(Literal::Placeholder(_)), true) => {
                     self.parameter_cols
                         .push((col, BinaryOperator::GreaterOrEqual));
                     return Ok(());
                 }
-                (Expr::Column(ref col), _, Expr::Literal(Literal::Placeholder(_)), false)
-                | (Expr::Column(ref col), Expr::Literal(Literal::Placeholder(_)), _, true) => {
+                (Expr::Column(col), _, Expr::Literal(Literal::Placeholder(_)), false)
+                | (Expr::Column(col), Expr::Literal(Literal::Placeholder(_)), _, true) => {
                     self.parameter_cols.push((col, BinaryOperator::LessOrEqual));
                     return Ok(());
                 }
@@ -442,7 +442,7 @@ where
                     ));
                 }
                 Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_ref(), rhs.as_ref()) {
-                    (Expr::Column(ref c), Expr::Literal(ref l)) => {
+                    (Expr::Column(c), Expr::Literal(l)) => {
                         // we only support "column = column +/- literal"
                         // TODO(ENG-142): Handle nested arithmetic
                         invariant_eq!(c, &field.column);
@@ -657,7 +657,7 @@ macro_rules! create_dummy_schema {
 #[cfg(test)]
 mod tests {
 
-    use readyset_sql::{ast::SqlQuery, Dialect};
+    use readyset_sql::{Dialect, ast::SqlQuery};
     use readyset_sql_parsing::parse_create_table;
 
     use super::*;
@@ -681,20 +681,22 @@ mod tests {
             .collect();
 
         let pkey_ref = pkey.iter().collect::<Vec<_>>();
-        if let Some(mut actual) =
-            flatten_conditional(&cond, &pkey_ref, readyset_data::Dialect::DEFAULT_MYSQL).unwrap()
+        match flatten_conditional(&cond, &pkey_ref, readyset_data::Dialect::DEFAULT_MYSQL).unwrap()
         {
-            let mut expected: Vec<Vec<DfValue>> = expected
-                .unwrap()
-                .into_iter()
-                .map(|v| v.into_iter().map(|c| c.into()).collect())
-                .collect();
+            Some(mut actual) => {
+                let mut expected: Vec<Vec<DfValue>> = expected
+                    .unwrap()
+                    .into_iter()
+                    .map(|v| v.into_iter().map(|c| c.into()).collect())
+                    .collect();
 
-            actual.sort();
-            expected.sort();
-            assert_eq!(actual, expected);
-        } else {
-            assert!(expected.is_none());
+                actual.sort();
+                expected.sort();
+                assert_eq!(actual, expected);
+            }
+            _ => {
+                assert!(expected.is_none());
+            }
         }
     }
 

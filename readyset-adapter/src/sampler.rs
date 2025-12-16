@@ -44,7 +44,7 @@
 //!   shared state must be adapted accordingly.
 //!
 
-use metrics::{counter, gauge, Label};
+use metrics::{Label, counter, gauge};
 use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::{collections::VecDeque, time::Duration};
@@ -70,7 +70,7 @@ use readyset_client_metrics::QueryExecutionEvent;
 use readyset_data::DfValue;
 use readyset_sql::ast::{SqlIdentifier, SqlQuery};
 use readyset_util::{
-    logging::{rate_limit, SAMPLER_LOG_SAMPLER},
+    logging::{SAMPLER_LOG_SAMPLER, rate_limit},
     shutdown::ShutdownReceiver,
 };
 
@@ -286,11 +286,11 @@ impl Sampler {
         let min_interval = std::time::Duration::from_secs_f64(1.0 / self.config.max_qps as f64);
         if let Some(last) = self.last_executed_at {
             let now = std::time::Instant::now();
-            if let Some(remaining) = min_interval.checked_sub(now.saturating_duration_since(last)) {
-                if !remaining.is_zero() {
-                    counter!(QUERY_SAMPLER_MAX_QPS_HIT).increment(1);
-                    tokio::time::sleep(remaining).await;
-                }
+            if let Some(remaining) = min_interval.checked_sub(now.saturating_duration_since(last))
+                && !remaining.is_zero()
+            {
+                counter!(QUERY_SAMPLER_MAX_QPS_HIT).increment(1);
+                tokio::time::sleep(remaining).await;
             }
         }
         self.last_executed_at = Some(std::time::Instant::now());
@@ -439,16 +439,16 @@ impl Sampler {
         match (rs_hash_opt, up_hash_opt) {
             (Some(rs_hash), Some(up_hash)) => {
                 // If retrying, detect volatility in upstream results
-                if let Some(prev_up) = entry.last_up_hash {
-                    if prev_up != up_hash {
-                        debug!(
-                            query = %entry.q,
-                            prev_up_hash = prev_up,
-                            up_hash,
-                            "Sampler upstream hash changed between attempts; treating as volatile and skipping"
-                        );
-                        return;
-                    }
+                if let Some(prev_up) = entry.last_up_hash
+                    && prev_up != up_hash
+                {
+                    debug!(
+                        query = %entry.q,
+                        prev_up_hash = prev_up,
+                        up_hash,
+                        "Sampler upstream hash changed between attempts; treating as volatile and skipping"
+                    );
+                    return;
                 }
 
                 if rs_hash != up_hash {

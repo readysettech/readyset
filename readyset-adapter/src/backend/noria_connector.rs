@@ -1,14 +1,14 @@
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::{atomic, Arc};
+use std::sync::{Arc, atomic};
 use std::time::Instant;
 
 use itertools::Itertools;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::query::QueryId;
-use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
 use readyset_client::recipe::CacheExpr;
+use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
 use readyset_client::results::{ResultIterator, Results};
 use readyset_client::{
     ColumnSchema, GraphvizOptions, ReadQuery, ReaderAddress, ReaderHandle, ReadySetHandle,
@@ -18,8 +18,8 @@ use readyset_client_metrics::QueryDestination;
 use readyset_data::encoding::Encoding;
 use readyset_data::{Collation, DfType, DfValue, Dialect};
 use readyset_errors::{
-    internal_err, invariant_eq, table_err, unsupported, unsupported_err, ReadySetError,
-    ReadySetResult,
+    ReadySetError, ReadySetResult, internal_err, invariant_eq, table_err, unsupported,
+    unsupported_err,
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_sql::ast::{
@@ -852,11 +852,9 @@ impl NoriaConnector {
         id: u64,
     ) -> ReadySetResult<QueryResult<'static>> {
         let status = noria_await!(self.inner, self.inner.noria.migration_status(id))?.to_string();
-        Ok(QueryResult::Meta(vec![(
-            "Migration Status".to_string(),
-            status,
-        )
-            .into()]))
+        Ok(QueryResult::Meta(vec![
+            ("Migration Status".to_string(), status).into(),
+        ]))
     }
 
     pub(crate) async fn table_statuses(
