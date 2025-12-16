@@ -333,6 +333,7 @@ impl WorkloadSpec {
 }
 
 /// A query with its index and generator
+#[derive(Debug)]
 pub struct Query {
     pub(crate) spec: String,
     /// The index of this query within the enclosing `QuerySet`.
@@ -420,6 +421,7 @@ impl Query {
 }
 
 /// A vector of queries and weights
+#[derive(Debug)]
 pub struct QuerySet {
     pub(crate) queries: Vec<Query>,
     pub(crate) weights: WeightedAliasIndex<usize>,
@@ -451,6 +453,7 @@ impl QuerySet {
     }
 }
 
+#[derive(Debug)]
 pub enum Sampler {
     Zipf(Zipf<f64>),
     Uniform(Uniform<usize>),
@@ -466,6 +469,7 @@ impl Sampler {
 }
 
 /// Generates parameter data for a single placeholder in the query
+#[derive(Debug)]
 pub(crate) struct ColGenerator {
     pub(crate) dist: Arc<(Vec<Vec<DfValue>>, Sampler)>,
     pub(crate) sql_type: SqlType,

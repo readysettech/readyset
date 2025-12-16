@@ -27,7 +27,7 @@ use crate::workload_emulator::WorkloadEmulator;
 
 #[allow(clippy::large_enum_variant)]
 #[enum_dispatch(BenchmarkControl)]
-#[derive(clap::Subcommand, Serialize, Deserialize)]
+#[derive(Debug, clap::Subcommand, Serialize, Deserialize)]
 pub enum Benchmark {
     WorkloadEmulator,
 }
@@ -40,7 +40,7 @@ impl Benchmark {
     }
 }
 
-#[derive(Parser, Clone, Deserialize, Serialize)]
+#[derive(Debug, Parser, Clone, Deserialize, Serialize)]
 pub struct DeploymentParameters {
     /// Instance label, for metrics.  In CI, it makes sense to set this to the
     /// CL# or commit hash.

@@ -18,7 +18,7 @@ const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
 /// Run ReadySet macrobenchmarks
 ///
 /// The usage of this command is documented at <http://docs/benchmarking.html>
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[command(name = "benchmark_cmd_runner", subcommand_negates_reqs = true)]
 struct BenchmarkRunner {
     /// Skips the setup step when executing the `benchmark_cmd`.
@@ -269,6 +269,7 @@ impl BenchmarkRunner {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut benchmark_cmd_runner = BenchmarkRunner::parse();
+    println!("Benchmark cli options: {:?}", &benchmark_cmd_runner);
     let _ = benchmark_cmd_runner
         .tracing
         .init("benchmarks", "benchmark-deployment")?;

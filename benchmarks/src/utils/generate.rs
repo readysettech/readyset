@@ -34,7 +34,7 @@ use crate::utils::path::benchmark_path;
 const MAX_BATCH_ROWS: usize = 500;
 const MAX_PARTITION_ROWS: usize = 20000;
 
-#[derive(Parser, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Parser, Clone, Default, Serialize, Deserialize)]
 pub struct DataGenerator {
     /// Path to the desired database SQL schema.
     #[arg(long, value_hint = ValueHint::AnyPath)]

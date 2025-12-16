@@ -61,7 +61,7 @@ pub enum QueryExecutionMode {
     SimpleText,
 }
 
-#[derive(Parser, Clone, Serialize, Deserialize)]
+#[derive(Debug, Parser, Clone, Serialize, Deserialize)]
 pub struct WorkloadEmulator {
     /// Path to the workload yaml schema
     #[arg(long, short)]
@@ -158,9 +158,8 @@ impl BenchmarkControl for WorkloadEmulator {
         &self,
         deployment: &DeploymentParameters,
     ) -> anyhow::Result<BenchmarkResults> {
-        let yaml = std::fs::read_to_string(&self.spec).unwrap();
-        let mut spec = WorkloadSpec::from_yaml(&yaml).unwrap();
-
+        let yaml = std::fs::read_to_string(&self.spec)?;
+        let mut spec = WorkloadSpec::from_yaml(&yaml)?;
         // only migrate when running readyset benches. we still need the
         // QuerySet we can get from the workload parsing, though.
         if self.benchmark_type != BenchmarkType::ReadySet {
