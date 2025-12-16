@@ -22,7 +22,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
-use crate::spec::{QuerySet, WorkloadSpec};
+use crate::spec::{QueryCacheType, QuerySet, WorkloadSpec};
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::query::interpolate_params;
@@ -91,6 +91,10 @@ pub struct WorkloadEmulator {
     /// How to execute queries against the database
     #[arg(long, value_enum, default_value_t = QueryExecutionMode::PreparedReuse)]
     query_execution_mode: QueryExecutionMode,
+
+    /// What type of cache to use: deep or shallow:<seconds>
+    #[arg(long)]
+    cache_type: Option<QueryCacheType>,
 
     /// Parsing mode.
     #[serde(skip)]
@@ -189,7 +193,12 @@ impl BenchmarkControl for WorkloadEmulator {
 
         let parsing_config = self.parsing_preset.into_config();
         let queries = spec
-            .load_queries_with_config(&distributions, &mut conn, parsing_config)
+            .load_queries_with_config(
+                &distributions,
+                &mut conn,
+                parsing_config,
+                self.cache_type.unwrap_or_default(),
+            )
             .await?;
 
         // if the user has passed in a prometheus push gateway URL, they clearly want

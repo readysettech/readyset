@@ -99,6 +99,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
+use std::time::Duration;
 
 use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
 use rand::distr::Uniform;
@@ -184,6 +185,53 @@ pub struct WorkloadParam {
     pub col: usize,
 }
 
+/// The type of cache to create.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum QueryCacheType {
+    /// A deep cache.
+    #[default]
+    Deep,
+    /// A shallow cache with `Duration` TTL.
+    Shallow(Duration),
+}
+
+impl QueryCacheType {
+    fn cache_type(&self) -> CacheType {
+        match self {
+            QueryCacheType::Deep => CacheType::Deep,
+            QueryCacheType::Shallow(_) => CacheType::Shallow,
+        }
+    }
+
+    fn policy(&self) -> Option<EvictionPolicy> {
+        match self {
+            QueryCacheType::Deep => None,
+            QueryCacheType::Shallow(duration) => Some(EvictionPolicy::Ttl(*duration)),
+        }
+    }
+}
+
+impl std::str::FromStr for QueryCacheType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "deep" => Ok(QueryCacheType::Deep),
+            s if s.starts_with("shallow:") => {
+                let duration_str = s.strip_prefix("shallow:").unwrap();
+                let seconds: u64 = duration_str
+                    .parse()
+                    .map_err(|_| format!("Invalid duration for shallow cache: {duration_str}"))?;
+                Ok(QueryCacheType::Shallow(Duration::from_secs(seconds)))
+            }
+            _ => Err(format!(
+                "Invalid cache type: '{}'. Expected 'deep' or 'shallow:<seconds>'",
+                s
+            )),
+        }
+    }
+}
+
 fn serialize_sql_type<S: Serializer>(sql_type: &SqlType, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(&sql_type.display(readyset_sql::Dialect::MySQL).to_string())
 }
@@ -261,7 +309,7 @@ impl WorkloadSpec {
         conn: &mut DatabaseConnection,
     ) -> anyhow::Result<QuerySet> {
         let parsing_config = ParsingPreset::for_tests().into_config();
-        self.load_queries_with_config(distributions, conn, parsing_config)
+        self.load_queries_with_config(distributions, conn, parsing_config, Default::default())
             .await
     }
 
@@ -270,6 +318,7 @@ impl WorkloadSpec {
         distributions: &Distributions,
         conn: &mut DatabaseConnection,
         parsing_config: ParsingConfig,
+        query_cache_type: QueryCacheType,
     ) -> anyhow::Result<QuerySet> {
         let weights =
             WeightedAliasIndex::new(self.queries.iter().map(|q| q.weight).collect()).unwrap();
@@ -293,8 +342,8 @@ impl WorkloadSpec {
 
                 let create_cache_query = CreateCacheStatement {
                     name: None,
-                    cache_type: None,
-                    policy: None,
+                    cache_type: Some(query_cache_type.cache_type()),
+                    policy: query_cache_type.policy(),
                     coalesce_ms: None,
                     inner: Ok(CacheInner::Statement(Box::new(stmt))),
                     unparsed_create_cache_statement: None,
