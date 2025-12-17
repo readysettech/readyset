@@ -1,6 +1,7 @@
 use std::hash::Hash;
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use assert_matches::assert_matches;
 use readyset_client::consensus::CacheDDLRequest;
@@ -724,6 +725,7 @@ async fn test_ttl_and_period_refresh() {
         EvictionPolicy::TtlAndPeriod {
             ttl: Duration::from_secs(10),
             refresh: Duration::from_secs(2),
+            schedule: false,
         },
     )
     .unwrap();
@@ -748,9 +750,6 @@ async fn test_ttl_and_period_refresh() {
 
 #[tokio::test]
 async fn test_coalesce_concurrent_requests() {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::Instant;
-
     let manager = Arc::new(CacheManager::<String, String>::new(None));
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
@@ -814,4 +813,79 @@ async fn test_coalesce_concurrent_requests() {
         diff < 500,
         "Expected completion within 500 ms, but got {diff} ms"
     );
+}
+
+#[tokio::test]
+async fn test_periodic_refresh_callback() {
+    let manager = CacheManager::<String, String>::new(None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+
+    manager
+        .create_cache(
+            None,
+            Some(query_id),
+            test_stmt(),
+            vec![],
+            EvictionPolicy::TtlAndPeriod {
+                ttl: Duration::from_secs(5),
+                refresh: Duration::from_secs(1),
+                schedule: true,
+            },
+            test_ddl_req(),
+            false,
+            None,
+        )
+        .unwrap();
+
+    let refresh_count = Arc::new(AtomicU32::new(0));
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string())
+        .await;
+    let CacheResult::Miss(mut guard) = result else {
+        panic!("expected miss");
+    };
+
+    guard.push("value_0".to_string());
+    guard.set_metadata(QueryMetadata::Test);
+
+    let count = Arc::clone(&refresh_count);
+    let refresh_callback = Arc::new(move |mut guard: crate::CacheInsertGuard<String, String>| {
+        let current = count.fetch_add(1, Ordering::SeqCst) + 1;
+        guard.push(format!("value_{}", current));
+        guard.set_metadata(QueryMetadata::Test);
+        tokio::spawn(async move {
+            guard.filled().await;
+        });
+    });
+
+    guard.set_refresh(refresh_callback);
+    guard.filled().await;
+    check_hit_value(
+        &manager,
+        &query_id,
+        "key1".to_string(),
+        vec!["value_0".to_string()],
+    )
+    .await;
+
+    // get a little out of phase
+    sleep(Duration::from_millis(200)).await;
+
+    for i in 1..=3 {
+        sleep(Duration::from_millis(1000)).await;
+
+        check_hit_value(
+            &manager,
+            &query_id,
+            "key1".to_string(),
+            vec![format!("value_{}", i)],
+        )
+        .await;
+    }
+
+    assert_eq!(refresh_count.load(Ordering::SeqCst), 3);
+
+    sleep(Duration::from_secs(10)).await;
+    check_miss(&manager, &query_id, "key1".to_string()).await;
 }

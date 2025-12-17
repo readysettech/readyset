@@ -8,7 +8,7 @@ mod manager;
 use readyset_util::SizeOf;
 
 pub use cache::CacheInfo;
-pub use manager::{CacheInsertGuard, CacheManager, CacheResult};
+pub use manager::{CacheInsertGuard, CacheManager, CacheResult, RequestRefresh};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MySqlMetadata {
@@ -82,8 +82,14 @@ pub struct QueryResult<V> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum EvictionPolicy {
-    Ttl { ttl: Duration },
-    TtlAndPeriod { ttl: Duration, refresh: Duration },
+    Ttl {
+        ttl: Duration,
+    },
+    TtlAndPeriod {
+        ttl: Duration,
+        refresh: Duration,
+        schedule: bool,
+    },
 }
 
 impl EvictionPolicy {

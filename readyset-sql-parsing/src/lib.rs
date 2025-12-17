@@ -480,6 +480,7 @@ fn parse_create_cache(
                     EvictionPolicy::TtlAndPeriod {
                         ttl: Duration::from_secs(ttl_secs),
                         refresh: Duration::from_secs(refresh_secs),
+                        schedule: false,
                     }
                 }
                 _ => {

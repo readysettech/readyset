@@ -885,16 +885,29 @@ impl DialectDisplay for CacheType {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum EvictionPolicy {
-    Ttl { ttl: Duration },
-    TtlAndPeriod { ttl: Duration, refresh: Duration },
+    Ttl {
+        ttl: Duration,
+    },
+    TtlAndPeriod {
+        ttl: Duration,
+        refresh: Duration,
+        schedule: bool,
+    },
 }
 
 impl DialectDisplay for EvictionPolicy {
     fn display(&self, _dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             Self::Ttl { ttl } => write!(f, "POLICY TTL {} SECONDS", ttl.as_secs()),
-            Self::TtlAndPeriod { ttl, refresh } => {
+            Self::TtlAndPeriod {
+                ttl,
+                refresh,
+                schedule,
+            } => {
                 write!(f, "POLICY TTL {} SECONDS REFRESH ", ttl.as_secs())?;
+                if *schedule {
+                    write!(f, "EVERY ")?;
+                }
                 write!(f, "{} SECONDS", refresh.as_secs())
             }
         })

@@ -21,6 +21,8 @@ use readyset_util::SizeOf;
 use crate::cache::{Cache, CacheExpiration, CacheInfo, InnerCache};
 use crate::{EvictionPolicy, QueryMetadata};
 
+pub type RequestRefresh<K, V> = Arc<dyn Fn(CacheInsertGuard<K, V>) + Send + Sync>;
+
 fn weight<K, V>(k: &K, v: &V) -> u32
 where
     K: SizeOf,
@@ -31,7 +33,11 @@ where
         .unwrap_or(u32::MAX)
 }
 
-pub struct CacheManager<K, V> {
+pub struct CacheManager<K, V>
+where
+    K: Clone + Hash + Eq + Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
     caches: HashMap<u64, Arc<Cache<K, V>>>,
     names: HashMap<Relation, u64>,
     query_ids: HashMap<QueryId, u64>,
@@ -140,7 +146,7 @@ where
         }
 
         let inner = Arc::clone(&self.inner);
-        let cache = Arc::new(Cache::new(
+        let cache = Cache::new(
             id,
             inner,
             policy,
@@ -151,7 +157,7 @@ where
             ddl_req,
             always,
             coalesce_ms,
-        ));
+        );
 
         if let Some(name) = name {
             let guard = self.names.pin();
@@ -186,6 +192,7 @@ where
         let cache = guard
             .get(&id)
             .ok_or_else(|| ReadySetError::ViewNotFound(display_name.clone()))?;
+        cache.stop();
 
         if let Some(name) = cache.name() {
             let names_guard = self.names.pin();
@@ -208,7 +215,11 @@ where
             .lock()
             .expect("couldn't lock next_id to drop all");
 
-        self.caches.pin().clear();
+        let caches = self.caches.pin();
+        for c in caches.values() {
+            c.stop();
+        }
+        caches.clear();
         self.names.pin().clear();
         self.query_ids.pin().clear();
     }
@@ -258,6 +269,7 @@ where
             metadata: None,
             filled: false,
             requested: Instant::now(),
+            refresh: None,
         }
     }
 
@@ -266,19 +278,20 @@ where
             return CacheResult::NotCached;
         };
         let res = cache.get(key.clone()).await;
+        let sched = cache.is_scheduled();
         let guard = Self::make_guard(cache, key);
         let query = query_id.to_string();
-        match res {
-            Some((res, false)) => {
+        match (res, sched) {
+            (Some((res, false)), _) | (Some((res, true)), true) => {
                 counter!(recorded::SHALLOW_HIT, "query" => query).increment(1);
                 CacheResult::Hit(res, guard)
             }
-            Some((res, true)) => {
+            (Some((res, true)), _) => {
                 counter!(recorded::SHALLOW_HIT, "query" => query.clone()).increment(1);
                 counter!(recorded::SHALLOW_REFRESH, "query" => query).increment(1);
                 CacheResult::HitAndRefresh(res, guard)
             }
-            None => {
+            (None, _) => {
                 counter!(recorded::SHALLOW_MISS, "query" => query).increment(1);
                 CacheResult::Miss(guard)
             }
@@ -350,12 +363,13 @@ where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
-    cache: Arc<Cache<K, V>>,
-    key: Option<K>,
-    results: Option<Vec<V>>,
-    metadata: Option<QueryMetadata>,
-    filled: bool,
-    requested: Instant,
+    pub(crate) cache: Arc<Cache<K, V>>,
+    pub(crate) key: Option<K>,
+    pub(crate) results: Option<Vec<V>>,
+    pub(crate) metadata: Option<QueryMetadata>,
+    pub(crate) filled: bool,
+    pub(crate) requested: Instant,
+    pub(crate) refresh: Option<RequestRefresh<K, V>>,
 }
 
 impl<K, V> Debug for CacheInsertGuard<K, V>
@@ -386,6 +400,14 @@ where
         self.metadata = Some(metadata);
     }
 
+    pub fn set_refresh(&mut self, req: RequestRefresh<K, V>) {
+        self.refresh = Some(req);
+    }
+
+    pub fn is_scheduled(&self) -> bool {
+        self.cache.is_scheduled()
+    }
+
     /// Mark the guard as fully filled and ready to be inserted.
     ///
     /// When the insertion actually happens can be controlled by the caller.  If in async code,
@@ -396,19 +418,39 @@ where
         self.filled = true;
         async {
             if self.filled {
-                let (metadata, cache, key, results, execution) = self.take();
-                cache.insert(key, results, metadata, execution).await;
+                let (metadata, cache, key, results, execution, refresh) = self.take();
+                cache
+                    .insert(key, results, metadata, execution, refresh)
+                    .await;
             }
         }
     }
 
-    fn take(&mut self) -> (QueryMetadata, Arc<Cache<K, V>>, K, Vec<V>, Duration) {
+    #[allow(clippy::type_complexity)]
+    fn take(
+        &mut self,
+    ) -> (
+        QueryMetadata,
+        Arc<Cache<K, V>>,
+        K,
+        Vec<V>,
+        Duration,
+        Option<RequestRefresh<K, V>>,
+    ) {
         let metadata = self.metadata.take().expect("no metadata for result set");
         let cache = Arc::clone(&self.cache);
         let key = self.key.take().unwrap();
         let results = self.results.take().unwrap();
         self.filled = false;
-        (metadata, cache, key, results, self.requested.elapsed())
+        let refresh = self.refresh.take();
+        (
+            metadata,
+            cache,
+            key,
+            results,
+            self.requested.elapsed(),
+            refresh,
+        )
     }
 }
 
@@ -419,9 +461,11 @@ where
 {
     fn drop(&mut self) {
         if self.filled {
-            let (metadata, cache, key, results, execution) = self.take();
+            let (metadata, cache, key, results, execution, refresh) = self.take();
             tokio::spawn(async move {
-                cache.insert(key, results, metadata, execution).await;
+                cache
+                    .insert(key, results, metadata, execution, refresh)
+                    .await;
             });
         }
     }

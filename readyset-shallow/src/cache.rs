@@ -1,16 +1,17 @@
+use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter};
 use std::future;
 use std::hash::Hash;
 use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
 use moka::policy::Expiry;
 use tokio::sync::{Mutex, oneshot};
-use tokio::time::timeout;
+use tokio::time::{interval, timeout};
 
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
@@ -19,9 +20,11 @@ use readyset_sql::ast::{
 };
 use readyset_util::SizeOf;
 
-use crate::{EvictionPolicy, QueryMetadata, QueryResult};
+use crate::{CacheInsertGuard, EvictionPolicy, QueryMetadata, QueryResult, RequestRefresh};
 
 pub(crate) type InnerCache<K, V> = Arc<MokaCache<(u64, K), Arc<CacheEntry<V>>>>;
+type ScheduledRefresh<K, V> = (K, RequestRefresh<K, V>);
+type Scheduler<K, V> = Arc<Mutex<BTreeMap<Instant, Vec<ScheduledRefresh<K, V>>>>>;
 
 fn current_timestamp_ms() -> u64 {
     SystemTime::now()
@@ -137,7 +140,14 @@ impl<K, V> Expiry<K, Arc<CacheEntry<V>>> for CacheExpiration {
         _left: Option<Duration>,
     ) -> Option<Duration> {
         match value.as_ref() {
-            CacheEntry::Present(values) => values.ttl_ms.map(Duration::from_millis),
+            CacheEntry::Present(values) => values.ttl_ms.map(|ttl| {
+                Duration::from_millis(
+                    ttl.saturating_sub(
+                        current_timestamp_ms()
+                            .saturating_sub(values.accessed_ms.load(Ordering::Relaxed)),
+                    ),
+                )
+            }),
             CacheEntry::Loading(_) => None,
         }
     }
@@ -163,6 +173,7 @@ impl From<CacheInfo> for CreateCacheStatement {
                 Some(readyset_sql::ast::EvictionPolicy::TtlAndPeriod {
                     ttl: Duration::from_millis(ttl_ms),
                     refresh: Duration::from_millis(refresh_ms),
+                    schedule: false,
                 })
             }
             (Some(ttl_ms), _) => Some(readyset_sql::ast::EvictionPolicy::from_ttl_ms(ttl_ms)),
@@ -182,7 +193,12 @@ impl From<CacheInfo> for CreateCacheStatement {
     }
 }
 
-pub struct Cache<K, V> {
+#[allow(clippy::type_complexity)]
+pub struct Cache<K, V>
+where
+    K: Clone + Hash + Eq + Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
     id: u64,
     inner: InnerCache<K, V>,
     cache_metadata: OnceLock<Arc<QueryMetadata>>,
@@ -195,11 +211,13 @@ pub struct Cache<K, V> {
     coalesce_ms: Option<u64>,
     ddl_req: CacheDDLRequest,
     always: bool,
+    scheduler: Option<Scheduler<K, V>>,
+    shutdown_tx: std::sync::Mutex<Option<oneshot::Sender<()>>>,
 }
 
 impl<K, V> Debug for Cache<K, V>
 where
-    K: Eq + Hash + Send + Sync + 'static,
+    K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -229,20 +247,31 @@ where
         ddl_req: CacheDDLRequest,
         always: bool,
         coalesce_ms: Option<Duration>,
-    ) -> Self {
-        let (ttl_ms, refresh_ms) = match policy {
+    ) -> Arc<Self> {
+        let (ttl_ms, refresh_ms, schedule) = match policy {
             EvictionPolicy::Ttl { ttl } => {
                 let ttl_ms = ttl.as_millis().try_into().unwrap_or(u64::MAX);
-                (Some(ttl_ms), Some(ttl_ms / 2))
+                (Some(ttl_ms), Some(ttl_ms / 2), false)
             }
-            EvictionPolicy::TtlAndPeriod { ttl, refresh } => {
+            EvictionPolicy::TtlAndPeriod {
+                ttl,
+                refresh,
+                schedule,
+            } => {
                 let ttl_ms = ttl.as_millis().try_into().unwrap_or(u64::MAX);
                 let refresh_ms = refresh.as_millis().try_into().unwrap_or(u64::MAX);
-                (Some(ttl_ms), Some(refresh_ms))
+                (Some(ttl_ms), Some(refresh_ms), schedule)
             }
         };
 
-        Self {
+        let (scheduler, shutdown_tx, shutdown_rx) = if schedule {
+            let (tx, rx) = oneshot::channel();
+            (Some(Default::default()), Some(tx), Some(rx))
+        } else {
+            (None, None, None)
+        };
+
+        let cache = Arc::new(Self {
             id,
             inner,
             cache_metadata: Default::default(),
@@ -255,17 +284,88 @@ where
             coalesce_ms: coalesce_ms.map(|d| d.as_millis().try_into().unwrap_or_default()),
             ddl_req,
             always,
+            scheduler: scheduler.clone(),
+            shutdown_tx: std::sync::Mutex::new(shutdown_tx),
+        });
+
+        if let Some(scheduler) = scheduler {
+            let weak = Arc::downgrade(&cache);
+            let shutdown_rx = shutdown_rx.unwrap();
+            tokio::spawn(Self::scheduler_loop(weak, scheduler, shutdown_rx));
+        }
+
+        cache
+    }
+
+    fn make_guard(
+        cache: Arc<Cache<K, V>>,
+        key: K,
+        refresh: RequestRefresh<K, V>,
+    ) -> CacheInsertGuard<K, V> {
+        CacheInsertGuard {
+            cache,
+            key: Some(key),
+            results: Some(Vec::new()),
+            metadata: None,
+            filled: false,
+            requested: Instant::now(),
+            refresh: Some(refresh),
         }
     }
 
-    pub(crate) async fn insert(
-        &self,
-        k: K,
-        v: Vec<V>,
-        metadata: QueryMetadata,
-        execution: Duration,
+    async fn process_due_callbacks(cache: Arc<Cache<K, V>>, scheduler: &Scheduler<K, V>) {
+        let now = Instant::now();
+
+        let due = {
+            let mut sched = scheduler.lock().await;
+            let times: Vec<_> = sched.range(..=now).map(|(instant, _)| *instant).collect();
+
+            times
+                .into_iter()
+                .filter_map(|instant| sched.remove(&instant))
+                .flatten()
+                .collect::<Vec<_>>()
+        };
+
+        for (key, callback) in due {
+            if let Some(e) = cache.inner.get(&(cache.id, key.clone())).await
+                && let CacheEntry::Present(ref e) = *e
+                && let Some(ttl_ms) = e.ttl_ms
+            {
+                let now = current_timestamp_ms();
+                if e.accessed_ms.load(Ordering::Relaxed) > now - ttl_ms {
+                    let guard = Self::make_guard(Arc::clone(&cache), key, Arc::clone(&callback));
+                    callback(guard);
+                }
+            }
+        }
+    }
+
+    async fn scheduler_loop(
+        cache: Weak<Cache<K, V>>,
+        scheduler: Scheduler<K, V>,
+        mut shutdown_rx: oneshot::Receiver<()>,
     ) {
-        let metadata = if let Some(existing) = self.cache_metadata.get() {
+        let mut ticker = interval(Duration::from_millis(10));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        loop {
+            if shutdown_rx.try_recv().is_ok() {
+                break;
+            }
+
+            ticker.tick().await;
+
+            let Some(cache) = cache.upgrade() else {
+                break;
+            };
+
+            Self::process_due_callbacks(cache, &scheduler).await;
+        }
+    }
+
+    fn dedupe_metadata(&self, metadata: QueryMetadata) -> Option<Arc<QueryMetadata>> {
+        if let Some(existing) = self.cache_metadata.get() {
             if existing.as_ref() == &metadata {
                 None
             } else {
@@ -282,11 +382,18 @@ where
             } else {
                 None
             }
-        };
+        }
+    }
 
+    fn make_entry(
+        &self,
+        v: Vec<V>,
+        metadata: Option<Arc<QueryMetadata>>,
+        execution: Duration,
+    ) -> CacheValues<V> {
         let now = current_timestamp_ms();
         let execution_ms = execution.as_millis().try_into().unwrap_or_default();
-        let entry = Arc::new(CacheEntry::Present(CacheValues {
+        CacheValues {
             values: Arc::new(v),
             metadata,
             accessed_ms: now.into(),
@@ -294,28 +401,77 @@ where
             refreshing: false.into(),
             ttl_ms: self.ttl_ms.map(|ttl| ttl.saturating_sub(execution_ms)),
             execution_ms,
-        }));
+        }
+    }
 
+    async fn notify_waiters(waiters: Option<Arc<Mutex<CacheStubInner>>>) {
+        let Some(waiters) = waiters else {
+            return;
+        };
+        let mut inner = waiters.lock().await;
+        inner.loaded = true;
+        for tx in inner.waiters.drain(..) {
+            let _ = tx.send(());
+        }
+    }
+
+    async fn insert_entry(&self, k: K, new: CacheValues<V>) -> Option<Arc<Mutex<CacheStubInner>>> {
         let mut waiters = None;
         self.inner
             .entry((self.id, k))
             .and_compute_with(|e| {
-                if let Some(e) = e
-                    && let CacheEntry::Loading(stub) = &**e.value()
-                {
-                    waiters = Some(Arc::clone(&stub.inner));
+                if let Some(e) = e {
+                    match &**e.value() {
+                        CacheEntry::Present(e) => {
+                            let acc = e.accessed_ms.load(Ordering::Relaxed);
+                            new.accessed_ms.store(acc, Ordering::Relaxed);
+                        }
+                        CacheEntry::Loading(stub) => {
+                            waiters = Some(Arc::clone(&stub.inner));
+                        }
+                    }
                 }
-                future::ready(Op::Put(entry))
+                let new = Arc::new(CacheEntry::Present(new));
+                future::ready(Op::Put(new))
             })
             .await;
+        waiters
+    }
 
-        if let Some(inner) = waiters {
-            let mut inner = inner.lock().await;
-            inner.loaded = true;
-            for tx in inner.waiters.drain(..) {
-                let _ = tx.send(());
-            }
+    async fn schedule_refresh(
+        &self,
+        k: K,
+        refresh: Option<RequestRefresh<K, V>>,
+        execution: Duration,
+    ) {
+        let Some(refresh) = refresh else {
+            return;
+        };
+        if let Some(ref sched) = self.scheduler
+            && let Some(ms) = self.refresh_ms
+        {
+            let mut sched = sched.lock().await;
+            let wait = Duration::from_millis(ms).saturating_sub(execution);
+            sched
+                .entry(Instant::now() + wait)
+                .or_insert_with(Vec::new)
+                .push((k, refresh));
         }
+    }
+
+    pub(crate) async fn insert(
+        &self,
+        k: K,
+        v: Vec<V>,
+        metadata: QueryMetadata,
+        execution: Duration,
+        refresh: Option<RequestRefresh<K, V>>,
+    ) {
+        let metadata = self.dedupe_metadata(metadata);
+        let entry = self.make_entry(v, metadata, execution);
+        let waiters = self.insert_entry(k.clone(), entry).await;
+        Self::notify_waiters(waiters).await;
+        self.schedule_refresh(k, refresh, execution).await;
     }
 
     fn get_hit(&self, values: &CacheValues<V>) -> Option<(QueryResult<V>, bool)> {
@@ -393,6 +549,10 @@ where
         &self.query_id
     }
 
+    pub(crate) fn is_scheduled(&self) -> bool {
+        self.scheduler.is_some()
+    }
+
     pub(crate) async fn count(&self) -> usize {
         self.inner.run_pending_tasks().await;
         self.inner.entry_count().try_into().unwrap_or(usize::MAX)
@@ -400,6 +560,12 @@ where
 
     pub(crate) async fn run_pending_tasks(&self) {
         self.inner.run_pending_tasks().await;
+    }
+
+    pub(crate) fn stop(&self) {
+        if let Some(tx) = self.shutdown_tx.lock().unwrap().take() {
+            let _ = tx.send(());
+        }
     }
 }
 
@@ -424,7 +590,7 @@ mod tests {
         }
     }
 
-    fn new<K, V>(max_capacity: Option<u64>, policy: EvictionPolicy) -> Cache<K, V>
+    fn new<K, V>(max_capacity: Option<u64>, policy: EvictionPolicy) -> Arc<Cache<K, V>>
     where
         K: Clone + Eq + Hash + Send + Sync + SizeOf + 'static,
         V: Send + Sync + SizeOf + 'static,
@@ -458,7 +624,7 @@ mod tests {
         let metadata = QueryMetadata::Test;
 
         cache
-            .insert(key.clone(), values.clone(), metadata, ZERO_DURATION)
+            .insert(key.clone(), values.clone(), metadata, ZERO_DURATION, None)
             .await;
         let result = cache.get(key.clone()).await.unwrap();
         assert_eq!(result.0.values.as_ref(), &values);
@@ -483,7 +649,13 @@ mod tests {
         for _ in 0..4 {
             tokio::time::sleep(Duration::from_secs(1)).await;
             cache
-                .insert(key.clone(), values.clone(), metadata.clone(), ZERO_DURATION)
+                .insert(
+                    key.clone(),
+                    values.clone(),
+                    metadata.clone(),
+                    ZERO_DURATION,
+                    None,
+                )
                 .await;
             let result = cache.get(key.clone()).await.unwrap();
             assert_eq!(result.0.values.as_ref(), &values);
@@ -537,6 +709,7 @@ mod tests {
                 values_0.clone(),
                 metadata.clone(),
                 ZERO_DURATION,
+                None,
             )
             .await;
         cache_1
@@ -545,6 +718,7 @@ mod tests {
                 values_1.clone(),
                 metadata.clone(),
                 ZERO_DURATION,
+                None,
             )
             .await;
 
@@ -583,7 +757,9 @@ mod tests {
         );
         for i in 0..COUNT {
             let v = vec!["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string()];
-            cache.insert(i, v, QueryMetadata::Test, ZERO_DURATION).await;
+            cache
+                .insert(i, v, QueryMetadata::Test, ZERO_DURATION, None)
+                .await;
         }
         cache.inner.run_pending_tasks().await;
 

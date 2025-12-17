@@ -4464,9 +4464,15 @@ fn resolve_eviction_policy(
 ) -> readyset_shallow::EvictionPolicy {
     match policy {
         Some(ast::EvictionPolicy::Ttl { ttl }) => readyset_shallow::EvictionPolicy::Ttl { ttl },
-        Some(ast::EvictionPolicy::TtlAndPeriod { ttl, refresh }) => {
-            readyset_shallow::EvictionPolicy::TtlAndPeriod { ttl, refresh }
-        }
+        Some(ast::EvictionPolicy::TtlAndPeriod {
+            ttl,
+            refresh,
+            schedule,
+        }) => readyset_shallow::EvictionPolicy::TtlAndPeriod {
+            ttl,
+            refresh,
+            schedule,
+        },
         None => readyset_shallow::EvictionPolicy::Ttl {
             ttl: Duration::from_millis(default_ttl_ms),
         },

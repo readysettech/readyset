@@ -941,6 +941,7 @@ fn cached_query_options(
                     Option::Policy(EvictionPolicy::TtlAndPeriod {
                         ttl: Duration::from_secs(ttl_secs),
                         refresh: Duration::from_secs(refresh_secs),
+                        schedule: false,
                     })
                 } else {
                     Option::Policy(EvictionPolicy::Ttl {
