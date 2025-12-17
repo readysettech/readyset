@@ -160,10 +160,10 @@ impl From<CacheInfo> for CreateCacheStatement {
     fn from(info: CacheInfo) -> Self {
         let policy = match (info.ttl_ms, info.refresh_ms) {
             (Some(ttl_ms), Some(refresh_ms)) if refresh_ms != ttl_ms / 2 => {
-                Some(readyset_sql::ast::EvictionPolicy::TtlAndPeriod(
-                    Duration::from_millis(ttl_ms),
-                    Duration::from_millis(refresh_ms),
-                ))
+                Some(readyset_sql::ast::EvictionPolicy::TtlAndPeriod {
+                    ttl: Duration::from_millis(ttl_ms),
+                    refresh: Duration::from_millis(refresh_ms),
+                })
             }
             (Some(ttl_ms), _) => Some(readyset_sql::ast::EvictionPolicy::from_ttl_ms(ttl_ms)),
             _ => None,
@@ -231,11 +231,11 @@ where
         coalesce_ms: Option<Duration>,
     ) -> Self {
         let (ttl_ms, refresh_ms) = match policy {
-            EvictionPolicy::Ttl(ttl) => {
+            EvictionPolicy::Ttl { ttl } => {
                 let ttl_ms = ttl.as_millis().try_into().unwrap_or(u64::MAX);
                 (Some(ttl_ms), Some(ttl_ms / 2))
             }
-            EvictionPolicy::TtlAndPeriod(ttl, refresh) => {
+            EvictionPolicy::TtlAndPeriod { ttl, refresh } => {
                 let ttl_ms = ttl.as_millis().try_into().unwrap_or(u64::MAX);
                 let refresh_ms = refresh.as_millis().try_into().unwrap_or(u64::MAX);
                 (Some(ttl_ms), Some(refresh_ms))
@@ -446,7 +446,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_ttl_expiration() {
-        let cache = new(None, EvictionPolicy::Ttl(Duration::from_secs(1)));
+        let cache = new(
+            None,
+            EvictionPolicy::Ttl {
+                ttl: Duration::from_secs(1),
+            },
+        );
 
         let key = vec!["test_key"];
         let values = vec![vec!["test_value"]];
@@ -464,7 +469,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_ttl_update() {
-        let cache = new(None, EvictionPolicy::Ttl(Duration::from_secs(1)));
+        let cache = new(
+            None,
+            EvictionPolicy::Ttl {
+                ttl: Duration::from_secs(1),
+            },
+        );
 
         let key = vec!["test_key"];
         let values = vec![vec!["test_value"]];
@@ -486,7 +496,9 @@ mod tests {
     #[tokio::test]
     async fn test_shared_inner_cache() {
         let inner = CacheManager::new_inner(None);
-        let policy = EvictionPolicy::Ttl(Duration::from_secs(60));
+        let policy = EvictionPolicy::Ttl {
+            ttl: Duration::from_secs(60),
+        };
         let stmt = SelectStatement::default();
 
         let cache_0 = Cache::new(
@@ -563,7 +575,12 @@ mod tests {
         const BYTES: u64 = 1000;
         const COUNT: u64 = 100;
 
-        let cache = new(Some(BYTES), EvictionPolicy::Ttl(Duration::from_secs(1)));
+        let cache = new(
+            Some(BYTES),
+            EvictionPolicy::Ttl {
+                ttl: Duration::from_secs(1),
+            },
+        );
         for i in 0..COUNT {
             let v = vec!["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string()];
             cache.insert(i, v, QueryMetadata::Test, ZERO_DURATION).await;
@@ -586,7 +603,9 @@ mod tests {
         let cache = Cache::<String, String>::new(
             42,
             inner,
-            EvictionPolicy::Ttl(Duration::from_secs(60)),
+            EvictionPolicy::Ttl {
+                ttl: Duration::from_secs(60),
+            },
             Some(relation.clone()),
             Some(query_id),
             SelectStatement::default(),

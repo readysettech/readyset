@@ -885,32 +885,32 @@ impl DialectDisplay for CacheType {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum EvictionPolicy {
-    Ttl(Duration),
-    TtlAndPeriod(Duration, Duration),
+    Ttl { ttl: Duration },
+    TtlAndPeriod { ttl: Duration, refresh: Duration },
 }
 
 impl DialectDisplay for EvictionPolicy {
     fn display(&self, _dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
-            Self::Ttl(duration) => write!(f, "POLICY TTL {} SECONDS", duration.as_secs()),
-            Self::TtlAndPeriod(ttl, refresh) => write!(
-                f,
-                "POLICY TTL {} SECONDS REFRESH {} SECONDS",
-                ttl.as_secs(),
-                refresh.as_secs()
-            ),
+            Self::Ttl { ttl } => write!(f, "POLICY TTL {} SECONDS", ttl.as_secs()),
+            Self::TtlAndPeriod { ttl, refresh } => {
+                write!(f, "POLICY TTL {} SECONDS REFRESH ", ttl.as_secs())?;
+                write!(f, "{} SECONDS", refresh.as_secs())
+            }
         })
     }
 }
 
 impl EvictionPolicy {
     pub fn from_ttl_ms(ttl_ms: u64) -> Self {
-        Self::Ttl(Duration::from_millis(ttl_ms))
+        Self::Ttl {
+            ttl: Duration::from_millis(ttl_ms),
+        }
     }
 
     pub fn ttl_ms(&self) -> u64 {
         match self {
-            Self::Ttl(ttl) | Self::TtlAndPeriod(ttl, _) => {
+            Self::Ttl { ttl } | Self::TtlAndPeriod { ttl, .. } => {
                 ttl.as_millis().try_into().unwrap_or(u64::MAX)
             }
         }
@@ -918,8 +918,10 @@ impl EvictionPolicy {
 
     pub fn refresh_ms(&self) -> u64 {
         match self {
-            Self::Ttl(ttl) => ttl.as_millis().try_into().unwrap_or(u64::MAX) / 2,
-            Self::TtlAndPeriod(_, refresh) => refresh.as_millis().try_into().unwrap_or(u64::MAX),
+            Self::Ttl { ttl } => ttl.as_millis().try_into().unwrap_or(u64::MAX) / 2,
+            Self::TtlAndPeriod { refresh, .. } => {
+                refresh.as_millis().try_into().unwrap_or(u64::MAX)
+            }
         }
     }
 }

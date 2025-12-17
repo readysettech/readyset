@@ -477,18 +477,22 @@ fn parse_create_cache(
                         ));
                     }
 
-                    EvictionPolicy::TtlAndPeriod(
-                        Duration::from_secs(ttl_secs),
-                        Duration::from_secs(refresh_secs),
-                    )
+                    EvictionPolicy::TtlAndPeriod {
+                        ttl: Duration::from_secs(ttl_secs),
+                        refresh: Duration::from_secs(refresh_secs),
+                    }
                 }
                 _ => {
                     parser.prev_token();
-                    EvictionPolicy::Ttl(Duration::from_secs(ttl_secs))
+                    EvictionPolicy::Ttl {
+                        ttl: Duration::from_secs(ttl_secs),
+                    }
                 }
             }
         } else {
-            EvictionPolicy::Ttl(Duration::from_secs(ttl_secs))
+            EvictionPolicy::Ttl {
+                ttl: Duration::from_secs(ttl_secs),
+            }
         };
 
         Some(policy)

@@ -938,12 +938,14 @@ fn cached_query_options(
             )),
             |(_, _, _, _, ttl_secs, _, _, _, refresh_opt)| {
                 if let Some((_, _, refresh_secs, _, _, _)) = refresh_opt {
-                    Option::Policy(EvictionPolicy::TtlAndPeriod(
-                        Duration::from_secs(ttl_secs),
-                        Duration::from_secs(refresh_secs),
-                    ))
+                    Option::Policy(EvictionPolicy::TtlAndPeriod {
+                        ttl: Duration::from_secs(ttl_secs),
+                        refresh: Duration::from_secs(refresh_secs),
+                    })
                 } else {
-                    Option::Policy(EvictionPolicy::Ttl(Duration::from_secs(ttl_secs)))
+                    Option::Policy(EvictionPolicy::Ttl {
+                        ttl: Duration::from_secs(ttl_secs),
+                    })
                 }
             },
         ),

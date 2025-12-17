@@ -28,7 +28,9 @@ where
 }
 
 fn test_policy() -> EvictionPolicy {
-    EvictionPolicy::Ttl(Duration::from_secs(60))
+    EvictionPolicy::Ttl {
+        ttl: Duration::from_secs(60),
+    }
 }
 
 fn test_stmt() -> SelectStatement {

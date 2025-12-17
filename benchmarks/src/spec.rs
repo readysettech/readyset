@@ -206,7 +206,7 @@ impl QueryCacheType {
     fn policy(&self) -> Option<EvictionPolicy> {
         match self {
             QueryCacheType::Deep => None,
-            QueryCacheType::Shallow(duration) => Some(EvictionPolicy::Ttl(*duration)),
+            QueryCacheType::Shallow(duration) => Some(EvictionPolicy::Ttl { ttl: *duration }),
         }
     }
 }

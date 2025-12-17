@@ -21,7 +21,9 @@ fn test_relation(name: &str) -> Relation {
 }
 
 fn test_policy() -> EvictionPolicy {
-    EvictionPolicy::Ttl(Duration::from_secs(60))
+    EvictionPolicy::Ttl {
+        ttl: Duration::from_secs(60),
+    }
 }
 
 fn test_stmt() -> SelectStatement {
@@ -551,7 +553,9 @@ async fn test_ttl_refresh_ahead() {
         &manager,
         None,
         Some(query_id),
-        EvictionPolicy::Ttl(Duration::from_secs(5)),
+        EvictionPolicy::Ttl {
+            ttl: Duration::from_secs(5),
+        },
     )
     .unwrap();
 
@@ -582,7 +586,9 @@ async fn test_ttl_expiration() {
         &manager,
         None,
         Some(query_id),
-        EvictionPolicy::Ttl(Duration::from_secs(5)),
+        EvictionPolicy::Ttl {
+            ttl: Duration::from_secs(5),
+        },
     )
     .unwrap();
 
@@ -715,7 +721,10 @@ async fn test_ttl_and_period_refresh() {
         &manager,
         None,
         Some(query_id),
-        EvictionPolicy::TtlAndPeriod(Duration::from_secs(10), Duration::from_secs(2)),
+        EvictionPolicy::TtlAndPeriod {
+            ttl: Duration::from_secs(10),
+            refresh: Duration::from_secs(2),
+        },
     )
     .unwrap();
 

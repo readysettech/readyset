@@ -82,14 +82,14 @@ pub struct QueryResult<V> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum EvictionPolicy {
-    Ttl(Duration),
-    TtlAndPeriod(Duration, Duration),
+    Ttl { ttl: Duration },
+    TtlAndPeriod { ttl: Duration, refresh: Duration },
 }
 
 impl EvictionPolicy {
     pub fn ttl_ms(&self) -> u64 {
         match self {
-            Self::Ttl(ttl) | Self::TtlAndPeriod(ttl, _) => {
+            Self::Ttl { ttl } | Self::TtlAndPeriod { ttl, .. } => {
                 ttl.as_millis().try_into().unwrap_or(u64::MAX)
             }
         }
@@ -97,8 +97,10 @@ impl EvictionPolicy {
 
     pub fn refresh_ms(&self) -> u64 {
         match self {
-            Self::Ttl(ttl) => ttl.as_millis().try_into().unwrap_or(u64::MAX) / 2,
-            Self::TtlAndPeriod(_, refresh) => refresh.as_millis().try_into().unwrap_or(u64::MAX),
+            Self::Ttl { ttl } => ttl.as_millis().try_into().unwrap_or(u64::MAX) / 2,
+            Self::TtlAndPeriod { refresh, .. } => {
+                refresh.as_millis().try_into().unwrap_or(u64::MAX)
+            }
         }
     }
 }
