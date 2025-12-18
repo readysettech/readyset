@@ -1750,10 +1750,39 @@ where
                 event.destination = Some(QueryDestination::ReadysetShallow);
                 Ok(QueryResult::Shallow(values))
             }
-            CacheResult::Miss(cache)
-            | CacheResult::Hit(_, cache)
-            | CacheResult::HitAndRefresh(_, cache) => {
+            CacheResult::Miss(mut cache)
+            | CacheResult::Hit(_, mut cache)
+            | CacheResult::HitAndRefresh(_, mut cache) => {
+                let literalized = adapter_rewrites::literalize(&view_request.statement, params)?;
+                let query = literalized.display(dialect).to_string();
                 let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await?;
+
+                if let Some(refresh) = refresh
+                    && cache.is_scheduled()
+                {
+                    let callback = {
+                        let query_id = *query_id;
+                        let path = view_request.schema_search_path.clone();
+                        let query = query.clone();
+                        let shallow_exec_meta = shallow_exec_meta.clone();
+                        let refresh = refresh.clone();
+
+                        Arc::new(move |cache| {
+                            let request = ShallowRefreshRequest {
+                                query_id,
+                                path: path.clone(),
+                                query: query.clone(),
+                                cache,
+                                shallow_exec_meta: Some(shallow_exec_meta.clone()),
+                            };
+                            if let Err(e) = refresh.try_send(request) {
+                                warn!("Failed to send shallow refresh request: {e}");
+                            }
+                        })
+                    };
+                    cache.set_refresh(callback);
+                }
+
                 Self::execute_upstream(
                     upstream,
                     prep,
@@ -3425,7 +3454,27 @@ where
                 event.destination = Some(QueryDestination::ReadysetShallow);
                 Ok(QueryResult::Shallow(values))
             }
-            CacheResult::Miss(cache) => {
+            CacheResult::Miss(mut cache) => {
+                if let Some(refresh) = refresh
+                    && cache.is_scheduled()
+                {
+                    let refresh = refresh.clone();
+                    let path = noria.schema_search_path().to_vec();
+                    let q = query.to_string();
+                    let callback = Arc::new(move |cache| {
+                        let req = ShallowRefreshRequest::<DB::CacheEntry, DB::ShallowExecMeta> {
+                            query_id,
+                            path: path.clone(),
+                            query: q.clone(),
+                            cache,
+                            shallow_exec_meta: None,
+                        };
+                        if let Err(e) = refresh.try_send(req) {
+                            warn!("Failed to send shallow refresh request: {}", e);
+                        }
+                    });
+                    cache.set_refresh(callback);
+                };
                 Self::query_fallback(upstream, query, event, Some(cache)).await
             }
             CacheResult::NotCached => {

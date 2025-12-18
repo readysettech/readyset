@@ -927,6 +927,7 @@ fn cached_query_options(
                 opt(tuple((
                     tag_no_case("refresh"),
                     whitespace1,
+                    opt(tuple((tag_no_case("every"), whitespace1))),
                     map_res(
                         map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
                         u64::from_str,
@@ -937,11 +938,11 @@ fn cached_query_options(
                 ))),
             )),
             |(_, _, _, _, ttl_secs, _, _, _, refresh_opt)| {
-                if let Some((_, _, refresh_secs, _, _, _)) = refresh_opt {
+                if let Some((_, _, every_opt, refresh_secs, _, _, _)) = refresh_opt {
                     Option::Policy(EvictionPolicy::TtlAndPeriod {
                         ttl: Duration::from_secs(ttl_secs),
                         refresh: Duration::from_secs(refresh_secs),
-                        schedule: false,
+                        schedule: every_opt.is_some(),
                     })
                 } else {
                     Option::Policy(EvictionPolicy::Ttl {

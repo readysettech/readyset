@@ -421,25 +421,24 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
 }
 
 /// Expects `CREATE CACHE` was already parsed. Attempts to parse a Readyset-specific create cache
-/// statement. Will simply error if it fails, since there's no relevant standard SQL to fall back to.
+/// statement. Will simply error if it fails, since there's no relevant standard SQL to fall back
+/// to.
 ///
 /// CREATE [type] CACHE
-///     [POLICY TTL <num> SECONDS [REFRESH <num> SECONDS] [COALESCE <num> SECONDS]
+///     [POLICY TTL <num> SECONDS [REFRESH [EVERY] <num> SECONDS] [COALESCE <num> SECONDS]]
 ///     [cache_option [, cache_option] ...]
 ///     [<name>]
 ///     FROM
-///     <SELECT statement>
+///     [<SELECT statement> | <query id>]
 ///
 /// type:
 ///     | DEEP
 ///     | SHALLOW
-///     | // empty -> DEEP
+///     | // empty -> default cache type (default default is DEEP)
 ///
 /// cache_options:
 ///     | ALWAYS
 ///     | CONCURRENTLY
-///
-/// TODO: support query id instead of select statement
 fn parse_create_cache(
     parser: &mut Parser,
     dialect: Dialect,
@@ -447,7 +446,7 @@ fn parse_create_cache(
 ) -> Result<SqlQuery, ReadysetParsingError> {
     let cache_type = parse_create_cache_keywords(parser)?;
 
-    // Parse optional policy (POLICY TTL N SECONDS [REFRESH M SECONDS])
+    // Parse optional policy (POLICY TTL N SECONDS [REFRESH [EVERY] M SECONDS])
     let policy = if parse_readyset_keyword(parser, ReadysetKeyword::POLICY) {
         if cache_type != Some(CacheType::Shallow) {
             return Err(ReadysetParsingError::ReadysetParsingError(
@@ -469,6 +468,7 @@ fn parse_create_cache(
         }
 
         let policy = if parse_readyset_keyword(parser, ReadysetKeyword::REFRESH) {
+            let scheduled_refresh = parser.parse_keyword(Keyword::EVERY);
             match parser.parse_literal_uint() {
                 Ok(refresh_secs) if parser.parse_keyword(Keyword::SECONDS) => {
                     if refresh_secs >= ttl_secs {
@@ -480,7 +480,7 @@ fn parse_create_cache(
                     EvictionPolicy::TtlAndPeriod {
                         ttl: Duration::from_secs(ttl_secs),
                         refresh: Duration::from_secs(refresh_secs),
-                        schedule: false,
+                        schedule: scheduled_refresh,
                     }
                 }
                 _ => {
