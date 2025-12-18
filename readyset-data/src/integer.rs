@@ -208,6 +208,7 @@ where
         | DfType::Row
         | DfType::Point
         | DfType::PostgisPoint
+        | DfType::PostgisPolygon
         | DfType::Tsvector => Err(ReadySetError::DfValueConversionError {
             src_type: from_ty.to_string(),
             target_type: to_ty.to_string(),

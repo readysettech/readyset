@@ -586,6 +586,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
             | DfType::Row
             | DfType::Point
             | DfType::PostgisPoint
+            | DfType::PostgisPolygon
             | DfType::Tsvector => Err(Self::coerce_err(to_ty, "Not allowed")),
         }
     }

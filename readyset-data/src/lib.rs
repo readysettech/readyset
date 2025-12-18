@@ -2435,6 +2435,7 @@ mod arbitrary {
             | Some(DfType::Row)
             | Some(DfType::Point)
             | Some(DfType::PostgisPoint)
+            | Some(DfType::PostgisPolygon)
             | Some(DfType::Tsvector) => Just(DfValue::None).boxed(),
         }
     }
