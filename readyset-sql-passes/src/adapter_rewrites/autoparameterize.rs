@@ -402,15 +402,14 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
     }
 }
 
-/// Replace all literals that are in positions we support parameters in the given query with
-/// parameters, and return the values for those parameters alongside the index in the parameter list
-/// where they appear as a tuple of (placeholder position, value).
+/// Replace all literals in positions we support with placeholders, extracting the literals as
+/// parameters in a parameter list of (placeholder position, value).
 pub fn auto_parameterize_query(
     query: &mut SelectStatement,
     prev: Vec<(usize, Literal)>,
     server_supports_mixed_comparisons: bool,
     visit_limit_clause: bool,
-) -> Vec<(usize, Literal)> {
+) -> ReadySetResult<Vec<(usize, Literal)>> {
     // Don't try to auto-parameterize equal-queries that already contain range params for now, since
     // we don't yet allow mixing range and equal parameters in the same query
     let mut visitor = AnalyzeLiteralsVisitor::default();
@@ -447,7 +446,7 @@ pub fn auto_parameterize_query(
             (false, false) => (true, false),
             // If the query contains equal and range placeholders, we bail, since we don't support
             // mixed comparisons yet
-            (true, true) => return vec![],
+            (true, true) => return Ok(vec![]),
         }
     };
 
@@ -459,9 +458,40 @@ pub fn auto_parameterize_query(
         visit_limit_clause,
         ..Default::default()
     };
-    #[allow(clippy::unwrap_used)] // error is !, which can never be returned
-    visitor.visit_select_statement(query).unwrap();
-    visitor.out
+    visitor.visit_select_statement(query)?;
+    Ok(visitor.out)
+}
+
+#[derive(Default)]
+struct FullyParameterizeVisitor {
+    param_idx: usize,
+    out: Vec<(usize, Literal)>,
+}
+
+impl<'ast> VisitorMut<'ast> for FullyParameterizeVisitor {
+    type Error = ReadySetError;
+
+    fn visit_literal(&mut self, literal: &mut Literal) -> Result<(), Self::Error> {
+        if *literal == Literal::Null {
+            return Ok(());
+        }
+        if !matches!(literal, Literal::Placeholder(..)) {
+            let val = mem::replace(literal, Literal::Placeholder(ItemPlaceholder::QuestionMark));
+            self.out.push((self.param_idx, val));
+        }
+        self.param_idx += 1;
+        Ok(())
+    }
+}
+
+/// Replace all literals with placeholders, extracting the literals as parameters in a parameter
+/// list of (placeholder position, value).
+pub fn fully_parameterize_query(
+    query: &mut SelectStatement,
+) -> ReadySetResult<Vec<(usize, Literal)>> {
+    let mut visitor = FullyParameterizeVisitor::default();
+    visitor.visit_select_statement(query)?;
+    Ok(visitor.out)
 }
 
 #[cfg(test)]
@@ -494,7 +524,8 @@ mod tests {
             Vec::new(),
             server_supports_mixed_comparisons,
             true,
-        );
+        )
+        .unwrap();
         assert_eq!(
             query,
             expected,

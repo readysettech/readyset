@@ -109,7 +109,7 @@ use readyset_sql::ast::{
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::{
-    AdapterRewriteParams, DfQueryParameters, QueryParameters,
+    AdapterRewriteParams, DfQueryParameters, ParameterizeMode, QueryParameters,
     convert_placeholders_to_question_marks,
 };
 use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites};
@@ -1286,18 +1286,20 @@ where
     /// Provides metadata required to prepare a select query
     fn plan_prepare_select(&mut self, stmt: SelectStatement) -> PrepareMeta {
         let mut rewritten = stmt.clone();
-        let params =
-            match adapter_rewrites::rewrite_equivalent(&mut rewritten, self.noria.rewrite_params())
-            {
-                Ok(params) => params,
-                Err(e) => {
-                    warn!(
-                        statement = %Sensitive(&stmt.display(self.settings.dialect)),
-                        "This statement could not be rewritten for Readyset"
-                    );
-                    return PrepareMeta::FailedToRewrite(e);
-                }
-            };
+        let params = match adapter_rewrites::rewrite_equivalent(
+            &mut rewritten,
+            self.noria.rewrite_params(),
+            ParameterizeMode::Auto,
+        ) {
+            Ok(params) => params,
+            Err(e) => {
+                warn!(
+                    statement = %Sensitive(&stmt.display(self.settings.dialect)),
+                    "This statement could not be rewritten for Readyset"
+                );
+                return PrepareMeta::FailedToRewrite(e);
+            }
+        };
 
         let query_id = QueryId::from_select(&rewritten, self.noria.schema_search_path());
 
@@ -2381,7 +2383,11 @@ where
         let ddl_req =
             ddl_req.ok_or_else(|| internal_err!("No statement supplied to shallow cache"))?;
 
-        adapter_rewrites::rewrite_equivalent(&mut stmt, self.noria.rewrite_params())?;
+        adapter_rewrites::rewrite_equivalent(
+            &mut stmt,
+            self.noria.rewrite_params(),
+            ParameterizeMode::Auto,
+        )?;
 
         let req = ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned());
         if let Err(e) = self.upstream_supports(&req).await {
@@ -4051,6 +4057,7 @@ where
                 let params = match adapter_rewrites::rewrite_equivalent(
                     &mut stmt,
                     self.noria.rewrite_params(),
+                    ParameterizeMode::Auto,
                 ) {
                     Ok(params) => params,
                     Err(_) if self.has_fallback() => {
@@ -4576,7 +4583,7 @@ where
         Err(e) => internal!("Failed to parse SELECT: {e}"),
     };
 
-    adapter_rewrites::rewrite_equivalent(&mut select_stmt, rewrite_params)?;
+    adapter_rewrites::rewrite_equivalent(&mut select_stmt, rewrite_params, ParameterizeMode::Auto)?;
 
     let query_id = QueryId::from_select(&select_stmt, &schema_search_path);
     let name = stmt.name.unwrap_or_else(|| query_id.into());

@@ -118,6 +118,15 @@ impl AdapterRewriteParams {
     }
 }
 
+/// How to handle parameterization.
+#[derive(Debug, Copy, Clone)]
+pub enum ParameterizeMode {
+    /// Readyset's original autoparameterization.
+    Auto,
+    /// Replace all literals with placeholders.
+    Full,
+}
+
 /// An initial rewrite pass mostly for autoparameterization.
 ///
 /// The transformations applied to the query result in a query that is equivalent to the
@@ -127,12 +136,18 @@ impl AdapterRewriteParams {
 /// - Replaces literals with placeholders when they can be used as lookup indices in the noria
 ///   dataflow representation of the query. Note that this pass may not replace all literals and is
 ///   therefore cannot guarantee that the rewritten query is free of user PII.
+/// - If full parameterization is requested, all literals are replaced with placeholders.
 pub fn rewrite_equivalent(
     query: &mut SelectStatement,
     flags: AdapterRewriteParams,
+    mode: ParameterizeMode,
 ) -> ReadySetResult<QueryParameters> {
     let span = trace_span!("adapter_rewrites", part = "equivalent").entered();
-    trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite query placeholders");
+    trace!(
+        parent: &span,
+        query = %query.display(flags.dialect),
+        "Going to rewrite query placeholders"
+    );
 
     let reordered_placeholders = reorder_numbered_placeholders(query);
     trace!(
@@ -141,13 +156,33 @@ pub fn rewrite_equivalent(
         query = %query.display(flags.dialect),
         placeholders=?reordered_placeholders
     );
-    let auto_parameters = autoparameterize::auto_parameterize_query(
-        query,
-        Vec::new(),
-        flags.server_supports_mixed_comparisons,
-        false,
-    );
-    trace!(parent: &span, pass="auto_parameterize_query", query = %query.display(flags.dialect), auto_parameters=?auto_parameters);
+    let auto_parameters = match mode {
+        ParameterizeMode::Auto => {
+            let auto_parameters = autoparameterize::auto_parameterize_query(
+                query,
+                Vec::new(),
+                flags.server_supports_mixed_comparisons,
+                false,
+            )?;
+            trace!(
+                parent: &span,
+                pass="auto_parameterize_query",
+                query = %query.display(flags.dialect),
+                auto_parameters=?auto_parameters
+            );
+            auto_parameters
+        }
+        ParameterizeMode::Full => {
+            let auto_parameters = autoparameterize::fully_parameterize_query(query)?;
+            trace!(
+                parent: &span,
+                pass="fully_parameterize_query",
+                query = %query.display(flags.dialect),
+                auto_parameters=?auto_parameters
+            );
+            auto_parameters
+        }
+    };
     number_placeholders(query)?;
     trace!(parent: &span, pass="number_placeholders", query = %query.display(flags.dialect));
 
@@ -201,7 +236,7 @@ pub fn rewrite_for_readyset(
         auto_parameters,
         flags.server_supports_mixed_comparisons,
         true,
-    );
+    )?;
     trace!(parent: &span, pass="auto_parameterize_query", query = %query.display(flags.dialect), auto_parameters=?auto_parameters);
     let rewritten_in_conditions = collapse_where_in(query, flags.dialect)?;
     trace!(parent: &span, pass="collapse_where_in", query = %query.display(flags.dialect), rewritten_in_conditions=?rewritten_in_conditions);
@@ -225,7 +260,7 @@ pub fn rewrite_query(
     query: &mut SelectStatement,
     flags: AdapterRewriteParams,
 ) -> ReadySetResult<DfQueryParameters> {
-    let params = rewrite_equivalent(query, flags)?;
+    let params = rewrite_equivalent(query, flags, ParameterizeMode::Auto)?;
     rewrite_for_readyset(query, flags, params)
 }
 
