@@ -91,6 +91,7 @@ pub struct CacheProperties {
     cache_type: CacheType,
     ttl_ms: Option<u64>,
     refresh_ms: Option<u64>,
+    coalesce_ms: Option<u64>,
     always: bool,
 }
 
@@ -107,6 +108,9 @@ impl Display for CacheProperties {
         if let Some(refresh_ms) = self.refresh_ms {
             properties.push(Cow::Owned(format!("refresh {refresh_ms} ms")));
         }
+        if let Some(coalesce_ms) = self.coalesce_ms {
+            properties.push(Cow::Owned(format!("coalesce {coalesce_ms} ms")));
+        }
         write!(f, "{}", properties.join(", "))
     }
 }
@@ -117,6 +121,7 @@ impl CacheProperties {
             cache_type,
             ttl_ms: None,
             refresh_ms: None,
+            coalesce_ms: None,
             always: false,
         }
     }
@@ -125,11 +130,15 @@ impl CacheProperties {
         self.always = always;
     }
 
-    pub fn set_ttl(&mut self, ttl_ms: u64) {
+    pub fn set_ttl_ms(&mut self, ttl_ms: u64) {
         self.ttl_ms = Some(ttl_ms);
     }
 
-    pub fn set_refresh(&mut self, refresh_ms: u64) {
+    pub fn set_refresh_ms(&mut self, refresh_ms: u64) {
         self.refresh_ms = Some(refresh_ms);
+    }
+
+    pub fn set_coalesce_ms(&mut self, coalesce_ms: u64) {
+        self.coalesce_ms = Some(coalesce_ms);
     }
 }

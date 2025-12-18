@@ -2911,6 +2911,7 @@ where
                 query,
                 ttl_ms,
                 refresh_ms,
+                coalesce_ms,
                 always,
                 ..
             } in self.shallow.list_caches(query_id, None)
@@ -2925,10 +2926,13 @@ where
                 let properties = {
                     let mut properties = CacheProperties::new(CacheType::Shallow);
                     if let Some(ttl_ms) = ttl_ms {
-                        properties.set_ttl(ttl_ms);
+                        properties.set_ttl_ms(ttl_ms);
                     }
                     if let Some(refresh_ms) = refresh_ms {
-                        properties.set_refresh(refresh_ms);
+                        properties.set_refresh_ms(refresh_ms);
+                    }
+                    if let Some(coalesce_ms) = coalesce_ms {
+                        properties.set_coalesce_ms(coalesce_ms);
                     }
                     properties.set_always(always);
                     properties.to_string().into()
