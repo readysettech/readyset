@@ -1283,14 +1283,39 @@ where
         Ok(res)
     }
 
+    /// A simple wrapper around rewrite_equivalent that tries a couple parameterization strategies.
+    ///
+    /// We first rewrite the query to a fully-parameterized form to see if a corresponding shallow
+    /// cache exists for that form.  If it does, we use that rewriten query and return all literals
+    /// as parameters.
+    ///
+    /// Otherwise, we proceed with the typical autoparameterization process, only parameterizing a
+    /// subset of placeholder positions we expect to be valid for deep caching.
+    fn rewrite_equivalent(
+        &mut self,
+        stmt: &mut SelectStatement,
+        flags: AdapterRewriteParams,
+    ) -> ReadySetResult<QueryParameters> {
+        let backup = stmt.clone();
+
+        let params = adapter_rewrites::rewrite_equivalent(stmt, flags, ParameterizeMode::Full)?;
+
+        let query_id = QueryId::from_select(stmt, self.noria.schema_search_path());
+        if self.shallow.exists(None, Some(&query_id)) {
+            // Stick with the fully-parameterized form.
+            return Ok(params);
+        }
+
+        // Go back to the regular autoparameterization form.
+        *stmt = backup;
+        let params = adapter_rewrites::rewrite_equivalent(stmt, flags, ParameterizeMode::Auto)?;
+        Ok(params)
+    }
+
     /// Provides metadata required to prepare a select query
     fn plan_prepare_select(&mut self, stmt: SelectStatement) -> PrepareMeta {
         let mut rewritten = stmt.clone();
-        let params = match adapter_rewrites::rewrite_equivalent(
-            &mut rewritten,
-            self.noria.rewrite_params(),
-            ParameterizeMode::Auto,
-        ) {
+        let params = match self.rewrite_equivalent(&mut rewritten, self.noria.rewrite_params()) {
             Ok(params) => params,
             Err(e) => {
                 warn!(
@@ -2386,7 +2411,7 @@ where
         adapter_rewrites::rewrite_equivalent(
             &mut stmt,
             self.noria.rewrite_params(),
-            ParameterizeMode::Auto,
+            ParameterizeMode::Full,
         )?;
 
         let req = ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned());
@@ -4054,11 +4079,7 @@ where
                 }
             }
             Ok(SqlQuery::Select(mut stmt)) => {
-                let params = match adapter_rewrites::rewrite_equivalent(
-                    &mut stmt,
-                    self.noria.rewrite_params(),
-                    ParameterizeMode::Auto,
-                ) {
+                let params = match self.rewrite_equivalent(&mut stmt, self.noria.rewrite_params()) {
                     Ok(params) => params,
                     Err(_) if self.has_fallback() => {
                         return Self::query_fallback(
@@ -4583,7 +4604,7 @@ where
         Err(e) => internal!("Failed to parse SELECT: {e}"),
     };
 
-    adapter_rewrites::rewrite_equivalent(&mut select_stmt, rewrite_params, ParameterizeMode::Auto)?;
+    adapter_rewrites::rewrite_equivalent(&mut select_stmt, rewrite_params, ParameterizeMode::Full)?;
 
     let query_id = QueryId::from_select(&select_stmt, &schema_search_path);
     let name = stmt.name.unwrap_or_else(|| query_id.into());
