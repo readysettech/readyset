@@ -25,6 +25,7 @@ psql-srv = { path = "../psql-srv" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-client = { path = "../readyset-client/" }
 readyset-data = { path = "../readyset-data" }
+readyset-errors = { path = "../readyset-errors" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
 readyset-server = { path = "../readyset-server/" }

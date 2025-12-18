@@ -24,6 +24,7 @@ use readyset_data::upstream_system_props::{
     init_system_props, UpstreamSystemProperties, DEFAULT_TIMEZONE_NAME,
 };
 use readyset_data::Dialect;
+use readyset_errors::ReadySetError;
 use readyset_server::{
     Builder, DurabilityMode, Handle, LocalAuthority, PrometheusBuilder, ReadySetHandle,
 };
@@ -33,7 +34,7 @@ use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
-use schema_catalog::SchemaCatalogSynchronizer;
+use schema_catalog::{SchemaCatalogSynchronizer, SchemaGeneration};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 
@@ -43,6 +44,39 @@ pub mod psql_helpers;
 pub use readyset_server::sleep;
 
 static UNIQUE_SERVER_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+fn is_leader_not_ready(err: &ReadySetError) -> bool {
+    match err {
+        ReadySetError::LeaderNotReady => true,
+        ReadySetError::RpcFailed { source, .. } => is_leader_not_ready(source),
+        ReadySetError::Context { error, .. } => is_leader_not_ready(error),
+        _ => false,
+    }
+}
+
+/// Wait for the schema generation to change, and for the leader to report it is ready.
+///
+/// This is a common synchronization point for tests that trigger schema changes via DDL on the
+/// upstream database. The server needs time to replicate and apply these changes before tests can
+/// proceed with operations that depend on the updated schema.
+pub async fn wait_for_schema_generation_change(
+    handle: &mut ReadySetHandle,
+    start_generation: SchemaGeneration,
+) {
+    eventually!(sleep: Duration::from_millis(100), message: format!(
+        "schema generation did not advance past {start_generation}"
+    ), {
+        match handle.schema_catalog().await {
+            Ok(catalog) => catalog.generation != start_generation,
+            Err(err) if is_leader_not_ready(&err) => false,
+            Err(err) => panic!("Failed to fetch schema catalog: {err}"),
+        }
+    });
+
+    eventually!(sleep: Duration::from_millis(100), message: "leader did not become ready".to_string(), {
+        handle.leader_ready().await.unwrap()
+    });
+}
 
 #[macro_export]
 macro_rules! derive_test_name {

@@ -4812,6 +4812,7 @@ dependencies = [
  "readyset-adapter",
  "readyset-client",
  "readyset-data",
+ "readyset-errors",
  "readyset-mysql",
  "readyset-psql",
  "readyset-server",
