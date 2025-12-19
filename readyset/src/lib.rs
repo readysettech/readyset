@@ -108,6 +108,15 @@ pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
         .ip())
 }
 
+fn parse_percent(percent: &str) -> anyhow::Result<f64> {
+    let percent: f64 = percent.parse()?;
+    ensure!(
+        (0.0..=100.0).contains(&percent),
+        "Value must be within 0.0 - 100.0"
+    );
+    Ok(percent)
+}
+
 pub struct NoriaAdapter<H>
 where
     H: ConnectionHandler,
@@ -342,7 +351,7 @@ pub struct Options {
     #[arg(
         long,
         env = "SHALLOW_MEMORY_PERCENT",
-        value_parser = clap::value_parser!(u32).range(0..=100)
+        value_parser = parse_percent
     )]
     shallow_memory_percent: Option<f64>,
 
