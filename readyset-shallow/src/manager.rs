@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use metrics::counter;
 use moka::future::Cache as MokaCache;
+use moka::notification::RemovalCause;
 use papaya::HashMap;
 use tracing::info;
 
@@ -46,7 +47,12 @@ where
     pub(crate) fn new_inner(max_capacity: Option<u64>) -> InnerCache<K, V> {
         let mut builder = MokaCache::builder()
             .expire_after(CacheExpiration)
-            .weigher(weight);
+            .weigher(weight)
+            .eviction_listener(|_, _, cause| {
+                if cause == RemovalCause::Size {
+                    counter!(recorded::SHALLOW_EVICT_MEMORY).increment(1);
+                }
+            });
         if let Some(capacity) = max_capacity {
             builder = builder.max_capacity(capacity);
         }
