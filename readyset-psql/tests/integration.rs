@@ -2191,6 +2191,97 @@ async fn left_join_on_computed_predicate_filters_right_side() {
     shutdown_tx.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, postgres_upstream)]
+async fn shallow_cache_scheduled_refresh() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let mut conn = DatabaseURL::from(opts)
+        .connect(&ServerCertVerification::Default)
+        .await
+        .unwrap();
+
+    conn.simple_query("CREATE TABLE test_data (id int PRIMARY KEY, value int)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.simple_query("INSERT INTO test_data (id, value) VALUES (1, 100)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.simple_query(
+        "CREATE SHALLOW CACHE POLICY TTL 5 SECONDS REFRESH EVERY 1 SECONDS FROM \
+         SELECT id, value FROM test_data WHERE id = $1",
+    )
+    .await
+    .unwrap();
+    sleep().await;
+
+    eventually! {
+        let res = explain_create_cache("SELECT id, value FROM test_data WHERE id = $1", &mut conn).await;
+        res.supported == "cached"
+    }
+
+    let stmt = conn
+        .prepare("SELECT id, value FROM test_data WHERE id = $1")
+        .await
+        .unwrap();
+
+    for _ in 0..2 {
+        let row: Vec<(i32, i32)> = conn
+            .execute(&stmt, &[&1])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.get(0).unwrap(), r.get(1).unwrap()))
+            .collect();
+        assert_eq!(row.len(), 1);
+        let initial_value: i32 = row[0].1;
+        assert_eq!(initial_value, 100);
+    }
+
+    let last = explain_last_statement(&mut conn).await;
+    assert_matches!(last.destination, QueryDestination::ReadysetShallow);
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    conn.simple_query("UPDATE test_data SET value = 101 WHERE id = 1")
+        .await
+        .unwrap();
+
+    for iteration in 0..5 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+        let row: Vec<(i32, i32)> = conn
+            .execute(&stmt, &[&1])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.get(0).unwrap(), r.get(1).unwrap()))
+            .collect();
+        assert_eq!(row.len(), 1);
+        let cached: i32 = row[0].1;
+        let expected = 101 + iteration;
+        assert_eq!(cached, expected);
+
+        let last = explain_last_statement(&mut conn).await;
+        assert_matches!(last.destination, QueryDestination::ReadysetShallow);
+
+        conn.simple_query(&format!(
+            "UPDATE test_data SET value = {} WHERE id = 1",
+            expected + 1,
+        ))
+        .await
+        .unwrap();
+    }
+
+    shutdown_tx.shutdown().await;
+}
+
 mod http_tests {
     use super::*;
     #[tokio::test(flavor = "multi_thread")]
