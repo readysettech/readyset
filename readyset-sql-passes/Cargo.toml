@@ -6,6 +6,7 @@ authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2024"
 
 [dependencies]
+hex = { workspace = true }
 itertools = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
@@ -17,6 +18,7 @@ readyset-data = { path = "../readyset-data" }
 readyset-sql = { path = "../readyset-sql" }
 dataflow-expression = { path = "../dataflow-expression" }
 strum = { workspace = true }
+sqlparser = { workspace = true, features = ["visitor"] }
 
 [dev-dependencies]
 criterion = { workspace = true }

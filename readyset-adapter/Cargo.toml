@@ -39,6 +39,7 @@ crossbeam-skiplist = { workspace = true }
 slab = { workspace = true }
 xxhash-rust = { workspace = true }
 rand = { workspace = true }
+sqlparser = { workspace = true }
 streaming-iterator = { workspace = true }
 
 readyset-adapter-types = { path = "../readyset-adapter-types" }

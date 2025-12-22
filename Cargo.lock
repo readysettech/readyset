@@ -4642,6 +4642,7 @@ dependencies = [
  "serde_json",
  "slab",
  "sqlformat",
+ "sqlparser",
  "streaming-iterator",
  "test-strategy",
  "tokio",
@@ -5349,6 +5350,7 @@ version = "0.0.1"
 dependencies = [
  "criterion",
  "dataflow-expression",
+ "hex",
  "itertools 0.14.0",
  "pretty_assertions",
  "readyset-data",
@@ -5356,6 +5358,7 @@ dependencies = [
  "readyset-sql",
  "readyset-sql-parsing",
  "serde",
+ "sqlparser",
  "strum",
  "tracing",
  "vec1",
@@ -6285,6 +6288,17 @@ dependencies = [
  "log",
  "recursive",
  "serde",
+ "sqlparser_derive",
+]
+
+[[package]]
+name = "sqlparser_derive"
+version = "0.3.0"
+source = "git+https://github.com/apache/datafusion-sqlparser-rs?branch=main#e3fbfd91b29706fcc7b4847f13ba71946a68e1f0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
 ]
 
 [[package]]
