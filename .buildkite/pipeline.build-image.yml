@@ -50,6 +50,9 @@ steps:
     command: |
       [ -d public ] && cd public
       .buildkite/push_docker_image_manifest.sh readyset-build
+      if [ "$BUILDKITE_BRANCH" == "refs/heads/main" ]; then
+        .buildkite/push_docker_image_manifest.sh readyset-build latest
+      fi
     plugins:
       ecr#${ECR_PLUGIN_VERSION}:
         login: true
