@@ -223,7 +223,7 @@ impl ArbitraryQueryParameters {
             coalesce_ms: None,
             inner: CacheInner::Statement {
                 deep: Ok(Box::new(stmt.clone())),
-                shallow: Ok(Box::new(stmt)),
+                shallow: Err("Not used".into()),
             },
             always: false,
             concurrently: false,

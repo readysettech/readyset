@@ -976,7 +976,7 @@ impl EvictionPolicy {
 pub enum CacheInner {
     Statement {
         deep: Result<Box<SelectStatement>, String>,
-        shallow: Result<Box<SelectStatement>, String>,
+        shallow: Result<Box<ShallowCacheQuery>, String>,
     },
     Id(SqlIdentifier),
 }
@@ -985,6 +985,9 @@ impl DialectDisplay for CacheInner {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
             Self::Statement { deep: Ok(stmt), .. } => write!(f, "{}", stmt.display(dialect)),
+            Self::Statement {
+                shallow: Ok(stmt), ..
+            } => write!(f, "{}", stmt.display(dialect)),
             Self::Statement {
                 deep: Err(unparsed),
                 ..
@@ -1004,7 +1007,7 @@ impl From<Box<SelectStatement>> for CacheInner {
     fn from(stmt: Box<SelectStatement>) -> Self {
         CacheInner::Statement {
             deep: Ok(stmt.clone()),
-            shallow: Ok(stmt),
+            shallow: Err("Not provided".to_string()),
         }
     }
 }
@@ -1014,7 +1017,7 @@ impl From<SelectStatement> for CacheInner {
         let boxed = Box::new(stmt);
         CacheInner::Statement {
             deep: Ok(boxed.clone()),
-            shallow: Ok(boxed),
+            shallow: Err("Not provided".to_string()),
         }
     }
 }

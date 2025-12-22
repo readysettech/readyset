@@ -347,7 +347,7 @@ impl WorkloadSpec {
                     coalesce_ms: None,
                     inner: CacheInner::Statement {
                         deep: Ok(Box::new(stmt.clone())),
-                        shallow: Ok(Box::new(stmt)),
+                        shallow: Err("Not used".into()),
                     },
                     unparsed_create_cache_statement: None,
                     always: false,

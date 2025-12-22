@@ -63,3 +63,109 @@ pub use transaction::*;
 pub use truncate::*;
 pub use update::*;
 pub use use_statement::*;
+
+use std::ops::{Deref, DerefMut};
+
+use derive_more::Display;
+use proptest::arbitrary::Arbitrary;
+use proptest::prelude::Just;
+use serde::{Deserialize, Serialize};
+
+use crate::{Dialect, DialectDisplay};
+
+#[derive(Clone, Display, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ShallowCacheQuery(sqlparser::ast::Query);
+
+impl Deref for ShallowCacheQuery {
+    type Target = sqlparser::ast::Query;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ShallowCacheQuery {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Default for ShallowCacheQuery {
+    /// Build the AST of a minimal SELECT 1 query.
+    fn default() -> Self {
+        use sqlparser::ast::helpers::attached_token::AttachedToken;
+        use sqlparser::ast::{
+            Expr, GroupByExpr, Query, Select, SelectFlavor, SelectItem, SetExpr, Value,
+        };
+
+        // We can instead call the parser on SELECT 1, but that requires calling unwrap
+        // on an external library, which we do not like.
+        let select_item =
+            SelectItem::UnnamedExpr(Expr::Value(Value::Number("1".into(), false).into()));
+        let select = Select {
+            distinct: None,
+            top: None,
+            projection: vec![select_item],
+            into: None,
+            from: vec![],
+            lateral_views: vec![],
+            selection: None,
+            group_by: GroupByExpr::Expressions(vec![], vec![]),
+            cluster_by: vec![],
+            distribute_by: vec![],
+            sort_by: vec![],
+            having: None,
+            qualify: None,
+            named_window: vec![],
+            connect_by: None,
+            exclude: None,
+            flavor: SelectFlavor::Standard,
+            select_token: AttachedToken::empty(),
+            top_before_distinct: false,
+            prewhere: None,
+            window_before_qualify: false,
+            value_table_mode: None,
+        };
+
+        Self(Query {
+            with: None,
+            body: Box::new(SetExpr::Select(Box::new(select))),
+            order_by: None,
+            fetch: None,
+            limit_clause: None,
+            locks: vec![],
+            for_clause: None,
+            settings: None,
+            format_clause: None,
+            pipe_operators: vec![],
+        })
+    }
+}
+
+impl Arbitrary for ShallowCacheQuery {
+    type Parameters = ();
+    type Strategy = Just<Self>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        Just(ShallowCacheQuery::default())
+    }
+}
+
+impl DialectDisplay for ShallowCacheQuery {
+    fn display(&self, _dialect: Dialect) -> impl std::fmt::Display + '_ {
+        // sqlparser preserves dialect-specific formatting, so we don't need to do anything
+        &self.0
+    }
+}
+
+impl From<sqlparser::ast::Query> for ShallowCacheQuery {
+    fn from(query: sqlparser::ast::Query) -> Self {
+        ShallowCacheQuery(query)
+    }
+}
+
+impl From<sqlparser::ast::Query> for Box<ShallowCacheQuery> {
+    fn from(query: sqlparser::ast::Query) -> Self {
+        Box::new(ShallowCacheQuery(query))
+    }
+}

@@ -6284,6 +6284,7 @@ source = "git+https://github.com/apache/datafusion-sqlparser-rs?branch=main#3880
 dependencies = [
  "log",
  "recursive",
+ "serde",
 ]
 
 [[package]]

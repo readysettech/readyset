@@ -188,7 +188,7 @@ impl From<CacheInfo> for CreateCacheStatement {
             coalesce_ms: info.coalesce_ms.map(Duration::from_millis),
             inner: CacheInner::Statement {
                 deep: Ok(Box::new(info.query.clone())),
-                shallow: Ok(Box::new(info.query)),
+                shallow: Err("TODO".into()),
             },
             unparsed_create_cache_statement: None,
             always: info.always,

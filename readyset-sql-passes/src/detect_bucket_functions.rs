@@ -142,7 +142,7 @@ mod tests {
             coalesce_ms: None,
             inner: CacheInner::Statement {
                 deep: Ok(Box::new(select_stmt.clone())),
-                shallow: Ok(Box::new(select_stmt)),
+                shallow: Err("Not used".to_string()),
             },
             unparsed_create_cache_statement: None,
             always: false, // should cause error
@@ -200,7 +200,7 @@ mod tests {
             coalesce_ms: None,
             inner: CacheInner::Statement {
                 deep: Ok(Box::new(select_stmt.clone())),
-                shallow: Ok(Box::new(select_stmt)),
+                shallow: Err("Not used".to_string()),
             },
             unparsed_create_cache_statement: None,
             always: true, // should succeed
@@ -246,7 +246,7 @@ mod tests {
             coalesce_ms: None,
             inner: CacheInner::Statement {
                 deep: Ok(Box::new(select_stmt.clone())),
-                shallow: Ok(Box::new(select_stmt)),
+                shallow: Err("Not used".to_string()),
             },
             unparsed_create_cache_statement: None,
             always: false,

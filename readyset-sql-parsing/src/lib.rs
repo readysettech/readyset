@@ -7,8 +7,8 @@ use readyset_errors::ReadySetError;
 use readyset_sql::ast::{
     AddTablesStatement, AlterReadysetStatement, AlterTableStatement, CacheInner, CacheType,
     CreateCacheStatement, CreateTableStatement, CreateViewStatement, DropCacheStatement,
-    EvictionPolicy, Expr, ResnapshotTableStatement, SelectStatement, SetEviction, SqlQuery,
-    SqlType, TableKey,
+    EvictionPolicy, Expr, ResnapshotTableStatement, SelectStatement, SetEviction,
+    ShallowCacheQuery, SqlQuery, SqlType, TableKey,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -637,6 +637,12 @@ fn parse_query_for_create_cache(
 ) -> CacheInner {
     // Try to parse as statement first
     if let Ok(statement) = parser.try_parse(|p| p.parse_statement()) {
+        let shallow = if let sqlparser::ast::Statement::Query(ref query) = statement {
+            Ok((*query.clone()).into())
+        } else {
+            Err(remaining_query.clone())
+        };
+
         return statement
             .try_into_dialect(dialect)
             .ok()
@@ -645,7 +651,7 @@ fn parse_query_for_create_cache(
                 let boxed = Box::new(select);
                 CacheInner::Statement {
                     deep: Ok(boxed.clone()),
-                    shallow: Ok(boxed),
+                    shallow,
                 }
             })
             .unwrap_or_else(|| CacheInner::Statement {
@@ -889,6 +895,23 @@ fn parse_drop(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
     } else {
         Ok(parser.parse_drop()?.try_into_dialect(dialect)?)
     }
+}
+
+/// Parse a SQL statement as a bare sqlparser AST [`sqlparser::ast::Query`],
+/// without converting to the Readyset AST.
+///
+/// This is intended for shallow-cache matching and should be preferred over calling sqlparser
+/// directly outside this crate.
+pub fn parse_shallow_query(
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<ShallowCacheQuery, ReadysetParsingError> {
+    parse_sqlparser_inner(dialect, input, |parser, _dialect, _input| {
+        parser
+            .parse_query()
+            .map(|boxed| (*boxed).into())
+            .map_err(ReadysetParsingError::SqlparserError)
+    })
 }
 
 /// Attempts to parse a Readyset-specific statement, and falls back to [`Parser::parse_statement`] if it fails.
@@ -1187,7 +1210,7 @@ where
 }
 
 macro_rules! export_parser {
-    ($(#[doc = $doc:expr])+ $parser:ident, $ty:ident) => {
+    ($(#[doc = $doc:expr])+ $parser:ident, $ty:ty) => {
         paste::paste! {
             $(
                 #[doc = $doc]
@@ -1223,11 +1246,81 @@ macro_rules! export_parser {
     };
 }
 
-export_parser!(
-    /// Parse a SQL query, including custom Readyset extension.
-    query,
-    SqlQuery
-);
+/// Parse a SQL query, including custom Readyset extension.
+///
+/// This is a custom implementation (rather than using `export_parser!`) because we need to merge
+/// `shallow_ast` from the sqlparser result into the nom result for `CreateCacheStatement` when
+/// both parsers succeed. This ensures `shallow_ast` is available even when nom is preferred.
+pub fn parse_query_with_config(
+    config: impl Into<ParsingConfig>,
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<SqlQuery, ReadysetParsingError> {
+    let config: ParsingConfig = config.into();
+
+    // only-sqlparser: skip nom entirely (performance)
+    if !config.nom {
+        return parse_sqlparser_inner(dialect, input, parse_readyset_query);
+    }
+
+    // Run sqlparser to get shallow AST (needed even for only-nom mode)
+    let sqlparser_result = parse_sqlparser_inner(dialect, input.as_ref(), parse_readyset_query);
+
+    let shallow_ast = match &sqlparser_result {
+        Ok(SqlQuery::CreateCache(cc)) => match &cc.inner {
+            CacheInner::Statement { shallow, .. } => Some(shallow.clone()),
+            _ => None,
+        },
+        Ok(SqlQuery::Explain(readyset_sql::ast::ExplainStatement::CreateCache {
+            inner: CacheInner::Statement { shallow, .. },
+            ..
+        })) => Some(shallow.clone()),
+        _ => None,
+    };
+
+    let mut nom_result = nom_sql::parse_query(dialect, input.as_ref());
+
+    if let Some(shallow_ast_val) = shallow_ast {
+        let target = match nom_result.as_mut() {
+            Ok(SqlQuery::CreateCache(cc)) => match &mut cc.inner {
+                CacheInner::Statement { shallow, .. } => Some(shallow),
+                _ => None,
+            },
+            Ok(SqlQuery::Explain(readyset_sql::ast::ExplainStatement::CreateCache {
+                inner: CacheInner::Statement { shallow, .. },
+                ..
+            })) => Some(shallow),
+            _ => None,
+        };
+        if let Some(target) = target {
+            *target = shallow_ast_val;
+        }
+    }
+
+    // only-nom: return nom result with shallow AST populated
+    if !config.sqlparser {
+        return nom_result.map_err(ReadysetParsingError::NomError);
+    }
+
+    parse_both_inner(
+        config,
+        dialect,
+        "",
+        move |_, _| nom_result,
+        move |_, _, _| sqlparser_result,
+    )
+}
+
+/// Uses the default parsing config for tests, which can panic (see
+/// [`ParsingPreset::for_tests()`]); so should only be used in tests; otherwise use
+/// [`parse_query_with_config`]
+pub fn parse_query(
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<SqlQuery, ReadysetParsingError> {
+    parse_query_with_config(ParsingPreset::for_tests(), dialect, input)
+}
+
 export_parser!(
     /// Parse a single SQL expression.
     expr,
