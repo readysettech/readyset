@@ -87,15 +87,13 @@ pub(super) fn mir_node_to_flow_parts(
 
     match graph[mir_node].df_node_index() {
         None => {
-            let flow_node = match graph[mir_node].inner {
+            let mir_node_inner = &graph[mir_node].inner;
+            record_reachable(mir_node_inner);
+            let flow_node = match mir_node_inner {
                 MirNodeInner::Accumulator {
-                    ref on,
-                    ref group_by,
-                    ref kind,
-                    ..
+                    on, group_by, kind, ..
                 } => {
                     invariant_eq!(ancestors.len(), 1);
-                    record_reachable("accumulator");
                     let parent = ancestors[0];
                     Some(make_grouped_node(
                         graph,
@@ -109,13 +107,9 @@ pub(super) fn mir_node_to_flow_parts(
                     )?)
                 }
                 MirNodeInner::Aggregation {
-                    ref on,
-                    ref group_by,
-                    ref kind,
-                    ..
+                    on, group_by, kind, ..
                 } => {
                     invariant_eq!(ancestors.len(), 1);
-                    record_reachable("aggregation");
                     let parent = ancestors[0];
                     Some(make_grouped_node(
                         graph,
@@ -129,29 +123,22 @@ pub(super) fn mir_node_to_flow_parts(
                     )?)
                 }
                 MirNodeInner::Base {
-                    ref column_specs,
-                    ref primary_key,
-                    ref unique_keys,
+                    column_specs,
+                    primary_key,
+                    unique_keys,
                     ..
-                } => {
-                    record_reachable("base");
-                    Some(make_base_node(
-                        name,
-                        column_specs.as_slice(),
-                        custom_types,
-                        primary_key.as_deref(),
-                        unique_keys,
-                        mig,
-                    )?)
-                }
+                } => Some(make_base_node(
+                    name,
+                    column_specs.as_slice(),
+                    custom_types,
+                    primary_key.as_deref(),
+                    unique_keys,
+                    mig,
+                )?),
                 MirNodeInner::Extremum {
-                    ref on,
-                    ref group_by,
-                    ref kind,
-                    ..
+                    on, group_by, kind, ..
                 } => {
                     invariant_eq!(ancestors.len(), 1);
-                    record_reachable("extremum");
                     let parent = ancestors[0];
                     Some(make_grouped_node(
                         graph,
@@ -165,15 +152,14 @@ pub(super) fn mir_node_to_flow_parts(
                     )?)
                 }
                 MirNodeInner::Window {
-                    ref partition_by,
-                    ref group_by,
-                    ref order_by,
-                    ref function,
-                    ref args,
-                    ref output_column,
+                    partition_by,
+                    group_by,
+                    order_by,
+                    function,
+                    args,
+                    output_column,
                 } => {
                     invariant_eq!(ancestors.len(), 1);
-                    record_reachable("window");
                     Some(make_window_node(
                         graph,
                         name,
@@ -187,9 +173,8 @@ pub(super) fn mir_node_to_flow_parts(
                         mig,
                     )?)
                 }
-                MirNodeInner::Filter { ref conditions } => {
+                MirNodeInner::Filter { conditions } => {
                     invariant_eq!(ancestors.len(), 1);
-                    record_reachable("filter");
                     let parent = ancestors[0];
                     Some(make_filter_node(
                         graph,
@@ -203,7 +188,6 @@ pub(super) fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Identity => {
                     invariant_eq!(ancestors.len(), 1);
-                    record_reachable("identity");
                     let parent = ancestors[0];
                     Some(make_identity_node(
                         graph,
@@ -213,13 +197,8 @@ pub(super) fn mir_node_to_flow_parts(
                         mig,
                     )?)
                 }
-                MirNodeInner::Join {
-                    ref on,
-                    ref project,
-                    ..
-                } => {
+                MirNodeInner::Join { on, project, .. } => {
                     invariant_eq!(ancestors.len(), 2);
-                    record_reachable("join");
 
                     let left = ancestors[0];
                     let right = ancestors[1];
@@ -237,7 +216,6 @@ pub(super) fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::JoinAggregates => {
                     invariant_eq!(ancestors.len(), 2);
-                    record_reachable("join aggregate");
                     let left = ancestors[0];
                     let right = ancestors[1];
                     Some(make_join_aggregates_node(
@@ -253,7 +231,7 @@ pub(super) fn mir_node_to_flow_parts(
                     // See the docstring for MirNodeInner::DependentJoin
                     internal!("Encountered dependent join when lowering to dataflow")
                 }
-                MirNodeInner::ViewKey { ref key } => {
+                MirNodeInner::ViewKey { key } => {
                     return Err(ReadySetError::UnsupportedPlaceholders {
                         placeholders: key.mapped_ref(
                             |ViewKeyColumn {
@@ -263,25 +241,24 @@ pub(super) fn mir_node_to_flow_parts(
                     });
                 }
                 MirNodeInner::Leaf {
-                    ref keys,
+                    keys,
                     index_type,
                     lowered_to_df,
-                    ref order_by,
+                    order_by,
                     limit,
-                    ref returned_cols,
-                    ref default_row,
-                    ref aggregates,
+                    returned_cols,
+                    default_row,
+                    aggregates,
                     ..
                 } => {
-                    if !lowered_to_df {
+                    if !*lowered_to_df {
                         invariant_eq!(ancestors.len(), 1);
-                        record_reachable("leaf");
                         let parent = ancestors[0];
                         let reader_processing = make_reader_processing(
                             graph,
                             &parent,
                             order_by,
-                            limit,
+                            *limit,
                             returned_cols,
                             default_row.clone(),
                             aggregates,
@@ -291,20 +268,15 @@ pub(super) fn mir_node_to_flow_parts(
                             parent,
                             name,
                             keys,
-                            index_type,
+                            *index_type,
                             reader_processing,
                             mig,
                         )?;
                     }
                     None
                 }
-                MirNodeInner::LeftJoin {
-                    ref on,
-                    ref project,
-                    ..
-                } => {
+                MirNodeInner::LeftJoin { on, project, .. } => {
                     invariant_eq!(ancestors.len(), 2);
-                    record_reachable("left join");
                     let left = ancestors[0];
                     let right = ancestors[1];
                     Some(make_join_node(
@@ -319,9 +291,8 @@ pub(super) fn mir_node_to_flow_parts(
                         mig,
                     )?)
                 }
-                MirNodeInner::Project { ref emit } => {
+                MirNodeInner::Project { emit } => {
                     invariant_eq!(ancestors.len(), 1);
-                    record_reachable("project");
                     let parent = ancestors[0];
                     Some(make_project_node(
                         graph,
@@ -333,11 +304,10 @@ pub(super) fn mir_node_to_flow_parts(
                     )?)
                 }
                 MirNodeInner::Union {
-                    ref emit,
+                    emit,
                     duplicate_mode,
                 } => {
                     invariant_eq!(ancestors.len(), emit.len());
-                    record_reachable("union");
                     #[allow(clippy::unwrap_used)]
                     Some(make_union_node(
                         graph,
@@ -347,13 +317,12 @@ pub(super) fn mir_node_to_flow_parts(
                         &graph
                             .neighbors_directed(mir_node, Direction::Incoming)
                             .collect::<Vec<_>>(),
-                        duplicate_mode,
+                        *duplicate_mode,
                         mig,
                     )?)
                 }
-                MirNodeInner::Distinct { ref group_by } => {
+                MirNodeInner::Distinct { group_by } => {
                     invariant_eq!(ancestors.len(), 1);
-                    record_reachable("distinct");
                     let parent = ancestors[0];
                     Some(make_distinct_node(
                         graph,
@@ -365,18 +334,17 @@ pub(super) fn mir_node_to_flow_parts(
                     )?)
                 }
                 MirNodeInner::Paginate {
-                    ref order,
-                    ref group_by,
+                    order,
+                    group_by,
                     limit,
                     ..
                 }
                 | MirNodeInner::TopK {
-                    ref order,
-                    ref group_by,
+                    order,
+                    group_by,
                     limit,
                 } => {
                     invariant_eq!(ancestors.len(), 1);
-                    record_reachable("paginate/topk node");
                     let parent = ancestors[0];
                     Some(make_paginate_or_topk_node(
                         graph,
@@ -385,14 +353,13 @@ pub(super) fn mir_node_to_flow_parts(
                         &graph.columns(mir_node),
                         order,
                         group_by,
-                        limit,
+                        *limit,
                         matches!(graph[mir_node].inner, MirNodeInner::TopK { .. }),
                         mig,
                     )?)
                 }
                 MirNodeInner::AliasTable { .. } => None,
             };
-
             if let MirNodeInner::Leaf {
                 ref mut lowered_to_df,
                 ..
@@ -413,8 +380,39 @@ pub(super) fn mir_node_to_flow_parts(
     }
 }
 
-fn record_reachable(node: &str) {
-    antithesis_sdk::assert_reachable!("Create dataflow node", &json!({"node_type": node}));
+macro_rules! record_reachable {
+    ($node_type:expr) => {{
+        antithesis_sdk::assert_reachable!(
+            "Create dataflow node",
+            &json!({"node_type": $node_type})
+        );
+    }};
+}
+
+fn record_reachable(node: &MirNodeInner) {
+    let node_type: &'static str = node.into();
+    match node {
+        MirNodeInner::Accumulator { .. } => record_reachable!(node_type),
+        MirNodeInner::Aggregation { .. } => record_reachable!(node_type),
+        MirNodeInner::Base { .. } => record_reachable!(node_type),
+        MirNodeInner::Window { .. } => record_reachable!(node_type),
+        MirNodeInner::Extremum { .. } => record_reachable!(node_type),
+        MirNodeInner::Filter { .. } => record_reachable!(node_type),
+        MirNodeInner::Identity => record_reachable!(node_type),
+        MirNodeInner::Join { .. } => record_reachable!(node_type),
+        MirNodeInner::JoinAggregates => record_reachable!(node_type),
+        MirNodeInner::LeftJoin { .. } => record_reachable!(node_type),
+        MirNodeInner::DependentJoin { .. } => record_reachable!(node_type),
+        MirNodeInner::DependentLeftJoin { .. } => record_reachable!(node_type),
+        MirNodeInner::ViewKey { .. } => record_reachable!(node_type),
+        MirNodeInner::Project { .. } => record_reachable!(node_type),
+        MirNodeInner::Union { .. } => record_reachable!(node_type),
+        MirNodeInner::Paginate { .. } => record_reachable!(node_type),
+        MirNodeInner::TopK { .. } => record_reachable!(node_type),
+        MirNodeInner::Distinct { .. } => record_reachable!(node_type),
+        MirNodeInner::AliasTable { .. } => record_reachable!(node_type),
+        MirNodeInner::Leaf { .. } => record_reachable!(node_type),
+    }
 }
 
 fn column_names(cs: &[Column]) -> Vec<&str> {

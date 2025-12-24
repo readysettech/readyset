@@ -16,6 +16,7 @@ use readyset_sql::ast::{
 };
 use readyset_sql::DialectDisplay;
 use serde::{Deserialize, Serialize};
+use strum::IntoStaticStr;
 use vec1::Vec1;
 
 use crate::Column;
@@ -70,7 +71,7 @@ impl Display for ViewKeyColumn {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, IntoStaticStr)]
 pub enum MirNodeInner {
     /// Node that computes an accumulation function on a column grouped by another set of columns,
     /// outputting its result as an additional column.

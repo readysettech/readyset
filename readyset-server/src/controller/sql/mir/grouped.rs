@@ -295,9 +295,38 @@ fn joinable_aggregate_nodes(
         .collect()
 }
 
+macro_rules! record_reachable {
+    ($fn_name:expr) => {{
+        antithesis_sdk::assert_reachable!(
+            "Lowered post-lookup aggregate function",
+            &json!({"function": $fn_name})
+        );
+    }};
+}
+
 fn record_reachable(function: &FunctionExpr) {
     let fn_name: &'static str = function.into();
-    antithesis_sdk::assert_reachable!("PostLookupAggregateFunction", &json!({"function": fn_name}));
+    match function {
+        ArrayAgg { .. } => record_reachable!(fn_name),
+        Avg { .. } => record_reachable!(fn_name),
+        Count { .. } => record_reachable!(fn_name),
+        CountStar => record_reachable!(fn_name),
+        Extract { .. } => record_reachable!(fn_name),
+        Lower { .. } => record_reachable!(fn_name),
+        Upper { .. } => record_reachable!(fn_name),
+        Sum { .. } => record_reachable!(fn_name),
+        Max(..) => record_reachable!(fn_name),
+        Min(..) => record_reachable!(fn_name),
+        GroupConcat { .. } => record_reachable!(fn_name),
+        RowNumber => record_reachable!(fn_name),
+        Rank => record_reachable!(fn_name),
+        DenseRank => record_reachable!(fn_name),
+        StringAgg { .. } => record_reachable!(fn_name),
+        Bucket { .. } => record_reachable!(fn_name),
+        Substring { .. } => record_reachable!(fn_name),
+        JsonObjectAgg { .. } => record_reachable!(fn_name),
+        Call { .. } => record_reachable!(fn_name),
+    }
 }
 
 /// Build up the set of [`PostLookupAggregates`] for the given query, given as both the query
@@ -343,15 +372,13 @@ pub(super) fn post_lookup_aggregates(
 
     let mut aggregates = vec![];
     for (function, alias) in &query_graph.aggregates {
+        record_reachable(function);
         aggregates.push(PostLookupAggregate {
             column: Column::named(alias.clone()).aliased_as_table(query_name.clone()),
             function: match function {
-                ArrayAgg { .. } => {
-                    record_reachable(function);
-                    PostLookupAggregateFunction::ArrayAgg {
-                        op: function.try_into()?,
-                    }
-                }
+                ArrayAgg { .. } => PostLookupAggregateFunction::ArrayAgg {
+                    op: function.try_into()?,
+                },
                 Avg { .. } => {
                     unsupported!("Average is not supported as a post-lookup aggregate")
                 }
@@ -368,24 +395,12 @@ pub(super) fn post_lookup_aggregates(
                 }
                 // Count and sum are handled the same way, as re-aggregating counts is
                 // done by just summing the numbers together
-                Count { .. } | CountStar | Sum { .. } => {
-                    record_reachable(function);
-                    PostLookupAggregateFunction::Sum
-                }
-                Max(_) => {
-                    record_reachable(function);
-                    PostLookupAggregateFunction::Max
-                }
-                Min(_) => {
-                    record_reachable(function);
-                    PostLookupAggregateFunction::Min
-                }
-                GroupConcat { .. } => {
-                    record_reachable(function);
-                    PostLookupAggregateFunction::GroupConcat {
-                        op: function.try_into()?,
-                    }
-                }
+                Count { .. } | CountStar | Sum { .. } => PostLookupAggregateFunction::Sum,
+                Max(_) => PostLookupAggregateFunction::Max,
+                Min(_) => PostLookupAggregateFunction::Min,
+                GroupConcat { .. } => PostLookupAggregateFunction::GroupConcat {
+                    op: function.try_into()?,
+                },
                 Extract { .. }
                 | Call { .. }
                 | Substring { .. }
@@ -393,18 +408,12 @@ pub(super) fn post_lookup_aggregates(
                 | Upper { .. }
                 | Bucket { .. } => continue,
                 // TODO: should this be supported given the projection workaround we have?
-                JsonObjectAgg { .. } => {
-                    record_reachable(function);
-                    PostLookupAggregateFunction::JsonObjectAgg {
-                        op: function.try_into()?,
-                    }
-                }
-                StringAgg { .. } => {
-                    record_reachable(function);
-                    PostLookupAggregateFunction::StringAgg {
-                        op: function.try_into()?,
-                    }
-                }
+                JsonObjectAgg { .. } => PostLookupAggregateFunction::JsonObjectAgg {
+                    op: function.try_into()?,
+                },
+                StringAgg { .. } => PostLookupAggregateFunction::StringAgg {
+                    op: function.try_into()?,
+                },
             },
         });
     }

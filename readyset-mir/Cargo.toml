@@ -13,6 +13,7 @@ petgraph = { workspace = true, features = ["serde-1"] }
 itertools = { workspace = true }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 serde = { workspace = true, features = ["rc", "derive"] }
+strum = { workspace = true }
 vec1 = { workspace = true }
 fixedbitset = { workspace = true }
 derive_more = { workspace = true }
