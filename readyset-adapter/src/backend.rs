@@ -2510,82 +2510,161 @@ where
         upstream.can_prepare(&query).await
     }
 
-    /// Process an EXPLAIN CREATE CACHE request.
-    ///
-    /// If necessary, first perform a dry run migration.  If the migration state is inlined, allow
-    /// the migration handler to advance the query's processing in the background.  A result of
-    /// pending indicates that the caller should try again later.
-    async fn explain_create_cache(
-        &mut self,
-        id: QueryId,
-        req: ViewCreateRequest,
-        migration_state: Option<MigrationState>,
-        cache_type: Option<CacheType>,
-    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        use MigrationState::*;
+    /// Extract any requested cache type from the EXPLAIN statement.
+    fn requested_cache_type(explain: &ExplainStatement) -> ReadySetResult<Option<CacheType>> {
+        let ExplainStatement::CreateCache { cache_type, .. } = explain else {
+            internal!("Unexpected EXPLAIN: {explain:?}");
+        };
+        Ok(*cache_type)
+    }
 
-        let cache_mode = self.settings.cache_mode;
-        let shallow_requested = cache_type == Some(CacheType::Shallow);
-        let migration_unknown = matches!(migration_state, Some(Pending) | None);
-
-        // Perform a dry run migration if necessary to determine support.
-        let migration_state =
-            if migration_unknown && cache_mode.defaults_deep() && !shallow_requested {
-                match self.noria.handle_dry_run(id, &req).await {
-                    Ok(()) => Some(DryRunSucceeded),
-                    Err(e) if e.is_transient() => Some(Pending),
-                    Err(e) => Some(Unsupported(
-                        e.unsupported_cause().unwrap_or_else(|| e.to_string()),
-                    )),
-                }
-            } else {
-                migration_state
-            };
-
-        // Determine support.
-        let supported = match cache_type {
-            Some(CacheType::Deep) => match migration_state {
-                Some(Successful(_)) => "cached",
-                Some(DryRunSucceeded) => "yes",
-                Some(Unsupported(ref e)) => &format!("no: {e}"),
-                Some(Inlined(_) | Pending) | None => "pending",
-            },
-            Some(CacheType::Shallow) => {
-                if matches!(migration_state, Some(Successful(_))) {
-                    "cached"
-                } else if let Err(e) = self.upstream_supports(&req).await {
-                    &format!("no: {e}")
-                } else {
-                    "yes"
-                }
-            }
-            None => match migration_state {
-                Some(Successful(_)) => "cached",
-                Some(Inlined(_) | Pending) if cache_mode.defaults_deep() => "pending",
-                Some(DryRunSucceeded) if cache_mode.defaults_deep() => "yes",
-                Some(Unsupported(ref e)) if cache_mode.is_deep() => &format!("no: {e}"),
-                Some(Inlined(_) | Pending | DryRunSucceeded | Unsupported(_)) | None => {
-                    if let Err(e) = self.upstream_supports(&req).await {
-                        &format!("no: {e}")
-                    } else {
-                        "yes"
-                    }
-                }
-            },
+    /// Extract the deep and shallow representations of the query from the EXPLAIN.
+    fn query_from_explain(
+        &self,
+        explain: &ExplainStatement,
+    ) -> ReadySetResult<(
+        ReadySetResult<ViewCreateRequest>,
+        ReadySetResult<ViewCreateRequest>,
+    )> {
+        let ExplainStatement::CreateCache { inner, .. } = explain else {
+            internal!("Unexpected EXPLAIN: {explain:?}");
         };
 
-        // Potentially update query status cache.
-        if let Some(migration_state) = migration_state {
-            self.state
-                .query_status_cache
-                .update_query_migration_state(&req, migration_state, None);
+        let inner = match inner {
+            Ok(inner) => inner,
+            Err(e) => {
+                return Err(ReadySetError::UnparseableQuery(e.clone()));
+            }
+        };
+
+        match inner {
+            CacheInner::Statement(stmt) => {
+                let mut stmt_deep = stmt.clone();
+                let mut stmt_shallow = stmt.clone();
+
+                // Rewrite for deep.
+                adapter_rewrites::rewrite_query(&mut stmt_deep, self.noria.rewrite_params())?;
+                let deep =
+                    ViewCreateRequest::new(*stmt_deep, self.noria.schema_search_path().to_owned());
+
+                // Rewrite for shallow.
+                adapter_rewrites::rewrite_equivalent(
+                    &mut stmt_shallow,
+                    self.noria.rewrite_params(),
+                    ParameterizeMode::Full,
+                )?;
+                let shallow = ViewCreateRequest::new(
+                    *stmt_shallow,
+                    self.noria.schema_search_path().to_owned(),
+                );
+
+                Ok((Ok(deep), Ok(shallow)))
+            }
+            CacheInner::Id(id) => match self.state.query_status_cache.query(id.as_str()) {
+                Some(q) => match q {
+                    Query::Parsed(req) => {
+                        let req = (*req).clone();
+                        let (_, migration_state) = self
+                            .state
+                            .query_status_cache
+                            .try_query_migration_state(&req);
+
+                        // The only way the shallow representation is in the query status cache is
+                        // if we've inserted an entry for an existing shallow cache.
+                        if matches!(
+                            migration_state,
+                            Some(MigrationState::Successful(CacheType::Shallow))
+                        ) {
+                            Ok((
+                                Err(ReadySetError::NoQueryForId { id: id.to_string() }),
+                                Ok(req),
+                            ))
+                        } else {
+                            Ok((
+                                Ok(req),
+                                Err(ReadySetError::NoQueryForId { id: id.to_string() }),
+                            ))
+                        }
+                    }
+                    Query::ParseFailed(_, e) => Err(ReadySetError::UnparseableQuery(e)),
+                },
+                None => Err(ReadySetError::NoQueryForId { id: id.to_string() }),
+            },
+        }
+    }
+
+    // Determine the migration state of the deep representation, performing a dry run if necessary.
+    async fn explain_migration_state(
+        &mut self,
+        deep: &ReadySetResult<ViewCreateRequest>,
+        cache_mode: CacheMode,
+        cache_type: Option<CacheType>,
+    ) -> MigrationState {
+        let deep = match deep {
+            Ok(deep) => deep,
+            Err(e) => {
+                return MigrationState::Unsupported(e.to_string());
+            }
+        };
+
+        // Check if we already know the migration state for this query.
+        let (id, migration_state) = self
+            .state
+            .query_status_cache
+            .try_query_migration_state(deep);
+
+        // Alternatively ask the controller if it knows about this query.
+        let migration_state = match migration_state {
+            Some(migration_state) => migration_state,
+            None => {
+                if self
+                    .noria
+                    .get_view_name(deep.clone())
+                    .await
+                    .is_ok_and(|r| r.is_some())
+                {
+                    MigrationState::Successful(CacheType::Deep)
+                } else {
+                    MigrationState::Pending
+                }
+            }
+        };
+
+        // If we already know the migration state, return it.
+        if migration_state != MigrationState::Pending {
+            return migration_state;
         }
 
-        // Output result.
+        // If a shallow cache was explicitly requested, just return the migration state we have.
+        if cache_type == Some(CacheType::Shallow) {
+            return migration_state;
+        }
+
+        // The default cache mode won't consider deep, and no one asked for deep.
+        if cache_mode == CacheMode::Shallow && cache_type != Some(CacheType::Deep) {
+            return migration_state;
+        }
+
+        // We don't yet know the migration state and are considering a deep cache.
+        match self.noria.handle_dry_run(id, deep).await {
+            Ok(()) => MigrationState::DryRunSucceeded,
+            Err(e) if e.is_transient() => MigrationState::Pending,
+            Err(e) => {
+                MigrationState::Unsupported(e.unsupported_cause().unwrap_or_else(|| e.to_string()))
+            }
+        }
+    }
+
+    fn output_explain_create_cache(
+        &self,
+        query_id: QueryId,
+        req: &ViewCreateRequest,
+        supported: &str,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         Ok(noria_connector::QueryResult::Meta(vec![
             MetaVariable {
                 name: "query id".into(),
-                value: id.to_string(),
+                value: query_id.to_string(),
             },
             MetaVariable {
                 name: "query".into(),
@@ -2596,6 +2675,87 @@ where
                 value: supported.into(),
             },
         ]))
+    }
+
+    /// Process an EXPLAIN CREATE CACHE request.
+    ///
+    /// If necessary, first perform a dry run migration.  If the migration state is inlined, allow
+    /// the migration handler to advance the query's processing in the background.  A result of
+    /// pending indicates that the caller should try again later.
+    async fn explain_create_cache(
+        &mut self,
+        explain: &ExplainStatement,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let cache_mode = self.settings.cache_mode;
+        let cache_type = Self::requested_cache_type(explain)?;
+
+        // Get the deep and shallow representations of the query.
+        let (deep, shallow) = self.query_from_explain(explain)?;
+
+        // The only time we care about the migration state of a shallow representation is if we've
+        // marked one as cached in the query status cache.
+        if let Ok(shallow) = &shallow
+            && let (query_id, Some(MigrationState::Successful(CacheType::Shallow))) = self
+                .state
+                .query_status_cache
+                .try_query_migration_state(shallow)
+        {
+            return self.output_explain_create_cache(query_id, shallow, "cached");
+        }
+
+        // Determine support.
+        let migration_state = self
+            .explain_migration_state(&deep, cache_mode, cache_type)
+            .await;
+        match cache_type {
+            Some(CacheType::Deep) => {
+                let deep = deep?;
+                let supported = match migration_state {
+                    MigrationState::Successful(..) => "cached",
+                    MigrationState::DryRunSucceeded => "yes",
+                    MigrationState::Unsupported(ref e) => &format!("no: {e}"),
+                    MigrationState::Inlined(..) | MigrationState::Pending => "pending",
+                };
+
+                self.output_explain_create_cache(QueryId::from(&deep), &deep, supported)
+            }
+            Some(CacheType::Shallow) => {
+                let shallow = shallow?;
+                let supported = if let Err(e) = self.upstream_supports(&shallow).await {
+                    &format!("no: {e}")
+                } else {
+                    "yes"
+                };
+
+                self.output_explain_create_cache(QueryId::from(&shallow), &shallow, supported)
+            }
+            None => {
+                let defaults_deep = cache_mode.defaults_deep();
+                let (req, supported): (_, &str) = match migration_state {
+                    MigrationState::Successful(..) => (deep?, "cached"),
+                    MigrationState::Inlined(..) | MigrationState::Pending if defaults_deep => {
+                        (deep?, "pending")
+                    }
+                    MigrationState::DryRunSucceeded if defaults_deep => (deep?, "yes"),
+                    MigrationState::Unsupported(ref e) if cache_mode.is_deep() => {
+                        (deep?, &format!("no: {e}"))
+                    }
+                    MigrationState::Inlined(..)
+                    | MigrationState::Pending
+                    | MigrationState::DryRunSucceeded
+                    | MigrationState::Unsupported(..) => {
+                        let shallow = shallow?;
+                        if let Err(e) = self.upstream_supports(&shallow).await {
+                            (shallow, &format!("no: {e}"))
+                        } else {
+                            (shallow, "yes")
+                        }
+                    }
+                };
+
+                self.output_explain_create_cache(QueryId::from(&req), &req, supported)
+            }
+        }
     }
 
     fn drop_view_request(&mut self, view_request: &ViewCreateRequest) {
@@ -3065,63 +3225,8 @@ where
             SqlQuery::Explain(ExplainStatement::Materializations) => {
                 self.noria.explain_materializations().await
             }
-            SqlQuery::Explain(ExplainStatement::CreateCache {
-                inner, cache_type, ..
-            }) => {
-                match inner {
-                    Ok(inner) => {
-                        let view_request = match inner {
-                            CacheInner::Statement(stmt) => {
-                                let mut stmt = *stmt.clone();
-                                adapter_rewrites::rewrite_query(
-                                    &mut stmt,
-                                    self.noria.rewrite_params(),
-                                )?;
-
-                                ViewCreateRequest::new(
-                                    stmt.clone(),
-                                    self.noria.schema_search_path().to_owned(),
-                                )
-                            }
-                            CacheInner::Id(id) => {
-                                match self.state.query_status_cache.query(id.as_str()) {
-                                    Some(q) => match q {
-                                        Query::Parsed(view_request) => (*view_request).clone(),
-                                        Query::ParseFailed(_, err) => {
-                                            return Err(ReadySetError::UnparseableQuery(err));
-                                        }
-                                    },
-                                    None => {
-                                        return Err(ReadySetError::NoQueryForId {
-                                            id: id.to_string(),
-                                        });
-                                    }
-                                }
-                            }
-                        };
-
-                        let (id, mut migration_state) = self
-                            .state
-                            .query_status_cache
-                            .try_query_migration_state(&view_request);
-
-                        // If the QSC didn't have this query, check with the controller to see if a
-                        // view already exists there
-                        if migration_state.is_none()
-                            && self
-                                .noria
-                                .get_view_name(view_request.clone())
-                                .await?
-                                .is_some()
-                        {
-                            migration_state = Some(MigrationState::Successful(CacheType::Deep));
-                        }
-
-                        self.explain_create_cache(id, view_request, migration_state, *cache_type)
-                            .await
-                    }
-                    Err(err) => Err(ReadySetError::UnparseableQuery(err.clone())),
-                }
+            SqlQuery::Explain(explain @ ExplainStatement::CreateCache { .. }) => {
+                self.explain_create_cache(explain).await
             }
             SqlQuery::CreateCache(create_cache_stmt) => {
                 if !self.allow_cache_ddl {
