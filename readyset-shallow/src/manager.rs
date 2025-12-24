@@ -8,6 +8,7 @@ use metrics::counter;
 use moka::future::Cache as MokaCache;
 use moka::notification::RemovalCause;
 use papaya::HashMap;
+use seize::Collector;
 use tracing::info;
 
 use readyset_client::consensus::CacheDDLRequest;
@@ -39,6 +40,11 @@ pub struct CacheManager<K, V> {
     next_id: Mutex<u64>,
 }
 
+fn new_table<K, V>() -> HashMap<K, V> {
+    let gc = Collector::new().batch_size(1);
+    HashMap::builder().collector(gc).build()
+}
+
 impl<K, V> CacheManager<K, V>
 where
     K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
@@ -61,9 +67,9 @@ where
 
     pub fn new(max_capacity: Option<u64>) -> Self {
         Self {
-            caches: Default::default(),
-            names: Default::default(),
-            query_ids: Default::default(),
+            caches: new_table(),
+            names: new_table(),
+            query_ids: new_table(),
             inner: Self::new_inner(max_capacity),
             next_id: Default::default(),
         }

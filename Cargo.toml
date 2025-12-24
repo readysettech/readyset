@@ -222,6 +222,7 @@ rocksdb = { version = "0.22.0", default-features = false, features = [
 rusty-fork = "0.3.0"
 rustyline = "17.0"
 rustyline-derive = "0.11.1"
+seize = "0.4.9"
 serde = "1.0.198"
 serde_bytes = "0.11"
 serde_json = "1.0.116"

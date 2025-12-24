@@ -5498,6 +5498,7 @@ dependencies = [
  "readyset-errors",
  "readyset-sql",
  "readyset-util",
+ "seize",
  "tokio",
  "tokio-postgres",
  "tracing",

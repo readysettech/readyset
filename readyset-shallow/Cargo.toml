@@ -15,6 +15,7 @@ tracing = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true }
 tokio-postgres = { workspace = true }
+seize = { workspace = true }
 psql-srv = { path = "../psql-srv" }
 
 readyset-client = { path = "../readyset-client" }
