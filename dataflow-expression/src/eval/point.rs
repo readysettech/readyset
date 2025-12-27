@@ -1,12 +1,12 @@
 use super::spatial::PostgisTypeFlags;
+use crate::eval::spatial::Pair;
 use readyset_data::dialect::SqlEngine;
 use readyset_errors::{invalid_query_err, ReadySetError, ReadySetResult};
 use tracing::trace;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Point {
-    x: f64,
-    y: f64,
+    coord: Pair,
     srid: Option<u32>,
 }
 
@@ -71,8 +71,7 @@ impl Point {
         }
 
         Ok(Point {
-            x,
-            y,
+            coord: Pair { x, y },
             srid: Some(srid),
         })
     }
@@ -135,8 +134,8 @@ impl Point {
         let is_little_endian = bytes[0] == 0x01;
         let (x, y) = Self::extract_coordinates(bytes, is_little_endian)?;
         let srid = Self::verify_postgis_type(bytes, is_little_endian)?;
-
-        Ok(Point { x, y, srid })
+        let coord = Pair { x, y };
+        Ok(Point { coord, srid })
     }
 
     /// Extracts the SRID from a PostGIS byte array and validates the geometry type and dimension flags.
@@ -198,15 +197,18 @@ impl Point {
     /// Format the point as a string. The format is engine-specific.
     pub fn format(&self, engine: SqlEngine, print_srid: bool) -> Result<String, ReadySetError> {
         match engine {
-            SqlEngine::MySQL => Ok(format!("POINT({} {})", self.x, self.y)),
+            SqlEngine::MySQL => Ok(format!("POINT({} {})", self.coord.x, self.coord.y)),
             SqlEngine::PostgreSQL => {
                 if print_srid {
                     if let Some(srid) = self.srid {
                         // EWKT format
-                        return Ok(format!("SRID={};POINT({} {})", srid, self.x, self.y));
+                        return Ok(format!(
+                            "SRID={};POINT({} {})",
+                            srid, self.coord.x, self.coord.y
+                        ));
                     }
                 }
-                Ok(format!("POINT({} {})", self.x, self.y))
+                Ok(format!("POINT({} {})", self.coord.x, self.coord.y))
             }
         }
     }
@@ -219,8 +221,8 @@ mod tests {
 
     // Helper function shared between MySQL and PostgreSQL tests
     fn assert_point_coordinates(pt: &Point, expected_x: f64, expected_y: f64) {
-        assert!((pt.x - expected_x).abs() < 1e-10);
-        assert!((pt.y - expected_y).abs() < 1e-10);
+        assert!((pt.coord.x - expected_x).abs() < 1e-10);
+        assert!((pt.coord.y - expected_y).abs() < 1e-10);
     }
 
     mod mysql {
