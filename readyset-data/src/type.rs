@@ -215,6 +215,10 @@ pub enum DfType {
     /// PostgreSQL.
     PostgisPoint,
 
+    /// [PostGIS `polygon`](https://postgis.net/docs/manual-3.5/using_postgis_dbmanagement.html#Polygon)
+    ///
+    /// This "postgis"-specific type is meant to distinguish it from the native `polygon` type in
+    /// PostgreSQL.
     PostgisPolygon,
 
     /// [PostgreSQL `tsvector`](https://www.postgresql.org/docs/current/datatype-textsearch.html).
