@@ -280,14 +280,16 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
                             Ok(Self::Serial)
                         } else if name.eq_ignore_ascii_case("point") {
                             Ok(Self::Point)
-                        } else if name.eq_ignore_ascii_case("geometry")
-                            && values
-                                .first()
-                                .cloned()
-                                .unwrap_or_default()
-                                .eq_ignore_ascii_case("point")
-                        {
-                            Ok(Self::PostgisPoint)
+                        } else if name.eq_ignore_ascii_case("geometry") {
+                            match values.first().map(|s| s.as_str()) {
+                                Some(v) if v.eq_ignore_ascii_case("point") => {
+                                    Ok(Self::PostgisPoint)
+                                }
+                                Some(v) if v.eq_ignore_ascii_case("polygon") => {
+                                    Ok(Self::PostgisPolygon)
+                                }
+                                _ => Ok(Self::Other(name.into())),
+                            }
                         } else {
                             Ok(Self::Other(name.into()))
                         }
@@ -323,6 +325,7 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
             Table(_column_definition_list) => unsupported!("TABLE type"),
             GeometricType(ty) => match ty {
                 Point => Ok(Self::Point),
+                Polygon => Ok(Self::PostgisPolygon),
                 t => unsupported!("geometric type {t}"),
             },
             // DuckDB-specific numeric types
