@@ -108,17 +108,6 @@ impl Polygon {
         })
     }
 
-    fn extract_number_of_pairs(
-        bytes: &[u8],
-        is_little_endian: bool,
-        start_byte: usize,
-    ) -> ReadySetResult<u32> {
-        if bytes.len() < start_byte + NUM_OF_BYTES_U32 {
-            return Err(invalid_query_err!("Invalid polygon byte array size"));
-        }
-        Self::extract_bytes_u32(&bytes, is_little_endian, start_byte)
-    }
-
     fn extract_pair(
         bytes: &[u8],
         is_little_endian: bool,
@@ -137,7 +126,7 @@ impl Polygon {
         is_little_endian: bool,
         start_byte: usize,
     ) -> ReadySetResult<Vec<Pair>> {
-        let num_pairs = Self::extract_number_of_pairs(&bytes, is_little_endian, start_byte)?; // First 4 bytes
+        let num_pairs = Self::extract_bytes_u32(&bytes, is_little_endian, start_byte)?; // First 4 bytes
         let mut pairs: Vec<Pair> = Vec::new();
         let mut offset = start_byte + NUM_OF_BYTES_U32;
         for _num in 0..num_pairs {

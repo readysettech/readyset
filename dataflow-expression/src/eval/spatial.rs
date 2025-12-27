@@ -33,9 +33,9 @@ use super::point::Point;
 use super::polygon::Polygon;
 
 pub enum SpatialType {
-    PostgisPoint,   // 1
-    PostgisPolygon, // 3
-    MysqlPoint,     // 1
+    PostgisPoint,
+    PostgisPolygon,
+    MysqlPoint,
 }
 
 #[derive(Debug, Clone)]
