@@ -64,6 +64,54 @@ bitflags! {
     }
 }
 
+/// Extracts the SRID from a PostGIS byte array and validates the dimension flags.
+///
+/// Returns the SRID if present, or None if not. Errors if:
+/// - Has bounding box
+/// - Has Z dimension
+/// - Has M dimension
+pub(crate) fn extract_srid(bytes: &[u8], is_little_endian: bool) -> ReadySetResult<Option<u32>> {
+    let type_code = u32::from_le_bytes(
+        bytes[1..5]
+            .try_into()
+            .map_err(|_| invalid_query_err!("Invalid spatial type"))?,
+    );
+
+    let flags = PostgisTypeFlags::from_bits_retain(type_code);
+
+    // Extract SRID if present - it obeys the byte order of the rest of the data block.
+    let srid = if flags.contains(PostgisTypeFlags::HAS_SRID) {
+        if is_little_endian {
+            Some(u32::from_le_bytes(
+                bytes[5..9]
+                    .try_into()
+                    .map_err(|_| invalid_query_err!("Invalid SRID"))?,
+            ))
+        } else {
+            Some(u32::from_be_bytes(
+                bytes[5..9]
+                    .try_into()
+                    .map_err(|_| invalid_query_err!("Invalid SRID"))?,
+            ))
+        }
+    } else {
+        None
+    };
+
+    // Validate dimension flags
+    if flags.contains(PostgisTypeFlags::HAS_BBOX) {
+        invalid_query_err!("Not supporting postgis bounding boxes");
+    }
+    if flags.contains(PostgisTypeFlags::HAS_Z) {
+        invalid_query_err!("Not supporting postgis geometrical shapes with Z dimensions");
+    }
+    if flags.contains(PostgisTypeFlags::HAS_M) {
+        invalid_query_err!("Not supporting postgis geometrical shapes with M dimensions");
+    }
+
+    Ok(srid)
+}
+
 fn try_get_spatial_type_from_mysql(bytes: &[u8]) -> ReadySetResult<SpatialType> {
     if bytes.len() < 9 {
         return Err(invalid_query_err!("Input too short for spatial type"));

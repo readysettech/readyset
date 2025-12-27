@@ -1,4 +1,4 @@
-use super::spatial::PostgisTypeFlags;
+use super::spatial::extract_srid;
 use crate::eval::spatial::Pair;
 use readyset_data::dialect::SqlEngine;
 use readyset_errors::{invalid_query_err, ReadySetError, ReadySetResult};
@@ -132,66 +132,10 @@ impl Point {
 
         // tells us the byte order of the points fields (X, Y), which are at the end of the array.
         let is_little_endian = bytes[0] == 0x01;
-        let (x, y) = Self::extract_coordinates(bytes, is_little_endian)?;
-        let srid = Self::verify_postgis_type(bytes, is_little_endian)?;
+        let srid = extract_srid(&bytes, is_little_endian)?;
+        let (x, y) = Self::extract_coordinates(&bytes, is_little_endian)?;
         let coord = Pair { x, y };
         Ok(Point { coord, srid })
-    }
-
-    /// Extracts the SRID from a PostGIS byte array and validates the geometry type and dimension flags.
-    ///
-    /// Returns the SRID if present, or None if not. Errors if:
-    /// - Geometry type is not a Point
-    /// - Has bounding box
-    /// - Has Z dimension
-    /// - Has M dimension
-    fn verify_postgis_type(bytes: &[u8], is_little_endian: bool) -> ReadySetResult<Option<u32>> {
-        let type_code = u32::from_le_bytes(
-            bytes[1..5]
-                .try_into()
-                .map_err(|_| invalid_query_err!("Invalid spatial type"))?,
-        );
-
-        // Check if geometry type is Point (1)
-        let geometry_type = type_code & 0x0F;
-        println!("Geometry type code: {}", geometry_type);
-        if geometry_type != 1 {
-            invalid_query_err!("Geometry type was not a point, was {:?}", geometry_type);
-        }
-
-        let flags = PostgisTypeFlags::from_bits_retain(type_code);
-
-        // Extract SRID if present - it obeys the byte order of the rest of the data block.
-        let srid = if flags.contains(PostgisTypeFlags::HAS_SRID) {
-            if is_little_endian {
-                Some(u32::from_le_bytes(
-                    bytes[5..9]
-                        .try_into()
-                        .map_err(|_| invalid_query_err!("Invalid SRID"))?,
-                ))
-            } else {
-                Some(u32::from_be_bytes(
-                    bytes[5..9]
-                        .try_into()
-                        .map_err(|_| invalid_query_err!("Invalid SRID"))?,
-                ))
-            }
-        } else {
-            None
-        };
-
-        // Validate dimension flags
-        if flags.contains(PostgisTypeFlags::HAS_BBOX) {
-            invalid_query_err!("Not supporting postgis bounding boxes");
-        }
-        if flags.contains(PostgisTypeFlags::HAS_Z) {
-            invalid_query_err!("Not supporting postgis points with Z dimensions");
-        }
-        if flags.contains(PostgisTypeFlags::HAS_M) {
-            invalid_query_err!("Not supporting postgis points with M dimensions");
-        }
-
-        Ok(srid)
     }
 
     /// Format the point as a string. The format is engine-specific.
