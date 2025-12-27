@@ -220,3 +220,189 @@ impl Polygon {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+
+    mod postgres {
+
+        use super::*;
+        use pretty_assertions::assert_eq;
+
+        fn make_ring_bytes(bytes: &mut Vec<u8>, ring: &Vec<Pair>, is_little_endian: bool) {
+            let num_of_pairs = ring.len() as u32;
+
+            if is_little_endian {
+                bytes.extend_from_slice(&num_of_pairs.to_le_bytes());
+            } else {
+                bytes.extend_from_slice(&num_of_pairs.to_be_bytes());
+            }
+
+            for pair in ring {
+                if is_little_endian {
+                    bytes.extend_from_slice(&pair.x.to_le_bytes());
+                    bytes.extend_from_slice(&pair.y.to_le_bytes());
+                } else {
+                    bytes.extend_from_slice(&pair.x.to_be_bytes());
+                    bytes.extend_from_slice(&pair.y.to_be_bytes());
+                }
+            }
+        }
+
+        fn make_polygon_bytes(
+            srid: Option<u32>,
+            external_ring: Option<&Vec<Pair>>,
+            holes: Option<&Vec<Vec<Pair>>>,
+            is_little_endian: bool,
+        ) -> Vec<u8> {
+            let mut bytes = Vec::with_capacity(9); // Initial Capacity for empty PostGIS Polygon is 9 bytes
+
+            bytes.push(if is_little_endian { 0x01 } else { 0x00 });
+
+            let type_code: u32 = if srid.is_some() { 0x20000003 } else { 3 };
+            bytes.extend_from_slice(&type_code.to_le_bytes());
+
+            // Srid
+            if let Some(srid) = srid {
+                if is_little_endian {
+                    bytes.extend_from_slice(&srid.to_le_bytes());
+                } else {
+                    bytes.extend_from_slice(&srid.to_be_bytes());
+                }
+            }
+
+            if let Some(external_ring) = external_ring {
+                let mut num_of_rings: u32 = 1;
+
+                if let Some(holes) = holes {
+                    num_of_rings += holes.len() as u32;
+                }
+
+                // write num_of_rings to the bytes array
+                if is_little_endian {
+                    bytes.extend_from_slice(&num_of_rings.to_le_bytes());
+                } else {
+                    bytes.extend_from_slice(&num_of_rings.to_be_bytes());
+                }
+
+                make_ring_bytes(&mut bytes, &external_ring, is_little_endian);
+
+                if let Some(holes) = holes {
+                    for hole in holes {
+                        make_ring_bytes(&mut bytes, hole, is_little_endian);
+                    }
+                }
+            } else {
+                bytes.extend_from_slice(&u32::to_le_bytes(0));
+            }
+
+            bytes
+        }
+
+        #[test]
+        fn test_valid_empty_polygon() {
+            let bytes = make_polygon_bytes(None, None, None, true);
+            let polygon = Polygon::try_from_postgis_bytes(&bytes).unwrap();
+            let format = polygon.format(SqlEngine::PostgreSQL, false).unwrap();
+            assert_eq!(format, "POLYGON EMPTY");
+        }
+
+        #[test]
+        fn test_valid_empty_polygon_with_srid() {
+            let bytes = make_polygon_bytes(Some(4326), None, None, true);
+            let polygon = Polygon::try_from_postgis_bytes(&bytes).unwrap();
+            let format = polygon.format(SqlEngine::PostgreSQL, true).unwrap();
+            assert_eq!(format, "SRID=4326;POLYGON EMPTY");
+        }
+
+        #[test]
+        fn test_invalid_empty_polygon() {
+            let bytes = vec![0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+            assert!(Polygon::try_from_postgis_bytes(&bytes).is_err());
+        }
+
+        #[test]
+        fn test_valid_polygon_le_be() {
+            let external_skelton: Vec<Pair> = vec![
+                Pair { x: 0.0, y: 0.0 },
+                Pair { x: 0.0, y: 1000.0 },
+                Pair {
+                    x: 1000.0,
+                    y: 1000.0,
+                },
+                Pair { x: 1000.0, y: 0.0 },
+                Pair { x: 0.0, y: 0.0 },
+            ];
+
+            let internal_holes: Vec<Vec<Pair>> = vec![vec![
+                Pair { x: 200.0, y: 200.0 },
+                Pair { x: 200.0, y: 800.0 },
+                Pair { x: 800.0, y: 800.0 },
+                Pair { x: 800.0, y: 200.0 },
+                Pair { x: 200.0, y: 200.0 },
+            ]];
+
+            // little endian
+            let bytes_le =
+                make_polygon_bytes(None, Some(&external_skelton), Some(&internal_holes), true);
+            let polygon_le = Polygon::try_from_postgis_bytes(&bytes_le).unwrap();
+
+            // big endian
+            let bytes_be =
+                make_polygon_bytes(None, Some(&external_skelton), Some(&internal_holes), false);
+            let polygon_be = Polygon::try_from_postgis_bytes(&bytes_be).unwrap();
+            assert_eq!(polygon_le.format(SqlEngine::PostgreSQL, false).unwrap(), "POLYGON((0 0,0 1000,1000 1000,1000 0,0 0),(200 200,200 800,800 800,800 200,200 200))");
+            assert_eq!(polygon_be.format(SqlEngine::PostgreSQL, false).unwrap(), "POLYGON((0 0,0 1000,1000 1000,1000 0,0 0),(200 200,200 800,800 800,800 200,200 200))");
+        }
+
+        #[test]
+        fn test_valid_polygon_le_be_with_srid() {
+            let external_skelton: Vec<Pair> = vec![
+                Pair { x: 0.0, y: 0.0 },
+                Pair { x: 0.0, y: 1000.0 },
+                Pair {
+                    x: 1000.0,
+                    y: 1000.0,
+                },
+                Pair { x: 1000.0, y: 0.0 },
+                Pair { x: 0.0, y: 0.0 },
+            ];
+
+            let internal_holes: Vec<Vec<Pair>> = vec![vec![
+                Pair { x: 200.0, y: 200.0 },
+                Pair { x: 200.0, y: 800.0 },
+                Pair { x: 800.0, y: 800.0 },
+                Pair { x: 800.0, y: 200.0 },
+                Pair { x: 200.0, y: 200.0 },
+            ]];
+
+            // little endian
+            let bytes_le = make_polygon_bytes(
+                Some(3857),
+                Some(&external_skelton),
+                Some(&internal_holes),
+                true,
+            );
+            let polygon_le = Polygon::try_from_postgis_bytes(&bytes_le).unwrap();
+
+            // big endian
+            let bytes_be = make_polygon_bytes(
+                Some(3857),
+                Some(&external_skelton),
+                Some(&internal_holes),
+                false,
+            );
+            let polygon_be = Polygon::try_from_postgis_bytes(&bytes_be).unwrap();
+            assert_eq!(polygon_le.format(SqlEngine::PostgreSQL, true).unwrap(), "SRID=3857;POLYGON((0 0,0 1000,1000 1000,1000 0,0 0),(200 200,200 800,800 800,800 200,200 200))");
+            assert_eq!(polygon_be.format(SqlEngine::PostgreSQL, true).unwrap(), "SRID=3857;POLYGON((0 0,0 1000,1000 1000,1000 0,0 0),(200 200,200 800,800 800,800 200,200 200))");
+        }
+
+        #[test]
+        fn test_invalid_polygon_bytes() {
+            let bytes = vec![1u8; 20]; // invalid bytes
+            assert!(Polygon::try_from_postgis_bytes(&bytes).is_err());
+        }
+    }
+}
