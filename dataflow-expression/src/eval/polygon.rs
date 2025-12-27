@@ -1,5 +1,5 @@
-use super::spatial::Pair;
 use super::spatial::extract_srid;
+use super::spatial::Pair;
 use readyset_data::dialect::SqlEngine;
 use readyset_errors::{invalid_query_err, ReadySetError, ReadySetResult};
 
@@ -36,21 +36,18 @@ pub(crate) struct Polygon {
     srid: Option<u32>,
 }
 
-const NUM_OF_BYTES_U32: usize = 4;
-const NUM_OF_BYTES_F64: usize = 8;
-const NUM_OF_BYTES_PAIR: usize = 16;
+const NUM_OF_BYTES_U32: usize = std::mem::size_of::<u32>();
+const NUM_OF_BYTES_F64: usize = std::mem::size_of::<f64>();
+const NUM_OF_BYTES_PAIR: usize = std::mem::size_of::<Pair>();
 
 impl Polygon {
     /// Create a new `Polygon` from a postgis byte array. This is the data we receive from the
     /// wal logical replication. The actual format is based on the postgis notion of
-    /// "Extended Well-Known Binary" (EWKB) [0]. This is much like the MySQL WKB format [1]
-    /// (see try_from_mysql_bytes), but explicitly includes the SRID (it's shoveled in the
-    /// middle of the byte array).
+    /// "Extended Well-Known Binary" (EWKB) [0]
     ///
-    /// Note: we are currently only support 2D polygons.
+    /// Note: we are currently only support 2D Postgis polygons.
     ///
     /// [0]: https://postgis.net/docs/using_postgis_dbmanagement.html#EWKB_EWKT
-    /// [1]: https://dev.mysql.com/doc/refman/8.4/en/gis-data-formats.html
     pub(crate) fn try_from_postgis_bytes(bytes: &[u8]) -> ReadySetResult<Self> {
         // Empty polygon have 9 Bytes long
         // 01 03 00 00 00 00 00 00 00
@@ -76,43 +73,39 @@ impl Polygon {
     fn extract_bytes_u32(
         bytes: &[u8],
         is_little_endian: bool,
-        start_byte: usize,
+        start: usize,
     ) -> ReadySetResult<u32> {
-        let range = start_byte..(start_byte + NUM_OF_BYTES_U32);
-        if is_little_endian {
-            Ok(u32::from_le_bytes(bytes[range].try_into().map_err(
-                |_| invalid_query_err!("Invalid little endian coordinate bytes"),
-            )?))
+        let end = start + NUM_OF_BYTES_U32;
+        let arr: [u8; 4] = bytes
+            .get(start..end)
+            .ok_or_else(|| invalid_query_err!("Insufficient bytes for u32 at offset {}", start))?
+            .try_into()
+            .map_err(|_| invalid_query_err!("Invalid byte slice length for u32"))?;
+
+        Ok(if is_little_endian {
+            u32::from_le_bytes(arr)
         } else {
-            Ok(u32::from_be_bytes(bytes[range].try_into().map_err(
-                |_| invalid_query_err!("Invalid big endian coordinate bytes"),
-            )?))
-        }
+            u32::from_be_bytes(arr)
+        })
     }
 
     fn extract_bytes_f64(
         bytes: &[u8],
         is_little_endian: bool,
-        start_byte: usize,
+        start: usize,
     ) -> ReadySetResult<f64> {
-        let range = start_byte..(start_byte + NUM_OF_BYTES_F64);
-        if is_little_endian {
-            Ok(f64::from_le_bytes(bytes[range].try_into().map_err(
-                |_| invalid_query_err!("Invalid little endian coordinate bytes"),
-            )?))
-        } else {
-            Ok(f64::from_be_bytes(bytes[range].try_into().map_err(
-                |_| invalid_query_err!("Invalid big endian coordinate bytes"),
-            )?))
-        }
-    }
+        let end = start + NUM_OF_BYTES_F64;
+        let arr: [u8; 8] = bytes
+            .get(start..end)
+            .ok_or_else(|| invalid_query_err!("Insufficient bytes for f64 at offset {}", start))?
+            .try_into()
+            .map_err(|_| invalid_query_err!("Invalid byte slice length for f64"))?;
 
-    fn extract_number_of_rings(
-        bytes: &[u8],
-        is_little_endian: bool,
-        start_byte: usize,
-    ) -> ReadySetResult<u32> {
-        Self::extract_bytes_u32(&bytes, is_little_endian, start_byte)
+        Ok(if is_little_endian {
+            f64::from_le_bytes(arr)
+        } else {
+            f64::from_be_bytes(arr)
+        })
     }
 
     fn extract_number_of_pairs(
@@ -164,7 +157,7 @@ impl Polygon {
         if srid == None {
             start_byte = 5;
         }
-        let number_of_rings = Self::extract_number_of_rings(&bytes, is_little_endian, start_byte)?;
+        let number_of_rings = Self::extract_bytes_u32(&bytes, is_little_endian, start_byte)?;
         if number_of_rings == 0 {
             return Ok((Vec::new(), Vec::new()));
         }
@@ -204,7 +197,7 @@ impl Polygon {
                 let mut polygon_string = String::new();
                 if print_srid {
                     if let Some(srid) = self.srid {
-                        polygon_string.push_str(&format!("SRID={};",srid));
+                        polygon_string.push_str(&format!("SRID={};", srid));
                     }
                 }
                 polygon_string.push_str("POLYGON");
@@ -218,7 +211,7 @@ impl Polygon {
                 polygon_string.push_str(&format!("(({})", Self::format_ring(&self.exterior_ring)));
 
                 for ring in &self.holes {
-                    polygon_string.push_str(&format!(",({})",Self::format_ring(&ring)));
+                    polygon_string.push_str(&format!(",({})", Self::format_ring(&ring)));
                 }
                 polygon_string.push(')');
                 Ok(polygon_string)

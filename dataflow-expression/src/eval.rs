@@ -22,9 +22,9 @@ macro_rules! non_null {
 
 pub(crate) mod builtins;
 pub mod json;
-pub(crate) mod spatial;
 pub(crate) mod point;
 pub(crate) mod polygon;
+pub(crate) mod spatial;
 
 #[cached(size = 1000)]
 fn like_pattern(pattern: String, case_sensitivity: CaseSensitivityMode) -> Arc<LikePattern> {
