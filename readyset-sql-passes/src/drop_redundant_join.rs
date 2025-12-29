@@ -12,8 +12,8 @@ use readyset_sql::analysis::visit::{Visitor, walk_select_statement};
 use readyset_sql::analysis::visit_mut::{VisitorMut, walk_expr};
 use readyset_sql::analysis::{visit, visit_mut};
 use readyset_sql::ast::{
-    Column, ColumnConstraint, Expr, JoinConstraint, JoinOperator, JoinRightSide, Relation,
-    SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+    Column, ColumnConstraint, Expr, JoinConstraint, JoinRightSide, Relation, SelectStatement,
+    SqlIdentifier, TableExpr, TableExprInner,
 };
 use std::collections::{HashMap, HashSet};
 use std::{iter, mem};
@@ -386,13 +386,6 @@ fn drop_redundant_self_joins(
     }
 
     let join_clause = &stmt.join[0];
-
-    if !matches!(
-        join_clause.operator,
-        JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin
-    ) {
-        return Ok(any_rewrite);
-    }
 
     let JoinRightSide::Table(rhs_base_table) = &join_clause.right else {
         return Ok(any_rewrite);
