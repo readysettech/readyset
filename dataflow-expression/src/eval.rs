@@ -22,6 +22,8 @@ macro_rules! non_null {
 
 pub(crate) mod builtins;
 pub mod json;
+pub(crate) mod point;
+pub(crate) mod polygon;
 pub(crate) mod spatial;
 
 #[cached(size = 1000)]

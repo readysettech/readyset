@@ -22,9 +22,8 @@ use serde_json::Value as JsonValue;
 use test_strategy::Arbitrary;
 use vec1::Vec1;
 
+use crate::eval::spatial::try_get_spatial_text;
 use crate::{BuiltinFunction, Dialect, Expr};
-
-use super::spatial::Point;
 
 const MICROS_IN_SECOND: u32 = 1_000_000;
 const MILLIS_IN_SECOND: u32 = 1_000;
@@ -1455,17 +1454,12 @@ impl BuiltinFunction {
                 let df_val = non_null!(expr.eval(record)?);
                 match df_val {
                     DfValue::ByteArray(bytes) => {
-                        let point = Point::try_from_bytes(&bytes, dialect.engine())?;
-                        Ok(DfValue::Text(
-                            point
-                                .format(dialect.engine(), false)
-                                .unwrap()
-                                .as_str()
-                                .into(),
-                        ))
+                        // TODO: Support other geometry types
+                        let text = try_get_spatial_text(&bytes, dialect.engine(), false)?;
+                        Ok(DfValue::Text(text.as_str().into()))
                     }
                     _ => Err(invalid_query_err!(
-                        "SpatialAsText requires a point argument (in the form of a byte array)"
+                        "SpatialAsText requires a geometric argument (in the form of a byte array)"
                     )),
                 }
             }
@@ -1473,17 +1467,11 @@ impl BuiltinFunction {
                 let df_val = non_null!(expr.eval(record)?);
                 match df_val {
                     DfValue::ByteArray(bytes) => {
-                        let point = Point::try_from_postgis_bytes(&bytes)?;
-                        Ok(DfValue::Text(
-                            point
-                                .format(SqlEngine::PostgreSQL, true)
-                                .unwrap()
-                                .as_str()
-                                .into(),
-                        ))
+                        let text = try_get_spatial_text(&bytes, SqlEngine::PostgreSQL, true)?;
+                        Ok(DfValue::Text(text.as_str().into()))
                     }
                     _ => Err(invalid_query_err!(
-                        "SpatialAsEWKT requires a point argument (in the form of a byte array)"
+                        "SpatialAsEWKT requires a geometric argument (in the form of a byte array)"
                     )),
                 }
             }
