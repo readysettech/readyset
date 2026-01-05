@@ -1947,9 +1947,6 @@ impl SqlToMirConverter {
 
                 self.handle_exists(ce, query_name, &name, parent, subquery)?
             }
-            Expr::Call(_) => {
-                internal!("Function calls should have been handled by projection earlier")
-            }
             Expr::In {
                 lhs,
                 rhs: InValue::Subquery(subquery),
@@ -3254,5 +3251,165 @@ mod tests {
         },
         // post-lookups not enabled
         expect_success: false
+    }
+
+    #[test]
+    fn function_call_predicate_is_supported() {
+        let query = parse_select(
+            readyset_sql::Dialect::MySQL,
+            "SELECT a FROM test_table WHERE json_overlaps(test_table.c, '[1,2,3]')",
+        )
+        .unwrap();
+
+        let qg = to_query_graph(query, Dialect::DEFAULT_MYSQL).unwrap();
+        let columns = &[
+            ColumnSpecification {
+                column: Column::from("test_table.a"),
+                sql_type: SqlType::Int(None),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+            ColumnSpecification {
+                column: Column::from("test_table.c"),
+                sql_type: SqlType::Json,
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+        ];
+
+        let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_MYSQL);
+        let result = converter
+            .make_base_node(&"test_table".into(), columns, None)
+            .and_then(|_| {
+                converter.named_query_to_mir(&"q1".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
+            });
+
+        assert!(
+            result.is_ok(),
+            "Expected MIR lowering to succeed, but it failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn coalesce_predicate_mysql() {
+        let query = parse_select(
+            readyset_sql::Dialect::MySQL,
+            "SELECT a FROM test_table WHERE COALESCE(test_table.b, TRUE)",
+        )
+        .unwrap();
+
+        let qg = to_query_graph(query, Dialect::DEFAULT_MYSQL).unwrap();
+        let columns = &[
+            ColumnSpecification {
+                column: Column::from("test_table.a"),
+                sql_type: SqlType::Int(None),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+            ColumnSpecification {
+                column: Column::from("test_table.b"),
+                sql_type: SqlType::Bool,
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+        ];
+
+        let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_MYSQL);
+        let result = converter
+            .make_base_node(&"test_table".into(), columns, None)
+            .and_then(|_| {
+                converter.named_query_to_mir(&"q1".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
+            });
+
+        assert!(
+            result.is_ok(),
+            "Expected MIR lowering to succeed for COALESCE predicate (MySQL), but it failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn ifnull_predicate_mysql() {
+        let query = parse_select(
+            readyset_sql::Dialect::MySQL,
+            "SELECT a FROM test_table WHERE IFNULL(test_table.b, FALSE)",
+        )
+        .unwrap();
+
+        let qg = to_query_graph(query, Dialect::DEFAULT_MYSQL).unwrap();
+        let columns = &[
+            ColumnSpecification {
+                column: Column::from("test_table.a"),
+                sql_type: SqlType::Int(None),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+            ColumnSpecification {
+                column: Column::from("test_table.b"),
+                sql_type: SqlType::Bool,
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+        ];
+
+        let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_MYSQL);
+        let result = converter
+            .make_base_node(&"test_table".into(), columns, None)
+            .and_then(|_| {
+                converter.named_query_to_mir(&"q1".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
+            });
+
+        assert!(
+            result.is_ok(),
+            "Expected MIR lowering to succeed for IFNULL predicate (MySQL), but it failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn coalesce_predicate_postgresql() {
+        let query = parse_select(
+            readyset_sql::Dialect::PostgreSQL,
+            "SELECT a FROM test_table WHERE COALESCE(test_table.b, TRUE)",
+        )
+        .unwrap();
+
+        let qg = to_query_graph(query, Dialect::DEFAULT_POSTGRESQL).unwrap();
+        let columns = &[
+            ColumnSpecification {
+                column: Column::from("test_table.a"),
+                sql_type: SqlType::Int(None),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+            ColumnSpecification {
+                column: Column::from("test_table.b"),
+                sql_type: SqlType::Bool,
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+        ];
+
+        let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_POSTGRESQL);
+        let result = converter
+            .make_base_node(&"test_table".into(), columns, None)
+            .and_then(|_| {
+                converter.named_query_to_mir(&"q1".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
+            });
+
+        assert!(
+            result.is_ok(),
+            "Expected MIR lowering to succeed for COALESCE predicate (PostgreSQL), but it failed: {:?}",
+            result.err()
+        );
     }
 }
