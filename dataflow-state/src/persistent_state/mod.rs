@@ -66,6 +66,7 @@ mod recorded;
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::io::{self, Read};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -755,6 +756,7 @@ impl State for PersistentState {
         let mut indices = Vec::new();
         let mut is_unique = Vec::new();
         let mut inner = self.db.inner_mut();
+        let mut seen_indices = HashSet::new();
 
         for (index, tags) in strict
             .into_iter()
@@ -767,6 +769,11 @@ impl State for PersistentState {
                 .iter()
                 .any(|pi| pi.index == index);
             if existing {
+                continue;
+            }
+
+            // Skip if we've already seen this index in this batch (deduplicates strict/weak)
+            if !seen_indices.insert(index.clone()) {
                 continue;
             }
 
@@ -3366,6 +3373,28 @@ mod tests {
         assert!(!state.is_useful());
         state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
         assert!(state.is_useful());
+    }
+
+    #[test]
+    fn persistent_state_no_duplicate_indices() {
+        let mut state = setup_persistent("persistent_state_no_duplicate_indices", None);
+        // no indices yet, not even for a (not guaranteed to actually have one) primary key
+        assert_eq!(0, state.db.inner().shared_state.indices.len());
+
+        // add in an index (this will be the PK) - should be no dupes!
+        let idx = Index::new(IndexType::HashMap, vec![0]);
+        state.add_index_multi(vec![(idx.clone(), None)], vec![idx]);
+        assert_eq!(1, state.db.inner().shared_state.indices.len());
+
+        // add in a secondary index - should be no dupes!
+        let idx = Index::new(IndexType::HashMap, vec![1]);
+        state.add_index_multi(vec![(idx.clone(), None)], vec![idx]);
+        assert_eq!(2, state.db.inner().shared_state.indices.len());
+
+        // add in the same secondary index - should not duplicate!
+        let idx = Index::new(IndexType::HashMap, vec![1]);
+        state.add_index_multi(vec![(idx, None)], vec![]);
+        assert_eq!(2, state.db.inner().shared_state.indices.len());
     }
 
     #[test]
