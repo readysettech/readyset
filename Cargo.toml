@@ -213,6 +213,7 @@ rand_distr = "0.5"
 rand_regex = "0.18.1"
 regex = "1.10.4"
 reqwest = "0.11.27"
+ringbuf = "0.4.8"
 rlimit = "0.10.1"
 rmp-serde = "1.2.0"
 rocksdb = { version = "0.22.0", default-features = false, features = [

@@ -70,7 +70,7 @@ use std::collections::HashSet;
 use std::io::{self, Read};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{mpsc, Arc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -94,6 +94,7 @@ use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_util::SizeOf;
 use replication_offset::ReplicationOffset;
+use ringbuf::traits::{Consumer, Producer, Split};
 use rocksdb::{
     self, BlockBasedOptions, ColumnFamily, ColumnFamilyDescriptor, CompactOptions, IteratorMode,
     SliceTransform, WriteBatch, DB,
@@ -1561,6 +1562,19 @@ impl IndexKeyValue {
     }
 }
 
+/// A wrapper to pass data from the secondary index creation code's single-threaded producer
+/// to the single-threaded consumer (there may be multiple single-threaded consumers but they
+/// each have their own channel/queue). The current channel implementation, `ringbuf`, is a
+/// lock-free, non-blocking ring buffer, so we need a mechanism for the producer to signal
+/// the consumers that there is no further data.
+#[derive(Clone)]
+enum SecondaryIndexMessage {
+    /// A data-bearing message with a row to be indexed.
+    Data(Arc<IndexKeyValue>),
+    /// A sentinel type to indicate no more data will be coming on this channel.
+    Done,
+}
+
 impl PersistentState {
     pub fn new<C: AsRef<[usize]>, K: IntoIterator<Item = C>>(
         mut name: String,
@@ -1972,16 +1986,18 @@ impl PersistentState {
         cf
     }
 
-    #[allow(clippy::type_complexity)]
-    fn make_channels<T>(num: usize) -> (Vec<SyncSender<Arc<T>>>, Vec<Receiver<Arc<T>>>) {
-        let mut txs = Vec::new();
-        let mut rxs = Vec::new();
+    fn make_channels(
+        num: usize,
+    ) -> Vec<(
+        impl Producer<Item = SecondaryIndexMessage>,
+        impl Consumer<Item = SecondaryIndexMessage>,
+    )> {
+        let mut channels = Vec::new();
         for _ in 0..num {
-            let (tx, rx) = mpsc::sync_channel(INDEX_BATCH_SIZE * 4);
-            txs.push(tx);
-            rxs.push(rx);
+            let rb = ringbuf::HeapRb::<SecondaryIndexMessage>::new(INDEX_BATCH_SIZE * 4);
+            channels.push(rb.split());
         }
-        (txs, rxs)
+        channels
     }
 
     fn write_secondary(
@@ -1989,30 +2005,43 @@ impl PersistentState {
         index: &Index,
         is_unique: bool,
         new: &PersistentIndex,
-        rx: Receiver<Arc<IndexKeyValue>>,
+        mut rx: impl Consumer<Item = SecondaryIndexMessage>,
     ) {
         let cf = Self::open_secondary_cf(inner, new);
 
         let mut opts = rocksdb::WriteOptions::default();
         opts.disable_wal(true);
+        let backoff = Duration::from_micros(5);
 
         'outer: loop {
             let mut batch = WriteBatch::default();
 
             for _ in 0..INDEX_BATCH_SIZE {
-                let Ok(kv) = rx.recv() else {
-                    inner.db.write_opt(batch, &opts).unwrap();
-                    break 'outer;
+                // Try to pop from the ring buffer, with backoff if empty
+                let msg = loop {
+                    match rx.try_pop() {
+                        Some(item) => break item,
+                        None => thread::sleep(backoff),
+                    }
                 };
 
-                let index_key = build_key(&kv.row, &index.columns);
-                let key = if is_unique && !index_key.has_null() {
-                    Self::serialize_prefix(&index_key)
-                } else {
-                    // TODO avoid storing pk as the value; already in the key
-                    Self::serialize_secondary(&index_key, &kv.pk)
-                };
-                batch.put_cf(cf, &key, &kv.pk);
+                // Check for Done sentinel indicating producer is done
+                match msg {
+                    SecondaryIndexMessage::Done => {
+                        inner.db.write_opt(batch, &opts).unwrap();
+                        break 'outer;
+                    }
+                    SecondaryIndexMessage::Data(kv) => {
+                        let index_key = build_key(&kv.row, &index.columns);
+                        let key = if is_unique && !index_key.has_null() {
+                            Self::serialize_prefix(&index_key)
+                        } else {
+                            // TODO avoid storing pk as the value; already in the key
+                            Self::serialize_secondary(&index_key, &kv.pk)
+                        };
+                        batch.put_cf(cf, &key, &kv.pk);
+                    }
+                }
             }
 
             inner.db.write_opt(batch, &opts).unwrap();
@@ -2043,7 +2072,20 @@ impl PersistentState {
         }
         let new = self.create_secondary(&mut inner, indices, is_unique);
         let inner = inner.downgrade();
-        let (txs, rxs) = Self::make_channels(new.len());
+        let channels = Self::make_channels(new.len());
+        let (mut txs, rxs): (Vec<_>, Vec<_>) = channels.into_iter().unzip();
+
+        // Macro to push to all consumers, with backoff when the buffer is full
+        macro_rules! send_message {
+            ($txs:expr, $msg:expr) => {{
+                let backoff = Duration::from_micros(5);
+                for tx in $txs {
+                    while tx.try_push($msg.clone()).is_err() {
+                        thread::sleep(backoff);
+                    }
+                }
+            }};
+        }
 
         thread::scope(|scope| {
             for (index, is_unique, new, rx) in itertools::izip!(indices, is_unique, &new, rxs) {
@@ -2066,21 +2108,24 @@ impl PersistentState {
             while let (Some(pk), Some(value)) = (iter.key(), iter.value()) {
                 let row = deserialize_row(value);
                 // TODO: only pass data that will be used by any index.
-                let kv = Arc::new(IndexKeyValue::new(pk.to_vec(), row));
-                for tx in &txs {
-                    tx.send(Arc::clone(&kv))
-                        .expect("send to index writer failed");
-                }
+                let msg =
+                    SecondaryIndexMessage::Data(Arc::new(IndexKeyValue::new(pk.to_vec(), row)));
+                send_message!(&mut txs, msg);
 
                 indexed += 1;
                 self.index_progress(started, &mut last_log, &mut last_status, indexed, estimated);
                 iter.next();
             }
 
+            // Send Done sentinel to signal completion to all consumers,
+            //even if there was an error in iterating
+            send_message!(&mut txs, SecondaryIndexMessage::Done);
+
             if let Err(err) = iter.status() {
                 // FIXME can't return error from here
                 error!(%err, "Error creating index");
             }
+
             drop(txs);
         });
 
