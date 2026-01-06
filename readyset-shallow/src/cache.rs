@@ -334,6 +334,10 @@ where
             {
                 let now = current_timestamp_ms();
                 if e.accessed_ms.load(Ordering::Relaxed) > now - ttl_ms {
+                    cache
+                        .schedule_refresh(key.clone(), Arc::clone(&callback), scheduler)
+                        .await;
+
                     let guard = Self::make_guard(Arc::clone(&cache), key, Arc::clone(&callback));
                     callback(guard);
                 }
@@ -415,14 +419,20 @@ where
         }
     }
 
-    async fn insert_entry(&self, k: K, new: CacheValues<V>) -> Option<Arc<Mutex<CacheStubInner>>> {
+    async fn insert_entry(
+        &self,
+        k: K,
+        new: CacheValues<V>,
+    ) -> (bool, Option<Arc<Mutex<CacheStubInner>>>) {
         let mut waiters = None;
+        let mut was_present = false;
         self.inner
             .entry((self.id, k))
             .and_compute_with(|e| {
                 if let Some(e) = e {
                     match &**e.value() {
                         CacheEntry::Present(e) => {
+                            was_present = true;
                             let acc = e.accessed_ms.load(Ordering::Relaxed);
                             new.accessed_ms.store(acc, Ordering::Relaxed);
                         }
@@ -435,28 +445,23 @@ where
                 future::ready(Op::Put(new))
             })
             .await;
-        waiters
+        (was_present, waiters)
     }
 
     async fn schedule_refresh(
         &self,
         k: K,
-        refresh: Option<RequestRefresh<K, V>>,
-        execution: Duration,
+        refresh: RequestRefresh<K, V>,
+        scheduler: &Scheduler<K, V>,
     ) {
-        let Some(refresh) = refresh else {
+        let Some(ms) = self.refresh_ms else {
             return;
         };
-        if let Some(ref sched) = self.scheduler
-            && let Some(ms) = self.refresh_ms
-        {
-            let mut sched = sched.lock().await;
-            let wait = Duration::from_millis(ms).saturating_sub(execution);
-            sched
-                .entry(Instant::now() + wait)
-                .or_insert_with(Vec::new)
-                .push((k, refresh));
-        }
+        let mut sched = scheduler.lock().await;
+        sched
+            .entry(Instant::now() + Duration::from_millis(ms))
+            .or_insert_with(Vec::new)
+            .push((k, refresh));
     }
 
     pub(crate) async fn insert(
@@ -469,9 +474,16 @@ where
     ) {
         let metadata = self.dedupe_metadata(metadata);
         let entry = self.make_entry(v, metadata, execution);
-        let waiters = self.insert_entry(k.clone(), entry).await;
+        let (was_present, waiters) = self.insert_entry(k.clone(), entry).await;
         Self::notify_waiters(waiters).await;
-        self.schedule_refresh(k, refresh, execution).await;
+
+        if let Some(refresh) = refresh
+            && let Some(ref sched) = self.scheduler
+            && !was_present
+        {
+            // for scheduled refresh, schedule the first refresh on first insertion
+            self.schedule_refresh(k, refresh, sched).await;
+        }
     }
 
     fn get_hit(&self, values: &CacheValues<V>) -> Option<(QueryResult<V>, bool)> {

@@ -889,3 +889,92 @@ async fn test_periodic_refresh_callback() {
     sleep(Duration::from_secs(10)).await;
     check_miss(&manager, &query_id, "key1".to_string()).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_slow_refresh_serves_stale_data() {
+    let manager = CacheManager::<String, u32>::new(None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+
+    manager
+        .create_cache(
+            None,
+            Some(query_id),
+            test_stmt(),
+            vec![],
+            EvictionPolicy::TtlAndPeriod {
+                ttl: Duration::from_secs(60),
+                refresh: Duration::from_secs(1),
+                schedule: true,
+            },
+            test_ddl_req(),
+            false,
+            None,
+        )
+        .unwrap();
+
+    let current = Arc::new(AtomicU32::new(0));
+
+    let updater = {
+        let current = Arc::clone(&current);
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_secs(1)).await;
+                current.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+    };
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string())
+        .await;
+    let CacheResult::Miss(mut guard) = result else {
+        panic!("expected miss");
+    };
+
+    let value = current.load(Ordering::SeqCst);
+    guard.push(value);
+    guard.set_metadata(QueryMetadata::Test);
+
+    let refresh = {
+        let current = Arc::clone(&current);
+        Arc::new(move |mut guard: crate::CacheInsertGuard<String, u32>| {
+            let value = current.load(Ordering::SeqCst);
+            tokio::spawn(async move {
+                sleep(Duration::from_secs(2)).await;
+                guard.push(value);
+                guard.set_metadata(QueryMetadata::Test);
+                guard.filled().await;
+                println!("inserted {value}");
+            });
+        })
+    };
+
+    guard.set_refresh(refresh);
+    guard.filled().await;
+
+    sleep(Duration::from_millis(200)).await;
+
+    for _ in 0..5 {
+        sleep(Duration::from_secs(1)).await;
+
+        let result = manager
+            .get_or_start_insert(&query_id, "key1".to_string())
+            .await;
+        let CacheResult::Hit(result, _) = result else {
+            panic!("expected hit");
+        };
+
+        let value = result.values[0];
+        let current = current.load(Ordering::SeqCst);
+        println!("test {value} {current}");
+
+        assert!(
+            value == current.saturating_sub(2),
+            "cached value {} should be <= current value {}",
+            value,
+            current
+        );
+    }
+
+    updater.abort();
+}
