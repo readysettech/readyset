@@ -10,7 +10,7 @@ use readyset_sql::ast::{
     CreateTableStatement, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlType,
     TableExpr, TableExprInner,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::iter;
 
 pub trait ResolveSchemasContext {
@@ -70,6 +70,16 @@ struct ResolveSchemaVisitor<R: ResolveSchemasContext> {
     /// Each element of this `Vec` is a level of subquery nesting, which can be `pop()`ed after
     /// walking through a query.
     alias_stack: Vec<HashSet<SqlIdentifier>>,
+
+    /// Stack of schemas from tables in the current JOIN context.
+    ///
+    /// When resolving tables in JOIN ON conditions, we should prefer tables from the schemas
+    /// of the tables being joined over the general search path. This avoids incorrectly resolving
+    /// to tables with the same name in earlier schemas in the search path.
+    ///
+    /// Each element maps a table name to its schema, tracking tables visible in the current
+    /// JOIN ON clause context.
+    join_context_schemas: Vec<HashMap<SqlIdentifier, SqlIdentifier>>,
 }
 
 impl<R> ResolveSchemaVisitor<R>
@@ -82,7 +92,47 @@ where
             .any(|frame| frame.contains(&table.name))
     }
 
+    /// Collect table names and their schemas from a TableExpr if it's a direct table reference
+    /// with an explicit schema. This is used to track JOIN context for proper resolution.
+    fn collect_table_schemas_from_expr(
+        &self,
+        table_expr: &TableExpr,
+        schemas_map: &mut HashMap<SqlIdentifier, SqlIdentifier>,
+    ) {
+        if let TableExprInner::Table(relation) = &table_expr.inner
+            && let Some(ref schema) = relation.schema
+        {
+            schemas_map.insert(relation.name.clone(), schema.clone());
+        }
+    }
+
     fn resolve_schema(&mut self, table: &mut Relation) -> Result<(), ReadySetError> {
+        // First, check if this table appears in the current JOIN context with an explicit schema.
+        // This ensures that unqualified table references in JOIN ON conditions resolve to the
+        // tables being joined, rather than to tables with the same name in earlier search path
+        // schemas.
+        for context_map in self.join_context_schemas.iter().rev() {
+            if let Some(schema) = context_map.get(&table.name) {
+                // Verify the table exists in this schema
+                match self.context.can_query_table(schema, &table.name) {
+                    Some(CanQuery::Yes) => {
+                        table.schema = Some(schema.clone());
+                        return Ok(());
+                    }
+                    Some(CanQuery::No) => {
+                        return Err(ReadySetError::TableNotReplicated {
+                            name: table.name.clone().into(),
+                            schema: Some(schema.into()),
+                        });
+                    }
+                    None => {
+                        // Fall through to search path if table doesn't exist in this schema
+                    }
+                }
+            }
+        }
+
+        // Fall back to search path resolution
         for schema in self.context.search_path() {
             match self.context.can_query_table(schema, &table.name) {
                 Some(CanQuery::Yes) => {
@@ -196,10 +246,24 @@ impl<'ast, R: ResolveSchemasContext> VisitorMut<'ast> for ResolveSchemaVisitor<R
         // this visitation.
         let mut from_aliases: HashSet<SqlIdentifier> = HashSet::new();
 
+        // Track schemas from explicitly-qualified tables to help resolve unqualified table
+        // references in JOIN ON conditions
+        let mut join_context_schemas = HashMap::new();
+
+        // Collect schemas from initial FROM tables
+        for table_expr in &select_statement.tables {
+            self.collect_table_schemas_from_expr(table_expr, &mut join_context_schemas);
+        }
+
         from_aliases = self
             .visit_from_items_with_from_aliases(select_statement.tables.iter_mut(), from_aliases)?;
 
         for join in &mut select_statement.join {
+            // Collect schemas from the table(s) being joined
+            for table in join.right.table_exprs() {
+                self.collect_table_schemas_from_expr(table, &mut join_context_schemas);
+            }
+
             from_aliases = self.visit_from_items_with_from_aliases(
                 match &mut join.right {
                     JoinRightSide::Table(table) => Either::Left(iter::once(table)),
@@ -207,8 +271,15 @@ impl<'ast, R: ResolveSchemasContext> VisitorMut<'ast> for ResolveSchemaVisitor<R
                 },
                 from_aliases,
             )?;
+
+            // Push the accumulated join context before visiting the ON constraint
             self.alias_stack.push(from_aliases);
+            self.join_context_schemas.push(join_context_schemas.clone());
+
             self.visit_join_constraint(&mut join.constraint)?;
+
+            // Pop the join context after visiting the constraint
+            self.join_context_schemas.pop();
             from_aliases = self
                 .alias_stack
                 .pop()
@@ -316,6 +387,7 @@ impl ResolveSchemas for SelectStatement {
         ResolveSchemaVisitor {
             context,
             alias_stack: Default::default(),
+            join_context_schemas: Default::default(),
         }
         .visit_select_statement(self)?;
         Ok(self)
@@ -330,6 +402,7 @@ impl ResolveSchemas for CreateTableStatement {
         ResolveSchemaVisitor {
             context,
             alias_stack: Default::default(),
+            join_context_schemas: Default::default(),
         }
         .visit_create_table_statement(self)?;
 
@@ -701,6 +774,14 @@ mod tests {
                 JOIN s1.t2 AS bar ON bar.id = s1.t1.id AND bar.id = foo.id
                 JOIN (SELECT * FROM s1.t1 WHERE foo.id = s1.t1.id) AS t1
                 WHERE bar.id = t1.id AND t1.id = foo.id",
+        );
+    }
+
+    #[test]
+    fn resolves_unqualified_table_in_join_on_to_joined_table_schema() {
+        select_rewrites_to(
+            "select d.id from s2.t1 d left join s2.t2 ON d.id = t2.d_id",
+            "select d.id from s2.t1 d left join s2.t2 ON d.id = s2.t2.d_id",
         );
     }
 }
