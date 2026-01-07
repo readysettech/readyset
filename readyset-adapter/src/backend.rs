@@ -3102,6 +3102,7 @@ where
                 refresh_ms,
                 coalesce_ms,
                 always,
+                schedule,
                 ..
             } in self.shallow.list_caches(query_id, None)
             {
@@ -3124,6 +3125,7 @@ where
                         properties.set_coalesce_ms(coalesce_ms);
                     }
                     properties.set_always(always);
+                    properties.set_schedule(schedule);
                     properties.to_string().into()
                 };
                 let count = self.metrics_handle.as_ref().map(|_| 0.to_string().into());

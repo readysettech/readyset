@@ -93,6 +93,7 @@ pub struct CacheProperties {
     refresh_ms: Option<u64>,
     coalesce_ms: Option<u64>,
     always: bool,
+    schedule: bool,
 }
 
 impl Display for CacheProperties {
@@ -106,7 +107,11 @@ impl Display for CacheProperties {
             properties.push(Cow::Owned(format!("ttl {ttl_ms} ms")));
         }
         if let Some(refresh_ms) = self.refresh_ms {
-            properties.push(Cow::Owned(format!("refresh {refresh_ms} ms")));
+            properties.push(Cow::Owned(if self.schedule {
+                format!("refresh every {refresh_ms} ms")
+            } else {
+                format!("refresh {refresh_ms} ms")
+            }));
         }
         if let Some(coalesce_ms) = self.coalesce_ms {
             properties.push(Cow::Owned(format!("coalesce {coalesce_ms} ms")));
@@ -123,11 +128,16 @@ impl CacheProperties {
             refresh_ms: None,
             coalesce_ms: None,
             always: false,
+            schedule: false,
         }
     }
 
     pub fn set_always(&mut self, always: bool) {
         self.always = always;
+    }
+
+    pub fn set_schedule(&mut self, schedule: bool) {
+        self.schedule = schedule;
     }
 
     pub fn set_ttl_ms(&mut self, ttl_ms: u64) {

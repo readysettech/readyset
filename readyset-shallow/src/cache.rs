@@ -164,6 +164,7 @@ pub struct CacheInfo {
     pub coalesce_ms: Option<u64>,
     pub ddl_req: CacheDDLRequest,
     pub always: bool,
+    pub schedule: bool,
 }
 
 impl From<CacheInfo> for CreateCacheStatement {
@@ -173,7 +174,7 @@ impl From<CacheInfo> for CreateCacheStatement {
                 Some(readyset_sql::ast::EvictionPolicy::TtlAndPeriod {
                     ttl: Duration::from_millis(ttl_ms),
                     refresh: Duration::from_millis(refresh_ms),
-                    schedule: false,
+                    schedule: info.schedule,
                 })
             }
             (Some(ttl_ms), _) => Some(readyset_sql::ast::EvictionPolicy::from_ttl_ms(ttl_ms)),
@@ -550,6 +551,7 @@ where
             coalesce_ms: self.coalesce_ms,
             ddl_req: self.ddl_req.clone(),
             always: self.always,
+            schedule: self.is_scheduled(),
         }
     }
 
