@@ -1,7 +1,4 @@
-use std::{
-    fmt,
-    hash::{Hash, Hasher},
-};
+use std::{fmt, hash::Hash};
 
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
@@ -12,7 +9,7 @@ use crate::{Dialect, DialectDisplay, ast::*};
 /// EXPLAIN statements
 ///
 /// This is a non-standard ReadySet-specific extension to SQL
-#[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ExplainStatement {
     /// Print a graphviz representation of the current query graph to stdout
     Graphviz {
@@ -40,70 +37,8 @@ pub enum ExplainStatement {
         /// statement. If it failed to parse, this will be an `Err` with the remainder [`String`]
         /// that could not be parsed.
         inner: Result<CacheInner, String>,
-        /// A full copy of the original 'explain create cache' statement.
-        unparsed_explain_create_cache_statement: String,
         cache_type: Option<CacheType>,
     },
-}
-
-impl PartialEq for ExplainStatement {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (ExplainStatement::LastStatement, ExplainStatement::LastStatement) => true,
-            (ExplainStatement::Domains, ExplainStatement::Domains) => true,
-            (ExplainStatement::Caches, ExplainStatement::Caches) => true,
-            (ExplainStatement::Materializations, ExplainStatement::Materializations) => true,
-            (
-                ExplainStatement::Graphviz {
-                    simplified: sa,
-                    for_cache: ca,
-                },
-                ExplainStatement::Graphviz {
-                    simplified: sb,
-                    for_cache: cb,
-                },
-            ) => sa == sb && ca == cb,
-            (
-                ExplainStatement::CreateCache {
-                    inner: ia,
-                    unparsed_explain_create_cache_statement: _,
-                    cache_type: ta,
-                },
-                ExplainStatement::CreateCache {
-                    inner: ib,
-                    unparsed_explain_create_cache_statement: _,
-                    cache_type: tb,
-                },
-            ) => ia == ib && ta == tb,
-            (_, _) => false,
-        }
-    }
-}
-
-impl Eq for ExplainStatement {}
-
-impl Hash for ExplainStatement {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        core::mem::discriminant(self).hash(state);
-        match self {
-            ExplainStatement::CreateCache {
-                inner,
-                unparsed_explain_create_cache_statement: _,
-                cache_type,
-            } => {
-                inner.hash(state);
-                cache_type.hash(state);
-            }
-            ExplainStatement::Graphviz {
-                simplified,
-                for_cache,
-            } => {
-                simplified.hash(state);
-                for_cache.hash(state);
-            }
-            _ => {}
-        }
-    }
 }
 
 impl DialectDisplay for ExplainStatement {

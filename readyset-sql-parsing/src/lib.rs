@@ -690,9 +690,6 @@ fn parse_explain(
                 return Ok(SqlQuery::Explain(
                     readyset_sql::ast::ExplainStatement::CreateCache {
                         inner: inner.inner,
-                        unparsed_explain_create_cache_statement: inner
-                            .unparsed_create_cache_statement
-                            .unwrap_or_default(),
                         cache_type: inner.cache_type,
                     },
                 ));
