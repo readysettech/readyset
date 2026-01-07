@@ -44,7 +44,7 @@ RUN cargo install --locked \
 
 # Install cargo-nextest
 RUN set -eux; \
-    VERSION="0.9.87"; \
+    VERSION="0.9.118"; \
     case "${TARGETARCH}" in \
       "arm64") PLATFORM="linux-arm";; \
       "amd64") PLATFORM="linux";; \
