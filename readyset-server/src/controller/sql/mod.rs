@@ -395,6 +395,13 @@ impl SqlIncorporator {
                             name.schema = Some(first_schema.clone())
                         }
                     }
+                    // Custom types must be schema-qualified by the time they reach the server.
+                    if name.schema.is_none() {
+                        return Err(invalid_query_err!(
+                            "Custom type {} must be schema-qualified",
+                            name.display_unquoted()
+                        ));
+                    }
                     let needs_resnapshot = if let Some(existing_ty) = self.get_custom_type(&name) {
                         invariant!(self.registry.contains_custom_type(&name));
                         // Type already exists, so check if it has been changed in a way that

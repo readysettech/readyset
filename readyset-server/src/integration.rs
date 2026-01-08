@@ -9511,3 +9511,28 @@ async fn check_supported_mysql_storage_engines() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_type_requires_schema() {
+    let (mut g, shutdown_tx) = start_simple_unsharded("create_type_requires_schema").await;
+
+    let err = g
+        .extend_recipe(ChangeList::from_change(
+            Change::CreateType {
+                name: Relation {
+                    schema: None,
+                    name: "missing_schema".into(),
+                },
+                ty: DfType::from_enum_variants(vec!["a".to_string(), "b".to_string()], None),
+            },
+            Dialect::DEFAULT_POSTGRESQL,
+        ))
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("must be schema-qualified"),
+        "unexpected error: {err}"
+    );
+
+    shutdown_tx.shutdown().await;
+}
