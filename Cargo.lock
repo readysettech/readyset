@@ -2077,6 +2077,8 @@ version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash 0.2.0",
 ]
 
@@ -3132,11 +3134,11 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.14.0"
+version = "0.16.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f8cc7106155f10bdf99a6f379688f543ad6596a415375b36a59a054ceda1198"
+checksum = "a1dc47f592c06f33f8e3aea9591776ec7c9f9e4124778ff8a3c3b87159f7e593"
 dependencies = [
- "hashbrown 0.15.5",
+ "hashbrown 0.16.1",
 ]
 
 [[package]]
@@ -3382,7 +3384,7 @@ dependencies = [
 [[package]]
 name = "mysql_async"
 version = "0.36.1"
-source = "git+https://github.com/readysettech/mysql_async#6760629b1f1463e3900ec618c76450d1e2832b85"
+source = "git+https://github.com/readysettech/mysql_async#ccd4fbd7ff2dd009d86b428faf03214efe550cdd"
 dependencies = [
  "bytes",
  "crossbeam-queue",
