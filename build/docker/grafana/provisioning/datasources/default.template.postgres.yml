@@ -2,6 +2,7 @@ apiVersion: 1
 
 datasources:
   - name: DS_PROMETHEUS
+    uid: readyset-prometheus
     type: prometheus
     # Access mode - proxy (server in the UI) or direct (browser in the UI).
     access: proxy
@@ -9,7 +10,8 @@ datasources:
     jsonData:
       httpMethod: POST
 
-  - name: ReadySet_DB
+  - name: DS_READYSET
+    uid: readyset-db
     type: postgres
     url: ${RS_HOST}:${RS_PORT:?}
     database: ${RS_DB_NAME:?}
@@ -17,7 +19,7 @@ datasources:
     secureJsonData:
       password: ${RS_PASS:-""}
     jsonData:
-      sslmode: 'disable'
+      sslmode: "disable"
       postgresVersion: 903
       timescaledb: false
     editable: true
