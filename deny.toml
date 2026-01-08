@@ -25,7 +25,15 @@ ignore = [
     # paste is unmaintained but works fine, lots of crates depend on it, and there doesn't seem to
     # be an alternative, so temporarily ignore it.
     "RUSTSEC-2024-0436",
+    { id = "RUSTSEC-2025-0141", reason = "bincode 1.3.3 is unmaintained but stable" }
 ]
+#ignore = [
+#    # paste is unmaintained but works fine, lots of crates depend on it, and there doesn't seem to
+#    # be an alternative, so temporarily ignore it.
+#    { id = "RUSTSEC-2024-0436" },
+#    { id = "RUSTSEC-2025-0141", reason = "bincode 1.3.3 is stable and no updates needed per maintainers" },
+#]
+
 # Ignore "unmaintained" advisories that we do not directly depend on.
 # see: https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html#the-unmaintained-field-optional
 unmaintained = "workspace"
