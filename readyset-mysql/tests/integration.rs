@@ -3318,3 +3318,79 @@ async fn test_utf8mb4_bin() {
 
     tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, mysql_upstream)]
+async fn shallow_cache_protocol_crossing() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut conn = Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE shallow (id int PRIMARY KEY, value int)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.query_drop("INSERT INTO shallow (id, value) VALUES (1, 100), (2, 200), (3, 300)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE SHALLOW CACHE FROM SELECT id, value FROM shallow WHERE id = ?")
+        .await
+        .unwrap();
+    sleep().await;
+
+    eventually! {
+        let res: Option<(String, String, String)> = conn
+            .query_first("EXPLAIN CREATE CACHE FROM SELECT id, value FROM shallow WHERE id = ?")
+            .await
+            .unwrap();
+        res.map(|r| r.2 == "cached").unwrap_or(false)
+    }
+
+    // should miss
+    let _: Vec<(i32, i32)> = conn
+        .query("SELECT id, value FROM shallow WHERE id = 1")
+        .await
+        .unwrap();
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::Upstream);
+
+    // should hit
+    let _: Vec<(i32, i32)> = conn
+        .query("SELECT id, value FROM shallow WHERE id = 1")
+        .await
+        .unwrap();
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    // should miss due to no metadata
+    let _: Vec<(i32, i32)> = conn
+        .exec("SELECT id, value FROM shallow WHERE id = ?", (1,))
+        .await
+        .unwrap();
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::Upstream);
+
+    // should hit
+    let _: Vec<(i32, i32)> = conn
+        .exec("SELECT id, value FROM shallow WHERE id = ?", (1,))
+        .await
+        .unwrap();
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    // should hit; metadata are present but unneeded
+    let _: Vec<(i32, i32)> = conn
+        .query("SELECT id, value FROM shallow WHERE id = 1")
+        .await
+        .unwrap();
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    shutdown_tx.shutdown().await;
+}

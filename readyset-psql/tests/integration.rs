@@ -2282,6 +2282,77 @@ async fn shallow_cache_scheduled_refresh() {
     shutdown_tx.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, postgres_upstream)]
+async fn shallow_cache_protocol_crossing() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let mut conn = DatabaseURL::from(opts)
+        .connect(&ServerCertVerification::Default)
+        .await
+        .unwrap();
+
+    conn.simple_query("CREATE TABLE shallow (id int PRIMARY KEY, value int)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.simple_query("INSERT INTO shallow (id, value) VALUES (1, 100), (2, 200), (3, 300)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.simple_query("CREATE SHALLOW CACHE FROM SELECT id, value FROM shallow WHERE id = $1")
+        .await
+        .unwrap();
+    sleep().await;
+
+    eventually! {
+        let res = explain_create_cache("SELECT id, value FROM shallow WHERE id = $1", &mut conn).await;
+        res.supported == "cached"
+    }
+
+    // should miss
+    conn.simple_query("SELECT id, value FROM shallow WHERE id = 1")
+        .await
+        .unwrap();
+    let info = explain_last_statement(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::Upstream);
+
+    // should hit
+    conn.simple_query("SELECT id, value FROM shallow WHERE id = 1")
+        .await
+        .unwrap();
+    let info = explain_last_statement(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    // should miss due to no metadata
+    let stmt = conn
+        .prepare("SELECT id, value FROM shallow WHERE id = $1")
+        .await
+        .unwrap();
+    conn.execute(&stmt, &[&1]).await.unwrap();
+    let info = explain_last_statement(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::Upstream);
+
+    // should hit
+    conn.execute(&stmt, &[&1]).await.unwrap();
+    let info = explain_last_statement(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    // should hit; metadata are present but unneeded
+    conn.simple_query("SELECT id, value FROM shallow WHERE id = 1")
+        .await
+        .unwrap();
+    let info = explain_last_statement(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    shutdown_tx.shutdown().await;
+}
+
 mod http_tests {
     use super::*;
     #[tokio::test(flavor = "multi_thread")]
