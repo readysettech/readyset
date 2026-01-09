@@ -931,6 +931,8 @@ async fn test_slow_refresh_serves_stale_data() {
         panic!("expected miss");
     };
 
+    sleep(Duration::from_millis(200)).await;
+
     let value = current.load(Ordering::SeqCst);
     guard.push(value);
     guard.set_metadata(QueryMetadata::Test);
@@ -954,7 +956,7 @@ async fn test_slow_refresh_serves_stale_data() {
 
     sleep(Duration::from_millis(200)).await;
 
-    for _ in 0..5 {
+    for _ in 0..10 {
         sleep(Duration::from_secs(1)).await;
 
         let result = manager
