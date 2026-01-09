@@ -114,11 +114,18 @@ impl FromStr for SqlMode {
     }
 }
 
-fn raw_sql_modes_to_list(sql_modes: &str) -> Result<Vec<SqlMode>, ReadySetError> {
+fn raw_sql_modes_to_list(sql_modes: &str) -> ReadySetResult<Vec<SqlMode>> {
     sql_modes
         .split(',')
-        .map(SqlMode::from_str)
-        .collect::<Result<Vec<SqlMode>, ReadySetError>>()
+        .filter_map(|s| {
+            let s = s.trim();
+            if s.is_empty() {
+                None
+            } else {
+                Some(SqlMode::from_str(s))
+            }
+        })
+        .collect()
 }
 
 lazy_static! {
