@@ -32,7 +32,7 @@ use upstream::StatementMeta;
 
 use crate::constants::DEFAULT_CHARACTER_SET;
 use crate::schema::convert_column;
-use crate::upstream::{self, MySqlUpstream};
+use crate::upstream::{self, CacheEntry, MySqlUpstream};
 use crate::value::mysql_value_to_dataflow_value;
 use crate::{Error, MySqlQueryHandler};
 
@@ -454,7 +454,7 @@ where
 }
 
 async fn handle_shallow_result<S>(
-    result: readyset_shallow::QueryResult<Vec<DfValue>>,
+    result: readyset_shallow::QueryResult<CacheEntry>,
     writer: QueryResultWriter<'_, S>,
 ) -> io::Result<()>
 where
@@ -471,7 +471,10 @@ where
         .collect::<Vec<_>>();
     let mut rw = writer.start(&formatted_cols).await?;
 
-    for row in result.values.iter() {
+    for entry in result.values.iter() {
+        let row = match entry {
+            CacheEntry::Text(values) | CacheEntry::Binary(values) => values,
+        };
         for val in row.iter() {
             let val: mysql_async::Value = val.try_into().map_err(|e| {
                 io::Error::new(
@@ -489,7 +492,7 @@ where
 async fn handle_upstream_result<S>(
     result: upstream::QueryResult<'_>,
     writer: QueryResultWriter<'_, S>,
-    cache: Option<CacheInsertGuard<Vec<DfValue>, Vec<DfValue>>>,
+    cache: Option<CacheInsertGuard<Vec<DfValue>, CacheEntry>>,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,

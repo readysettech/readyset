@@ -28,11 +28,33 @@ use readyset_shallow::{CacheInsertGuard, MySqlMetadata, QueryMetadata};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_sql::Dialect;
 use readyset_util::redacted::RedactedString;
+use readyset_util::SizeOf;
 
 use crate::backend::write_query_results;
 use crate::{handle_error, Error};
 
 type StatementID = u32;
+
+#[derive(Debug)]
+pub enum CacheEntry {
+    Text(Vec<DfValue>),
+    Binary(Vec<DfValue>),
+}
+
+impl SizeOf for CacheEntry {
+    fn deep_size_of(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + match self {
+                Self::Text(values) | Self::Binary(values) => values.deep_size_of(),
+            }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Text(values) | Self::Binary(values) => values.is_empty(),
+        }
+    }
+}
 
 /// Indicates the minimum upstream server version that we currently support. Used to error out
 /// during connection phase if the version for the upstream server is too low.
@@ -95,7 +117,7 @@ impl<'a> QueryResult<'a> {
     pub async fn process<S>(
         self,
         writer: Option<QueryResultWriter<'_, S>>,
-        mut cache: Option<CacheInsertGuard<Vec<DfValue>, Vec<DfValue>>>,
+        mut cache: Option<CacheInsertGuard<Vec<DfValue>, CacheEntry>>,
     ) -> io::Result<()>
     where
         S: AsyncRead + AsyncWrite + Unpin,
@@ -127,6 +149,8 @@ impl<'a> QueryResult<'a> {
                 mut stream,
                 columns,
             } => {
+                let is_binary = matches!(stream, ReadResultStream::Binary(_));
+
                 let formatted_cols = columns.iter().map(|c| c.into()).collect::<Vec<_>>();
                 let mut rw = if let Some(writer) = writer {
                     Some(writer.start(&formatted_cols).await?)
@@ -169,7 +193,12 @@ impl<'a> QueryResult<'a> {
                     }
 
                     if let (Some(cache), Some(copy)) = (cache.as_mut(), copy) {
-                        cache.push(copy);
+                        let entry = if is_binary {
+                            CacheEntry::Binary(copy)
+                        } else {
+                            CacheEntry::Text(copy)
+                        };
+                        cache.push(entry);
                     }
                 }
 
@@ -195,7 +224,7 @@ impl<'a> QueryResult<'a> {
 
 #[async_trait]
 impl Refresh for QueryResult<'_> {
-    type Entry = Vec<DfValue>;
+    type Entry = CacheEntry;
 
     async fn refresh(self, cache: CacheInsertGuard<Vec<DfValue>, Self::Entry>) -> io::Result<()> {
         self.process(
@@ -352,7 +381,7 @@ impl UpstreamDatabase for MySqlUpstream {
     type StatementMeta = StatementMeta;
     type PrepareData<'a> = ();
     type ExecMeta = ();
-    type CacheEntry = Vec<DfValue>;
+    type CacheEntry = CacheEntry;
     type ShallowExecMeta = ();
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "8.0.26-readyset\0";
@@ -607,8 +636,11 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(())
     }
 
-    async fn is_meta_compatible(&mut self, _cache: &Self::CacheEntry) -> Result<bool, Self::Error> {
-        Ok(true)
+    async fn is_meta_compatible(&mut self, cache: &Self::CacheEntry) -> Result<bool, Self::Error> {
+        match cache {
+            CacheEntry::Text(_) => Ok(false),
+            CacheEntry::Binary(_) => Ok(true),
+        }
     }
 }
 
