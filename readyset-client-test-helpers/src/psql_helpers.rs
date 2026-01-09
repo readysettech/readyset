@@ -7,6 +7,7 @@ use readyset_adapter::backend::{QueryDestination, QueryInfo};
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter::Backend;
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
+use readyset_util::retry_with_exponential_backoff;
 use tokio::net::TcpStream;
 use tokio_postgres::{Client, Config, NoTls, SimpleQueryMessage};
 use tracing::error;
@@ -73,7 +74,13 @@ impl Adapter for PostgreSQLAdapter {
     async fn recreate_database(db_name: &str) {
         let mut config = upstream_config();
 
-        let (client, connection) = config.dbname("postgres").connect(NoTls).await.unwrap();
+        let (client, connection) = retry_with_exponential_backoff!(
+            { config.dbname("postgres").connect(NoTls).await },
+            retries: 10,
+            delay: 100,
+            backoff: 2,
+        )
+        .unwrap();
         tokio::spawn(connection);
 
         tokio::time::timeout(Duration::from_secs(60), async move {
