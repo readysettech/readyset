@@ -88,7 +88,10 @@ impl JoinOperator {
     pub fn is_inner_join(&self) -> bool {
         matches!(
             self,
-            JoinOperator::Join | JoinOperator::InnerJoin | JoinOperator::CrossJoin
+            JoinOperator::Join
+                | JoinOperator::InnerJoin
+                | JoinOperator::CrossJoin
+                | JoinOperator::StraightJoin
         )
     }
 }

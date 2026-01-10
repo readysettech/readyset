@@ -7,7 +7,7 @@ use readyset_errors::{
 };
 use readyset_sql::analysis::visit::{Visitor, walk_function_expr, walk_select_statement};
 use readyset_sql::analysis::visit_mut::{VisitorMut, walk_expr};
-use readyset_sql::analysis::{ReferredColumns, is_aggregate, visit};
+use readyset_sql::analysis::{ReferredColumns, is_aggregate, visit, visit_mut};
 use readyset_sql::ast::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
     InValue, JoinConstraint, JoinRightSide, LimitClause, Literal, OrderBy, OrderClause, OrderType,
@@ -63,6 +63,17 @@ macro_rules! is_single_from_item {
 macro_rules! is_column_of {
     ($col:expr,$rel:expr) => {
         matches!(&$col.table, Some(t) if *t == $rel)
+    };
+}
+
+#[macro_export]
+macro_rules! as_column {
+    ($expr: expr) => {
+        if let Expr::Column(column) = $expr {
+            column
+        } else {
+            unreachable!("Must be Column")
+        }
     };
 }
 
@@ -2090,7 +2101,7 @@ pub(crate) fn rewrite_top_k_in_place(stmt: &mut SelectStatement) -> ReadySetResu
     rewrite_top_k_in_place_impl(stmt).map(|_| {})
 }
 
-fn analyse_fix_correlated_subquery_group_by(
+pub(crate) fn analyse_fix_correlated_subquery_group_by(
     cols_set: &HashSet<(Column, Column)>,
     group_by: &mut GroupByClause,
 ) -> ReadySetResult<bool> {
@@ -2218,4 +2229,140 @@ pub(crate) fn bubble_alias_to_anchor_top(
     }
 
     ensure_here(anchor_top, ff_alias)
+}
+
+/// Hoist simple join ON predicates into the top-level WHERE clause.
+pub(crate) fn hoist_parametrizable_join_filters_to_where(
+    stmt: &mut SelectStatement,
+) -> ReadySetResult<bool> {
+    let mut add_to_where = Vec::new();
+
+    for jc in stmt.join.iter_mut() {
+        // Only hoist from INNER joins
+        if !jc.operator.is_inner_join() {
+            continue;
+        }
+        if let JoinConstraint::On(join_expr) = &jc.constraint {
+            let mut cands = Vec::new();
+            let rem = split_expr(
+                join_expr,
+                &|e| is_simple_parametrizable_filter(e, |_, _| true),
+                &mut cands,
+            );
+            if !cands.is_empty() {
+                jc.constraint = rem.map_or(JoinConstraint::Empty, JoinConstraint::On);
+                add_to_where.extend(cands);
+            }
+        }
+    }
+
+    if add_to_where.is_empty() {
+        return Ok(false);
+    }
+
+    let mut acc = None;
+    for e in add_to_where {
+        acc = and_predicates_skip_true(acc, e);
+    }
+    stmt.where_clause = and_predicates_skip_true(mem::take(&mut stmt.where_clause), acc.unwrap());
+
+    Ok(true)
+}
+
+/// Returns true if this SELECT defines a FROM-item whose relation "matches" `rhs_rel`.
+///
+/// We treat that as a lexical shadowing of the outer RHS alias and **never** descend
+/// into such a subquery when collecting or rebinding RHS references. This prevents us
+/// from accidentally rewriting columns that belong to a new scope with the same alias.
+///
+/// Correctness of this guard relies on `get_from_item_reference_name` and `is_column_of!`
+/// using the same `Relation` identity that the resolver assigned to aliases.
+fn shadows_rhs_alias(stmt: &SelectStatement, rhs_rel: &Relation) -> bool {
+    get_local_from_items_iter!(stmt)
+        .any(|t| get_from_item_reference_name(t).is_ok_and(|rel| rel == *rhs_rel))
+}
+
+pub(crate) fn deep_columns_visitor_mut(
+    stmt: &mut SelectStatement,
+    shadow_rel: &Relation,
+    visitor: &mut impl FnMut(&mut Expr),
+) -> ReadySetResult<()> {
+    struct ExprVisitor<'a> {
+        shadow_rel: &'a Relation,
+        visitor: &'a mut dyn FnMut(&mut Expr),
+        depth: usize,
+    }
+
+    impl<'a> VisitorMut<'a> for ExprVisitor<'a> {
+        type Error = ReadySetError;
+
+        fn visit_expr(&mut self, expr: &'a mut Expr) -> Result<(), Self::Error> {
+            if matches!(expr, Expr::Column(_)) {
+                (self.visitor)(expr);
+                Ok(())
+            } else {
+                walk_expr(self, expr)
+            }
+        }
+
+        fn visit_select_statement(
+            &mut self,
+            stmt: &'a mut SelectStatement,
+        ) -> Result<(), Self::Error> {
+            self.depth += 1;
+            if self.depth == 1 || !shadows_rhs_alias(stmt, self.shadow_rel) {
+                visit_mut::walk_select_statement(self, stmt)?;
+            }
+            self.depth -= 1;
+            Ok(())
+        }
+    }
+
+    ExprVisitor {
+        shadow_rel,
+        visitor,
+        depth: 0,
+    }
+    .visit_select_statement(stmt)
+}
+
+pub(crate) fn deep_columns_visitor(
+    stmt: &SelectStatement,
+    shadow_rel: &Relation,
+    visitor: &mut impl FnMut(&Expr),
+) -> ReadySetResult<()> {
+    struct ExprVisitor<'a> {
+        shadow_rel: &'a Relation,
+        visitor: &'a mut dyn FnMut(&Expr),
+        depth: usize,
+    }
+
+    impl<'a> Visitor<'a> for ExprVisitor<'a> {
+        type Error = ReadySetError;
+
+        fn visit_expr(&mut self, expr: &'a Expr) -> Result<(), Self::Error> {
+            if matches!(expr, Expr::Column(_)) {
+                (self.visitor)(expr);
+                Ok(())
+            } else {
+                visit::walk_expr(self, expr)
+            }
+        }
+
+        fn visit_select_statement(&mut self, stmt: &'a SelectStatement) -> Result<(), Self::Error> {
+            self.depth += 1;
+            if self.depth == 1 || !shadows_rhs_alias(stmt, self.shadow_rel) {
+                walk_select_statement(self, stmt)?;
+            }
+            self.depth -= 1;
+            Ok(())
+        }
+    }
+
+    ExprVisitor {
+        shadow_rel,
+        visitor,
+        depth: 0,
+    }
+    .visit_select_statement(stmt)
 }

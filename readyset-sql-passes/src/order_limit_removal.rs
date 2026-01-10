@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-
+use itertools::Itertools;
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err};
 use readyset_sql::ast::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableBody, Expr, LimitClause, Relation,
-    SelectStatement, SqlQuery, TableExpr, TableKey,
+    BinaryOperator, Column, ColumnConstraint, CreateTableBody, Expr, LimitClause, Literal,
+    Relation, SelectStatement, SqlQuery, TableExpr, TableKey,
 };
+use std::collections::HashMap;
 
 pub trait OrderLimitRemoval: Sized {
     /// Remove any LIMIT and ORDER statement belonging to a query that is determined to return at
@@ -37,22 +37,23 @@ fn is_unique_or_primary(
         None => {
             // Attempt to resolve alias. Most queries are not likely to do this, so we resolve
             // reactively
-            let err = || internal_err!("Table name must match table in base schema");
-            let resolved_table = table_exprs
-                .iter()
-                .find_map(|table_expr| {
-                    if let Some(alias) = table_expr.alias.as_ref() {
-                        if table.schema.is_none() && table.name == alias {
-                            table_expr.inner.as_table()
-                        } else {
-                            None
-                        }
+            if let Some(resolved_table) = table_exprs.iter().find_map(|table_expr| {
+                if let Some(alias) = table_expr.alias.as_ref() {
+                    if table.schema.is_none() && table.name == alias {
+                        table_expr.inner.as_table()
                     } else {
                         None
                     }
-                })
-                .ok_or_else(err)?;
-            base_schemas.get(resolved_table).ok_or_else(err)?
+                } else {
+                    None
+                }
+            }) {
+                base_schemas
+                    .get(resolved_table)
+                    .ok_or_else(|| internal_err!("Table name must match table in base schema"))?
+            } else {
+                return Ok(false);
+            }
         }
         Some(table) => table,
     };
@@ -85,7 +86,7 @@ fn is_unique_or_primary(
         || col_spec
             .constraints
             .iter()
-            .any(|c| matches!(c, ColumnConstraint::Unique)))
+            .any(|c| matches!(c, ColumnConstraint::Unique | ColumnConstraint::PrimaryKey)))
 }
 
 fn compares_unique_key_against_literal(
@@ -95,11 +96,10 @@ fn compares_unique_key_against_literal(
 ) -> ReadySetResult<bool> {
     match expr {
         Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_ref(), op, rhs.as_ref()) {
-            (Expr::Literal(_), BinaryOperator::Equal, Expr::Column(c))
-            | (Expr::Literal(_), BinaryOperator::Is, Expr::Column(c))
-            | (Expr::Column(c), BinaryOperator::Equal, Expr::Literal(_))
-            | (Expr::Column(c), BinaryOperator::Is, Expr::Literal(_)) => {
-                Ok(is_unique_or_primary(c, base_schemas, table_exprs)?)
+            (Expr::Literal(lit), BinaryOperator::Equal, Expr::Column(c))
+            | (Expr::Column(c), BinaryOperator::Equal, Expr::Literal(lit)) => {
+                Ok(!matches!(lit, Literal::Null)
+                    && is_unique_or_primary(c, base_schemas, table_exprs)?)
             }
             (lhs, BinaryOperator::And, rhs) => {
                 Ok(
@@ -123,11 +123,17 @@ impl OrderLimitRemoval for SelectStatement {
         let has_limit = matches!(
             self.limit_clause,
             LimitClause::LimitOffset { limit: Some(_), .. } | LimitClause::OffsetCommaLimit { .. }
+        ) && matches!(
+            self.limit_clause.offset(), // OFFSET > 0 implies (>= OFFSET) rows to return, hence do not drop
+            None | Some(Literal::Integer(0)) | Some(Literal::UnsignedInteger(0))
         );
+
         // If the query uses an equality filter on a column that has a unique or primary key
         // index, remove order and limit
         if has_limit
             && let Some(ref expr) = self.where_clause
+            && self.join.is_empty()
+            && matches!(self.tables.iter().exactly_one(), Ok(tab) if tab.inner.as_table().is_some())
             && compares_unique_key_against_literal(expr, base_schemas, &self.tables)?
         {
             self.limit_clause = LimitClause::default();

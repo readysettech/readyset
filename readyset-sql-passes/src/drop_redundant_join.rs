@@ -1,19 +1,17 @@
-use crate::rewrite_utils::{
-    alias_for_expr, as_sub_query_with_alias_mut, expect_field_as_expr,
-    expect_sub_query_with_alias_mut, get_from_item_reference_name, is_column_eq_column,
-    project_columns_if_not_exist_fix_duplicate_aliases,
+pub(crate) use crate::rewrite_utils::{
+    alias_for_expr, as_sub_query_with_alias_mut, deep_columns_visitor, deep_columns_visitor_mut,
+    expect_field_as_expr, expect_sub_query_with_alias_mut, get_from_item_reference_name,
+    is_column_eq_column, project_columns_if_not_exist_fix_duplicate_aliases,
 };
 use crate::{
-    RewriteContext, get_local_from_items_iter, get_local_from_items_iter_mut, is_column_of,
+    RewriteContext, as_column, get_local_from_items_iter, get_local_from_items_iter_mut,
+    is_column_of,
 };
 use itertools::{Either, Itertools};
-use readyset_errors::{ReadySetError, ReadySetResult};
-use readyset_sql::analysis::visit::{Visitor, walk_select_statement};
-use readyset_sql::analysis::visit_mut::{VisitorMut, walk_expr};
-use readyset_sql::analysis::{visit, visit_mut};
+use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{
-    Column, ColumnConstraint, Expr, JoinConstraint, JoinRightSide, Relation, SelectStatement,
-    SqlIdentifier, TableExpr, TableExprInner,
+    Column, ColumnConstraint, Expr, JoinConstraint, JoinOperator, JoinRightSide, Relation,
+    SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
 use std::collections::{HashMap, HashSet};
 use std::{iter, mem};
@@ -195,19 +193,6 @@ fn lhs_is_subset_of_rhs(
     Ok(false)
 }
 
-/// Returns true if this SELECT defines a FROM-item whose relation "matches" `rhs_rel`.
-///
-/// We treat that as a lexical shadowing of the outer RHS alias and **never** descend
-/// into such a subquery when collecting or rebinding RHS references. This prevents us
-/// from accidentally rewriting columns that belong to a new scope with the same alias.
-///
-/// Correctness of this guard relies on `get_from_item_reference_name` and `is_column_of!`
-/// using the same `Relation` identity that the resolver assigned to aliases.
-fn shadows_rhs_alias(stmt: &SelectStatement, rhs_rel: &Relation) -> bool {
-    get_local_from_items_iter!(stmt)
-        .any(|t| get_from_item_reference_name(t).is_ok_and(|rel| rel == *rhs_rel))
-}
-
 /// Collects the *names* of all columns that reference `rhs_rel` anywhere in `stmt`,
 /// descending into all non-shadowing subqueries.
 ///
@@ -223,39 +208,12 @@ fn collect_rhs_refs(
     rhs_rel: &Relation,
     rhs_refs: &mut HashSet<SqlIdentifier>,
 ) -> ReadySetResult<()> {
-    struct ExprVisitor<'a> {
-        rhs_rel: &'a Relation,
-        rhs_refs: &'a mut HashSet<SqlIdentifier>,
-    }
-
-    impl<'a> Visitor<'a> for ExprVisitor<'a> {
-        type Error = ReadySetError;
-
-        fn visit_expr(&mut self, expr: &'a Expr) -> Result<(), Self::Error> {
-            // We only care about column references; all other expression kinds are traversed
-            // recursively via walk_expr so that we see correlated uses in nested subqueries.
-            if let Expr::Column(column) = expr {
-                if is_column_of!(column, *self.rhs_rel) {
-                    self.rhs_refs.insert(column.name.clone());
-                }
-                Ok(())
-            } else {
-                visit::walk_expr(self, expr)
-            }
+    deep_columns_visitor(stmt, rhs_rel, &mut |expr| {
+        let column = as_column!(expr);
+        if is_column_of!(column, *rhs_rel) {
+            rhs_refs.insert(column.name.clone());
         }
-
-        fn visit_select_statement(&mut self, stmt: &'a SelectStatement) -> Result<(), Self::Error> {
-            if shadows_rhs_alias(stmt, self.rhs_rel) {
-                Ok(())
-            } else {
-                walk_select_statement(self, stmt)
-            }
-        }
-    }
-
-    ExprVisitor { rhs_rel, rhs_refs }.visit_select_statement(stmt)?;
-
-    Ok(())
+    })
 }
 
 /// Rebind all references to `rhs_rel.col` to `lhs_rel.<alias>` throughout `stmt`,
@@ -281,52 +239,19 @@ fn rebind_rhs_refs(
     col_to_alias: &HashMap<SqlIdentifier, SqlIdentifier>,
     lhs_rel: &Relation,
 ) -> ReadySetResult<()> {
-    struct ExprVisitor<'a> {
-        rhs_rel: &'a Relation,
-        lhs_rel: &'a Relation,
-        col_to_alias: &'a HashMap<SqlIdentifier, SqlIdentifier>,
-    }
-
-    impl<'a> VisitorMut<'a> for ExprVisitor<'a> {
-        type Error = ReadySetError;
-
-        fn visit_expr(&mut self, expr: &'a mut Expr) -> Result<(), Self::Error> {
-            if let Expr::Column(column) = expr {
-                if is_column_of!(column, *self.rhs_rel) {
-                    if let Some(alias) = self.col_to_alias.get(&column.name) {
-                        column.name = alias.clone();
-                        column.table = Some(self.lhs_rel.clone());
-                    } else {
-                        unreachable!(
-                            "expected every referenced RHS column to be projected into the LHS \
-                             subquery before rebinding"
-                        )
-                    }
-                }
-                Ok(())
+    deep_columns_visitor_mut(stmt, rhs_rel, &mut |expr| {
+        let column = as_column!(expr);
+        if is_column_of!(column, *rhs_rel) {
+            if let Some(alias) = col_to_alias.get(&column.name) {
+                column.name = alias.clone();
+                column.table = Some(lhs_rel.clone());
             } else {
-                walk_expr(self, expr)
+                unreachable!(
+                    "Expected every referenced RHS column to be projected into the LHS subquery before rebinding"
+                )
             }
         }
-
-        fn visit_select_statement(
-            &mut self,
-            stmt: &'a mut SelectStatement,
-        ) -> Result<(), Self::Error> {
-            if shadows_rhs_alias(stmt, self.rhs_rel) {
-                Ok(())
-            } else {
-                visit_mut::walk_select_statement(self, stmt)
-            }
-        }
-    }
-
-    ExprVisitor {
-        rhs_rel,
-        lhs_rel,
-        col_to_alias,
-    }
-    .visit_select_statement(stmt)
+    })
 }
 
 /// Eliminate a very specific redundant LEFT self-join pattern.
@@ -344,7 +269,7 @@ fn rebind_rhs_refs(
 ///
 /// Under the following conditions:
 ///   • There is exactly one FROM item and at least one JOIN in the outer statement.
-///   • The first JOIN is a LEFT JOIN whose RHS is a base table `T1`.
+///   • The first JOIN is a JOIN whose RHS is a base table `T1`.
 ///   • The join condition is a single, pure equality `LHS.<key> = T1.<key>` between
 ///     different relations (`is_column_eq_column` enforces this).
 ///   • `lhs_is_subset_of_rhs` proves that `LHS.<key>` is a direct projection of the
@@ -381,11 +306,22 @@ fn drop_redundant_self_joins(
         }
     }
 
-    if !stmt.tables.len() == 1 || stmt.join.is_empty() {
+    if stmt.tables.len() != 1 || stmt.join.is_empty() {
         return Ok(any_rewrite);
     }
 
     let join_clause = &stmt.join[0];
+    match join_clause.operator {
+        JoinOperator::Join
+        | JoinOperator::LeftJoin
+        | JoinOperator::LeftOuterJoin
+        | JoinOperator::InnerJoin
+        | JoinOperator::CrossJoin
+        | JoinOperator::StraightJoin => {}
+        JoinOperator::RightJoin | JoinOperator::RightOuterJoin => {
+            return Ok(any_rewrite);
+        }
+    }
 
     let JoinRightSide::Table(rhs_base_table) = &join_clause.right else {
         return Ok(any_rewrite);
@@ -447,12 +383,7 @@ fn drop_redundant_self_joins(
     let col_to_alias = proj_exprs
         .into_iter()
         .zip(proj_aliases)
-        .map(|(expr, (_, alias))| {
-            let Expr::Column(Column { name, .. }) = expr else {
-                unreachable!("Must be Column");
-            };
-            (name, alias)
-        })
+        .map(|(expr, (_, alias))| (as_column!(expr).name, alias))
         .collect::<HashMap<_, _>>();
 
     rebind_rhs_refs(stmt, &rhs_rel, &col_to_alias, &lhs_rel)?;

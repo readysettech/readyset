@@ -734,14 +734,12 @@ pub(crate) fn agg_only_no_gby_cardinality(
     Ok(None)
 }
 
-fn has_limit_one_deep(stmt: &SelectStatement) -> bool {
+pub(crate) fn has_limit_one_deep(stmt: &SelectStatement) -> bool {
     // Walk down a chain of single-subquery FROM items, if present.
     let mut cur = stmt;
     loop {
-        // Local LIMIT 1 (optionally OFFSET 0)
-        if matches!(cur.limit_clause.limit(), Some(Literal::Integer(1)))
-            && matches!(cur.limit_clause.offset(), None | Some(Literal::Integer(0)))
-        {
+        // Local LIMIT 1 (any OFFSET) => AtMostOne row after TOP-K materialization
+        if matches!(cur.limit_clause.limit(), Some(Literal::Integer(1))) {
             return true;
         }
         // Descend if this SELECT has exactly one FROM item which is a subquery with alias.
@@ -868,7 +866,7 @@ pub(crate) fn as_joinable_derived_table_with_opts(
     opts: AsJoinableOpts,
 ) -> ReadySetResult<(TableExpr, Option<Expr>)> {
     // True iff this SELECT **or** a chain of single-child projecting wrappers beneath it
-    // contains an explicit `LIMIT 1` (with optional `OFFSET 0`). Capture this *before*
+    // contains an explicit `LIMIT 1` (with any OFFSET). Capture this *before*
     // TOP-K materialization; afterward, ORDER/LIMIT are consumed into ROW_NUMBER() and gone.
     // We use this flag to:
     //  - relax scalar validation (allow non-aggregated scalar with LIMIT 1),
