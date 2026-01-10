@@ -2353,6 +2353,47 @@ async fn shallow_cache_protocol_crossing() {
     shutdown_tx.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, postgres_upstream)]
+async fn shallow_cache_prepared_statement_without_parameters() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let mut conn = DatabaseURL::from(opts)
+        .connect(&ServerCertVerification::Default)
+        .await
+        .unwrap();
+
+    conn.simple_query("CREATE TABLE shallow (a INT)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.simple_query("INSERT INTO shallow VALUES (42)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.simple_query("CREATE SHALLOW CACHE FROM SELECT a FROM shallow")
+        .await
+        .unwrap();
+    sleep().await;
+
+    let stmt = conn.prepare("SELECT a FROM shallow").await.unwrap();
+
+    conn.execute::<_, &[&i32]>(&stmt, &[]).await.unwrap();
+    let info = explain_last_statement(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::Upstream);
+
+    conn.execute::<_, &[&i32]>(&stmt, &[]).await.unwrap();
+    let info = explain_last_statement(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    shutdown_tx.shutdown().await;
+}
+
 mod http_tests {
     use super::*;
     #[tokio::test(flavor = "multi_thread")]

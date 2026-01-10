@@ -1716,10 +1716,14 @@ where
         dialect: Dialect,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let keys = query_params.make_keys(params)?;
-        let [key] = &keys[..] else {
-            internal!("shallow cache {query_id} query had {} keys", keys.len());
+        let key = match keys.as_slice() {
+            [] => vec![],
+            [key] => key.to_vec(),
+            [..] => {
+                internal!("shallow cache {query_id} query had {} keys", keys.len());
+            }
         };
-        let res = shallow.get_or_start_insert(query_id, key.to_vec()).await;
+        let res = shallow.get_or_start_insert(query_id, key).await;
 
         match res {
             CacheResult::Hit(values, _) if Self::is_meta_compatible(upstream, &values).await? => {
