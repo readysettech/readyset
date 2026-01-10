@@ -3,6 +3,26 @@ use std::iter;
 
 use crate::ast::*;
 
+/// When stack space falls below this threshold, a new stack segment is allocated.
+pub const STACK_RED_ZONE: usize = 32 * 1024;
+
+/// Stack size to allocate when growing.
+pub const STACK_SIZE: usize = 1024 * 1024;
+
+/// Wraps a recursive function body with stack overflow protection.
+///
+/// Uses `stacker::maybe_grow` to automatically allocate a new stack segment when the current stack
+/// is running low.
+macro_rules! with_stack_guard {
+    ($body:expr) => {
+        stacker::maybe_grow(
+            $crate::analysis::STACK_RED_ZONE,
+            $crate::analysis::STACK_SIZE,
+            move || $body,
+        )
+    };
+}
+
 pub mod visit;
 pub mod visit_mut;
 

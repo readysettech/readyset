@@ -5527,6 +5527,7 @@ dependencies = [
  "readyset-util",
  "serde",
  "sqlparser",
+ "stacker",
  "strum",
  "test-strategy",
  "test-utils",

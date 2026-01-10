@@ -241,6 +241,7 @@ smallvec = { version = "1.13.2", default-features = false }
 socket2 = "0.6"
 sqlformat = "0.3.1"
 sqlparser = { git = "https://github.com/apache/datafusion-sqlparser-rs", branch = "main" }
+stacker = "0.1"
 strawpoll = "0.2.3"
 streaming-iterator = "0.1"
 stringprep = "0.1.4"

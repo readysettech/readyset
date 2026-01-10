@@ -496,7 +496,7 @@ pub fn walk_expr<'ast, V: VisitorMut<'ast>>(
     visitor: &mut V,
     expr: &'ast mut Expr,
 ) -> Result<(), V::Error> {
-    match expr {
+    with_stack_guard!(match expr {
         Expr::Call(fexpr) => visitor.visit_function_expr(fexpr),
         Expr::Literal(lit) => visitor.visit_literal(lit),
         Expr::BinaryOp { lhs, rhs, .. }
@@ -574,7 +574,7 @@ pub fn walk_expr<'ast, V: VisitorMut<'ast>>(
             }
             Ok(())
         }
-    }
+    })
 }
 
 pub fn walk_case_when_branch<'ast, V: VisitorMut<'ast>>(
