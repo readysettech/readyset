@@ -2129,7 +2129,13 @@ impl QueryOperation {
                         negated: *negated,
                     },
                     FilterOp::IsNull { negated } => {
-                        tbl.expect_value(col, DfValue::None);
+                        // Don't add NULL to expected values for SERIAL/BIGSERIAL types, as
+                        // PostgreSQL adds implicit NOT NULL constraints to these columns. This
+                        // causes us to get `Too many local rejects` errors trying to generate
+                        // logictest cases when fuzzing.
+                        if !matches!(filter.column_type, SqlType::Serial | SqlType::BigSerial) {
+                            tbl.expect_value(col, DfValue::None);
+                        }
                         Expr::BinaryOp {
                             lhs: Box::new(col_expr),
                             op: if *negated {
