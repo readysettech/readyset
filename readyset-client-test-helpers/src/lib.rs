@@ -433,6 +433,7 @@ impl TestBuilder {
                 Backend::<A::Upstream, A::Handler>::start_shallow_refresh_workers(
                     &tokio::runtime::Handle::current(),
                     &cdc_upstream_config,
+                    100,
                 ),
             )
         } else {

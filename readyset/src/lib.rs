@@ -353,6 +353,14 @@ pub struct Options {
     )]
     shallow_memory_percent: Option<f64>,
 
+    /// Specifies how large the pool of shallow cache refresh workers should be.
+    ///
+    /// These workers are responsible for refreshing shallow caches by running queries on the
+    /// upstream database.  When all workers are busy, expect this many additional connections to
+    /// the upstream.
+    #[arg(long, env = "SHALLOW_REFRESH_WORKERS", default_value = "100")]
+    shallow_refresh_workers: usize,
+
     #[command(flatten)]
     pub server_worker_options: WorkerOptions,
 
@@ -1393,6 +1401,7 @@ where
             Backend::<H::UpstreamDatabase, H>::start_shallow_refresh_workers(
                 rt.handle(),
                 &upstream_config,
+                options.shallow_refresh_workers,
             );
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {

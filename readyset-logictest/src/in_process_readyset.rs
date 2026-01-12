@@ -175,6 +175,7 @@ async fn setup_adapter(
                             Backend::<$upstream, $handler>::start_shallow_refresh_workers(
                                 &tokio::runtime::Handle::current(),
                                 &config,
+                                100,
                             ),
                         )
                     } else {

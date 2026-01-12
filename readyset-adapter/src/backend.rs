@@ -4542,13 +4542,13 @@ where
     pub fn start_shallow_refresh_workers(
         rt: &tokio::runtime::Handle,
         config: &UpstreamConfig,
+        count: usize,
     ) -> async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>> {
-        let cpus = num_cpus::get();
         let (sender, receiver) = async_channel::bounded::<
             ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>,
-        >(5 * cpus);
+        >(5 * count);
 
-        for _ in 0..cpus {
+        for _ in 0..count {
             rt.spawn(Self::shallow_refresh_worker(
                 receiver.clone(),
                 config.clone(),
