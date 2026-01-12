@@ -722,14 +722,20 @@ impl<'a> NoriaAdapter<'a> {
 
         let replication_offsets = noria.replication_offsets().await?;
         trace!(?replication_offsets, "Loaded replication offsets");
-        let mut min_pos = replication_offsets
-            .min_present_offset()?
-            .expect("Minimal offset must be present after snapshot")
-            .clone();
-        let max_pos = replication_offsets
-            .max_offset()?
-            .expect("Maximum offset must be present after snapshot")
-            .clone();
+        let (mut min_pos, max_pos) = match (
+            replication_offsets.min_present_offset()?,
+            replication_offsets.max_offset()?,
+        ) {
+            (Some(min), Some(max)) => (min.clone(), max.clone()),
+            _ => {
+                // Some tables don't have replication offsets, so we need to resnapshot.
+                // This can happen if the adapter restarted after a DDL change created
+                // tables but before they were fully snapshotted and replication offsets
+                // were set.
+                warn!("Some tables missing replication offsets, triggering resnapshot");
+                return Err(ReadySetError::ResnapshotNeeded);
+            }
+        };
 
         let mut adapter = NoriaAdapter {
             noria,
