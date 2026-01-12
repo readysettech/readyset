@@ -280,19 +280,20 @@ where
         let res = cache.get(key.clone()).await;
         let sched = cache.is_scheduled();
         let guard = Self::make_guard(cache, key);
-        let query = query_id.to_string();
+        let query_id = query_id.to_string();
+
         match (res, sched) {
             (Some((res, false)), _) | (Some((res, true)), true) => {
-                counter!(recorded::SHALLOW_HIT, "query" => query).increment(1);
+                counter!(recorded::SHALLOW_HIT, "query_id" => query_id).increment(1);
                 CacheResult::Hit(res, guard)
             }
             (Some((res, true)), _) => {
-                counter!(recorded::SHALLOW_HIT, "query" => query.clone()).increment(1);
-                counter!(recorded::SHALLOW_REFRESH, "query" => query).increment(1);
+                counter!(recorded::SHALLOW_HIT, "query_id" => query_id.clone()).increment(1);
+                counter!(recorded::SHALLOW_REFRESH, "query_id" => query_id).increment(1);
                 CacheResult::HitAndRefresh(res, guard)
             }
             (None, _) => {
-                counter!(recorded::SHALLOW_MISS, "query" => query).increment(1);
+                counter!(recorded::SHALLOW_MISS, "query_id" => query_id).increment(1);
                 CacheResult::Miss(guard)
             }
         }
