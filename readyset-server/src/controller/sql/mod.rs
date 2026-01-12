@@ -1533,6 +1533,7 @@ impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
         };
 
         if self.view_schemas().contains_key(&relation)
+            || self.base_schemas().contains_key(&relation)
             || self.uncompiled_views().contains(&&relation)
         {
             Some(CanQuery::Yes)
