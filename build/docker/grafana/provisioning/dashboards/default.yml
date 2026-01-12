@@ -54,3 +54,9 @@ providers:
     options:
       allowUiUpdates: true
       path: /var/lib/grafana/dashboards/benchmarking.json
+
+  - name: Shallow Caching
+    type: file
+    options:
+      allowUiUpdates: true
+      path: /var/lib/grafana/dashboards/shallow_caching.json
