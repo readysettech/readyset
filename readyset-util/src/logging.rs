@@ -22,6 +22,8 @@ pub const ADAPTER_SHALLOW_REFRESH_SET_SCHEMA: &str = "ADAPTER_SHALLOW_REFRESH_SE
 pub const ADAPTER_SHALLOW_REFRESH_RUN: &str = "ADAPTER_SHALLOW_REFRESH_RUN";
 /// Key for shallow cache refresh result set read failure.
 pub const ADAPTER_SHALLOW_REFRESH_READ: &str = "ADAPTER_SHALLOW_REFRESH_READ";
+/// Key for shallow cache refresh send failure.
+pub const ADAPTER_SHALLOW_REFRESH_SEND_REQUEST: &str = "ADAPTER_SHALLOW_REFRESH_SEND_REQUEST";
 
 fn interval_for_key(key: &str) -> Duration {
     let var_name = format!("{}_LOG_RATE_LIMIT_SECS", key.to_ascii_uppercase());

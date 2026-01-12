@@ -87,6 +87,7 @@ use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use readyset_adapter_types::{DeallocateId, ParsedCommand, PreparedStatementType};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
+use readyset_client::metrics::recorded::SHALLOW_REFRESH_QUEUE_EXCEEDED;
 use readyset_client::query::*;
 use readyset_client::recipe::CacheExpr;
 use readyset_client::results::Results;
@@ -1699,6 +1700,20 @@ where
         upstream.is_meta_compatible(first).await
     }
 
+    fn send_refresh(
+        refresh: &async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
+        req: ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>,
+    ) {
+        let Err(e) = refresh.try_send(req) else {
+            return;
+        };
+
+        metrics::counter!(SHALLOW_REFRESH_QUEUE_EXCEEDED).increment(1);
+        rate_limit(true, ADAPTER_SHALLOW_REFRESH_SEND_REQUEST, || {
+            warn!("Failed to send shallow refresh request: {e}");
+        });
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn execute_shallow<'a>(
         upstream: &'a mut DB,
@@ -1746,9 +1761,7 @@ where
                         cache,
                         shallow_exec_meta,
                     };
-                    if let Err(e) = refresh.try_send(request) {
-                        warn!("Failed to send shallow refresh request: {e}");
-                    }
+                    Self::send_refresh(refresh, request);
                 }
 
                 event.destination = Some(QueryDestination::ReadysetShallow);
@@ -1779,9 +1792,7 @@ where
                                 cache,
                                 shallow_exec_meta: Some(shallow_exec_meta.clone()),
                             };
-                            if let Err(e) = refresh.try_send(request) {
-                                warn!("Failed to send shallow refresh request: {e}");
-                            }
+                            Self::send_refresh(&refresh, request);
                         })
                     };
                     cache.set_refresh(callback);
@@ -3557,9 +3568,7 @@ where
                         cache,
                         shallow_exec_meta: None,
                     };
-                    if let Err(e) = refresh.try_send(request) {
-                        warn!("Failed to send shallow refresh request: {}", e);
-                    }
+                    Self::send_refresh(refresh, request);
                 }
 
                 event.destination = Some(QueryDestination::ReadysetShallow);
@@ -3580,9 +3589,7 @@ where
                             cache,
                             shallow_exec_meta: None,
                         };
-                        if let Err(e) = refresh.try_send(req) {
-                            warn!("Failed to send shallow refresh request: {}", e);
-                        }
+                        Self::send_refresh(&refresh, req);
                     });
                     cache.set_refresh(callback);
                 };
