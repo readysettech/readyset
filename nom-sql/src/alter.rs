@@ -30,7 +30,10 @@ fn add_column(
         let (i, _) = whitespace1(i)?;
 
         map(column_specification(dialect), |c| {
-            AlterTableDefinition::AddColumn(c)
+            AlterTableDefinition::AddColumn {
+                spec: c,
+                position: None,
+            }
         })(i)
     }
 }
@@ -131,7 +134,14 @@ fn change_column(
         let (i, _) = whitespace1(i)?;
         let (i, spec) = column_specification(dialect)(i)?;
 
-        Ok((i, AlterTableDefinition::ChangeColumn { name, spec }))
+        Ok((
+            i,
+            AlterTableDefinition::ChangeColumn {
+                name,
+                spec,
+                position: None,
+            },
+        ))
     }
 }
 
@@ -148,6 +158,7 @@ fn modify_column(
             AlterTableDefinition::ChangeColumn {
                 name: spec.column.name.clone(),
                 spec,
+                position: None,
             }
         })(i)
     }
@@ -508,26 +519,32 @@ mod tests {
                 schema: None,
             },
             definitions: Ok(vec![
-                AlterTableDefinition::AddColumn(ColumnSpecification {
-                    column: Column {
-                        name: "Email".into(),
-                        table: None,
+                AlterTableDefinition::AddColumn {
+                    spec: ColumnSpecification {
+                        column: Column {
+                            name: "Email".into(),
+                            table: None,
+                        },
+                        sql_type: SqlType::VarChar(Some(255)),
+                        generated: None,
+                        constraints: vec![],
+                        comment: None,
                     },
-                    sql_type: SqlType::VarChar(Some(255)),
-                    generated: None,
-                    constraints: vec![],
-                    comment: None,
-                }),
-                AlterTableDefinition::AddColumn(ColumnSpecification {
-                    column: Column {
-                        name: "snailmail".into(),
-                        table: None,
+                    position: None,
+                },
+                AlterTableDefinition::AddColumn {
+                    spec: ColumnSpecification {
+                        column: Column {
+                            name: "snailmail".into(),
+                            table: None,
+                        },
+                        sql_type: SqlType::Text,
+                        generated: None,
+                        constraints: vec![],
+                        comment: None,
                     },
-                    sql_type: SqlType::Text,
-                    generated: None,
-                    constraints: vec![],
-                    comment: None,
-                }),
+                    position: None,
+                },
             ]),
             only: false,
         };
@@ -542,16 +559,19 @@ mod tests {
         fn display_add_column() {
             let stmt = AlterTableStatement {
                 table: "t".into(),
-                definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
-                    column: Column {
-                        name: "c".into(),
-                        table: None,
+                definitions: Ok(vec![AlterTableDefinition::AddColumn {
+                    spec: ColumnSpecification {
+                        column: Column {
+                            name: "c".into(),
+                            table: None,
+                        },
+                        sql_type: SqlType::Int(Some(32)),
+                        generated: None,
+                        comment: None,
+                        constraints: vec![],
                     },
-                    sql_type: SqlType::Int(Some(32)),
-                    generated: None,
-                    comment: None,
-                    constraints: vec![],
-                })]),
+                    position: None,
+                }]),
                 only: false,
             };
 
@@ -610,16 +630,19 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
-                    column: Column {
-                        name: "c".into(),
-                        table: None,
+                definitions: Ok(vec![AlterTableDefinition::AddColumn {
+                    spec: ColumnSpecification {
+                        column: Column {
+                            name: "c".into(),
+                            table: None,
+                        },
+                        sql_type: SqlType::Int(None),
+                        generated: None,
+                        constraints: vec![],
+                        comment: None,
                     },
-                    sql_type: SqlType::Int(None),
-                    generated: None,
-                    constraints: vec![],
-                    comment: None,
-                })]),
+                    position: None,
+                }]),
                 only: false,
             };
             let result =
@@ -636,26 +659,32 @@ mod tests {
                     schema: None,
                 },
                 definitions: Ok(vec![
-                    AlterTableDefinition::AddColumn(ColumnSpecification {
-                        column: Column {
-                            name: "c".into(),
-                            table: None,
+                    AlterTableDefinition::AddColumn {
+                        spec: ColumnSpecification {
+                            column: Column {
+                                name: "c".into(),
+                                table: None,
+                            },
+                            sql_type: SqlType::Int(None),
+                            generated: None,
+                            constraints: vec![],
+                            comment: None,
                         },
-                        sql_type: SqlType::Int(None),
-                        generated: None,
-                        constraints: vec![],
-                        comment: None,
-                    }),
-                    AlterTableDefinition::AddColumn(ColumnSpecification {
-                        column: Column {
-                            name: "d".into(),
-                            table: None,
+                        position: None,
+                    },
+                    AlterTableDefinition::AddColumn {
+                        spec: ColumnSpecification {
+                            column: Column {
+                                name: "d".into(),
+                                table: None,
+                            },
+                            sql_type: SqlType::Text,
+                            generated: None,
+                            constraints: vec![],
+                            comment: None,
                         },
-                        sql_type: SqlType::Text,
-                        generated: None,
-                        constraints: vec![],
-                        comment: None,
-                    }),
+                        position: None,
+                    },
                 ]),
                 only: false,
             };
@@ -758,7 +787,8 @@ mod tests {
                             generated: None,
                             constraints: vec![ColumnConstraint::NotNull],
                             comment: None,
-                        }
+                        },
+                        position: None,
                     }]),
                     only: false,
                 }
@@ -784,7 +814,8 @@ mod tests {
                                 ColumnConstraint::PrimaryKey
                             ],
                             comment: None,
-                        }
+                        },
+                        position: None,
                     }]),
                     only: false,
                 }
@@ -807,7 +838,8 @@ mod tests {
                             generated: None,
                             constraints: vec![],
                             comment: None,
-                        }
+                        },
+                        position: None,
                     }]),
                     only: false,
                 }
@@ -887,13 +919,19 @@ mod tests {
                 res,
                 AlterTableStatement {
                     table: Relation::from("discussion_user"),
-                    definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
-                        column: Column::from("subscription"),
-                        sql_type: SqlType::from_enum_variants(["follow".into(), "ignore".into(),]),
-                        generated: None,
-                        constraints: vec![ColumnConstraint::Null],
-                        comment: None,
-                    })]),
+                    definitions: Ok(vec![AlterTableDefinition::AddColumn {
+                        spec: ColumnSpecification {
+                            column: Column::from("subscription"),
+                            sql_type: SqlType::from_enum_variants([
+                                "follow".into(),
+                                "ignore".into()
+                            ]),
+                            generated: None,
+                            constraints: vec![ColumnConstraint::Null],
+                            comment: None,
+                        },
+                        position: None,
+                    }]),
                     only: false,
                 }
             );
@@ -958,13 +996,16 @@ mod tests {
                 AlterTableStatement {
                     table: Relation::from("t"),
                     definitions: Ok(vec![
-                        AlterTableDefinition::AddColumn(ColumnSpecification {
-                            column: Column::from("c"),
-                            sql_type: SqlType::Int(None),
-                            generated: None,
-                            constraints: vec![],
-                            comment: None,
-                        }),
+                        AlterTableDefinition::AddColumn {
+                            spec: ColumnSpecification {
+                                column: Column::from("c"),
+                                sql_type: SqlType::Int(None),
+                                generated: None,
+                                constraints: vec![],
+                                comment: None,
+                            },
+                            position: None,
+                        },
                         AlterTableDefinition::Algorithm {
                             equals: true,
                             algorithm: AlterTableAlgorithm::Instant
@@ -985,16 +1026,19 @@ mod tests {
         fn display_add_column() {
             let stmt = AlterTableStatement {
                 table: "t".into(),
-                definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
-                    column: Column {
-                        name: "c".into(),
-                        table: None,
+                definitions: Ok(vec![AlterTableDefinition::AddColumn {
+                    spec: ColumnSpecification {
+                        column: Column {
+                            name: "c".into(),
+                            table: None,
+                        },
+                        sql_type: SqlType::Int(Some(32)),
+                        generated: None,
+                        comment: None,
+                        constraints: vec![],
                     },
-                    sql_type: SqlType::Int(Some(32)),
-                    generated: None,
-                    comment: None,
-                    constraints: vec![],
-                })]),
+                    position: None,
+                }]),
                 only: false,
             };
 
@@ -1053,16 +1097,19 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
-                    column: Column {
-                        name: "c".into(),
-                        table: None,
+                definitions: Ok(vec![AlterTableDefinition::AddColumn {
+                    spec: ColumnSpecification {
+                        column: Column {
+                            name: "c".into(),
+                            table: None,
+                        },
+                        sql_type: SqlType::Int(None),
+                        generated: None,
+                        constraints: vec![],
+                        comment: None,
                     },
-                    sql_type: SqlType::Int(None),
-                    generated: None,
-                    constraints: vec![],
-                    comment: None,
-                })]),
+                    position: None,
+                }]),
                 only: false,
             };
             let result =
@@ -1079,26 +1126,32 @@ mod tests {
                     schema: None,
                 },
                 definitions: Ok(vec![
-                    AlterTableDefinition::AddColumn(ColumnSpecification {
-                        column: Column {
-                            name: "c".into(),
-                            table: None,
+                    AlterTableDefinition::AddColumn {
+                        spec: ColumnSpecification {
+                            column: Column {
+                                name: "c".into(),
+                                table: None,
+                            },
+                            sql_type: SqlType::Int(None),
+                            generated: None,
+                            constraints: vec![],
+                            comment: None,
                         },
-                        sql_type: SqlType::Int(None),
-                        generated: None,
-                        constraints: vec![],
-                        comment: None,
-                    }),
-                    AlterTableDefinition::AddColumn(ColumnSpecification {
-                        column: Column {
-                            name: "d".into(),
-                            table: None,
+                        position: None,
+                    },
+                    AlterTableDefinition::AddColumn {
+                        spec: ColumnSpecification {
+                            column: Column {
+                                name: "d".into(),
+                                table: None,
+                            },
+                            sql_type: SqlType::Text,
+                            generated: None,
+                            constraints: vec![],
+                            comment: None,
                         },
-                        sql_type: SqlType::Text,
-                        generated: None,
-                        constraints: vec![],
-                        comment: None,
-                    }),
+                        position: None,
+                    },
                 ]),
                 only: false,
             };

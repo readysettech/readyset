@@ -124,6 +124,52 @@ fn test_alter_table_rename() {
     check_rt_mysql_sqlparser!("ALTER TABLE tb1 RENAME AS tb2");
 }
 
+/// Roundtrip tests for MySQL column position (FIRST, AFTER) in ALTER TABLE
+#[test]
+fn test_alter_table_add_column_position() {
+    // ADD COLUMN with FIRST
+    check_rt_mysql_sqlparser!("ALTER TABLE t ADD COLUMN c INT FIRST");
+
+    // ADD COLUMN with AFTER
+    check_rt_mysql_sqlparser!("ALTER TABLE t ADD COLUMN c INT AFTER other_col");
+
+    // ADD COLUMN without position (should still work)
+    check_rt_mysql_sqlparser!("ALTER TABLE t ADD COLUMN c INT");
+}
+
+#[test]
+fn test_alter_table_change_column_position() {
+    // CHANGE COLUMN with FIRST
+    check_rt_mysql_sqlparser!("ALTER TABLE t CHANGE COLUMN old_col new_col INT FIRST");
+
+    // CHANGE COLUMN with AFTER
+    check_rt_mysql_sqlparser!("ALTER TABLE t CHANGE COLUMN old_col new_col INT AFTER other_col");
+
+    // CHANGE COLUMN without position
+    check_rt_mysql_sqlparser!("ALTER TABLE t CHANGE COLUMN old_col new_col INT");
+}
+
+#[test]
+fn test_alter_table_column_position_reserved_words() {
+    // AFTER with reserved word column name (requires backticks in MySQL)
+    check_rt_mysql_sqlparser!("ALTER TABLE t ADD COLUMN c INT AFTER `select`");
+    check_rt_mysql_sqlparser!("ALTER TABLE t ADD COLUMN c INT AFTER `from`");
+    check_rt_mysql_sqlparser!("ALTER TABLE t ADD COLUMN c INT AFTER `table`");
+
+    // CHANGE COLUMN with reserved word in AFTER
+    check_rt_mysql_sqlparser!("ALTER TABLE t CHANGE COLUMN old_col new_col INT AFTER `order`");
+}
+
+#[test]
+fn test_alter_table_column_position_quoted_identifiers() {
+    // Identifiers with special characters
+    check_rt_mysql_sqlparser!("ALTER TABLE t ADD COLUMN c INT AFTER `my-column`");
+    check_rt_mysql_sqlparser!("ALTER TABLE t ADD COLUMN c INT AFTER `column with spaces`");
+
+    // Mixed case identifiers
+    check_rt_mysql_sqlparser!("ALTER TABLE t ADD COLUMN c INT AFTER `CamelCase`");
+}
+
 #[test]
 fn limit_placeholders() {
     check_rt_mysql!("select * from users limit ?");

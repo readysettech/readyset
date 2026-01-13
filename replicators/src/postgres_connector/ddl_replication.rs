@@ -629,10 +629,10 @@ mod tests {
                 assert_eq!(stmt.table.name, "t");
                 assert_eq!(
                     stmt.definitions.unwrap(),
-                    vec![AlterTableDefinition::AddColumn(ColumnSpecification::new(
-                        "y".into(),
-                        SqlType::Int(None),
-                    )),]
+                    vec![AlterTableDefinition::AddColumn {
+                        spec: ColumnSpecification::new("y".into(), SqlType::Int(None)),
+                        position: None,
+                    }]
                 );
             }
             _ => panic!("Unexpected DDL event data: {:?}", ddl.data),

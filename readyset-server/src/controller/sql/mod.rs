@@ -1062,7 +1062,7 @@ impl SqlIncorporator {
                             AlterTableDefinition::Algorithm { .. }
                             | AlterTableDefinition::Lock { .. } => Ok(()),
                             // These operations will change the underlying table, and should have been caught earlier
-                            AlterTableDefinition::AddColumn(_)
+                            AlterTableDefinition::AddColumn { .. }
                             | AlterTableDefinition::AddKey(TableKey::PrimaryKey { .. })
                             | AlterTableDefinition::AddKey(TableKey::UniqueKey { .. })
                             | AlterTableDefinition::AlterColumn { .. }

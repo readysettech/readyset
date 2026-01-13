@@ -93,6 +93,36 @@ impl fmt::Display for ReplicaIdentity {
     }
 }
 
+/// MySQL column position specifier for ALTER TABLE ADD COLUMN and CHANGE COLUMN.
+///
+/// MySQL allows specifying where a new column should be placed in the table's column order.
+/// This affects the physical storage order and the order columns appear in SELECT *.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum MySQLColumnPosition {
+    /// Place the column first in the table
+    First,
+    /// Place the column after the specified column
+    After(SqlIdentifier),
+}
+
+impl From<sqlparser::ast::MySQLColumnPosition> for MySQLColumnPosition {
+    fn from(value: sqlparser::ast::MySQLColumnPosition) -> Self {
+        match value {
+            sqlparser::ast::MySQLColumnPosition::First => Self::First,
+            sqlparser::ast::MySQLColumnPosition::After(ident) => Self::After(ident.value.into()),
+        }
+    }
+}
+
+impl DialectDisplay for MySQLColumnPosition {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            MySQLColumnPosition::First => write!(f, "FIRST"),
+            MySQLColumnPosition::After(col) => write!(f, "AFTER {}", dialect.quote_identifier(col)),
+        })
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterTableLock {
     Default,
@@ -155,7 +185,11 @@ impl From<sqlparser::ast::AlterTableAlgorithm> for AlterTableAlgorithm {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterTableDefinition {
-    AddColumn(ColumnSpecification),
+    AddColumn {
+        spec: ColumnSpecification,
+        /// MySQL column position (FIRST or AFTER column_name)
+        position: Option<MySQLColumnPosition>,
+    },
     AddKey(TableKey),
     AlterColumn {
         name: SqlIdentifier,
@@ -168,6 +202,8 @@ pub enum AlterTableDefinition {
     ChangeColumn {
         name: SqlIdentifier,
         spec: ColumnSpecification,
+        /// MySQL column position (FIRST or AFTER column_name)
+        position: Option<MySQLColumnPosition>,
     },
     RenameColumn {
         name: SqlIdentifier,
@@ -209,8 +245,11 @@ impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinitio
                 column_keyword: _,
                 if_not_exists: _,
                 column_def,
-                column_position: _,
-            } => Ok(Self::AddColumn(column_def.try_into_dialect(dialect)?)),
+                column_position,
+            } => Ok(Self::AddColumn {
+                spec: column_def.try_into_dialect(dialect)?,
+                position: column_position.map(Into::into),
+            }),
             DropConstraint {
                 if_exists: _,
                 name,
@@ -250,7 +289,7 @@ impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinitio
                 new_name,
                 data_type,
                 options,
-                column_position: _,
+                column_position,
             } => Ok(Self::ChangeColumn {
                 name: old_name.into_dialect(dialect),
                 spec: sqlparser::ast::ColumnDef {
@@ -262,6 +301,7 @@ impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinitio
                         .collect(),
                 }
                 .try_into_dialect(dialect)?,
+                position: column_position.map(Into::into),
             }),
             AlterColumn { column_name, op } => Ok(Self::AlterColumn {
                 name: column_name.into_dialect(dialect),
@@ -283,8 +323,12 @@ impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinitio
 impl DialectDisplay for AlterTableDefinition {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
-            Self::AddColumn(col) => {
-                write!(f, "ADD COLUMN {}", col.display(dialect))
+            Self::AddColumn { spec, position } => {
+                write!(f, "ADD COLUMN {}", spec.display(dialect))?;
+                if let Some(pos) = position {
+                    write!(f, " {}", pos.display(dialect))?;
+                }
+                Ok(())
             }
             Self::AddKey(index) => {
                 write!(f, "ADD {}", index.display(dialect))
@@ -304,13 +348,21 @@ impl DialectDisplay for AlterTableDefinition {
                 }
                 Ok(())
             }
-            Self::ChangeColumn { name, spec } => {
+            Self::ChangeColumn {
+                name,
+                spec,
+                position,
+            } => {
                 write!(
                     f,
                     "CHANGE COLUMN {} {}",
                     dialect.quote_identifier(name),
                     spec.display(dialect)
-                )
+                )?;
+                if let Some(pos) = position {
+                    write!(f, " {}", pos.display(dialect))?;
+                }
+                Ok(())
             }
             Self::RenameColumn { name, new_name } => {
                 write!(

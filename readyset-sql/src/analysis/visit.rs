@@ -1101,13 +1101,19 @@ pub fn walk_alter_table_definition<'a, V: Visitor<'a>>(
     alter_table_definition: &'a AlterTableDefinition,
 ) -> Result<(), V::Error> {
     match alter_table_definition {
-        AlterTableDefinition::AddColumn(spec) => visitor.visit_column_specification(spec),
+        AlterTableDefinition::AddColumn { spec, position: _ } => {
+            visitor.visit_column_specification(spec)
+        }
         AlterTableDefinition::AddKey(key) => visitor.visit_table_key(key),
         AlterTableDefinition::AlterColumn { name, operation } => {
             visitor.visit_sql_identifier(name)?;
             visitor.visit_alter_column_operation(operation)
         }
-        AlterTableDefinition::ChangeColumn { name, spec } => {
+        AlterTableDefinition::ChangeColumn {
+            name,
+            spec,
+            position: _,
+        } => {
             visitor.visit_sql_identifier(name)?;
             visitor.visit_column_specification(spec)
         }

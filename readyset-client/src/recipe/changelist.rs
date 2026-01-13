@@ -433,7 +433,7 @@ impl Change {
             Change::AlterTable(alter_table) => {
                 if let Ok(definitions) = &alter_table.definitions {
                     definitions.iter().any(|def| match def {
-                        AlterTableDefinition::AddColumn(_)
+                        AlterTableDefinition::AddColumn { .. }
                         | AlterTableDefinition::AlterColumn { .. }
                         | AlterTableDefinition::DropColumn { .. }
                         | AlterTableDefinition::ChangeColumn { .. }
