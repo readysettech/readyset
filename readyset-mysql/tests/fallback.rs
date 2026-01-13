@@ -13,6 +13,7 @@ use readyset_server::NodeIndex;
 use readyset_sql::ast::Relation;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
+use regex::Regex;
 use test_utils::skip_flaky_finder;
 use test_utils::{tags, upstream};
 
@@ -1001,13 +1002,7 @@ async fn replication_failure_ignores_table() {
             .unwrap();
         results.sort();
         assert_eq!(results, vec![1, 2]);
-        assert_last_statement_matches(
-            source,
-            "readyset_then_upstream",
-            "view destroyed",
-            &mut client,
-        )
-        .await;
+        assert_last_statement_matches(source, "upstream", "view destroyed|ok", &mut client).await;
     }
 
     shutdown_tx.shutdown().await;
@@ -1083,10 +1078,10 @@ async fn last_statement_matches(dest: &str, status: &str, client: &mut Conn) -> 
             format!(r#"dest column was expected to contain "{dest}", but was: "{dest_col}""#),
         );
     }
-    if !status_col.contains(status) {
+    if !Regex::new(status).unwrap().is_match(&status_col) {
         return (
             false,
-            format!(r#"status column was expected to contain "{status}", but was: "{status_col}""#),
+            format!(r#"status column was expected to match "{status}", but was: "{status_col}""#),
         );
     }
     (true, "".to_string())

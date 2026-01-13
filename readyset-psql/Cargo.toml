@@ -65,6 +65,7 @@ chrono = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
+regex = { workspace = true }
 test-strategy = { workspace = true }
 
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers" }

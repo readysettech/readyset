@@ -5232,6 +5232,7 @@ dependencies = [
  "readyset-sql-passes",
  "readyset-tracing",
  "readyset-util",
+ "regex",
  "serde_json",
  "tempfile",
  "test-discovery",

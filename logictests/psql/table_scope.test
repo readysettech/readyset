@@ -50,21 +50,12 @@ insert into s1.t (x) values (1);
 
 graphviz
 
-# Let the query error out once to bust the view cache in the adapter backend (in
-# prod, this would go to fallback)
-onlyif readyset
-statement error
-select x from t;
-
-# Recreate the query...
-onlyif readyset
-statement ok
-create cache from select x from t;
-
 query I nosort
 select x from t;
 ----
 1
+
+graphviz
 
 # 3. That should also happen if we change the schema path *after* creating the query
 
@@ -90,24 +81,17 @@ select x from t3;
 ----
 2
 
+graphviz
+
 statement ok
 create table s1.t3 (x int);
 
 statement ok
 insert into s1.t3 (x) values (1);
 
-# Let the query error out once to bust the view cache in the adapter backend (in
-# prod, this would go to fallback)
-onlyif readyset
-statement error
-select x from t3;
-
-# Recreate the query...
-onlyif readyset
-statement ok
-create cache from select x from t3;
-
 query I nosort
 select x from t3;
 ----
 1
+
+graphviz

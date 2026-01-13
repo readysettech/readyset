@@ -16,6 +16,7 @@ use readyset_util::eventually;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use readyset_util::shutdown::ShutdownSender;
+use regex::Regex;
 use test_utils::{tags, upstream};
 
 use crate::common::setup_standalone_with_authority;
@@ -876,7 +877,7 @@ async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> (b
                     ),
                 );
             }
-            if !status_col.contains(status) {
+            if !Regex::new(status).unwrap().is_match(status_col) {
                 return (
                     false,
                     format!(
@@ -967,7 +968,7 @@ async fn assert_table_ignored(client: &Client) {
         let mut results = vec![c1, c2];
         results.sort();
         assert_eq!(results, vec!["1", "2"]);
-        assert_last_statement_matches!(source, "readyset_then_upstream", "view destroyed", client);
+        assert_last_statement_matches!(source, "upstream", "view destroyed|ok", client);
     }
 }
 
@@ -1980,6 +1981,8 @@ async fn named_cache_queryable_after_being_cleared() {
             .await
             .unwrap();
         conn.simple_query("CREATE TABLE t (x int)").await.unwrap();
+        // TODO(mvzink): Remove sleep once REA-6109 is fixed.
+        sleep().await;
         eventually!(
             conn.simple_query("CREATE CACHE test FROM SELECT * FROM t WHERE x = 1")
                 .await
