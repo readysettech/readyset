@@ -1028,7 +1028,7 @@ fn min_max_arg_type(dialect: ParseDialect) -> impl Strategy<Value = SqlType> {
     match dialect {
         ParseDialect::MySQL => any_with::<SqlType>(SqlTypeArbitraryOptions {
             generate_arrays: false,
-            dialect: Some(dialect),
+            dialect,
             ..Default::default()
         })
         .boxed(),
@@ -1044,7 +1044,7 @@ pub enum WindowFunctionType {
     DenseRank,
     CountStar,
     Count {
-        #[any(generate_arrays = false, dialect = Some(args_shared.0))]
+        #[any(generate_arrays = false, dialect = args_shared.0)]
         column_type: SqlType,
     },
     Sum {
@@ -1276,7 +1276,7 @@ impl AggregateType {
                 (
                     any_with::<SqlType>(SqlTypeArbitraryOptions {
                         generate_arrays: false,
-                        dialect: Some(dialect),
+                        dialect,
                         ..Default::default()
                     }),
                     any::<bool>()
@@ -1409,7 +1409,7 @@ impl Arbitrary for Filter {
                 // PG's json doesn't support comparison operators
                 generate_json: dialect == ParseDialect::MySQL,
                 generate_unsupported: false,
-                dialect: Some(dialect.0),
+                dialect: dialect.0,
             }),
             any::<LogicalOp>(),
         )
@@ -1642,7 +1642,7 @@ pub enum SubqueryPosition {
         /// If correlated, contains the type of the column that is compared
         #[strategy(proptest::option::of(any_with::<SqlType>(SqlTypeArbitraryOptions {
             generate_arrays: false,
-            dialect: Some(args.0),
+            dialect: args.0,
             ..Default::default()
         })))]
         correlated: Option<SqlType>,

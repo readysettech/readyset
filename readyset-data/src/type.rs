@@ -907,7 +907,7 @@ mod tests {
     #[proptest]
     fn arbitrary_sql_type_doesnt_generate_unsupported_mysql(
         #[strategy(SqlType::arbitrary_with(SqlTypeArbitraryOptions {
-            dialect: Some(readyset_sql::Dialect::MySQL),
+            dialect: readyset_sql::Dialect::MySQL,
             generate_arrays: true,
             generate_json: true,
             generate_other: true,
@@ -922,7 +922,7 @@ mod tests {
     #[proptest]
     fn arbitrary_sql_type_doesnt_generate_unsupported_postgresql(
         #[strategy(SqlType::arbitrary_with(SqlTypeArbitraryOptions {
-            dialect: Some(readyset_sql::Dialect::PostgreSQL),
+            dialect: readyset_sql::Dialect::PostgreSQL,
             generate_arrays: true,
             generate_json: true,
             generate_other: true,

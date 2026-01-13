@@ -2449,7 +2449,7 @@ impl Arbitrary for Expr {
                     box_expr.clone(),
                     any_with::<SqlType>(SqlTypeArbitraryOptions {
                         generate_unsupported: true,
-                        dialect: params,
+                        dialect: params.unwrap_or(Dialect::MySQL),
                         ..Default::default()
                     }),
                     any_with::<CastStyle>(params),

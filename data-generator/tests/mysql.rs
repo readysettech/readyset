@@ -36,7 +36,7 @@ async fn mysql_connection() -> mysql_async::Conn {
 #[tags(serial, slow, no_retry, mysql_upstream)]
 #[proptest]
 fn value_of_type_always_valid(
-    #[any(generate_arrays = false, dialect = Some(Dialect::MySQL))] ty: SqlType,
+    #[any(generate_arrays = false, dialect = Dialect::MySQL)] ty: SqlType,
 ) {
     let val = value_of_type(&ty);
     eprintln!("value: {val:?}");
@@ -63,7 +63,7 @@ fn value_of_type_always_valid(
 #[tags(serial, slow, no_retry, mysql_upstream)]
 #[proptest]
 fn unique_value_of_type_always_valid(
-    #[any(generate_arrays = false, dialect = Some(Dialect::MySQL))] ty: SqlType,
+    #[any(generate_arrays = false, dialect = Dialect::MySQL)] ty: SqlType,
     #[strategy(0..=255u32)] idx: u32,
 ) {
     prop_assume!(!matches!(ty, SqlType::Bool));
@@ -93,7 +93,7 @@ fn unique_value_of_type_always_valid(
 #[tags(serial, slow, no_retry, mysql_upstream)]
 #[proptest]
 fn random_value_of_type_always_valid(
-    #[any(generate_arrays = false, dialect = Some(Dialect::MySQL))] ty: SqlType,
+    #[any(generate_arrays = false, dialect = Dialect::MySQL)] ty: SqlType,
     seed: u64,
 ) {
     prop_assume!(!matches!(ty, SqlType::Bool));

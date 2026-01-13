@@ -333,7 +333,7 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
 #[proptest(ProptestConfig::default(), cases = 128, max_shrink_time = 60_000)]
 fn round_trip_mysql_type_arbitrary(
     #[strategy(SqlType::arbitrary_with(SqlTypeArbitraryOptions {
-        dialect: Some(Dialect::MySQL),
+        dialect: Dialect::MySQL,
         generate_arrays: false,
         generate_json: true,
         generate_other: false,

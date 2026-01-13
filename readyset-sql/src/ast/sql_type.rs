@@ -432,7 +432,7 @@ pub struct SqlTypeArbitraryOptions {
     pub generate_unsupported: bool,
 
     /// Constrain types to only those which are valid for this SQL dialect
-    pub dialect: Option<Dialect>,
+    pub dialect: Dialect,
 }
 
 impl Default for SqlTypeArbitraryOptions {
@@ -442,7 +442,7 @@ impl Default for SqlTypeArbitraryOptions {
             generate_other: false,
             generate_json: true,
             generate_unsupported: false,
-            dialect: None,
+            dialect: Dialect::MySQL,
         }
     }
 }
@@ -457,22 +457,19 @@ impl Arbitrary for SqlType {
         use proptest::prelude::*;
 
         let precision_range_u16 = match args.dialect {
-            Some(Dialect::PostgreSQL) => 1..=1000u16,
-            // Default to MySQL's more restricted range
-            _ => 1..=65,
+            Dialect::PostgreSQL => 1..=1000u16,
+            Dialect::MySQL => 1..=65,
         };
 
         let precision_range_u8 = match args.dialect {
-            Some(Dialect::PostgreSQL) => 1..=u8::MAX,
-            // Default to MySQL's more restricted range
-            _ => 1..=65,
+            Dialect::PostgreSQL => 1..=u8::MAX,
+            Dialect::MySQL => 1..=65,
         };
 
         let scale_range = move |precision: u8| match args.dialect {
             // Postgres actually supports -1000..=1000, but we can't even represent that
-            Some(Dialect::PostgreSQL) => 0..=precision,
-            // Default to MySQL's more restricted range
-            _ => 0..=precision.min(30),
+            Dialect::PostgreSQL => 0..=precision,
+            Dialect::MySQL => 0..=precision.min(30),
         };
 
         let mut variants = vec![
@@ -507,7 +504,7 @@ impl Arbitrary for SqlType {
             variants.push(Just(Json).boxed());
         }
 
-        if args.dialect.is_none() || args.dialect == Some(Dialect::PostgreSQL) {
+        if args.dialect == Dialect::PostgreSQL {
             variants.extend([
                 Just(Int(None)).boxed(),
                 Just(BigInt(None)).boxed(),
@@ -536,7 +533,7 @@ impl Arbitrary for SqlType {
             }
         }
 
-        if args.dialect.is_none() || args.dialect == Some(Dialect::MySQL) {
+        if args.dialect == Dialect::MySQL {
             variants.extend([
                 (1..255u16).prop_map(|p| Int(Some(p))).boxed(),
                 (1..255u16).prop_map(|p| BigInt(Some(p))).boxed(),
@@ -561,7 +558,7 @@ impl Arbitrary for SqlType {
             ]);
         }
 
-        if args.generate_arrays && args.dialect != Some(Dialect::MySQL) {
+        if args.generate_arrays && args.dialect != Dialect::MySQL {
             variants.push(
                 any_with::<Box<SqlType>>(SqlTypeArbitraryOptions {
                     generate_arrays: false,
