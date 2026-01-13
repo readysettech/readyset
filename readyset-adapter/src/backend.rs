@@ -4253,13 +4253,19 @@ where
                 let params = match self.rewrite_equivalent(&mut stmt, self.noria.rewrite_params()) {
                     Ok(params) => params,
                     Err(_) if self.has_fallback() => {
-                        return Self::query_fallback(
-                            self.upstream.as_mut(),
-                            query,
-                            &mut event,
-                            None,
-                        )
-                        .await;
+                        let result =
+                            Self::query_fallback(self.upstream.as_mut(), query, &mut event, None)
+                                .await;
+                        // Update last_query before early return so EXPLAIN LAST STATEMENT works
+                        self.last_query = event.destination.as_ref().map(|d| QueryInfo {
+                            destination: d.clone(),
+                            noria_error: event
+                                .noria_error
+                                .as_ref()
+                                .map(|e| e.to_string())
+                                .unwrap_or_default(),
+                        });
+                        return result;
                     }
                     Err(e) => return Err(e.into()),
                 };
