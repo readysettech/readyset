@@ -473,12 +473,45 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                         SqlOption::NamedParenthesizedList(NamedParenthesizedList {
                             key,
                             name,
-                            ..
+                            values,
                         }) => {
                             if key.value == "ENGINE" {
+                                // Standard MySQL engines (InnoDB, MyISAM, etc.) don't use
+                                // parameters, so `values` is always empty. ClickHouse engines
+                                // use parameters but aren't supported.
                                 options.push(CreateTableOption::Engine(
                                     name.map(|n| n.value.to_string()),
                                 ));
+                            } else if key.value == "UNION" {
+                                // MERGE tables (deprecated in MySQL 8.0) use UNION=(t1,t2,...)
+                                return unsupported!("MERGE table UNION clause");
+                            } else {
+                                // Store unknown options for transparency
+                                let value = match (&name, values.is_empty()) {
+                                    (Some(n), true) => n.value.to_string(),
+                                    (Some(n), false) => format!(
+                                        "{}({})",
+                                        n.value,
+                                        values
+                                            .iter()
+                                            .map(|v| v.value.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
+                                    ),
+                                    (None, false) => format!(
+                                        "({})",
+                                        values
+                                            .iter()
+                                            .map(|v| v.value.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
+                                    ),
+                                    (None, true) => String::new(),
+                                };
+                                options.push(CreateTableOption::Other {
+                                    key: key.value.to_string(),
+                                    value,
+                                });
                             }
                         }
                         SqlOption::Comment(
@@ -488,16 +521,16 @@ impl TryFromDialect<sqlparser::ast::CreateTable> for CreateTableStatement {
                             key: ident.to_string(),
                             value: "".to_string(),
                         }),
-                        SqlOption::Clustered(table_options_clustered) => {
-                            todo!("{table_options_clustered}")
+                        SqlOption::Clustered(_) => {
+                            return unsupported!("SQL Server CLUSTERED table options");
                         }
-                        SqlOption::Partition {
-                            column_name,
-                            range_direction,
-                            for_values,
-                        } => todo!("{column_name:?}, {range_direction:?}, {for_values:?}"),
-                        SqlOption::TableSpace(tablespace_option) => {
-                            todo!("{tablespace_option:?}")
+                        SqlOption::Partition { .. } => {
+                            return unsupported!("SQL Server PARTITION table options");
+                        }
+                        SqlOption::TableSpace(_) => {
+                            // MySQL TABLESPACE option controls physical storage location.
+                            // Safe to ignore for caching purposes (similar to PG storage
+                            // parameters handled in CreateTableOptions::With below).
                         }
                     }
                 }
