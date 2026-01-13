@@ -115,7 +115,7 @@ impl From<CacheExpr> for CreateCacheStatement {
             cache_type: value.cache_type,
             policy: value.policy,
             coalesce_ms: None,
-            inner: Ok(CacheInner::Statement(Box::new(value.statement))),
+            inner: CacheInner::Statement(Ok(Box::new(value.statement))),
             always: value.always,
             // CacheExpr represents a migrated query, and the below fields are not relevant for an
             // already-migrated query

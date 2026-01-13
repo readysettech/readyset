@@ -1038,8 +1038,9 @@ pub fn create_cached_query(
         let (i, name) = opt(terminated(relation(dialect), whitespace1))(i)?;
         let (i, _) = tag_no_case("from")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, inner) =
+        let (i, inner_result) =
             parse_fallible(cached_query_inner(dialect), until_statement_terminator)(i)?;
+        let inner = inner_result.unwrap_or_else(|err| CacheInner::Statement(Err(err)));
         Ok((
             i,
             CreateCacheStatement {
@@ -1801,7 +1802,7 @@ mod tests {
             );
             assert_eq!(res.name, Some("foo".into()));
             let statement = match res.inner {
-                Ok(CacheInner::Statement(s)) => s,
+                CacheInner::Statement(Ok(s)) => s,
                 _ => panic!(),
             };
             assert_eq!(
@@ -1818,7 +1819,7 @@ mod tests {
             );
             assert_eq!(res.name, None);
             let statement = match res.inner {
-                Ok(CacheInner::Statement(s)) => s,
+                CacheInner::Statement(Ok(s)) => s,
                 _ => panic!(),
             };
             assert_eq!(
@@ -1835,7 +1836,7 @@ mod tests {
             );
             assert_eq!(res.name.unwrap(), Relation::from("foo"));
             let id = match res.inner {
-                Ok(CacheInner::Id(s)) => s,
+                CacheInner::Id(s) => s,
                 _ => panic!(),
             };
             assert_eq!(id.as_str(), "q_0123456789ABCDEF")
@@ -1849,7 +1850,7 @@ mod tests {
             );
             assert!(res.name.is_none());
             let id = match res.inner {
-                Ok(CacheInner::Id(s)) => s,
+                CacheInner::Id(s) => s,
                 _ => panic!(),
             };
             assert_eq!(id.as_str(), "q_0123456789ABCDEF")
@@ -1885,7 +1886,7 @@ mod tests {
             for stmt in q {
                 assert!(stmt.name.is_none());
                 let statement = match stmt.inner {
-                    Ok(CacheInner::Statement(s)) => s,
+                    CacheInner::Statement(Ok(s)) => s,
                     _ => panic!(),
                 };
                 assert_eq!(

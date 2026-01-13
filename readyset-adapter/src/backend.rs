@@ -2545,15 +2545,8 @@ where
             internal!("Unexpected EXPLAIN: {explain:?}");
         };
 
-        let inner = match inner {
-            Ok(inner) => inner,
-            Err(e) => {
-                return Err(ReadySetError::UnparseableQuery(e.clone()));
-            }
-        };
-
         match inner {
-            CacheInner::Statement(stmt) => {
+            CacheInner::Statement(Ok(stmt)) => {
                 let mut stmt_deep = stmt.clone();
                 let mut stmt_shallow = stmt.clone();
 
@@ -2575,6 +2568,7 @@ where
 
                 Ok((Ok(deep), Ok(shallow)))
             }
+            CacheInner::Statement(Err(e)) => Err(ReadySetError::UnparseableQuery(e.clone())),
             CacheInner::Id(id) => match self.state.query_status_cache.query(id.as_str()) {
                 Some(q) => match q {
                     Query::Parsed(req) => {
@@ -3263,22 +3257,20 @@ where
                     unparsed_create_cache_statement,
                 } = create_cache_stmt;
                 let (stmt, search_path) = match inner {
-                    Ok(CacheInner::Statement(st)) => Ok((*st.clone(), None)),
-                    Ok(CacheInner::Id(id)) => {
-                        match self.state.query_status_cache.query(id.as_str()) {
-                            Some(q) => match q {
-                                Query::Parsed(view_request) => Ok((
-                                    view_request.statement.clone(),
-                                    Some(view_request.schema_search_path.clone()),
-                                )),
-                                Query::ParseFailed(_, err) => {
-                                    Err(ReadySetError::UnparseableQuery(err))
-                                }
-                            },
-                            None => Err(ReadySetError::NoQueryForId { id: id.to_string() }),
-                        }
+                    CacheInner::Statement(Ok(st)) => Ok((*st.clone(), None)),
+                    CacheInner::Statement(Err(err)) => {
+                        Err(ReadySetError::UnparseableQuery(err.clone()))
                     }
-                    Err(err) => Err(ReadySetError::UnparseableQuery(err.clone())),
+                    CacheInner::Id(id) => match self.state.query_status_cache.query(id.as_str()) {
+                        Some(q) => match q {
+                            Query::Parsed(view_request) => Ok((
+                                view_request.statement.clone(),
+                                Some(view_request.schema_search_path.clone()),
+                            )),
+                            Query::ParseFailed(_, err) => Err(ReadySetError::UnparseableQuery(err)),
+                        },
+                        None => Err(ReadySetError::NoQueryForId { id: id.to_string() }),
+                    },
                 }?;
 
                 // Log a telemetry event
@@ -4784,9 +4776,9 @@ where
     }
 
     let mut select_stmt = match stmt.inner {
-        Ok(CacheInner::Statement(s)) => *s,
-        Ok(CacheInner::Id(_)) => internal!("Cannot recreate from query ID"),
-        Err(e) => internal!("Failed to parse SELECT: {e}"),
+        CacheInner::Statement(Ok(s)) => *s,
+        CacheInner::Statement(Err(e)) => internal!("Failed to parse SELECT: {e}"),
+        CacheInner::Id(_) => internal!("Cannot recreate from query ID"),
     };
 
     adapter_rewrites::rewrite_equivalent(&mut select_stmt, rewrite_params, ParameterizeMode::Full)?;

@@ -33,10 +33,10 @@ pub enum ExplainStatement {
         /// The result of parsing the inner statement or query ID for the `EXPLAIN CREATE CACHE`
         /// statement.
         ///
-        /// If parsing succeeded, then this will be an `Ok` result with the definition of the
-        /// statement. If it failed to parse, this will be an `Err` with the remainder [`String`]
-        /// that could not be parsed.
-        inner: Result<CacheInner, String>,
+        /// If parsing succeeded, then this will contain an Ok result with the definition of the
+        /// statement.  If the statement failed to parse, this will contain an Err result with the
+        /// remainder of the string that could not be parsed.
+        inner: CacheInner,
         cache_type: Option<CacheType>,
     },
 }
@@ -71,11 +71,7 @@ impl DialectDisplay for ExplainStatement {
                         write!(f, " {}", cache_type.display(dialect))?;
                     }
                     write!(f, " CACHE FROM ")?;
-
-                    match inner {
-                        Ok(inner) => write!(f, "{}", inner.display(dialect)),
-                        Err(unparsed) => write!(f, "{unparsed}"),
-                    }
+                    write!(f, "{}", inner.display(dialect))
                 }
             }
         })

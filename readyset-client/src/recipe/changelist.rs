@@ -206,8 +206,11 @@ impl ChangeList {
                     // because currently the rewrite only validates the stmt. If the validation
                     // fails, we should not persist the cache in the changelist.
                     let statement = match inner {
-                        Ok(CacheInner::Statement(stmt)) => stmt,
-                        Ok(CacheInner::Id(id)) => {
+                        CacheInner::Statement(Ok(stmt)) => stmt,
+                        CacheInner::Statement(Err(err)) => {
+                            return Err(ReadySetError::UnparseableQuery(err))
+                        }
+                        CacheInner::Id(id) => {
                             error!(
                                 %id,
                                 "attempted to issue CREATE CACHE with an id"
@@ -217,7 +220,6 @@ impl ChangeList {
                                          the adapter"
                             );
                         }
-                        Err(err) => return Err(ReadySetError::UnparseableQuery(err)),
                     };
                     changes.push(Change::CreateCache(CreateCache {
                         name,
@@ -506,8 +508,11 @@ impl Change {
                 ..
             }) => {
                 let mut statement = match inner {
-                    Ok(CacheInner::Statement(stmt)) => stmt,
-                    Ok(CacheInner::Id(id)) => {
+                    CacheInner::Statement(Ok(stmt)) => stmt,
+                    CacheInner::Statement(Err(err)) => {
+                        return Err(ReadySetError::UnparseableQuery(err))
+                    }
+                    CacheInner::Id(id) => {
                         error!(
                             %id,
                             "attempted to issue CREATE CACHE with an id"
@@ -517,7 +522,6 @@ impl Change {
                                 the adapter"
                         );
                     }
-                    Err(err) => return Err(ReadySetError::UnparseableQuery(err)),
                 };
 
                 adapter_rewrites::rewrite_query(

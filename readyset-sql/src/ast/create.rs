@@ -4,7 +4,6 @@ use std::{
     time::Duration,
 };
 
-use derive_more::From;
 use itertools::Itertools;
 use proptest::{
     prelude::{Strategy as _, any},
@@ -973,18 +972,37 @@ impl EvictionPolicy {
 }
 
 /// The SelectStatement or query ID referenced in a [`CreateCacheStatement`]
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, From, Arbitrary)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum CacheInner {
-    Statement(Box<SelectStatement>),
+    Statement(Result<Box<SelectStatement>, String>),
     Id(SqlIdentifier),
 }
 
 impl DialectDisplay for CacheInner {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
-            Self::Statement(stmt) => write!(f, "{}", stmt.display(dialect)),
+            Self::Statement(Ok(stmt)) => write!(f, "{}", stmt.display(dialect)),
+            Self::Statement(Err(unparsed)) => write!(f, "{unparsed}"),
             Self::Id(id) => write!(f, "{id}"),
         })
+    }
+}
+
+impl From<SqlIdentifier> for CacheInner {
+    fn from(id: SqlIdentifier) -> Self {
+        CacheInner::Id(id)
+    }
+}
+
+impl From<Box<SelectStatement>> for CacheInner {
+    fn from(stmt: Box<SelectStatement>) -> Self {
+        CacheInner::Statement(Ok(stmt))
+    }
+}
+
+impl From<SelectStatement> for CacheInner {
+    fn from(stmt: SelectStatement) -> Self {
+        CacheInner::Statement(Ok(Box::new(stmt)))
     }
 }
 
@@ -1016,11 +1034,11 @@ pub struct CreateCacheStatement {
     pub coalesce_ms: Option<Duration>,
     /// The result of parsing the inner statement or query ID for the `CREATE CACHE` statement.
     ///
-    /// If parsing succeeded, then this will be an `Ok` result with the definition of the
-    /// statement. If it failed to parse, this will be an `Err` with the remainder [`String`]
-    /// that could not be parsed.
-    #[strategy(any::<CacheInner>().prop_map(Ok))]
-    pub inner: Result<CacheInner, String>,
+    /// If parsing succeeded, then this will contain an Ok result with the definition of the
+    /// statement.  If the statement failed to parse, this will contain an Err result with the
+    /// remainder of the string that could not be parsed.
+    #[strategy(any::<CacheInner>())]
+    pub inner: CacheInner,
     /// A full copy of the original 'create cache' statement that can be used to re-create the
     /// cache after an upgrade
     ///
@@ -1087,10 +1105,7 @@ impl DialectDisplay for CreateCacheStatement {
                 write!(f, "{} ", name.display(dialect))?;
             }
             write!(f, "FROM ")?;
-            match &self.inner {
-                Ok(inner) => write!(f, "{}", inner.display(dialect)),
-                Err(unparsed) => write!(f, "{unparsed}"),
-            }
+            write!(f, "{}", self.inner.display(dialect))
         })
     }
 }

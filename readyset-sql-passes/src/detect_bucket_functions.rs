@@ -11,18 +11,12 @@ pub trait DetectBucketFunctions {
 
 impl DetectBucketFunctions for CreateCacheStatement {
     fn detect_and_validate_bucket_always(&self) -> ReadySetResult<()> {
-        let inner = match &self.inner {
-            Ok(inner) => inner,
-            Err(_) => return Ok(()),
-        };
-
-        let has_bucket_function = match inner {
-            CacheInner::Statement(select_stmt) => has_bucket_function_in_select(select_stmt)?,
+        let has_bucket_function = match &self.inner {
+            CacheInner::Statement(Ok(select_stmt)) => has_bucket_function_in_select(select_stmt)?,
+            CacheInner::Statement(Err(_)) => return Ok(()),
             // shouldn't be possible since bucket is not an upstream function and therefor can't
             // have an ID reference.
-            CacheInner::Id(_) => {
-                return Ok(());
-            }
+            CacheInner::Id(_) => return Ok(()),
         };
 
         if has_bucket_function && !self.always {
@@ -143,7 +137,7 @@ mod tests {
             cache_type: None,
             policy: None,
             coalesce_ms: None,
-            inner: Ok(CacheInner::Statement(Box::new(select_stmt))),
+            inner: CacheInner::Statement(Ok(Box::new(select_stmt))),
             unparsed_create_cache_statement: None,
             always: false, // should cause error
             concurrently: false,
@@ -198,7 +192,7 @@ mod tests {
             cache_type: None,
             policy: None,
             coalesce_ms: None,
-            inner: Ok(CacheInner::Statement(Box::new(select_stmt))),
+            inner: CacheInner::Statement(Ok(Box::new(select_stmt))),
             unparsed_create_cache_statement: None,
             always: true, // should succeed
             concurrently: false,
@@ -241,7 +235,7 @@ mod tests {
             cache_type: None,
             policy: None,
             coalesce_ms: None,
-            inner: Ok(CacheInner::Statement(Box::new(select_stmt))),
+            inner: CacheInner::Statement(Ok(Box::new(select_stmt))),
             unparsed_create_cache_statement: None,
             always: false,
             concurrently: false,

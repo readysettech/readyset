@@ -153,10 +153,10 @@ mod tests {
             explain_statement(Dialect::MySQL),
             b"EXPLAIN CREATE CACHE FROM SELECT id FROM users WHERE name = ?"
         ) {
-            ExplainStatement::CreateCache { inner, .. } => match inner.unwrap() {
-                CacheInner::Statement(stmt) => stmt,
-                _ => panic!(),
-            },
+            ExplainStatement::CreateCache {
+                inner: CacheInner::Statement(Ok(stmt)),
+                ..
+            } => stmt,
             _ => panic!(),
         };
 
@@ -172,10 +172,10 @@ mod tests {
             explain_statement(Dialect::MySQL),
             b"EXPLAIN CREATE CACHE FROM q_000000000000"
         ) {
-            ExplainStatement::CreateCache { inner, .. } => match inner.unwrap() {
-                CacheInner::Id(id) => id,
-                _ => panic!(),
-            },
+            ExplainStatement::CreateCache {
+                inner: CacheInner::Id(id),
+                ..
+            } => id,
             _ => panic!(),
         };
 

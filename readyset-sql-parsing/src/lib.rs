@@ -561,13 +561,13 @@ fn parse_create_cache(
         .collect::<Vec<_>>()
         .join(" ");
 
-    let query = parse_query_for_create_cache(parser, dialect);
+    let inner = parse_query_for_create_cache(parser, dialect, remaining_query);
     Ok(SqlQuery::CreateCache(CreateCacheStatement {
         name,
         cache_type,
         policy,
         coalesce_ms,
-        inner: query.map_err(|_| remaining_query),
+        inner,
         unparsed_create_cache_statement: Some(input.as_ref().trim().to_string()),
         always,
         concurrently,
@@ -633,22 +633,23 @@ fn parse_create_cache_keywords(
 fn parse_query_for_create_cache(
     parser: &mut Parser,
     dialect: Dialect,
-) -> Result<CacheInner, String> {
+    remaining_query: String,
+) -> CacheInner {
+    // Try to parse as statement first
     if let Ok(statement) = parser.try_parse(|p| p.parse_statement()) {
-        let query: SqlQuery = statement
+        return statement
             .try_into_dialect(dialect)
-            .map_err(ReadysetParsingError::from)?;
-        let select = query
-            .into_select()
-            .ok_or_else(|| "expected SELECT".to_string())?;
-        Ok(CacheInner::Statement(Box::new(select)))
-    } else {
-        let id = parser
-            .parse_identifier()
-            .map_err(ReadysetParsingError::from)?
-            .into_dialect(dialect);
-        Ok(CacheInner::Id(id))
+            .ok()
+            .and_then(|query: SqlQuery| query.into_select())
+            .map(|select| CacheInner::Statement(Ok(Box::new(select))))
+            .unwrap_or_else(|| CacheInner::Statement(Err(remaining_query)));
     }
+
+    // Otherwise, try to parse as identifier
+    parser
+        .parse_identifier()
+        .map(|id| CacheInner::Id(id.into_dialect(dialect)))
+        .unwrap_or_else(|_| CacheInner::Statement(Err(remaining_query)))
 }
 
 fn parse_explain(

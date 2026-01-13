@@ -221,7 +221,7 @@ impl ArbitraryQueryParameters {
             cache_type: None,
             policy: None,
             coalesce_ms: None,
-            inner: Ok(CacheInner::Statement(Box::new(stmt))),
+            inner: CacheInner::Statement(Ok(Box::new(stmt))),
             always: false,
             concurrently: false,
             unparsed_create_cache_statement: None,
