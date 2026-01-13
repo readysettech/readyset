@@ -45,11 +45,12 @@ use readyset_sql::ast::{
     NonReplicatedRelation, Relation, RenameTableStatement, SelectStatement, SqlIdentifier,
     SqlQuery, TableKey,
 };
+use readyset_sql::DialectDisplay;
 use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteContext, AdapterRewriteParams};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::consensus::CacheDDLRequest;
 
@@ -225,6 +226,7 @@ impl ChangeList {
                         name,
                         statement,
                         always,
+                        schema_generation_used: 0,
                     }))
                 }
                 SqlQuery::AlterTable(ats) => changes.push(Change::AlterTable(ats)),
@@ -293,6 +295,46 @@ impl ChangeList {
         }
     }
 
+    /// Construct a new `ChangeList` from `self`, but with the given schema generation
+    pub fn with_schema_generation(self, schema_generation: u64) -> Self {
+        let mut this = self;
+        for change in &mut this.changes {
+            if let Change::CreateCache(cache) = change {
+                cache.schema_generation_used = schema_generation;
+            }
+        }
+        this
+    }
+
+    /// Returns true if any `CreateCache` in this changelist is missing a schema generation.
+    pub fn has_missing_schema_generation(&self) -> bool {
+        self.changes.iter().any(|change| match change {
+            Change::CreateCache(cache) => cache.schema_generation_used == 0,
+            _ => false,
+        })
+    }
+
+    /// Fill only missing schema generations for `CreateCache` changes.
+    ///
+    /// Returns true if any fields were filled.
+    pub fn fill_missing_schema_generation(&mut self, schema_generation: u64) -> bool {
+        let mut filled = false;
+        for change in &mut self.changes {
+            if let Change::CreateCache(cache) = change {
+                if cache.schema_generation_used == 0 {
+                    debug!(
+                        generation = schema_generation,
+                        query = %cache.statement.display(self.dialect.into()),
+                        "Filling missing schema generation for CreateCache"
+                    );
+                    cache.schema_generation_used = schema_generation;
+                    filled = true;
+                }
+            }
+        }
+        filled
+    }
+
     /// Return a mutable reference to the changes in this `ChangeList`
     pub fn changes_mut(&mut self) -> &mut Vec<Change> {
         &mut self.changes
@@ -328,6 +370,17 @@ pub struct CreateCache {
     /// If set to `true`, execution of this cache will bypass transaction handling in the
     /// adapter
     pub always: bool,
+    /// Schema generation that was used to rewrite this cache.
+    ///
+    /// This captures the generation of the `SchemaCatalog` at the time the query was rewritten
+    /// by the adapter. The controller validates this matches its current generation before
+    /// performing the migration.
+    ///
+    /// # Special Values
+    /// - A value of 0 indicates the generation was not set (e.g., in tests or legacy paths)
+    /// - `has_missing_schema_generation()` treats 0 as "missing"
+    /// - `fix_changelist_schema_generation()` will fill in 0s with the current generation
+    pub schema_generation_used: u64,
 }
 
 /// Metadata about a PostgreSQL table
@@ -415,7 +468,12 @@ pub enum Change {
 impl Change {
     /// Creates a new [`Change::CreateCache`] from the given `name`,
     /// [`SelectStatement`], and unparsed String.
-    pub fn create_cache<N>(name: N, statement: SelectStatement, always: bool) -> Self
+    pub fn create_cache<N>(
+        name: N,
+        statement: SelectStatement,
+        always: bool,
+        schema_generation_used: u64,
+    ) -> Self
     where
         N: Into<Relation>,
     {
@@ -423,6 +481,7 @@ impl Change {
             name: Some(name.into()),
             statement: Box::new(statement),
             always,
+            schema_generation_used,
         })
     }
 
@@ -481,7 +540,7 @@ impl Change {
             } => true,
             Change::CreateTable { .. }
             | Change::CreateView(_)
-            | Change::CreateCache { .. }
+            | Change::CreateCache(_)
             | Change::CreateType { .. }
             | Change::Drop { .. }
             | Change::AddNonReplicatedRelation(_) => false,
@@ -494,7 +553,7 @@ impl Change {
     pub fn from_cache_ddl_request<C: AdapterRewriteContext>(
         ddl_req: &CacheDDLRequest,
         adapter_rewrite_params: AdapterRewriteParams,
-        adapter_rewrite_context: C,
+        adapter_rewrite_context: &C,
         parsing_preset: ParsingPreset,
     ) -> ReadySetResult<Self> {
         match parse_query_with_config(
@@ -535,6 +594,7 @@ impl Change {
                     name,
                     statement,
                     always,
+                    schema_generation_used: adapter_rewrite_context.schema_generation(),
                 }))
             },
             SqlQuery::DropCache(dcs) => Ok(Change::Drop {

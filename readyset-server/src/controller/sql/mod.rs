@@ -1489,7 +1489,7 @@ impl SqlIncorporator {
     /// minimizes cloning (but there's still some), whereas the [`SchemaCatalog`] is aimed at easy
     /// serialization/synchronization with the adapter and doesn't need (and likely can't safely
     /// duplicate) the complete picture that `SqlIncorporator` has.
-    pub(crate) fn schema_catalog(&self) -> SchemaCatalog {
+    pub(crate) fn schema_catalog(&self, generation: u64) -> SchemaCatalog {
         let base_schemas = self
             .base_schemas
             .iter()
@@ -1513,6 +1513,7 @@ impl SqlIncorporator {
             custom_types,
             view_schemas: self.view_schemas.clone(),
             non_replicated_relations: self.non_replicated_relations().clone(),
+            generation,
         }
     }
 }
@@ -1555,7 +1556,11 @@ impl RewriteContext for SqlIncorporatorRewriteContext<'_> {
     }
 }
 
-impl AdapterRewriteContext for SqlIncorporatorRewriteContext<'_> {}
+impl AdapterRewriteContext for SqlIncorporatorRewriteContext<'_> {
+    fn schema_generation(&self) -> u64 {
+        0
+    }
+}
 
 impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
     fn add_invalidating_table(&self, table: Relation) {

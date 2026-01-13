@@ -8,19 +8,19 @@ use crate::SchemaCatalog;
 
 pub struct RewriteContext {
     _dialect: Dialect,
-    _schema_catalog: Arc<SchemaCatalog>,
+    schema_catalog: Arc<SchemaCatalog>,
     search_path: Vec<SqlIdentifier>,
 }
 
 impl RewriteContext {
     pub fn new(
         _dialect: Dialect,
-        _schema_catalog: Arc<SchemaCatalog>,
+        schema_catalog: Arc<SchemaCatalog>,
         search_path: Vec<SqlIdentifier>,
     ) -> Self {
         Self {
             _dialect,
-            _schema_catalog,
+            schema_catalog,
             search_path,
         }
     }
@@ -34,4 +34,8 @@ impl RewriteContext {
     }
 }
 
-impl AdapterRewriteContext for RewriteContext {}
+impl AdapterRewriteContext for RewriteContext {
+    fn schema_generation(&self) -> u64 {
+        self.schema_catalog.generation
+    }
+}

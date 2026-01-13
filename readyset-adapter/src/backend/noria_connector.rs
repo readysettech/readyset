@@ -28,7 +28,9 @@ use readyset_sql::ast::{
     UpdateStatement,
 };
 use readyset_sql::{DialectDisplay, TryFromDialect as _, TryIntoDialect as _};
-use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams, DfQueryParameters};
+use readyset_sql_passes::adapter_rewrites::{
+    self, AdapterRewriteContext as _, AdapterRewriteParams, DfQueryParameters,
+};
 use readyset_util::redacted::Sensitive;
 use readyset_util::shared_cache::{self, LocalCache};
 use schema_catalog::RewriteContext;
@@ -348,6 +350,7 @@ pub(crate) enum ExecuteSelectContext<'ctx> {
         statement: &'ctx SelectStatement,
         create_if_missing: bool,
         processed_query_params: DfQueryParameters,
+        schema_generation: u64,
     },
 }
 
@@ -1001,13 +1004,19 @@ impl NoriaConnector {
         deep: ViewCreateRequest,
         always: bool,
         concurrently: bool,
+        schema_generation: u64,
     ) -> ReadySetResult<Option<u64>> {
         let name = match name {
             Some(name) => name,
             None => &QueryId::from(&deep).into(),
         };
         let changelist = ChangeList::from_change(
-            Change::create_cache(name.clone(), deep.statement.clone(), always),
+            Change::create_cache(
+                name.clone(),
+                deep.statement.clone(),
+                always,
+                schema_generation,
+            ),
             self.dialect,
         )
         .with_schema_search_path(deep.schema_search_path.clone());
@@ -1034,9 +1043,15 @@ impl NoriaConnector {
         &mut self,
         id: QueryId,
         req: &ViewCreateRequest,
+        schema_generation: u64,
     ) -> ReadySetResult<()> {
         let changelist = ChangeList::from_change(
-            Change::create_cache(id.to_string(), req.statement.clone(), false),
+            Change::create_cache(
+                id.to_string(),
+                req.statement.clone(),
+                false,
+                schema_generation,
+            ),
             self.dialect,
         )
         .with_schema_search_path(req.schema_search_path.clone());
@@ -1052,6 +1067,7 @@ impl NoriaConnector {
         is_prepared: bool,
         create_if_not_exist: bool,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
+        schema_generation: u64,
     ) -> ReadySetResult<Relation> {
         let search_path =
             override_schema_search_path.unwrap_or_else(|| self.schema_search_path().to_vec());
@@ -1083,7 +1099,7 @@ impl NoriaConnector {
                     // expensive, so we fall back to constructing a 'create cache' statement from a
                     // displayed version of the the SelectStatement we already parsed in this case
                     let changelist = ChangeList::from_change(
-                        Change::create_cache(qname.clone(), q.clone(), false),
+                        Change::create_cache(qname.clone(), q.clone(), false, schema_generation),
                         self.dialect,
                     )
                     .with_schema_search_path(search_path);
@@ -1452,6 +1468,7 @@ impl NoriaConnector {
                 true,
                 create_if_not_exist,
                 Some(rewrite_context.search_path().to_vec()),
+                rewrite_context.schema_generation(),
             )
             .await?;
 
@@ -1522,9 +1539,16 @@ impl NoriaConnector {
                 statement,
                 create_if_missing,
                 processed_query_params,
+                schema_generation,
             } => {
                 let name = self
-                    .get_view_name_cached(statement, false, create_if_missing, None)
+                    .get_view_name_cached(
+                        statement,
+                        false,
+                        create_if_missing,
+                        None,
+                        schema_generation,
+                    )
                     .await?;
                 (
                     Cow::Owned(name),
@@ -1590,6 +1614,7 @@ impl NoriaConnector {
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         create_if_not_exists: bool,
         is_prepared: bool,
+        schema_generation: u64,
     ) -> ReadySetResult<()> {
         let qname = self
             .get_view_name_cached(
@@ -1597,6 +1622,7 @@ impl NoriaConnector {
                 is_prepared,
                 create_if_not_exists,
                 override_schema_search_path,
+                schema_generation,
             )
             .await?;
 

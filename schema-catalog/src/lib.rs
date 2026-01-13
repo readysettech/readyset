@@ -22,6 +22,16 @@ pub use rewrite_context::RewriteContext;
 /// thus generally decided by what we do in [`readyset_sql_passes::adapter_rewrites`].
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SchemaCatalog {
+    /// Monotonically increasing generation number that changes whenever the schema is modified.
+    /// Used to detect when cache creation attempts are using stale schema information.
+    ///
+    /// # Semantics
+    /// - Starts at 0 and increments after each successful DDL migration
+    /// - CreateCache-only migrations do NOT increment the generation
+    /// - A value of 0 is treated as "missing/unset" in some contexts
+    /// - The generation from this catalog should be attached to cache creation requests
+    ///   so the controller can validate the adapter's schema view matches its own
+    pub generation: u64,
     /// Base table schemas, mapping relation names to their CREATE TABLE definitions.
     pub base_schemas: HashMap<Relation, CreateTableBody>,
     /// Views that have been declared but not yet compiled into the dataflow graph.

@@ -133,6 +133,7 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
 
     async fn apply_update(&self, catalog: SchemaCatalog) {
         trace!(
+            generation = catalog.generation,
             base_tables = ?catalog.base_schemas.keys().collect::<Vec<_>>(),
             uncompiled_views = ?catalog.uncompiled_views,
             custom_types = ?catalog.custom_types.keys().collect::<Vec<_>>(),
@@ -141,7 +142,31 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
             "Received schema catalog from server"
         );
 
+        let current_generation = {
+            let cache = self.handle.inner.read().await;
+            cache.as_ref().map(|c| c.generation)
+        };
+
+        if let Some(current) = current_generation {
+            if catalog.generation < current {
+                warn!(
+                    new_generation = catalog.generation,
+                    current_generation = current,
+                    "Skipping schema catalog update with older generation"
+                );
+                return;
+            }
+            if catalog.generation == current {
+                trace!(
+                    generation = catalog.generation,
+                    "Skipping schema catalog update with unchanged generation"
+                );
+                return;
+            }
+        }
+
         debug!(
+            generation = catalog.generation,
             base_tables = catalog.base_schemas.len(),
             uncompiled_views = catalog.uncompiled_views.len(),
             custom_types = catalog.custom_types.len(),
@@ -251,6 +276,7 @@ mod tests {
             Self {
                 should_fail,
                 catalog: SchemaCatalog {
+                    generation: 42,
                     base_schemas: HashMap::new(),
                     uncompiled_views: Vec::new(),
                     custom_types: HashMap::new(),

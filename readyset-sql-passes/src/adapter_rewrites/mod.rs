@@ -156,9 +156,16 @@ impl AdapterRewriteParams {
     }
 }
 
-pub trait AdapterRewriteContext {}
+pub trait AdapterRewriteContext {
+    /// Schema generation associated with the schema snapshot used for rewrites.
+    fn schema_generation(&self) -> u64;
+}
 
-impl<C: AdapterRewriteContext> AdapterRewriteContext for &C {}
+impl<C: AdapterRewriteContext> AdapterRewriteContext for &C {
+    fn schema_generation(&self) -> u64 {
+        (**self).schema_generation()
+    }
+}
 
 /// How to handle parameterization.
 #[derive(Debug, Copy, Clone)]
@@ -1668,7 +1675,11 @@ mod tests {
 
         struct TestAdapterRewriteContext {}
 
-        impl AdapterRewriteContext for TestAdapterRewriteContext {}
+        impl AdapterRewriteContext for TestAdapterRewriteContext {
+            fn schema_generation(&self) -> u64 {
+                0
+            }
+        }
 
         fn rewrite_context() -> impl AdapterRewriteContext {
             TestAdapterRewriteContext {}

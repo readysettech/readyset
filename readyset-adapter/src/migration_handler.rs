@@ -24,7 +24,7 @@ use readyset_util::redacted::Sensitive;
 use readyset_util::shutdown::ShutdownReceiver;
 use schema_catalog::{RewriteContext, SchemaCatalogHandle};
 use tokio::select;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::backend::NoriaConnector;
 use crate::query_status_cache::QueryStatusCache;
@@ -189,6 +189,7 @@ impl MigrationHandler {
                         query.query().clone(),
                         /* always */ false,
                         /* concurrently */ false,
+                        0, // TODO: pass actual schema generation
                     )
                     .await;
                 // Inform the query status cache of completed migrations
@@ -318,8 +319,9 @@ impl MigrationHandler {
             view_request.schema_search_path.clone(),
         );
 
+        // TODO(mvzink): Pass actual schema generation
         self.noria
-            .handle_create_cached_query(None, req, false, false)
+            .handle_create_cached_query(None, req, false, false, 0)
             .await?;
         Ok(())
     }
@@ -355,9 +357,22 @@ impl MigrationHandler {
             view_request.schema_search_path.as_slice(),
         );
 
+        let schema_generation = match self.schema_catalog_handle.get_catalog_retrying().await {
+            Ok(catalog) => catalog.generation,
+            Err(error) => {
+                warn!(%error, "Failed to fetch schema generation for dry run migration");
+                return;
+            }
+        };
+
         // We do not need to provide a real "create cache" String for a dry run migration
         let changelist = ChangeList::from_change(
-            Change::create_cache(qname, view_request.statement.clone(), false),
+            Change::create_cache(
+                qname,
+                view_request.statement.clone(),
+                false,
+                schema_generation,
+            ),
             self.dialect,
         )
         .with_schema_search_path(view_request.schema_search_path.clone());

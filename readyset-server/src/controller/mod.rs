@@ -846,9 +846,11 @@ impl Controller {
                     let n_caches = changelist.changes.len();
                     match retry_with_exponential_backoff!(
                         || async {
-                            let changelist = changelist.clone();
+                            let mut changelist = changelist.clone();
                             let mut writer = inner.dataflow_state_handle.write().await;
                             let ds = writer.as_mut();
+                            changelist =
+                                changelist.with_schema_generation(ds.schema_generation());
                             ds.extend_recipe(changelist.into(), false, None).await?;
                             ReadySetResult::Ok(writer)
                         },
@@ -890,7 +892,7 @@ impl Controller {
                 let ds = inner.dataflow_state_handle.read().await;
                 (
                     ds.recipe.adapter_rewrite_params(),
-                    Arc::new(ds.recipe.schema_catalog()),
+                    Arc::new(ds.recipe.schema_catalog(ds.schema_generation())),
                 )
             } else {
                 return Err(ReadySetError::NotLeader);
@@ -900,16 +902,19 @@ impl Controller {
             ddl_reqs
                 .iter()
                 .filter(|req| matches!(
-                    Change::from_cache_ddl_request(
-                        req,
-                        adapter_rewrite_params,
-                        schema_catalog::RewriteContext::new(
+                    {
+                        let rewrite_context = schema_catalog::RewriteContext::new(
                             req.dialect,
                             schema_catalog.clone(),
                             req.schema_search_path.clone(),
-                        ),
-                        self.parsing_preset,
-                    ),
+                        );
+                        Change::from_cache_ddl_request(
+                            req,
+                            adapter_rewrite_params,
+                            &rewrite_context,
+                            self.parsing_preset,
+                        )
+                    },
                     Ok(Change::Drop { .. })
                 ))
                 .all(|req| req.dialect == ddl_reqs[0].dialect),
@@ -920,16 +925,19 @@ impl Controller {
             ddl_reqs
                 .iter()
                 .filter(|req| matches!(
-                    Change::from_cache_ddl_request(
-                        req,
-                        adapter_rewrite_params,
-                        schema_catalog::RewriteContext::new(
+                    {
+                        let rewrite_context = schema_catalog::RewriteContext::new(
                             req.dialect,
                             schema_catalog.clone(),
                             req.schema_search_path.clone(),
-                        ),
-                        self.parsing_preset,
-                    ),
+                        );
+                        Change::from_cache_ddl_request(
+                            req,
+                            adapter_rewrite_params,
+                            &rewrite_context,
+                            self.parsing_preset,
+                        )
+                    },
                     Ok(Change::Drop { .. })
                 ))
                 .all(|req| req.schema_search_path.is_empty()),
@@ -940,16 +948,19 @@ impl Controller {
             ddl_reqs
                 .iter()
                 .filter(|req| matches!(
-                    Change::from_cache_ddl_request(
-                        req,
-                        adapter_rewrite_params,
-                        schema_catalog::RewriteContext::new(
+                    {
+                        let rewrite_context = schema_catalog::RewriteContext::new(
                             req.dialect,
                             schema_catalog.clone(),
                             req.schema_search_path.clone(),
-                        ),
-                        self.parsing_preset,
-                    ),
+                        );
+                        Change::from_cache_ddl_request(
+                            req,
+                            adapter_rewrite_params,
+                            &rewrite_context,
+                            self.parsing_preset,
+                        )
+                    },
                     Ok(Change::CreateCache(_))
                 ))
                 .all(|req| req.dialect == ddl_reqs[0].dialect),
@@ -963,14 +974,15 @@ impl Controller {
         let mut last_was_drop = false;
 
         for ddl_req in ddl_reqs {
+            let rewrite_context = schema_catalog::RewriteContext::new(
+                ddl_req.dialect,
+                schema_catalog.clone(),
+                ddl_req.schema_search_path.clone(),
+            );
             match Change::from_cache_ddl_request(
                 &ddl_req,
                 adapter_rewrite_params,
-                schema_catalog::RewriteContext::new(
-                    ddl_req.dialect,
-                    schema_catalog.clone(),
-                    ddl_req.schema_search_path.clone(),
-                ),
+                &rewrite_context,
                 self.parsing_preset,
             ) {
                 Ok(change) => {

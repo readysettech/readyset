@@ -109,8 +109,8 @@ use readyset_sql::ast::{
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::{
-    AdapterRewriteParams, DfQueryParameters, QueryParameters, ShallowQueryParameters,
-    convert_placeholders_to_question_marks,
+    AdapterRewriteContext as _, AdapterRewriteParams, DfQueryParameters, QueryParameters,
+    ShallowQueryParameters, convert_placeholders_to_question_marks,
 };
 use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -950,6 +950,7 @@ enum ShouldTrySelect {
     Yes {
         status: QueryStatus,
         params: DfQueryParameters,
+        schema_generation: u64,
     },
     /// We should not attempt to select from ReadySet, and should proxy if there is an upstream. If
     /// there is no upstream, we should return an error. If there is no error, it is because we are
@@ -1995,6 +1996,7 @@ where
                             Some(view_request.schema_search_path.clone()),
                             false, // create_if_not_exists
                             true,  // is_prepared
+                            rewrite_context.schema_generation(),
                         )
                         .await
                         .is_ok();
@@ -2310,6 +2312,7 @@ where
         shallow: ReadySetResult<ShallowViewRequest>,
         always: bool,
         concurrently: bool,
+        schema_generation: u64,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let deep = deep?;
         let (query_id, name, requested_name) = self.make_name_and_id(name, QueryId::from(&deep));
@@ -2325,7 +2328,13 @@ where
         // Now migrate the new query
         let migration_state = match self
             .noria
-            .handle_create_cached_query(Some(name), deep.clone(), always, concurrently)
+            .handle_create_cached_query(
+                Some(name),
+                deep.clone(),
+                always,
+                concurrently,
+                schema_generation,
+            )
             .await
         {
             Ok(None) => MigrationState::Successful(CacheType::Deep),
@@ -2372,6 +2381,7 @@ where
         shallow: ReadySetResult<ShallowViewRequest>,
         always: bool,
         concurrently: bool,
+        schema_generation: u64,
         ddl_req: Option<CacheDDLRequest>,
         quiet: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
@@ -2382,7 +2392,14 @@ where
         }
 
         let res = self
-            .create_cached_query(&mut name, deep, shallow, always, concurrently)
+            .create_cached_query(
+                &mut name,
+                deep,
+                shallow,
+                always,
+                concurrently,
+                schema_generation,
+            )
             .await;
 
         remove_ddl_on_error(
@@ -2500,6 +2517,7 @@ where
     ) -> ReadySetResult<(
         ReadySetResult<ViewCreateRequest>,
         ReadySetResult<ShallowViewRequest>,
+        u64,
     )> {
         match inner {
             CacheInner::Statement { deep, shallow } => {
@@ -2508,6 +2526,7 @@ where
 
                 // Rewrite for deep.
                 let rewrite_context = self.rewrite_context(None).await?;
+                let schema_generation = rewrite_context.schema_generation();
                 let deep = match deep {
                     Ok(mut deep) => {
                         match adapter_rewrites::rewrite_query(
@@ -2540,17 +2559,19 @@ where
                     Err(e) => Err(ReadySetError::UnparseableQuery(e)),
                 };
 
-                Ok((deep, shallow))
+                Ok((deep, shallow, schema_generation))
             }
             CacheInner::Id(id) => match self.state.query_status_cache.query(id.as_str()) {
                 Some(q) => match q {
                     Query::Parsed(deep) => Ok((
                         Ok((*deep).clone()),
                         Err(ReadySetError::NoQueryForId { id: id.to_string() }),
+                        0, // TODO(mvzink): Possibly this needs to be moved into the `CreateViewRequest`
                     )),
                     Query::ShallowParsed(shallow) => Ok((
                         Err(ReadySetError::NoQueryForId { id: id.to_string() }),
                         Ok((*shallow).clone()),
+                        0,
                     )),
                     Query::ParseFailed(_, e) => Err(ReadySetError::UnparseableQuery(e)),
                 },
@@ -2566,6 +2587,7 @@ where
     ) -> ReadySetResult<(
         ReadySetResult<ViewCreateRequest>,
         ReadySetResult<ShallowViewRequest>,
+        u64,
     )> {
         let ExplainStatement::CreateCache { inner, .. } = explain else {
             internal!("Unexpected EXPLAIN: {explain:?}");
@@ -2580,6 +2602,7 @@ where
         deep: &ReadySetResult<ViewCreateRequest>,
         cache_mode: CacheMode,
         cache_type: Option<CacheType>,
+        schema_generation: u64,
     ) -> MigrationState {
         let deep = match deep {
             Ok(deep) => deep,
@@ -2627,7 +2650,7 @@ where
         }
 
         // We don't yet know the migration state and are considering a deep cache.
-        match self.noria.handle_dry_run(id, deep).await {
+        match self.noria.handle_dry_run(id, deep, schema_generation).await {
             Ok(()) => MigrationState::DryRunSucceeded,
             Err(e) if e.is_transient() => MigrationState::Pending,
             Err(e) => {
@@ -2671,7 +2694,7 @@ where
         let cache_type = Self::requested_cache_type(explain)?;
 
         // Get the deep and shallow representations of the query.
-        let (deep, shallow) = self.query_from_explain(explain).await?;
+        let (deep, shallow, schema_generation) = self.query_from_explain(explain).await?;
 
         // The only time we care about the migration state of a shallow representation is if we've
         // marked one as cached in the query status cache.
@@ -2687,7 +2710,7 @@ where
 
         // Determine support.
         let migration_state = self
-            .explain_migration_state(&deep, cache_mode, cache_type)
+            .explain_migration_state(&deep, cache_mode, cache_type, schema_generation)
             .await;
         match cache_type {
             Some(CacheType::Deep) => {
@@ -3254,7 +3277,7 @@ where
                     concurrently,
                     unparsed_create_cache_statement,
                 } = create_cache_stmt;
-                let (deep, shallow) = self.query_from_cache_inner(inner).await?;
+                let (deep, shallow, schema_generation) = self.query_from_cache_inner(inner).await?;
 
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
@@ -3289,6 +3312,7 @@ where
                         shallow,
                         *always,
                         *concurrently,
+                        schema_generation,
                         ddl_req,
                         false,
                     )
@@ -3312,6 +3336,7 @@ where
                             shallow.clone(),
                             *always,
                             *concurrently,
+                            schema_generation,
                             ddl_req.clone(),
                             true,
                         )
@@ -3616,13 +3641,25 @@ where
         query: &'a str,
         mut view_request: ViewCreateRequest,
         params: QueryParameters,
+        schema_generation: u64,
         event: &mut QueryExecutionEvent,
         sampler_tx: Option<
             &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
         >,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        match Self::noria_should_try_select(noria, settings, state, &mut view_request, params) {
-            ShouldTrySelect::Yes { status, params } => {
+        match Self::noria_should_try_select(
+            noria,
+            settings,
+            state,
+            &mut view_request,
+            params,
+            schema_generation,
+        ) {
+            ShouldTrySelect::Yes {
+                status,
+                params,
+                schema_generation,
+            } => {
                 Self::noria_adhoc_select(
                     noria,
                     upstream,
@@ -3633,6 +3670,7 @@ where
                     status,
                     event,
                     params,
+                    schema_generation,
                     sampler_tx,
                 )
                 .await
@@ -3660,6 +3698,7 @@ where
         mut status: QueryStatus,
         event: &mut QueryExecutionEvent,
         params: DfQueryParameters,
+        schema_generation: u64,
         sampler_tx: Option<
             &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
         >,
@@ -3698,10 +3737,18 @@ where
         }
 
         event.destination = Some(QueryDestination::Readyset(None));
+        let create_if_missing = settings.migration_mode == MigrationMode::InRequestPath;
+        let schema_generation = if create_if_missing {
+            schema_generation
+        } else {
+            0
+        };
+
         let ctx = ExecuteSelectContext::AdHoc {
             statement: &view_request.statement,
-            create_if_missing: settings.migration_mode == MigrationMode::InRequestPath,
+            create_if_missing,
             processed_query_params: params,
+            schema_generation,
         };
         let res = noria.execute_select(ctx, event).await;
         if status.execution_info.is_none() {
@@ -3810,6 +3857,7 @@ where
         q: &mut ViewCreateRequest,
         rewrite_params: AdapterRewriteParams,
         params: QueryParameters,
+        schema_generation: u64,
     ) -> ShouldTrySelect {
         match adapter_rewrites::rewrite_for_readyset(&mut q.statement, rewrite_params, params) {
             Ok(params) => {
@@ -3820,7 +3868,11 @@ where
                     true
                 };
                 if should_try {
-                    ShouldTrySelect::Yes { status, params }
+                    ShouldTrySelect::Yes {
+                        status,
+                        params,
+                        schema_generation,
+                    }
                 } else {
                     ShouldTrySelect::No { error: None }
                 }
@@ -3847,10 +3899,18 @@ where
         q: &mut ViewCreateRequest,
         rewrite_params: AdapterRewriteParams,
         params: QueryParameters,
+        schema_generation: u64,
     ) -> ShouldTrySelect {
         // if the cache is not yet created, it's probably better
         // to let the adapter try the other path.
-        match Self::process_and_check_query(settings, state, q, rewrite_params, params) {
+        match Self::process_and_check_query(
+            settings,
+            state,
+            q,
+            rewrite_params,
+            params,
+            schema_generation,
+        ) {
             ShouldTrySelect::Yes {
                 status:
                     status @ QueryStatus {
@@ -3858,7 +3918,12 @@ where
                         ..
                     },
                 params,
-            } => ShouldTrySelect::Yes { status, params },
+                schema_generation,
+            } => ShouldTrySelect::Yes {
+                status,
+                params,
+                schema_generation,
+            },
             ShouldTrySelect::Yes { .. } => ShouldTrySelect::No { error: None },
             no => no,
         }
@@ -3889,6 +3954,7 @@ where
         state: &BackendState<DB>,
         q: &mut ViewCreateRequest,
         params: QueryParameters,
+        schema_generation: u64,
     ) -> ShouldTrySelect {
         let mut rewrite_params = noria.rewrite_params();
 
@@ -3898,7 +3964,14 @@ where
         if is_topk_candidate {
             let mut original = q.clone();
 
-            match Self::lookup_topk_cache(settings, state, q, rewrite_params, params.clone()) {
+            match Self::lookup_topk_cache(
+                settings,
+                state,
+                q,
+                rewrite_params,
+                params.clone(),
+                schema_generation,
+            ) {
                 yes @ ShouldTrySelect::Yes { .. } => return yes,
                 ShouldTrySelect::No { .. } => {
                     trace!("No TopK cache for query, trying parameterized cache");
@@ -3910,7 +3983,21 @@ where
             }
         }
 
-        Self::process_and_check_query(settings, state, q, rewrite_params, params)
+        match Self::process_and_check_query(
+            settings,
+            state,
+            q,
+            rewrite_params,
+            params,
+            schema_generation,
+        ) {
+            ShouldTrySelect::Yes { status, params, .. } => ShouldTrySelect::Yes {
+                status,
+                params,
+                schema_generation,
+            },
+            ShouldTrySelect::No { error } => ShouldTrySelect::No { error },
+        }
     }
 
     /// Handles a parsed set statement by deferring to `Handler::handle_set_statement` and
@@ -4344,6 +4431,7 @@ where
                     query,
                     view_request,
                     params,
+                    rewrite_context.schema_generation(),
                     &mut event,
                     sampler_tx,
                 )

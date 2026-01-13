@@ -247,7 +247,7 @@ impl Recipe {
     ///
     /// This creates a snapshot of the schema information that can be shared
     /// between Readyset components.
-    pub(crate) fn schema_catalog(&self) -> SchemaCatalog {
-        self.inc.schema_catalog()
+    pub(crate) fn schema_catalog(&self, generation: u64) -> SchemaCatalog {
+        self.inc.schema_catalog(generation)
     }
 }

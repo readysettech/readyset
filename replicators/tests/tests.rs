@@ -541,6 +541,7 @@ impl TestHandle {
                                 .unwrap(),
                         ),
                         always: false,
+                        schema_generation_used: 0,
                     }),
                 ],
                 self.dialect,
@@ -2285,6 +2286,7 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
             .unwrap(),
         ),
         always: false,
+        schema_generation_used: 0,
     });
     ctx.noria
         .extend_recipe(ChangeList::from_change(
@@ -2366,6 +2368,7 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
                     .unwrap(),
                 ),
                 always: true,
+                schema_generation_used: 0,
             }),
             Dialect::DEFAULT_POSTGRESQL
         ))

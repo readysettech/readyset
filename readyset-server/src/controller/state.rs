@@ -126,6 +126,19 @@ pub struct DfState {
     pub(super) recipe: Recipe,
     /// Latest replication position for the schema if from replica or binlog
     schema_replication_offset: Option<ReplicationOffset>,
+    /// Schema generation number, incremented on every successful migration commit.
+    /// Used to detect when cache creation attempts are using stale schema information.
+    ///
+    /// # Semantics
+    /// - Initialized to 0 on first boot
+    /// - Incremented after each successful DDL migration (but NOT for CreateCache-only migrations)
+    /// - A value of 0 in `CreateCache::schema_generation_used` is treated as "missing/unset"
+    /// - Uses `wrapping_add` for increment (wraps to 0 after u64::MAX)
+    ///
+    /// # Known Limitations to be fixed in a follow-up CL
+    /// - Generation 0 being both "initial value" and "missing sentinel" is a semantic conflict
+    /// - After u64::MAX migrations (practically impossible), wrap-around to 0 could cause issues
+    schema_generation: u64,
     /// Placement restrictions for nodes and the domains they are placed into.
     #[serde_as(as = "Vec<(_, _)>")]
     pub(super) node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
@@ -176,6 +189,7 @@ impl DfState {
             materializations,
             recipe,
             schema_replication_offset,
+            schema_generation: 0,
             node_restrictions,
             domains: Default::default(),
             domain_nodes: Default::default(),
@@ -189,6 +203,16 @@ impl DfState {
 
     pub(super) fn schema_replication_offset(&self) -> &Option<ReplicationOffset> {
         &self.schema_replication_offset
+    }
+
+    /// Retrieve the current schema generation number, incremented when DDL or other changes are
+    /// made that could affect how we rewrite SQL queries.
+    ///
+    /// Note: This is here instead of on [`SqlIncorporator`] only because we ([`DfState`]) are more
+    /// suited to ensuring we increment the generation number on every migration commit (see
+    /// [`DfState::apply_recipe`]).
+    pub(super) fn schema_generation(&self) -> u64 {
+        self.schema_generation
     }
 
     pub(super) fn get_info(&self) -> ReadySetResult<GraphInfo> {
@@ -1602,6 +1626,30 @@ impl DfState {
             }
         }
 
+        if let Some(create_cache) = recipe_spec
+            .changes
+            .changes()
+            .find_map(|change| match change {
+                Change::CreateCache(create_cache)
+                    if create_cache.schema_generation_used != self.schema_generation =>
+                {
+                    Some(create_cache)
+                }
+                _ => None,
+            })
+        {
+            let err = ReadySetError::SchemaGenerationMismatch {
+                used: Some(create_cache.schema_generation_used),
+                current: self.schema_generation,
+            };
+            warn!(%err, ?create_cache, "Schema generation mismatch");
+        }
+
+        let should_increment_schema_generation = recipe_spec
+            .changes
+            .changes()
+            .any(|change| !matches!(change, Change::CreateCache(_)));
+
         match self
             .apply_recipe(recipe_spec.changes, dry_run, table_statuses)
             .await
@@ -1610,6 +1658,13 @@ impl DfState {
                 if let Some(offset) = &recipe_spec.replication_offset {
                     debug!(%offset, "Updating schema replication offset");
                     offset.try_max_into(&mut self.schema_replication_offset)?
+                }
+                if !dry_run && should_increment_schema_generation {
+                    self.schema_generation = self.schema_generation.wrapping_add(1);
+                    trace!(
+                        schema_generation = self.schema_generation,
+                        "Incremented schema generation after successful migration"
+                    );
                 }
 
                 Ok(x)
@@ -1970,6 +2025,10 @@ impl DfStateHandle {
         writer: DfStateWriter<'_>,
         authority: &Arc<Authority>,
     ) -> ReadySetResult<()> {
+        let previous_generation = {
+            let guard = self.reader.read().await;
+            guard.state.schema_generation()
+        };
         let new_state = &writer.state;
         if let Some(local) = authority.as_local() {
             local.update_controller_in_place(|state: Option<&mut ControllerState>| match state {
@@ -2013,10 +2072,14 @@ impl DfStateHandle {
         drop(state_guard);
 
         if let Some(notifier) = &self.schema_change_notifier {
-            let catalog = new_state.recipe.schema_catalog();
-            match SchemaCatalogUpdate::try_from(&catalog) {
-                Ok(update) => notifier.send(ControllerEvent::SchemaCatalogUpdate(update)),
-                Err(error) => warn!(%error, "Failed to serialize schema catalog update"),
+            if new_state.schema_generation() != previous_generation {
+                let catalog = new_state
+                    .recipe
+                    .schema_catalog(new_state.schema_generation());
+                match SchemaCatalogUpdate::try_from(&catalog) {
+                    Ok(update) => notifier.send(ControllerEvent::SchemaCatalogUpdate(update)),
+                    Err(error) => warn!(%error, "Failed to serialize schema catalog update"),
+                }
             }
         }
 

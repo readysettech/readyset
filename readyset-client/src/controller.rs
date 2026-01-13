@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, Mutex, RwLock};
 use tower::ServiceExt;
 use tower_service::Service;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 use url::Url;
 
 use crate::consensus::{Authority, AuthorityControl};
@@ -812,39 +812,54 @@ impl ReadySetHandle {
         flush_partial()
     );
 
+    async fn fix_changelist_schema_generation(
+        &mut self,
+        changes: &mut ChangeList,
+    ) -> ReadySetResult<()> {
+        if changes.has_missing_schema_generation() {
+            let generation = self.schema_catalog().await?.generation;
+            if changes.fill_missing_schema_generation(generation) {
+                warn!(
+                    generation,
+                    "Filled missing schema generation for CreateCache in ChangeList (should only happen in tests)"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
     /// Performs a dry-run migration with the given set of queries.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn dry_run(
-        &mut self,
-        changes: ChangeList,
-    ) -> impl Future<Output = ReadySetResult<ExtendRecipeResult>> + '_ {
+    pub async fn dry_run(&mut self, changes: ChangeList) -> ReadySetResult<ExtendRecipeResult> {
+        let mut changes = changes;
+        self.fix_changelist_schema_generation(&mut changes).await?;
+
         let request = ExtendRecipeSpec::from(changes);
 
-        self.rpc("dry_run", request, self.migration_timeout)
+        self.rpc("dry_run", request, self.migration_timeout).await
     }
 
     /// Extend the existing recipe with the given set of queries.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn extend_recipe(
-        &mut self,
-        changes: ChangeList,
-    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
+    pub async fn extend_recipe(&mut self, changes: ChangeList) -> ReadySetResult<()> {
+        let mut changes = changes;
+        self.fix_changelist_schema_generation(&mut changes).await?;
+
         let request = ExtendRecipeSpec::from(changes);
 
-        async move {
-            match self
-                .rpc("extend_recipe", request, self.migration_timeout)
-                .await?
-            {
-                ExtendRecipeResult::Done => Ok(()),
-                ExtendRecipeResult::Pending(migration_id) => {
-                    while self.migration_status(migration_id).await?.is_pending() {
-                        tokio::time::sleep(EXTEND_RECIPE_POLL_INTERVAL).await;
-                    }
-                    Ok(())
+        match self
+            .rpc("extend_recipe", request, self.migration_timeout)
+            .await?
+        {
+            ExtendRecipeResult::Done => Ok(()),
+            ExtendRecipeResult::Pending(migration_id) => {
+                while self.migration_status(migration_id).await?.is_pending() {
+                    tokio::time::sleep(EXTEND_RECIPE_POLL_INTERVAL).await;
                 }
+                Ok(())
             }
         }
     }
@@ -859,20 +874,19 @@ impl ReadySetHandle {
 
     /// Asynchronous version of extend_recipe(). The Controller should immediately return an ID that
     /// can be used to query the migration status.
-    pub fn extend_recipe_async(
-        &mut self,
-        changes: ChangeList,
-    ) -> impl Future<Output = ReadySetResult<u64>> + '_ {
+    pub async fn extend_recipe_async(&mut self, changes: ChangeList) -> ReadySetResult<u64> {
+        let mut changes = changes;
+        self.fix_changelist_schema_generation(&mut changes).await?;
+
         let request = ExtendRecipeSpec::from(changes).concurrently();
-        async move {
-            match self
-                .rpc("extend_recipe", request, self.migration_timeout)
-                .await?
-            {
-                ExtendRecipeResult::Pending(migration_id) => Ok(migration_id),
-                ExtendRecipeResult::Done => {
-                    internal!("CREATE CACHE CONCURRENTLY did not return migration id")
-                }
+
+        match self
+            .rpc("extend_recipe", request, self.migration_timeout)
+            .await?
+        {
+            ExtendRecipeResult::Pending(migration_id) => Ok(migration_id),
+            ExtendRecipeResult::Done => {
+                internal!("CREATE CACHE CONCURRENTLY did not return migration id")
             }
         }
     }
@@ -880,35 +894,44 @@ impl ReadySetHandle {
     /// Extend the existing recipe with the given set of queries and don't require leader ready.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn extend_recipe_no_leader_ready(
+    pub async fn extend_recipe_no_leader_ready(
         &mut self,
         changes: ChangeList,
-    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
+    ) -> ReadySetResult<()> {
+        let mut changes = changes;
+        self.fix_changelist_schema_generation(&mut changes).await?;
+
         let request = ExtendRecipeSpec {
             require_leader_ready: false,
             ..changes.into()
         };
 
         self.rpc("extend_recipe", request, self.migration_timeout)
+            .await
     }
 
     /// Extend the existing recipe with the given set of queries and an optional replication offset
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn extend_recipe_with_offset(
-        &mut self,
+    pub async fn extend_recipe_with_offset<'a>(
+        &'a mut self,
         changes: ChangeList,
-        replication_offset: &ReplicationOffset,
+        replication_offset: &'a ReplicationOffset,
         require_leader_ready: bool,
-    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
+    ) -> ReadySetResult<()> {
+        let replication_offset = replication_offset.clone();
+        let mut changes = changes;
+        self.fix_changelist_schema_generation(&mut changes).await?;
+
         let request = ExtendRecipeSpec {
             changes,
-            replication_offset: Some(Cow::Borrowed(replication_offset)),
+            replication_offset: Some(Cow::Owned(replication_offset)),
             require_leader_ready,
             concurrently: false,
         };
 
         self.rpc("extend_recipe", request, self.migration_timeout)
+            .await
     }
 
     simple_request!(

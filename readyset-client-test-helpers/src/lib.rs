@@ -333,6 +333,11 @@ impl TestBuilder {
         self
     }
 
+    pub fn schema_catalog_polling_interval(mut self, interval: Duration) -> Self {
+        self.schema_catalog_polling_interval = interval;
+        self
+    }
+
     pub async fn build<A>(self) -> (A::ConnectionOpts, Handle, ShutdownSender)
     where
         A: Adapter + 'static,

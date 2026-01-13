@@ -633,7 +633,7 @@ impl Leader {
             (&Method::GET | &Method::POST, "/schema_catalog") => {
                 require_leader_ready()?;
                 let ds = self.dataflow_state_handle.read().await;
-                let schema = ds.recipe.schema_catalog();
+                let schema = ds.recipe.schema_catalog(ds.schema_generation());
                 return_serialized!(schema)
             }
             (&Method::GET | &Method::POST, "/replay_paths") => {

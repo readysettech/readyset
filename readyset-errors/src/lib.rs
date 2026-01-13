@@ -276,6 +276,17 @@ pub enum ReadySetError {
     #[error("view not yet available")]
     ViewNotYetAvailable,
 
+    /// A cache creation attempt used a stale schema catalog generation
+    #[error(
+        "Schema generation mismatch: query was rewritten using generation {used:?}, but current generation is {current}"
+    )]
+    SchemaGenerationMismatch {
+        /// The schema generation used to rewrite the query
+        used: Option<u64>,
+        /// The current schema generation on the controller
+        current: u64,
+    },
+
     /// A request was made to a destroyed view
     #[error("view destroyed")]
     ViewDestroyed,
