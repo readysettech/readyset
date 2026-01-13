@@ -519,6 +519,50 @@ impl TryFromDialect<sqlparser::ast::Select> for SelectStatement {
         value: sqlparser::ast::Select,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
+        // DISTINCT ON deduplication
+        if matches!(value.distinct, Some(sqlparser::ast::Distinct::On(_))) {
+            unsupported!("DISTINCT ON not supported")?;
+        }
+
+        // TOP clause
+        if value.top.is_some() {
+            unsupported!("TOP clause not supported; use LIMIT instead")?;
+        }
+
+        // SELECT INTO (DDL operation)
+        if value.into.is_some() {
+            unsupported!("SELECT INTO not supported")?;
+        }
+
+        // LATERAL VIEW, CLUSTER BY, DISTRIBUTE BY, SORT BY clauses
+        if !value.lateral_views.is_empty() {
+            unsupported!("LATERAL VIEW not supported")?;
+        }
+        if !value.cluster_by.is_empty() {
+            unsupported!("CLUSTER BY not supported")?;
+        }
+        if !value.distribute_by.is_empty() {
+            unsupported!("DISTRIBUTE BY not supported")?;
+        }
+        if !value.sort_by.is_empty() {
+            unsupported!("SORT BY not supported; use ORDER BY instead")?;
+        }
+
+        // QUALIFY clause
+        if value.qualify.is_some() {
+            unsupported!("QUALIFY clause not supported")?;
+        }
+
+        // SELECT AS VALUE/STRUCT
+        if value.value_table_mode.is_some() {
+            unsupported!("SELECT AS VALUE/STRUCT not supported")?;
+        }
+
+        // CONNECT BY hierarchical queries
+        if value.connect_by.is_some() {
+            unsupported!("CONNECT BY not supported; use WITH RECURSIVE instead")?;
+        }
+
         let mut tables: Vec<TableExpr> = Vec::new();
         let mut join: Vec<JoinClause> = Vec::new();
         for table_with_joins in value.from {
