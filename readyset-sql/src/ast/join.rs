@@ -47,7 +47,13 @@ pub enum JoinOperator {
     #[weight(0)]
     RightOuterJoin,
     InnerJoin,
+    /// CrossJoin with an ON clause is invalid in PostgreSQL (though MySQL allows it).
+    /// Weight 0 to prevent random generation that could produce invalid SQL.
+    #[weight(0)]
     CrossJoin,
+    /// STRAIGHT_JOIN is MySQL-specific syntax, not valid in PostgreSQL.
+    /// Weight 0 to prevent random generation that could produce invalid SQL.
+    #[weight(0)]
     StraightJoin,
 }
 
