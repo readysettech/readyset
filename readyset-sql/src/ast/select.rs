@@ -586,8 +586,27 @@ impl TryFromDialect<sqlparser::ast::Query> for SelectStatement {
             order_by,
             limit_clause,
             with,
+            fetch,
+            locks,
+            for_clause,
             ..
         } = value;
+
+        // FETCH clause (ANSI SQL pagination alternative to LIMIT)
+        if fetch.is_some() {
+            unsupported!("FETCH clause not supported; use LIMIT and OFFSET instead")?;
+        }
+
+        // Row-level locking (FOR UPDATE, FOR SHARE, etc.)
+        if !locks.is_empty() {
+            unsupported!("Row-level locking (FOR UPDATE, FOR SHARE) not supported")?;
+        }
+
+        // SQL Server FOR XML/JSON/BROWSE clause
+        if for_clause.is_some() {
+            unsupported!("FOR XML/FOR JSON clause not supported")?;
+        }
+
         match *body {
             sqlparser::ast::SetExpr::Select(select) => {
                 let mut select: SelectStatement = (*select).try_into_dialect(dialect)?;
