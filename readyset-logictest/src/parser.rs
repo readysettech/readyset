@@ -221,7 +221,7 @@ fn value(i: &[u8]) -> IResult<&[u8], Value> {
                         if ts.has_timezone() {
                             Some(Value::TimestampTz(ts.to_chrono()))
                         } else {
-                            Some(Value::Date(ts.to_chrono().naive_utc()))
+                            Some(Value::DateTime(ts.to_chrono().naive_utc()))
                         }
                     }
                     Err(_) => None,

@@ -219,8 +219,7 @@ pub enum Value {
     Integer(i64),
     UnsignedInteger(u64),
     Real(i64, u64),
-    // note: `Date` currently behaves more like a `DateTime`/`Timestamp`
-    Date(NaiveDateTime),
+    DateTime(NaiveDateTime),
     Time(MySqlTime),
     TimestampTz(DateTime<FixedOffset>),
     ByteArray(Vec<u8>),
@@ -262,7 +261,7 @@ impl TryFrom<mysql_async::Value> for Value {
                     (f.fract() * 1_000_000_000.0).round() as _,
                 ))
             }
-            Date(y, mo, d, h, min, s, us) => Ok(Self::Date(
+            Date(y, mo, d, h, min, s, us) => Ok(Self::DateTime(
                 NaiveDate::from_ymd_opt(y.into(), mo.into(), d.into())
                     .unwrap()
                     .and_hms_micro_opt(h.into(), min.into(), s.into(), us)
@@ -318,7 +317,7 @@ impl From<Value> for mysql_async::Value {
             Value::Real(i, f) => (i as f64 + ((f as f64) / 1_000_000_000.0)).into(),
             Value::Numeric(d) => d.to_string().into(),
             Value::Null => mysql_async::Value::NULL,
-            Value::Date(dt) => mysql_async::Value::from(dt),
+            Value::DateTime(dt) => mysql_async::Value::from(dt),
             Value::Time(t) => mysql_async::Value::Time(
                 !t.is_positive(),
                 (t.hour() / 24).into(),
@@ -379,7 +378,7 @@ impl pgsql::types::ToSql for Value {
                 Type::NUMERIC => d.to_sql(ty, out),
                 _ => panic!("unexpected type {ty:?} for Numeric"),
             },
-            Value::Date(x) => match *ty {
+            Value::DateTime(x) => match *ty {
                 Type::TIMESTAMP => x.to_sql(ty, out),
                 _ => panic!("unexpected type {ty:?} for Date"),
             },
@@ -496,7 +495,7 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
                     Ok(datetime) => datetime,
                     Err(_) => NaiveDate::from_sql(ty, raw)?.and_hms_opt(0, 0, 0).unwrap(),
                 };
-                Ok(Self::Date(val))
+                Ok(Self::DateTime(val))
             }
             Type::TIME => Ok(Self::Time(NaiveTime::from_sql(ty, raw)?.into())),
             Type::TIMESTAMP => Ok(Self::TimestampTz(DateTime::<FixedOffset>::from_sql(
@@ -568,7 +567,7 @@ impl TryFrom<DfValue> for Value {
             DfValue::Float(f) => Ok(f.into()),
             DfValue::Double(f) => Ok(f.into()),
             DfValue::Text(_) | DfValue::TinyText(_) => Ok(Value::Text(value.try_into()?)),
-            DfValue::TimestampTz(ref ts) => Ok(Value::Date(ts.to_chrono().naive_utc())),
+            DfValue::TimestampTz(ref ts) => Ok(Value::DateTime(ts.to_chrono().naive_utc())),
             DfValue::Time(t) => Ok(Value::Time(t)),
             DfValue::ByteArray(t) => Ok(Value::ByteArray(t.as_ref().clone())),
             DfValue::Numeric(ref d) => Ok(Value::Numeric(d.as_ref().clone())),
@@ -610,7 +609,7 @@ impl Display for Value {
                 //  so we can display it correctly.
                 write!(f, "{d}")
             }
-            Self::Date(dt) => write!(f, "{}", dt.format(TIMESTAMP_FORMAT)),
+            Self::DateTime(dt) => write!(f, "{}", dt.format(TIMESTAMP_FORMAT)),
             Self::Null => write!(f, "NULL"),
             Self::Time(t) => write!(f, "{t}"),
             Self::ByteArray(a) => {
@@ -703,7 +702,7 @@ impl Value {
             Self::UnsignedInteger(_) => Some(Type::UnsignedInteger),
             Self::Real(_, _) => Some(Type::Real),
             Self::Numeric(_) => Some(Type::Numeric),
-            Self::Date(_) => Some(Type::Date),
+            Self::DateTime(_) => Some(Type::Date),
             Self::Time(_) => Some(Type::Time),
             Self::ByteArray(_) => Some(Type::ByteArray),
             Self::Null => None,
@@ -743,7 +742,7 @@ impl Value {
                 // TODO(fran): Add support for MySQL's DECIMAL.
                 bail!("Conversion of {:?} to DECIMAL is not implemented", val)
             }
-            Type::Date => Ok(Self::Date(mysql_async::from_value_opt(val)?)),
+            Type::Date => Ok(Self::DateTime(mysql_async::from_value_opt(val)?)),
             Type::Time => Ok(Self::Time(match val {
                 mysql_async::Value::Bytes(s) => {
                     MySqlTime::from_str(std::str::from_utf8(&s)?).map_err(|e| anyhow!("{}", e))?
@@ -772,7 +771,7 @@ impl Value {
             | (Self::Integer(_), Type::Integer)
             | (Self::UnsignedInteger(_), Type::UnsignedInteger)
             | (Self::Real(_, _), Type::Real)
-            | (Self::Date(_), Type::Date)
+            | (Self::DateTime(_), Type::Date)
             | (Self::Time(_), Type::Time)
             | (Self::TimestampTz(_), Type::TimestampTz)
             | (Self::BitVector(_), Type::BitVec)
@@ -784,13 +783,13 @@ impl Value {
             (Self::UnsignedInteger(u), Type::Integer) => {
                 Ok(Cow::Owned(Self::Integer((*u).try_into()?)))
             }
-            (Self::TimestampTz(ts), Type::Date) => Ok(Cow::Owned(Self::Date(ts.naive_local()))),
+            (Self::TimestampTz(ts), Type::Date) => Ok(Cow::Owned(Self::DateTime(ts.naive_local()))),
             (Self::Text(txt), Type::Integer) => Ok(Cow::Owned(Self::Integer(txt.parse()?))),
             (Self::Text(txt), Type::UnsignedInteger) => {
                 Ok(Cow::Owned(Self::UnsignedInteger(txt.parse()?)))
             }
             (Self::Text(txt), Type::Real) => Ok(Cow::Owned(Self::from(txt.parse::<f64>()?))),
-            (Self::Text(txt), Type::Date) => Ok(Cow::Owned(Self::Date(
+            (Self::Text(txt), Type::Date) => Ok(Cow::Owned(Self::DateTime(
                 NaiveDateTime::parse_from_str(txt, "%Y-%m-%d %H:%M:%S").or_else(|_| {
                     NaiveDate::parse_from_str(txt, "%Y-%m-%d")
                         .map(|nd| nd.and_hms_opt(0, 0, 0).unwrap())
@@ -832,7 +831,7 @@ impl Value {
             (Self::Numeric(dec), Type::Json) => Ok(Cow::Owned(Self::Json(Self::parse_json_value(
                 &dec.to_string(),
             )?))),
-            (Self::Date(ndt), Type::Json) => {
+            (Self::DateTime(ndt), Type::Json) => {
                 Ok(Cow::Owned(Self::Json(JsonValue::String(ndt.to_string()))))
             }
             (Self::Time(time), Type::Json) => {
@@ -842,8 +841,8 @@ impl Value {
                 Ok(Cow::Owned(Self::Json(JsonValue::String(ts.to_string()))))
             }
             (Self::Integer(i), Type::Text) => Ok(Cow::Owned(Self::Text(i.to_string()))),
-            (Self::Date(ndt), Type::Text) => Ok(Cow::Owned(Self::Text(ndt.to_string()))),
-            (Self::Date(ndt), Type::TimestampTz) => Ok(Cow::Owned(Self::TimestampTz(
+            (Self::DateTime(ndt), Type::Text) => Ok(Cow::Owned(Self::Text(ndt.to_string()))),
+            (Self::DateTime(ndt), Type::TimestampTz) => Ok(Cow::Owned(Self::TimestampTz(
                 FixedOffset::east_opt(0).unwrap().from_utc_datetime(ndt),
             ))),
             (Self::Numeric(dec), Type::Text) => Ok(Cow::Owned(Self::Text(dec.to_string()))),
