@@ -84,10 +84,9 @@ fn join_constraint(
     }
 }
 
-// Parse JOIN clause
 fn join_clause(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], JoinClause> {
     move |i| {
-        let (remaining_input, (_, _natural, operator, _, right, _, constraint)) = tuple((
+        let (remaining_input, (_, natural, operator, _, right, _, constraint)) = tuple((
             whitespace0,
             opt(terminated(tag_no_case("natural"), whitespace1)),
             join_operator,
@@ -96,6 +95,13 @@ fn join_clause(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
             whitespace0,
             join_constraint(dialect),
         ))(i)?;
+
+        if natural.is_some() {
+            return Err(nom::Err::Error(NomSqlError {
+                input: i,
+                kind: ErrorKind::Tag,
+            }));
+        }
 
         Ok((
             remaining_input,

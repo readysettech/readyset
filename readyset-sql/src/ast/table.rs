@@ -223,10 +223,28 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
                 alias: Some(TableAlias { columns, .. }),
                 ..
             } if !columns.is_empty() => unsupported!("Table alias with column renaming")?,
-            TableFactor::Table { name, alias, .. } => Ok(Self {
-                inner: TableExprInner::Table(name.try_into_dialect(dialect)?),
-                alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)),
-            }),
+            TableFactor::Table {
+                name,
+                alias,
+                sample,
+                with_ordinality,
+                partitions,
+                ..
+            } => {
+                if sample.is_some() {
+                    unsupported!("TABLESAMPLE clause")?;
+                }
+                if with_ordinality {
+                    unsupported!("WITH ORDINALITY clause")?;
+                }
+                if !partitions.is_empty() {
+                    unsupported!("PARTITION clause")?;
+                }
+                Ok(Self {
+                    inner: TableExprInner::Table(name.try_into_dialect(dialect)?),
+                    alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)),
+                })
+            }
             TableFactor::Derived {
                 subquery,
                 alias,
