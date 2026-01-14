@@ -77,7 +77,7 @@ impl DialectDisplay for SqlQuery {
             Self::CompoundSelect(compound) => write!(f, "{}", compound.display(dialect)),
             Self::StartTransaction(tx) => write!(f, "{tx}"),
             Self::Commit(commit) => write!(f, "{commit}"),
-            Self::Rollback(rollback) => write!(f, "{rollback}"),
+            Self::Rollback(rollback) => write!(f, "{}", rollback.display(dialect)),
             Self::RenameTable(rename) => write!(f, "{}", rename.display(dialect)),
             Self::Use(use_db) => write!(f, "{use_db}"),
             Self::Show(show) => write!(f, "{}", show.display(dialect)),
@@ -183,7 +183,9 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
                 StartTransactionStatement::Start
             })),
             CreateType { .. } => Err(AstConversionError::Skipped(format!("CREATE TYPE: {value}"))),
-            Rollback { .. } => Ok(Self::Rollback(RollbackStatement {})),
+            Rollback { savepoint, .. } => Ok(Self::Rollback(RollbackStatement {
+                savepoint: savepoint.map(|ident| SqlIdentifier::from(ident.value)),
+            })),
             Commit { .. } => Ok(Self::Commit(CommitStatement {})),
             alter @ AlterTable { .. } => Ok(Self::AlterTable(alter.try_into_dialect(dialect)?)),
             truncate @ Truncate { .. } => Ok(Self::Truncate(truncate.try_into_dialect(dialect)?)),

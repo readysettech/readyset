@@ -2614,3 +2614,62 @@ async fn real_type() {
 
     shutdown_tx.shutdown().await;
 }
+
+/// Tests that ROLLBACK TO SAVEPOINT does not end transaction state tracking,
+/// and that we proxy the TO SAVEPOINT clause correctly to upstream.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow, postgres_upstream)]
+async fn rollback_to_savepoint_preserves_transaction() {
+    readyset_tracing::init_test_logging();
+    let (config, _handle, shutdown_tx) = setup().await;
+    let client = connect(config).await;
+
+    client.simple_query("CREATE TABLE t (x int)").await.unwrap();
+    sleep().await;
+
+    client
+        .simple_query("CREATE CACHE FROM SELECT * FROM t")
+        .await
+        .unwrap();
+
+    eventually! {
+        let _ = client.query("SELECT * FROM t", &[]).await.unwrap();
+        last_statement_matches("readyset", "", &client).await.0
+    }
+
+    client.simple_query("BEGIN").await.unwrap();
+    client
+        .simple_query("INSERT INTO t VALUES (1)")
+        .await
+        .unwrap();
+    client.simple_query("SAVEPOINT sp1").await.unwrap();
+    client
+        .simple_query("INSERT INTO t VALUES (2)")
+        .await
+        .unwrap();
+    client
+        .simple_query("ROLLBACK TO SAVEPOINT sp1")
+        .await
+        .unwrap();
+
+    // Verify ROLLBACK TO SAVEPOINT was proxied correctly: row 2 should be rolled back
+    let rows: Vec<i32> = client
+        .query("SELECT * FROM t", &[])
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get(0))
+        .collect();
+    assert_eq!(rows, vec![1], "row 2 should have been rolled back");
+
+    // Verify we're still in a transaction (query was proxied, not served from cache)
+    assert_last_statement_matches!("t", "upstream", "", &client);
+
+    client.simple_query("COMMIT").await.unwrap();
+
+    // After commit, should hit cache again
+    let _ = client.query("SELECT * FROM t", &[]).await.unwrap();
+    assert_last_statement_matches!("t", "readyset", "", &client);
+
+    shutdown_tx.shutdown().await;
+}

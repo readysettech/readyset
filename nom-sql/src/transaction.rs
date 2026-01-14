@@ -6,6 +6,7 @@ use nom_locate::LocatedSpan;
 use readyset_sql::{ast::*, Dialect};
 
 use crate::common::statement_terminator;
+use crate::dialect::DialectParser;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::NomSqlResult;
 
@@ -105,21 +106,34 @@ pub fn commit(d: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], 
     }
 }
 
-// Parse rule for a COMMIT query.
-// TODO(peter): Handle dialect differences.
+// Parse rule for a ROLLBACK query.
+// Supports: ROLLBACK [WORK | TRANSACTION] [TO [SAVEPOINT] savepoint_name]
 pub fn rollback(
-    _: Dialect,
+    dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], RollbackStatement> {
     move |i| {
-        let (remaining_input, (_, _)) = tuple((
-            whitespace0,
-            tuple((
-                tag_no_case("rollback"),
-                opt(tuple((whitespace1, tag_no_case("work")))),
-            )),
-        ))(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag_no_case("rollback")(i)?;
+        // Optional WORK or TRANSACTION keyword
+        let (i, _) = opt(tuple((
+            whitespace1,
+            alt((tag_no_case("work"), tag_no_case("transaction"))),
+        )))(i)?;
+        // Optional TO [SAVEPOINT] savepoint_name
+        let (i, savepoint) = opt(tuple((
+            whitespace1,
+            tag_no_case("to"),
+            whitespace1,
+            opt(tuple((tag_no_case("savepoint"), whitespace1))),
+            dialect.identifier(),
+        )))(i)?;
 
-        Ok((remaining_input, RollbackStatement))
+        Ok((
+            i,
+            RollbackStatement {
+                savepoint: savepoint.map(|(.., name)| name),
+            },
+        ))
     }
 }
 
@@ -215,11 +229,143 @@ mod tests {
         let qstring = "    ROLLBACK ";
 
         let res = rollback(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1, RollbackStatement,);
+        assert_eq!(res.unwrap().1, RollbackStatement { savepoint: None });
 
         let qstring = "    ROLLBACK       WORK   ";
 
         let res = rollback(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1, RollbackStatement,);
+        assert_eq!(res.unwrap().1, RollbackStatement { savepoint: None });
+    }
+
+    #[test]
+    fn rollback_to_savepoint() {
+        // MySQL syntax: ROLLBACK TO SAVEPOINT sp1
+        let qstring = "ROLLBACK TO SAVEPOINT sp1";
+        let res = rollback(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            RollbackStatement {
+                savepoint: Some("sp1".into())
+            }
+        );
+
+        // MySQL syntax without SAVEPOINT keyword: ROLLBACK TO sp1
+        let qstring = "ROLLBACK TO sp1";
+        let res = rollback(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            RollbackStatement {
+                savepoint: Some("sp1".into())
+            }
+        );
+
+        // PostgreSQL syntax: ROLLBACK TRANSACTION TO SAVEPOINT sp1
+        let qstring = "ROLLBACK TRANSACTION TO SAVEPOINT sp1";
+        let res = rollback(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            RollbackStatement {
+                savepoint: Some("sp1".into())
+            }
+        );
+
+        // PostgreSQL syntax: ROLLBACK WORK TO sp1
+        let qstring = "ROLLBACK WORK TO sp1";
+        let res = rollback(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            RollbackStatement {
+                savepoint: Some("sp1".into())
+            }
+        );
+    }
+
+    #[test]
+    fn rollback_to_savepoint_quoted() {
+        // MySQL with backtick-quoted identifier containing special characters
+        let qstring = "ROLLBACK TO SAVEPOINT `my-savepoint`";
+        let res = rollback(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            RollbackStatement {
+                savepoint: Some("my-savepoint".into())
+            }
+        );
+
+        // MySQL with backtick-quoted identifier containing spaces
+        let qstring = "ROLLBACK TO SAVEPOINT `my savepoint`";
+        let res = rollback(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            RollbackStatement {
+                savepoint: Some("my savepoint".into())
+            }
+        );
+
+        // PostgreSQL with double-quoted identifier containing special characters
+        let qstring = r#"ROLLBACK TO SAVEPOINT "My-Savepoint""#;
+        let res = rollback(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            RollbackStatement {
+                savepoint: Some("My-Savepoint".into())
+            }
+        );
+
+        // PostgreSQL with double-quoted identifier preserves case
+        let qstring = r#"ROLLBACK TO SAVEPOINT "MyMixedCase""#;
+        let res = rollback(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            RollbackStatement {
+                savepoint: Some("MyMixedCase".into())
+            }
+        );
+    }
+
+    #[test]
+    fn rollback_to_savepoint_reserved_keywords() {
+        // MySQL with reserved keyword as quoted identifier
+        let qstring = "ROLLBACK TO SAVEPOINT `select`";
+        let res = rollback(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            RollbackStatement {
+                savepoint: Some("select".into())
+            }
+        );
+
+        // PostgreSQL with reserved keyword as quoted identifier
+        let qstring = r#"ROLLBACK TO SAVEPOINT "select""#;
+        let res = rollback(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            RollbackStatement {
+                savepoint: Some("select".into())
+            }
+        );
+    }
+
+    #[test]
+    fn rollback_to_savepoint_case_sensitivity() {
+        // PostgreSQL: unquoted identifiers are lowercased
+        let qstring = "ROLLBACK TO SAVEPOINT MyMixedCase";
+        let res = rollback(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            RollbackStatement {
+                savepoint: Some("mymixedcase".into())
+            }
+        );
+
+        // MySQL: unquoted identifiers preserve case
+        let qstring = "ROLLBACK TO SAVEPOINT MyMixedCase";
+        let res = rollback(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            RollbackStatement {
+                savepoint: Some("MyMixedCase".into())
+            }
+        );
     }
 }

@@ -2259,8 +2259,10 @@ where
             SqlQuery::Commit(_) => {
                 proxy_state.end_transaction();
             }
-            SqlQuery::Rollback(_) => {
-                proxy_state.end_transaction();
+            SqlQuery::Rollback(rollback_stmt) => {
+                if rollback_stmt.ends_transaction() {
+                    proxy_state.end_transaction();
+                }
             }
             _ => (),
         }
@@ -2272,6 +2274,7 @@ where
         upstream: Option<&'a mut DB>,
         proxy_state: &mut ProxyState,
         query: &SqlQuery,
+        raw_query: &'a str,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let upstream = upstream.ok_or_else(|| {
             ReadySetError::Internal(
@@ -2290,10 +2293,18 @@ where
                 proxy_state.end_transaction();
                 Ok(result)
             }
-            SqlQuery::Rollback(_) => {
-                let result = QueryResult::Upstream(upstream.rollback().await?, None, None);
-                proxy_state.end_transaction();
-                Ok(result)
+            SqlQuery::Rollback(rollback_stmt) => {
+                if rollback_stmt.ends_transaction() {
+                    let result = QueryResult::Upstream(upstream.rollback().await?, None, None);
+                    proxy_state.end_transaction();
+                    Ok(result)
+                } else {
+                    // ROLLBACK TO SAVEPOINT does NOT end the transaction - it only rolls back
+                    // to the savepoint. We must use query() to preserve the savepoint name.
+                    let result =
+                        QueryResult::Upstream(upstream.query(raw_query).await?, None, None);
+                    Ok(result)
+                }
             }
             _ => {
                 error!(
@@ -4077,6 +4088,7 @@ where
                             Some(upstream),
                             &mut state.proxy_state,
                             &query,
+                            raw_query,
                         )
                         .await
                     }

@@ -1168,3 +1168,50 @@ async fn resnapshot_table_command() {
 
     shutdown_tx.shutdown().await;
 }
+
+/// Tests that ROLLBACK TO SAVEPOINT does not end transaction state tracking,
+/// and that we proxy the TO SAVEPOINT clause correctly to upstream.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow, mysql_upstream)]
+async fn rollback_to_savepoint_preserves_transaction() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let mut conn = Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM t")
+        .await
+        .unwrap();
+    eventually! {
+        conn.query_drop("SELECT * FROM t").await.unwrap();
+        matches!(last_query_info(&mut conn).await.destination, QueryDestination::Readyset(_))
+    }
+
+    conn.query_drop("BEGIN").await.unwrap();
+    conn.query_drop("INSERT INTO t VALUES (1)").await.unwrap();
+    conn.query_drop("SAVEPOINT sp1").await.unwrap();
+    conn.query_drop("INSERT INTO t VALUES (2)").await.unwrap();
+    conn.query_drop("ROLLBACK TO SAVEPOINT sp1").await.unwrap();
+
+    // Verify ROLLBACK TO SAVEPOINT was proxied correctly: row 2 should be rolled back
+    let rows: Vec<i32> = conn.query("SELECT * FROM t").await.unwrap();
+    assert_eq!(rows, vec![1], "row 2 should have been rolled back");
+
+    // Verify we're still in a transaction (query was proxied, not served from cache)
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Upstream
+    );
+
+    conn.query_drop("COMMIT").await.unwrap();
+
+    // After commit, should hit cache again
+    conn.query_drop("SELECT * FROM t").await.unwrap();
+    assert_matches!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Readyset(_)
+    );
+
+    shutdown_tx.shutdown().await;
+}
