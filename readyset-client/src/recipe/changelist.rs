@@ -206,8 +206,8 @@ impl ChangeList {
                     // because currently the rewrite only validates the stmt. If the validation
                     // fails, we should not persist the cache in the changelist.
                     let statement = match inner {
-                        CacheInner::Statement(Ok(stmt)) => stmt,
-                        CacheInner::Statement(Err(err)) => {
+                        CacheInner::Statement { deep: Ok(stmt), .. } => stmt,
+                        CacheInner::Statement { deep: Err(err), .. } => {
                             return Err(ReadySetError::UnparseableQuery(err))
                         }
                         CacheInner::Id(id) => {
@@ -508,8 +508,8 @@ impl Change {
                 ..
             }) => {
                 let mut statement = match inner {
-                    CacheInner::Statement(Ok(stmt)) => stmt,
-                    CacheInner::Statement(Err(err)) => {
+                    CacheInner::Statement { deep: Ok(stmt), .. } => stmt,
+                    CacheInner::Statement { deep: Err(err), .. } => {
                         return Err(ReadySetError::UnparseableQuery(err))
                     }
                     CacheInner::Id(id) => {

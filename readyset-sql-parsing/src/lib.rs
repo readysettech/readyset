@@ -641,15 +641,24 @@ fn parse_query_for_create_cache(
             .try_into_dialect(dialect)
             .ok()
             .and_then(|query: SqlQuery| query.into_select())
-            .map(|select| CacheInner::Statement(Ok(Box::new(select))))
-            .unwrap_or_else(|| CacheInner::Statement(Err(remaining_query)));
+            .map(|select| CacheInner::Statement {
+                deep: Ok(Box::new(select)),
+                shallow: Err("shallow".to_string()),
+            })
+            .unwrap_or_else(|| CacheInner::Statement {
+                deep: Err(remaining_query.clone()),
+                shallow: Err(remaining_query),
+            });
     }
 
     // Otherwise, try to parse as identifier
     parser
         .parse_identifier()
         .map(|id| CacheInner::Id(id.into_dialect(dialect)))
-        .unwrap_or_else(|_| CacheInner::Statement(Err(remaining_query)))
+        .unwrap_or_else(|_| CacheInner::Statement {
+            deep: Err(remaining_query.clone()),
+            shallow: Err(remaining_query),
+        })
 }
 
 fn parse_explain(

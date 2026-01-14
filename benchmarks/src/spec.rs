@@ -345,7 +345,10 @@ impl WorkloadSpec {
                     cache_type: Some(query_cache_type.cache_type()),
                     policy: query_cache_type.policy(),
                     coalesce_ms: None,
-                    inner: CacheInner::Statement(Ok(Box::new(stmt))),
+                    inner: CacheInner::Statement {
+                        deep: Ok(Box::new(stmt.clone())),
+                        shallow: Ok(Box::new(stmt)),
+                    },
                     unparsed_create_cache_statement: None,
                     always: false,
                     concurrently: false,

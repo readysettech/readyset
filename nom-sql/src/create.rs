@@ -1040,7 +1040,10 @@ pub fn create_cached_query(
         let (i, _) = whitespace1(i)?;
         let (i, inner_result) =
             parse_fallible(cached_query_inner(dialect), until_statement_terminator)(i)?;
-        let inner = inner_result.unwrap_or_else(|err| CacheInner::Statement(Err(err)));
+        let inner = inner_result.unwrap_or_else(|err| CacheInner::Statement {
+            deep: Err(err.clone()),
+            shallow: Err(err),
+        });
         Ok((
             i,
             CreateCacheStatement {
@@ -1802,7 +1805,7 @@ mod tests {
             );
             assert_eq!(res.name, Some("foo".into()));
             let statement = match res.inner {
-                CacheInner::Statement(Ok(s)) => s,
+                CacheInner::Statement { deep: Ok(s), .. } => s,
                 _ => panic!(),
             };
             assert_eq!(
@@ -1819,7 +1822,7 @@ mod tests {
             );
             assert_eq!(res.name, None);
             let statement = match res.inner {
-                CacheInner::Statement(Ok(s)) => s,
+                CacheInner::Statement { deep: Ok(s), .. } => s,
                 _ => panic!(),
             };
             assert_eq!(
@@ -1886,7 +1889,7 @@ mod tests {
             for stmt in q {
                 assert!(stmt.name.is_none());
                 let statement = match stmt.inner {
-                    CacheInner::Statement(Ok(s)) => s,
+                    CacheInner::Statement { deep: Ok(s), .. } => s,
                     _ => panic!(),
                 };
                 assert_eq!(

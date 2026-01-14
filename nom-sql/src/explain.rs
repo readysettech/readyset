@@ -154,7 +154,7 @@ mod tests {
             b"EXPLAIN CREATE CACHE FROM SELECT id FROM users WHERE name = ?"
         ) {
             ExplainStatement::CreateCache {
-                inner: CacheInner::Statement(Ok(stmt)),
+                inner: CacheInner::Statement { deep: Ok(stmt), .. },
                 ..
             } => stmt,
             _ => panic!(),

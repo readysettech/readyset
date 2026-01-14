@@ -186,7 +186,10 @@ impl From<CacheInfo> for CreateCacheStatement {
             cache_type: Some(CacheType::Shallow),
             policy,
             coalesce_ms: info.coalesce_ms.map(Duration::from_millis),
-            inner: CacheInner::Statement(Ok(Box::new(info.query))),
+            inner: CacheInner::Statement {
+                deep: Ok(Box::new(info.query)),
+                shallow: Err("shallow".to_string()),
+            },
             unparsed_create_cache_statement: None,
             always: info.always,
             concurrently: false,

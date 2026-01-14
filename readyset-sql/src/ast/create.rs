@@ -974,15 +974,21 @@ impl EvictionPolicy {
 /// The SelectStatement or query ID referenced in a [`CreateCacheStatement`]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum CacheInner {
-    Statement(Result<Box<SelectStatement>, String>),
+    Statement {
+        deep: Result<Box<SelectStatement>, String>,
+        shallow: Result<Box<SelectStatement>, String>,
+    },
     Id(SqlIdentifier),
 }
 
 impl DialectDisplay for CacheInner {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
-            Self::Statement(Ok(stmt)) => write!(f, "{}", stmt.display(dialect)),
-            Self::Statement(Err(unparsed)) => write!(f, "{unparsed}"),
+            Self::Statement { deep: Ok(stmt), .. } => write!(f, "{}", stmt.display(dialect)),
+            Self::Statement {
+                deep: Err(unparsed),
+                ..
+            } => write!(f, "{unparsed}"),
             Self::Id(id) => write!(f, "{id}"),
         })
     }
@@ -996,13 +1002,19 @@ impl From<SqlIdentifier> for CacheInner {
 
 impl From<Box<SelectStatement>> for CacheInner {
     fn from(stmt: Box<SelectStatement>) -> Self {
-        CacheInner::Statement(Ok(stmt))
+        CacheInner::Statement {
+            deep: Ok(stmt),
+            shallow: Err("shallow".to_string()),
+        }
     }
 }
 
 impl From<SelectStatement> for CacheInner {
     fn from(stmt: SelectStatement) -> Self {
-        CacheInner::Statement(Ok(Box::new(stmt)))
+        CacheInner::Statement {
+            deep: Ok(Box::new(stmt)),
+            shallow: Err("shallow".to_string()),
+        }
     }
 }
 

@@ -12,8 +12,11 @@ pub trait DetectBucketFunctions {
 impl DetectBucketFunctions for CreateCacheStatement {
     fn detect_and_validate_bucket_always(&self) -> ReadySetResult<()> {
         let has_bucket_function = match &self.inner {
-            CacheInner::Statement(Ok(select_stmt)) => has_bucket_function_in_select(select_stmt)?,
-            CacheInner::Statement(Err(_)) => return Ok(()),
+            CacheInner::Statement {
+                deep: Ok(select_stmt),
+                ..
+            } => has_bucket_function_in_select(select_stmt)?,
+            CacheInner::Statement { deep: Err(_), .. } => return Ok(()),
             // shouldn't be possible since bucket is not an upstream function and therefor can't
             // have an ID reference.
             CacheInner::Id(_) => return Ok(()),
@@ -137,7 +140,10 @@ mod tests {
             cache_type: None,
             policy: None,
             coalesce_ms: None,
-            inner: CacheInner::Statement(Ok(Box::new(select_stmt))),
+            inner: CacheInner::Statement {
+                deep: Ok(Box::new(select_stmt)),
+                shallow: Err("shallow".to_string()),
+            },
             unparsed_create_cache_statement: None,
             always: false, // should cause error
             concurrently: false,
@@ -192,7 +198,10 @@ mod tests {
             cache_type: None,
             policy: None,
             coalesce_ms: None,
-            inner: CacheInner::Statement(Ok(Box::new(select_stmt))),
+            inner: CacheInner::Statement {
+                deep: Ok(Box::new(select_stmt)),
+                shallow: Err("shallow".to_string()),
+            },
             unparsed_create_cache_statement: None,
             always: true, // should succeed
             concurrently: false,
@@ -235,7 +244,10 @@ mod tests {
             cache_type: None,
             policy: None,
             coalesce_ms: None,
-            inner: CacheInner::Statement(Ok(Box::new(select_stmt))),
+            inner: CacheInner::Statement {
+                deep: Ok(Box::new(select_stmt)),
+                shallow: Err("shallow".to_string()),
+            },
             unparsed_create_cache_statement: None,
             always: false,
             concurrently: false,

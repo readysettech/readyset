@@ -2546,7 +2546,7 @@ where
         };
 
         match inner {
-            CacheInner::Statement(Ok(stmt)) => {
+            CacheInner::Statement { deep: Ok(stmt), .. } => {
                 let mut stmt_deep = stmt.clone();
                 let mut stmt_shallow = stmt.clone();
 
@@ -2568,7 +2568,9 @@ where
 
                 Ok((Ok(deep), Ok(shallow)))
             }
-            CacheInner::Statement(Err(e)) => Err(ReadySetError::UnparseableQuery(e.clone())),
+            CacheInner::Statement { deep: Err(e), .. } => {
+                Err(ReadySetError::UnparseableQuery(e.clone()))
+            }
             CacheInner::Id(id) => match self.state.query_status_cache.query(id.as_str()) {
                 Some(q) => match q {
                     Query::Parsed(req) => {
@@ -3257,8 +3259,8 @@ where
                     unparsed_create_cache_statement,
                 } = create_cache_stmt;
                 let (stmt, search_path) = match inner {
-                    CacheInner::Statement(Ok(st)) => Ok((*st.clone(), None)),
-                    CacheInner::Statement(Err(err)) => {
+                    CacheInner::Statement { deep: Ok(st), .. } => Ok((*st.clone(), None)),
+                    CacheInner::Statement { deep: Err(err), .. } => {
                         Err(ReadySetError::UnparseableQuery(err.clone()))
                     }
                     CacheInner::Id(id) => match self.state.query_status_cache.query(id.as_str()) {
@@ -4776,8 +4778,8 @@ where
     }
 
     let mut select_stmt = match stmt.inner {
-        CacheInner::Statement(Ok(s)) => *s,
-        CacheInner::Statement(Err(e)) => internal!("Failed to parse SELECT: {e}"),
+        CacheInner::Statement { deep: Ok(s), .. } => *s,
+        CacheInner::Statement { deep: Err(e), .. } => internal!("Failed to parse SELECT: {e}"),
         CacheInner::Id(_) => internal!("Cannot recreate from query ID"),
     };
 

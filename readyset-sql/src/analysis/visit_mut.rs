@@ -1300,8 +1300,8 @@ pub fn walk_create_cache_statement<'a, V: VisitorMut<'a>>(
     create_cache_statement: &'a mut CreateCacheStatement,
 ) -> Result<(), V::Error> {
     match &mut create_cache_statement.inner {
-        CacheInner::Statement(Ok(stmt)) => visitor.visit_select_statement(stmt)?,
-        CacheInner::Statement(Err(_)) => {}
+        CacheInner::Statement { deep: Ok(stmt), .. } => visitor.visit_select_statement(stmt)?,
+        CacheInner::Statement { deep: Err(_), .. } => {}
         CacheInner::Id(_) => {}
     }
 
