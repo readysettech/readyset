@@ -359,7 +359,7 @@ pub use crate::table::{
 };
 pub use crate::view::{
     KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyBatch, ReadReplyStats, SchemaType,
-    View, ViewCreateRequest, ViewQuery,
+    ShallowViewRequest, View, ViewCreateRequest, ViewQuery,
 };
 
 pub mod builders {

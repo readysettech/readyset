@@ -30,7 +30,7 @@ use readyset_errors::{
 };
 use readyset_sql::ast::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, ItemPlaceholder, Literal,
-    Relation, SelectStatement, SqlIdentifier, SqlType,
+    Relation, SelectStatement, ShallowCacheQuery, SqlIdentifier, SqlType,
 };
 use readyset_sql::TryFromDialect as _;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
@@ -106,6 +106,32 @@ impl ViewCreateRequest {
         }
 
         format!("{anon:?}")
+    }
+}
+
+/// All the information necessary to create a shallow cache view.
+///
+/// This structure is similar to [`ViewCreateRequest`] but stores the query as a `ShallowViewRequest`
+/// instead of a `SelectStatement`, allowing it to handle queries with syntax unsupported by deep caching.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ShallowViewRequest {
+    /// The query itself, stored as sqlparser AST to support unsupported syntax
+    pub query: ShallowCacheQuery,
+
+    /// The schema search path to use to resolve table references within the changelist
+    ///
+    /// This is actually passed as [`recipe::changelist::ChangeList::schema_search_path`] when
+    /// views are created.
+    pub schema_search_path: Vec<SqlIdentifier>,
+}
+
+impl ShallowViewRequest {
+    /// Initialize a new [`ShallowViewRequest`] with the given query and schema search path
+    pub fn new(query: ShallowCacheQuery, schema_search_path: Vec<SqlIdentifier>) -> Self {
+        Self {
+            query,
+            schema_search_path,
+        }
     }
 }
 

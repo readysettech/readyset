@@ -103,6 +103,10 @@ impl MigrationHandler {
                     }
                     successes += 1;
                 }
+                Query::ShallowParsed(_) => {
+                    // Shallow cache queries don't need migration, skip them
+                    continue;
+                }
                 Query::ParseFailed(..) => {
                     error!("Should not be migrating query that failed to parse. Ignoring");
                     failures += 1;

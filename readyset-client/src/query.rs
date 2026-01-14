@@ -13,8 +13,9 @@ use std::time::{Duration, Instant};
 
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
-use readyset_sql::ast::{CacheType, Relation, SelectStatement, SqlIdentifier};
+use readyset_sql::ast::{CacheType, Relation, SelectStatement, ShallowCacheQuery, SqlIdentifier};
 use readyset_sql::DialectDisplay;
+use readyset_sql_passes::adapter_rewrites::anonymize_shallow_query;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_util::fmt::fmt_with;
 use readyset_util::hash::hash;
@@ -22,7 +23,7 @@ use serde::ser::{SerializeSeq, SerializeTuple};
 use serde::{Deserialize, Serialize, Serializer};
 use vec1::Vec1;
 
-use crate::{PlaceholderIdx, ViewCreateRequest};
+use crate::{PlaceholderIdx, ShallowViewRequest, ViewCreateRequest};
 
 /// Uniquely identifies a SELECT statement that is in a particular form. In other words,
 /// `s1_query_id == s2_query_id` **only if** `s1 == s2`. This means that the unparsed,
@@ -45,11 +46,37 @@ impl QueryId {
     {
         QueryId(hash(&unparsed_select.as_ref()))
     }
+
+    /// Generate QueryId from sqlparser AST by normalizing to SQL string.
+    /// This allows shallow caches to work with queries containing unsupported syntax.
+    pub fn from_shallow_query(
+        query: &ShallowCacheQuery,
+        schema_search_path: &[SqlIdentifier],
+    ) -> Self {
+        // Normalize the query to a consistent SQL string representation
+        let normalized_sql = normalize_sqlparser_query(query);
+        QueryId(hash(&(normalized_sql, schema_search_path)))
+    }
+}
+
+/// Normalize sqlparser Query to a consistent SQL string representation.
+fn normalize_sqlparser_query(query: &ShallowCacheQuery) -> String {
+    // Use sqlparser's Display implementation to convert AST to SQL
+    // For consistent normalization, we could apply additional formatting here (e.g.
+    // sql_insight::normalizer::normalize)
+    // For now, just use the Display implementation
+    format!("{}", query)
 }
 
 impl From<&ViewCreateRequest> for QueryId {
     fn from(value: &ViewCreateRequest) -> Self {
         QueryId(hash(value))
+    }
+}
+
+impl From<&ShallowViewRequest> for QueryId {
+    fn from(value: &ShallowViewRequest) -> Self {
+        QueryId::from_shallow_query(&value.query, &value.schema_search_path)
     }
 }
 
@@ -90,6 +117,8 @@ impl From<QueryId> for Relation {
 pub enum Query {
     /// A Query that was successfully parsed by ReadySet
     Parsed(Arc<ViewCreateRequest>),
+    /// A Query that was successfully parsed for shallow caching (using sqlparser AST)
+    ShallowParsed(Arc<ShallowViewRequest>),
     /// A Query that ReadySet failed to parse, but Upstream was able to parse.
     /// The first element is the unparsed query, the second is the error message
     ParseFailed(Arc<String>, String),
@@ -107,6 +136,18 @@ impl From<ViewCreateRequest> for Query {
     }
 }
 
+impl From<Arc<ShallowViewRequest>> for Query {
+    fn from(svr: Arc<ShallowViewRequest>) -> Self {
+        Self::ShallowParsed(svr)
+    }
+}
+
+impl From<ShallowViewRequest> for Query {
+    fn from(svr: ShallowViewRequest) -> Self {
+        Self::ShallowParsed(Arc::new(svr))
+    }
+}
+
 impl From<String> for Query {
     fn from(s: String) -> Self {
         Self::ParseFailed(Arc::new(s), "".to_string())
@@ -117,6 +158,7 @@ impl PartialEq for Query {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Parsed(l0), Self::Parsed(r0)) => l0 == r0,
+            (Self::ShallowParsed(l0), Self::ShallowParsed(r0)) => l0 == r0,
             (Self::ParseFailed(l0, _), Self::ParseFailed(r0, _)) => l0 == r0,
             _ => false,
         }
@@ -127,6 +169,7 @@ impl Hash for Query {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             Query::Parsed(stmt) => stmt.hash(state),
+            Query::ShallowParsed(stmt) => stmt.hash(state),
             Query::ParseFailed(str, _) => str.hash(state),
         }
     }
@@ -136,6 +179,7 @@ impl DialectDisplay for Query {
     fn display(&self, dialect: readyset_sql::Dialect) -> impl Display + '_ {
         fmt_with(move |f| match self {
             Query::Parsed(q) => write!(f, "{}", q.statement.display(dialect)),
+            Query::ShallowParsed(q) => write!(f, "{}", q.query.display(dialect)),
             Query::ParseFailed(s, _) => write!(f, "{s}"),
         })
     }
@@ -154,6 +198,11 @@ impl Query {
                 // FIXME: Use correct dialect.
                 return statement.display(readyset_sql::Dialect::MySQL).to_string();
             }
+            Query::ShallowParsed(q) => {
+                let mut query = q.query.clone();
+                anonymize_shallow_query(&mut query, anonymizer);
+                format!("{query}")
+            }
             Query::ParseFailed(..) => "<redacted: parsing failed>".to_string(),
         }
     }
@@ -163,7 +212,16 @@ impl Query {
     pub fn into_parsed(self) -> Option<Arc<ViewCreateRequest>> {
         match self {
             Query::Parsed(vcr) => Some(vcr),
-            Query::ParseFailed(..) => None,
+            Query::ShallowParsed(_) | Query::ParseFailed(..) => None,
+        }
+    }
+
+    /// If this query was successfully parsed for shallow caching, returns the inner [`Arc<ShallowViewRequest>`],
+    /// otherwise returns [`None`]
+    pub fn into_shallow_parsed(self) -> Option<Arc<ShallowViewRequest>> {
+        match self {
+            Query::ShallowParsed(vcr) => Some(vcr),
+            Query::Parsed(_) | Query::ParseFailed(..) => None,
         }
     }
 }
@@ -355,6 +413,7 @@ impl MigrationState {
     pub fn default_for_query(query: &Query) -> Self {
         match query {
             Query::Parsed { .. } => Self::Pending,
+            Query::ShallowParsed { .. } => Self::Pending,
             Query::ParseFailed(_, reason) => Self::Unsupported(reason.clone()),
         }
     }

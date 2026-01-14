@@ -54,7 +54,8 @@ pub fn extract_referenced_tables(query: &Query) -> Option<Vec<Relation>> {
             }
         }
         // ParseFailed queries don't have structured data to extract tables from
-        Query::ParseFailed(..) => None,
+        // ShallowParsed are handled separately.
+        Query::ShallowParsed(_) | Query::ParseFailed(..) => None,
     }
 }
 

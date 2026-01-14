@@ -2618,6 +2618,11 @@ where
                             ))
                         }
                     }
+                    // TODO: should be fixed in follow-ups
+                    Query::ShallowParsed(_) => Ok((
+                        Err(ReadySetError::NoQueryForId { id: id.to_string() }),
+                        Err(ReadySetError::NoQueryForId { id: id.to_string() }),
+                    )),
                     Query::ParseFailed(_, e) => Err(ReadySetError::UnparseableQuery(e)),
                 },
                 None => Err(ReadySetError::NoQueryForId { id: id.to_string() }),
@@ -3290,6 +3295,9 @@ where
                                 view_request.statement.clone(),
                                 Some(view_request.schema_search_path.clone()),
                             )),
+                            Query::ShallowParsed(_) => {
+                                Err(ReadySetError::UnparseableQuery("TODO".into()))
+                            }
                             Query::ParseFailed(_, err) => Err(ReadySetError::UnparseableQuery(err)),
                         },
                         None => Err(ReadySetError::NoQueryForId { id: id.to_string() }),

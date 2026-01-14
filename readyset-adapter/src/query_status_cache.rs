@@ -16,9 +16,9 @@ use metrics::gauge;
 use parking_lot::RwLock;
 use tracing::{error, warn};
 
-use readyset_client::ViewCreateRequest;
 use readyset_client::metrics::recorded;
 use readyset_client::query::*;
+use readyset_client::{ShallowViewRequest, ViewCreateRequest};
 use readyset_data::DfValue;
 use readyset_sql::ast::{CacheType, Relation};
 
@@ -121,6 +121,9 @@ impl PersistentStatusCacheHandle {
                         None
                     }
                 }
+                // ShallowParsed queries are not included in cached_list since they can't be
+                // converted to ViewCreateRequest. They are handled separately.
+                Query::ShallowParsed(..) => None,
                 Query::ParseFailed(..) => None,
             })
             .collect::<Vec<_>>()
@@ -186,6 +189,7 @@ impl QueryStatusKey for Query {
     {
         match self {
             Query::Parsed(k) => k.with_status(cache, f),
+            Query::ShallowParsed(k) => k.with_status(cache, f),
             Query::ParseFailed(k, _) => k.with_status(cache, f),
         }
     }
@@ -196,8 +200,37 @@ impl QueryStatusKey for Query {
     {
         match self {
             Query::Parsed(k) => k.with_mut_status(cache, f),
+            Query::ShallowParsed(k) => k.with_mut_status(cache, f),
             Query::ParseFailed(k, _) => k.with_mut_status(cache, f),
         }
+    }
+
+    fn query_id(&self) -> QueryId {
+        self.into()
+    }
+}
+
+impl QueryStatusKey for ShallowViewRequest {
+    fn with_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
+    where
+        F: FnOnce(Option<&QueryStatus>) -> R,
+    {
+        let id = QueryId::from(self);
+        // Since this isn't mutating anything, we only need to access the in-memory map.
+        f(cache.id_to_status.get(&id).as_deref())
+    }
+
+    fn with_mut_status<F, R>(&self, cache: &QueryStatusCache, f: F) -> R
+    where
+        F: Fn(Option<&mut QueryStatus>) -> R,
+    {
+        let id = QueryId::from(self);
+        // Since this is potentially mutating, we need to apply F to both the in-memory and the
+        // persistent version of the status.
+        f(cache.id_to_status.get_mut(&id).as_deref_mut());
+        let mut statuses = cache.persistent_handle.statuses.write();
+        let transformed_status = statuses.get_mut(&id).map(|(_, status)| status);
+        f(transformed_status)
     }
 
     fn query_id(&self) -> QueryId {
@@ -329,6 +362,7 @@ impl QueryStatusCache {
         let q: Query = q.into();
         let status = match q {
             Query::Parsed { .. } => status,
+            Query::ShallowParsed { .. } => status,
             Query::ParseFailed(_, ref reason) => {
                 let mut status = status;
                 if !matches!(status.migration_state, MigrationState::Unsupported(_)) {
