@@ -51,13 +51,21 @@ impl TryFromDialect<sqlparser::ast::Statement> for TruncateStatement {
     ) -> Result<Self, AstConversionError> {
         if let sqlparser::ast::Statement::Truncate {
             table_names,
-            partitions: _,
+            partitions,
             table: _,
             identity,
             cascade,
+            // ClickHouse-specific; Readyset doesn't support ClickHouse dialect
             on_cluster: _,
         } = value
         {
+            // Reject Hive-style TRUNCATE TABLE ... PARTITION (...) syntax.
+            // Silently ignoring partitions would truncate the entire table when
+            // the user expected only specific partitions to be truncated.
+            if partitions.is_some() {
+                return unsupported!("TRUNCATE with PARTITION clause");
+            }
+
             let tables = table_names
                 .into_iter()
                 .map(|tn| tn.try_into_dialect(dialect))
@@ -101,5 +109,31 @@ impl DialectDisplay for TruncateStatement {
 
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_with_partition_returns_unsupported() {
+        let stmt = sqlparser::ast::Statement::Truncate {
+            table_names: vec![sqlparser::ast::TruncateTableTarget {
+                name: sqlparser::ast::ObjectName(vec![sqlparser::ast::ObjectNamePart::Identifier(
+                    sqlparser::ast::Ident::new("test_table"),
+                )]),
+                only: false,
+            }],
+            partitions: Some(vec![]),
+            table: false,
+            identity: None,
+            cascade: None,
+            on_cluster: None,
+        };
+        let result = TruncateStatement::try_from_dialect(stmt, Dialect::MySQL);
+        assert!(
+            matches!(&result, Err(AstConversionError::Unsupported(msg)) if msg.contains("PARTITION"))
+        );
     }
 }
