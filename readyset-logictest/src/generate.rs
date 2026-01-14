@@ -323,9 +323,21 @@ impl Seed {
             conn.query_drop(insert_statement.display(dialect).to_string())
                 .await
                 .with_context(|| {
+                    let table_name = insert_statement.table.display_unquoted().to_string();
+                    let col_types = self
+                        .generator
+                        .table(table_name.as_str())
+                        .map(|spec| {
+                            spec.columns
+                                .iter()
+                                .map(|(name, col)| format!("{}: {:?}", name, col.sql_type))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_default();
                     format!(
-                        "Inserting seed data for {}",
-                        insert_statement.table.display_unquoted()
+                        "Inserting seed data for {} (columns: [{}])",
+                        table_name, col_types
                     )
                 })?;
         }

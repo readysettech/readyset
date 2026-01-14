@@ -729,7 +729,7 @@ fn uniform_random_value(min: &DfValue, max: &DfValue) -> DfValue {
 /// Generate a unique value with the given [`SqlType`] from a monotonically increasing counter,
 /// `idx`.
 ///
-/// This is an injective function (from `(idx, typ)` to the resultant [`DfValue`]).
+/// This is a bijective function (from `(idx, typ)` to the resultant [`DfValue`]).
 pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
     let clamp_digits = |prec: u32| {
         10u64
@@ -771,12 +771,33 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         SqlType::BigIntUnsigned(_) | SqlType::Unsigned | SqlType::UnsignedInteger => {
             (idx as u64).into()
         }
-        SqlType::TinyInt(_) => (idx as i8).into(),
-        SqlType::TinyIntUnsigned(_) => (idx).into(),
-        SqlType::SmallInt(_) | SqlType::Int2 => (idx as i16).into(),
-        SqlType::SmallIntUnsigned(_) => (idx as u16).into(),
-        SqlType::MediumInt(_) => (idx as i32).into(),
-        SqlType::MediumIntUnsigned(_) => (idx).into(),
+        SqlType::TinyInt(_) => {
+            assert!(idx <= i8::MAX as u32, "generated too many TinyInts");
+            (idx as i8).into()
+        }
+        SqlType::TinyIntUnsigned(_) => {
+            assert!(idx <= u8::MAX as u32, "generated too many TinyIntUnsigneds");
+            (idx as u8).into()
+        }
+        SqlType::SmallInt(_) | SqlType::Int2 => {
+            assert!(idx <= i16::MAX as u32, "generated too many SmallInts");
+            (idx as i16).into()
+        }
+        SqlType::SmallIntUnsigned(_) => {
+            assert!(
+                idx <= u16::MAX as u32,
+                "generated too many SmallIntUnsigneds"
+            );
+            (idx as u16).into()
+        }
+        SqlType::MediumInt(_) => {
+            assert!(idx < (1u32 << 23), "generated too many MediumInts");
+            (idx as i32).into()
+        }
+        SqlType::MediumIntUnsigned(_) => {
+            assert!(idx < (1u32 << 24), "generated too many MediumIntUnsigneds");
+            idx.into()
+        }
         SqlType::Float | SqlType::Double => (1.5 + idx as f64).try_into().unwrap(),
         SqlType::Real => (1.5 + idx as f32).try_into().unwrap(),
         SqlType::Decimal(prec, scale) => {
