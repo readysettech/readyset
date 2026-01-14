@@ -343,19 +343,67 @@ impl pgsql::types::ToSql for Value {
         ty: &pgsql::types::Type,
         out: &mut bytes::BytesMut,
     ) -> Result<pgsql::types::IsNull, Box<dyn Error + Sync + Send>> {
+        use pgsql::types::Type;
+
         match self {
-            Value::Text(x) => x.to_sql(ty, out),
-            Value::Integer(x) => x.to_sql(ty, out),
-            Value::UnsignedInteger(_) => unimplemented!("psql doesn't have unsigned integers!"),
-            Value::Real(i, f) => (*i as f64 + ((*f as f64) / 1_000_000_000.0)).to_sql(ty, out),
-            Value::Numeric(d) => d.to_sql(ty, out),
-            Value::Date(x) => x.to_sql(ty, out),
-            Value::Time(x) => NaiveTime::from(*x).to_sql(ty, out),
-            Value::ByteArray(array) => array.to_sql(ty, out),
+            Value::Text(x) => match *ty {
+                Type::TEXT | Type::VARCHAR => x.to_sql(ty, out),
+                ref ty if ty.name() == "citext" => x.to_sql(ty, out),
+                _ => panic!("unexpected type {ty:?} for Text"),
+            },
+            Value::Integer(x) => match *ty {
+                Type::BOOL => (*x != 0).to_sql(ty, out),
+                Type::CHAR => (*x as i8).to_sql(ty, out),
+                Type::INT2 => (*x as i16).to_sql(ty, out),
+                Type::INT4 => (*x as i32).to_sql(ty, out),
+                Type::INT8 => x.to_sql(ty, out),
+                _ => panic!("unexpected type {ty:?} for Integer"),
+            },
+            Value::UnsignedInteger(x) => match *ty {
+                Type::BOOL => (*x != 0).to_sql(ty, out),
+                Type::CHAR => (*x as i8).to_sql(ty, out),
+                Type::INT2 => (*x as i16).to_sql(ty, out),
+                Type::INT4 => (*x as i32).to_sql(ty, out),
+                Type::INT8 => (*x as i64).to_sql(ty, out),
+                _ => panic!("unexpected type {ty:?} for UnsignedInteger"),
+            },
+            Value::Real(i, f) => {
+                let val = *i as f64 + ((*f as f64) / 1_000_000_000.0);
+                match *ty {
+                    Type::FLOAT4 => (val as f32).to_sql(ty, out),
+                    Type::FLOAT8 => val.to_sql(ty, out),
+                    _ => panic!("unexpected type {ty:?} for Real"),
+                }
+            }
+            Value::Numeric(d) => match *ty {
+                Type::NUMERIC => d.to_sql(ty, out),
+                _ => panic!("unexpected type {ty:?} for Numeric"),
+            },
+            Value::Date(x) => match *ty {
+                Type::TIMESTAMP => x.to_sql(ty, out),
+                _ => panic!("unexpected type {ty:?} for Date"),
+            },
+            Value::Time(x) => match *ty {
+                Type::TIME => NaiveTime::from(*x).to_sql(ty, out),
+                _ => panic!("unexpected type {ty:?} for Time"),
+            },
+            Value::ByteArray(array) => match *ty {
+                Type::BYTEA => array.to_sql(ty, out),
+                _ => panic!("unexpected type {ty:?} for ByteArray"),
+            },
             Value::Null => None::<i8>.to_sql(ty, out),
-            Value::BitVector(b) => b.to_sql(ty, out),
-            Value::TimestampTz(ts) => ts.to_sql(ty, out),
-            Value::Json(json) => json.to_string().to_sql(ty, out),
+            Value::BitVector(b) => match *ty {
+                Type::BIT | Type::VARBIT => b.to_sql(ty, out),
+                _ => panic!("unexpected type {ty:?} for BitVector"),
+            },
+            Value::TimestampTz(ts) => match *ty {
+                Type::TIMESTAMPTZ => ts.to_sql(ty, out),
+                _ => panic!("unexpected type {ty:?} for TimestampTz"),
+            },
+            Value::Json(json) => match *ty {
+                Type::JSON | Type::JSONB => json.to_sql(ty, out),
+                _ => panic!("unexpected type {ty:?} for Json"),
+            },
         }
     }
 
@@ -372,9 +420,15 @@ impl pgsql::types::ToSql for Value {
             | Type::FLOAT8
             | Type::NUMERIC
             | Type::TEXT
-            | Type::DATE
+            | Type::VARCHAR
+            | Type::TIMESTAMP
+            | Type::TIMESTAMPTZ
             | Type::TIME
-            | Type::BIT => true,
+            | Type::BYTEA
+            | Type::BIT
+            | Type::VARBIT
+            | Type::JSON
+            | Type::JSONB => true,
             ref ty if ty.name() == "citext" => true,
             _ => false,
         }
