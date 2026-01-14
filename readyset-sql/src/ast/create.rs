@@ -842,13 +842,13 @@ impl TryFromDialect<sqlparser::ast::Statement> for CreateViewStatement {
         value: sqlparser::ast::Statement,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        if let sqlparser::ast::Statement::CreateView {
+        if let sqlparser::ast::Statement::CreateView(sqlparser::ast::CreateView {
             or_replace,
             name,
             columns,
             query,
             ..
-        } = value
+        }) = value
         {
             Ok(Self {
                 name: name.try_into_dialect(dialect)?,
@@ -857,7 +857,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for CreateViewStatement {
                 definition: (*query)
                     .try_into_dialect(dialect)
                     .map(Box::new)
-                    .map_err(|err| err.to_string()),
+                    .map_err(|err: AstConversionError| err.to_string()),
             })
         } else {
             failed!("Should only be called with a CreateView statement")

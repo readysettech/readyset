@@ -331,10 +331,17 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
             UHugeInt => unsupported!("UHUGEINT type"),
             UBigInt => unsupported!("UBIGINT type"),
             // Databricks-specific datatype
-            TimestampNtz => unsupported!("TIMESTAMP_NTZ type"),
+            sqlparser::ast::DataType::TimestampNtz(_) => unsupported!("TIMESTAMP_NTZ type"),
             NamedTable { .. } => unsupported!("NAMED TABLE type"),
             TsQuery => unsupported!("psql TSQUERY type"),
             TsVector => Ok(Self::Tsvector),
+            // MySQL unsigned types
+            DecimalUnsigned(_)
+            | DecUnsigned(_)
+            | FloatUnsigned(_)
+            | RealUnsigned
+            | DoubleUnsigned(_)
+            | DoublePrecisionUnsigned => unsupported!("MySQL UNSIGNED decimal/float type"),
         }
     }
 }

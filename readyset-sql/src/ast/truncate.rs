@@ -49,7 +49,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for TruncateStatement {
         value: sqlparser::ast::Statement,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        if let sqlparser::ast::Statement::Truncate {
+        if let sqlparser::ast::Statement::Truncate(sqlparser::ast::Truncate {
             table_names,
             partitions,
             table: _,
@@ -57,7 +57,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for TruncateStatement {
             cascade,
             // ClickHouse-specific; Readyset doesn't support ClickHouse dialect
             on_cluster: _,
-        } = value
+        }) = value
         {
             // Reject Hive-style TRUNCATE TABLE ... PARTITION (...) syntax.
             // Silently ignoring partitions would truncate the entire table when
@@ -68,7 +68,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for TruncateStatement {
 
             let tables = table_names
                 .into_iter()
-                .map(|tn| tn.try_into_dialect(dialect))
+                .map(|tn: sqlparser::ast::TruncateTableTarget| tn.try_into_dialect(dialect))
                 .try_collect()?;
             Ok(Self {
                 tables,
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn truncate_with_partition_returns_unsupported() {
-        let stmt = sqlparser::ast::Statement::Truncate {
+        let stmt = sqlparser::ast::Statement::Truncate(sqlparser::ast::Truncate {
             table_names: vec![sqlparser::ast::TruncateTableTarget {
                 name: sqlparser::ast::ObjectName(vec![sqlparser::ast::ObjectNamePart::Identifier(
                     sqlparser::ast::Ident::new("test_table"),
@@ -130,7 +130,7 @@ mod tests {
             identity: None,
             cascade: None,
             on_cluster: None,
-        };
+        });
         let result = TruncateStatement::try_from_dialect(stmt, Dialect::MySQL);
         assert!(
             matches!(&result, Err(AstConversionError::Unsupported(msg)) if msg.contains("PARTITION"))

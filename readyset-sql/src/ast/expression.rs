@@ -899,7 +899,7 @@ impl TryFrom<sqlparser::ast::UnaryOperator> for UnaryOperator {
             UnOp::Plus => not_yet_implemented!("Unary + operator"),
             UnOp::Minus => Ok(Self::Neg),
             UnOp::Not => Ok(Self::Not),
-            UnOp::PGBitwiseNot
+            UnOp::BitwiseNot
             | UnOp::PGSquareRoot
             | UnOp::PGCubeRoot
             | UnOp::PGPostfixFactorial
@@ -2174,6 +2174,11 @@ fn sqlparser_value_into_string(value: sqlparser::ast::Value) -> String {
         | DoubleQuotedString(s)
         | HexStringLiteral(s)
         | Placeholder(s) => s,
+        QuoteDelimitedStringLiteral(sqlparser::ast::QuoteDelimitedString { value: s, .. })
+        | NationalQuoteDelimitedStringLiteral(sqlparser::ast::QuoteDelimitedString {
+            value: s,
+            ..
+        }) => s,
         Boolean(b) => b.to_string(),
         Null => "NULL".to_string(),
     }

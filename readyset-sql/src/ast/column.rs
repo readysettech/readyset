@@ -296,17 +296,13 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
                 sqlparser::ast::ColumnOption::Default(expr) => constraints.push(
                     ColumnConstraint::DefaultValue(expr.try_into_dialect(dialect)?),
                 ),
-                sqlparser::ast::ColumnOption::Unique {
-                    is_primary,
-                    characteristics: _, // Parse but ignore constraint timing for column-level constraints
-                } => {
-                    if is_primary {
-                        constraints.push(ColumnConstraint::PrimaryKey)
-                    } else {
-                        constraints.push(ColumnConstraint::Unique)
-                    }
+                sqlparser::ast::ColumnOption::Unique(_) => {
+                    constraints.push(ColumnConstraint::Unique)
                 }
-                sqlparser::ast::ColumnOption::ForeignKey { .. } => {
+                sqlparser::ast::ColumnOption::PrimaryKey(_) => {
+                    constraints.push(ColumnConstraint::PrimaryKey)
+                }
+                sqlparser::ast::ColumnOption::ForeignKey(_) => {
                     return not_yet_implemented!("foreign key");
                 }
                 sqlparser::ast::ColumnOption::DialectSpecific(vec) => {
@@ -398,7 +394,8 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
                 | sqlparser::ast::ColumnOption::OnConflict(_)
                 | sqlparser::ast::ColumnOption::Policy(_)
                 | sqlparser::ast::ColumnOption::Srid(_)
-                | sqlparser::ast::ColumnOption::Tags(_) => {
+                | sqlparser::ast::ColumnOption::Tags(_)
+                | sqlparser::ast::ColumnOption::Invisible => {
                     // Don't care about these options
                 }
             }

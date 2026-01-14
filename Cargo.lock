@@ -1559,7 +1559,7 @@ checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
 dependencies = [
  "cfg-if",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6279,8 +6279,8 @@ dependencies = [
 
 [[package]]
 name = "sqlparser"
-version = "0.58.0"
-source = "git+https://github.com/apache/datafusion-sqlparser-rs?branch=main#e3fbfd91b29706fcc7b4847f13ba71946a68e1f0"
+version = "0.60.0"
+source = "git+https://github.com/apache/datafusion-sqlparser-rs?branch=main#3880a933e4c2d1e639c1b8bcb48bea34c37801fd"
 dependencies = [
  "log",
  "recursive",
@@ -6302,6 +6302,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
+ "windows-sys 0.52.0",
  "windows-sys 0.59.0",
 ]
 

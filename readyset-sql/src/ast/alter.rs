@@ -422,16 +422,16 @@ impl TryFromDialect<sqlparser::ast::Statement> for AlterTableStatement {
         value: sqlparser::ast::Statement,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        if let sqlparser::ast::Statement::AlterTable {
+        if let sqlparser::ast::Statement::AlterTable(sqlparser::ast::AlterTable {
             name,
             if_exists: _,
             only,
             operations,
             location: _,
             on_cluster: _,
-            iceberg: _,
+            table_type: _,
             end_token: _,
-        } = value
+        }) = value
         {
             Ok(Self {
                 table: name.try_into_dialect(dialect)?,

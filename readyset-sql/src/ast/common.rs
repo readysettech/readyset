@@ -220,16 +220,16 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
     ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::TableConstraint::*;
         match value {
-            Check {
+            Check(sqlparser::ast::CheckConstraint {
                 name,
                 expr,
                 enforced,
-            } => Ok(Self::CheckConstraint {
+            }) => Ok(Self::CheckConstraint {
                 constraint_name: name.into_dialect(dialect),
                 expr: expr.try_into_dialect(dialect)?,
                 enforced,
             }),
-            ForeignKey {
+            ForeignKey(sqlparser::ast::ForeignKeyConstraint {
                 name,
                 columns,
                 foreign_table,
@@ -237,9 +237,10 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 on_delete,
                 on_update,
                 index_name,
-                // XXX Not sure why, but we don't support characteristics
+                // XXX Not sure why, but we don't support these
+                match_kind: _,
                 characteristics: _characteristics,
-            } => Ok(Self::ForeignKey {
+            }) => Ok(Self::ForeignKey {
                 constraint_name: name.into_dialect(dialect),
                 index_name: index_name.into_dialect(dialect),
                 columns: columns.into_dialect(dialect),
@@ -248,25 +249,26 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 on_delete: on_delete.map(Into::into),
                 on_update: on_update.map(Into::into),
             }),
-            FulltextOrSpatial {
+            FulltextOrSpatial(sqlparser::ast::FullTextOrSpatialConstraint {
                 fulltext: true,
                 opt_index_name,
                 columns,
                 index_type_display: _index_type_display,
-            } => Ok(Self::FulltextKey {
+            }) => Ok(Self::FulltextKey {
                 index_name: opt_index_name.into_dialect(dialect),
                 columns: columns.try_into_dialect(dialect)?,
             }),
-            FulltextOrSpatial {
-                fulltext: false, ..
-            } => unsupported!("spatial index not supported"),
-            Index {
+            FulltextOrSpatial(sqlparser::ast::FullTextOrSpatialConstraint {
+                fulltext: false,
+                ..
+            }) => unsupported!("spatial index not supported"),
+            Index(sqlparser::ast::IndexConstraint {
                 name,
                 index_type,
                 columns,
                 display_as_key: _,
                 index_options,
-            } => {
+            }) => {
                 // sqlparser parses more (MySQL) options than we support, so just pull out `USING`
                 // if it's there. `index_type` will be filled if `USING` was *before* the column
                 // list (deprecated syntax for MySQL, standard for Postgres), otherwise it will be
@@ -286,7 +288,7 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                     index_type,
                 })
             }
-            PrimaryKey {
+            PrimaryKey(sqlparser::ast::PrimaryKeyConstraint {
                 name,
                 index_name,
                 columns,
@@ -294,13 +296,13 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 // XXX: Not sure why, but we don't support any of these
                 index_type: _index_type,
                 index_options: _index_options,
-            } => Ok(Self::PrimaryKey {
+            }) => Ok(Self::PrimaryKey {
                 constraint_name: name.into_dialect(dialect),
                 index_name: index_name.into_dialect(dialect),
                 columns: columns.try_into_dialect(dialect)?,
                 constraint_timing: characteristics.map(Into::into),
             }),
-            Unique {
+            Unique(sqlparser::ast::UniqueConstraint {
                 name,
                 index_name,
                 index_type,
@@ -309,7 +311,7 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 characteristics,
                 index_options,
                 index_type_display: _,
-            } => {
+            }) => {
                 // See above comment on `Index`
                 let index_type = index_options
                     .into_iter()

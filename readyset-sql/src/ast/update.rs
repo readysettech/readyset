@@ -22,7 +22,8 @@ impl TryFromDialect<sqlparser::ast::Statement> for UpdateStatement {
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
         match value {
-            sqlparser::ast::Statement::Update {
+            sqlparser::ast::Statement::Update(sqlparser::ast::Update {
+                update_token: _,
                 table,
                 assignments,
                 from: _,
@@ -30,7 +31,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for UpdateStatement {
                 returning: _,
                 or: _,
                 limit: _,
-            } => {
+            }) => {
                 let table = table.try_into_dialect(dialect)?;
                 let fields: Vec<(Column, Expr)> = assignments.try_into_dialect(dialect)?;
                 let where_clause = selection.try_into_dialect(dialect)?;
