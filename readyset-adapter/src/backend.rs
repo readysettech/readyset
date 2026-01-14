@@ -2463,13 +2463,13 @@ where
             return Err(ReadySetError::CreateCacheError(e.to_string()));
         }
 
-        self.authority
-            .add_shallow_cache_ddl_request(ddl_req.clone())
-            .await?;
-
         let (query_id, name, requested_name) = self.make_name_and_id(&mut name, &stmt);
 
         self.drop_caches_on_collision(Some(query_id), requested_name.as_ref())
+            .await?;
+
+        self.authority
+            .add_shallow_cache_ddl_request(ddl_req.clone())
             .await?;
 
         let res = self.shallow.create_cache(
