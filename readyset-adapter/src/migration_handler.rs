@@ -177,8 +177,7 @@ impl MigrationHandler {
                     .noria
                     .handle_create_cached_query(
                         None,
-                        &query.query().statement,
-                        Some(query.query().schema_search_path.clone()),
+                        query.query().clone(),
                         /* always */ false,
                         /* concurrently */ false,
                     )
@@ -301,16 +300,13 @@ impl MigrationHandler {
             })
             .collect::<ReadySetResult<HashMap<_, _>>>()?;
 
-        let inlined_query = view_request.statement.clone().inline_literals(&mapping);
+        let req = ViewCreateRequest::new(
+            view_request.statement.clone().inline_literals(&mapping),
+            view_request.schema_search_path.clone(),
+        );
 
         self.noria
-            .handle_create_cached_query(
-                None,
-                &inlined_query,
-                Some(view_request.schema_search_path.clone()),
-                false,
-                false,
-            )
+            .handle_create_cached_query(None, req, false, false)
             .await?;
         Ok(())
     }

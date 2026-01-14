@@ -997,22 +997,19 @@ impl NoriaConnector {
     pub async fn handle_create_cached_query(
         &mut self,
         name: Option<&Relation>,
-        statement: &SelectStatement,
-        override_schema_search_path: Option<Vec<SqlIdentifier>>,
+        deep: ViewCreateRequest,
         always: bool,
         concurrently: bool,
     ) -> ReadySetResult<Option<u64>> {
         let name = match name {
             Some(name) => name,
-            None => &QueryId::from_select(statement, self.schema_search_path()).into(),
+            None => &QueryId::from(&deep).into(),
         };
-        let schema_search_path =
-            override_schema_search_path.unwrap_or_else(|| self.schema_search_path.clone());
         let changelist = ChangeList::from_change(
-            Change::create_cache(name.clone(), statement.clone(), always),
+            Change::create_cache(name.clone(), deep.statement.clone(), always),
             self.dialect,
         )
-        .with_schema_search_path(schema_search_path.clone());
+        .with_schema_search_path(deep.schema_search_path.clone());
 
         if concurrently {
             let id = noria_await!(self.inner, self.inner.noria.extend_recipe_async(changelist))?;
@@ -1023,12 +1020,7 @@ impl NoriaConnector {
             // If the query is already in there with a different name, we don't need to make a new
             // name for it, as *lookups* only need one of the names for the query, and
             // when we drop it we'll be hitting noria anyway
-            self.view_name_cache
-                .insert(
-                    ViewCreateRequest::new(statement.clone(), schema_search_path),
-                    name.clone(),
-                )
-                .await;
+            self.view_name_cache.insert(deep, name.clone()).await;
 
             Ok(None)
         }

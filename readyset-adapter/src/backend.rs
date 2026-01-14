@@ -2344,9 +2344,9 @@ where
     fn make_name_and_id<'a>(
         &self,
         name: &'a mut Option<Relation>,
-        stmt: &SelectStatement,
+        req: &ViewCreateRequest,
     ) -> (QueryId, &'a Relation, Option<Relation>) {
-        let query_id = QueryId::from_select(stmt, self.noria.schema_search_path());
+        let query_id = QueryId::from(req);
         let requested_name = name.clone();
         let name = match name {
             Some(name) => &*name,
@@ -2362,27 +2362,26 @@ where
     async fn create_cached_query(
         &mut self,
         name: &mut Option<Relation>,
-        stmt: SelectStatement,
-        override_schema_search_path: Option<Vec<SqlIdentifier>>,
+        deep: ReadySetResult<ViewCreateRequest>,
+        shallow: ReadySetResult<ViewCreateRequest>,
         always: bool,
         concurrently: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let (query_id, name, requested_name) = self.make_name_and_id(name, &stmt);
+        let deep = deep?;
+        let (query_id, name, requested_name) = self.make_name_and_id(name, &deep);
 
         // If we have existing caches with the same query_id or name, drop them first.
         self.drop_caches_on_collision(Some(query_id), requested_name.as_ref())
             .await?;
+        if let Ok(shallow) = shallow {
+            self.drop_caches_on_collision(Some(QueryId::from(&shallow)), None)
+                .await?;
+        }
 
         // Now migrate the new query
         let migration_state = match self
             .noria
-            .handle_create_cached_query(
-                Some(name),
-                &stmt,
-                override_schema_search_path,
-                always,
-                concurrently,
-            )
+            .handle_create_cached_query(Some(name), deep.clone(), always, concurrently)
             .await
         {
             Ok(None) => MigrationState::Successful(CacheType::Deep),
@@ -2412,15 +2411,12 @@ where
                 }
             }
         };
-        self.state.query_status_cache.update_query_migration_state(
-            &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
-            migration_state,
-            None,
-        );
-        self.state.query_status_cache.always_attempt_readyset(
-            &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
-            always,
-        );
+        self.state
+            .query_status_cache
+            .update_query_migration_state(&deep, migration_state, None);
+        self.state
+            .query_status_cache
+            .always_attempt_readyset(&deep, always);
         Ok(noria_connector::QueryResult::Empty)
     }
 
@@ -2428,15 +2424,13 @@ where
     async fn create_deep_cache(
         &mut self,
         mut name: Option<Relation>,
-        mut stmt: SelectStatement,
-        search_path: Option<Vec<SqlIdentifier>>,
+        deep: ReadySetResult<ViewCreateRequest>,
+        shallow: ReadySetResult<ViewCreateRequest>,
         always: bool,
         concurrently: bool,
         ddl_req: Option<CacheDDLRequest>,
         quiet: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        adapter_rewrites::rewrite_query(&mut stmt, self.noria.rewrite_params())?;
-
         if let Some(ref ddl_req) = ddl_req {
             self.authority
                 .add_cache_ddl_request(ddl_req.clone())
@@ -2444,7 +2438,7 @@ where
         }
 
         let res = self
-            .create_cached_query(&mut name, stmt, search_path, always, concurrently)
+            .create_cached_query(&mut name, deep, shallow, always, concurrently)
             .await;
 
         remove_ddl_on_error(
@@ -2461,10 +2455,12 @@ where
         res
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn create_shallow_cache(
         &mut self,
         mut name: Option<Relation>,
-        mut stmt: SelectStatement,
+        deep: ReadySetResult<ViewCreateRequest>,
+        shallow: ReadySetResult<ViewCreateRequest>,
         policy: Option<ast::EvictionPolicy>,
         ddl_req: Option<CacheDDLRequest>,
         always: bool,
@@ -2473,21 +2469,19 @@ where
         let ddl_req =
             ddl_req.ok_or_else(|| internal_err!("No statement supplied to shallow cache"))?;
 
-        adapter_rewrites::rewrite_equivalent(
-            &mut stmt,
-            self.noria.rewrite_params(),
-            ParameterizeMode::Full,
-        )?;
-
-        let req = ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned());
-        if let Err(e) = self.upstream_supports(&req).await {
+        let shallow = shallow?;
+        if let Err(e) = self.upstream_supports(&shallow).await {
             return Err(ReadySetError::CreateCacheError(e.to_string()));
         }
 
-        let (query_id, name, requested_name) = self.make_name_and_id(&mut name, &stmt);
+        let (query_id, name, requested_name) = self.make_name_and_id(&mut name, &shallow);
 
         self.drop_caches_on_collision(Some(query_id), requested_name.as_ref())
             .await?;
+        if let Ok(deep) = deep {
+            self.drop_caches_on_collision(Some(QueryId::from(&deep)), None)
+                .await?;
+        }
 
         self.authority
             .add_shallow_cache_ddl_request(ddl_req.clone())
@@ -2496,8 +2490,8 @@ where
         let res = self.shallow.create_cache(
             Some(name.clone()),
             Some(query_id),
-            stmt,
-            self.noria.schema_search_path().to_owned(),
+            shallow.statement.clone(),
+            shallow.schema_search_path.clone(),
             resolve_eviction_policy(policy, self.settings.default_ttl_ms),
             ddl_req.clone(),
             always,
@@ -2506,13 +2500,13 @@ where
 
         if res.is_ok() {
             self.state.query_status_cache.update_query_migration_state(
-                &req,
+                &shallow,
                 MigrationState::Successful(CacheType::Shallow),
                 None,
             );
             self.state
                 .query_status_cache
-                .always_attempt_readyset(&req, always);
+                .always_attempt_readyset(&shallow, always);
         }
 
         remove_ddl_on_error(
@@ -2554,18 +2548,14 @@ where
         Ok(*cache_type)
     }
 
-    /// Extract the deep and shallow representations of the query from the EXPLAIN.
-    fn query_from_explain(
+    /// Extract the deep and shallow representations of the query.
+    fn query_from_cache_inner(
         &self,
-        explain: &ExplainStatement,
+        inner: &CacheInner,
     ) -> ReadySetResult<(
         ReadySetResult<ViewCreateRequest>,
         ReadySetResult<ViewCreateRequest>,
     )> {
-        let ExplainStatement::CreateCache { inner, .. } = explain else {
-            internal!("Unexpected EXPLAIN: {explain:?}");
-        };
-
         match inner {
             CacheInner::Statement { deep, .. } => {
                 let deep = deep.clone();
@@ -2637,6 +2627,21 @@ where
                 None => Err(ReadySetError::NoQueryForId { id: id.to_string() }),
             },
         }
+    }
+
+    /// Extract the deep and shallow representations of the query from the EXPLAIN.
+    fn query_from_explain(
+        &self,
+        explain: &ExplainStatement,
+    ) -> ReadySetResult<(
+        ReadySetResult<ViewCreateRequest>,
+        ReadySetResult<ViewCreateRequest>,
+    )> {
+        let ExplainStatement::CreateCache { inner, .. } = explain else {
+            internal!("Unexpected EXPLAIN: {explain:?}");
+        };
+
+        self.query_from_cache_inner(inner)
     }
 
     // Determine the migration state of the deep representation, performing a dry run if necessary.
@@ -3293,25 +3298,7 @@ where
                     concurrently,
                     unparsed_create_cache_statement,
                 } = create_cache_stmt;
-                let (stmt, search_path) = match inner {
-                    CacheInner::Statement { deep: Ok(st), .. } => Ok((*st.clone(), None)),
-                    CacheInner::Statement { deep: Err(err), .. } => {
-                        Err(ReadySetError::UnparseableQuery(err.clone()))
-                    }
-                    CacheInner::Id(id) => match self.state.query_status_cache.query(id.as_str()) {
-                        Some(q) => match q {
-                            Query::Parsed(view_request) => Ok((
-                                view_request.statement.clone(),
-                                Some(view_request.schema_search_path.clone()),
-                            )),
-                            Query::ShallowParsed(_) => {
-                                Err(ReadySetError::UnparseableQuery("TODO".into()))
-                            }
-                            Query::ParseFailed(_, err) => Err(ReadySetError::UnparseableQuery(err)),
-                        },
-                        None => Err(ReadySetError::NoQueryForId { id: id.to_string() }),
-                    },
-                }?;
+                let (deep, shallow) = self.query_from_cache_inner(inner)?;
 
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
@@ -3342,8 +3329,8 @@ where
                 if deep_requested || (cache_mode.is_deep() && !shallow_requested) {
                     self.create_deep_cache(
                         name.clone(),
-                        stmt,
-                        search_path,
+                        deep,
+                        shallow,
                         *always,
                         *concurrently,
                         ddl_req,
@@ -3353,7 +3340,8 @@ where
                 } else if shallow_requested || (cache_mode.is_shallow() && !deep_requested) {
                     self.create_shallow_cache(
                         name.clone(),
-                        stmt,
+                        deep,
+                        shallow,
                         *policy,
                         ddl_req,
                         *always,
@@ -3361,19 +3349,19 @@ where
                     )
                     .await
                 } else {
-                    let deep = self
+                    let res = self
                         .create_deep_cache(
                             name.clone(),
-                            stmt.clone(),
-                            search_path,
+                            deep.clone(),
+                            shallow.clone(),
                             *always,
                             *concurrently,
                             ddl_req.clone(),
                             true,
                         )
                         .await;
-                    match deep {
-                        Ok(deep) => Ok(deep),
+                    match res {
+                        Ok(res) => Ok(res),
                         Err(error) if error.is_transient() => {
                             info!(%error, "Skipping CREATE CACHE due to transient error");
                             Err(ReadySetError::CreateCacheError(format!(
@@ -3387,7 +3375,8 @@ where
                             );
                             self.create_shallow_cache(
                                 name.clone(),
-                                stmt,
+                                deep,
+                                shallow,
                                 *policy,
                                 ddl_req,
                                 *always,
