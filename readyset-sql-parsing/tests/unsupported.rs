@@ -295,3 +295,54 @@ fn natural_join_unsupported() {
         "NATURAL"
     );
 }
+
+#[test]
+fn compound_select_fetch_clause_unsupported() {
+    let result = parse_query_with_config(
+        ParsingPreset::OnlySqlparser,
+        Dialect::PostgreSQL,
+        "SELECT id FROM a UNION SELECT id FROM b FETCH FIRST 10 ROWS ONLY",
+    );
+    assert!(
+        result.is_err(),
+        "FETCH in compound SELECT should be rejected"
+    );
+    assert!(
+        result.unwrap_err().to_string().contains("FETCH"),
+        "Error should mention FETCH"
+    );
+}
+
+#[test]
+fn compound_select_for_update_unsupported() {
+    let result = parse_query_with_config(
+        ParsingPreset::OnlySqlparser,
+        Dialect::PostgreSQL,
+        "SELECT id FROM a UNION SELECT id FROM b FOR UPDATE",
+    );
+    assert!(
+        result.is_err(),
+        "FOR UPDATE in compound SELECT should be rejected"
+    );
+    assert!(
+        result.unwrap_err().to_string().contains("locking"),
+        "Error should mention locking"
+    );
+}
+
+#[test]
+fn compound_select_for_share_unsupported() {
+    let result = parse_query_with_config(
+        ParsingPreset::OnlySqlparser,
+        Dialect::PostgreSQL,
+        "SELECT id FROM a UNION SELECT id FROM b FOR SHARE",
+    );
+    assert!(
+        result.is_err(),
+        "FOR SHARE in compound SELECT should be rejected"
+    );
+    assert!(
+        result.unwrap_err().to_string().contains("locking"),
+        "Error should mention locking"
+    );
+}

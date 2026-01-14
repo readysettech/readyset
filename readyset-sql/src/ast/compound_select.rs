@@ -67,7 +67,12 @@ impl TryFromDialect<sqlparser::ast::Query> for CompoundSelectStatement {
             order_by,
             limit_clause,
             with,
-            ..
+            fetch,
+            locks,
+            for_clause,
+            settings: _,       // ClickHouse-specific, not parsed in MySQL/PostgreSQL
+            format_clause: _,  // ClickHouse-specific, not parsed in MySQL/PostgreSQL
+            pipe_operators: _, // BigQuery-specific, not parsed in MySQL/PostgreSQL
         } = value;
         if !matches!(*body, sqlparser::ast::SetExpr::SetOperation { .. }) {
             return failed!("Expected a set operation");
@@ -75,6 +80,21 @@ impl TryFromDialect<sqlparser::ast::Query> for CompoundSelectStatement {
         if with.is_some() {
             // not supported at the moment
             return unsupported!("WITH clause is not supported in compound SELECT statements");
+        }
+
+        // FETCH clause (ANSI SQL pagination alternative to LIMIT)
+        if fetch.is_some() {
+            unsupported!("FETCH clause not supported; use LIMIT and OFFSET instead")?;
+        }
+
+        // Row-level locking (FOR UPDATE, FOR SHARE, etc.)
+        if !locks.is_empty() {
+            unsupported!("Row-level locking (FOR UPDATE, FOR SHARE) not supported")?;
+        }
+
+        // SQL Server FOR XML/JSON/BROWSE clause
+        if for_clause.is_some() {
+            unsupported!("FOR XML/FOR JSON clause not supported")?;
         }
         let selects = flatten_set_expr(body, dialect)?;
         let order = order_by.try_into_dialect(dialect)?;
