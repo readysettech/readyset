@@ -2567,30 +2567,39 @@ where
         };
 
         match inner {
-            CacheInner::Statement { deep: Ok(stmt), .. } => {
-                let mut stmt_deep = stmt.clone();
-                let mut stmt_shallow = stmt.clone();
+            CacheInner::Statement { deep, .. } => {
+                let deep = deep.clone();
+                let shallow = deep.clone();
 
                 // Rewrite for deep.
-                adapter_rewrites::rewrite_query(&mut stmt_deep, self.noria.rewrite_params())?;
-                let deep =
-                    ViewCreateRequest::new(*stmt_deep, self.noria.schema_search_path().to_owned());
+                let deep = match deep {
+                    Ok(mut deep) => {
+                        adapter_rewrites::rewrite_query(&mut deep, self.noria.rewrite_params())?;
+                        Ok(ViewCreateRequest::new(
+                            *deep,
+                            self.noria.schema_search_path().to_owned(),
+                        ))
+                    }
+                    Err(e) => Err(ReadySetError::UnparseableQuery(e)),
+                };
 
                 // Rewrite for shallow.
-                adapter_rewrites::rewrite_equivalent(
-                    &mut stmt_shallow,
-                    self.noria.rewrite_params(),
-                    ParameterizeMode::Full,
-                )?;
-                let shallow = ViewCreateRequest::new(
-                    *stmt_shallow,
-                    self.noria.schema_search_path().to_owned(),
-                );
+                let shallow = match shallow {
+                    Ok(mut shallow) => {
+                        adapter_rewrites::rewrite_equivalent(
+                            &mut shallow,
+                            self.noria.rewrite_params(),
+                            ParameterizeMode::Full,
+                        )?;
+                        Ok(ViewCreateRequest::new(
+                            *shallow,
+                            self.noria.schema_search_path().to_owned(),
+                        ))
+                    }
+                    Err(e) => Err(ReadySetError::UnparseableQuery(e)),
+                };
 
-                Ok((Ok(deep), Ok(shallow)))
-            }
-            CacheInner::Statement { deep: Err(e), .. } => {
-                Err(ReadySetError::UnparseableQuery(e.clone()))
+                Ok((deep, shallow))
             }
             CacheInner::Id(id) => match self.state.query_status_cache.query(id.as_str()) {
                 Some(q) => match q {
