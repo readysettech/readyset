@@ -203,10 +203,11 @@ impl fmt::Display for DfValue {
             DfValue::TimestampTz(ref ts) => write!(f, "{ts}"),
             DfValue::Time(ref t) => write!(f, "{t}"),
             DfValue::ByteArray(ref array) => {
+                // E'\x...' can produce invalid UTF-8 sequences.
                 write!(
                     f,
-                    "E'\\x{}'",
-                    array.iter().map(|byte| format!("{byte:02x}")).join("")
+                    "X'{}'",
+                    array.iter().map(|byte| format!("{byte:02X}")).join("")
                 )
             }
             DfValue::Numeric(ref d) => write!(f, "{d}"),
@@ -2903,7 +2904,7 @@ mod tests {
         assert_eq!(timestamp.to_string(), "1970-01-01 00:00:00");
         assert_eq!(timestamp_tz.to_string(), "1969-12-31 18:30:00-05:30");
         assert_eq!(int.to_string(), "5");
-        assert_eq!(bytes.to_string(), "E'\\x0008275c6480'");
+        assert_eq!(bytes.to_string(), "X'0008275C6480'");
         assert_eq!(
             bits.to_string(),
             "000000000000100000100111010111000110010010000000"

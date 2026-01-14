@@ -254,14 +254,10 @@ impl DialectDisplay for Literal {
                     .collect::<Vec<String>>()
                     .join(" ")
             ),
-            Literal::ByteArray(b) => match dialect {
-                Dialect::PostgreSQL => {
-                    write!(f, "E'\\x{}'", b.iter().map(|v| format!("{v:x}")).join(""))
-                }
-                Dialect::MySQL => {
-                    write!(f, "X'{}'", b.iter().map(|v| format!("{v:02X}")).join(""))
-                }
-            },
+            Literal::ByteArray(b) => {
+                // E'\x...' can produce invalid UTF-8 sequences.
+                write!(f, "X'{}'", b.iter().map(|v| format!("{v:02X}")).join(""))
+            }
             Literal::Placeholder(item) => write!(f, "{item}"),
             Literal::BitVector(b) => {
                 write!(
