@@ -641,9 +641,12 @@ fn parse_query_for_create_cache(
             .try_into_dialect(dialect)
             .ok()
             .and_then(|query: SqlQuery| query.into_select())
-            .map(|select| CacheInner::Statement {
-                deep: Ok(Box::new(select)),
-                shallow: Err("shallow".to_string()),
+            .map(|select| {
+                let boxed = Box::new(select);
+                CacheInner::Statement {
+                    deep: Ok(boxed.clone()),
+                    shallow: Ok(boxed),
+                }
             })
             .unwrap_or_else(|| CacheInner::Statement {
                 deep: Err(remaining_query.clone()),

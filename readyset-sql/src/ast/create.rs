@@ -1003,17 +1003,18 @@ impl From<SqlIdentifier> for CacheInner {
 impl From<Box<SelectStatement>> for CacheInner {
     fn from(stmt: Box<SelectStatement>) -> Self {
         CacheInner::Statement {
-            deep: Ok(stmt),
-            shallow: Err("shallow".to_string()),
+            deep: Ok(stmt.clone()),
+            shallow: Ok(stmt),
         }
     }
 }
 
 impl From<SelectStatement> for CacheInner {
     fn from(stmt: SelectStatement) -> Self {
+        let boxed = Box::new(stmt);
         CacheInner::Statement {
-            deep: Ok(Box::new(stmt)),
-            shallow: Err("shallow".to_string()),
+            deep: Ok(boxed.clone()),
+            shallow: Ok(boxed),
         }
     }
 }

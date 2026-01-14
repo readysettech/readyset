@@ -141,8 +141,8 @@ mod tests {
             policy: None,
             coalesce_ms: None,
             inner: CacheInner::Statement {
-                deep: Ok(Box::new(select_stmt)),
-                shallow: Err("shallow".to_string()),
+                deep: Ok(Box::new(select_stmt.clone())),
+                shallow: Ok(Box::new(select_stmt)),
             },
             unparsed_create_cache_statement: None,
             always: false, // should cause error
@@ -199,8 +199,8 @@ mod tests {
             policy: None,
             coalesce_ms: None,
             inner: CacheInner::Statement {
-                deep: Ok(Box::new(select_stmt)),
-                shallow: Err("shallow".to_string()),
+                deep: Ok(Box::new(select_stmt.clone())),
+                shallow: Ok(Box::new(select_stmt)),
             },
             unparsed_create_cache_statement: None,
             always: true, // should succeed
@@ -245,8 +245,8 @@ mod tests {
             policy: None,
             coalesce_ms: None,
             inner: CacheInner::Statement {
-                deep: Ok(Box::new(select_stmt)),
-                shallow: Err("shallow".to_string()),
+                deep: Ok(Box::new(select_stmt.clone())),
+                shallow: Ok(Box::new(select_stmt)),
             },
             unparsed_create_cache_statement: None,
             always: false,

@@ -116,8 +116,8 @@ impl From<CacheExpr> for CreateCacheStatement {
             policy: value.policy,
             coalesce_ms: None,
             inner: CacheInner::Statement {
-                deep: Ok(Box::new(value.statement)),
-                shallow: Err("shallow".to_string()),
+                deep: Ok(Box::new(value.statement.clone())),
+                shallow: Ok(Box::new(value.statement)),
             },
             always: value.always,
             // CacheExpr represents a migrated query, and the below fields are not relevant for an
