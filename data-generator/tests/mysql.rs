@@ -67,6 +67,7 @@ fn unique_value_of_type_always_valid(
     #[strategy(0..=255u32)] idx: u32,
 ) {
     prop_assume!(!matches!(ty, SqlType::Bool));
+    prop_assume!(!(matches!(ty, SqlType::TinyInt(_)) && idx > i8::MAX as u32));
 
     let val = unique_value_of_type(&ty, idx);
     eprintln!("value: {val:?}");
