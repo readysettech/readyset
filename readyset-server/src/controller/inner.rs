@@ -547,6 +547,11 @@ impl Leader {
                 return_serialized!(res);
             }
             (&Method::POST, "/replication_offsets") => {
+                // During recovery, domains are not yet placed so we can't query replication
+                // offsets. Return a retryable error instead of a confusing NoSuchReplica error.
+                if self.running_recovery.is_some() {
+                    return Err(ReadySetError::ControllerRecovering);
+                }
                 let res = {
                     let ds = self.dataflow_state_handle.read().await;
                     ds.replication_offsets().await

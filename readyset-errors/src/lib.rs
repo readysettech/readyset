@@ -437,6 +437,15 @@ pub enum ReadySetError {
     )]
     LeaderNotReady,
 
+    /// The controller is currently recovering from a restart and placing domains.
+    ///
+    /// This is a transient state that occurs during ReadySet restart. The controller
+    /// deserializes state with domain information in the graph but the domain handles
+    /// not yet repopulated. Callers should retry with backoff, as recovery may take
+    /// minutes for large deployments.
+    #[error("Controller is recovering")]
+    ControllerRecovering,
+
     /// A request was made to an API endpoint not known to the controller.
     #[error("API endpoint not found")]
     UnknownEndpoint,
@@ -776,6 +785,17 @@ impl ReadySetError {
     /// exhaustive, and we may not offer support due to other errors not tracked here.
     pub fn caused_by_unsupported(&self) -> bool {
         self.any_cause(|e| e.is_unsupported())
+    }
+
+    /// Returns `true` if the error is [`ControllerRecovering`].
+    pub fn is_controller_recovering(&self) -> bool {
+        matches!(self, Self::ControllerRecovering)
+    }
+
+    /// Returns true if the error either *is* [`ControllerRecovering`], or was *caused by*
+    /// [`ControllerRecovering`]
+    pub fn caused_by_controller_recovering(&self) -> bool {
+        self.any_cause(|e| e.is_controller_recovering())
     }
 
     /// Returns `true` if self is ['ViewNotFound'] or ['ViewNotFoundForQuery'].
@@ -1307,5 +1327,39 @@ mod test {
             err.table_not_found_cause().unwrap(),
             ("t2_view", Some("public"))
         )
+    }
+
+    #[test]
+    fn caused_by_controller_recovering() {
+        // Direct error
+        let err = ReadySetError::ControllerRecovering;
+        assert!(err.is_controller_recovering());
+        assert!(err.caused_by_controller_recovering());
+
+        // Wrapped in RpcFailed
+        let err = ReadySetError::RpcFailed {
+            during: "test_rpc_call".into(),
+            source: Box::new(ReadySetError::ControllerRecovering),
+        };
+        assert!(!err.is_controller_recovering()); // Not directly ControllerRecovering
+        assert!(err.caused_by_controller_recovering()); // But caused by it
+
+        // Two levels deep
+        let err = ReadySetError::RpcFailed {
+            during: "outer".into(),
+            source: Box::new(ReadySetError::Context {
+                context: "inner context".into(),
+                error: Box::new(ReadySetError::ControllerRecovering),
+            }),
+        };
+        assert!(err.caused_by_controller_recovering());
+
+        // Not caused by ControllerRecovering
+        let err = ReadySetError::NoSuchReplica {
+            domain_index: 0,
+            shard: 0,
+            replica: 0,
+        };
+        assert!(!err.caused_by_controller_recovering());
     }
 }

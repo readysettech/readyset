@@ -266,6 +266,11 @@ impl<'a> NoriaAdapter<'a> {
                     full_snapshot = true;
                     warn!(error=%err, "Restarting adapter after error encountered. Full resnapshot will be performed");
                 }
+                err if err.caused_by_controller_recovering() => {
+                    // Just continue the loop, no need to return error
+                    debug!("Controller is still recovering, retrying adapter start");
+                    tokio::time::sleep(WAIT_BEFORE_RESNAPSHOT).await;
+                }
 
                 err => {
                     warn!(error=%err, "Restarting adapter after error encountered");
