@@ -67,15 +67,41 @@ fn cast_format_unsupported() {
 }
 
 #[test]
-fn function_advanced_features_unsupported() {
-    // Test that advanced function features are rejected
+fn function_filter_unsupported() {
+    // Test that FILTER clause on aggregates is rejected
     for query in &[
         "SELECT COUNT(*) FILTER (WHERE x > 0) FROM t",
-        "SELECT SUM(x) WITHIN GROUP (ORDER BY y) FROM t",
-        "SELECT FIRST_VALUE(x) IGNORE NULLS OVER (ORDER BY y)",
+        "SELECT SUM(x) FILTER (WHERE x > 0) FROM t",
     ] {
-        check_parse_fails!(Dialect::PostgreSQL, query, "Function with");
+        check_parse_fails!(Dialect::PostgreSQL, query, "Function with FILTER clause");
     }
+}
+
+#[test]
+fn function_within_group_unsupported() {
+    // Test that WITHIN GROUP (ORDER BY) clause is rejected (REA-6128)
+    // This is used for ordered-set aggregate functions in PostgreSQL
+    for query in &[
+        "SELECT SUM(x) WITHIN GROUP (ORDER BY y) FROM t",
+        "SELECT MAX(RowNum) WITHIN GROUP (ORDER BY RowNum) FROM qa.DataTypes GROUP BY Test_INT, RowNum",
+        "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY salary) FROM employees",
+        "SELECT mode() WITHIN GROUP (ORDER BY value) FROM measurements",
+    ] {
+        check_parse_fails!(
+            Dialect::PostgreSQL,
+            query,
+            "Function with WITHIN GROUP clause"
+        );
+    }
+}
+
+#[test]
+fn function_ignore_nulls_unsupported() {
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "SELECT FIRST_VALUE(x) IGNORE NULLS OVER (ORDER BY y)",
+        "Function with IGNORE NULLS"
+    );
 }
 
 #[test]
