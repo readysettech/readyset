@@ -16,7 +16,6 @@ async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
 }
 
 mod types {
-    use std::fmt::Display;
     use std::panic::{AssertUnwindSafe, RefUnwindSafe};
     use std::time::Duration;
 
@@ -44,9 +43,8 @@ mod types {
 
     use super::*;
 
-    async fn test_type_roundtrip<T, V>(type_name: T, vals: Vec<V>)
+    async fn test_type_roundtrip<V>(type_name: &str, vals: Vec<V>)
     where
-        T: Display,
         V: ToSql + Sync + PartialEq + RefUnwindSafe,
         for<'a> V: FromSql<'a>,
     {
@@ -79,7 +77,7 @@ mod types {
         });
 
         // check parameter parsing
-        if type_name.to_string().as_str() != "json" {
+        if type_name != "json" {
             for v in vals.iter() {
                 let count_where_result = client
                     .query_one(
@@ -94,8 +92,9 @@ mod types {
             }
         }
 
-        // Can't compare JSON for equality in postgres
-        if type_name.to_string() != "json" {
+        // - Can't compare JSON for equality in postgres
+        // - bpchar equality and string equality don't match (bpchar '' == ' ')
+        if type_name != "json" && type_name != "bpchar" {
             // check parameter passing and value returning when going through fallback
 
             for v in vals.iter() {
