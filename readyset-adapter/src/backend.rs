@@ -339,6 +339,7 @@ pub struct BackendBuilder {
     db_version: Option<String>,
     cache_mode: CacheMode,
     default_ttl_ms: u64,
+    default_coalesce_ms: u64,
 }
 
 impl Default for BackendBuilder {
@@ -365,6 +366,7 @@ impl Default for BackendBuilder {
             db_version: None,
             cache_mode: CacheMode::default(),
             default_ttl_ms: 10_000,
+            default_coalesce_ms: 5_000,
         }
     }
 }
@@ -428,6 +430,7 @@ impl BackendBuilder {
                 placeholder_inlining: self.placeholder_inlining,
                 cache_mode: self.cache_mode,
                 default_ttl_ms: self.default_ttl_ms,
+                default_coalesce_ms: self.default_coalesce_ms,
             },
             telemetry_sender: self.telemetry_sender,
             authority,
@@ -557,6 +560,11 @@ impl BackendBuilder {
 
     pub fn default_ttl_ms(mut self, default_ttl_ms: u64) -> Self {
         self.default_ttl_ms = default_ttl_ms;
+        self
+    }
+
+    pub fn default_coalesce_ms(mut self, default_coalesce_ms: u64) -> Self {
+        self.default_coalesce_ms = default_coalesce_ms;
         self
     }
 }
@@ -742,6 +750,8 @@ struct BackendSettings {
     cache_mode: CacheMode,
     /// Specifies the default TTL for shallow caches when no TTL is specified.
     default_ttl_ms: u64,
+    /// Specifies the default coalesce interval for shallow caches when none is specified.
+    default_coalesce_ms: u64,
 }
 
 /// QueryInfo holds information regarding the last query that was sent along this connection
@@ -2480,7 +2490,7 @@ where
             resolve_eviction_policy(policy, self.settings.default_ttl_ms),
             ddl_req.clone(),
             always,
-            coalesce_ms,
+            resolve_coalesce(coalesce_ms, self.settings.default_coalesce_ms),
         );
 
         if res.is_ok() {
@@ -4646,6 +4656,13 @@ fn resolve_eviction_policy(
     }
 }
 
+fn resolve_coalesce(coalesce: Option<Duration>, default_coalesce_ms: u64) -> Option<Duration> {
+    coalesce.or_else(|| match default_coalesce_ms {
+        0 => None,
+        _ => Some(Duration::from_millis(default_coalesce_ms)),
+    })
+}
+
 /// Remove a DDL request from authority when cache creation fails.
 ///
 /// The extend_recipe may have failed, in which case we should remove our intention
@@ -4706,6 +4723,7 @@ pub async fn recreate_shallow_caches<V>(
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,
     default_ttl_ms: u64,
+    default_coalesce_ms: u64,
 ) -> ReadySetResult<()>
 where
     V: Debug + Send + Sync + SizeOf + 'static,
@@ -4718,6 +4736,7 @@ where
             parsing_preset,
             rewrite_params,
             default_ttl_ms,
+            default_coalesce_ms,
         )
         .await
         {
@@ -4734,6 +4753,7 @@ async fn handle_shallow_cache_statement<V>(
     parsing_preset: ParsingPreset,
     rewrite_params: AdapterRewriteParams,
     default_ttl_ms: u64,
+    default_coalesce_ms: u64,
 ) -> ReadySetResult<()>
 where
     V: Debug + Send + Sync + SizeOf + 'static,
@@ -4754,6 +4774,7 @@ where
                 rewrite_params,
                 req,
                 default_ttl_ms,
+                default_coalesce_ms,
             )
             .await
         }
@@ -4761,6 +4782,7 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn recover_shallow_cache_create<V>(
     shallow: &CacheManager<Vec<DfValue>, V>,
     query_status_cache: &'static QueryStatusCache,
@@ -4769,6 +4791,7 @@ async fn recover_shallow_cache_create<V>(
     rewrite_params: AdapterRewriteParams,
     ddl_req: CacheDDLRequest,
     default_ttl_ms: u64,
+    default_coalesce_ms: u64,
 ) -> ReadySetResult<()>
 where
     V: Debug + Send + Sync + SizeOf + 'static,
@@ -4796,7 +4819,7 @@ where
         resolve_eviction_policy(stmt.policy, default_ttl_ms),
         ddl_req,
         stmt.always,
-        stmt.coalesce_ms,
+        resolve_coalesce(stmt.coalesce_ms, default_coalesce_ms),
     )?;
 
     query_status_cache.update_query_migration_state(

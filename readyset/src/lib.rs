@@ -502,6 +502,12 @@ pub struct Options {
     /// Specifies the default TTL for shallow caches when no TTL is specified.
     #[arg(long, env = "DEFAULT_TTL_MS", default_value = "10000")]
     pub default_ttl_ms: u64,
+
+    /// Specifies the default coalesce interval for shallow caches when none is specified.
+    ///
+    /// A value of 0 will disable coalescing by default.
+    #[arg(long, env = "DEFAULT_COALESCE_MS", default_value = "5000")]
+    pub default_coalesce_ms: u64,
 }
 
 impl Options {
@@ -1392,6 +1398,7 @@ where
                 parsing_preset,
                 adapter_rewrite_params,
                 options.default_ttl_ms,
+                options.default_coalesce_ms,
             )) {
                 error!("Failed to recreate shallow caches: {}", e);
             }
@@ -1439,6 +1446,7 @@ where
                 .migration_mode(migration_mode)
                 .cache_mode(options.cache_mode)
                 .default_ttl_ms(options.default_ttl_ms)
+                .default_coalesce_ms(options.default_coalesce_ms)
                 .query_max_failure_seconds(options.query_max_failure_seconds)
                 .telemetry_sender(telemetry_sender.clone())
                 .fallback_recovery_seconds(options.fallback_recovery_seconds)
