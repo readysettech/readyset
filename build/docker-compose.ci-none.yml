@@ -1,14 +1,7 @@
-# A config with no upstream, but which does include consul to enable those tests (as they are part
-# of the "no upstream" suite).
+# A config with no upstream.  This is a dummy placeholder, since the pipeline auto-selects a compose
+# file based on the name "docker-compose.ci-{{ upstream}}.yml"
 
 services:
-  consul-server:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/consul:1.15
-    expose:
-      - "8500"
-      - "8600"
   app:
-    depends_on:
-      - consul-server
     environment:
       - ALLOW_UNAUTHENTICATED_CONNECTIONS=true

@@ -1,11 +1,6 @@
 # Depends on `docker-compose.yml` from build/
 
 services:
-  consul-server:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/consul:1.15
-    expose:
-      - "8500"
-      - "8600"
   mysql:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/mysql:8.0
     expose:
@@ -48,7 +43,6 @@ services:
       - mysql
       - postgres
       - postgres13
-      - consul-server
 
 volumes:
   target:

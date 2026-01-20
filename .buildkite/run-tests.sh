@@ -55,9 +55,9 @@ NEXTEST_FILTER=()
 
 # We use $UPSTREAM_CONFIG to determine which tests to run; the appropriate docker containers and
 # images should already have been set up by the pipeline step. The `default` config has mysql8,
-# postgres15, postgres13, as well as consul and redis which are used for some non-upstream tests. We
-# shouldn't need to filter down to a subset of the tests in that case. For specific upstreams, we
-# run only the tests that run against that particular upstream.
+# postgres15, postgres13, and redis which is used for some non-upstream tests. We shouldn't need to
+# filter down to a subset of the tests in that case. For specific upstreams, we run only the tests
+# that run against that particular upstream.
 #
 # The filter sets should generally match the groups defined in .config/nextest.toml, but we can't
 # just identify a group to run. Besides, down the line these tests may become parallelizable and we
