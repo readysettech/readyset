@@ -2,7 +2,6 @@ name: readyset
 services:
   cache:
     image: "docker.io/readysettech/readyset:latest"
-    platform: linux/amd64
     ports:
       # The ReadySet Adapter listen port, i.e. what your application / SQL shell connects to
       - "5433:5433"
