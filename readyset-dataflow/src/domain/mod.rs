@@ -1233,6 +1233,16 @@ impl Domain {
         }
 
         if !self.not_ready.is_empty() && self.not_ready.contains(&me) {
+            // Writes to base nodes should never arrive before the node is ready.
+            // If this happens, something is fundamentally broken in initialization
+            // ordering. Fail fast rather than silently dropping data.
+            if matches!(m, Packet::Input(_)) && self.nodes[me].borrow().is_base() {
+                internal!(
+                    "Packet::Input arrived at not-ready base node {}; this would silently \
+                     drop data. This indicates a bug in initialization ordering.",
+                    me
+                );
+            }
             return Ok(());
         }
 
