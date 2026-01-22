@@ -2394,6 +2394,80 @@ async fn shallow_cache_prepared_statement_without_parameters() {
     shutdown_tx.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, postgres_upstream)]
+async fn shallow_cache_equality_and_in_clause() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let mut conn = DatabaseURL::from(opts)
+        .connect(&ServerCertVerification::Default)
+        .await
+        .unwrap();
+
+    conn.simple_query("CREATE TABLE shallow_in (a INT, b INT, value INT)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.simple_query(
+        "INSERT INTO shallow_in (a, b, value) VALUES \
+         (1, 10, 100), (1, 20, 200), (1, 30, 300), \
+         (2, 10, 110), (2, 20, 210), (2, 30, 310)",
+    )
+    .await
+    .unwrap();
+    sleep().await;
+
+    conn.simple_query(
+        "CREATE SHALLOW CACHE FROM SELECT a, b, value FROM shallow_in WHERE a = $1 AND b IN ($2)",
+    )
+    .await
+    .unwrap();
+    sleep().await;
+
+    eventually! {
+        let res = explain_create_cache(
+            "SELECT a, b, value FROM shallow_in WHERE a = $1 AND b IN ($2)",
+            &mut conn,
+        )
+        .await;
+        res.supported == "cached"
+    }
+
+    // First query should miss (no cached data yet)
+    conn.simple_query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (10, 20)")
+        .await
+        .unwrap();
+    let info = explain_last_statement(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::Upstream);
+
+    // Second identical query should hit
+    conn.simple_query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (10, 20)")
+        .await
+        .unwrap();
+    let info = explain_last_statement(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    // In set contents should be normalized (sorted)
+    conn.simple_query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (20, 10)")
+        .await
+        .unwrap();
+    let info = explain_last_statement(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    // Different IN values should miss
+    conn.simple_query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (20, 30)")
+        .await
+        .unwrap();
+    let info = explain_last_statement(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::Upstream);
+
+    shutdown_tx.shutdown().await;
+}
+
 mod http_tests {
     use super::*;
     #[tokio::test(flavor = "multi_thread")]

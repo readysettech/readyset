@@ -6,10 +6,10 @@
 //!
 //! # Differences from Deep Cache Rewrites
 //!
-//! The key difference is that shallow cache rewrites always use operate on the sqlparser AST
+//! The key difference is that shallow cache rewrites always operate on the sqlparser AST
 //! directly, rather than the Readyset AST and the parameterization pass replaces all literals.
 //!
-//! - [`rewrite_equivalent_shallow`]: Equivalent to [`super::rewrite_equivalent`]
+//! - [`rewrite_shallow`]: Equivalent to [`super::rewrite_equivalent`]
 //! - [`anonymize_shallow_query`]: Equivalent to [`crate::anonymize::Anonymize`]
 //! - [`literalize_shallow_query`]: Equivalent to [`super::literalize`]
 //! - [`convert_placeholders_to_question_marks`]: Equivalent to [`super::convert_placeholders_to_question_marks`]
@@ -25,9 +25,9 @@ use readyset_sql::{AstConversionError, Dialect, DialectDisplay};
 use sqlparser::ast::{
     Expr, Ident, ObjectName, Value, ValueWithSpan, Visit, VisitMut, Visitor, VisitorMut,
 };
-use tracing::{error, trace, trace_span};
+use tracing::{trace, trace_span};
 
-use crate::adapter_rewrites::{AdapterRewriteParams, QueryParameters};
+use crate::adapter_rewrites::{AdapterRewriteParams, InArrayParam, ShallowQueryParameters};
 use crate::anonymize::Anonymizer;
 
 macro_rules! break_err {
@@ -39,12 +39,16 @@ macro_rules! break_err {
 /// Rewrites a shallow cache query, producing parameterized output.
 ///
 /// This is the sqlparser-AST equivalent of [`super::rewrite_equivalent`].
-/// All literals are replaced with placeholders, not just those in supported positions.
-pub fn rewrite_equivalent_shallow(
+/// All literals are replaced with placeholders, and IN/NOT IN lists are treated as single array
+/// parameters, allowing queries with different IN set sizes to share the same normalized query
+/// form and cache entry.
+///
+/// Returns [`ShallowQueryParameters`] which can generate cache keys with array-valued parameters.
+pub fn rewrite_shallow(
     query: &mut ShallowCacheQuery,
     flags: AdapterRewriteParams,
-) -> ReadySetResult<QueryParameters> {
-    let span = trace_span!("adapter_rewrites", part = "equivalent_shallow").entered();
+) -> ReadySetResult<ShallowQueryParameters> {
+    let span = trace_span!("adapter_rewrites", part = "shallow").entered();
     trace!(
         parent: &span,
         query = %query.display(flags.dialect),
@@ -59,12 +63,13 @@ pub fn rewrite_equivalent_shallow(
         placeholders = ?reordered_placeholders,
     );
 
-    let auto_parameters = fully_parameterize_query(query)?;
+    let (auto_parameters, in_array_params) = fully_parameterize_query(query)?;
     trace!(
         parent: &span,
         pass = "fully_parameterize_query",
         query = %query.display(flags.dialect),
         auto_parameters = ?auto_parameters,
+        in_array_params = ?in_array_params,
     );
 
     number_placeholders(query)?;
@@ -74,11 +79,12 @@ pub fn rewrite_equivalent_shallow(
         query = %query.display(flags.dialect),
     );
 
-    Ok(QueryParameters {
-        dialect: flags.dialect,
+    Ok(ShallowQueryParameters::new(
+        flags.dialect,
         reordered_placeholders,
         auto_parameters,
-    })
+        in_array_params,
+    ))
 }
 
 /// Anonymizes a sqlparser query for safe, PII-free logging and telemetry.
@@ -169,12 +175,20 @@ fn reorder_numbered_placeholders(query: &sqlparser::ast::Query) -> Option<Vec<us
 /// This is the sqlparser-AST equivalent of deep cache's `autoparameterize` pass.
 /// Unlike the deep cache's auto-parameterization, this replaces ALL literals regardless
 /// of their position in the query (not just those in WHERE clause comparisons).
+///
+/// IN/NOT IN lists are treated as single array parameters:
+/// - Collapses IN/NOT IN lists to single placeholders (`WHERE x IN (1,2,3)` → `WHERE x IN (?)`)
+/// - Sorts IN list values for consistent normalization
+/// - Tracks `InArrayParam` for each collapsed IN clause
+#[allow(clippy::type_complexity)]
 fn fully_parameterize_query(
     query: &mut sqlparser::ast::Query,
-) -> ReadySetResult<Vec<(usize, Literal)>> {
+) -> ReadySetResult<(Vec<(usize, Literal)>, Vec<InArrayParam>)> {
     let mut visitor = FullyParameterizeVisitor::default();
-    let _ = VisitMut::visit(query, &mut visitor);
-    Ok(visitor.out)
+    match VisitMut::visit(query, &mut visitor) {
+        ControlFlow::Continue(()) => Ok((visitor.out, visitor.in_array_params)),
+        ControlFlow::Break(e) => Err(e),
+    }
 }
 
 /// Renumbers all placeholders to sequential `$1`, `$2`, etc.
@@ -212,26 +226,107 @@ impl Visitor for ReorderNumberedPlaceholdersVisitor {
     }
 }
 
-/// Replaces all literals with `?` placeholders and collects the original values.
+/// Replaces all literals with `?` placeholders, collapsing IN lists to single placeholders.
 ///
 /// Mirrors `autoparameterize::FullyParameterizeVisitor` for the Readyset AST.
 #[derive(Default)]
 struct FullyParameterizeVisitor {
     param_idx: usize,
     out: Vec<(usize, Literal)>,
+    in_array_params: Vec<InArrayParam>,
+    /// Number of placeholders we auto-inserted that haven't been visited yet.
+    /// When post_visit_expr sees a placeholder, if this is > 0, we skip incrementing
+    /// param_idx since we already accounted for it in pre_visit_expr.
+    pending_auto_placeholders: usize,
 }
 
 impl VisitorMut for FullyParameterizeVisitor {
-    type Break = Infallible;
+    type Break = ReadySetError;
+
+    fn pre_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
+        // Handle IN/NOT IN specially - collapse to single placeholder
+        if let Expr::InList { list, .. } = expr {
+            // Check if all items are Value nodes (literals or placeholders)
+            let collapse = list.iter().all(|e| matches!(e, Expr::Value(_)));
+
+            if collapse && !list.is_empty() {
+                let start_index = self.param_idx;
+                let value_count = list.len();
+
+                let owned_list = mem::take(list);
+
+                // Extract only literal (non-placeholder) items as auto_parameters.
+                // Placeholders represent user-provided values at execute time and are
+                // NOT extracted — they will be supplied via make_keys at execute time.
+                let mut literals: Vec<(usize, Literal)> = Vec::new();
+                for (i, e) in owned_list.into_iter().enumerate() {
+                    if let Expr::Value(ValueWithSpan { value, .. }) = e {
+                        if matches!(value, Value::Placeholder(_)) {
+                            // User-provided placeholder — don't extract as auto_param
+                            continue;
+                        }
+                        match sqlparser_value_to_literal(value) {
+                            Ok(lit) => literals.push((start_index + i, lit)),
+                            Err(e) => break_err!(e),
+                        }
+                    }
+                }
+
+                // Sort literal values for consistent normalization (only when all items
+                // are literals; for mixed cases, positions are fixed by auto_param indices)
+                if literals.len() == value_count {
+                    // All items were literals — sort values and assign sequential positions
+                    literals.sort_by(|a, b| a.1.cmp(&b.1));
+                    for (seq, (_, lit)) in literals.drain(..).enumerate() {
+                        self.out.push((start_index + seq, lit));
+                    }
+                } else {
+                    // Mixed or all-placeholder — keep positional indices as-is
+                    for (idx, lit) in literals {
+                        self.out.push((idx, lit));
+                    }
+                }
+
+                self.param_idx += value_count;
+
+                // Replace with single placeholder
+                *list = vec![Expr::Value(ValueWithSpan {
+                    value: Value::Placeholder("?".into()),
+                    span: sqlparser::tokenizer::Span::empty(),
+                })];
+
+                self.in_array_params.push(InArrayParam {
+                    param_index: start_index,
+                    value_count,
+                });
+
+                // Track that we inserted a placeholder so post_visit_expr doesn't double-count
+                self.pending_auto_placeholders += 1;
+
+                // Note: returning Continue still allows visitor to traverse children,
+                // but we've already handled them by replacing the list.
+                return ControlFlow::Continue(());
+            }
+        }
+        ControlFlow::Continue(())
+    }
 
     fn post_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
         let Expr::Value(ValueWithSpan { value, .. }) = expr else {
             return ControlFlow::Continue(());
         };
 
-        // Skip existing placeholders but count them for correct indexing
+        // Handle placeholders: either auto-inserted ones (don't count) or user-provided ones
+        // (count)
         if matches!(value, Value::Placeholder(_)) {
-            self.param_idx += 1;
+            if self.pending_auto_placeholders > 0 {
+                // This is a placeholder we inserted in pre_visit_expr - don't increment param_idx
+                // since we already accounted for it when processing the IN list
+                self.pending_auto_placeholders -= 1;
+            } else {
+                // User-provided placeholder - count it for correct indexing
+                self.param_idx += 1;
+            }
             return ControlFlow::Continue(());
         }
 
@@ -241,9 +336,7 @@ impl VisitorMut for FullyParameterizeVisitor {
                 self.out.push((self.param_idx, literal));
                 self.param_idx += 1;
             }
-            Err(e) => {
-                error!(%e, "Autoparameterization pass failed to convert Value to Literal; Skipping Value.")
-            }
+            Err(e) => break_err!(e),
         }
 
         ControlFlow::Continue(())
@@ -425,6 +518,135 @@ impl VisitorMut for LiteralizeVisitor<'_> {
     }
 }
 
+/// Single-pass visitor that expands collapsed IN arrays and literalizes all placeholders.
+///
+/// After `rewrite_shallow`, IN lists are collapsed to single placeholders. This visitor
+/// reverses that collapse and substitutes all placeholders with literal values in a single
+/// AST traversal, combining the work that previously required three separate passes
+/// (expand, renumber, literalize).
+struct ExpandAndLiteralizeVisitor<'a> {
+    merged_params: &'a [DfValue],
+    in_array_params: &'a [InArrayParam],
+    next_param_idx: usize,
+    next_in_param: usize,
+}
+
+impl VisitorMut for ExpandAndLiteralizeVisitor<'_> {
+    type Break = ReadySetError;
+
+    fn pre_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
+        // Detect collapsed IN lists (single placeholder) and expand + literalize in one step
+        if let Expr::InList { list, .. } = expr
+            && list.len() == 1
+            && matches!(
+                &list[0],
+                Expr::Value(ValueWithSpan {
+                    value: Value::Placeholder(_),
+                    ..
+                })
+            )
+            && let Some(in_param) = self.in_array_params.get(self.next_in_param)
+        {
+            self.next_in_param += 1;
+            let start = self.next_param_idx;
+            let end = start + in_param.value_count;
+            if end > self.merged_params.len() {
+                break_err!(internal_err!(
+                    "IN array expansion out of bounds: need {} values at index {}, have {}",
+                    in_param.value_count,
+                    start,
+                    self.merged_params.len()
+                ));
+            }
+
+            let mut new_list = Vec::with_capacity(in_param.value_count);
+            for v in &self.merged_params[start..end] {
+                match dfvalue_to_sql_value(v) {
+                    Ok(val) => new_list.push(Expr::Value(ValueWithSpan {
+                        value: val,
+                        span: sqlparser::tokenizer::Span::empty(),
+                    })),
+                    Err(e) => break_err!(e),
+                }
+            }
+            *list = new_list;
+            self.next_param_idx = end;
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn post_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
+        let Expr::Value(ValueWithSpan { value, .. }) = expr else {
+            return ControlFlow::Continue(());
+        };
+        if !matches!(value, Value::Placeholder(_)) {
+            return ControlFlow::Continue(());
+        }
+
+        if self.next_param_idx >= self.merged_params.len() {
+            break_err!(internal_err!(
+                "Missing parameter at index {}: only {} provided",
+                self.next_param_idx,
+                self.merged_params.len()
+            ));
+        }
+
+        match dfvalue_to_sql_value(&self.merged_params[self.next_param_idx]) {
+            Ok(v) => {
+                *value = v;
+                self.next_param_idx += 1;
+            }
+            Err(e) => break_err!(e),
+        }
+        ControlFlow::Continue(())
+    }
+}
+
+/// Literalize a normalized shallow query for prepared statement execution.
+///
+/// This handles expanding collapsed IN arrays and literalizing all placeholders in a single
+/// AST traversal, so that a query like `WHERE a = $1 AND b IN ($2)` with merged params
+/// `[1, 10, 20]` and `in_array_params = [{param_index: 1, value_count: 2}]` produces
+/// `WHERE a = 1 AND b IN (10, 20)`.
+pub fn literalize_shallow_prepared(
+    query: &ShallowCacheQuery,
+    merged_params: &[DfValue],
+    in_array_params: &[InArrayParam],
+    dialect: Dialect,
+) -> ReadySetResult<String> {
+    let span = trace_span!("adapter_rewrites", part = "literalize_shallow_prepared").entered();
+    trace!(
+        parent: &span,
+        query = %query.display(dialect),
+        param_count = merged_params.len(),
+        in_array_count = in_array_params.len(),
+        "Literalizing shallow query for prepared execution"
+    );
+
+    let mut query_clone = (**query).clone();
+
+    let mut visitor = ExpandAndLiteralizeVisitor {
+        merged_params,
+        in_array_params,
+        next_param_idx: 0,
+        next_in_param: 0,
+    };
+    match VisitMut::visit(&mut query_clone, &mut visitor) {
+        ControlFlow::Continue(()) => {}
+        ControlFlow::Break(e) => return Err(e),
+    }
+
+    if visitor.next_in_param != in_array_params.len() {
+        return Err(internal_err!(
+            "Expected to expand {} IN arrays but found {} in query",
+            in_array_params.len(),
+            visitor.next_in_param
+        ));
+    }
+
+    Ok(format!("{query_clone}"))
+}
+
 /// Anonymizes a single identifier using the provided anonymizer.
 fn anonymize_ident(ident: &mut Ident, anonymizer: &mut Anonymizer) {
     let mut sql_id: readyset_sql::ast::SqlIdentifier = ident.value.as_str().into();
@@ -501,7 +723,7 @@ mod tests {
         let mut query = parse_query(dialect, "SELECT * FROM t WHERE id = 1");
         let flags = AdapterRewriteParams::new(dialect);
 
-        let params = rewrite_equivalent_shallow(&mut query, flags).unwrap();
+        let params = rewrite_shallow(&mut query, flags).unwrap();
 
         assert_eq!(params.auto_parameters.len(), 1);
         assert_eq!(format!("{query}"), "SELECT * FROM t WHERE id = $1");
@@ -513,7 +735,7 @@ mod tests {
         let mut query = parse_query(dialect, "SELECT * FROM t WHERE id = 1 AND val = 'test'");
         let flags = AdapterRewriteParams::new(dialect);
 
-        let params = rewrite_equivalent_shallow(&mut query, flags).unwrap();
+        let params = rewrite_shallow(&mut query, flags).unwrap();
 
         assert_eq!(params.auto_parameters.len(), 2);
         let query_str = format!("{}", query);
@@ -526,7 +748,7 @@ mod tests {
         let mut query = parse_query(dialect, "SELECT * FROM t WHERE id = $1 AND val = $2");
         let flags = AdapterRewriteParams::new(dialect);
 
-        let _params = rewrite_equivalent_shallow(&mut query, flags).unwrap();
+        let _params = rewrite_shallow(&mut query, flags).unwrap();
 
         let query_str = format!("{query}");
         assert!(query_str.contains("$1"));
@@ -539,7 +761,7 @@ mod tests {
         let mut query = parse_query(dialect, "SELECT * FROM t WHERE id = $3 AND val = $1");
         let flags = AdapterRewriteParams::new(dialect);
 
-        let _params = rewrite_equivalent_shallow(&mut query, flags).unwrap();
+        let _params = rewrite_shallow(&mut query, flags).unwrap();
 
         let query_str = format!("{query}");
         assert!(query_str.contains("$1"));
@@ -695,5 +917,373 @@ mod tests {
         convert_placeholders_to_question_marks(&mut query).unwrap();
 
         assert_eq!(format!("{query}"), original);
+    }
+
+    mod in_set_parameterization {
+        use super::*;
+
+        fn shallow_process(
+            query: &str,
+            params: Vec<DfValue>,
+            dialect: Dialect,
+        ) -> (Vec<DfValue>, String) {
+            let mut query = parse_query(dialect, query);
+            let flags = AdapterRewriteParams::new(dialect);
+            let processed = rewrite_shallow(&mut query, flags).unwrap();
+            (processed.make_keys(&params).unwrap(), format!("{query}"))
+        }
+
+        fn shallow_process_postgres(query: &str, params: Vec<DfValue>) -> (Vec<DfValue>, String) {
+            shallow_process(query, params, Dialect::PostgreSQL)
+        }
+
+        fn shallow_process_mysql(query: &str, params: Vec<DfValue>) -> (Vec<DfValue>, String) {
+            shallow_process(query, params, Dialect::MySQL)
+        }
+
+        #[test]
+        fn in_clause_becomes_array_parameter() {
+            let (keys, query_str) =
+                shallow_process_postgres("SELECT * FROM foo WHERE x IN (1, 2, 3)", vec![]);
+
+            // Query should have IN ($1) with single placeholder
+            assert_eq!(query_str, "SELECT * FROM foo WHERE x IN ($1)");
+
+            // Keys should have a single array parameter
+            assert_eq!(keys.len(), 1);
+            assert_eq!(
+                keys[0],
+                DfValue::from(vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)])
+            );
+        }
+
+        #[test]
+        fn in_clause_with_other_params() {
+            let (keys, query_str) = shallow_process_postgres(
+                "SELECT * FROM foo WHERE x IN (1, 2, 3) AND y = 'test'",
+                vec![],
+            );
+
+            assert_eq!(query_str, "SELECT * FROM foo WHERE x IN ($1) AND y = $2");
+
+            assert_eq!(keys.len(), 2);
+            assert_eq!(
+                keys[0],
+                DfValue::from(vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)])
+            );
+            assert_eq!(keys[1], DfValue::from("test"));
+        }
+
+        #[test]
+        fn multiple_in_clauses() {
+            let (keys, query_str) = shallow_process_postgres(
+                "SELECT * FROM foo WHERE x IN (1, 2) AND y IN (3, 4, 5)",
+                vec![],
+            );
+
+            assert_eq!(query_str, "SELECT * FROM foo WHERE x IN ($1) AND y IN ($2)");
+
+            assert_eq!(keys.len(), 2);
+            assert_eq!(
+                keys[0],
+                DfValue::from(vec![DfValue::from(1), DfValue::from(2)])
+            );
+            assert_eq!(
+                keys[1],
+                DfValue::from(vec![DfValue::from(3), DfValue::from(4), DfValue::from(5)])
+            );
+        }
+
+        #[test]
+        fn not_in_clause_becomes_array() {
+            let (keys, query_str) =
+                shallow_process_postgres("SELECT * FROM foo WHERE x NOT IN (1, 2, 3)", vec![]);
+
+            assert_eq!(query_str, "SELECT * FROM foo WHERE x NOT IN ($1)");
+
+            assert_eq!(keys.len(), 1);
+            assert_eq!(
+                keys[0],
+                DfValue::from(vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)])
+            );
+        }
+
+        #[test]
+        fn same_normalized_query_for_different_in_sizes() {
+            let dialect = Dialect::PostgreSQL;
+            let flags = AdapterRewriteParams::new(dialect);
+
+            let mut query1 = parse_query(dialect, "SELECT * FROM foo WHERE x IN (1, 2)");
+            let mut query2 = parse_query(dialect, "SELECT * FROM foo WHERE x IN (1, 2, 3, 4, 5)");
+
+            rewrite_shallow(&mut query1, flags).unwrap();
+            rewrite_shallow(&mut query2, flags).unwrap();
+
+            // Both should produce the same normalized query
+            assert_eq!(
+                format!("{query1}"),
+                format!("{query2}"),
+                "Different IN set sizes should produce same normalized query"
+            );
+            assert_eq!(format!("{query1}"), "SELECT * FROM foo WHERE x IN ($1)");
+        }
+
+        #[test]
+        fn mysql_in_clause() {
+            let (keys, query_str) =
+                shallow_process_mysql("SELECT * FROM foo WHERE x IN (1, 2, 3)", vec![]);
+
+            assert_eq!(query_str, "SELECT * FROM foo WHERE x IN ($1)");
+
+            assert_eq!(keys.len(), 1);
+            assert_eq!(
+                keys[0],
+                DfValue::from(vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)])
+            );
+        }
+
+        #[test]
+        fn mixed_in_and_equality() {
+            let (keys, query_str) = shallow_process_postgres(
+                "SELECT * FROM t WHERE a = 1 AND b IN (2, 3) AND c = 4 AND d IN (5, 6, 7)",
+                vec![],
+            );
+
+            assert_eq!(
+                query_str,
+                "SELECT * FROM t WHERE a = $1 AND b IN ($2) AND c = $3 AND d IN ($4)"
+            );
+
+            assert_eq!(keys.len(), 4);
+            assert_eq!(keys[0], DfValue::from(1));
+            assert_eq!(
+                keys[1],
+                DfValue::from(vec![DfValue::from(2), DfValue::from(3)])
+            );
+            assert_eq!(keys[2], DfValue::from(4));
+            assert_eq!(
+                keys[3],
+                DfValue::from(vec![DfValue::from(5), DfValue::from(6), DfValue::from(7)])
+            );
+        }
+
+        #[test]
+        fn single_element_in_list() {
+            let (keys, query_str) =
+                shallow_process_postgres("SELECT * FROM foo WHERE x IN (42)", vec![]);
+
+            // Single element IN list should still become an array parameter
+            assert_eq!(query_str, "SELECT * FROM foo WHERE x IN ($1)");
+            assert_eq!(keys.len(), 1);
+            assert_eq!(keys[0], DfValue::from(vec![DfValue::from(42)]));
+        }
+
+        #[test]
+        fn null_value_in_list() {
+            let (keys, query_str) =
+                shallow_process_postgres("SELECT * FROM foo WHERE x IN (1, NULL, 3)", vec![]);
+
+            assert_eq!(query_str, "SELECT * FROM foo WHERE x IN ($1)");
+            assert_eq!(keys.len(), 1);
+            assert_eq!(
+                keys[0],
+                DfValue::from(vec![DfValue::None, DfValue::from(1), DfValue::from(3)])
+            );
+        }
+
+        #[test]
+        fn mixed_placeholders_and_literals_collapsed() {
+            // IN lists with mixed placeholders and literals are still collapsed
+            let dialect = Dialect::PostgreSQL;
+            let mut query = parse_query(dialect, "SELECT * FROM foo WHERE x IN ($1, 2, $2)");
+            let flags = AdapterRewriteParams::new(dialect);
+
+            let processed = rewrite_shallow(&mut query, flags).unwrap();
+
+            assert_eq!(processed.in_array_params.len(), 1);
+            assert_eq!(processed.in_array_params[0].value_count, 3);
+        }
+
+        #[test]
+        fn in_clause_all_placeholders() {
+            // Prepared statement: WHERE x IN (?, ?) with user-provided params
+            let (keys, query_str) = shallow_process_mysql(
+                "SELECT * FROM foo WHERE a = 1 AND x IN (?, ?)",
+                vec![DfValue::from(10), DfValue::from(20)],
+            );
+
+            // Should normalize the same as an all-literal version
+            assert_eq!(query_str, "SELECT * FROM foo WHERE a = $1 AND x IN ($2)");
+
+            // Keys: [1, Array([10, 20])]
+            assert_eq!(keys.len(), 2);
+            assert_eq!(keys[0], DfValue::from(1));
+            assert_eq!(
+                keys[1],
+                DfValue::from(vec![DfValue::from(10), DfValue::from(20)])
+            );
+        }
+
+        #[test]
+        fn in_clause_placeholders_sorted() {
+            // Ensure (20, 10) produces the same cache key as (10, 20)
+            let (keys1, _) = shallow_process_mysql(
+                "SELECT * FROM foo WHERE x IN (?, ?)",
+                vec![DfValue::from(10), DfValue::from(20)],
+            );
+            let (keys2, _) = shallow_process_mysql(
+                "SELECT * FROM foo WHERE x IN (?, ?)",
+                vec![DfValue::from(20), DfValue::from(10)],
+            );
+            assert_eq!(keys1, keys2);
+        }
+
+        #[test]
+        fn in_clause_placeholders_match_cache_definition() {
+            // Cache defined with IN (?), prepared with IN (?, ?) — same normalized form
+            let dialect = Dialect::MySQL;
+            let flags = AdapterRewriteParams::new(dialect);
+
+            let mut cache_query = parse_query(dialect, "SELECT * FROM foo WHERE x IN (?)");
+            rewrite_shallow(&mut cache_query, flags).unwrap();
+
+            let mut prep_query = parse_query(dialect, "SELECT * FROM foo WHERE x IN (?, ?)");
+            rewrite_shallow(&mut prep_query, flags).unwrap();
+
+            assert_eq!(
+                format!("{cache_query}"),
+                format!("{prep_query}"),
+                "Cache definition and prepared statement should produce same normalized query"
+            );
+        }
+
+        #[test]
+        fn mixed_placeholders_and_literals_make_keys() {
+            // IN ($1, 2, $2) with user params for $1 and $2
+            let dialect = Dialect::PostgreSQL;
+            let mut query = parse_query(dialect, "SELECT * FROM foo WHERE x IN ($1, 2, $2)");
+            let flags = AdapterRewriteParams::new(dialect);
+
+            let processed = rewrite_shallow(&mut query, flags).unwrap();
+
+            assert_eq!(format!("{query}"), "SELECT * FROM foo WHERE x IN ($1)");
+            assert_eq!(processed.in_array_params.len(), 1);
+            assert_eq!(processed.in_array_params[0].value_count, 3);
+
+            // User provides 2 params (for $1 and $2), auto_param fills in literal 2
+            let keys = processed
+                .make_keys(&[DfValue::from(10), DfValue::from(30)])
+                .unwrap();
+            assert_eq!(keys.len(), 1);
+            assert_eq!(
+                keys[0],
+                DfValue::from(vec![DfValue::from(2), DfValue::from(10), DfValue::from(30)])
+            );
+        }
+
+        #[test]
+        fn literalize_for_execute_with_in_arrays() {
+            let dialect = Dialect::MySQL;
+            let mut query = parse_query(dialect, "SELECT * FROM t WHERE a = 1 AND b IN (?, ?)");
+            let flags = AdapterRewriteParams::new(dialect);
+
+            let params = rewrite_shallow(&mut query, flags).unwrap();
+
+            let sql = params
+                .literalize_for_execute(&query, &[DfValue::from(10), DfValue::from(20)])
+                .unwrap();
+
+            assert!(
+                sql.contains("a = 1"),
+                "should contain literalized auto_param: {sql}"
+            );
+            assert!(
+                sql.contains("b IN (10, 20)"),
+                "should expand IN array: {sql}"
+            );
+        }
+
+        #[test]
+        fn in_clause_placeholders_not_at_end() {
+            // IN array in the middle: WHERE x = 1 AND y IN (?, ?, ?) AND z = 5
+            let (keys, query_str) = shallow_process_mysql(
+                "SELECT * FROM t WHERE x = 1 AND y IN (?, ?, ?) AND z = 5",
+                vec![DfValue::from(2), DfValue::from(3), DfValue::from(4)],
+            );
+
+            assert_eq!(
+                query_str,
+                "SELECT * FROM t WHERE x = $1 AND y IN ($2) AND z = $3"
+            );
+
+            // Keys: [1, Array([2, 3, 4]), 5]
+            assert_eq!(keys.len(), 3);
+            assert_eq!(keys[0], DfValue::from(1));
+            assert_eq!(
+                keys[1],
+                DfValue::from(vec![DfValue::from(2), DfValue::from(3), DfValue::from(4)])
+            );
+            assert_eq!(keys[2], DfValue::from(5));
+        }
+
+        #[test]
+        fn literalize_in_clause_not_at_end() {
+            // Verify literalization also works with IN array in the middle
+            let dialect = Dialect::MySQL;
+            let mut query = parse_query(
+                dialect,
+                "SELECT * FROM t WHERE x = 1 AND y IN (?, ?, ?) AND z = 5",
+            );
+            let flags = AdapterRewriteParams::new(dialect);
+            let params = rewrite_shallow(&mut query, flags).unwrap();
+
+            let sql = params
+                .literalize_for_execute(
+                    &query,
+                    &[DfValue::from(2), DfValue::from(3), DfValue::from(4)],
+                )
+                .unwrap();
+
+            assert!(sql.contains("x = 1"), "should contain x = 1: {sql}");
+            assert!(
+                sql.contains("y IN (2, 3, 4)"),
+                "should expand IN array in middle: {sql}"
+            );
+            assert!(sql.contains("z = 5"), "should contain z = 5: {sql}");
+        }
+
+        #[test]
+        fn literalize_for_execute_multiple_in_clauses() {
+            let dialect = Dialect::MySQL;
+            let mut query = parse_query(
+                dialect,
+                "SELECT * FROM t WHERE a IN (?, ?) AND b = 1 AND c IN (?, ?, ?)",
+            );
+            let flags = AdapterRewriteParams::new(dialect);
+            let params = rewrite_shallow(&mut query, flags).unwrap();
+
+            let sql = params
+                .literalize_for_execute(
+                    &query,
+                    &[
+                        DfValue::from(10),
+                        DfValue::from(20),
+                        DfValue::from(30),
+                        DfValue::from(40),
+                        DfValue::from(50),
+                    ],
+                )
+                .unwrap();
+
+            assert!(
+                sql.contains("a IN (10, 20)"),
+                "should expand first IN array: {sql}"
+            );
+            assert!(sql.contains("b = 1"), "should contain b = 1: {sql}");
+            assert!(
+                sql.contains("c IN (30, 40, 50)"),
+                "should expand second IN array: {sql}"
+            );
+        }
     }
 }

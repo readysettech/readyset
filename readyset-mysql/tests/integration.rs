@@ -3430,3 +3430,188 @@ async fn shallow_cache_prepared_statement_without_parameters() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, mysql_upstream)]
+async fn shallow_cache_equality_and_in_clause() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut conn = Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE shallow_in (a INT, b INT, value INT)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.query_drop(
+        "INSERT INTO shallow_in (a, b, value) VALUES \
+         (1, 10, 100), (1, 20, 200), (1, 30, 300), \
+         (2, 10, 110), (2, 20, 210), (2, 30, 310)",
+    )
+    .await
+    .unwrap();
+    sleep().await;
+
+    conn.query_drop(
+        "CREATE SHALLOW CACHE FROM SELECT a, b, value FROM shallow_in WHERE a = ? AND b IN (?)",
+    )
+    .await
+    .unwrap();
+    sleep().await;
+
+    eventually! {
+        let res: Option<(String, String, String)> = conn
+            .query_first(
+                "EXPLAIN CREATE CACHE FROM SELECT a, b, value FROM shallow_in WHERE a = ? AND b IN (?)",
+            )
+            .await
+            .unwrap();
+        res.map(|r| r.2 == "cached").unwrap_or(false)
+    }
+
+    // First query should miss (no cached data yet)
+    let mut results: Vec<(i32, i32, i32)> = conn
+        .query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (10, 20)")
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 2);
+    results.sort();
+    assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::Upstream);
+
+    // Second identical query should hit
+    let mut results: Vec<(i32, i32, i32)> = conn
+        .query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (10, 20)")
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 2);
+    results.sort();
+    assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    // In set contents should be normalized (sorted)
+    let mut results: Vec<(i32, i32, i32)> = conn
+        .query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (20, 10)")
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 2);
+    results.sort();
+    assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    // Different IN values should miss
+    let mut results: Vec<(i32, i32, i32)> = conn
+        .query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (20, 30)")
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 2);
+    results.sort();
+    assert_eq!(results, vec![(1, 20, 200), (1, 30, 300)]);
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::Upstream);
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, mysql_upstream)]
+async fn shallow_cache_in_clause_prepared() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut conn = Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE shallow_in (a INT, b INT, value INT)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.query_drop(
+        "INSERT INTO shallow_in (a, b, value) VALUES \
+         (1, 10, 100), (1, 20, 200), (1, 30, 300), \
+         (2, 10, 110), (2, 20, 210), (2, 30, 310)",
+    )
+    .await
+    .unwrap();
+    sleep().await;
+
+    conn.query_drop(
+        "CREATE SHALLOW CACHE FROM SELECT a, b, value FROM shallow_in WHERE a = ? AND b IN (?)",
+    )
+    .await
+    .unwrap();
+    sleep().await;
+
+    eventually! {
+        let res: Option<(String, String, String)> = conn
+            .query_first(
+                "EXPLAIN CREATE CACHE FROM SELECT a, b, value FROM shallow_in WHERE a = ? AND b IN (?)",
+            )
+            .await
+            .unwrap();
+        res.map(|r| r.2 == "cached").unwrap_or(false)
+    }
+
+    // First query should miss (no cached data yet)
+    let stmt = conn
+        .prep("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (?, ?)")
+        .await
+        .unwrap();
+    let mut results: Vec<(i32, i32, i32)> = conn.exec(&stmt, (10, 20)).await.unwrap();
+    assert_eq!(results.len(), 2);
+    results.sort();
+    assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::Upstream);
+
+    // Second identical query should hit
+    let mut results: Vec<(i32, i32, i32)> = conn
+        .query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (10, 20)")
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 2);
+    results.sort();
+    assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    // In set contents should be normalized (sorted)
+    let mut results: Vec<(i32, i32, i32)> = conn
+        .query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (20, 10)")
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 2);
+    results.sort();
+    assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    // Prepared statement should also hit cache
+    let mut results: Vec<(i32, i32, i32)> = conn.exec(&stmt, (10, 20)).await.unwrap();
+    assert_eq!(results.len(), 2);
+    results.sort();
+    assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+    // Different IN values should miss
+    let mut results: Vec<(i32, i32, i32)> = conn
+        .query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (20, 30)")
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 2);
+    results.sort();
+    assert_eq!(results, vec![(1, 20, 200), (1, 30, 300)]);
+    let info = last_query_info(&mut conn).await;
+    assert_matches!(info.destination, QueryDestination::Upstream);
+
+    shutdown_tx.shutdown().await;
+}

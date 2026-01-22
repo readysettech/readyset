@@ -112,7 +112,7 @@ use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::{
     AdapterRewriteParams, DfQueryParameters, ParameterizeMode, QueryParameters,
-    convert_placeholders_to_question_marks,
+    ShallowQueryParameters, convert_placeholders_to_question_marks,
 };
 use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -199,7 +199,7 @@ struct PrepareSelectMeta {
 struct PrepareShallowSelectMeta {
     query_id: QueryId,
     stmt: ShallowViewRequest,
-    params: QueryParameters,
+    params: ShallowQueryParameters,
     always: bool,
 }
 
@@ -597,8 +597,8 @@ where
     view_request: Option<ViewCreateRequest>,
     /// Query used for shallow caching.
     shallow: Option<ShallowViewRequest>,
-    /// Query parameters from rewrite_equivalent, used for shallow cache key generation
-    params: Option<QueryParameters>,
+    /// Query parameters from rewrite_shallow, used for shallow cache key generation
+    params: Option<ShallowQueryParameters>,
 }
 
 impl<DB> PreparedStatement<DB>
@@ -1713,21 +1713,14 @@ where
         exec_meta: &'a DB::ExecMeta,
         event: &mut QueryExecutionEvent,
         query_id: &QueryId,
-        query_params: &QueryParameters,
+        query_params: &ShallowQueryParameters,
         refresh: Option<
             &async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
         >,
         view_request: &ShallowViewRequest,
-        dialect: Dialect,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let keys = query_params.make_keys(params)?;
-        let key = match keys.as_slice() {
-            [] => vec![],
-            [key] => key.to_vec(),
-            [..] => {
-                internal!("shallow cache {query_id} query had {} keys", keys.len());
-            }
-        };
+        let merged = query_params.merge_params(params)?.unwrap_or_default();
+        let key = query_params.make_keys_from_merged(&merged)?;
         let res = shallow.get_or_start_insert(query_id, key).await;
 
         match res {
@@ -1740,11 +1733,8 @@ where
             {
                 if let Some(refresh) = refresh {
                     let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await.ok();
-                    let query = adapter_rewrites::literalize_shallow_query(
-                        &view_request.query,
-                        params,
-                        dialect,
-                    )?;
+                    let query =
+                        query_params.literalize_from_merged(&view_request.query, &merged)?;
 
                     let request = ShallowRefreshRequest {
                         query_id: *query_id,
@@ -1762,11 +1752,7 @@ where
             CacheResult::Miss(mut cache)
             | CacheResult::Hit(_, mut cache)
             | CacheResult::HitAndRefresh(_, mut cache) => {
-                let query = adapter_rewrites::literalize_shallow_query(
-                    &view_request.query,
-                    params,
-                    dialect,
-                )?;
+                let query = query_params.literalize_from_merged(&view_request.query, &merged)?;
                 let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await?;
 
                 if let Some(refresh) = refresh
@@ -2144,7 +2130,6 @@ where
                     query_params,
                     self.shallow_refresh_sender.as_ref(),
                     view_request,
-                    self.settings.dialect,
                 )
                 .await
             }
@@ -2550,7 +2535,7 @@ where
                 // Rewrite for shallow.
                 let shallow = match shallow {
                     Ok(mut shallow) => {
-                        adapter_rewrites::rewrite_equivalent_shallow(
+                        adapter_rewrites::rewrite_shallow(
                             &mut shallow,
                             self.noria.rewrite_params(),
                         )?;
@@ -3535,12 +3520,12 @@ where
     fn should_query_shallow(
         &self,
         shallow: Result<ShallowCacheQuery, ReadySetError>,
-    ) -> Option<(QueryId, ShallowViewRequest, QueryParameters, bool)> {
+    ) -> Option<(QueryId, ShallowViewRequest, ShallowQueryParameters, bool)> {
         let Ok(mut shallow) = shallow else {
             return None;
         };
         let Ok(params) =
-            adapter_rewrites::rewrite_equivalent_shallow(&mut shallow, self.noria.rewrite_params())
+            adapter_rewrites::rewrite_shallow(&mut shallow, self.noria.rewrite_params())
         else {
             return None;
         };
@@ -3576,15 +3561,14 @@ where
         req: ShallowViewRequest,
         query: &'a str,
         event: &mut QueryExecutionEvent,
-        params: QueryParameters,
+        params: ShallowQueryParameters,
         refresh: Option<
             &async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
         >,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let query_id = QueryId::from(&req);
         event.query_id = Some(query_id).into();
-        let keys = params.make_keys::<DfValue>(&[])?;
-        let key = keys.into_iter().next().unwrap_or_default().into_owned();
+        let key = params.make_keys(&[])?;
         let res = shallow.get_or_start_insert(&query_id, key).await;
 
         match res {
@@ -4867,7 +4851,7 @@ where
         CacheInner::Id(_) => internal!("Cannot recreate from query ID"),
     };
 
-    adapter_rewrites::rewrite_equivalent_shallow(&mut select_stmt, rewrite_params)?;
+    adapter_rewrites::rewrite_shallow(&mut select_stmt, rewrite_params)?;
 
     let query_id = QueryId::from_shallow_query(&select_stmt, &schema_search_path);
     let name = stmt.name.unwrap_or_else(|| query_id.into());

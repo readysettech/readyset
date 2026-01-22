@@ -15,13 +15,13 @@ use readyset_errors::{
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
     BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, OrderClause,
-    SelectMetadata, SelectStatement,
+    SelectMetadata, SelectStatement, ShallowCacheQuery,
 };
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
 use serde::{Deserialize, Serialize};
 pub use shallow_cache_rewrites::{
-    anonymize_shallow_query, convert_placeholders_to_question_marks, literalize_shallow_query,
-    rewrite_equivalent_shallow,
+    anonymize_shallow_query, convert_placeholders_to_question_marks, literalize_shallow_prepared,
+    literalize_shallow_query, rewrite_shallow,
 };
 use tracing::{trace, trace_span};
 
@@ -58,6 +58,39 @@ pub struct QueryParameters {
     dialect: Dialect,
     reordered_placeholders: Option<Vec<usize>>,
     auto_parameters: Vec<(usize, Literal)>,
+}
+
+/// Tracks an IN/NOT IN clause that becomes a single array parameter for shallow caching.
+///
+/// For shallow caching, we don't explode IN values into separate cache keys. Instead, we treat
+/// the entire IN list as a single `DfValue::Array` parameter. This allows queries with different
+/// IN set sizes (e.g., `IN (1,2,3)` vs `IN (1,2,3,4)`) to share the same normalized query form.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct InArrayParam {
+    /// Index in the parameter list where the array value should go.
+    /// After autoparameterization, this is where the first IN value would appear.
+    pub param_index: usize,
+    /// Number of original IN values to collect into the array.
+    pub value_count: usize,
+}
+
+/// Query parameters specialized for shallow caching.
+///
+/// Unlike [`QueryParameters`] which is used for deep caching (where IN clauses are exploded into
+/// multiple lookup keys), this treats IN clause values as single array parameters. This enables
+/// queries with different IN set sizes to share the same `QueryId` and cache entry.
+///
+/// Construct a [`ShallowQueryParameters`] by calling
+/// [`rewrite_shallow`], then pass the list of user-provided parameters
+/// to [`ShallowQueryParameters::make_keys`] to generate a single cache key with array-valued
+/// parameters.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct ShallowQueryParameters {
+    dialect: Dialect,
+    reordered_placeholders: Option<Vec<usize>>,
+    auto_parameters: Vec<(usize, Literal)>,
+    /// IN/NOT IN clauses that become array parameters
+    in_array_params: Vec<InArrayParam>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -269,6 +302,39 @@ pub fn rewrite_query(
     rewrite_for_readyset(query, flags, params)
 }
 
+/// Reorder params and splice in auto_parameters. Returns `None` if result would be empty.
+fn prepare_params<T>(
+    dialect: Dialect,
+    reordered_placeholders: &Option<Vec<usize>>,
+    auto_parameters: &[(usize, Literal)],
+    params: &[T],
+) -> ReadySetResult<Option<Vec<T>>>
+where
+    T: Clone + TryFromDialect<Literal> + Debug + Default + PartialEq,
+{
+    // Reorder parameters if numbered placeholders were out of order
+    let params = if let Some(order_map) = reordered_placeholders {
+        Cow::Owned(reorder_params(params, order_map)?)
+    } else {
+        Cow::Borrowed(params)
+    };
+
+    if params.is_empty() && auto_parameters.is_empty() {
+        return Ok(None);
+    }
+
+    // Convert auto_parameters literals to target type
+    let auto_parameters = auto_parameters
+        .iter()
+        .map(|(i, lit)| -> ReadySetResult<_> { Ok((*i, lit.clone().try_into_dialect(dialect)?)) })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Splice auto parameters into user-provided parameters
+    Ok(Some(
+        splice_auto_parameters(&params, &auto_parameters).into_owned(),
+    ))
+}
+
 fn make_keys<'param, T>(
     dialect: Dialect,
     reordered_placeholders: &Option<Vec<usize>>,
@@ -280,15 +346,15 @@ fn make_keys<'param, T>(
 where
     T: Clone + TryFromDialect<Literal> + Debug + Default + PartialEq,
 {
+    // Reorder parameters first (before pagination stripping)
     let params = if let Some(order_map) = reordered_placeholders {
         Cow::Owned(reorder_params(params, order_map)?)
     } else {
         Cow::Borrowed(params)
     };
 
-    let mut params = params.as_ref();
-
-    if let Some(pagination_parameters) = pagination_parameters {
+    // Strip pagination params from the end if using fallback pagination
+    let params: &[T] = if let Some(pagination_parameters) = pagination_parameters {
         let AdapterPaginationParams {
             limit_clause,
             force_paginate_in_adapter,
@@ -297,26 +363,34 @@ where
         if *force_paginate_in_adapter {
             // When fallback pagination is used, remove the parameters for offset and limit from the
             // list
+            let mut end = params.len();
             if matches!(limit_clause.offset(), Some(Literal::Placeholder(_))) {
                 // Skip parameter for offset
-                params = &params[..params.len() - 1];
+                end -= 1;
             }
             if matches!(limit_clause.limit(), Some(Literal::Placeholder(_))) {
                 // Skip parameter for limit
-                params = &params[..params.len() - 1];
+                end -= 1;
             }
+            &params[..end]
+        } else {
+            &params
         }
-    }
+    } else {
+        &params
+    };
 
     if params.is_empty() && auto_parameters.is_empty() {
         return Ok(vec![]);
     }
 
+    // Convert auto_parameters literals to target type
     let auto_parameters = auto_parameters
         .iter()
         .map(|(i, lit)| -> ReadySetResult<_> { Ok((*i, lit.clone().try_into_dialect(dialect)?)) })
         .collect::<Result<Vec<_>, _>>()?;
 
+    // Splice auto parameters into user-provided parameters
     let params = splice_auto_parameters(params, &auto_parameters);
 
     if let Some(rewritten_in_conditions) = rewritten_in_conditions
@@ -331,19 +405,129 @@ where
     }
 }
 
-impl QueryParameters {
-    pub fn make_keys<'param, T>(&self, params: &'param [T]) -> ReadySetResult<Vec<Cow<'param, [T]>>>
-    where
-        T: Clone + TryFromDialect<Literal> + Debug + Default + PartialEq,
-    {
-        make_keys(
+impl ShallowQueryParameters {
+    /// Creates a new `ShallowQueryParameters` instance.
+    pub fn new(
+        dialect: Dialect,
+        reordered_placeholders: Option<Vec<usize>>,
+        auto_parameters: Vec<(usize, Literal)>,
+        in_array_params: Vec<InArrayParam>,
+    ) -> Self {
+        Self {
+            dialect,
+            reordered_placeholders,
+            auto_parameters,
+            in_array_params,
+        }
+    }
+
+    /// Merge auto_parameters with user-provided params, returning the full parameter list.
+    ///
+    /// Returns `None` when both user params and auto_parameters are empty (parameterless query).
+    /// The returned vec can be passed to [`make_keys_from_merged`] and [`literalize_from_merged`]
+    /// to avoid recomputing the merge.
+    pub fn merge_params(&self, user_params: &[DfValue]) -> ReadySetResult<Option<Vec<DfValue>>> {
+        prepare_params(
             self.dialect,
             &self.reordered_placeholders,
             &self.auto_parameters,
-            None,
-            None,
-            params,
+            user_params,
         )
+    }
+
+    /// Generate a cache key for shallow caching.
+    ///
+    /// Collects IN clause values into single `DfValue::Array` parameters, producing exactly one
+    /// cache key.
+    ///
+    /// # Example
+    ///
+    /// For a query `SELECT * FROM foo WHERE x IN (1, 2, 3) AND y = 'test'`:
+    /// - Produces 1 key: `[Array([1, 2, 3]), "test"]`
+    pub fn make_keys(&self, params: &[DfValue]) -> ReadySetResult<Vec<DfValue>> {
+        let Some(merged) = self.merge_params(params)? else {
+            return Ok(vec![]);
+        };
+        self.make_keys_from_merged(&merged)
+    }
+
+    /// Generate a cache key from pre-merged parameters.
+    ///
+    /// Collects IN clause values into `DfValue::Array` parameters and sorts them for
+    /// consistent cache keys.
+    pub fn make_keys_from_merged(&self, merged: &[DfValue]) -> ReadySetResult<Vec<DfValue>> {
+        if merged.is_empty() {
+            return Ok(vec![]);
+        }
+
+        if self.in_array_params.is_empty() {
+            return Ok(merged.to_vec());
+        }
+
+        debug_assert!(
+            self.in_array_params.is_sorted_by_key(|p| p.param_index),
+            "in_array_params must be sorted by param_index"
+        );
+
+        let mut result = Vec::with_capacity(merged.len());
+        let mut src_idx = 0;
+
+        for in_param in &self.in_array_params {
+            let start = in_param.param_index;
+            let end = start + in_param.value_count;
+
+            if end > merged.len() {
+                return Err(invalid_query_err!(
+                    "IN array parameter out of bounds: expected {} values starting at index {}, \
+                     but only {} parameters available",
+                    in_param.value_count,
+                    start,
+                    merged.len()
+                ));
+            }
+
+            // Copy non-IN params before this IN array
+            result.extend(merged[src_idx..start].iter().cloned());
+
+            // Collect IN array values, sort for consistent cache keys, and wrap in Array
+            let mut array_values: Vec<DfValue> = merged[start..end].to_vec();
+            array_values.sort();
+            result.push(DfValue::from(array_values));
+            src_idx = end;
+        }
+
+        // Copy remaining params after last IN array
+        result.extend(merged[src_idx..].iter().cloned());
+
+        Ok(result)
+    }
+
+    /// Literalize the normalized query for a prepared statement execution.
+    ///
+    /// Merges auto_parameters with user-provided params, expands collapsed IN arrays,
+    /// and produces a fully literalized SQL string suitable for upstream execution.
+    pub fn literalize_for_execute(
+        &self,
+        query: &ShallowCacheQuery,
+        user_params: &[DfValue],
+    ) -> ReadySetResult<String> {
+        let merged = match self.merge_params(user_params)? {
+            Some(m) => m,
+            None => return Ok(format!("{}", &**query)),
+        };
+        self.literalize_from_merged(query, &merged)
+    }
+
+    /// Literalize a query from pre-merged parameters.
+    ///
+    /// Expands collapsed IN arrays and substitutes all placeholders with literal values,
+    /// producing a fully literalized SQL string suitable for upstream execution.
+    pub fn literalize_from_merged(
+        &self,
+        query: &ShallowCacheQuery,
+        merged: &[DfValue],
+    ) -> ReadySetResult<String> {
+        literalize_shallow_prepared(query, merged, &self.in_array_params, self.dialect)
     }
 }
 
@@ -869,48 +1053,6 @@ fn splice_auto_parameters<'param, T: Clone>(
     }
     res.extend(params.to_vec());
     Cow::Owned(res)
-}
-
-struct LiteralizeVisitor {
-    params: Vec<Literal>,
-}
-
-impl<'ast> VisitorMut<'ast> for LiteralizeVisitor {
-    type Error = ReadySetError;
-
-    fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
-        if let Literal::Placeholder(ItemPlaceholder::DollarNumber(n)) = literal {
-            let idx = (*n as usize)
-                .checked_sub(1)
-                .ok_or_else(|| invalid_query_err!("Invalid placeholder number: ${}", n))?;
-
-            let param = self.params.get(idx).ok_or_else(|| {
-                invalid_query_err!(
-                    "Missing parameter for placeholder ${n}: only {} parameters provided",
-                    self.params.len()
-                )
-            })?;
-
-            *literal = param.clone();
-        }
-        Ok(())
-    }
-}
-
-/// Replace all dollar-number placeholders in a query with the provided parameter values.
-///
-/// This operation is the inverse of autoparameterization.
-pub fn literalize(query: &SelectStatement, params: &[DfValue]) -> ReadySetResult<SelectStatement> {
-    let mut query = query.clone();
-    let params = params
-        .iter()
-        .cloned()
-        .map(Literal::try_from)
-        .collect::<ReadySetResult<_>>()?;
-
-    let mut visitor = LiteralizeVisitor { params };
-    visitor.visit_select_statement(&mut query)?;
-    Ok(query)
 }
 
 #[cfg(test)]
@@ -2106,98 +2248,6 @@ mod tests {
                 keys,
                 vec![vec![1.into(), 1.into()], vec![1.into(), 2.into()]]
             );
-        }
-
-        #[test]
-        fn literalize_basic() {
-            let query = parse_select_statement_postgres("SELECT * FROM users WHERE id = $1");
-            let params = vec![DfValue::from(42)];
-            let result = literalize(&query, &params).unwrap();
-            let expected = parse_select_statement_postgres("SELECT * FROM users WHERE id = 42");
-            assert_eq!(result, expected);
-        }
-
-        #[test]
-        fn literalize_multiple_parameters() {
-            let query = parse_select_statement_postgres(
-                "SELECT * FROM users WHERE id = $1 AND name = $2 AND age = $3",
-            );
-            let params = vec![DfValue::from(42), DfValue::from("Alice"), DfValue::from(25)];
-            let result = literalize(&query, &params).unwrap();
-            let expected = parse_select_statement_postgres(
-                "SELECT * FROM users WHERE id = 42 AND name = 'Alice' AND age = 25",
-            );
-            assert_eq!(result, expected);
-        }
-
-        #[test]
-        fn literalize_non_sequential() {
-            let query = parse_select_statement_postgres(
-                "SELECT * FROM t WHERE x = $3 AND y = $1 AND z = $2",
-            );
-            let params = vec![DfValue::from(10), DfValue::from(20), DfValue::from(30)];
-            let result = literalize(&query, &params).unwrap();
-            let expected = parse_select_statement_postgres(
-                "SELECT * FROM t WHERE x = 30 AND y = 10 AND z = 20",
-            );
-            assert_eq!(result, expected);
-        }
-
-        #[test]
-        fn literalize_reused_parameters() {
-            let query = parse_select_statement_postgres(
-                "SELECT * FROM t WHERE x = $1 AND y = $1 AND z = $1",
-            );
-            let params = vec![DfValue::from(42)];
-            let result = literalize(&query, &params).unwrap();
-            let expected = parse_select_statement_postgres(
-                "SELECT * FROM t WHERE x = 42 AND y = 42 AND z = 42",
-            );
-            assert_eq!(result, expected);
-        }
-
-        #[test]
-        fn literalize_with_limit_offset() {
-            let query =
-                parse_select_statement_postgres("SELECT * FROM t WHERE id = $1 LIMIT $2 OFFSET $3");
-            let params = vec![DfValue::from(5), DfValue::from(10), DfValue::from(20)];
-            let result = literalize(&query, &params).unwrap();
-            let expected =
-                parse_select_statement_postgres("SELECT * FROM t WHERE id = 5 LIMIT 10 OFFSET 20");
-            assert_eq!(result, expected);
-        }
-
-        #[test]
-        fn literalize_missing_parameter() {
-            let query = parse_select_statement_postgres("SELECT * FROM t WHERE x = $1 AND y = $2");
-            let params = vec![DfValue::from(42)];
-            let result = literalize(&query, &params);
-            assert!(matches!(
-                result,
-                Err(e) if e.to_string().contains("Missing parameter for placeholder $2")
-            ));
-        }
-
-        #[test]
-        fn literalize_no_parameters() {
-            let query = parse_select_statement_postgres("SELECT * FROM users WHERE id = 42");
-            let params: Vec<DfValue> = vec![];
-            let result = literalize(&query, &params).unwrap();
-            let expected = parse_select_statement_postgres("SELECT * FROM users WHERE id = 42");
-            assert_eq!(result, expected);
-        }
-
-        #[test]
-        fn literalize_in_subquery() {
-            let query = parse_select_statement_postgres(
-                "SELECT * FROM t WHERE id IN (SELECT id FROM s WHERE x = $1)",
-            );
-            let params = vec![DfValue::from(10)];
-            let result = literalize(&query, &params).unwrap();
-            let expected = parse_select_statement_postgres(
-                "SELECT * FROM t WHERE id IN (SELECT id FROM s WHERE x = 10)",
-            );
-            assert_eq!(result, expected);
         }
 
         /// Test that excessive IN clause combinations are rejected
