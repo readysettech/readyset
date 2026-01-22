@@ -424,6 +424,14 @@ impl QueryStatusCache {
         }
     }
 
+    /// Try to return the query status of a query.  Does not modify the query status cache.
+    pub fn try_query_status<Q>(&self, q: &Q) -> Option<QueryStatus>
+    where
+        Q: QueryStatusKey,
+    {
+        q.with_status(self, |s| s.cloned())
+    }
+
     /// Updates the transition time in the execution info for the given query.
     pub fn update_transition_time<Q>(&self, q: &Q, transition: &std::time::Instant)
     where
