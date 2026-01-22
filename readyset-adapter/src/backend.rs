@@ -3551,20 +3551,56 @@ where
         res
     }
 
+    /// Determine if this query should be routed to a shallow cache.
+    ///
+    /// Return query and parameters if it should; otherwise return None.
+    fn should_query_shallow(
+        &self,
+        shallow: Result<SqlQuery, ReadySetError>,
+    ) -> Option<(QueryId, ViewCreateRequest, QueryParameters)> {
+        let Ok(SqlQuery::Select(mut shallow)) = shallow else {
+            return None;
+        };
+        let Ok(params) = adapter_rewrites::rewrite_equivalent(
+            &mut shallow,
+            self.noria.rewrite_params(),
+            ParameterizeMode::Full,
+        ) else {
+            return None;
+        };
+
+        let shallow = ViewCreateRequest::new(shallow, self.noria.schema_search_path().to_owned());
+        let (query_id, migration) = self
+            .state
+            .query_status_cache
+            .try_query_migration_state(&shallow);
+        if migration != Some(MigrationState::Successful(CacheType::Shallow)) {
+            // Shallow cache doesn't exist.
+            return None;
+        }
+
+        let always = self
+            .state
+            .query_status_cache
+            .try_query_status(&shallow)
+            .is_some_and(|status| status.always);
+        if self.state.proxy_state.should_proxy() && !always {
+            // Shallow cache exists, but we're proxying anyway.
+            return None;
+        }
+
+        Some((query_id, shallow, params))
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn query_shallow<'a>(
         noria: &'a mut NoriaConnector,
         upstream: Option<&'a mut DB>,
         shallow: &Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
-        settings: &BackendSettings,
-        state: &mut BackendState<DB>,
         req: ViewCreateRequest,
         query: &'a str,
         event: &mut QueryExecutionEvent,
         params: QueryParameters,
-        sampler_tx: Option<
-            &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
-        >,
         refresh: Option<
             &async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
         >,
@@ -3616,12 +3652,7 @@ where
                 };
                 Self::query_fallback(upstream, query, event, Some(cache)).await
             }
-            CacheResult::NotCached => {
-                Self::try_noria_adhoc_select(
-                    noria, upstream, settings, state, query, req, params, event, sampler_tx,
-                )
-                .await
-            }
+            CacheResult::NotCached => Err(ReadySetError::NoCacheForQuery.into()),
         }
     }
 
@@ -4167,12 +4198,51 @@ where
         let query_log_sender = self.query_log_sender.clone();
         let slowlog = self.settings.slowlog;
 
-        let parse_result = {
+        let (parsed, shallow_parsed) = {
             let _t = event.start_parse_timer();
-            self.parse_query(query)
+            let parsed = self.parse_query(query);
+            (parsed.clone(), parsed)
         };
 
-        let result = match parse_result {
+        if let Some((query_id, shallow, params)) = self.should_query_shallow(shallow_parsed) {
+            let result = Self::query_shallow(
+                &mut self.noria,
+                self.upstream.as_mut(),
+                &self.shallow,
+                shallow,
+                query,
+                &mut event,
+                params,
+                self.shallow_refresh_sender.as_ref(),
+            )
+            .await;
+
+            event.sql_type = SqlQueryType::Read;
+            event.query_id = QueryIdWrapper::Calculated(query_id);
+            if let Err(e) = &result {
+                event.set_noria_error(&internal_err!("{e}"));
+            }
+
+            self.last_query = event.destination.as_ref().map(|d| QueryInfo {
+                destination: d.clone(),
+                noria_error: event
+                    .noria_error
+                    .as_ref()
+                    .map(|e| e.to_string())
+                    .unwrap_or_default(),
+            });
+
+            log_query(
+                query_log_sender.as_ref(),
+                event,
+                slowlog,
+                self.settings.dialect,
+            );
+
+            return result;
+        }
+
+        let result = match parsed {
             // Parse error, but no fallback exists
             Err(e) if !self.has_fallback() => {
                 error!("{}", e);
@@ -4272,7 +4342,11 @@ where
                 }
             }
             Ok(SqlQuery::Select(mut stmt)) => {
-                let params = match self.rewrite_equivalent(&mut stmt, self.noria.rewrite_params()) {
+                let params = match adapter_rewrites::rewrite_equivalent(
+                    &mut stmt,
+                    self.noria.rewrite_params(),
+                    ParameterizeMode::Auto,
+                ) {
                     Ok(params) => params,
                     Err(_) if self.has_fallback() => {
                         let result =
@@ -4296,7 +4370,6 @@ where
                     ViewCreateRequest::new(stmt, self.noria.schema_search_path().to_owned());
 
                 event.sql_type = SqlQueryType::Read;
-
                 if let Some(QueryLogMode::Verbose) = self.query_log_mode {
                     event.query = Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
                 }
@@ -4306,36 +4379,24 @@ where
                 event.query_id =
                     QueryIdWrapper::Uncalculated(self.noria.schema_search_path().into());
 
-                let should_proxy = self.state.proxy_state.should_proxy()
-                    && !self
-                        .state
-                        .query_status_cache
-                        .query_status(&view_request)
-                        .always;
-
-                if should_proxy {
-                    Self::query_fallback(self.upstream.as_mut(), query, &mut event, None).await
+                let sampler_tx = if !self.is_internal_connection {
+                    self.sampler_tx.as_ref()
                 } else {
-                    let sampler_tx = if !self.is_internal_connection {
-                        self.sampler_tx.as_ref()
-                    } else {
-                        None
-                    };
-                    Self::query_shallow(
-                        &mut self.noria,
-                        self.upstream.as_mut(),
-                        &self.shallow,
-                        &self.settings,
-                        &mut self.state,
-                        view_request,
-                        query,
-                        &mut event,
-                        params,
-                        sampler_tx,
-                        self.shallow_refresh_sender.as_ref(),
-                    )
-                    .await
-                }
+                    None
+                };
+
+                Self::try_noria_adhoc_select(
+                    &mut self.noria,
+                    self.upstream.as_mut(),
+                    &self.settings,
+                    &mut self.state,
+                    query,
+                    view_request,
+                    params,
+                    &mut event,
+                    sampler_tx,
+                )
+                .await
             }
             Ok(SqlQuery::Deallocate(stmt)) => Ok(Self::handle_deallocate_statement(stmt)),
             Ok(_) if self.state.proxy_state.should_proxy() => {
