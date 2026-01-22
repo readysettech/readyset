@@ -177,6 +177,8 @@ enum PrepareMeta {
     Write { stmt: SqlQuery },
     /// A read (Select; may be extended in the future)
     Select(PrepareSelectMeta),
+    /// A shallow read.
+    ShallowSelect(PrepareShallowSelectMeta),
     /// A transaction boundary (Start, Commit, Rollback)
     Transaction { stmt: SqlQuery },
     /// A set command
@@ -187,19 +189,17 @@ enum PrepareMeta {
 struct PrepareSelectMeta {
     stmt: SelectStatement,
     rewritten: SelectStatement,
-    backend: PrepareSelectBackend,
+    must_migrate: bool,
+    should_do_noria: bool,
+    always: bool,
 }
 
 #[derive(Debug)]
-enum PrepareSelectBackend {
-    Deep {
-        must_migrate: bool,
-        should_do_noria: bool,
-        always: bool,
-    },
-    Shallow {
-        params: QueryParameters,
-    },
+struct PrepareShallowSelectMeta {
+    query_id: QueryId,
+    stmt: ViewCreateRequest,
+    params: QueryParameters,
+    always: bool,
 }
 
 /// How to behave when receiving unsupported `SET` statements
@@ -594,6 +594,8 @@ where
     /// If statement was successfully rewritten, will store all information necessary to install
     /// the view in readyset
     view_request: Option<ViewCreateRequest>,
+    /// Query used for shallow caching.
+    shallow: Option<ViewCreateRequest>,
     /// Query parameters from rewrite_equivalent, used for shallow cache key generation
     params: Option<QueryParameters>,
 }
@@ -632,6 +634,12 @@ where
         self.view_request
             .as_ref()
             .ok_or_else(|| internal_err!("Expected ViewRequest for CachedPreparedStatement"))
+    }
+
+    fn as_shallow(&self) -> ReadySetResult<&ViewCreateRequest> {
+        self.shallow
+            .as_ref()
+            .ok_or_else(|| internal_err!("Missing shallow query"))
     }
 }
 
@@ -1109,25 +1117,18 @@ where
         statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
-        let (do_noria, do_migrate, shallow) = match &select_meta.backend {
-            PrepareSelectBackend::Deep {
-                should_do_noria,
-                must_migrate,
-                ..
-            } => (*should_do_noria, *must_migrate, false),
-            PrepareSelectBackend::Shallow { .. } => (false, false, true),
-        };
-
         let up_prep: OptionFuture<_> = self
             .upstream
             .as_mut()
             .map(|u| u.prepare(query, data, statement_type))
             .into();
-        let noria_prep: OptionFuture<_> = do_noria
-            .then_some(
-                self.noria
-                    .prepare_select(select_meta.stmt.clone(), do_migrate, None),
-            )
+        let noria_prep: OptionFuture<_> = select_meta
+            .should_do_noria
+            .then_some(self.noria.prepare_select(
+                select_meta.stmt.clone(),
+                select_meta.must_migrate,
+                None,
+            ))
             .into();
 
         let (upstream_res, noria_res) = future::join(up_prep, noria_prep).await;
@@ -1207,7 +1208,6 @@ where
                 PrepareResultInner::Noria(noria_res)
             }
             (None, Some(Err(noria_err))) => return Err(noria_err.into()),
-            (Some(upstream_res), _) if shallow => PrepareResultInner::Shallow(upstream_res?),
             (Some(upstream_res), _) => PrepareResultInner::Upstream(upstream_res?),
             (None, None) => return Err(ReadySetError::Unsupported(query.to_string()).into()),
         };
@@ -1294,73 +1294,17 @@ where
         Ok(res)
     }
 
-    /// A simple wrapper around rewrite_equivalent that tries a couple parameterization strategies.
-    ///
-    /// We first rewrite the query to a fully-parameterized form to see if a corresponding shallow
-    /// cache exists for that form.  If it does, we use that rewriten query and return all literals
-    /// as parameters.
-    ///
-    /// Otherwise, we proceed with the typical autoparameterization process, only parameterizing a
-    /// subset of placeholder positions we expect to be valid for deep caching.
-    fn rewrite_equivalent(
-        &mut self,
-        stmt: &mut SelectStatement,
-        flags: AdapterRewriteParams,
-    ) -> ReadySetResult<QueryParameters> {
-        let backup = stmt.clone();
-
-        let params = adapter_rewrites::rewrite_equivalent(stmt, flags, ParameterizeMode::Full)?;
-
-        let query_id = QueryId::from_select(stmt, self.noria.schema_search_path());
-        if self.shallow.exists(None, Some(&query_id)) {
-            // Stick with the fully-parameterized form.
-            return Ok(params);
-        }
-
-        // Go back to the regular autoparameterization form.
-        *stmt = backup;
-        let params = adapter_rewrites::rewrite_equivalent(stmt, flags, ParameterizeMode::Auto)?;
-        Ok(params)
-    }
-
     /// Provides metadata required to prepare a select query
     fn plan_prepare_select(&mut self, stmt: SelectStatement) -> PrepareMeta {
         let mut rewritten = stmt.clone();
-        let params = match self.rewrite_equivalent(&mut rewritten, self.noria.rewrite_params()) {
-            Ok(params) => params,
-            Err(e) => {
-                warn!(
-                    statement = %Sensitive(&stmt.display(self.settings.dialect)),
-                    "This statement could not be rewritten for Readyset"
-                );
-                return PrepareMeta::FailedToRewrite(e);
-            }
+        if let Err(e) = adapter_rewrites::rewrite_query(&mut rewritten, self.noria.rewrite_params())
+        {
+            warn!(
+                statement = %Sensitive(&stmt.display(self.settings.dialect)),
+                "This statement could not be rewritten for Readyset"
+            );
+            return PrepareMeta::FailedToRewrite(e);
         };
-
-        let query_id = QueryId::from_select(&rewritten, self.noria.schema_search_path());
-
-        if self.shallow.exists(None, Some(&query_id)) {
-            return PrepareMeta::Select(PrepareSelectMeta {
-                stmt,
-                rewritten,
-                backend: PrepareSelectBackend::Shallow { params },
-            });
-        }
-
-        match adapter_rewrites::rewrite_for_readyset(
-            &mut rewritten,
-            self.noria.rewrite_params(),
-            params,
-        ) {
-            Ok(_params) => {}
-            Err(e) => {
-                warn!(
-                    statement = %Sensitive(&stmt.display(self.settings.dialect)),
-                    "This statement could not be rewritten for Readyset"
-                );
-                return PrepareMeta::FailedToRewrite(e);
-            }
-        }
 
         let status = self
             .state
@@ -1377,41 +1321,45 @@ where
             PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
                 rewritten,
-                backend: PrepareSelectBackend::Deep {
-                    // For select statements only InRequestPath should trigger migrations
-                    // synchronously, or if no upstream is present.
-                    must_migrate: self.settings.migration_mode == MigrationMode::InRequestPath
-                        || !self.has_fallback(),
-                    should_do_noria: should_do_readyset,
-                    always: status.always,
-                },
+                // For select statements only InRequestPath should trigger migrations
+                // synchronously, or if no upstream is present.
+                must_migrate: self.settings.migration_mode == MigrationMode::InRequestPath
+                    || !self.has_fallback(),
+                should_do_noria: should_do_readyset,
+                always: status.always,
             })
         }
     }
 
     /// Provides metadata required to prepare a query
     async fn plan_prepare(&mut self, query: &str, event: &mut QueryExecutionEvent) -> PrepareMeta {
-        if self.state.proxy_state == ProxyState::ProxyAlways {
-            return PrepareMeta::Proxy;
-        }
-
-        let parse_result = match self.state.parsed_query_cache.get(query) {
-            Some(cached_query) => Ok(cached_query.clone()),
+        let (parsed, shallow_parsed) = match self.state.parsed_query_cache.get(query) {
+            Some(cached_query) => (Ok(cached_query.clone()), Ok(cached_query.clone())),
             None => {
-                let res = {
+                let (parsed, shallow_parsed) = {
                     let _t = event.start_parse_timer();
-                    self.parse_query(query)
+                    let parsed = self.parse_query(query);
+                    (parsed.clone(), parsed)
                 };
-                if res.is_ok() {
+                if let Ok(parsed) = &parsed {
                     self.state
                         .parsed_query_cache
-                        .put(query.to_string(), res.clone().unwrap());
+                        .put(query.to_string(), parsed.clone());
                 }
-                res
+                (parsed, shallow_parsed)
             }
         };
 
-        match parse_result {
+        if let Some((query_id, stmt, params, always)) = self.should_query_shallow(shallow_parsed) {
+            return PrepareMeta::ShallowSelect(PrepareShallowSelectMeta {
+                query_id,
+                stmt,
+                params,
+                always,
+            });
+        }
+
+        match parsed {
             Ok(SqlQuery::Select(stmt)) => self.plan_prepare_select(stmt),
             Ok(
                 query @ SqlQuery::Insert(_)
@@ -1459,6 +1407,16 @@ where
             PrepareMeta::Select(select_meta) => {
                 self.mirror_prepare(select_meta, query, data, statement_type, event)
                     .await
+            }
+            PrepareMeta::ShallowSelect(..) => {
+                let Some(upstream) = self.upstream.as_mut() else {
+                    internal!("Shallow cache needs upstream");
+                };
+                let _t = event.start_upstream_timer();
+                upstream
+                    .prepare(query, data, statement_type)
+                    .await
+                    .map(PrepareResultInner::Shallow)
             }
             PrepareMeta::Write { stmt } => {
                 self.prepare_write(query, stmt, data, statement_type, event)
@@ -1514,6 +1472,7 @@ where
                 execution_info: None,
                 parsed_query: Some(Arc::new(stmt)),
                 view_request: None,
+                shallow: None,
                 always: false,
                 params: None,
             },
@@ -1524,18 +1483,16 @@ where
                 execution_info: None,
                 parsed_query: Some(Arc::new(SqlQuery::Set(stmt))),
                 view_request: None,
+                shallow: None,
                 always: false,
                 params: None,
             },
             PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
                 rewritten,
-                backend,
+                always,
+                ..
             }) => {
-                let (always, params) = match &backend {
-                    PrepareSelectBackend::Deep { always, .. } => (*always, None),
-                    PrepareSelectBackend::Shallow { params, .. } => (false, Some(params.clone())),
-                };
                 let request =
                     ViewCreateRequest::new(rewritten, self.noria.schema_search_path().to_owned());
                 let migration_state = self
@@ -1549,10 +1506,27 @@ where
                     execution_info: None,
                     parsed_query: Some(Arc::new(SqlQuery::Select(stmt))),
                     view_request: Some(request),
+                    shallow: None,
                     always,
-                    params,
+                    params: None,
                 }
             }
+            PrepareMeta::ShallowSelect(PrepareShallowSelectMeta {
+                query_id,
+                stmt,
+                params,
+                always,
+            }) => PreparedStatement {
+                query_id: Some(query_id),
+                prep: PrepareResult::new(statement_id, prep),
+                migration_state: MigrationState::Successful(CacheType::Shallow),
+                execution_info: None,
+                parsed_query: None,
+                view_request: None,
+                shallow: Some(stmt),
+                always,
+                params: Some(params),
+            },
             PrepareMeta::Proxy
             | PrepareMeta::FailedToParse
             | PrepareMeta::FailedToRewrite(..)
@@ -1563,6 +1537,7 @@ where
                 execution_info: None,
                 parsed_query: None,
                 view_request: None,
+                shallow: None,
                 always: false,
                 params: None,
             },
@@ -1820,10 +1795,7 @@ where
                 )
                 .await
             }
-            CacheResult::NotCached => {
-                Self::execute_upstream(upstream, prep, params, exec_meta, None, event, false, None)
-                    .await
-            }
+            CacheResult::NotCached => Err(ReadySetError::NoCacheForQuery.into()),
         }
     }
 
@@ -2074,16 +2046,8 @@ where
                     self.settings.fallback_recovery_duration,
                 );
 
-                let always_readyset = cached_statement
-                    .view_request
-                    .as_ref()
-                    .map(|stmt| self.state.query_status_cache.query_status(stmt).always)
-                    .unwrap_or(false);
-
                 if cached_statement.is_unsupported_execute() {
                     true
-                } else if always_readyset {
-                    false
                 } else {
                     is_recovering || self.state.proxy_state.should_proxy()
                 }
@@ -2157,7 +2121,7 @@ where
                     .params
                     .as_ref()
                     .ok_or_else(|| internal_err!("Shallow prepare missing params"))?;
-                let view_request = cached_statement.as_view_request()?;
+                let view_request = cached_statement.as_shallow()?;
 
                 Self::execute_shallow(
                     Self::upstream_mut(upstream)?,
@@ -3557,7 +3521,7 @@ where
     fn should_query_shallow(
         &self,
         shallow: Result<SqlQuery, ReadySetError>,
-    ) -> Option<(QueryId, ViewCreateRequest, QueryParameters)> {
+    ) -> Option<(QueryId, ViewCreateRequest, QueryParameters, bool)> {
         let Ok(SqlQuery::Select(mut shallow)) = shallow else {
             return None;
         };
@@ -3589,7 +3553,7 @@ where
             return None;
         }
 
-        Some((query_id, shallow, params))
+        Some((query_id, shallow, params, always))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -4204,7 +4168,7 @@ where
             (parsed.clone(), parsed)
         };
 
-        if let Some((query_id, shallow, params)) = self.should_query_shallow(shallow_parsed) {
+        if let Some((query_id, shallow, params, _)) = self.should_query_shallow(shallow_parsed) {
             let result = Self::query_shallow(
                 &mut self.noria,
                 self.upstream.as_mut(),
