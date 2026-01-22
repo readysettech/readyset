@@ -151,13 +151,26 @@ pub enum FunctionExpr {
         allow_duplicate_keys: bool,
     },
 
-    /// Generic function call expression
+    /// Generic function call expression for built-in functions
     Call {
         /// Name of the function, always lowercased even if we don't recognize it.
         name: SqlIdentifier,
         /// Arguments to the function, or `None` if called without parentheses. With parens but no
         /// arguments is `Some(vec![])`.
         arguments: Option<Vec<Expr>>,
+    },
+
+    /// User-defined function call, optionally schema-qualified
+    ///
+    /// This variant is used when we parse a function call that could be a UDF
+    /// (i.e., schema-qualified calls like `myschema.func()`).
+    Udf {
+        /// Optional schema qualification (e.g., `myschema.func()`)
+        schema: Option<SqlIdentifier>,
+        /// Function name
+        name: SqlIdentifier,
+        /// Arguments to the function (always requires parentheses, unlike `Call`)
+        arguments: Vec<Expr>,
     },
 }
 
@@ -281,15 +294,41 @@ impl FunctionExpr {
             FunctionExpr::Call {
                 name,
                 arguments: Some(arguments),
-            } => format!(
-                "{}({})",
+            } => {
+                format!(
+                    "{}({})",
+                    name,
+                    arguments
+                        .iter()
+                        .map(|arg| arg.alias(dialect))
+                        .collect::<Option<Vec<_>>>()?
+                        .join(", ")
+                )
+            }
+            FunctionExpr::Udf {
+                schema,
                 name,
-                arguments
-                    .iter()
-                    .map(|arg| arg.alias(dialect))
-                    .collect::<Option<Vec<_>>>()?
-                    .join(", ") //FIXME
-            ),
+                arguments,
+            } => {
+                let qualified_name = if let Some(s) = schema {
+                    format!(
+                        "{}.{}",
+                        dialect.quote_identifier(s),
+                        dialect.quote_identifier(name)
+                    )
+                } else {
+                    dialect.quote_identifier(name).to_string()
+                };
+                format!(
+                    "{}({})",
+                    qualified_name,
+                    arguments
+                        .iter()
+                        .map(|arg| arg.alias(dialect))
+                        .collect::<Option<Vec<_>>>()?
+                        .join(", ")
+                )
+            }
             FunctionExpr::RowNumber => "row_number()".to_string(),
             FunctionExpr::Rank => "rank()".to_string(),
             FunctionExpr::DenseRank => "dense_rank()".to_string(),
@@ -336,6 +375,7 @@ impl FunctionExpr {
                 arguments: Some(arguments),
                 ..
             } => concrete_iter!(arguments),
+            FunctionExpr::Udf { arguments, .. } => concrete_iter!(arguments),
             FunctionExpr::Substring { string, pos, len } => {
                 concrete_iter!(
                     iter::once(string.as_ref())
@@ -436,7 +476,7 @@ impl DialectDisplay for FunctionExpr {
             FunctionExpr::Call {
                 name,
                 arguments: None,
-            } => write!(f, "{name}"),
+            } => write!(f, "{}", name),
             FunctionExpr::Call {
                 name,
                 arguments: Some(arguments),
@@ -445,6 +485,21 @@ impl DialectDisplay for FunctionExpr {
                     f,
                     "{}({})",
                     name,
+                    arguments.iter().map(|arg| arg.display(dialect)).join(", ")
+                )
+            }
+            FunctionExpr::Udf {
+                schema,
+                name,
+                arguments,
+            } => {
+                if let Some(s) = schema {
+                    write!(f, "{}.", dialect.quote_identifier(s))?;
+                }
+                write!(
+                    f,
+                    "{}({})",
+                    dialect.quote_identifier(name),
                     arguments.iter().map(|arg| arg.display(dialect)).join(", ")
                 )
             }
@@ -1133,6 +1188,7 @@ impl Expr {
                 Expr::Call(FunctionExpr::Call {
                     name,
                     arguments: Some(arguments),
+                    ..
                 }) if name.eq_ignore_ascii_case("ALL") => {
                     Ok(Self::OpAll {
                         lhs,
@@ -1145,6 +1201,7 @@ impl Expr {
                 Expr::Call(FunctionExpr::Call {
                     name,
                     arguments: Some(arguments),
+                    ..
                 }) if name.eq_ignore_ascii_case("ANY") => {
                     Ok(Self::OpAny {
                         lhs,
@@ -1708,6 +1765,21 @@ impl TryFromDialect<sqlparser::ast::OrderByOptions> for (OrderType, NullOrder) {
     }
 }
 
+/// Checks if a schema qualifier is acceptable for a built-in function.
+///
+/// Built-in functions can be called:
+/// - Without schema qualification (e.g., `count(x)`)
+/// - In PostgreSQL, with `pg_catalog` schema (e.g., `pg_catalog.count(x)`)
+///
+/// Returns `true` if the schema is acceptable for a built-in, `false` if the function
+/// should be treated as a user-defined function call.
+fn is_builtin_schema(schema: &Option<SqlIdentifier>, dialect: Dialect) -> bool {
+    match schema {
+        None => true,
+        Some(s) => dialect == Dialect::PostgreSQL && s.as_str().eq_ignore_ascii_case("pg_catalog"),
+    }
+}
+
 /// Convert a function call into an expression.
 ///
 /// We don't turn every function into a [`FunctionExpr`], because we have some special cases that
@@ -1754,22 +1826,35 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             unsupported!("Function with WITHIN GROUP clause")?;
         }
 
-        let mut ident = name
-            .0
-            .into_iter()
-            .filter_map(|part| match part {
-                sqlparser::ast::ObjectNamePart::Identifier(ident) => Some(ident),
-                _ => None,
-            })
-            .exactly_one()
-            .map_err(|_| {
-                unsupported_err!(
-                    "non-builtin function (UDF) or identifier constructor in function name"
-                )
-            })?;
+        // Function names can have at most 2 parts: schema.name or just name.
+        let mut ident_iter = name.0.into_iter().map(|part| match part {
+            sqlparser::ast::ObjectNamePart::Identifier(ident) => Ok(ident),
+            sqlparser::ast::ObjectNamePart::Function(_) => {
+                unsupported!("identifier constructor in function name")
+            }
+        });
+
+        let first = match ident_iter.next() {
+            Some(result) => result?,
+            None => return failed!("Function name cannot be empty"),
+        };
+
+        let (schema, mut ident) = match ident_iter.next() {
+            None => (None, first),
+            Some(second) => {
+                let second = second?;
+                if ident_iter.next().is_some() {
+                    unsupported!(
+                        "Function names with more than 2 parts not supported (max 2: schema.name)"
+                    )?;
+                }
+                (Some(first.into_dialect(dialect)), second)
+            }
+        };
 
         // Special case for `COUNT(*)`
-        if ident.value.eq_ignore_ascii_case("COUNT")
+        if is_builtin_schema(&schema, dialect)
+            && ident.value.eq_ignore_ascii_case("COUNT")
             && matches!(
                 args,
                 FunctionArguments::List(FunctionArgumentList { ref args, .. })
@@ -1799,6 +1884,12 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 clauses,
             ),
             sqlparser::ast::FunctionArguments::None => {
+                // Functions without arguments like `CURRENT_TIMESTAMP` are always built-ins.
+                // Schema-qualified functions always require arguments (e.g., `myschema.func`
+                // without parens would be parsed as a column reference, not a function call).
+                if schema.is_some() {
+                    failed!("Schema-qualified function calls require parentheses")?;
+                }
                 ident.value.make_ascii_lowercase();
                 return Ok(Self::Call(FunctionExpr::Call {
                     name: ident.into_dialect(dialect),
@@ -1847,26 +1938,28 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 .map(Box::new)
         };
 
-        let expr = if ident.value.eq_ignore_ascii_case("AVG") {
+        let is_builtin = is_builtin_schema(&schema, dialect);
+
+        let expr = if is_builtin && ident.value.eq_ignore_ascii_case("AVG") {
             Self::Call(FunctionExpr::Avg {
                 expr: next_expr()?,
                 distinct,
             })
-        } else if ident.value.eq_ignore_ascii_case("COUNT") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("COUNT") {
             Self::Call(FunctionExpr::Count {
                 expr: next_expr()?,
                 distinct,
             })
-        } else if ident.value.eq_ignore_ascii_case("DATE") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("DATE") {
             // TODO: Arguably, this should be in a SQL rewrite pass to preserve input when rendering
             Self::Cast {
                 expr: next_expr()?,
                 ty: crate::ast::SqlType::Date,
                 style: CastStyle::As,
             }
-        } else if ident.value.eq_ignore_ascii_case("EXTRACT") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("EXTRACT") {
             return failed!("{ident} should have been converted earlier");
-        } else if ident.value.eq_ignore_ascii_case("GROUP_CONCAT") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("GROUP_CONCAT") {
             // group_concat() is a mysql-specific function, and caller optionally sets
             // the output separator with special `SEPARATOR ''` syntax. we fish that value
             // out of the `clauses` list above.
@@ -1877,7 +1970,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 distinct: distinct.into(),
                 order_by,
             })
-        } else if ident.value.eq_ignore_ascii_case("STRING_AGG") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("STRING_AGG") {
             // `string_agg()` is a pg-specific function, and we get the mandatory separator
             // from the second parameter to the function.
             let expr = next_expr()?;
@@ -1895,39 +1988,40 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 distinct: distinct.into(),
                 order_by,
             })
-        } else if ident.value.eq_ignore_ascii_case("ARRAY_AGG") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("ARRAY_AGG") {
             let order_by = order_by_clause();
             Self::Call(FunctionExpr::ArrayAgg {
                 expr: next_expr()?,
                 distinct: distinct.into(),
                 order_by,
             })
-        } else if ident.value.eq_ignore_ascii_case("JSON_OBJECT_AGG") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("JSON_OBJECT_AGG") {
             Self::Call(FunctionExpr::JsonObjectAgg {
                 key: next_expr()?,
                 value: next_expr()?,
                 allow_duplicate_keys: true,
             })
-        } else if ident.value.eq_ignore_ascii_case("BUCKET") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("BUCKET") {
             Self::Call(FunctionExpr::Bucket {
                 expr: next_expr()?,
                 interval: next_expr()?,
             })
-        } else if ident.value.eq_ignore_ascii_case("ROW_NUMBER") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("ROW_NUMBER") {
             Self::Call(FunctionExpr::RowNumber)
-        } else if ident.value.eq_ignore_ascii_case("RANK") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("RANK") {
             Self::Call(FunctionExpr::Rank)
-        } else if ident.value.eq_ignore_ascii_case("DENSE_RANK") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("DENSE_RANK") {
             Self::Call(FunctionExpr::DenseRank)
-        } else if ident.value.eq_ignore_ascii_case("JSONB_OBJECT_AGG")
-            || ident.value.eq_ignore_ascii_case("JSON_OBJECTAGG")
+        } else if is_builtin
+            && (ident.value.eq_ignore_ascii_case("JSONB_OBJECT_AGG")
+                || ident.value.eq_ignore_ascii_case("JSON_OBJECTAGG"))
         {
             Self::Call(FunctionExpr::JsonObjectAgg {
                 key: next_expr()?,
                 value: next_expr()?,
                 allow_duplicate_keys: false,
             })
-        } else if ident.value.eq_ignore_ascii_case("LOWER") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("LOWER") {
             let expr = next_expr()?;
             match *expr {
                 Self::Collate { expr, collation } => Self::Call(FunctionExpr::Lower {
@@ -1939,21 +2033,21 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                     collation: None,
                 }),
             }
-        } else if ident.value.eq_ignore_ascii_case("MAX") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("MAX") {
             Self::Call(FunctionExpr::Max(next_expr()?))
-        } else if ident.value.eq_ignore_ascii_case("MIN") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("MIN") {
             Self::Call(FunctionExpr::Min(next_expr()?))
-        } else if ident.value.eq_ignore_ascii_case("ROW") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("ROW") {
             Self::Row {
                 explicit: true,
                 exprs: exprs.by_ref().collect::<Result<_, _>>()?,
             }
-        } else if ident.value.eq_ignore_ascii_case("SUM") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("SUM") {
             Self::Call(FunctionExpr::Sum {
                 expr: next_expr()?,
                 distinct,
             })
-        } else if ident.value.eq_ignore_ascii_case("UPPER") {
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("UPPER") {
             let expr = next_expr()?;
             match *expr {
                 Self::Collate { expr, collation } => Self::Call(FunctionExpr::Upper {
@@ -1965,11 +2059,18 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                     collation: None,
                 }),
             }
-        } else {
+        } else if is_builtin {
+            // Built-in function that we don't have a specific variant for
             ident.value.make_ascii_lowercase();
             Self::Call(FunctionExpr::Call {
                 name: ident.clone().into_dialect(dialect),
                 arguments: Some(exprs.by_ref().collect::<Result<_, _>>()?),
+            })
+        } else {
+            Self::Call(FunctionExpr::Udf {
+                schema,
+                name: ident.clone().into_dialect(dialect),
+                arguments: exprs.by_ref().collect::<Result<_, _>>()?,
             })
         };
 
@@ -2387,11 +2488,18 @@ impl Arbitrary for Expr {
                     }),
                 (
                     any::<SqlIdentifier>(),
+                    proptest::option::of(proptest::collection::vec(element.clone(), 0..24))
+                )
+                    .prop_map(|(name, arguments)| FunctionExpr::Call { name, arguments }),
+                (
+                    proptest::option::of(any::<SqlIdentifier>()),
+                    any::<SqlIdentifier>(),
                     proptest::collection::vec(element.clone(), 0..24)
                 )
-                    .prop_map(|(name, arguments)| FunctionExpr::Call {
+                    .prop_map(|(schema, name, arguments)| FunctionExpr::Udf {
+                        schema,
                         name,
-                        arguments: Some(arguments)
+                        arguments,
                     })
             ]
             .prop_map(Expr::Call)

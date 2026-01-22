@@ -162,3 +162,129 @@ fn time_without_time_zone_type() {
     check_rt_postgres!("CREATE TABLE t_time (c TIME)");
     check_rt_postgres!("CREATE TABLE t_time (c TIME WITHOUT TIME ZONE)");
 }
+
+#[test]
+fn user_defined_function_expr_qualified() {
+    check_rt_mysql_sqlparser!(
+        r#"
+        SELECT DISTINCT con.cco_conta,
+                        tmp.pa_codigo,
+                        cco.cli_cpfcnpj,
+                        cco.end_uf,
+                        modal.mod_modalbacen,
+                        agencia_0009.saldoparcelacontabiladitivo (emp.cco_conta, emp.con_ndoc, emp.con_seq, emp.emp_parcela, "2025-06-30") AS Saldo,
+                        agencia_0009.saldoparcelacontabiladitivo (emp.cco_conta, emp.con_ndoc, emp.con_seq, emp.emp_parcela, "2025-05-31") AS SaldoAnt,
+                        con.con_ndoc,
+                        con.mod_codigo,
+                        con.prd_codigo,
+                        con.con_parcelas,
+                        con.con_juros,
+                        con.con_vlrini AS ValorInicial,
+                        emp.emp_parcela,
+                        con.con_emis AS emissao,
+                        con.con_tipooper,
+                        "" AS con_caracespecial,
+                        emp.emp_vcto AS vencimento,
+                        prd.prd_nivelinicial,
+                        1 AS prd_provisiona,
+                        con.con_regime_caixa,
+                        con.con_taxacdi,
+                        con.con_seq,
+                        con.emprestimo_proporcional,
+                        con.prd_tipocalcpos,
+                        agencia_0009.DiasAtrasoEmprestimoaditivo (con.cco_conta, con.con_ndoc, con.con_seq, "2025-06-30") AS DiasAtraso,
+                        con.con_data_inclusao_regime,
+                        con.con_finan_hh,
+                        con.con_valor,
+                        modal.ORI_CODIGO,
+                        atp.atp_entrada,
+                        con.con_tac,
+                        if(con.con_tac > 0, tjeoaefetivar(con.cco_conta, con.con_ndoc, con.con_seq, "2025-06-30"), 0) AS RendasTjeo,
+
+          (SELECT MAX(EMP_VCTO)
+           FROM agencia_0009.ep_parcela
+           WHERE cco_conta = con.cco_conta
+             AND con_ndoc = con.con_ndoc
+             AND con_seq = con.con_seq
+             AND (emp_pgto IS NULL
+                  OR emp_pgto > "2025-06-30")
+           LIMIT 1) AS VctoUltimaParcela,
+                        con.con_vcto
+        FROM agencia_0009.ep_saldocontrato AS sco
+        LEFT JOIN agencia_0009.ep_contrato AS con ON sco.cco_conta = con.cco_conta
+        AND sco.sco_ndoc = con.con_ndoc
+        AND sco.sco_seq = con.con_seq
+        LEFT JOIN agencia_0009.ep_parcela AS emp ON con.cco_conta = emp.cco_conta
+        AND con.con_ndoc = emp.con_ndoc
+        AND con.con_seq = emp.con_seq
+        LEFT JOIN agencia_0009.view_dadoscontas AS cco ON con.cco_conta = cco.cco_conta
+        LEFT JOIN agencia_0009.cc_saldo AS tmp ON con.cco_conta = tmp.cco_conta
+        AND tmp.sld_data = "2025-06-30"
+        LEFT JOIN unico.ep_produto AS prd ON con.prd_codigo = prd.prd_codigo
+        LEFT JOIN unico.ep_modalidade AS modal ON con.mod_codigo = modal.mod_codigo
+        LEFT JOIN agencia_0009.4966_atp_contrato AS atp ON atp.cco_conta = con.cco_conta
+        AND atp.atp_ndoc = con.con_ndoc
+        AND atp.atp_tipooper = 5
+        AND atp.atp_entrada <= "2025-06-30"
+        AND (atp.atp_saida IS NULL
+             OR atp.atp_saida > "2025-06-30")
+        WHERE (sco.sco_data = "2025-06-30"
+               OR sco.sco_data = "2025-05-30")
+          AND sco_tipo = 5
+          AND IF(con.con_taxacdi > 0, (emp.emp_pagpos IS NULL
+                                       OR emp.emp_pagpos > "2025-05-31"), (emp.emp_pgto IS NULL
+                                                                           OR emp.emp_pgto > "2025-05-31"))
+        HAVING Saldo > 0
+        OR SaldoAnt > 0
+    "#
+    );
+}
+
+#[test]
+fn schema_qualified_function_simple_mysql() {
+    // Basic schema-qualified function call
+    check_rt_mysql_sqlparser!("SELECT myschema.myfunc()");
+    check_rt_mysql_sqlparser!("SELECT myschema.myfunc(1)");
+    check_rt_mysql_sqlparser!("SELECT myschema.myfunc(1, 2, 3)");
+    check_rt_mysql_sqlparser!("SELECT myschema.myfunc(x, y) FROM t");
+}
+
+#[test]
+fn schema_qualified_function_simple_postgres() {
+    // Basic schema-qualified function call for PostgreSQL
+    check_rt_postgres_sqlparser!("SELECT myschema.myfunc()");
+    check_rt_postgres_sqlparser!("SELECT myschema.myfunc(1)");
+    check_rt_postgres_sqlparser!("SELECT myschema.myfunc(1, 2, 3)");
+    check_rt_postgres_sqlparser!("SELECT myschema.myfunc(x, y) FROM t");
+}
+
+#[test]
+fn schema_qualified_function_quoted_mysql() {
+    // Schema-qualified function with quoted identifiers (MySQL uses backticks)
+    check_rt_mysql_sqlparser!("SELECT `my-schema`.`my-func`()");
+    check_rt_mysql_sqlparser!("SELECT `my schema`.`my func`(1, 2)");
+}
+
+#[test]
+fn schema_qualified_function_quoted_postgres() {
+    // Schema-qualified function with quoted identifiers (PostgreSQL uses double quotes)
+    check_rt_postgres_sqlparser!(r#"SELECT "my-schema"."my-func"()"#);
+    check_rt_postgres_sqlparser!(r#"SELECT "my schema"."my func"(1, 2)"#);
+}
+
+#[test]
+fn pg_catalog_qualified_builtin_function() {
+    // pg_catalog-qualified built-in functions should be recognized as built-ins
+    check_rt_postgres_sqlparser!("SELECT pg_catalog.count(*) FROM t");
+    check_rt_postgres_sqlparser!("SELECT pg_catalog.sum(x) FROM t");
+    check_rt_postgres_sqlparser!("SELECT pg_catalog.max(x) FROM t");
+}
+
+#[test]
+fn unqualified_function_still_works() {
+    // Ensure unqualified function calls still work as before
+    check_rt_mysql_sqlparser!("SELECT myfunc()");
+    check_rt_mysql_sqlparser!("SELECT myfunc(1, 2, 3)");
+    check_rt_postgres_sqlparser!("SELECT myfunc()");
+    check_rt_postgres_sqlparser!("SELECT myfunc(1, 2, 3)");
+}

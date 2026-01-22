@@ -1152,6 +1152,13 @@ impl Expr {
                     ty,
                 })
             }
+            AstExpr::Call(FunctionExpr::Udf { schema, name, .. }) => {
+                if let Some(schema) = schema {
+                    unsupported!("User-defined function call: {}.{}", schema, name)
+                } else {
+                    unsupported!("User-defined function call: {}", name)
+                }
+            }
             AstExpr::Call(FunctionExpr::Substring { string, pos, len }) => {
                 let string = Self::lower(*string, dialect, context)?;
                 let ty = if string.ty().is_any_text() {
@@ -2282,6 +2289,46 @@ pub(crate) mod tests {
                 )),
                 ty: DfType::DEFAULT_TEXT
             }
+        );
+    }
+
+    #[test]
+    fn udf_schema_qualified_unsupported() {
+        let input = AstExpr::Call(FunctionExpr::Udf {
+            schema: Some("myschema".into()),
+            name: "myfunc".into(),
+            arguments: vec![AstExpr::Literal(1.into()), AstExpr::Literal(2.into())],
+        });
+        let result = Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("User-defined function call"),
+            "Expected unsupported UDF error, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("myschema.myfunc"),
+            "Expected error to contain function name, got: {err}"
+        );
+    }
+
+    #[test]
+    fn udf_unqualified_unsupported() {
+        let input = AstExpr::Call(FunctionExpr::Udf {
+            schema: None,
+            name: "my_custom_function".into(),
+            arguments: vec![AstExpr::Literal(1.into())],
+        });
+        let result = Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context());
+        assert!(result.is_err(), "Expected UDF to be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("User-defined function call"),
+            "Expected unsupported UDF error, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("my_custom_function"),
+            "Expected error to contain function name, got: {err}"
         );
     }
 

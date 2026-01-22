@@ -156,6 +156,12 @@ impl<'a> ReferredColumnsIter<'a> {
                 }
                 self.visit_expr(first_arg)
             }),
+            Udf { arguments, .. } => arguments.first().and_then(|first_arg| {
+                if arguments.len() >= 2 {
+                    self.exprs_to_visit.extend(arguments.iter().skip(1));
+                }
+                self.visit_expr(first_arg)
+            }),
             Substring { string, pos, len } => {
                 self.exprs_to_visit.extend(pos.iter().map(|e| e.as_ref()));
                 self.exprs_to_visit.extend(len.iter().map(|e| e.as_ref()));
@@ -293,6 +299,10 @@ impl<'a> ReferredColumnsMut<'a> {
                 arguments: Some(arguments),
                 ..
             } => arguments.split_first_mut().and_then(|(first_arg, args)| {
+                self.exprs_to_visit.extend(args);
+                self.visit_expr(first_arg)
+            }),
+            Udf { arguments, .. } => arguments.split_first_mut().and_then(|(first_arg, args)| {
                 self.exprs_to_visit.extend(args);
                 self.visit_expr(first_arg)
             }),
@@ -444,8 +454,11 @@ pub fn is_aggregate(function: &FunctionExpr) -> bool {
         | FunctionExpr::RowNumber
         | FunctionExpr::Rank
         | FunctionExpr::DenseRank
-        // For now, assume all "generic" function calls are not aggregates
-        | FunctionExpr::Call { .. } => false,
+        // For now, assume all "generic" function calls are not aggregates.
+        // NOTE: UDFs might be aggregates in the upstream database, but we have no way
+        // to know this at parse time. Queries using aggregate UDFs are unsupported.
+        | FunctionExpr::Call { .. }
+        | FunctionExpr::Udf { .. } => false,
     }
 }
 

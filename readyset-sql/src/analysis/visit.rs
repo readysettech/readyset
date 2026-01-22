@@ -620,6 +620,12 @@ pub fn walk_function_expr<'ast, V: Visitor<'ast>>(
             }
             Ok(())
         }
+        FunctionExpr::Udf { arguments, .. } => {
+            for arg in arguments {
+                visitor.visit_expr(arg)?;
+            }
+            Ok(())
+        }
         FunctionExpr::Substring { string, pos, len } => {
             visitor.visit_expr(string.as_ref())?;
             if let Some(pos) = pos {

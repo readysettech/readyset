@@ -3412,4 +3412,63 @@ mod tests {
             result.err()
         );
     }
+
+    #[test]
+    fn udf_schema_qualified_parses() {
+        use readyset_sql::ast::FunctionExpr;
+        use readyset_sql_parsing::{parse_select_with_config, ParsingPreset};
+
+        // We use OnlySqlparser because nom-sql doesn't support schema-qualified function calls.
+        let query = parse_select_with_config(
+            ParsingPreset::OnlySqlparser,
+            readyset_sql::Dialect::MySQL,
+            "SELECT myschema.myfunc(1) FROM test_table",
+        )
+        .unwrap();
+
+        let has_udf = query.fields.iter().any(|field| {
+            matches!(
+                field,
+                readyset_sql::ast::FieldDefinitionExpr::Expr {
+                    expr: readyset_sql::ast::Expr::Call(FunctionExpr::Udf { .. }),
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_udf,
+            "Expected schema-qualified function call to be parsed as FunctionExpr::Udf"
+        );
+    }
+
+    #[test]
+    fn udf_unqualified_parses_as_call() {
+        use readyset_sql::ast::FunctionExpr;
+        use readyset_sql_parsing::{parse_select_with_config, ParsingPreset};
+
+        // Unqualified function calls that aren't recognized built-ins are parsed as
+        // FunctionExpr::Call (not Udf). The Udf variant is specifically for schema-qualified
+        // function calls. Unknown unqualified functions will be rejected during expression
+        // lowering with "Function X does not exist".
+        let query = parse_select_with_config(
+            ParsingPreset::OnlySqlparser,
+            readyset_sql::Dialect::PostgreSQL,
+            "SELECT totally_unknown_function_xyz(1) FROM test_table",
+        )
+        .unwrap();
+
+        let has_call = query.fields.iter().any(|field| {
+            matches!(
+                field,
+                readyset_sql::ast::FieldDefinitionExpr::Expr {
+                    expr: readyset_sql::ast::Expr::Call(FunctionExpr::Call { name, .. }),
+                    ..
+                } if name.as_str() == "totally_unknown_function_xyz"
+            )
+        });
+        assert!(
+            has_call,
+            "Expected unqualified unknown function call to be parsed as FunctionExpr::Call"
+        );
+    }
 }

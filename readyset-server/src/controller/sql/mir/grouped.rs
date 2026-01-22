@@ -326,6 +326,7 @@ fn record_reachable(function: &FunctionExpr) {
         Substring { .. } => record_reachable!(fn_name),
         JsonObjectAgg { .. } => record_reachable!(fn_name),
         Call { .. } => record_reachable!(fn_name),
+        Udf { .. } => record_reachable!(fn_name),
     }
 }
 
@@ -403,6 +404,7 @@ pub(super) fn post_lookup_aggregates(
                 },
                 Extract { .. }
                 | Call { .. }
+                | Udf { .. }
                 | Substring { .. }
                 | Lower { .. }
                 | Upper { .. }

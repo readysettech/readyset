@@ -497,6 +497,7 @@ impl SelectStatement {
                     | FunctionExpr::JsonObjectAgg { .. }
                     | FunctionExpr::StringAgg { .. } => true,
                     FunctionExpr::Call { .. }
+                    | FunctionExpr::Udf { .. }
                     | FunctionExpr::Extract { .. }
                     | FunctionExpr::Lower { .. }
                     | FunctionExpr::DenseRank
