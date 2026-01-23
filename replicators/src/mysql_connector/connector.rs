@@ -41,7 +41,7 @@ use readyset_sql::ast::{
     NotReplicatedReason, Relation, SqlIdentifier, SqlQuery,
 };
 use replication_offset::mysql::MySqlPosition;
-use replication_offset::ReplicationOffset;
+use replication_offset::{GtidEvent, GtidSource, ReplicationOffset};
 use uuid::Uuid;
 
 use crate::mysql_connector::utils::{mysql_pad_binary_column, mysql_pad_char_column};
@@ -67,14 +67,15 @@ macro_rules! binlog_err {
         } else {
             ("".to_string(), "".to_string())
         };
-        let gtid_message = if let Some(gtid) = $connector.current_gtid {
+        let gtid_message = if let Some(ref gtid) = $connector.current_gtid {
             format!(" at GTID {}", gtid)
         } else {
             "".to_string()
         };
+        let offset_str = format!("{}", $connector.replication_offset);
         ReadySetError::ReplicationFailed(format!(
             "Binlog error before position {}{}{} at {}:{}:{}: {}{}",
-            $connector.next_position,
+            offset_str,
             gtid_message,
             table_name_msg,
             std::file!(),
@@ -136,11 +137,12 @@ pub(crate) struct MySqlBinlogConnector {
     /// The binlog "slave" must be assigned a unique `server_uuid` in the replica topology
     /// if one is not assigned we will use a random UUID
     server_uuid: Option<Uuid>,
-    /// If we just want to continue reading the binlog from a previous point
-    next_position: MySqlPosition,
-    /// The GTID of the current transaction. Table modification events will have
-    /// the current GTID attached if enabled in mysql.
-    current_gtid: Option<u64>,
+    /// Tracks the replication offset that Readyset has persisted.
+    /// For GTID mode, this contains the GTID set with pending transaction tracking.
+    replication_offset: ReplicationOffset,
+    /// The GTID of the current transaction. Table modification events will have the current GTID
+    /// attached if enabled in mysql.
+    current_gtid: Option<GtidEvent>,
     /// Whether to log statements received by the connector
     enable_statement_logging: bool,
     /// Timestamp of the last reported position. This is use to ensure we keep the distance
@@ -154,6 +156,9 @@ pub(crate) struct MySqlBinlogConnector {
     table_schemas: HashMap<Relation, CreateTableBody>,
     /// Parsing mode that determines which parser(s) to use and how to handle conflicts
     parsing_config: ParsingConfig,
+    /// Whether the upstream server has GTID mode enabled.
+    #[allow(dead_code)] // Will be used when GTID mode detection is implemented
+    gtid_mode: bool,
 }
 
 impl MySqlBinlogConnector {
@@ -240,19 +245,22 @@ impl MySqlBinlogConnector {
 
     /// After we have registered as a replica, we can request the binlog
     async fn request_binlog(&mut self) -> mysql::Result<()> {
-        info!(next_position = %self.next_position, "Starting binlog replication");
-        let filename = self.next_position.binlog_file_name().to_string();
+        let pos = self
+            .replication_offset
+            .mysql_position()
+            .map_err(|e| mysql_async::Error::Other(Box::new(e)))?;
+        info!(next_position = %pos, "Starting binlog replication");
+        let filename = pos.binlog_file_name().to_string();
 
         // If the next position is greater than u32::MAX, we need to re-snapshot
-        if self.next_position.position > u64::from(u32::MAX) {
+        if pos.position > u64::from(u32::MAX) {
             Err(mysql_async::Error::Other(Box::new(
                 ReadySetError::FullResnapshotNeeded,
             )))?;
         }
         let cmd = mysql_common::packets::ComBinlogDump::new(self.server_id())
             .with_pos(
-                self.next_position
-                    .position
+                pos.position
                     .try_into()
                     .expect("Impossible binlog start position. Please re-snapshot."),
             )
@@ -306,13 +314,14 @@ impl MySqlBinlogConnector {
             reader: binlog::EventStreamReader::new(binlog::consts::BinlogVersion::Version4),
             server_id,
             server_uuid: config.replication_server_uuid,
-            next_position,
+            replication_offset: ReplicationOffset::MySql(next_position),
             current_gtid: None,
             enable_statement_logging,
             last_reported_pos_ts: Instant::now() - Duration::from_secs(MAX_POSITION_TIME),
             table_filter,
             table_schemas: Default::default(),
             parsing_config: parsing_preset.into_config().rate_limit_logging(false),
+            gtid_mode: false,
         };
 
         connector.set_parameters().await?;
@@ -453,13 +462,14 @@ impl MySqlBinlogConnector {
         );
 
         // We are on this binlog already, no need to do anything
-        if self.next_position.binlog_file_suffix == rotate_position.binlog_file_suffix
-            && self.next_position.position == 0
+        let current_pos = self.replication_offset.mysql_position()?;
+        if current_pos.binlog_file_suffix == rotate_position.binlog_file_suffix
+            && current_pos.position == 0
         {
             return Ok(ReplicationAction::Empty);
         }
 
-        self.next_position = rotate_position;
+        self.replication_offset = ReplicationOffset::MySql(rotate_position);
 
         Ok(ReplicationAction::LogPosition)
     }
@@ -817,11 +827,12 @@ impl MySqlBinlogConnector {
         &mut self,
         mut table: Relation,
         current_schema: &String,
-    ) -> Vec<Change> {
+    ) -> ReadySetResult<Vec<Change>> {
         if table.schema.is_none() {
             table.schema = Some(SqlIdentifier::from(current_schema));
         }
-        vec![
+        let pos = self.replication_offset.mysql_position()?;
+        Ok(vec![
             Change::Drop {
                 name: table.clone(),
                 if_exists: true,
@@ -830,11 +841,11 @@ impl MySqlBinlogConnector {
                 name: table,
                 reason: NotReplicatedReason::OtherError(format!(
                     "Event received as binlog_format=STATEMENT. File: {:} - Pos: {:}",
-                    self.next_position.binlog_file_name(),
-                    self.next_position.position
+                    pos.binlog_file_name(),
+                    pos.position
                 )),
             }),
-        ]
+        ])
     }
     /// Process a single binlog QUERY_EVENT.
     /// This occurs when someone issues a DDL statement or Query using binlog_format = STATEMENT.
@@ -913,19 +924,19 @@ impl MySqlBinlogConnector {
             Ok(SqlQuery::Insert(insert)) => {
                 let changes = self
                     .drop_and_add_non_replicated_table(insert.table, &schema)
-                    .await;
+                    .await?;
                 Ok(ReplicationAction::DdlChange { schema, changes })
             }
             Ok(SqlQuery::Update(update)) => {
                 let changes = self
                     .drop_and_add_non_replicated_table(update.table, &schema)
-                    .await;
+                    .await?;
                 Ok(ReplicationAction::DdlChange { schema, changes })
             }
             Ok(SqlQuery::Delete(delete)) => {
                 let changes = self
                     .drop_and_add_non_replicated_table(delete.table, &schema)
-                    .await;
+                    .await?;
                 Ok(ReplicationAction::DdlChange { schema, changes })
             }
             Ok(query) => {
@@ -1177,7 +1188,7 @@ impl MySqlBinlogConnector {
         }
         unimplemented!(
             "Row V1 event that will affect current tables: {:?}",
-            self.next_position
+            self.replication_offset
         );
     }
 
@@ -1213,20 +1224,23 @@ impl MySqlBinlogConnector {
 
             let binlog_event = handle_err!(self, res);
 
-            if u64::from(binlog_event.header().log_pos()) < self.next_position.position
-                && self.next_position.position + u64::from(binlog_event.header().event_size())
-                    > u64::from(u32::MAX)
             {
-                self.next_position.position =
-                    u64::from(u32::MAX) + 1 + u64::from(binlog_event.header().log_pos());
-            } else {
-                self.next_position.position = u64::from(binlog_event.header().log_pos());
+                let pos = self.replication_offset.mysql_position_mut()?;
+                if u64::from(binlog_event.header().log_pos()) < pos.position
+                    && pos.position + u64::from(binlog_event.header().event_size())
+                        > u64::from(u32::MAX)
+                {
+                    pos.position =
+                        u64::from(u32::MAX) + 1 + u64::from(binlog_event.header().log_pos());
+                } else {
+                    pos.position = u64::from(binlog_event.header().log_pos());
+                }
             }
 
             let is_last = match until {
                 Some(limit) => {
                     let limit = MySqlPosition::try_from(limit).expect("Valid binlog limit");
-                    self.next_position >= limit
+                    *self.replication_offset.mysql_position()? >= limit
                 }
                 None => false,
             };
@@ -1234,7 +1248,7 @@ impl MySqlBinlogConnector {
                 EventType::ROTATE_EVENT => {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = handle_err!(self, self.process_event_rotate(event).await);
-                    return Ok((vec![action], &self.next_position));
+                    return Ok((vec![action], self.replication_offset.mysql_position()?));
                 }
 
                 EventType::QUERY_EVENT => {
@@ -1246,7 +1260,7 @@ impl MySqlBinlogConnector {
                         }
                         Err(err) => return Err(binlog_err!(self, None, err)),
                     };
-                    return Ok((vec![action], &self.next_position));
+                    return Ok((vec![action], self.replication_offset.mysql_position()?));
                 }
                 ev @ EventType::TABLE_MAP_EVENT => {
                     // Used for row-based binary logging. This event precedes each row operation
@@ -1268,19 +1282,19 @@ impl MySqlBinlogConnector {
                 EventType::WRITE_ROWS_EVENT => {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_write_rows(event).await?;
-                    return Ok((vec![action], &self.next_position));
+                    return Ok((vec![action], self.replication_offset.mysql_position()?));
                 }
 
                 EventType::UPDATE_ROWS_EVENT => {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_update_rows(event).await?;
-                    return Ok((vec![action], &self.next_position));
+                    return Ok((vec![action], self.replication_offset.mysql_position()?));
                 }
 
                 EventType::DELETE_ROWS_EVENT => {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_delete_rows(event).await?;
-                    return Ok((vec![action], &self.next_position));
+                    return Ok((vec![action], self.replication_offset.mysql_position()?));
                 }
 
                 EventType::TRANSACTION_PAYLOAD_EVENT => {
@@ -1289,14 +1303,17 @@ impl MySqlBinlogConnector {
                         self,
                         self.process_event_transaction_payload(event, is_last).await
                     );
-                    return Ok((actions, &self.next_position));
+                    return Ok((actions, self.replication_offset.mysql_position()?));
                 }
 
                 EventType::XID_EVENT => {
                     // Generated for a commit of a transaction that modifies one or more tables of
                     // an XA-capable storage engine (InnoDB).
                     if self.report_position_elapsed() || is_last {
-                        return Ok((vec![ReplicationAction::LogPosition], &self.next_position));
+                        return Ok((
+                            vec![ReplicationAction::LogPosition],
+                            self.replication_offset.mysql_position()?,
+                        ));
                     }
                     continue;
                 }
@@ -1306,21 +1323,21 @@ impl MySqlBinlogConnector {
                     let event: binlog::events::WriteRowsEventV1<'_> =
                         handle_err!(self, binlog_event.read_event());
                     let action = self.process_row_v1_metadata(event.table_id()).await?;
-                    return Ok((vec![action], &self.next_position));
+                    return Ok((vec![action], self.replication_offset.mysql_position()?));
                 }
 
                 EventType::UPDATE_ROWS_EVENT_V1 => {
                     let event: binlog::events::UpdateRowsEventV1<'_> =
                         handle_err!(self, binlog_event.read_event());
                     let action = self.process_row_v1_metadata(event.table_id()).await?;
-                    return Ok((vec![action], &self.next_position));
+                    return Ok((vec![action], self.replication_offset.mysql_position()?));
                 }
 
                 EventType::DELETE_ROWS_EVENT_V1 => {
                     let event: binlog::events::DeleteRowsEventV1<'_> =
                         handle_err!(self, binlog_event.read_event());
                     let action = self.process_row_v1_metadata(event.table_id()).await?;
-                    return Ok((vec![action], &self.next_position));
+                    return Ok((vec![action], self.replication_offset.mysql_position()?));
                 }
                 EventType::GTID_EVENT => {
                     // GTID stands for Global Transaction Identifier It is composed of two parts:
@@ -1335,7 +1352,15 @@ impl MySqlBinlogConnector {
                     if self.enable_statement_logging {
                         info!(target: "replicator_statement", "{:?}", ev);
                     }
-                    self.current_gtid = Some(ev.gno());
+                    // Create GtidEvent from the GTID event
+                    let server_uuid = Uuid::from_bytes(ev.sid());
+                    self.current_gtid = Some(GtidEvent::new(
+                        GtidSource {
+                            server_uuid,
+                            tag: None,
+                        },
+                        ev.gno(),
+                    ));
                 }
 
                 EventType::HEARTBEAT_EVENT => {}
@@ -1395,7 +1420,10 @@ impl MySqlBinlogConnector {
             // We didn't get an actionable event, but we still need to check that we haven't reached
             // the until limit
             if is_last {
-                return Ok((vec![ReplicationAction::LogPosition], &self.next_position));
+                return Ok((
+                    vec![ReplicationAction::LogPosition],
+                    self.replication_offset.mysql_position()?,
+                ));
             }
         }
     }
