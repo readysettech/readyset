@@ -751,6 +751,18 @@ fn parse_interval(segment: &str, original: &str) -> ReadySetResult<(u64, u64)> {
     Ok((start, end))
 }
 
+impl From<&GtidSet> for crate::ReplicationOffset {
+    fn from(value: &GtidSet) -> Self {
+        crate::ReplicationOffset::Gtid(value.clone())
+    }
+}
+
+impl From<GtidSet> for crate::ReplicationOffset {
+    fn from(value: GtidSet) -> Self {
+        crate::ReplicationOffset::Gtid(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
