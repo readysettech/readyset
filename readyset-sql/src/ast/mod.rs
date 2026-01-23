@@ -64,6 +64,7 @@ pub use truncate::*;
 pub use update::*;
 pub use use_statement::*;
 
+use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 
 use derive_more::Display;
@@ -73,8 +74,24 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Dialect, DialectDisplay};
 
-#[derive(Clone, Display, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Display, Debug, Serialize, Deserialize, Eq)]
 pub struct ShallowCacheQuery(sqlparser::ast::Query);
+
+// Use sqlparser's Display implementation to convert AST to SQL For consistent normalization, we
+// could apply additional formatting here (e.g. sql_insight::normalizer::normalize)
+// For now, just use the Display implementation
+impl Hash for ShallowCacheQuery {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let query = format!("{self}");
+        query.hash(state);
+    }
+}
+
+impl PartialEq for ShallowCacheQuery {
+    fn eq(&self, other: &Self) -> bool {
+        format!("{self}") == format!("{other}")
+    }
+}
 
 impl Deref for ShallowCacheQuery {
     type Target = sqlparser::ast::Query;

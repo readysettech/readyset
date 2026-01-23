@@ -47,25 +47,12 @@ impl QueryId {
         QueryId(hash(&unparsed_select.as_ref()))
     }
 
-    /// Generate QueryId from sqlparser AST by normalizing to SQL string.
-    /// This allows shallow caches to work with queries containing unsupported syntax.
     pub fn from_shallow_query(
         query: &ShallowCacheQuery,
         schema_search_path: &[SqlIdentifier],
     ) -> Self {
-        // Normalize the query to a consistent SQL string representation
-        let normalized_sql = normalize_sqlparser_query(query);
-        QueryId(hash(&(normalized_sql, schema_search_path)))
+        QueryId(hash(&(query, schema_search_path)))
     }
-}
-
-/// Normalize sqlparser Query to a consistent SQL string representation.
-fn normalize_sqlparser_query(query: &ShallowCacheQuery) -> String {
-    // Use sqlparser's Display implementation to convert AST to SQL
-    // For consistent normalization, we could apply additional formatting here (e.g.
-    // sql_insight::normalizer::normalize)
-    // For now, just use the Display implementation
-    format!("{}", query)
 }
 
 impl From<&ViewCreateRequest> for QueryId {
