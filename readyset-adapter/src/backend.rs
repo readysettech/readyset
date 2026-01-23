@@ -88,11 +88,11 @@ use mysql_common::row::convert::{FromRow, FromRowError};
 use readyset_adapter_types::{DeallocateId, ParsedCommand, PreparedStatementType};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
 use readyset_client::metrics::recorded::SHALLOW_REFRESH_QUEUE_EXCEEDED;
-use readyset_client::query::*;
 use readyset_client::recipe::CacheExpr;
 use readyset_client::results::Results;
 use readyset_client::status::CacheProperties;
 use readyset_client::{CacheMode, ColumnSchema, PlaceholderIdx, ViewCreateRequest};
+use readyset_client::{ShallowViewRequest, query::*};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{
     EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode, ReadysetExecutionEvent,
@@ -105,7 +105,8 @@ use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
     self, AlterReadysetStatement, CacheInner, CacheType, CreateCacheStatement, DeallocateStatement,
     DropAllCachesStatement, DropCacheStatement, ExplainStatement, Relation, SelectStatement,
-    SetStatement, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, UseStatement,
+    SetStatement, ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier,
+    UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
@@ -197,7 +198,7 @@ struct PrepareSelectMeta {
 #[derive(Debug)]
 struct PrepareShallowSelectMeta {
     query_id: QueryId,
-    stmt: ViewCreateRequest,
+    stmt: ShallowViewRequest,
     params: QueryParameters,
     always: bool,
 }
@@ -595,7 +596,7 @@ where
     /// the view in readyset
     view_request: Option<ViewCreateRequest>,
     /// Query used for shallow caching.
-    shallow: Option<ViewCreateRequest>,
+    shallow: Option<ShallowViewRequest>,
     /// Query parameters from rewrite_equivalent, used for shallow cache key generation
     params: Option<QueryParameters>,
 }
@@ -636,7 +637,7 @@ where
             .ok_or_else(|| internal_err!("Expected ViewRequest for CachedPreparedStatement"))
     }
 
-    fn as_shallow(&self) -> ReadySetResult<&ViewCreateRequest> {
+    fn as_shallow(&self) -> ReadySetResult<&ShallowViewRequest> {
         self.shallow
             .as_ref()
             .ok_or_else(|| internal_err!("Missing shallow query"))
@@ -1334,12 +1335,14 @@ where
     /// Provides metadata required to prepare a query
     async fn plan_prepare(&mut self, query: &str, event: &mut QueryExecutionEvent) -> PrepareMeta {
         let (parsed, shallow_parsed) = match self.state.parsed_query_cache.get(query) {
-            Some(cached_query) => (Ok(cached_query.clone()), Ok(cached_query.clone())),
+            Some(cached_query) => {
+                let _t = event.start_parse_timer();
+                (Ok(cached_query.clone()), self.parse_shallow_query(query))
+            }
             None => {
                 let (parsed, shallow_parsed) = {
                     let _t = event.start_parse_timer();
-                    let parsed = self.parse_query(query);
-                    (parsed.clone(), parsed)
+                    (self.parse_query(query), self.parse_shallow_query(query))
                 };
                 if let Ok(parsed) = &parsed {
                     self.state
@@ -1712,7 +1715,7 @@ where
         refresh: Option<
             &async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
         >,
-        view_request: &ViewCreateRequest,
+        view_request: &ShallowViewRequest,
         dialect: Dialect,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let keys = query_params.make_keys(params)?;
@@ -1735,9 +1738,11 @@ where
             {
                 if let Some(refresh) = refresh {
                     let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await.ok();
-                    let literalized =
-                        adapter_rewrites::literalize(&view_request.statement, params)?;
-                    let query = literalized.display(dialect).to_string();
+                    let query = adapter_rewrites::literalize_shallow_query(
+                        &view_request.query,
+                        params,
+                        dialect,
+                    )?;
 
                     let request = ShallowRefreshRequest {
                         query_id: *query_id,
@@ -1755,8 +1760,11 @@ where
             CacheResult::Miss(mut cache)
             | CacheResult::Hit(_, mut cache)
             | CacheResult::HitAndRefresh(_, mut cache) => {
-                let literalized = adapter_rewrites::literalize(&view_request.statement, params)?;
-                let query = literalized.display(dialect).to_string();
+                let query = adapter_rewrites::literalize_shallow_query(
+                    &view_request.query,
+                    params,
+                    dialect,
+                )?;
                 let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await?;
 
                 if let Some(refresh) = refresh
@@ -2308,9 +2316,8 @@ where
     fn make_name_and_id<'a>(
         &self,
         name: &'a mut Option<Relation>,
-        req: &ViewCreateRequest,
+        query_id: QueryId,
     ) -> (QueryId, &'a Relation, Option<Relation>) {
-        let query_id = QueryId::from(req);
         let requested_name = name.clone();
         let name = match name {
             Some(name) => &*name,
@@ -2327,12 +2334,12 @@ where
         &mut self,
         name: &mut Option<Relation>,
         deep: ReadySetResult<ViewCreateRequest>,
-        shallow: ReadySetResult<ViewCreateRequest>,
+        shallow: ReadySetResult<ShallowViewRequest>,
         always: bool,
         concurrently: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let deep = deep?;
-        let (query_id, name, requested_name) = self.make_name_and_id(name, &deep);
+        let (query_id, name, requested_name) = self.make_name_and_id(name, QueryId::from(&deep));
 
         // If we have existing caches with the same query_id or name, drop them first.
         self.drop_caches_on_collision(Some(query_id), requested_name.as_ref())
@@ -2389,7 +2396,7 @@ where
         &mut self,
         mut name: Option<Relation>,
         deep: ReadySetResult<ViewCreateRequest>,
-        shallow: ReadySetResult<ViewCreateRequest>,
+        shallow: ReadySetResult<ShallowViewRequest>,
         always: bool,
         concurrently: bool,
         ddl_req: Option<CacheDDLRequest>,
@@ -2424,7 +2431,7 @@ where
         &mut self,
         mut name: Option<Relation>,
         deep: ReadySetResult<ViewCreateRequest>,
-        shallow: ReadySetResult<ViewCreateRequest>,
+        shallow: ReadySetResult<ShallowViewRequest>,
         policy: Option<ast::EvictionPolicy>,
         ddl_req: Option<CacheDDLRequest>,
         always: bool,
@@ -2438,7 +2445,8 @@ where
             return Err(ReadySetError::CreateCacheError(e.to_string()));
         }
 
-        let (query_id, name, requested_name) = self.make_name_and_id(&mut name, &shallow);
+        let (query_id, name, requested_name) =
+            self.make_name_and_id(&mut name, QueryId::from(&shallow));
 
         self.drop_caches_on_collision(Some(query_id), requested_name.as_ref())
             .await?;
@@ -2454,7 +2462,7 @@ where
         let res = self.shallow.create_cache(
             Some(name.clone()),
             Some(query_id),
-            shallow.statement.clone(),
+            shallow.query.clone(),
             shallow.schema_search_path.clone(),
             resolve_eviction_policy(policy, self.settings.default_ttl_ms),
             ddl_req.clone(),
@@ -2488,17 +2496,17 @@ where
     }
 
     /// Determines via running PREPARE if the upstream can support this query.
-    async fn upstream_supports(&mut self, req: &ViewCreateRequest) -> anyhow::Result<()> {
+    async fn upstream_supports(&mut self, req: &ShallowViewRequest) -> anyhow::Result<()> {
         let Some(upstream) = self.upstream.as_mut() else {
             bail!("No upstream database found");
         };
 
         let query = if matches!(DB::SQL_DIALECT, Dialect::MySQL) {
-            let mut stmt = req.statement.clone();
+            let mut stmt = req.query.clone();
             convert_placeholders_to_question_marks(&mut stmt)?;
             stmt.display(DB::SQL_DIALECT).to_string()
         } else {
-            req.statement.display(DB::SQL_DIALECT).to_string()
+            req.query.display(DB::SQL_DIALECT).to_string()
         };
 
         upstream.can_prepare(&query).await
@@ -2518,12 +2526,12 @@ where
         inner: &CacheInner,
     ) -> ReadySetResult<(
         ReadySetResult<ViewCreateRequest>,
-        ReadySetResult<ViewCreateRequest>,
+        ReadySetResult<ShallowViewRequest>,
     )> {
         match inner {
-            CacheInner::Statement { deep, .. } => {
+            CacheInner::Statement { deep, shallow } => {
                 let deep = deep.clone();
-                let shallow = deep.clone();
+                let shallow = shallow.clone();
 
                 // Rewrite for deep.
                 let deep = match deep {
@@ -2540,12 +2548,11 @@ where
                 // Rewrite for shallow.
                 let shallow = match shallow {
                     Ok(mut shallow) => {
-                        adapter_rewrites::rewrite_equivalent(
+                        adapter_rewrites::rewrite_equivalent_shallow(
                             &mut shallow,
                             self.noria.rewrite_params(),
-                            ParameterizeMode::Full,
                         )?;
-                        Ok(ViewCreateRequest::new(
+                        Ok(ShallowViewRequest::new(
                             *shallow,
                             self.noria.schema_search_path().to_owned(),
                         ))
@@ -2557,34 +2564,13 @@ where
             }
             CacheInner::Id(id) => match self.state.query_status_cache.query(id.as_str()) {
                 Some(q) => match q {
-                    Query::Parsed(req) => {
-                        let req = (*req).clone();
-                        let (_, migration_state) = self
-                            .state
-                            .query_status_cache
-                            .try_query_migration_state(&req);
-
-                        // The only way the shallow representation is in the query status cache is
-                        // if we've inserted an entry for an existing shallow cache.
-                        if matches!(
-                            migration_state,
-                            Some(MigrationState::Successful(CacheType::Shallow))
-                        ) {
-                            Ok((
-                                Err(ReadySetError::NoQueryForId { id: id.to_string() }),
-                                Ok(req),
-                            ))
-                        } else {
-                            Ok((
-                                Ok(req),
-                                Err(ReadySetError::NoQueryForId { id: id.to_string() }),
-                            ))
-                        }
-                    }
-                    // TODO: should be fixed in follow-ups
-                    Query::ShallowParsed(_) => Ok((
+                    Query::Parsed(deep) => Ok((
+                        Ok((*deep).clone()),
                         Err(ReadySetError::NoQueryForId { id: id.to_string() }),
+                    )),
+                    Query::ShallowParsed(shallow) => Ok((
                         Err(ReadySetError::NoQueryForId { id: id.to_string() }),
+                        Ok((*shallow).clone()),
                     )),
                     Query::ParseFailed(_, e) => Err(ReadySetError::UnparseableQuery(e)),
                 },
@@ -2599,7 +2585,7 @@ where
         explain: &ExplainStatement,
     ) -> ReadySetResult<(
         ReadySetResult<ViewCreateRequest>,
-        ReadySetResult<ViewCreateRequest>,
+        ReadySetResult<ShallowViewRequest>,
     )> {
         let ExplainStatement::CreateCache { inner, .. } = explain else {
             internal!("Unexpected EXPLAIN: {explain:?}");
@@ -2673,7 +2659,7 @@ where
     fn output_explain_create_cache(
         &self,
         query_id: QueryId,
-        req: &ViewCreateRequest,
+        query: String,
         supported: &str,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         Ok(noria_connector::QueryResult::Meta(vec![
@@ -2683,7 +2669,7 @@ where
             },
             MetaVariable {
                 name: "query".into(),
-                value: req.statement.display(self.settings.dialect).to_string(),
+                value: query,
             },
             MetaVariable {
                 name: "readyset supported".into(),
@@ -2715,7 +2701,8 @@ where
                 .query_status_cache
                 .try_query_migration_state(shallow)
         {
-            return self.output_explain_create_cache(query_id, shallow, "cached");
+            let query = shallow.query.display(self.settings.dialect).to_string();
+            return self.output_explain_create_cache(query_id, query, "cached");
         }
 
         // Determine support.
@@ -2732,7 +2719,8 @@ where
                     MigrationState::Inlined(..) | MigrationState::Pending => "pending",
                 };
 
-                self.output_explain_create_cache(QueryId::from(&deep), &deep, supported)
+                let query = deep.statement.display(self.settings.dialect).to_string();
+                self.output_explain_create_cache(QueryId::from(&deep), query, supported)
             }
             Some(CacheType::Shallow) => {
                 let shallow = shallow?;
@@ -2742,18 +2730,19 @@ where
                     "yes"
                 };
 
-                self.output_explain_create_cache(QueryId::from(&shallow), &shallow, supported)
+                let query = shallow.query.display(self.settings.dialect).to_string();
+                self.output_explain_create_cache(QueryId::from(&shallow), query, supported)
             }
             None => {
                 let defaults_deep = cache_mode.defaults_deep();
-                let (req, supported): (_, &str) = match migration_state {
-                    MigrationState::Successful(..) => (deep?, "cached"),
+                let (deep, shallow, supported): (_, _, &str) = match migration_state {
+                    MigrationState::Successful(..) => (Some(deep?), None, "cached"),
                     MigrationState::Inlined(..) | MigrationState::Pending if defaults_deep => {
-                        (deep?, "pending")
+                        (Some(deep?), None, "pending")
                     }
-                    MigrationState::DryRunSucceeded if defaults_deep => (deep?, "yes"),
+                    MigrationState::DryRunSucceeded if defaults_deep => (Some(deep?), None, "yes"),
                     MigrationState::Unsupported(ref e) if cache_mode.is_deep() => {
-                        (deep?, &format!("no: {e}"))
+                        (Some(deep?), None, &format!("no: {e}"))
                     }
                     MigrationState::Inlined(..)
                     | MigrationState::Pending
@@ -2761,14 +2750,26 @@ where
                     | MigrationState::Unsupported(..) => {
                         let shallow = shallow?;
                         if let Err(e) = self.upstream_supports(&shallow).await {
-                            (shallow, &format!("no: {e}"))
+                            (None, Some(shallow), &format!("no: {e}"))
                         } else {
-                            (shallow, "yes")
+                            (None, Some(shallow), "yes")
                         }
                     }
                 };
 
-                self.output_explain_create_cache(QueryId::from(&req), &req, supported)
+                let (query_id, query) = match (deep, shallow) {
+                    (Some(deep), None) => (
+                        QueryId::from(&deep),
+                        deep.statement.display(self.settings.dialect).to_string(),
+                    ),
+                    (None, Some(shallow)) => (
+                        QueryId::from(&shallow),
+                        shallow.query.display(self.settings.dialect).to_string(),
+                    ),
+                    _ => internal!("Expected either deep or shallow AST"),
+                };
+
+                self.output_explain_create_cache(query_id, query, supported)
             }
         }
     }
@@ -2783,6 +2784,17 @@ where
             .query_status_cache
             .always_attempt_readyset(view_request, false);
         self.invalidate_prepared_statements_cache(view_request);
+    }
+
+    fn drop_shallow_view_request(&mut self, shallow: &ShallowViewRequest) {
+        self.state.query_status_cache.update_query_migration_state(
+            shallow,
+            MigrationState::Pending,
+            None,
+        );
+        self.state
+            .query_status_cache
+            .always_attempt_readyset(shallow, false);
     }
 
     /// Forwards a `DROP CACHE` request to noria
@@ -2819,8 +2831,8 @@ where
             ..
         }) = info
         {
-            let view_request = ViewCreateRequest::new(query, schema_search_path);
-            self.drop_view_request(&view_request);
+            let view_request = ShallowViewRequest::new(query, schema_search_path);
+            self.drop_shallow_view_request(&view_request);
         };
 
         if let Err(e) = retry_with_exponential_backoff!(
@@ -3520,20 +3532,18 @@ where
     /// Return query and parameters if it should; otherwise return None.
     fn should_query_shallow(
         &self,
-        shallow: Result<SqlQuery, ReadySetError>,
-    ) -> Option<(QueryId, ViewCreateRequest, QueryParameters, bool)> {
-        let Ok(SqlQuery::Select(mut shallow)) = shallow else {
+        shallow: Result<ShallowCacheQuery, ReadySetError>,
+    ) -> Option<(QueryId, ShallowViewRequest, QueryParameters, bool)> {
+        let Ok(mut shallow) = shallow else {
             return None;
         };
-        let Ok(params) = adapter_rewrites::rewrite_equivalent(
-            &mut shallow,
-            self.noria.rewrite_params(),
-            ParameterizeMode::Full,
-        ) else {
+        let Ok(params) =
+            adapter_rewrites::rewrite_equivalent_shallow(&mut shallow, self.noria.rewrite_params())
+        else {
             return None;
         };
 
-        let shallow = ViewCreateRequest::new(shallow, self.noria.schema_search_path().to_owned());
+        let shallow = ShallowViewRequest::new(shallow, self.noria.schema_search_path().to_owned());
         let (query_id, migration) = self
             .state
             .query_status_cache
@@ -3561,7 +3571,7 @@ where
         noria: &'a mut NoriaConnector,
         upstream: Option<&'a mut DB>,
         shallow: &Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
-        req: ViewCreateRequest,
+        req: ShallowViewRequest,
         query: &'a str,
         event: &mut QueryExecutionEvent,
         params: QueryParameters,
@@ -3569,7 +3579,7 @@ where
             &async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
         >,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let query_id = QueryId::from_select(&req.statement, noria.schema_search_path());
+        let query_id = QueryId::from(&req);
         event.query_id = Some(query_id).into();
         let keys = params.make_keys::<DfValue>(&[])?;
         let key = keys.into_iter().next().unwrap_or_default().into_owned();
@@ -4164,8 +4174,7 @@ where
 
         let (parsed, shallow_parsed) = {
             let _t = event.start_parse_timer();
-            let parsed = self.parse_query(query);
-            (parsed.clone(), parsed)
+            (self.parse_query(query), self.parse_shallow_query(query))
         };
 
         if let Some((query_id, shallow, params, _)) = self.should_query_shallow(shallow_parsed) {
@@ -4419,7 +4428,7 @@ where
         self.is_internal_connection = is_internal;
     }
 
-    fn parse_query(&mut self, query: &str) -> ReadySetResult<SqlQuery> {
+    fn parse_query(&self, query: &str) -> ReadySetResult<SqlQuery> {
         trace!(%query, "Parsing query");
         readyset_sql_parsing::parse_query_with_config(
             self.settings
@@ -4430,6 +4439,11 @@ where
             query,
         )
         .map_err(Into::into)
+    }
+
+    fn parse_shallow_query(&self, query: &str) -> ReadySetResult<ShallowCacheQuery> {
+        trace!(%query, "Parsing shallow query");
+        readyset_sql_parsing::parse_shallow_query(self.settings.dialect, query).map_err(Into::into)
     }
 
     pub fn does_require_authentication(&self) -> bool {
@@ -4844,14 +4858,16 @@ where
     }
 
     let mut select_stmt = match stmt.inner {
-        CacheInner::Statement { deep: Ok(s), .. } => *s,
-        CacheInner::Statement { deep: Err(e), .. } => internal!("Failed to parse SELECT: {e}"),
+        CacheInner::Statement { shallow: Ok(s), .. } => *s,
+        CacheInner::Statement {
+            shallow: Err(e), ..
+        } => internal!("Failed to parse SELECT: {e}"),
         CacheInner::Id(_) => internal!("Cannot recreate from query ID"),
     };
 
-    adapter_rewrites::rewrite_equivalent(&mut select_stmt, rewrite_params, ParameterizeMode::Full)?;
+    adapter_rewrites::rewrite_equivalent_shallow(&mut select_stmt, rewrite_params)?;
 
-    let query_id = QueryId::from_select(&select_stmt, &schema_search_path);
+    let query_id = QueryId::from_shallow_query(&select_stmt, &schema_search_path);
     let name = stmt.name.unwrap_or_else(|| query_id.into());
 
     shallow.create_cache(
@@ -4866,12 +4882,12 @@ where
     )?;
 
     query_status_cache.update_query_migration_state(
-        &ViewCreateRequest::new(select_stmt.clone(), schema_search_path.clone()),
+        &ShallowViewRequest::new(select_stmt.clone(), schema_search_path.clone()),
         MigrationState::Successful(CacheType::Shallow),
         None,
     );
     query_status_cache.always_attempt_readyset(
-        &ViewCreateRequest::new(select_stmt, schema_search_path),
+        &ShallowViewRequest::new(select_stmt, schema_search_path),
         stmt.always,
     );
 

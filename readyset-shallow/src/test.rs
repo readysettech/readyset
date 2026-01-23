@@ -7,8 +7,7 @@ use assert_matches::assert_matches;
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_errors::ReadySetError;
-use readyset_sql::ast::Relation;
-use readyset_sql::ast::SelectStatement;
+use readyset_sql::ast::{Relation, ShallowCacheQuery};
 use readyset_util::SizeOf;
 use tokio::time::sleep;
 
@@ -27,8 +26,8 @@ fn test_policy() -> EvictionPolicy {
     }
 }
 
-fn test_stmt() -> SelectStatement {
-    SelectStatement::default()
+fn test_stmt() -> ShallowCacheQuery {
+    ShallowCacheQuery::default()
 }
 
 fn test_ddl_req() -> CacheDDLRequest {

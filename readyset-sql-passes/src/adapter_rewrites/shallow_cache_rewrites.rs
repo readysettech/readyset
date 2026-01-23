@@ -317,7 +317,6 @@ impl VisitorMut for QuestionMarkPlaceholdersVisitor {
 /// Converts all placeholders to MySQL-style `?` placeholders.
 ///
 /// This is primarily used for MySQL compatibility checks when preparing statements.
-#[allow(dead_code)]
 pub fn convert_placeholders_to_question_marks(query: &mut ShallowCacheQuery) -> ReadySetResult<()> {
     let mut visitor = QuestionMarkPlaceholdersVisitor;
     let _ = VisitMut::visit(&mut **query, &mut visitor);

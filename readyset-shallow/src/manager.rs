@@ -15,7 +15,7 @@ use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_errors::{ReadySetError, ReadySetResult, internal};
-use readyset_sql::ast::{Relation, SelectStatement, SqlIdentifier};
+use readyset_sql::ast::{Relation, ShallowCacheQuery, SqlIdentifier};
 use readyset_util::SizeOf;
 
 use crate::cache::{Cache, CacheExpiration, CacheInfo, InnerCache};
@@ -121,7 +121,7 @@ where
         &self,
         name: Option<Relation>,
         query_id: Option<QueryId>,
-        query: SelectStatement,
+        query: ShallowCacheQuery,
         schema_search_path: Vec<SqlIdentifier>,
         policy: EvictionPolicy,
         ddl_req: CacheDDLRequest,

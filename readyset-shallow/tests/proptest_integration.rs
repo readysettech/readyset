@@ -7,7 +7,7 @@ use proptest::prelude::*;
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_shallow::{CacheManager, CacheResult, EvictionPolicy, MySqlMetadata, QueryMetadata};
-use readyset_sql::ast::SelectStatement;
+use readyset_sql::ast::ShallowCacheQuery;
 use readyset_util::SizeOf;
 
 fn test_metadata() -> QueryMetadata {
@@ -33,8 +33,8 @@ fn test_policy() -> EvictionPolicy {
     }
 }
 
-fn test_stmt() -> SelectStatement {
-    SelectStatement::default()
+fn test_stmt() -> ShallowCacheQuery {
+    ShallowCacheQuery::default()
 }
 
 fn test_ddl_req() -> CacheDDLRequest {

@@ -20,7 +20,8 @@ use readyset_sql::ast::{
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
 use serde::{Deserialize, Serialize};
 pub use shallow_cache_rewrites::{
-    anonymize_shallow_query, literalize_shallow_query, rewrite_equivalent_shallow,
+    anonymize_shallow_query, convert_placeholders_to_question_marks, literalize_shallow_query,
+    rewrite_equivalent_shallow,
 };
 use tracing::{trace, trace_span};
 
@@ -840,24 +841,6 @@ pub fn number_placeholders(query: &mut SelectStatement) -> ReadySetResult<()> {
     };
     visitor.visit_select_statement(query)?;
     Ok(())
-}
-
-struct QuestionMarkPlaceholdersVisitor;
-
-impl<'ast> VisitorMut<'ast> for QuestionMarkPlaceholdersVisitor {
-    type Error = ReadySetError;
-
-    fn visit_literal(&mut self, literal: &mut Literal) -> Result<(), Self::Error> {
-        if let Literal::Placeholder(item) = literal {
-            *item = ItemPlaceholder::QuestionMark;
-        }
-        Ok(())
-    }
-}
-
-pub fn convert_placeholders_to_question_marks(stmt: &mut SelectStatement) -> ReadySetResult<()> {
-    let mut visitor = QuestionMarkPlaceholdersVisitor;
-    visitor.visit_select_statement(stmt)
 }
 
 /// Splice the given list of extracted parameters, which should be a tuple of (placeholder position,

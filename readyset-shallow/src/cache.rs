@@ -16,7 +16,7 @@ use tokio::time::{interval, timeout};
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_sql::ast::{
-    CacheInner, CacheType, CreateCacheStatement, Relation, SelectStatement, SqlIdentifier,
+    CacheInner, CacheType, CreateCacheStatement, Relation, ShallowCacheQuery, SqlIdentifier,
 };
 use readyset_util::SizeOf;
 
@@ -157,7 +157,7 @@ impl<K, V> Expiry<K, Arc<CacheEntry<V>>> for CacheExpiration {
 pub struct CacheInfo {
     pub name: Option<Relation>,
     pub query_id: Option<QueryId>,
-    pub query: SelectStatement,
+    pub query: ShallowCacheQuery,
     pub schema_search_path: Vec<SqlIdentifier>,
     pub ttl_ms: Option<u64>,
     pub refresh_ms: Option<u64>,
@@ -187,8 +187,8 @@ impl From<CacheInfo> for CreateCacheStatement {
             policy,
             coalesce_ms: info.coalesce_ms.map(Duration::from_millis),
             inner: CacheInner::Statement {
-                deep: Ok(Box::new(info.query.clone())),
-                shallow: Err("TODO".into()),
+                deep: Err("deep".into()),
+                shallow: Ok(Box::new(info.query.clone())),
             },
             unparsed_create_cache_statement: None,
             always: info.always,
@@ -208,7 +208,7 @@ where
     cache_metadata: OnceLock<Arc<QueryMetadata>>,
     name: Option<Relation>,
     query_id: Option<QueryId>,
-    query: SelectStatement,
+    query: ShallowCacheQuery,
     schema_search_path: Vec<SqlIdentifier>,
     ttl_ms: Option<u64>,
     refresh_ms: Option<u64>,
@@ -246,7 +246,7 @@ where
         policy: EvictionPolicy,
         name: Option<Relation>,
         query_id: Option<QueryId>,
-        query: SelectStatement,
+        query: ShallowCacheQuery,
         schema_search_path: Vec<SqlIdentifier>,
         ddl_req: CacheDDLRequest,
         always: bool,
@@ -590,8 +590,6 @@ where
 mod tests {
     use std::time::Duration;
 
-    use readyset_sql::ast::SelectStatement;
-
     use crate::{CacheManager, EvictionPolicy, QueryMetadata};
 
     use super::*;
@@ -619,7 +617,7 @@ mod tests {
             policy,
             None,
             None,
-            SelectStatement::default(),
+            ShallowCacheQuery::default(),
             vec![],
             test_ddl_req(),
             false,
@@ -688,7 +686,7 @@ mod tests {
         let policy = EvictionPolicy::Ttl {
             ttl: Duration::from_secs(60),
         };
-        let stmt = SelectStatement::default();
+        let stmt = ShallowCacheQuery::default();
 
         let cache_0 = Cache::new(
             0,
@@ -801,7 +799,7 @@ mod tests {
             },
             Some(relation.clone()),
             Some(query_id),
-            SelectStatement::default(),
+            ShallowCacheQuery::default(),
             vec![],
             test_ddl_req(),
             false,
