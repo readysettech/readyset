@@ -298,7 +298,7 @@ fn joinable_aggregate_nodes(
 macro_rules! record_reachable {
     ($fn_name:expr) => {{
         antithesis_sdk::assert_reachable!(
-            "Lowered post-lookup aggregate function",
+            "[exclude-nightly] Lowered post-lookup aggregate function",
             &json!({"function": $fn_name})
         );
     }};

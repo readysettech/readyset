@@ -179,7 +179,10 @@ impl BuiltinFunction {
             null_on_failure: true,
         };
 
-        antithesis_sdk::assert_reachable!("Lowering builtin function", &json!({"function": name}));
+        antithesis_sdk::assert_reachable!(
+            "[exclude-nightly] Lowering builtin function",
+            &json!({"function": name})
+        );
         let result = match name {
             "convert_tz" => {
                 // Type is inferred from input argument

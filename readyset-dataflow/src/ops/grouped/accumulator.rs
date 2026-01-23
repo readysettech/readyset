@@ -45,7 +45,10 @@ impl Accumulator {
         _dialect: &Dialect,
     ) -> ReadySetResult<GroupedOperator<Accumulator>> {
         let op_name: &'static str = op.clone().into();
-        antithesis_sdk::assert_reachable!("Accumulation", &json!({"op": op_name}));
+        antithesis_sdk::assert_reachable!(
+            "[exclude-nightly] Accumulation",
+            &json!({"op": op_name})
+        );
         let collation = over_col_ty.collation().unwrap_or(Collation::Utf8);
 
         let out_ty = match &op {
