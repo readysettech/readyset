@@ -6,3 +6,4 @@ mod utils;
 pub(crate) use connector::MySqlBinlogConnector;
 pub(crate) use snapshot::MySqlReplicator;
 pub use snapshot::MYSQL_INTERNAL_DBS;
+pub use utils::is_gtid_mode_enabled;

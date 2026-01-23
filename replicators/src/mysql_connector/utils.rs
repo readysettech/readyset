@@ -2,7 +2,7 @@ use mysql_async::{self as mysql, prelude::Queryable};
 use mysql_common::collations::{Collation as MyCollation, CollationId};
 use readyset_data::encoding::Encoding;
 use readyset_data::{Collation as RsCollation, DfValue, Dialect};
-use readyset_errors::{internal, ReadySetResult};
+use readyset_errors::{internal, replication_failed, replication_failed_err, ReadySetResult};
 use std::sync::Arc;
 
 //TODO(marce): Make this a configuration parameter or dynamically adjust based on the table size
@@ -70,6 +70,33 @@ pub(crate) fn mysql_pad_binary_column(mut val: Vec<u8>, col_len: usize) -> Ready
         val.extend(std::iter::repeat_n(0, col_len - val.len()));
     }
     Ok(DfValue::ByteArray(Arc::new(val)))
+}
+
+/// Check if GTID mode is enabled on the MySQL server.
+///
+/// Returns:
+/// - `Ok(true)` if gtid_mode is ON (fully enabled)
+/// - `Ok(false)` if gtid_mode is OFF
+/// - `Err` if gtid_mode is in a permissive mode (not yet supported) or query fails
+#[allow(dead_code)] // Will be used when GTID mode is integrated into noria_adapter
+pub async fn is_gtid_mode_enabled(conn: &mut mysql_async::Conn) -> ReadySetResult<bool> {
+    let mode: Option<(String, String)> = conn
+        .query_first("SHOW VARIABLES LIKE 'gtid_mode'")
+        .await
+        .map_err(|e| replication_failed_err!("Failed to query gtid_mode: {e}"))?;
+
+    let value = mode
+        .ok_or_else(|| replication_failed_err!("MySQL did not return gtid_mode"))?
+        .1;
+
+    match value.as_str() {
+        "OFF" => Ok(false),
+        "ON" => Ok(true),
+        other if other.contains("PERMISSIVE") => {
+            replication_failed!("GTID permissive modes are not yet supported (gtid_mode={other})")
+        }
+        other => replication_failed!("Unexpected gtid_mode value: {other}"),
+    }
 }
 
 pub fn parse_mysql_version(version: &str) -> mysql_async::Result<u32> {

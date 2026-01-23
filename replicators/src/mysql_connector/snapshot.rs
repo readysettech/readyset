@@ -21,12 +21,12 @@ use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::TableStatus;
 use readyset_data::{DfValue, Dialect};
 use readyset_decimal::Decimal;
-use readyset_errors::{internal_err, ReadySetResult};
+use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_sql::DialectDisplay;
 use readyset_sql_parsing::ParsingPreset;
 use replication_offset::mysql::MySqlPosition;
-use replication_offset::{ReplicationOffset, ReplicationOffsets};
+use replication_offset::{GtidSet, ReplicationOffset, ReplicationOffsets};
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -58,6 +58,14 @@ pub enum TableKind {
     View,
 }
 
+/// Holds the result of querying SHOW MASTER STATUS / SHOW BINARY LOG STATUS
+struct MasterStatus {
+    /// The binlog file position
+    position: MySqlPosition,
+    /// The executed GTID set (column 5 of SHOW MASTER STATUS), if available
+    executed_gtid_set: Option<String>,
+}
+
 pub(crate) struct MySqlReplicator<'a> {
     /// This is the underlying (regular) MySQL connection
     pub(crate) pool: mysql::Pool,
@@ -69,6 +77,8 @@ pub(crate) struct MySqlReplicator<'a> {
     pub(crate) snapshot_query_comment: Option<String>,
     /// Any TableStatus updates sent here will update this controller's state machine.
     pub(crate) table_status_tx: UnboundedSender<(Relation, TableStatus)>,
+    /// Whether the upstream server has GTID mode enabled.
+    pub(crate) gtid_mode: bool,
 }
 
 /// Get the list of tables defined in the database
@@ -323,14 +333,14 @@ impl MySqlReplicator<'_> {
             }
         }
 
-        // Get the current binlog position, since at this point the tables are not locked, binlog
+        // Get the current replication offset, since at this point the tables are not locked, binlog
         // will advance while we are taking the snapshot. This is fine, we will catch up later.
-        // We prefer to take the binlog position *after* the recipe is loaded in order to make sure
+        // We prefer to take the replication offset *after* the recipe is loaded in order to make sure
         // no ddl changes took place between the binlog position and the schema that we loaded
-        let binlog_position = self.get_binlog_position().await?;
+        let schema_offset = self.current_replication_offset().await?;
 
         noria
-            .set_schema_replication_offset(Some(&binlog_position.into()))
+            .set_schema_replication_offset(Some(&schema_offset))
             .await?;
 
         let table_list = replicated_tables
@@ -369,17 +379,13 @@ impl MySqlReplicator<'_> {
         Ok(tx)
     }
 
-    /// Use the SHOW MASTER STATUS or SHOW BINARY LOG STATUS statement to determine
-    /// the current binary log file name and position.
-    async fn get_binlog_position(&self) -> mysql::Result<MySqlPosition> {
-        let mut conn = self.pool.get_conn().await?;
-        let query = match get_mysql_version(&mut conn).await {
+    /// Query the master status from a connection to determine the current replication offset
+    async fn master_status_from_conn(&self, conn: &mut mysql::Conn) -> mysql::Result<MasterStatus> {
+        let query = match get_mysql_version(conn).await {
             Ok(version) => {
                 if version >= 80400 {
-                    // MySQL 8.4.0 and above
                     "SHOW BINARY LOG STATUS"
                 } else {
-                    // MySQL 8.3.0 and below
                     "SHOW MASTER STATUS"
                 }
             }
@@ -388,7 +394,7 @@ impl MySqlReplicator<'_> {
             }
         };
 
-        let pos: mysql::Row = conn.query_first(query).await?.ok_or_else(|| {
+        let row: mysql::Row = conn.query_first(query).await?.ok_or_else(|| {
             mysql_async::Error::Other(Box::new(internal_err!(
                 "Empty response for SHOW MASTER STATUS. \
                  Ensure the binlog_format parameter is set to ROW and, if using RDS, backup \
@@ -396,11 +402,53 @@ impl MySqlReplicator<'_> {
             )))
         })?;
 
-        let file: String = pos.get(0).expect("Binlog file name");
-        let offset: u64 = pos.get(1).expect("Binlog offset");
+        let file: String = row.get(0).expect("Binlog file name");
+        let offset: u64 = row.get(1).expect("Binlog offset");
+        let executed_gtid_set = match row.get_opt::<String, _>(4) {
+            Some(Ok(value)) if !value.is_empty() => Some(value),
+            Some(Err(err)) => {
+                return Err(mysql_async::Error::Other(Box::new(err)));
+            }
+            _ => None,
+        };
 
-        MySqlPosition::from_file_name_and_position(file, offset)
-            .map_err(|err| mysql_async::Error::Other(Box::new(err)))
+        let position = MySqlPosition::from_file_name_and_position(file, offset)
+            .map_err(|err| mysql_async::Error::Other(Box::new(err)))?;
+
+        Ok(MasterStatus {
+            position,
+            executed_gtid_set,
+        })
+    }
+
+    /// Get the replication offset from master status, using GTID if enabled
+    async fn replication_offset_from_master_status(
+        &self,
+        conn: &mut mysql::Conn,
+    ) -> ReadySetResult<ReplicationOffset> {
+        let status = self
+            .master_status_from_conn(conn)
+            .await
+            .map_err(|err| ReadySetError::ReplicationFailed(format!("{err}")))?;
+
+        if self.gtid_mode {
+            let gtid_set = status.executed_gtid_set.ok_or_else(|| {
+                ReadySetError::ReplicationFailed(
+                    "Executed_Gtid_Set missing while GTID mode enabled".into(),
+                )
+            })?;
+            let parsed = GtidSet::parse(gtid_set.trim())?;
+            Ok(ReplicationOffset::Gtid(parsed))
+        } else {
+            Ok(status.position.into())
+        }
+    }
+
+    /// Use the SHOW MASTER STATUS or SHOW BINARY LOG STATUS statement to determine
+    /// the current replication offset (either a file position or a GTID set)
+    async fn current_replication_offset(&self) -> ReadySetResult<ReplicationOffset> {
+        let mut conn = self.pool.get_conn().await?;
+        self.replication_offset_from_master_status(&mut conn).await
     }
 
     /// Issue a `LOCK TABLES tbl_name READ` for the table name provided
@@ -664,7 +712,9 @@ impl MySqlReplicator<'_> {
         let mut read_lock = self.lock_table(&table).await?;
         // We acquire the position for each table individually, since it changes from
         // one lock to the other
-        let repl_offset = ReplicationOffset::from(self.get_binlog_position().await?);
+        let repl_offset = self
+            .replication_offset_from_master_status(&mut read_lock)
+            .await?;
         span.in_scope(|| info!("Snapshotting table"));
 
         let trx = self.get_one_transaction().instrument(span.clone()).await?;

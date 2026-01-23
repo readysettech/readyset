@@ -110,6 +110,13 @@ pub struct UpstreamConfig {
     #[serde(default)]
     pub replication_server_uuid: Option<Uuid>,
 
+    /// Enable GTID-based replication for MySQL. When set, Readyset uses GTID
+    /// (Global Transaction Identifiers) instead of traditional binlog file/position
+    /// tracking. Requires the upstream MySQL server to have gtid_mode=ON.
+    #[arg(long, env = "ENABLE_GTID")]
+    #[serde(default)]
+    pub enable_gtid: bool,
+
     /// Hostname to report when registering as a replica with the upstream database (MySQL only).
     /// If not set, no hostname will be reported.
     #[arg(long = "report-host", env = "REPORT_HOST")]
@@ -362,6 +369,7 @@ impl Default for UpstreamConfig {
             replication_enabled: true,
             replication_server_id: Default::default(),
             replication_server_uuid: Default::default(),
+            enable_gtid: false,
             replica_report_host: Default::default(),
             replica_report_port: Default::default(),
             replica_report_user: Default::default(),

@@ -33,7 +33,7 @@ use readyset_util::{retry_with_exponential_backoff, select};
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 
 use crate::db_util::{CreateSchema, DatabaseSchemas};
-use crate::mysql_connector::{MySqlBinlogConnector, MySqlReplicator};
+use crate::mysql_connector::{is_gtid_mode_enabled, MySqlBinlogConnector, MySqlReplicator};
 use crate::postgres_connector::{
     drop_publication, drop_readyset_schema, drop_replication_slot, PostgresReplicator,
     PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
@@ -327,6 +327,23 @@ impl<'a> NoriaAdapter<'a> {
             backoff: 2,
         )?;
 
+        // Only check for GTID mode when explicitly enabled via --enable-gtid
+        let gtid_mode = if config.enable_gtid {
+            let mut conn = mysql::Conn::new(mysql_opts_builder.clone()).await?;
+            let server_gtid = is_gtid_mode_enabled(&mut conn).await?;
+            if !server_gtid {
+                return Err(ReadySetError::ReplicationFailed(
+                    "--enable-gtid is set but the upstream MySQL server does not have \
+                     gtid_mode=ON. Enable GTID mode on the server or remove --enable-gtid"
+                        .to_string(),
+                ));
+            }
+            info!("GTID mode enabled via --enable-gtid, server confirms gtid_mode=ON");
+            true
+        } else {
+            false
+        };
+
         let pos = match (replication_offsets.min_present_offset()?, resnapshot) {
             (None, _) | (_, true) => {
                 let span = info_span!("taking database snapshot");
@@ -370,6 +387,7 @@ impl<'a> NoriaAdapter<'a> {
                     parsing_preset,
                     snapshot_query_comment: config.snapshot_query_comment.clone(),
                     table_status_tx: table_status_tx.clone(),
+                    gtid_mode,
                 };
 
                 let snapshot_start = Instant::now();
