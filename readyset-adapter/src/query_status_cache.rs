@@ -523,15 +523,8 @@ impl QueryStatusCache {
         let should_insert = q.with_mut_status(self, |s| {
             match s {
                 Some(s) => {
-                    // We do not support transitions from the `Unsupported` state, as we assume
-                    // any `Unsupported` query will remain `Unsupported` for the duration of
-                    // this process.
-                    //
                     // `Inlined` queries may only be changed from `Inlined` to `Unsupported`.
-                    if !matches!(
-                        s.migration_state,
-                        MigrationState::Unsupported(_) | MigrationState::Inlined(_)
-                    ) {
+                    if !matches!(s.migration_state, MigrationState::Inlined(_)) {
                         s.migration_state = MigrationState::Pending
                     }
                     false
@@ -554,9 +547,7 @@ impl QueryStatusCache {
     }
 
     /// Updates a query's migration state to `m` unless the query's migration state was
-    /// `MigrationState::Unsupported` or `MigrationState::Inlined`. An unsupported query cannot
-    /// currently become supported once again. An Inlined query can only transition to the
-    /// Unsupported state.
+    /// `MigrationState::Inlined`. An Inlined query can only transition to the Unsupported state.
     ///
     /// If provided, also updates this query's ALWAYS status.
     pub fn update_query_migration_state<Q>(&self, q: &Q, m: MigrationState, always: Option<bool>)
@@ -567,10 +558,6 @@ impl QueryStatusCache {
             match s {
                 Some(s) => {
                     match s.migration_state {
-                        // We do not support transitions from the `Unsupported` state, as we assume
-                        // any `Unsupported` query will remain `Unsupported` for the duration of
-                        // this process.
-                        MigrationState::Unsupported(_) => {}
                         // A query with an Inlined state can only transition to Unsupported.
                         MigrationState::Inlined(_) => {
                             if matches!(m, MigrationState::Unsupported(_)) {
@@ -1152,13 +1139,38 @@ mod tests {
         let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
         let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
-        cache.update_query_migration_state(&q, MigrationState::Pending, None);
         cache.update_query_migration_state(&q, MigrationState::Unsupported("Failed".into()), None);
         assert_eq!(
             cache.query_migration_state(&q).1,
             MigrationState::Unsupported("Failed".into())
         );
         cache.update_query_migration_state(&q, MigrationState::Pending, None);
+        assert_eq!(cache.query_migration_state(&q).1, MigrationState::Pending);
+        cache.update_query_migration_state(&q, MigrationState::Unsupported("Failed".into()), None);
+        assert_eq!(
+            cache.query_migration_state(&q).1,
+            MigrationState::Unsupported("Failed".into())
+        );
+        cache.update_query_migration_state(
+            &q,
+            MigrationState::Successful(CacheType::Shallow),
+            None,
+        );
+        assert_eq!(
+            cache.query_migration_state(&q).1,
+            MigrationState::Successful(CacheType::Shallow)
+        );
+        cache.update_query_migration_state(&q, MigrationState::Unsupported("Failed".into()), None);
+        assert_eq!(
+            cache.query_migration_state(&q).1,
+            MigrationState::Unsupported("Failed".into())
+        );
+        cache.update_query_migration_state(&q, MigrationState::Successful(CacheType::Deep), None);
+        assert_eq!(
+            cache.query_migration_state(&q).1,
+            MigrationState::Successful(CacheType::Deep)
+        );
+        cache.update_query_migration_state(&q, MigrationState::Unsupported("Failed".into()), None);
         assert_eq!(
             cache.query_migration_state(&q).1,
             MigrationState::Unsupported("Failed".into())
@@ -1173,12 +1185,20 @@ mod tests {
         );
         assert_eq!(
             cache.query_migration_state(&q).1,
-            MigrationState::Unsupported("Failed".into())
+            MigrationState::Inlined(InlinedState {
+                inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
+                epoch: 0,
+            }),
         );
-        cache.update_query_migration_state(&q, MigrationState::Successful(CacheType::Deep), None);
+        cache.update_query_migration_state(&q, MigrationState::Unsupported("Failed".into()), None);
         assert_eq!(
             cache.query_migration_state(&q).1,
             MigrationState::Unsupported("Failed".into())
+        );
+        cache.update_query_migration_state(&q, MigrationState::DryRunSucceeded, None);
+        assert_eq!(
+            cache.query_migration_state(&q).1,
+            MigrationState::DryRunSucceeded
         );
     }
 
