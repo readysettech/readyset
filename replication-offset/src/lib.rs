@@ -1,7 +1,10 @@
 //! Data types for implementing snapshot and streaming replication from an upstream database.
 
 pub mod mysql;
+pub mod mysql_gtid;
 pub mod postgres;
+
+pub use mysql_gtid::{GtidEvent, GtidRange, GtidSet, GtidSource};
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;

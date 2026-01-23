@@ -970,6 +970,43 @@ macro_rules! internal_err {
     }
 }
 
+/// Make a new [`ReadySetError::ReplicationFailed`] with the provided format arguments.
+///
+/// When building in debug mode, the returned error also captures file, line, and column information
+/// for further debugging purposes
+///
+/// # Examples
+///
+/// ```
+/// use readyset_errors::replication_failed_err;
+///
+/// let x = 4;
+/// let my_err = replication_failed_err!("{x} things went wrong during replication!");
+/// assert!(my_err.to_string().contains("4 things went wrong during replication!"));
+/// ```
+#[macro_export]
+macro_rules! replication_failed_err {
+    ($($format_args:tt)*) => {
+        $crate::ReadySetError::ReplicationFailed(format!(
+            "{}{}",
+            $crate::__location_info!("in {}: "),
+            format_args!($($format_args)*)
+        ))
+    }
+}
+
+/// Return a [`ReadySetError::ReplicationFailed`] from the current function.
+///
+/// Usage is like [`panic!`], in that you can pass a format string and arguments.
+/// When building in debug mode, the returned error also captures file, line, and column information
+/// for further debugging purposes.
+#[macro_export]
+macro_rules! replication_failed {
+    ($($format_args:tt)*) => {
+        return Err($crate::replication_failed_err!($($format_args)*).into())
+    };
+}
+
 /// Make a new [`ReadySetError::InvalidQuery`] with the provided format arguments.
 ///
 /// When building in debug mode, the returned error also captures file, line, and column information

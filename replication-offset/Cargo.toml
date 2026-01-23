@@ -12,6 +12,10 @@ serde = { workspace = true, features = ["derive"] }
 readyset-util = { path = "../readyset-util" }
 bytes = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+bincode = { workspace = true }
 
 [lints]
 workspace = true
