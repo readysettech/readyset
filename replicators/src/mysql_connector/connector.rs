@@ -27,7 +27,7 @@ use readyset_decimal::Decimal;
 use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
 use serde_json::Map;
 use tokio::time::timeout;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use database_utils::UpstreamConfig;
 use readyset_client::metrics::recorded;
@@ -35,7 +35,9 @@ use readyset_client::recipe::changelist::{Change, IntoChanges as _};
 use readyset_client::recipe::ChangeList;
 use readyset_client::{Modification, ReadySetHandle, TableOperation};
 use readyset_data::{Collation as RsCollation, DfValue, Dialect, TimestampTz};
-use readyset_errors::{internal, internal_err, unsupported_err, ReadySetError, ReadySetResult};
+use readyset_errors::{
+    internal, internal_err, replication_failed, unsupported_err, ReadySetError, ReadySetResult,
+};
 use readyset_sql::ast::{
     AlterTableStatement, CollationName, CreateTableBody, CreateTableOption, NonReplicatedRelation,
     NotReplicatedReason, Relation, SqlIdentifier, SqlQuery,
@@ -162,6 +164,17 @@ pub(crate) struct MySqlBinlogConnector {
     /// Whether the upstream server has GTID mode enabled.
     #[allow(dead_code)] // Will be used when GTID mode detection is implemented
     gtid_mode: bool,
+    /// Number of row events to skip during crash recovery.
+    ///
+    /// When resuming from a persisted GTID set with a pending transaction, we need to
+    /// skip the row events that were already applied before the crash. This counter is
+    /// initialized from the pending GTID's event_index and decremented for each row event
+    /// until it reaches 0.
+    events_to_skip: u64,
+    /// Maximum number of row events to skip during GTID crash recovery within a
+    /// single transaction. If the pending event index exceeds this limit,
+    /// replication fails assuming corrupt state.
+    max_gtid_rows_to_skip: u64,
 }
 
 impl MySqlBinlogConnector {
@@ -295,7 +308,6 @@ impl MySqlBinlogConnector {
     ///
     /// This tracks how many row events have been processed within the current transaction.
     /// Used for crash recovery to skip already-applied events on reconnect.
-    #[allow(dead_code)] // Used starting from crash recovery implementation
     fn advance_current_gtid_event(&mut self) {
         if let Some(set) = self.replication_offset.gtid_set_mut() {
             if let Some(pending) = set.pending_mut() {
@@ -310,6 +322,24 @@ impl MySqlBinlogConnector {
             set.set_pending(gtid);
         }
     }
+
+    /// Check if we should skip the current row event during crash recovery.
+    ///
+    /// Returns `true` if the event should be skipped (already applied before crash),
+    /// `false` if the event should be processed normally.
+    fn should_skip_row_event(&mut self) -> bool {
+        if self.events_to_skip > 0 {
+            self.events_to_skip -= 1;
+            trace!(
+                remaining = self.events_to_skip,
+                "Crash recovery: skipping already-applied row event"
+            );
+            true
+        } else {
+            false
+        }
+    }
+
     /// Compute the checksum of the event and compare to the supplied checksum
     fn validate_event_checksum(event: &binlog::events::Event) -> bool {
         if let Ok(Some(BinlogChecksumAlg::BINLOG_CHECKSUM_ALG_CRC32)) =
@@ -360,7 +390,33 @@ impl MySqlBinlogConnector {
             table_schemas: Default::default(),
             parsing_config: parsing_preset.into_config().rate_limit_logging(false),
             gtid_mode: false,
+            events_to_skip: 0,
+            max_gtid_rows_to_skip: config.max_gtid_rows_to_skip,
         };
+
+        // Crash recovery: if we have a pending GTID, skip the events that were
+        // already applied before the crash.
+        if let ReplicationOffset::Gtid(set) = &connector.replication_offset {
+            if let Some(pending) = set.pending() {
+                if pending.event_index() > connector.max_gtid_rows_to_skip {
+                    replication_failed!(
+                        "Pending GTID {} has unreasonable event_index {} \
+                         (max {}). Increase --max-gtid-rows-to-skip if the \
+                         upstream transaction legitimately has more row events, \
+                         otherwise the persisted state may be corrupt",
+                        pending,
+                        pending.event_index(),
+                        connector.max_gtid_rows_to_skip,
+                    );
+                }
+                info!(
+                    pending_gtid = %pending,
+                    events_to_skip = pending.event_index(),
+                    "Crash recovery: will skip already-applied events"
+                );
+                connector.events_to_skip = pending.event_index();
+            }
+        }
 
         connector.set_parameters().await?;
 
@@ -1163,28 +1219,40 @@ impl MySqlBinlogConnector {
                     };
                 }
                 EventType::WRITE_ROWS_EVENT => {
+                    if self.should_skip_row_event() {
+                        continue;
+                    }
                     let event = handle_err!(self, binlog_ev.read_event());
                     let binlog_action =
                         handle_err!(self, self.process_event_write_rows(event).await);
                     self.merge_table_actions(&mut hash_actions, binlog_action)
                         .await;
+                    self.advance_current_gtid_event();
                 }
 
                 EventType::UPDATE_ROWS_EVENT => {
+                    if self.should_skip_row_event() {
+                        continue;
+                    }
                     let event = handle_err!(self, binlog_ev.read_event());
 
                     let binlog_action =
                         handle_err!(self, self.process_event_update_rows(event).await);
                     self.merge_table_actions(&mut hash_actions, binlog_action)
                         .await;
+                    self.advance_current_gtid_event();
                 }
 
                 EventType::DELETE_ROWS_EVENT => {
+                    if self.should_skip_row_event() {
+                        continue;
+                    }
                     let event = handle_err!(self, binlog_ev.read_event());
                     let binlog_action =
                         handle_err!(self, self.process_event_delete_rows(event).await);
                     self.merge_table_actions(&mut hash_actions, binlog_action)
                         .await;
+                    self.advance_current_gtid_event();
                 }
                 EventType::XID_EVENT => {
                     // InnoDB commit inside compressed transaction payload.
@@ -1353,20 +1421,32 @@ impl MySqlBinlogConnector {
                 }
 
                 EventType::WRITE_ROWS_EVENT => {
+                    if self.should_skip_row_event() {
+                        continue;
+                    }
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_write_rows(event).await?;
+                    self.advance_current_gtid_event();
                     return Ok((vec![action], self.current_offset()));
                 }
 
                 EventType::UPDATE_ROWS_EVENT => {
+                    if self.should_skip_row_event() {
+                        continue;
+                    }
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_update_rows(event).await?;
+                    self.advance_current_gtid_event();
                     return Ok((vec![action], self.current_offset()));
                 }
 
                 EventType::DELETE_ROWS_EVENT => {
+                    if self.should_skip_row_event() {
+                        continue;
+                    }
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_delete_rows(event).await?;
+                    self.advance_current_gtid_event();
                     return Ok((vec![action], self.current_offset()));
                 }
 
@@ -1423,15 +1503,55 @@ impl MySqlBinlogConnector {
                     if self.enable_statement_logging {
                         info!(target: "replicator_statement", "{:?}", ev);
                     }
-                    // Safety net: if the previous GTID was not finalized (e.g., due to a
-                    // missing COMMIT), finalize it before starting a new one.
-                    self.finalize_current_gtid();
-
-                    // Create GtidEvent from the GTID event and set it as pending
+                    // Create GtidEvent from the GTID event
                     let server_uuid = Uuid::from_bytes(ev.sid());
                     let tag = ev.tag().map(|t| t.as_str().to_string());
                     let incoming_gtid = GtidEvent::new(GtidSource { server_uuid, tag }, ev.gno());
-                    self.set_current_gtid(incoming_gtid);
+
+                    // Check if this GTID matches the existing pending GTID from crash recovery.
+                    // If so, keep the existing pending with its event_index intact — this allows
+                    // us to correctly skip already-applied events.
+                    let should_set_pending =
+                        if let Some(set) = self.replication_offset.gtid_set_mut() {
+                            if let Some(pending) = set.pending() {
+                                // Only set new pending if it's a different GTID
+                                pending.source() != incoming_gtid.source()
+                                    || pending.sequence_number() != incoming_gtid.sequence_number()
+                            } else {
+                                true
+                            }
+                        } else {
+                            false
+                        };
+
+                    if should_set_pending {
+                        // Safety net: finalize any unfinalized pending GTID before
+                        // starting a new transaction.
+                        if self
+                            .replication_offset
+                            .gtid_set_mut()
+                            .is_some_and(|s| s.pending().is_some())
+                        {
+                            warn!(
+                                incoming_gtid = %incoming_gtid,
+                                "Auto-finalizing implicitly-committed GTID \
+                                 before starting new transaction"
+                            );
+                            self.finalize_current_gtid();
+                        }
+                        // Reset skip counter: the persisted pending GTID did not
+                        // match the first GTID we received after reconnect.
+                        if self.events_to_skip > 0 {
+                            warn!(
+                                events_to_skip = self.events_to_skip,
+                                incoming_gtid = %incoming_gtid,
+                                "Crash recovery: incoming GTID differs from persisted \
+                                 pending; resetting skip counter to avoid dropping rows"
+                            );
+                            self.events_to_skip = 0;
+                        }
+                        self.set_current_gtid(incoming_gtid);
+                    }
                 }
 
                 EventType::HEARTBEAT_EVENT => {}

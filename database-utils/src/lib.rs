@@ -117,6 +117,15 @@ pub struct UpstreamConfig {
     #[serde(default)]
     pub enable_gtid: bool,
 
+    /// Maximum number of row events to skip during GTID crash recovery. When
+    /// Readyset restarts after a crash mid-transaction, it replays from the
+    /// pending GTID and skips row events that were already applied within that
+    /// transaction. If the pending event index exceeds this limit, replication
+    /// fails assuming the persisted state is corrupt.
+    #[arg(long, env = "MAX_GTID_ROWS_TO_SKIP", default_value = "10000")]
+    #[serde(default = "default_max_gtid_rows_to_skip")]
+    pub max_gtid_rows_to_skip: u64,
+
     /// Hostname to report when registering as a replica with the upstream database (MySQL only).
     /// If not set, no hostname will be reported.
     #[arg(long = "report-host", env = "REPORT_HOST")]
@@ -354,6 +363,10 @@ fn default_status_update_interval_secs() -> u16 {
     UpstreamConfig::default().status_update_interval_secs
 }
 
+fn default_max_gtid_rows_to_skip() -> u64 {
+    10_000
+}
+
 fn duration_from_seconds(i: &str) -> Result<Duration, ParseIntError> {
     i.parse::<u64>().map(Duration::from_secs)
 }
@@ -370,6 +383,7 @@ impl Default for UpstreamConfig {
             replication_server_id: Default::default(),
             replication_server_uuid: Default::default(),
             enable_gtid: false,
+            max_gtid_rows_to_skip: default_max_gtid_rows_to_skip(),
             replica_report_host: Default::default(),
             replica_report_port: Default::default(),
             replica_report_user: Default::default(),
