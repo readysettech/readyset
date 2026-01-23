@@ -305,8 +305,6 @@ impl<'a> NoriaAdapter<'a> {
         parsing_preset: ParsingPreset,
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     ) -> ReadySetResult<std::convert::Infallible> {
-        use replication_offset::mysql::MySqlPosition;
-
         let mut mysql_opts_builder = OptsBuilder::from_opts(mysql_options).prefer_socket(false);
 
         let ssl_opts = get_mysql_tls_config(&ServerCertVerification::from(config).await?);
@@ -435,11 +433,10 @@ impl<'a> NoriaAdapter<'a> {
                 // can do this "catching up" by just starting replication at
                 // the old offset. Note that at the very least we will
                 // always have the schema offset for the minimum.
-                let pos: MySqlPosition = replication_offsets
+                let pos: ReplicationOffset = replication_offsets
                     .min_present_offset()?
                     .expect("Minimal offset must be present after snapshot")
-                    .clone()
-                    .try_into()?;
+                    .clone();
 
                 span.in_scope(|| info!("Snapshot finished"));
                 histogram!(recorded::REPLICATOR_SNAPSHOT_DURATION)
@@ -457,7 +454,7 @@ impl<'a> NoriaAdapter<'a> {
 
                 pos
             }
-            (Some(pos), _) => pos.clone().try_into()?,
+            (Some(pos), _) => pos.clone(),
         };
 
         let connector = Box::new(
@@ -469,6 +466,7 @@ impl<'a> NoriaAdapter<'a> {
                 table_filter.clone(),
                 parsing_preset,
                 config,
+                gtid_mode,
             )
             .await?,
         );
@@ -485,7 +483,7 @@ impl<'a> NoriaAdapter<'a> {
             table_status_tx,
         };
 
-        let mut current_pos: ReplicationOffset = pos.into();
+        let mut current_pos: ReplicationOffset = pos;
 
         // At this point it is possible that we just finished replication, but
         // our schema and our tables are taken at different position in the binlog.

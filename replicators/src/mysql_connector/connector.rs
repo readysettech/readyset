@@ -20,6 +20,9 @@ use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
 use mysql_common::collations::{Collation, CollationId};
 use mysql_common::constants::ColumnType;
+use mysql_common::packets::{
+    BinlogDumpFlags, ComBinlogDump, ComBinlogDumpGtid, GnoInterval, Sid, Tag,
+};
 use mysql_common::{binlog, Value};
 use mysql_srv::ColumnFlags;
 use readyset_data::encoding::{mysql_character_set_name_to_collation_id, Encoding};
@@ -36,14 +39,15 @@ use readyset_client::recipe::ChangeList;
 use readyset_client::{Modification, ReadySetHandle, TableOperation};
 use readyset_data::{Collation as RsCollation, DfValue, Dialect, TimestampTz};
 use readyset_errors::{
-    internal, internal_err, replication_failed, unsupported_err, ReadySetError, ReadySetResult,
+    internal, internal_err, replication_failed, replication_failed_err, unsupported_err,
+    ReadySetError, ReadySetResult,
 };
 use readyset_sql::ast::{
     AlterTableStatement, CollationName, CreateTableBody, CreateTableOption, NonReplicatedRelation,
     NotReplicatedReason, Relation, SqlIdentifier, SqlQuery,
 };
 use replication_offset::mysql::MySqlPosition;
-use replication_offset::{GtidEvent, GtidSource, ReplicationOffset};
+use replication_offset::{GtidEvent, GtidSet, GtidSource, ReplicationOffset};
 use uuid::Uuid;
 
 use crate::mysql_connector::utils::{mysql_pad_binary_column, mysql_pad_char_column};
@@ -162,7 +166,6 @@ pub(crate) struct MySqlBinlogConnector {
     /// Parsing mode that determines which parser(s) to use and how to handle conflicts
     parsing_config: ParsingConfig,
     /// Whether the upstream server has GTID mode enabled.
-    #[allow(dead_code)] // Will be used when GTID mode detection is implemented
     gtid_mode: bool,
     /// Number of row events to skip during crash recovery.
     ///
@@ -261,29 +264,40 @@ impl MySqlBinlogConnector {
 
     /// After we have registered as a replica, we can request the binlog
     async fn request_binlog(&mut self) -> mysql::Result<()> {
-        let pos = self
-            .replication_offset
-            .mysql_position()
-            .map_err(|e| mysql_async::Error::Other(Box::new(e)))?;
-        info!(next_position = %pos, "Starting binlog replication");
-        let filename = pos.binlog_file_name().to_string();
+        info!(offset = %self.replication_offset, "Starting binlog replication");
 
-        // If the next position is greater than u32::MAX, we need to re-snapshot
-        if pos.position > u64::from(u32::MAX) {
-            Err(mysql_async::Error::Other(Box::new(
-                ReadySetError::FullResnapshotNeeded,
-            )))?;
+        match &self.replication_offset {
+            ReplicationOffset::MySql(pos) => {
+                if pos.position > u64::from(u32::MAX) {
+                    Err(mysql_async::Error::Other(Box::new(
+                        ReadySetError::FullResnapshotNeeded,
+                    )))?;
+                }
+                let filename = pos.binlog_file_name().to_string();
+                let cmd = ComBinlogDump::new(self.server_id())
+                    .with_pos(
+                        pos.position
+                            .try_into()
+                            .expect("Impossible binlog start position. Please re-snapshot."),
+                    )
+                    .with_filename(filename.as_bytes());
+
+                self.connection.write_command(&cmd).await?;
+                self.connection.read_packet().await?;
+            }
+            ReplicationOffset::Gtid(ref set) => {
+                let sids = Self::gtid_set_to_sids(set)
+                    .map_err(|e| mysql_async::Error::Other(Box::new(e)))?;
+                let cmd = ComBinlogDumpGtid::new(self.server_id())
+                    .with_pos(4)
+                    .with_sids(sids)
+                    .with_flags(BinlogDumpFlags::BINLOG_THROUGH_GTID);
+
+                self.connection.write_command(&cmd).await?;
+                self.connection.read_packet().await?;
+            }
+            _ => unreachable!("MySQL connector only uses MySQL offsets"),
         }
-        let cmd = mysql_common::packets::ComBinlogDump::new(self.server_id())
-            .with_pos(
-                pos.position
-                    .try_into()
-                    .expect("Impossible binlog start position. Please re-snapshot."),
-            )
-            .with_filename(filename.as_bytes());
-
-        self.connection.write_command(&cmd).await?;
-        self.connection.read_packet().await?;
         Ok(())
     }
 
@@ -340,6 +354,28 @@ impl MySqlBinlogConnector {
         }
     }
 
+    /// Convert a GtidSet into the SID format required by ComBinlogDumpGtid.
+    fn gtid_set_to_sids(set: &GtidSet) -> ReadySetResult<Vec<Sid<'_>>> {
+        let mut result = Vec::new();
+
+        for (key, ranges) in set.iter() {
+            let intervals: Vec<GnoInterval> = ranges
+                .iter()
+                .map(|range| GnoInterval::new(range.start, range.end + 1))
+                .collect();
+
+            let mut sid = Sid::new(*key.server_uuid.as_bytes()).with_intervals(intervals);
+            if let Some(ref tag) = key.tag {
+                let tag = Tag::new(tag)
+                    .map_err(|e| replication_failed_err!("Invalid GTID tag '{}': {}", tag, e))?;
+                sid = sid.with_tag(tag);
+            }
+            result.push(sid);
+        }
+
+        Ok(result)
+    }
+
     /// Compute the checksum of the event and compare to the supplied checksum
     fn validate_event_checksum(event: &binlog::events::Event) -> bool {
         if let Ok(Some(BinlogChecksumAlg::BINLOG_CHECKSUM_ALG_CRC32)) =
@@ -356,14 +392,16 @@ impl MySqlBinlogConnector {
     }
 
     /// Connect to a given MySQL database and subscribe to the binlog
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn connect<O: Into<mysql::Opts>>(
         noria: ReadySetHandle,
         mysql_opts: O,
-        next_position: MySqlPosition,
+        start_offset: ReplicationOffset,
         enable_statement_logging: bool,
         table_filter: TableFilter,
         parsing_preset: ParsingPreset,
         config: &UpstreamConfig,
+        gtid_mode: bool,
     ) -> ReadySetResult<Self> {
         let server_id = config
             .replication_server_id
@@ -371,11 +409,15 @@ impl MySqlBinlogConnector {
             .map(|id| id.0.parse::<u32>())
             .transpose()
             .map_err(|_| {
-                ReadySetError::ReplicationFailed(format!(
+                replication_failed_err!(
                     "{} is an invalid server id--it must be a valid u32.",
                     config.replication_server_id.clone().unwrap()
-                ))
+                )
             })?;
+
+        if matches!(start_offset, ReplicationOffset::Postgres(_)) {
+            replication_failed!("Unsupported replication offset for MySQL: {start_offset:?}");
+        }
 
         let mut connector = MySqlBinlogConnector {
             noria,
@@ -383,13 +425,13 @@ impl MySqlBinlogConnector {
             reader: binlog::EventStreamReader::new(binlog::consts::BinlogVersion::Version4),
             server_id,
             server_uuid: config.replication_server_uuid,
-            replication_offset: ReplicationOffset::MySql(next_position),
+            replication_offset: start_offset,
             enable_statement_logging,
             last_reported_pos_ts: Instant::now() - Duration::from_secs(MAX_POSITION_TIME),
             table_filter,
             table_schemas: Default::default(),
             parsing_config: parsing_preset.into_config().rate_limit_logging(false),
-            gtid_mode: false,
+            gtid_mode,
             events_to_skip: 0,
             max_gtid_rows_to_skip: config.max_gtid_rows_to_skip,
         };
@@ -416,6 +458,13 @@ impl MySqlBinlogConnector {
                 );
                 connector.events_to_skip = pending.event_index();
             }
+        }
+
+        // Validate that offset type matches gtid_mode
+        if connector.replication_offset.is_gtid() && !connector.gtid_mode {
+            replication_failed!(
+                "GTID replication offset provided but gtid_mode is not enabled on the server"
+            );
         }
 
         connector.set_parameters().await?;
@@ -545,6 +594,12 @@ impl MySqlBinlogConnector {
     ) -> ReadySetResult<ReplicationAction> {
         if self.enable_statement_logging {
             info!(target: "replicator_statement", "{:?}", rotate_event);
+        }
+
+        // In GTID mode, position tracking is handled by GTIDs, not file offsets.
+        // Rotate events still fire but are irrelevant for our position tracking.
+        if self.replication_offset.is_gtid() {
+            return Ok(ReplicationAction::Empty);
         }
 
         let rotate_position = handle_err!(
@@ -925,7 +980,19 @@ impl MySqlBinlogConnector {
         if table.schema.is_none() {
             table.schema = Some(SqlIdentifier::from(current_schema));
         }
-        let pos = self.replication_offset.mysql_position()?;
+        let reason = if self.replication_offset.is_gtid() {
+            format!(
+                "Event received as binlog_format=STATEMENT. Position: {}",
+                self.replication_offset
+            )
+        } else {
+            let pos = self.replication_offset.mysql_position()?;
+            format!(
+                "Event received as binlog_format=STATEMENT. File: {} - Pos: {}",
+                pos.binlog_file_name(),
+                pos.position
+            )
+        };
         Ok(vec![
             Change::Drop {
                 name: table.clone(),
@@ -933,11 +1000,7 @@ impl MySqlBinlogConnector {
             },
             Change::AddNonReplicatedRelation(NonReplicatedRelation {
                 name: table,
-                reason: NotReplicatedReason::OtherError(format!(
-                    "Event received as binlog_format=STATEMENT. File: {:} - Pos: {:}",
-                    pos.binlog_file_name(),
-                    pos.position
-                )),
+                reason: NotReplicatedReason::OtherError(reason),
             }),
         ])
     }
@@ -1200,7 +1263,7 @@ impl MySqlBinlogConnector {
                             return Err(binlog_err!(
                                 self,
                                 format!("Could not process query inside transaction: {err}")
-                            ))
+                            ));
                         }
                         Ok(action) => match action {
                             ReplicationAction::LogPosition => {
@@ -1427,6 +1490,7 @@ impl MySqlBinlogConnector {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_write_rows(event).await?;
                     self.advance_current_gtid_event();
+
                     return Ok((vec![action], self.current_offset()));
                 }
 
@@ -1437,6 +1501,7 @@ impl MySqlBinlogConnector {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_update_rows(event).await?;
                     self.advance_current_gtid_event();
+
                     return Ok((vec![action], self.current_offset()));
                 }
 
@@ -1447,6 +1512,7 @@ impl MySqlBinlogConnector {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_delete_rows(event).await?;
                     self.advance_current_gtid_event();
+
                     return Ok((vec![action], self.current_offset()));
                 }
 
