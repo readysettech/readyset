@@ -1,5 +1,6 @@
 use crate::ops::utils::Order;
 use crate::prelude::*;
+use crate::processing::ColumnMiss;
 use crate::LookupIndex;
 
 use dataflow_state::PointKey;
@@ -792,29 +793,72 @@ impl Ingredient for Window {
     }
 
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
-        let our_index = self
-            .our_index
-            .expect("our index not set, should have been set in on_commit");
-
-        let columns = cols
+        // Check if the output column (the window function result) is in the requested columns
+        let non_output_cols: Vec<usize> = cols
             .iter()
             .copied()
             .filter(|c| *c != self.output_col_index)
-            .collect::<Vec<_>>();
+            .collect();
 
-        // the cols we're asking for all belong to the parent
-        if columns.len() == cols.len() {
-            ColumnSource::ExactCopy(ColumnRef {
+        if non_output_cols.len() == cols.len() {
+            // Early exit: the requested columns don't include the output column; they all belong to the
+            // parent and can be traced back directly
+            return ColumnSource::ExactCopy(ColumnRef {
                 node: self.src.as_global(),
                 columns: cols.to_vec(),
-            })
-        } else {
-            // asked about the output col - reference this node with the other columns
-            ColumnSource::GeneratedFromColumns(vec1![ColumnRef {
-                node: our_index.as_global(),
-                columns,
-            }])
+            });
         }
+
+        if non_output_cols.is_empty() {
+            // Only the output column was requested. We can't create an index on just the
+            // generated column, so we need a full replay
+            return ColumnSource::RequiresFullReplay(vec1![self.src.as_global()]);
+        }
+
+        // Check if the non-output columns are a subset of lookup_key (group_by + partition_by).
+        // If yes ->    we can use partial materialization via handle_upquery.
+        // If no  ->    we need a full replay because the state isn't keyed appropriately.
+        let all_in_lookup_key = non_output_cols
+            .iter()
+            .all(|col| self.lookup_key.contains(col));
+
+        if all_in_lookup_key {
+            let our_index = self
+                .our_index
+                .expect("our_index not set, should have been set in on_commit")
+                .as_global();
+
+            ColumnSource::GeneratedFromColumns(vec1![ColumnRef {
+                node: our_index,
+                columns: non_output_cols,
+            }])
+        } else {
+            ColumnSource::RequiresFullReplay(vec1![self.src.as_global()])
+        }
+    }
+
+    fn handle_upquery(&mut self, miss: ColumnMiss) -> ReadySetResult<Vec<ColumnMiss>> {
+        let index = *self
+            .our_index
+            .expect("our_index not set, should have been set in on_commit");
+
+        let output_pos = miss
+            .column_indices
+            .iter()
+            .position(|ci| *ci == self.output_col_index)
+            .expect("handle_upquery called but output column not in missed columns");
+
+        Ok(vec![ColumnMiss {
+            node: index,
+            column_indices: self.lookup_key.clone(),
+            missed_keys: miss.missed_keys.mapped(|k| {
+                k.map_endpoints(|mut r| {
+                    r.remove(output_pos)
+                        .expect("output column position out of bounds in key");
+                    r
+                })
+            }),
+        }])
     }
 
     fn description(&self) -> String {
@@ -1416,6 +1460,89 @@ mod tests {
         .unwrap();
 
         assert_eq!(window.lookup_key, vec![3, 0, 2, 1]);
+    }
+
+    /// Test that column_source returns RequiresFullReplay when only the output column is requested.
+    /// This prevents creating an index with 0 columns which would cause an error.
+    #[test]
+    fn column_source_output_only_requires_full_replay() {
+        let (g, s) = setup_row_number(vec![0], vec![1]);
+        // The output column (row_num) is at index 4
+        let src = g.node().column_source(&[4]);
+        assert_eq!(src, ColumnSource::RequiresFullReplay(vec1![s.as_global()]));
+    }
+
+    /// Test that column_source returns GeneratedFromColumns when the output column is requested
+    /// along with columns that ARE in lookup_key (group_by + partition_by).
+    /// This enables partial materialization via handle_upquery, which is faster than a full replay.
+    #[test]
+    fn column_source_output_with_lookup_key_cols_generated() {
+        let (g, _s) = setup_row_number(vec![0], vec![1]);
+        // Request the partition column (1) and output column (4)
+        // Column 1 is in lookup_key (group_by=[0], partition_by=[1] => lookup_key=[0,1])
+        let src = g.node().column_source(&[1, 4]);
+        assert_eq!(
+            src,
+            ColumnSource::GeneratedFromColumns(vec1![ColumnRef {
+                node: g.node_index().as_global(),
+                columns: vec![1], // non-output columns
+            }])
+        );
+    }
+
+    /// Test that column_source returns RequiresFullReplay when the output column is requested
+    /// along with columns that are NOT in lookup_key.
+    #[test]
+    fn column_source_output_with_non_lookup_cols_requires_full_replay() {
+        let (g, s) = setup_row_number(vec![0], vec![1]);
+        // Request column 2 (order_by column, NOT in lookup_key) and output column (4)
+        // lookup_key = [0, 1], so column 2 is not in it
+        let src = g.node().column_source(&[2, 4]);
+        assert_eq!(src, ColumnSource::RequiresFullReplay(vec1![s.as_global()]));
+    }
+
+    /// Test that column_source returns ExactCopy for non-output columns.
+    #[test]
+    fn column_source_non_output_exact_copy() {
+        let (g, s) = setup_row_number(vec![0], vec![1]);
+        // Request only the order column (2)
+        let src = g.node().column_source(&[2]);
+        assert_eq!(
+            src,
+            ColumnSource::ExactCopy(ColumnRef {
+                node: s.as_global(),
+                columns: vec![2],
+            })
+        );
+    }
+
+    /// Test that handle_upquery correctly remaps an upquery for generated columns.
+    /// It should strip out the output column value and remap to lookup_key columns.
+    #[test]
+    fn handle_upquery_for_output_col_query() {
+        let (g, _s) = setup_row_number(vec![0], vec![1]);
+        // Upquery for columns [1, 4] (partition_by col and output col)
+        // with key ["A", 3] (partition value "A", row_number 3)
+        let res = g
+            .node_mut()
+            .handle_upquery(ColumnMiss {
+                node: *g.node_index(),
+                column_indices: vec![1, 4],
+                missed_keys: vec1![vec1![DfValue::from("A"), DfValue::from(3)].into()],
+            })
+            .unwrap();
+
+        assert_eq!(res.len(), 1);
+        // Should remap to lookup_key columns [0, 1] with just the partition value ["A"]
+        // (output column value stripped)
+        assert_eq!(
+            *res.first().unwrap(),
+            ColumnMiss {
+                node: *g.node_index(),
+                column_indices: vec![0, 1], // lookup_key
+                missed_keys: vec1![vec1![DfValue::from("A")].into()]  // output col value stripped
+            }
+        );
     }
 
     #[test]

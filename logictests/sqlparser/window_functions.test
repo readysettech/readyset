@@ -874,3 +874,11 @@ ORDER BY order_col, id;
 6
 5
 25
+
+# Test window function output column in range filter (subquery pattern)
+# Regression test for partial upquery with Window node (REA-6092)
+
+query I
+SELECT count(*) FROM (SELECT ROW_NUMBER() OVER() AS rn FROM j) AS inner_q WHERE inner_q.rn <= 1;
+----
+1
