@@ -67,12 +67,18 @@ macro_rules! binlog_err {
         } else {
             ("".to_string(), "".to_string())
         };
-        let gtid_message = if let Some(ref gtid) = $connector.current_gtid {
-            format!(" at GTID {}", gtid)
-        } else {
-            "".to_string()
+        let (gtid_message, offset_str) = match &$connector.replication_offset {
+            ReplicationOffset::MySql(pos) => ("".to_string(), format!("{}", pos)),
+            ReplicationOffset::Gtid(set) => {
+                let pending_msg = if let Some(pending) = set.pending() {
+                    format!(" at pending GTID {}", pending)
+                } else {
+                    "".to_string()
+                };
+                (pending_msg, format!("GTID:{}", set))
+            }
+            _ => unreachable!("MySQL connector only uses MySQL offsets"),
         };
-        let offset_str = format!("{}", $connector.replication_offset);
         ReadySetError::ReplicationFailed(format!(
             "Binlog error before position {}{}{} at {}:{}:{}: {}{}",
             offset_str,
@@ -140,9 +146,6 @@ pub(crate) struct MySqlBinlogConnector {
     /// Tracks the replication offset that Readyset has persisted.
     /// For GTID mode, this contains the GTID set with pending transaction tracking.
     replication_offset: ReplicationOffset,
-    /// The GTID of the current transaction. Table modification events will have the current GTID
-    /// attached if enabled in mysql.
-    current_gtid: Option<GtidEvent>,
     /// Whether to log statements received by the connector
     enable_statement_logging: bool,
     /// Timestamp of the last reported position. This is use to ensure we keep the distance
@@ -271,6 +274,42 @@ impl MySqlBinlogConnector {
         Ok(())
     }
 
+    /// Mark the current GTID as completed and update the replication offset.
+    ///
+    /// Called when XID_EVENT (InnoDB commit) or COMMIT is received to finalize the
+    /// pending GTID, adding its sequence number to the committed set.
+    fn finalize_current_gtid(&mut self) {
+        if let Some(set) = self.replication_offset.gtid_set_mut() {
+            set.finalize_pending();
+        }
+    }
+
+    /// Clear the pending GTID without finalizing (e.g., on ROLLBACK).
+    fn clear_current_gtid(&mut self) {
+        if let Some(set) = self.replication_offset.gtid_set_mut() {
+            set.clear_pending();
+        }
+    }
+
+    /// Advance the event index of the current GTID (called after each row event).
+    ///
+    /// This tracks how many row events have been processed within the current transaction.
+    /// Used for crash recovery to skip already-applied events on reconnect.
+    #[allow(dead_code)] // Used starting from crash recovery implementation
+    fn advance_current_gtid_event(&mut self) {
+        if let Some(set) = self.replication_offset.gtid_set_mut() {
+            if let Some(pending) = set.pending_mut() {
+                pending.advance_event();
+            }
+        }
+    }
+
+    /// Set the pending GTID (called when GTID_EVENT is received).
+    fn set_current_gtid(&mut self, gtid: GtidEvent) {
+        if let Some(set) = self.replication_offset.gtid_set_mut() {
+            set.set_pending(gtid);
+        }
+    }
     /// Compute the checksum of the event and compare to the supplied checksum
     fn validate_event_checksum(event: &binlog::events::Event) -> bool {
         if let Ok(Some(BinlogChecksumAlg::BINLOG_CHECKSUM_ALG_CRC32)) =
@@ -315,7 +354,6 @@ impl MySqlBinlogConnector {
             server_id,
             server_uuid: config.replication_server_uuid,
             replication_offset: ReplicationOffset::MySql(next_position),
-            current_gtid: None,
             enable_statement_logging,
             last_reported_pos_ts: Instant::now() - Duration::from_secs(MAX_POSITION_TIME),
             table_filter,
@@ -893,7 +931,16 @@ impl MySqlBinlogConnector {
         ) {
             Ok(SqlQuery::StartTransaction(_)) => Err(ReadySetError::SkipEvent),
             Ok(SqlQuery::Commit(_)) if self.report_position_elapsed() || is_last => {
+                self.finalize_current_gtid();
                 Ok(ReplicationAction::LogPosition)
+            }
+            Ok(SqlQuery::Commit(_)) => {
+                self.finalize_current_gtid();
+                Err(ReadySetError::SkipEvent)
+            }
+            Ok(SqlQuery::Rollback(stmt)) if stmt.ends_transaction() => {
+                self.clear_current_gtid();
+                Err(ReadySetError::SkipEvent)
             }
             Ok(SqlQuery::Truncate(truncate)) if truncate.tables.len() == 1 => {
                 // MySQL only allows one table in the statement, or we would be in trouble.
@@ -1139,6 +1186,10 @@ impl MySqlBinlogConnector {
                     self.merge_table_actions(&mut hash_actions, binlog_action)
                         .await;
                 }
+                EventType::XID_EVENT => {
+                    // InnoDB commit inside compressed transaction payload.
+                    self.finalize_current_gtid();
+                }
                 ev => {
                     if self.enable_statement_logging {
                         info!(target: "replicator_statement", "unhandled event: {:?}", ev);
@@ -1205,6 +1256,11 @@ impl MySqlBinlogConnector {
         false
     }
 
+    /// Get the current replication offset.
+    fn current_offset(&self) -> ReplicationOffset {
+        self.replication_offset.clone()
+    }
+
     /// Process binlog events until an actionable event occurs.
     ///
     /// # Arguments
@@ -1214,7 +1270,7 @@ impl MySqlBinlogConnector {
     pub(crate) async fn next_action_inner(
         &mut self,
         until: Option<&ReplicationOffset>,
-    ) -> ReadySetResult<(Vec<ReplicationAction>, &MySqlPosition)> {
+    ) -> ReadySetResult<(Vec<ReplicationAction>, ReplicationOffset)> {
         use mysql_common::binlog::events;
 
         loop {
@@ -1224,8 +1280,9 @@ impl MySqlBinlogConnector {
 
             let binlog_event = handle_err!(self, res);
 
-            {
-                let pos = self.replication_offset.mysql_position_mut()?;
+            // Update file position for file-based replication mode.
+            // In GTID mode, position tracking is done via the GTID set instead.
+            if let Ok(pos) = self.replication_offset.mysql_position_mut() {
                 if u64::from(binlog_event.header().log_pos()) < pos.position
                     && pos.position + u64::from(binlog_event.header().event_size())
                         > u64::from(u32::MAX)
@@ -1237,18 +1294,27 @@ impl MySqlBinlogConnector {
                 }
             }
 
-            let is_last = match until {
-                Some(limit) => {
+            // Check if we've reached the replication limit.
+            // For file-based mode, compare binlog positions.
+            // For GTID mode, compare GTID sets.
+            let is_last = match (&self.replication_offset, until) {
+                (ReplicationOffset::MySql(pos), Some(limit)) => {
                     let limit = MySqlPosition::try_from(limit).expect("Valid binlog limit");
-                    *self.replication_offset.mysql_position()? >= limit
+                    *pos >= limit
                 }
-                None => false,
+                (ReplicationOffset::Gtid(current), Some(ReplicationOffset::Gtid(target))) => {
+                    // We've caught up when our current GTID set includes all GTIDs in the target.
+                    // Note: We compare completed GTIDs only. If we have a pending GTID that's
+                    // beyond the target, we're still caught up for the completed transactions.
+                    current.try_partial_cmp(target)?.is_ge()
+                }
+                _ => false,
             };
             match handle_err!(self, binlog_event.header().event_type()) {
                 EventType::ROTATE_EVENT => {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = handle_err!(self, self.process_event_rotate(event).await);
-                    return Ok((vec![action], self.replication_offset.mysql_position()?));
+                    return Ok((vec![action], self.current_offset()));
                 }
 
                 EventType::QUERY_EVENT => {
@@ -1260,7 +1326,14 @@ impl MySqlBinlogConnector {
                         }
                         Err(err) => return Err(binlog_err!(self, None, err)),
                     };
-                    return Ok((vec![action], self.replication_offset.mysql_position()?));
+                    // DDL statements (CREATE TABLE, ALTER TABLE, etc.) are
+                    // implicitly committed by MySQL — there is no XID_EVENT or
+                    // COMMIT query following them. Finalize the pending GTID so
+                    // the returned offset reflects the committed state.
+                    if matches!(action, ReplicationAction::DdlChange { .. }) {
+                        self.finalize_current_gtid();
+                    }
+                    return Ok((vec![action], self.current_offset()));
                 }
                 ev @ EventType::TABLE_MAP_EVENT => {
                     // Used for row-based binary logging. This event precedes each row operation
@@ -1282,19 +1355,19 @@ impl MySqlBinlogConnector {
                 EventType::WRITE_ROWS_EVENT => {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_write_rows(event).await?;
-                    return Ok((vec![action], self.replication_offset.mysql_position()?));
+                    return Ok((vec![action], self.current_offset()));
                 }
 
                 EventType::UPDATE_ROWS_EVENT => {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_update_rows(event).await?;
-                    return Ok((vec![action], self.replication_offset.mysql_position()?));
+                    return Ok((vec![action], self.current_offset()));
                 }
 
                 EventType::DELETE_ROWS_EVENT => {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_delete_rows(event).await?;
-                    return Ok((vec![action], self.replication_offset.mysql_position()?));
+                    return Ok((vec![action], self.current_offset()));
                 }
 
                 EventType::TRANSACTION_PAYLOAD_EVENT => {
@@ -1303,17 +1376,15 @@ impl MySqlBinlogConnector {
                         self,
                         self.process_event_transaction_payload(event, is_last).await
                     );
-                    return Ok((actions, self.replication_offset.mysql_position()?));
+                    return Ok((actions, self.current_offset()));
                 }
 
                 EventType::XID_EVENT => {
                     // Generated for a commit of a transaction that modifies one or more tables of
                     // an XA-capable storage engine (InnoDB).
+                    self.finalize_current_gtid();
                     if self.report_position_elapsed() || is_last {
-                        return Ok((
-                            vec![ReplicationAction::LogPosition],
-                            self.replication_offset.mysql_position()?,
-                        ));
+                        return Ok((vec![ReplicationAction::LogPosition], self.current_offset()));
                     }
                     continue;
                 }
@@ -1323,23 +1394,23 @@ impl MySqlBinlogConnector {
                     let event: binlog::events::WriteRowsEventV1<'_> =
                         handle_err!(self, binlog_event.read_event());
                     let action = self.process_row_v1_metadata(event.table_id()).await?;
-                    return Ok((vec![action], self.replication_offset.mysql_position()?));
+                    return Ok((vec![action], self.current_offset()));
                 }
 
                 EventType::UPDATE_ROWS_EVENT_V1 => {
                     let event: binlog::events::UpdateRowsEventV1<'_> =
                         handle_err!(self, binlog_event.read_event());
                     let action = self.process_row_v1_metadata(event.table_id()).await?;
-                    return Ok((vec![action], self.replication_offset.mysql_position()?));
+                    return Ok((vec![action], self.current_offset()));
                 }
 
                 EventType::DELETE_ROWS_EVENT_V1 => {
                     let event: binlog::events::DeleteRowsEventV1<'_> =
                         handle_err!(self, binlog_event.read_event());
                     let action = self.process_row_v1_metadata(event.table_id()).await?;
-                    return Ok((vec![action], self.replication_offset.mysql_position()?));
+                    return Ok((vec![action], self.current_offset()));
                 }
-                EventType::GTID_EVENT => {
+                EventType::GTID_EVENT | EventType::GTID_TAGGED_LOG_EVENT => {
                     // GTID stands for Global Transaction Identifier It is composed of two parts:
                     // SID for Source Identifier, and GNO for Group Number. The basic idea is to
                     // Associate an identifier, the Global Transaction Identifier or GTID, to every
@@ -1352,15 +1423,15 @@ impl MySqlBinlogConnector {
                     if self.enable_statement_logging {
                         info!(target: "replicator_statement", "{:?}", ev);
                     }
-                    // Create GtidEvent from the GTID event
+                    // Safety net: if the previous GTID was not finalized (e.g., due to a
+                    // missing COMMIT), finalize it before starting a new one.
+                    self.finalize_current_gtid();
+
+                    // Create GtidEvent from the GTID event and set it as pending
                     let server_uuid = Uuid::from_bytes(ev.sid());
-                    self.current_gtid = Some(GtidEvent::new(
-                        GtidSource {
-                            server_uuid,
-                            tag: None,
-                        },
-                        ev.gno(),
-                    ));
+                    let tag = ev.tag().map(|t| t.as_str().to_string());
+                    let incoming_gtid = GtidEvent::new(GtidSource { server_uuid, tag }, ev.gno());
+                    self.set_current_gtid(incoming_gtid);
                 }
 
                 EventType::HEARTBEAT_EVENT => {}
@@ -1420,10 +1491,7 @@ impl MySqlBinlogConnector {
             // We didn't get an actionable event, but we still need to check that we haven't reached
             // the until limit
             if is_last {
-                return Ok((
-                    vec![ReplicationAction::LogPosition],
-                    self.replication_offset.mysql_position()?,
-                ));
+                return Ok((vec![ReplicationAction::LogPosition], self.current_offset()));
             }
         }
     }
@@ -1963,7 +2031,6 @@ impl Connector for MySqlBinlogConnector {
         _: &ReplicationOffset,
         until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(Vec<ReplicationAction>, ReplicationOffset)> {
-        let (actions, pos) = self.next_action_inner(until).await?;
-        Ok((actions, pos.into()))
+        self.next_action_inner(until).await
     }
 }

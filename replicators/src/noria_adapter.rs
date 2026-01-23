@@ -495,7 +495,7 @@ impl<'a> NoriaAdapter<'a> {
         // Only once binlog advanced to that point, can we send a ready signal to
         // ReadySet.
         match adapter.replication_offsets.max_offset()? {
-            Some(max) if max > &current_pos => {
+            Some(max) if max.try_partial_cmp(&current_pos)?.is_gt() => {
                 info!(start = %current_pos, end = %max, "Catching up");
                 let max = max.clone();
                 if let Err(err) = adapter
@@ -1080,40 +1080,47 @@ impl<'a> NoriaAdapter<'a> {
         for action in actions {
             match action {
                 ReplicationAction::DdlChange { .. } | ReplicationAction::LogPosition => {
-                    match &self.replication_offsets.schema {
-                        Some(cur) if pos <= *cur => {
-                            if !catchup {
-                                warn!(%pos, %cur, "Skipping schema update for earlier entry");
-                            }
+                    let already_applied = match &self.replication_offsets.schema {
+                        Some(cur) => pos.try_partial_cmp(cur)?.is_le(),
+                        None => false,
+                    };
+                    if already_applied {
+                        if !catchup {
+                            warn!(%pos, cur = %self.replication_offsets.schema.as_ref().expect("checked above"),
+                                  "Skipping schema update for earlier entry");
                         }
-                        _ => {
-                            actionables.push(action);
-                        }
+                    } else {
+                        actionables.push(action);
                     }
                 }
                 ReplicationAction::TableAction { table, actions } => {
-                    match self.replication_offsets.tables.get(&table) {
-                        Some(Some(cur)) if pos <= *cur => {
-                            if !catchup {
-                                warn!(
-                                    table = %table.display_unquoted(),
-                                    %pos,
-                                    %cur,
-                                    "Skipping table action for earlier entry"
-                                );
-                            }
-                            continue;
-                        }
-
+                    let already_applied = match self.replication_offsets.tables.get(&table) {
                         Some(Some(cur)) => {
-                            trace!(table = %table.display_unquoted(), %cur);
+                            let ord = pos.try_partial_cmp(cur)?;
+                            if ord.is_gt() {
+                                trace!(table = %table.display_unquoted(), %cur);
+                            }
+                            ord.is_le()
                         }
                         _ => {
                             trace!(
                                 table = %table.display_unquoted(),
                                 "no replication offset for table"
                             );
+                            false
                         }
+                    };
+                    if already_applied {
+                        if !catchup {
+                            warn!(
+                                table = %table.display_unquoted(),
+                                %pos,
+                                cur = %self.replication_offsets.tables.get(&table)
+                                    .expect("checked above").as_ref().expect("checked above"),
+                                "Skipping table action for earlier entry"
+                            );
+                        }
+                        continue;
                     }
                     if self.table_filter.should_be_processed(
                         table.schema.as_deref().ok_or_else(|| {
@@ -1166,8 +1173,10 @@ impl<'a> NoriaAdapter<'a> {
                 )
             ));
 
-            if until.as_ref().map(|u| *position >= *u).unwrap_or(false) {
-                return Ok(());
+            if let Some(u) = until.as_ref() {
+                if position.try_partial_cmp(u)?.is_ge() {
+                    return Ok(());
+                }
             }
 
             select! {
