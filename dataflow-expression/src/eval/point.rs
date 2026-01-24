@@ -132,8 +132,8 @@ impl Point {
 
         // tells us the byte order of the points fields (X, Y), which are at the end of the array.
         let is_little_endian = bytes[0] == 0x01;
-        let srid = extract_srid(&bytes, is_little_endian)?;
-        let (x, y) = Self::extract_coordinates(&bytes, is_little_endian)?;
+        let srid = extract_srid(bytes, is_little_endian)?;
+        let (x, y) = Self::extract_coordinates(bytes, is_little_endian)?;
         let coord = Pair { x, y };
         Ok(Point { coord, srid })
     }

@@ -19,7 +19,6 @@ use readyset_errors::{invalid_query_err, ReadySetError, ReadySetResult};
 ///          ------------
 ///          t
 ///          (1 row)
-
 ///
 ///  invalid  SELECT ST_IsValid('POLYGON ((20 180, 180 180, 180 20, 20 20, 30, 40))');
 ///           ERROR:  parse error - invalid geometry
@@ -60,13 +59,13 @@ impl Polygon {
 
         // tells us the byte order of the pair fields (X, Y).
         let is_little_endian = bytes[0] == 0x01;
-        let srid = extract_srid(&bytes, is_little_endian)?;
-        let (external_ring, internal_rings) = Self::extract_rings(&bytes, is_little_endian, srid)?;
+        let srid = extract_srid(bytes, is_little_endian)?;
+        let (external_ring, internal_rings) = Self::extract_rings(bytes, is_little_endian, srid)?;
 
         Ok(Polygon {
             exterior_ring: external_ring,
             holes: internal_rings,
-            srid: srid,
+            srid,
         })
     }
 
@@ -116,21 +115,21 @@ impl Polygon {
         if bytes.len() < start_byte + NUM_OF_BYTES_PAIR {
             return Err(invalid_query_err!("Invalid polygon byte array size"));
         }
-        let x = Self::extract_bytes_f64(&bytes, is_little_endian, start_byte)?;
-        let y = Self::extract_bytes_f64(&bytes, is_little_endian, start_byte + NUM_OF_BYTES_F64)?;
+        let x = Self::extract_bytes_f64(bytes, is_little_endian, start_byte)?;
+        let y = Self::extract_bytes_f64(bytes, is_little_endian, start_byte + NUM_OF_BYTES_F64)?;
 
-        Ok(Pair { x: x, y: y })
+        Ok(Pair { x, y })
     }
     fn extract_ring(
         bytes: &[u8],
         is_little_endian: bool,
         start_byte: usize,
     ) -> ReadySetResult<Vec<Pair>> {
-        let num_pairs = Self::extract_bytes_u32(&bytes, is_little_endian, start_byte)?; // First 4 bytes
+        let num_pairs = Self::extract_bytes_u32(bytes, is_little_endian, start_byte)?; // First 4 bytes
         let mut pairs: Vec<Pair> = Vec::new();
         let mut offset = start_byte + NUM_OF_BYTES_U32;
         for _num in 0..num_pairs {
-            let pair = Self::extract_pair(&bytes, is_little_endian, offset)?;
+            let pair = Self::extract_pair(bytes, is_little_endian, offset)?;
             pairs.push(pair);
             offset += NUM_OF_BYTES_PAIR; // 16 byte for each pair
         }
@@ -143,24 +142,24 @@ impl Polygon {
         srid: Option<u32>,
     ) -> ReadySetResult<(Vec<Pair>, Vec<Vec<Pair>>)> {
         let mut start_byte: usize = 9;
-        if srid == None {
+        if srid.is_none() {
             start_byte = 5;
         }
-        let number_of_rings = Self::extract_bytes_u32(&bytes, is_little_endian, start_byte)?;
+        let number_of_rings = Self::extract_bytes_u32(bytes, is_little_endian, start_byte)?;
         if number_of_rings == 0 {
             return Ok((Vec::new(), Vec::new()));
         }
 
         // extract exterior ring
         let mut offset = start_byte + NUM_OF_BYTES_U32;
-        let external_ring = Self::extract_ring(&bytes, is_little_endian, offset)?;
+        let external_ring = Self::extract_ring(bytes, is_little_endian, offset)?;
 
         // extract internal rings
         let mut internal_rings: Vec<Vec<Pair>> = Vec::new();
         let mut previous_ring_size = external_ring.len() * NUM_OF_BYTES_PAIR + NUM_OF_BYTES_U32;
         for _ring_num in 1..number_of_rings {
             offset += previous_ring_size;
-            let ring = Self::extract_ring(&bytes, is_little_endian, offset)?;
+            let ring = Self::extract_ring(bytes, is_little_endian, offset)?;
             previous_ring_size = ring.len() * NUM_OF_BYTES_PAIR + NUM_OF_BYTES_U32;
             internal_rings.push(ring);
         }
@@ -192,7 +191,7 @@ impl Polygon {
                 polygon_string.push_str("POLYGON");
 
                 // handle empty polygon
-                if self.exterior_ring.len() == 0 {
+                if self.exterior_ring.is_empty() {
                     polygon_string.push_str(" EMPTY");
                     return Ok(polygon_string);
                 }
@@ -200,7 +199,7 @@ impl Polygon {
                 polygon_string.push_str(&format!("(({})", Self::format_ring(&self.exterior_ring)));
 
                 for ring in &self.holes {
-                    polygon_string.push_str(&format!(",({})", Self::format_ring(&ring)));
+                    polygon_string.push_str(&format!(",({})", Self::format_ring(ring)));
                 }
                 polygon_string.push(')');
                 Ok(polygon_string)
@@ -276,7 +275,7 @@ mod test {
                     bytes.extend_from_slice(&num_of_rings.to_be_bytes());
                 }
 
-                make_ring_bytes(&mut bytes, &external_ring, is_little_endian);
+                make_ring_bytes(&mut bytes, external_ring, is_little_endian);
 
                 if let Some(holes) = holes {
                     for hole in holes {

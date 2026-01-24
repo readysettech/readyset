@@ -71,11 +71,19 @@ bitflags! {
 /// - Has Z dimension
 /// - Has M dimension
 pub(crate) fn extract_srid(bytes: &[u8], is_little_endian: bool) -> ReadySetResult<Option<u32>> {
-    let type_code = u32::from_le_bytes(
-        bytes[1..5]
-            .try_into()
-            .map_err(|_| invalid_query_err!("Invalid spatial type"))?,
-    );
+    let type_code = if is_little_endian {
+        u32::from_le_bytes(
+            bytes[1..5]
+                .try_into()
+                .map_err(|_| invalid_query_err!("Invalid spatial type"))?,
+        )
+    } else {
+        u32::from_be_bytes(
+            bytes[1..5]
+                .try_into()
+                .map_err(|_| invalid_query_err!("Invalid spatial type"))?,
+        )
+    };
 
     let flags = PostgisTypeFlags::from_bits_retain(type_code);
 
@@ -100,13 +108,17 @@ pub(crate) fn extract_srid(bytes: &[u8], is_little_endian: bool) -> ReadySetResu
 
     // Validate dimension flags
     if flags.contains(PostgisTypeFlags::HAS_BBOX) {
-        invalid_query_err!("Not supporting postgis bounding boxes");
+        return Err(invalid_query_err!("Not supporting postgis bounding boxes"));
     }
     if flags.contains(PostgisTypeFlags::HAS_Z) {
-        invalid_query_err!("Not supporting postgis geometrical shapes with Z dimensions");
+        return Err(invalid_query_err!(
+            "Not supporting postgis geometrical shapes with Z dimensions"
+        ));
     }
     if flags.contains(PostgisTypeFlags::HAS_M) {
-        invalid_query_err!("Not supporting postgis geometrical shapes with M dimensions");
+        return Err(invalid_query_err!(
+            "Not supporting postgis geometrical shapes with M dimensions"
+        ));
     }
 
     Ok(srid)
@@ -142,7 +154,7 @@ fn try_get_spatial_type_from_postgres(bytes: &[u8]) -> ReadySetResult<SpatialTyp
             .map_err(|_| invalid_query_err!("Invalid spatial type"))?,
     );
 
-    let geometry_type = wkb_type & 0x0F;
+    let geometry_type = wkb_type & 0xFF;
     match geometry_type {
         1 => Ok(SpatialType::PostgisPoint),
         3 => Ok(SpatialType::PostgisPolygon),
@@ -155,8 +167,8 @@ fn try_get_spatial_type_from_postgres(bytes: &[u8]) -> ReadySetResult<SpatialTyp
 
 fn try_get_spatial_type(bytes: &[u8], engine: SqlEngine) -> ReadySetResult<SpatialType> {
     match engine {
-        SqlEngine::MySQL => try_get_spatial_type_from_mysql(&bytes),
-        SqlEngine::PostgreSQL => try_get_spatial_type_from_postgres(&bytes),
+        SqlEngine::MySQL => try_get_spatial_type_from_mysql(bytes),
+        SqlEngine::PostgreSQL => try_get_spatial_type_from_postgres(bytes),
     }
 }
 
@@ -165,15 +177,15 @@ pub(crate) fn try_get_spatial_text(
     engine: SqlEngine,
     flags: bool,
 ) -> ReadySetResult<String> {
-    let spatial_type = try_get_spatial_type(&bytes, engine)?;
+    let spatial_type = try_get_spatial_type(bytes, engine)?;
     match spatial_type {
         SpatialType::MysqlPoint | SpatialType::PostgisPoint => {
-            let point = Point::try_from_bytes(&bytes, engine)?;
-            Ok(point.format(engine, flags).unwrap())
+            let point = Point::try_from_bytes(bytes, engine)?;
+            Ok(point.format(engine, flags)?)
         }
         SpatialType::PostgisPolygon => {
-            let polygon = Polygon::try_from_postgis_bytes(&bytes)?;
-            Ok(polygon.format(engine, flags).unwrap())
+            let polygon = Polygon::try_from_postgis_bytes(bytes)?;
+            Ok(polygon.format(engine, flags)?)
         }
     }
 }
