@@ -642,22 +642,14 @@ fn parse_query_for_create_cache(
         } else {
             Err(remaining_query.clone())
         };
-
-        return statement
+        let deep = statement
             .try_into_dialect(dialect)
             .ok()
             .and_then(|query: SqlQuery| query.into_select())
-            .map(|select| {
-                let boxed = Box::new(select);
-                CacheInner::Statement {
-                    deep: Ok(boxed.clone()),
-                    shallow,
-                }
-            })
-            .unwrap_or_else(|| CacheInner::Statement {
-                deep: Err(remaining_query.clone()),
-                shallow: Err(remaining_query),
-            });
+            .map(Box::new)
+            .ok_or(remaining_query);
+
+        return CacheInner::Statement { deep, shallow };
     }
 
     // Otherwise, try to parse as identifier
