@@ -6293,8 +6293,8 @@ dependencies = [
 
 [[package]]
 name = "sqlparser_derive"
-version = "0.3.0"
-source = "git+https://github.com/apache/datafusion-sqlparser-rs?branch=main#e3fbfd91b29706fcc7b4847f13ba71946a68e1f0"
+version = "0.4.0"
+source = "git+https://github.com/apache/datafusion-sqlparser-rs?branch=main#3880a933e4c2d1e639c1b8bcb48bea34c37801fd"
 dependencies = [
  "proc-macro2",
  "quote",
