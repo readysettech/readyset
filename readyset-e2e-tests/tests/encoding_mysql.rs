@@ -329,6 +329,24 @@ macro_rules! test_encoding_replication {
     };
 }
 
+macro_rules! test_encoding_replication_very_slow {
+    ($name:ident, $coltype:expr_2021, $charset:expr_2021, $range:expr_2021) => {
+        paste::paste! {
+            #[tokio::test]
+            #[tags(serial, very_slow, mysql_upstream)]
+            async fn [<test_ $name _snapshot>]() {
+                test_snapshot_encoding(stringify!($name), $coltype, $charset, $range).await;
+            }
+
+            #[tokio::test]
+            #[tags(serial, very_slow, mysql_upstream)]
+            async fn [<test_ $name _streaming>]() {
+                test_streaming_encoding(stringify!($name), $coltype, $charset, $range).await;
+            }
+        }
+    };
+}
+
 fn format_u32s<I>(width: usize, range: I) -> impl Iterator<Item = (u32, String)>
 where
     I: IntoIterator<Item = u32>,
@@ -583,38 +601,38 @@ where
     })
 }
 
-test_encoding_replication!(
+test_encoding_replication_very_slow!(
     utf8mb3_bmp_codepoints_varchar,
     "VARCHAR(255)",
     "utf8mb3_general_ci",
     format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
-test_encoding_replication!(
+test_encoding_replication_very_slow!(
     utf8mb3_bmp_codepoints_char,
     "CHAR(10)",
     "utf8mb3_general_ci",
     format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
-test_encoding_replication!(
+test_encoding_replication_very_slow!(
     utf8mb3_bmp_codepoints_text,
     "TEXT",
     "utf8mb3_general_ci",
     format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
 
-test_encoding_replication!(
+test_encoding_replication_very_slow!(
     utf8mb4_bmp_codepoints_varchar,
     "VARCHAR(255)",
     "utf8mb4_general_ci",
     format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
-test_encoding_replication!(
+test_encoding_replication_very_slow!(
     utf8mb4_bmp_codepoints_char,
     "CHAR(10)",
     "utf8mb4_general_ci",
     format_utf8_chars((char::MIN..=char::MAX).filter(|c| c.len_utf8() <= 3))
 );
-test_encoding_replication!(
+test_encoding_replication_very_slow!(
     utf8mb4_bmp_codepoints_text,
     "TEXT",
     "utf8mb4_general_ci",

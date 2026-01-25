@@ -83,7 +83,7 @@ if [[ -z "${RUN_SLOW_TESTS+x}" ]]; then
     if [[ ${#NEXTEST_FILTER[@]} -gt 0 ]]; then
         NEXTEST_FILTER+=("and")
     fi
-    NEXTEST_FILTER+=("(not test(/:slow:/))")
+    NEXTEST_FILTER+=("(not (test(/:slow:/) or test(/:very_slow:/)))")
 fi
 
 if [[ "$TEST_CATEGORY" == "nextest" ]]; then

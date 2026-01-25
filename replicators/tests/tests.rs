@@ -738,31 +738,31 @@ async fn mysql_replication() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, very_slow, postgres_upstream)]
 async fn pgsql_replication_catch_up() {
     replication_catch_up_inner(&pgsql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, very_slow, mysql_upstream)]
 async fn mysql_replication_catch_up() {
     replication_catch_up_inner(&mysql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, very_slow, postgres_upstream)]
 async fn pgsql_replication_many_tables() {
     replication_many_tables_inner(&pgsql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, very_slow, mysql_upstream)]
 async fn mysql_replication_many_tables() {
     replication_many_tables_inner(&mysql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, very_slow, postgres_upstream)]
 async fn pgsql_replication_big_tables() {
     replication_big_tables_inner(&pgsql_url()).await.unwrap()
 }
@@ -853,7 +853,7 @@ async fn pgsql_snapshot_compaction_timeout_inner(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, very_slow, mysql_upstream)]
 async fn mysql_replication_big_tables() {
     replication_big_tables_inner(&mysql_url()).await.unwrap()
 }

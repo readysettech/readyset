@@ -80,6 +80,7 @@ const VALID_TAGS: &[&str] = &[
     "serial",
     "no_retry",
     "slow",
+    "very_slow",
     "mysql_upstream",
     "mysql8_upstream",
     "postgres_upstream",
@@ -135,6 +136,8 @@ const VALID_TAGS: &[&str] = &[
 ///   the same upstream; see .config/nextest.toml for test groups)
 /// - `no_retry`: For generative tests such as proptests which should not be retried if they fail
 /// - `slow`: For tests that are expected to take a long time to run. See [`slow`]
+/// - `very_slow`: For tests that are extremely slow; these are prioritized to run first so they
+///   don't become long-pole tests that delay CI completion
 /// - `mysql_upstream`: For tests that can run against any supported MySQL version
 /// - `mysql8_upstream`: For tests that specifically target MySQL 8.x features or behavior
 /// - `postgres_upstream`: For tests that can run against any supported PostgreSQL version
@@ -183,7 +186,7 @@ pub fn tags(args: TokenStream, item: TokenStream) -> TokenStream {
         item.attrs.push(serial_attr);
     }
 
-    let uses_slow = tags.iter().any(|tag| tag == "slow");
+    let uses_slow = tags.iter().any(|tag| tag == "slow" || tag == "very_slow");
     if uses_slow {
         let slow_attr = parse_quote! {
             #[::test_utils::slow]

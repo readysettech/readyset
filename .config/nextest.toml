@@ -24,6 +24,11 @@ serial = { max-threads = 1 }
 serial-postgres = { max-threads = 1 }
 serial-mysql = { max-threads = 1 }
 
+# Prioritize very_slow tests to run first so they don't become long-pole tests
+[[profile.default.overrides]]
+filter = 'test(/:very_slow:/)'
+priority = 100
+
 [[profile.default.overrides]]
 filter = 'test(/:serial:/) and not (test(/:postgres\d*_upstream:/) or test(/:mysql\d*_upstream:/))'
 test-group = 'serial'
