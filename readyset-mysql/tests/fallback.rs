@@ -405,10 +405,10 @@ async fn prep_then_always_select_in_tx() {
         .await
         .unwrap();
     sleep().await;
-    let prepared = conn.prep("SELECT x FROM t").await.unwrap();
     conn.query_drop("CREATE CACHE ALWAYS test_always FROM SELECT x FROM t;")
         .await
         .unwrap();
+    let prepared = conn.prep("SELECT x FROM t").await.unwrap();
     let mut tx = conn
         .start_transaction(mysql_async::TxOpts::new())
         .await
