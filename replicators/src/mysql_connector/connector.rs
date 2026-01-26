@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use atoi::atoi;
 use binlog::consts::{BinlogChecksumAlg, EventType};
+use failpoint_macros::set_failpoint;
 use metrics::counter;
 use mysql::prelude::Queryable;
 use mysql_async as mysql;
@@ -28,6 +29,8 @@ use mysql_srv::ColumnFlags;
 use readyset_data::encoding::{mysql_character_set_name_to_collation_id, Encoding};
 use readyset_decimal::Decimal;
 use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use serde_json::Map;
 use tokio::time::timeout;
 use tracing::{debug, error, info, trace, warn};
@@ -1291,6 +1294,8 @@ impl MySqlBinlogConnector {
                     self.merge_table_actions(&mut hash_actions, binlog_action)
                         .await;
                     self.advance_current_gtid_event();
+                    // Failpoint for GTID crash recovery testing
+                    set_failpoint!(failpoints::MYSQL_GTID_ROW_EVENT);
                 }
 
                 EventType::UPDATE_ROWS_EVENT => {
@@ -1304,6 +1309,7 @@ impl MySqlBinlogConnector {
                     self.merge_table_actions(&mut hash_actions, binlog_action)
                         .await;
                     self.advance_current_gtid_event();
+                    set_failpoint!(failpoints::MYSQL_GTID_ROW_EVENT);
                 }
 
                 EventType::DELETE_ROWS_EVENT => {
@@ -1316,6 +1322,7 @@ impl MySqlBinlogConnector {
                     self.merge_table_actions(&mut hash_actions, binlog_action)
                         .await;
                     self.advance_current_gtid_event();
+                    set_failpoint!(failpoints::MYSQL_GTID_ROW_EVENT);
                 }
                 EventType::XID_EVENT => {
                     // InnoDB commit inside compressed transaction payload.
@@ -1490,7 +1497,7 @@ impl MySqlBinlogConnector {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_write_rows(event).await?;
                     self.advance_current_gtid_event();
-
+                    set_failpoint!(failpoints::MYSQL_GTID_ROW_EVENT);
                     return Ok((vec![action], self.current_offset()));
                 }
 
@@ -1501,7 +1508,7 @@ impl MySqlBinlogConnector {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_update_rows(event).await?;
                     self.advance_current_gtid_event();
-
+                    set_failpoint!(failpoints::MYSQL_GTID_ROW_EVENT);
                     return Ok((vec![action], self.current_offset()));
                 }
 
@@ -1512,7 +1519,7 @@ impl MySqlBinlogConnector {
                     let event = handle_err!(self, binlog_event.read_event());
                     let action = self.process_event_delete_rows(event).await?;
                     self.advance_current_gtid_event();
-
+                    set_failpoint!(failpoints::MYSQL_GTID_ROW_EVENT);
                     return Ok((vec![action], self.current_offset()));
                 }
 

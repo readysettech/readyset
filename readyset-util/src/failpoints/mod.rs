@@ -71,3 +71,6 @@ pub const CONTROLLER_EVENTS_SSE_CONNECT_DELAY: &str = "controller-events-sse-con
 /// extract the delay value and performs a `std::thread::sleep` outside the lock scope. Configure
 /// with e.g. `"1*return(3000)"` to delay one broadcast by 3 seconds.
 pub const CONTROLLER_EVENTS_SSE_SEND_DELAY: &str = "controller-events-sse-send-delay";
+/// A failpoint after processing a row event in MySQL GTID replication.
+/// Use with "Nx*off->panic" to crash after N events within a transaction.
+pub const MYSQL_GTID_ROW_EVENT: &str = "mysql-gtid-row-event";
