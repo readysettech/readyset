@@ -249,6 +249,7 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
                 subquery,
                 alias,
                 lateral,
+                sample: None,
             } => match subquery.try_into_dialect(dialect)? {
                 crate::ast::SqlQuery::Select(mut subselect) => {
                     subselect.lateral = lateral;

@@ -57,6 +57,8 @@ impl TryFromDialect<sqlparser::ast::Statement> for TruncateStatement {
             cascade,
             // ClickHouse-specific; Readyset doesn't support ClickHouse dialect
             on_cluster: _,
+            // Snowflake/Redshift-specific; reject instead of ignore
+            if_exists: false,
         }) = value
         {
             // Reject Hive-style TRUNCATE TABLE ... PARTITION (...) syntax.
@@ -124,12 +126,14 @@ mod tests {
                     sqlparser::ast::Ident::new("test_table"),
                 )]),
                 only: false,
+                has_asterisk: false,
             }],
             partitions: Some(vec![]),
             table: false,
             identity: None,
             cascade: None,
             on_cluster: None,
+            if_exists: false,
         });
         let result = TruncateStatement::try_from_dialect(stmt, Dialect::MySQL);
         assert!(

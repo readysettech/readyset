@@ -1326,11 +1326,16 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             } => {
                 unsupported!("CAST with FORMAT clause")
             }
+            Cast { array: true, .. } => {
+                // TODO(mvzink): Add support REA-6288
+                unsupported!("CAST with ARRAY syntax")
+            }
             Cast {
                 kind,
                 expr,
                 data_type,
                 format: None,
+                array: false,
             } => Ok(Self::Cast {
                 expr: expr.try_into_dialect(dialect)?,
                 ty: data_type.try_into_dialect(dialect)?,

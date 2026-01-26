@@ -935,11 +935,10 @@ fn constraint_check_on_column() {
         "CREATE TABLE t (x INT CHECK (x > 1))",
         "nom-sql error"
     );
-    // REA-5845
     check_parse_fails!(
         Dialect::MySQL,
         "CREATE TABLE t (x INT CHECK (x > 1) NOT ENFORCED)",
-        "both parsers failed"
+        "nom-sql error"
     );
 }
 
@@ -1737,12 +1736,7 @@ fn truncate() {
     check_parse_postgres!("truncate mytable restrict");
     check_parse_postgres!("truncate mytable cascade");
     check_parse_postgres!("truncate mytable restart identity cascade");
-    // REA-5858
-    check_parse_fails!(
-        Dialect::PostgreSQL,
-        "truncate t1 *, t2*, t3",
-        "sqlparser error"
-    );
+    check_parse_postgres!("truncate t1 *, t2*, t3");
     check_parse_postgres!(r#"TRUNCATE "t1", ONLY "t2" RESTART IDENTITY CASCADE"#);
 }
 

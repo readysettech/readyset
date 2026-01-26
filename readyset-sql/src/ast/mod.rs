@@ -142,6 +142,7 @@ impl Default for ShallowCacheQuery {
             prewhere: None,
             window_before_qualify: false,
             value_table_mode: None,
+            select_modifiers: Default::default(),
         };
 
         Self(Query {
