@@ -36,7 +36,9 @@ use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed}
 use readyset_sql::ast;
 use readyset_sql::ast::{NullOrder, OrderType, Relation, SqlQuery};
 use readyset_sql::Dialect as SqlDialect;
-use readyset_sql_parsing::{parse_create_table, parse_create_view, parse_query, parse_select};
+use readyset_sql_parsing::{
+    parse_create_table, parse_create_view, parse_query, parse_select, ParsingPreset,
+};
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use rusty_fork::rusty_fork_test;
@@ -9508,6 +9510,90 @@ async fn check_supported_mysql_storage_engines() {
     )
     .await
     .expect("Should replicate table with supported storage engine");
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Test window function queries that filter on the generated output column.
+/// These patterns previously caused "partially overlapping partial indices" errors
+/// during migration (REA-6092, REA-5942). The bug occurred because:
+/// 1. Range filters (<=) on the output column create BTreeMap indices
+/// 2. Window's suggest_indexes returned HashMap indices
+/// 3. The index type mismatch caused the partial overlap validation to fail
+#[tokio::test(flavor = "multi_thread")]
+async fn window_output_column_filter_patterns() {
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
+        authority_store,
+    )));
+    let mut builder = Builder::for_tests();
+    builder.set_dialect(SqlDialect::MySQL);
+    builder.set_persistence(get_persistence_params(
+        "window_output_column_filter_patterns",
+    ));
+    builder.set_sharding(None);
+    builder.set_parsing_preset(ParsingPreset::OnlySqlparser);
+    builder.set_mixed_comparisons(true);
+    let (mut g, shutdown_tx) = builder.start_local_custom(authority.clone()).await.unwrap();
+
+    // Test 1: Simple count with ROW_NUMBER filter (REA-6092)
+    g.extend_recipe(
+        ChangeList::from_strings_with_config(
+            vec![
+                "CREATE TABLE t1 (id int PRIMARY KEY)",
+                "CREATE CACHE q1 FROM SELECT count(*) FROM (
+                    SELECT ROW_NUMBER() OVER() AS rn FROM t1
+                ) AS inner_q WHERE inner_q.rn <= ?",
+            ],
+            Dialect::DEFAULT_MYSQL,
+            ParsingPreset::OnlySqlparser.into_config(),
+        )
+        .unwrap(),
+    )
+    .await
+    .expect("cache creation should succeed for ROW_NUMBER with range filter");
+
+    // Test 2: Filter on BOTH partition column AND output column (REA-6092)
+    // Combining = and <= creates a BTreeMap index that triggers the bug.
+    g.extend_recipe(
+        ChangeList::from_strings_with_config(
+            vec![
+                "CREATE TABLE products (id int PRIMARY KEY, category varchar(255), qty int)",
+                "CREATE CACHE q2 FROM SELECT * FROM (
+                    SELECT *, ROW_NUMBER() OVER (PARTITION BY category ORDER BY qty) AS rn
+                    FROM products
+                ) ranked WHERE category = ? AND rn <= ?",
+            ],
+            Dialect::DEFAULT_MYSQL,
+            ParsingPreset::OnlySqlparser.into_config(),
+        )
+        .unwrap(),
+    )
+    .await
+    .expect("cache creation should succeed for partition + output column filter");
+
+    // Test 3: DISTINCT with DENSE_RANK and range filter (REA-5942)
+    g.extend_recipe(
+        ChangeList::from_strings_with_config(
+            vec![
+                "CREATE TABLE t3 (id int PRIMARY KEY, val int)",
+                "CREATE CACHE q3 FROM SELECT DISTINCT val FROM (
+                    SELECT val, DENSE_RANK() OVER (ORDER BY val DESC) AS rnk
+                    FROM t3
+                ) AS Olap WHERE rnk <= ?",
+            ],
+            Dialect::DEFAULT_MYSQL,
+            ParsingPreset::OnlySqlparser.into_config(),
+        )
+        .unwrap(),
+    )
+    .await
+    .expect("cache creation should succeed for DISTINCT with DENSE_RANK filter");
+
+    // Verify all views were created
+    g.view("q1").await.expect("q1 should be accessible");
+    g.view("q2").await.expect("q2 should be accessible");
+    g.view("q3").await.expect("q3 should be accessible");
 
     shutdown_tx.shutdown().await;
 }

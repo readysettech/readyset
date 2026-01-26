@@ -627,15 +627,15 @@ SELECT a, sum(b) OVER (PARTITION BY a) FROM t WHERE a IN (1, 2, 3);
 # distinct not supported in WFs (yet)
 
 onlyif readyset
-statement error: Query failed to parse
+statement error: Conversion not supported
 SELECT COUNT(DISTINCT a) OVER () FROM t;
 
 onlyif readyset
-statement error: Query failed to parse
+statement error: Conversion not supported
 SELECT SUM(DISTINCT a) OVER (PARTITION BY a) FROM t;
 
 onlyif readyset
-statement error: Query failed to parse
+statement error: Conversion not supported
 SELECT AVG(DISTINCT a) OVER (PARTITION BY a) FROM t;
 
 onlyif readyset
@@ -874,11 +874,3 @@ ORDER BY order_col, id;
 6
 5
 25
-
-# Test window function output column in range filter (subquery pattern)
-# Regression test for partial upquery with Window node (REA-6092)
-
-query I
-SELECT count(*) FROM (SELECT ROW_NUMBER() OVER() AS rn FROM j) AS inner_q WHERE inner_q.rn <= 1;
-----
-1
