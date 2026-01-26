@@ -1,5 +1,5 @@
-use readyset_client_test_helpers::TestBuilder;
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
+use readyset_client_test_helpers::TestBuilder;
 use readyset_server::{DurabilityMode, Handle};
 use readyset_util::shutdown::ShutdownSender;
 use test_utils::{tags, upstream};
@@ -29,7 +29,7 @@ mod types {
     use proptest::string::string_regex;
     use readyset_adapter::backend::QueryDestination;
     use readyset_client_test_helpers::psql_helpers::{connect, last_query_info, upstream_config};
-    use readyset_client_test_helpers::{Adapter, sleep};
+    use readyset_client_test_helpers::{sleep, Adapter};
     use readyset_data::DfValue;
     use readyset_decimal::Decimal;
     use readyset_util::arbitrary::{
@@ -1167,5 +1167,56 @@ mod types {
         readyset_tracing::init_test_logging();
         let vals = vec![vec!["1".to_string(); 1500]; 15];
         test_type_roundtrip("text[]", vals).await;
+    }
+
+    /// Tests that empty array literals passed as the string '{}' are correctly handled.
+    /// This is a regression test for the case where PostgreSQL receives empty arrays
+    /// as text literals rather than proper array values.
+    #[tokio::test(flavor = "multi_thread")]
+    #[tags(serial, slow)]
+    #[upstream(postgres13, postgres15)]
+    async fn empty_array_literal_parameter() {
+        readyset_tracing::init_test_logging();
+        let (config, _handle, shutdown_tx) = setup().await;
+        let client = connect(config).await;
+
+        client
+            .simple_query("CREATE TABLE t_empty_arr (id int, arr text[])")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("INSERT INTO t_empty_arr VALUES (1, '{}')")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("INSERT INTO t_empty_arr VALUES (2, '{a,b}')")
+            .await
+            .unwrap();
+
+        // Test empty array roundtrip through ReadySet
+        eventually!(run_test: {
+            client
+                .query_one("SELECT arr FROM t_empty_arr WHERE id = 1", &[])
+                .await
+                .unwrap()
+                .get::<_, Vec<String>>(0)
+        }, then_assert: |result| {
+            assert!(result.is_empty(), "Expected empty array, got {:?}", result);
+        });
+
+        // Also verify non-empty arrays still work
+        eventually!(run_test: {
+            client
+                .query_one("SELECT arr FROM t_empty_arr WHERE id = 2", &[])
+                .await
+                .unwrap()
+                .get::<_, Vec<String>>(0)
+        }, then_assert: |result| {
+            assert_eq!(result, vec!["a".to_string(), "b".to_string()]);
+        });
+
+        shutdown_tx.shutdown().await;
     }
 }
