@@ -1,16 +1,25 @@
 use std::process::Command;
 
-fn main() {
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
+const DEBUG_COMMIT_ID: &str = "dev";
 
-    set_version_info();
+fn main() {
+    let profile = std::env::var("PROFILE").unwrap_or_default();
+    eprintln!("PROFILE={profile}");
+    let is_debug = profile != "release";
+
+    // Only watch git HEAD in release builds to avoid unnecessary rebuilds during development
+    if !is_debug {
+        println!("cargo:rerun-if-changed=../../.git/HEAD");
+    }
+
+    set_version_info(is_debug);
 }
 
-/// Sets the fields to populate ['VERSION']
+/// Sets environment variables for version information (COMMIT_ID, RELEASE_VERSION, etc.)
 /// This is best effort. A failure here shouldn't cause us to fail building entirely.
-fn set_version_info() {
+fn set_version_info(is_debug: bool) {
     set_release_version();
-    set_commit_id();
+    set_commit_id(is_debug);
     set_platform();
     set_rustc_version();
     set_profile();
@@ -28,22 +37,49 @@ fn set_release_version() {
 
 /// Set COMMIT_ID to one of the following, in order:
 /// - $BUILDKITE_COMMIT
+/// - "dev" (debug builds only, to avoid unnecessary rebuilds)
 /// - $(git rev-parse HEAD)
 /// - "unknown-commit-id"
-fn set_commit_id() {
-    let get_commit_id_from_git = || {
-        Command::new("git")
-            .args(["rev-parse", "HEAD"])
-            .output()
-            .ok()
-            .and_then(|output| {
-                String::from_utf8(output.stdout)
-                    .ok()
-                    .map(|s| s.trim().to_owned())
-            })
-    };
+fn set_commit_id(is_debug: bool) {
+    eprintln!("sending cargo directive: cargo:rerun-if-env-changed=BUILDKITE_COMMIT");
+    println!("cargo:rerun-if-env-changed=BUILDKITE_COMMIT");
 
-    env_or_unknown_with_fallback("BUILDKITE_COMMIT", "commit-id", get_commit_id_from_git);
+    // Always honor CI env var if set
+    if let Ok(commit) = std::env::var("BUILDKITE_COMMIT") {
+        let commit = commit.trim();
+        if !commit.is_empty() {
+            eprintln!("sending cargo directive: cargo:rustc-env=BUILDKITE_COMMIT={commit}");
+            println!("cargo:rustc-env=BUILDKITE_COMMIT={commit}");
+            return;
+        }
+    }
+
+    // Debug builds: use static placeholder to avoid rebuilds on every commit
+    if is_debug {
+        eprintln!("sending cargo directive: cargo:rustc-env=BUILDKITE_COMMIT={DEBUG_COMMIT_ID}");
+        println!("cargo:rustc-env=BUILDKITE_COMMIT={DEBUG_COMMIT_ID}");
+        return;
+    }
+
+    // Release builds: get actual commit from git
+    let commit_id = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            String::from_utf8(output.stdout)
+                .ok()
+                .map(|s| s.trim().to_owned())
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            eprintln!("sending cargo directive: cargo:warning=Failed to get commit-id from local repository.");
+            println!("cargo:warning=Failed to get commit-id from local repository.");
+            String::from("unknown-commit-id")
+        });
+
+    eprintln!("sending cargo directive: cargo:rustc-env=BUILDKITE_COMMIT={commit_id}");
+    println!("cargo:rustc-env=BUILDKITE_COMMIT={commit_id}");
 }
 
 /// Set PLATFORM to one of the following, in order:

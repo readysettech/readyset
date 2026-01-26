@@ -9,7 +9,7 @@ edition = "2024"
 
 [dependencies]
 const-str = { workspace = true }
-serde = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 
 [lints]
 workspace = true
