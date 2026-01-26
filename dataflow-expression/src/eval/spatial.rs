@@ -26,6 +26,9 @@ use bitflags::bitflags;
 /// The former being legacy, while the latter is state-of-the-art.
 ///
 /// As of (Jan 2025) PostGIS Polygon is supported, extending support to MySQL Polygon is straightforward.
+///
+/// https://github.com/postgis/postgis/blob/master/doc/ZMSgeoms.txt (for ewkb).
+/// https://github.com/postgis/postgis/blob/master/doc/bnf-wkb.txt (for wkb).
 use readyset_data::dialect::SqlEngine;
 use readyset_errors::{invalid_query_err, ReadySetResult};
 
