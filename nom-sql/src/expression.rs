@@ -402,6 +402,7 @@ where
                     expr: tt.into(),
                     ty,
                     style: CastStyle::DoubleColon,
+                    array: false,
                 }
             }
             OpSuffix(lhs, op, suffix, rhs) => {
@@ -670,6 +671,7 @@ fn cast(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], 
                 expr: Box::new(arg),
                 ty,
                 style: CastStyle::As,
+                array: false,
             },
         ))
     }
@@ -720,6 +722,7 @@ fn convert(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8
                     expr: Box::new(arg),
                     ty,
                     style: CastStyle::Convert,
+                    array: false,
                 },
             )
         } else {
@@ -755,6 +758,7 @@ fn date_cast_function(
                 expr: Box::new(arg),
                 ty: SqlType::Date,
                 style: CastStyle::As,
+                array: false,
             },
         ))
     }
@@ -955,6 +959,7 @@ mod tests {
                         name: "abc".into(),
                     }),
                     style: CastStyle::DoubleColon,
+                    array: false,
                 }),
                 op: BinaryOperator::Less,
                 rhs: Box::new(Expr::Literal(Literal::String("{b,c}".to_string()))),
@@ -1038,7 +1043,8 @@ mod tests {
                     rhs: Box::new(Expr::Cast {
                         expr: Box::new(Expr::Literal(Literal::Integer(128))),
                         ty: SqlType::Int(None),
-                        style: CastStyle::DoubleColon
+                        style: CastStyle::DoubleColon,
+                        array: false,
                     }),
                 }
             );
@@ -1052,7 +1058,8 @@ mod tests {
                     rhs: Box::new(Expr::Cast {
                         expr: Box::new(Expr::Literal(Literal::Integer(128))),
                         ty: SqlType::Text,
-                        style: CastStyle::DoubleColon
+                        style: CastStyle::DoubleColon,
+                        array: false,
                     }),
                 }
             );
@@ -1068,6 +1075,7 @@ mod tests {
                     }),
                     ty: SqlType::Text,
                     style: CastStyle::DoubleColon,
+                    array: false,
                 },
             );
 
@@ -1083,6 +1091,7 @@ mod tests {
                         expr: Box::new(Expr::Column(Column::from("postgres.column"))),
                         ty: SqlType::Double,
                         style: CastStyle::DoubleColon,
+                        array: false,
                     }),
                 }
             );
@@ -1096,7 +1105,8 @@ mod tests {
                 Expr::Cast {
                     expr: Box::new(Expr::Literal(Literal::Integer(-128))),
                     ty: SqlType::Unsigned,
-                    style: CastStyle::As
+                    style: CastStyle::As,
+                    array: false,
                 }
             );
         }
@@ -1109,6 +1119,7 @@ mod tests {
                 expr: Box::new(Expr::Literal(Literal::String(arg.to_string()))),
                 ty: SqlType::Date,
                 style: CastStyle::As,
+                array: false,
             }
         }
         fn from_date_func(dialect: Dialect, arg: &str) -> Expr {
@@ -2359,6 +2370,7 @@ mod tests {
                         expr: Box::new(Expr::Literal(r#"["a", "b"]"#.into())),
                         ty: SqlType::Jsonb,
                         style: CastStyle::DoubleColon,
+                        array: false,
                     }),
                     op: BinaryOperator::DoublePipe,
                     rhs: Box::new(Expr::Literal(r#"["c", "d"]"#.into())),
@@ -2619,6 +2631,7 @@ mod tests {
                             expr: Box::new(Expr::Literal("2".into())),
                             ty: SqlType::Int(None),
                             style: CastStyle::DoubleColon,
+                            array: false,
                         },
                     ])),
                     Expr::Array(ArrayArguments::List(vec![Expr::Literal(3.into())]))
@@ -2635,6 +2648,7 @@ mod tests {
                         expr: Box::new(Expr::Literal("2".into())),
                         ty: SqlType::Int(None),
                         style: CastStyle::DoubleColon,
+                        array: false,
                     },
                 ]),
             )]));

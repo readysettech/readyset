@@ -719,6 +719,7 @@ mod tests {
                                 precision: None
                             },
                             style: CastStyle::DoubleColon,
+                            array: false,
                         },
                         alias: Some("foo".into())
                     }],

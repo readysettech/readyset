@@ -1099,6 +1099,8 @@ pub enum Expr {
         expr: Box<Expr>,
         ty: SqlType,
         style: CastStyle,
+        /// MySQL ARRAY cast syntax: `CAST(expr AS type ARRAY)`
+        array: bool,
     },
 
     /// `CONVERT(expression USING charset)`
@@ -1326,16 +1328,12 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             } => {
                 unsupported!("CAST with FORMAT clause")
             }
-            Cast { array: true, .. } => {
-                // TODO(mvzink): Add support REA-6288
-                unsupported!("CAST with ARRAY syntax")
-            }
             Cast {
                 kind,
                 expr,
                 data_type,
                 format: None,
-                array: false,
+                array,
             } => Ok(Self::Cast {
                 expr: expr.try_into_dialect(dialect)?,
                 ty: data_type.try_into_dialect(dialect)?,
@@ -1344,6 +1342,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 } else {
                     CastStyle::As
                 },
+                array,
             }),
             Ceil { expr: _, field: _ } => not_yet_implemented!("CEIL"),
             Collate { expr, collation } => Ok(Self::Collate {
@@ -1388,6 +1387,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                         expr,
                         ty: data_type.try_into_dialect(dialect)?,
                         style: CastStyle::Convert,
+                        array: false,
                     })
                 } else if let Some(charset) = charset {
                     Ok(Self::ConvertUsing {
@@ -1961,6 +1961,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 expr: next_expr()?,
                 ty: crate::ast::SqlType::Date,
                 style: CastStyle::As,
+                array: false,
             }
         } else if is_builtin && ident.value.eq_ignore_ascii_case("EXTRACT") {
             return failed!("{ident} should have been converted earlier");
@@ -2292,13 +2293,27 @@ impl DialectDisplay for Expr {
                 write!(f, " IN ({})", rhs.display(dialect))
             }
             Expr::NestedSelect(q) => write!(f, "({})", q.display(dialect)),
-            Expr::Cast { expr, ty, style } => {
+            Expr::Cast {
+                expr,
+                ty,
+                style,
+                array,
+            } => {
                 let expr = expr.display(dialect);
                 let ty = ty.display(dialect);
                 match style {
-                    CastStyle::As => write!(f, "CAST({expr} as {ty})"),
-                    CastStyle::Convert => write!(f, "CONVERT({expr}, {ty})"),
-                    CastStyle::DoubleColon => write!(f, "({expr}::{ty})"),
+                    CastStyle::As => {
+                        let array_suffix = if *array { " ARRAY" } else { "" };
+                        write!(f, "CAST({expr} as {ty}{array_suffix})")
+                    }
+                    CastStyle::Convert => {
+                        debug_assert!(!array, "ARRAY syntax is only valid with CAST, not CONVERT");
+                        write!(f, "CONVERT({expr}, {ty})")
+                    }
+                    CastStyle::DoubleColon => {
+                        debug_assert!(!array, "ARRAY syntax is only valid with CAST, not ::");
+                        write!(f, "({expr}::{ty})")
+                    }
                 }
             }
             Expr::ConvertUsing { expr, charset } => {
@@ -2571,8 +2586,19 @@ impl Arbitrary for Expr {
                         ..Default::default()
                     }),
                     any_with::<CastStyle>(params),
+                    any::<bool>(),
                 )
-                    .prop_map(|(expr, ty, style)| Expr::Cast { expr, ty, style })
+                    .prop_map(move |(expr, ty, style, array)| {
+                        // ARRAY syntax is MySQL-specific and only valid with CastStyle::As
+                        let array =
+                            array && params != Some(Dialect::PostgreSQL) && style == CastStyle::As;
+                        Expr::Cast {
+                            expr,
+                            ty,
+                            style,
+                            array,
+                        }
+                    })
                     .boxed())
                 .or(proptest::collection::vec(element, 0..24)
                     .prop_map(|exprs| Expr::Array(ArrayArguments::List(exprs)))

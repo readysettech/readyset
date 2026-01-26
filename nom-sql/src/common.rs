@@ -881,6 +881,7 @@ mod tests {
                 expr: Box::new(Expr::Column("foo".into())),
                 ty: SqlType::Int(None),
                 style: CastStyle::As,
+                array: false,
             }))
         )
     }
@@ -1053,6 +1054,7 @@ mod tests {
                 })),
                 ty: SqlType::Date,
                 style: CastStyle::As,
+                array: false,
             };
             let res = expression(Dialect::MySQL)(LocatedSpan::new(qs));
             assert_eq!(res.unwrap().1, expected);
@@ -1141,6 +1143,7 @@ mod tests {
                 })),
                 ty: SqlType::Date,
                 style: CastStyle::As,
+                array: false,
             };
             let res = expression(Dialect::PostgreSQL)(LocatedSpan::new(qs));
             assert_eq!(res.unwrap().1, expected);

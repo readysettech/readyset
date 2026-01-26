@@ -115,6 +115,77 @@ fn cast_with_double_types() {
     check_parse_both!(sql);
 }
 
+/// MySQL CAST with ARRAY syntax should parse successfully (via sqlparser only, nom-sql doesn't
+/// support this syntax). The actual unsupported error is raised during dataflow lowering.
+#[test]
+fn mysql_cast_with_array_parses() {
+    // This syntax is MySQL-specific and only parsed by sqlparser, not nom-sql
+    let sql = "SELECT CAST(x AS SIGNED ARRAY) FROM t";
+    let result = parse_query_with_config(ParsingPreset::OnlySqlparser, Dialect::MySQL, sql);
+    assert!(
+        result.is_ok(),
+        "CAST with ARRAY should parse: {:?}",
+        result.err()
+    );
+
+    // Verify the AST has array=true
+    let query = result.unwrap();
+    if let SqlQuery::Select(SelectStatement { fields, .. }) = query {
+        if let FieldDefinitionExpr::Expr { expr, .. } = &fields[0] {
+            if let Expr::Cast { array, .. } = expr {
+                assert!(*array, "Cast should have array=true");
+            } else {
+                panic!("Expected Cast expression");
+            }
+        } else {
+            panic!("Expected Expr field");
+        }
+    } else {
+        panic!("Expected Select query");
+    }
+}
+
+/// Verify that CAST with ARRAY round-trips through display correctly.
+#[test]
+fn mysql_cast_with_array_roundtrip() {
+    let sql = "SELECT CAST(x AS SIGNED ARRAY) FROM t";
+    let query = parse_query_with_config(ParsingPreset::OnlySqlparser, Dialect::MySQL, sql)
+        .expect("CAST with ARRAY should parse");
+
+    let displayed = query.display(Dialect::MySQL).to_string();
+    assert!(
+        displayed.contains("ARRAY"),
+        "Round-trip should preserve ARRAY syntax: {}",
+        displayed
+    );
+}
+
+/// MySQL CREATE TABLE with functional index using CAST...ARRAY should parse the CAST...ARRAY
+/// syntax successfully. The functional index itself is rejected for a different reason
+/// (non-column expressions in index columns aren't supported), but critically the CAST...ARRAY
+/// syntax is plumbed through and not rejected at AST conversion time.
+#[test]
+fn mysql_create_table_with_cast_array_functional_index() {
+    let sql = "CREATE TABLE t (j JSON, INDEX idx1 ((CAST(j->'$.id' AS UNSIGNED ARRAY))))";
+    let result = parse_query_with_config(ParsingPreset::OnlySqlparser, Dialect::MySQL, sql);
+
+    // The parse will fail due to functional indices not being supported, but the error
+    // should be about "non-column expression", NOT about "CAST with ARRAY syntax".
+    // This proves the CAST...ARRAY was plumbed through the AST successfully.
+    let err = result.expect_err("Functional indices are not supported in CREATE TABLE");
+    let err_str = err.to_string();
+    assert!(
+        err_str.contains("non-column expression"),
+        "Error should be about non-column expression, not CAST ARRAY: {}",
+        err_str
+    );
+    assert!(
+        !err_str.contains("CAST with ARRAY syntax"),
+        "Error should NOT be about CAST ARRAY syntax (it should parse through): {}",
+        err_str
+    );
+}
+
 #[test]
 fn union() {
     check_parse_both!("SELECT a FROM b UNION SELECT c FROM d;");

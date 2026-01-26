@@ -1344,6 +1344,9 @@ impl Expr {
                 expr: Box::new(Self::lower(*rhs, dialect, context)?),
                 ty: DfType::Bool, // type of NOT is always bool
             }),
+            AstExpr::Cast { array: true, .. } => {
+                unsupported!("CAST with ARRAY syntax is not supported")
+            }
             AstExpr::Cast {
                 expr, ty: to_type, ..
             } => {
@@ -1762,6 +1765,28 @@ pub(crate) mod tests {
                 ty: enum_ty,
                 null_on_failure: false
             }
+        );
+    }
+
+    #[test]
+    fn cast_with_array_unsupported() {
+        use readyset_sql::ast::{CastStyle, SqlType};
+
+        let expr = AstExpr::Cast {
+            expr: Box::new(AstExpr::Column("x".into())),
+            ty: SqlType::Int(None),
+            style: CastStyle::As,
+            array: true,
+        };
+
+        let result = Expr::lower(expr, Dialect::DEFAULT_MYSQL, &no_op_lower_context());
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("ARRAY"),
+            "Error should mention ARRAY: {}",
+            err
         );
     }
 

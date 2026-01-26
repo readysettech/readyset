@@ -27,6 +27,7 @@ where
         } else {
             CastStyle::As
         },
+        array: false,
     })
 }
 
