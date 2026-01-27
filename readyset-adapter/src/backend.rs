@@ -87,7 +87,7 @@ use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use readyset_adapter_types::{DeallocateId, ParsedCommand, PreparedStatementType};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
-use readyset_client::metrics::recorded::SHALLOW_REFRESH_QUEUE_EXCEEDED;
+use readyset_client::metrics::recorded::{SHALLOW_REFRESH, SHALLOW_REFRESH_QUEUE_EXCEEDED};
 use readyset_client::recipe::CacheExpr;
 use readyset_client::results::Results;
 use readyset_client::status::CacheProperties;
@@ -1692,7 +1692,9 @@ where
         refresh: &async_channel::Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
         req: ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>,
     ) {
+        let query_id = req.query_id;
         let Err(e) = refresh.try_send(req) else {
+            metrics::counter!(SHALLOW_REFRESH, "query_id" => query_id.to_string()).increment(1);
             return;
         };
 

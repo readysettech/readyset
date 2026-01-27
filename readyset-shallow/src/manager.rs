@@ -288,8 +288,7 @@ where
                 CacheResult::Hit(res, guard)
             }
             (Some((res, true)), _) => {
-                counter!(recorded::SHALLOW_HIT, "query_id" => query_id.clone()).increment(1);
-                counter!(recorded::SHALLOW_REFRESH, "query_id" => query_id).increment(1);
+                counter!(recorded::SHALLOW_HIT, "query_id" => query_id).increment(1);
                 CacheResult::HitAndRefresh(res, guard)
             }
             (None, _) => {
