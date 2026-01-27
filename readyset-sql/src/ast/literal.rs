@@ -408,6 +408,9 @@ impl Literal {
             SqlType::Point | SqlType::PostgisPoint => {
                 unimplemented!("Points aren't implemented yet")
             }
+            SqlType::PostgisPolygon => {
+                unimplemented!("Polygons aren't implemented yet")
+            }
             SqlType::Tsvector => unimplemented!("Tsvector isn't implemented"),
         }
     }

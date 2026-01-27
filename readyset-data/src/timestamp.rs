@@ -572,6 +572,7 @@ impl TimestampTz {
             | DfType::Row
             | DfType::Point
             | DfType::PostgisPoint
+            | DfType::PostgisPolygon
             | DfType::Tsvector => Err(ReadySetError::DfValueConversionError {
                 src_type: "DfValue::TimestampTz".to_string(),
                 target_type: format!("{to_ty:?}"),

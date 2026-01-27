@@ -215,6 +215,12 @@ pub enum DfType {
     /// PostgreSQL.
     PostgisPoint,
 
+    /// [PostGIS `polygon`](https://postgis.net/docs/manual-3.5/using_postgis_dbmanagement.html#Polygon)
+    ///
+    /// This "postgis"-specific type is meant to distinguish it from the native `polygon` type in
+    /// PostgreSQL.
+    PostgisPolygon,
+
     /// [PostgreSQL `tsvector`](https://www.postgresql.org/docs/current/datatype-textsearch.html).
     ///
     /// We do not currently support the data in upstream `tsvector` columns, nor do we
@@ -335,6 +341,7 @@ impl DfType {
             Citext => Self::Text(Collation::Utf8Ci),
             Point => Self::Point,
             PostgisPoint => Self::PostgisPoint,
+            PostgisPolygon => Self::PostgisPolygon,
             Tsvector => Self::Tsvector,
             Other(ref id) => resolve_custom_type(id.clone()).ok_or_else(|| {
                 let id_upper = format!("{}", id.display_unquoted()).to_uppercase();
@@ -398,7 +405,8 @@ impl DfType {
             | DfType::Json
             | DfType::Jsonb
             | DfType::Point
-            | DfType::PostgisPoint => PgTypeCategory::UserDefined,
+            | DfType::PostgisPoint
+            | DfType::PostgisPolygon => PgTypeCategory::UserDefined,
         }
     }
 
@@ -880,6 +888,7 @@ impl fmt::Display for DfType {
             Self::Numeric { prec, scale } => write!(f, "{kind:?}({prec}, {scale})"),
             Self::Point => write!(f, "Point"),
             Self::PostgisPoint => write!(f, "Postgis Geometry(Point)"),
+            Self::PostgisPolygon => write!(f, "Postgis Geometry(Polygon)"),
             Self::Tsvector => write!(f, "TSVECTOR"),
         }
     }

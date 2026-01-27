@@ -482,6 +482,21 @@ fn type_identifier_part3(
                 )),
                 |_| SqlType::PostgisPoint,
             ),
+            map(
+                tuple((
+                    tag_no_case("geometry"),
+                    tuple((
+                        whitespace0,
+                        tag("("),
+                        whitespace0,
+                        tag_no_case("polygon"),
+                        opt(tuple((tag(","), whitespace0, digit1))),
+                        whitespace0,
+                        tag(")"),
+                    )),
+                )),
+                |_| SqlType::PostgisPolygon,
+            ),
             map(tag_no_case("tsvector"), |_| SqlType::Tsvector),
             map(other_type(dialect), SqlType::Other),
         ))(i)
