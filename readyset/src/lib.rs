@@ -932,7 +932,7 @@ where
         };
         let deployment = options.deployment.clone();
         let adapter_authority =
-            Arc::new(authority_type.to_authority(&authority_address, &deployment));
+            Arc::new(authority_type.to_authority(&authority_address, &deployment)?);
 
         let adapter_rewrite_params = AdapterRewriteParams {
             dialect: self.database_type.into(),
@@ -1323,7 +1323,7 @@ where
             }
 
             let server_handle = rt.block_on(async move {
-                let authority = Arc::new(authority.to_authority(&authority_address, &deployment));
+                let authority = Arc::new(authority.to_authority(&authority_address, &deployment)?);
 
                 builder
                     .start_with_readers(

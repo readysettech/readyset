@@ -256,8 +256,12 @@ pub(crate) async fn start_readyset(
     tokio::task::JoinHandle<()>,
     DatabaseURL,
 ) {
-    let authority =
-        Arc::new(readyset_client::consensus::AuthorityType::Local.to_authority("", "logictest"));
+    // LocalAuthority::new() is infallible, so unwrap is safe here
+    let authority = Arc::new(
+        readyset_client::consensus::AuthorityType::Local
+            .to_authority("", "logictest")
+            .expect("LocalAuthority creation cannot fail"),
+    );
     let (noria_handle, shutdown_tx) = start_noria_server(run_opts, authority.clone()).await;
     let migration_mode = if out_of_band_migration {
         MigrationMode::OutOfBand

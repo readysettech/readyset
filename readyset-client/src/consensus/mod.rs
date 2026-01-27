@@ -418,12 +418,17 @@ impl Display for AuthorityType {
 }
 
 impl AuthorityType {
-    pub fn to_authority(&self, addr: &str, deployment: &str) -> Authority {
+    pub fn to_authority(&self, addr: &str, deployment: &str) -> ReadySetResult<Authority> {
         match self {
-            AuthorityType::Local => Authority::from(LocalAuthority::new()),
-            AuthorityType::Standalone => {
-                Authority::from(StandaloneAuthority::new(addr, deployment).unwrap())
-            }
+            AuthorityType::Local => Ok(Authority::from(LocalAuthority::new())),
+            AuthorityType::Standalone => Ok(Authority::from(
+                StandaloneAuthority::new(addr, deployment).map_err(|e| {
+                    ReadySetError::Internal(format!(
+                        "failed to create standalone authority at '{}' for deployment '{}': {}",
+                        addr, deployment, e
+                    ))
+                })?,
+            )),
         }
     }
 }
