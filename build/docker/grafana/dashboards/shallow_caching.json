@@ -116,7 +116,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(readyset_shallow_shallow_result_hit{deployment=\"$deployment\",query_id=~\"$queryfilter\"}[$__rate_interval])",
+          "expr": "changes(readyset_shallow_shallow_result_hit{deployment=\"$deployment\", query_id=~\"$queryfilter\"}[$__interval])",
           "fullMetaSearch": false,
           "includeNullMetadata": false,
           "instant": false,
@@ -215,7 +215,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(readyset_shallow_shallow_result_miss{deployment=\"$deployment\",query_id=~\"$queryfilter\"}[$__rate_interval])",
+          "expr": "changes(readyset_shallow_shallow_result_miss{deployment=\"$deployment\", query_id=~\"$queryfilter\"}[$__interval])",
           "fullMetaSearch": false,
           "includeNullMetadata": false,
           "instant": false,
@@ -314,7 +314,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(readyset_shallow_shallow_result_refresh{deployment=\"$deployment\",query_id=~\"$queryfilter\"}[$__rate_interval])",
+          "expr": "changes(readyset_shallow_shallow_result_refresh{deployment=\"$deployment\", query_id=~\"$queryfilter\"}[$__interval])",
           "fullMetaSearch": false,
           "includeNullMetadata": false,
           "instant": false,
@@ -325,6 +325,108 @@
         }
       ],
       "title": "Result Refresh",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "red",
+            "mode": "fixed"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "percentage",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "changes(readyset_shallow_shallow_refresh_queue_exceeded{deployment=~\"$deployment\"}[$__interval])",
+          "format": "time_series",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Refresh queue exceeds",
       "type": "timeseries"
     }
   ],
@@ -412,6 +514,6 @@
   "timezone": "browser",
   "title": "Shallow Caching",
   "uid": "shallow_caching",
-  "version": 0,
+  "version": 1,
   "weekStart": ""
 }
