@@ -359,9 +359,7 @@ fn limit_placeholders() {
     check_parse_postgres!("select * from users limit :1");
 }
 
-// TODO: Fix REA-6179
 #[test]
-#[should_panic = "nom-sql AST differs from sqlparser-rs AST"]
 fn limit_placeholders_create_cache() {
     check_parse_mysql!("create cache from select * from users limit ?");
     check_parse_mysql!("create cache from select * from users limit $1");

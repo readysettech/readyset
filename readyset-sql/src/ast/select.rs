@@ -226,16 +226,15 @@ impl TryFromDialect<sqlparser::ast::Expr> for LimitValue {
         value: sqlparser::ast::Expr,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        match value {
-            sqlparser::ast::Expr::Value(value) => match value.try_into()? {
-                n @ Literal::Integer(i) if i >= 0 => Ok(Self::Literal(n)),
-                n @ Literal::UnsignedInteger(_) => Ok(Self::Literal(n)),
-                v => unsupported!(
-                    "unexpected LIMIT {} (not a non-negative integer)",
-                    v.display(dialect)
-                ),
-            },
-            _ => unsupported!("unexpected LIMIT {value} (not a literal)"),
+        // Delegate to Literal conversion which handles both Expr::Value and Expr::Identifier
+        match Literal::try_from(value)? {
+            n @ Literal::Integer(i) if i >= 0 => Ok(Self::Literal(n)),
+            n @ Literal::UnsignedInteger(_) => Ok(Self::Literal(n)),
+            n @ Literal::Placeholder(_) => Ok(Self::Literal(n)),
+            v => unsupported!(
+                "unexpected LIMIT {} (not a non-negative integer or placeholder)",
+                v.display(dialect)
+            ),
         }
     }
 }
