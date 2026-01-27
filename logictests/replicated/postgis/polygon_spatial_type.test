@@ -1,0 +1,205 @@
+statement ok
+create extension postgis;
+
+# =============================================================================
+# Simple polygon without holes, no SRID
+# =============================================================================
+
+statement ok
+create table simple_polygons (id int primary key, geom geometry(polygon));
+
+statement ok
+insert into simple_polygons values
+  (1, ST_GeomFromText('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))')),
+  (2, ST_GeomFromText('POLYGON((1.5 2.5, 3.5 2.5, 3.5 4.5, 1.5 4.5, 1.5 2.5))'));
+
+# Test raw binary retrieval - ensures we can snapshot/replicate the data
+query B nosort
+select geom from simple_polygons where id = 1
+----
+0x010300000001000000050000000000000000000000000000000000000000000000000024400000000000000000000000000000244000000000000024400000000000000000000000000000244000000000000000000000000000000000
+
+query B nosort
+select geom from simple_polygons where id = 2
+----
+0x01030000000100000005000000000000000000F83F00000000000004400000000000000C4000000000000004400000000000000C400000000000001240000000000000F83F0000000000001240000000000000F83F0000000000000440
+
+# TEST ST_AsText output
+query T nosort
+select ST_AsText(geom) from simple_polygons where id = 1
+----
+POLYGON((0 0,10 0,10 10,0 10,0 0))
+
+query T nosort
+select ST_AsText(geom) from simple_polygons where id = 2
+----
+POLYGON((1.5 2.5,3.5 2.5,3.5 4.5,1.5 4.5,1.5 2.5))
+
+# Test ST_AsEWKT (should be same as ST_AsText when no SRID)
+query T nosort
+select ST_AsEWKT(geom) from simple_polygons where id = 1
+----
+POLYGON((0 0,10 0,10 10,0 10,0 0))
+
+# =============================================================================
+# Polygon with explicit SRID
+# =============================================================================
+
+statement ok
+create table polygons_with_srid (id int primary key, geom geometry(polygon, 4326));
+
+statement ok
+insert into polygons_with_srid values
+  (1, ST_GeomFromText('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))', 4326)),
+  (2, ST_GeomFromText('POLYGON((-122.4 37.8, -122.3 37.8, -122.3 37.7, -122.4 37.7, -122.4 37.8))', 4326));
+
+# Raw binary with SRID embedded
+query B nosort
+select geom from polygons_with_srid where id = 1
+----
+0x0103000020E610000001000000050000000000000000000000000000000000000000000000000024400000000000000000000000000000244000000000000024400000000000000000000000000000244000000000000000000000000000000000
+
+# ST_AsText should NOT include SRID
+query T nosort
+select ST_AsText(geom) from polygons_with_srid where id = 1
+----
+POLYGON((0 0,10 0,10 10,0 10,0 0))
+
+# ST_AsEWKT SHOULD include SRID
+query T nosort
+select ST_AsEWKT(geom) from polygons_with_srid where id = 1
+----
+SRID=4326;POLYGON((0 0,10 0,10 10,0 10,0 0))
+
+query T nosort
+select ST_AsEWKT(geom) from polygons_with_srid where id = 2
+----
+SRID=4326;POLYGON((-122.4 37.8,-122.3 37.8,-122.3 37.7,-122.4 37.7,-122.4 37.8))
+
+# =============================================================================
+# Polygon with holes (interior rings)
+# =============================================================================
+
+statement ok
+create table polygons_with_holes (id int primary key, geom geometry(polygon));
+
+statement ok
+insert into polygons_with_holes values
+  (1, ST_GeomFromText('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0), (2 2, 8 2, 8 8, 2 8, 2 2))')),
+  (2, ST_GeomFromText('POLYGON((0 0, 100 0, 100 100, 0 100, 0 0), (10 10, 20 10, 20 20, 10 20, 10 10), (30 30, 40 30, 40 40, 30 40, 30 30))'));
+
+# Single hole
+query T nosort
+select ST_AsText(geom) from polygons_with_holes where id = 1
+----
+POLYGON((0 0,10 0,10 10,0 10,0 0),(2 2,8 2,8 8,2 8,2 2))
+
+# Multiple holes
+query T nosort
+select ST_AsText(geom) from polygons_with_holes where id = 2
+----
+POLYGON((0 0,100 0,100 100,0 100,0 0),(10 10,20 10,20 20,10 20,10 10),(30 30,40 30,40 40,30 40,30 30))
+
+# =============================================================================
+# Polygon with holes AND SRID
+# =============================================================================
+
+statement ok
+create table polygons_holes_srid (id int primary key, geom geometry(polygon, 3857));
+
+statement ok
+insert into polygons_holes_srid values
+  (1, ST_GeomFromText('POLYGON((0 0, 1000 0, 1000 1000, 0 1000, 0 0), (200 200, 800 200, 800 800, 200 800, 200 200))', 3857));
+
+query T nosort
+select ST_AsText(geom) from polygons_holes_srid where id = 1
+----
+POLYGON((0 0,1000 0,1000 1000,0 1000,0 0),(200 200,800 200,800 800,200 800,200 200))
+
+query T nosort
+select ST_AsEWKT(geom) from polygons_holes_srid where id = 1
+----
+SRID=3857;POLYGON((0 0,1000 0,1000 1000,0 1000,0 0),(200 200,800 200,800 800,200 800,200 200))
+
+# =============================================================================
+# Empty polygon
+# =============================================================================
+
+statement ok
+create table empty_polygons (id int primary key, geom geometry(polygon));
+
+statement ok
+insert into empty_polygons values (1, ST_GeomFromText('POLYGON EMPTY'));
+
+query T nosort
+select ST_AsText(geom) from empty_polygons where id = 1
+----
+POLYGON EMPTY
+
+query T nosort
+select ST_AsEWKT(geom) from empty_polygons where id = 1
+----
+POLYGON EMPTY
+
+# =============================================================================
+# Empty polygon with SRID
+# =============================================================================
+
+statement ok
+create table empty_polygons_srid (id int primary key, geom geometry(polygon, 4326));
+
+statement ok
+insert into empty_polygons_srid values (1, ST_SetSRID(ST_GeomFromText('POLYGON EMPTY'), 4326));
+
+query T nosort
+select ST_AsText(geom) from empty_polygons_srid where id = 1
+----
+POLYGON EMPTY
+
+query T nosort
+select ST_AsEWKT(geom) from empty_polygons_srid where id = 1
+----
+SRID=4326;POLYGON EMPTY
+
+# =============================================================================
+# Polygons with high-precision coordinates
+# =============================================================================
+
+statement ok
+create table precise_polygons (id int primary key, geom geometry(polygon));
+
+statement ok
+insert into precise_polygons values
+  (1, ST_GeomFromText('POLYGON((0.123456789 0.987654321, 1.111111111 0.987654321, 1.111111111 1.222222222, 0.123456789 1.222222222, 0.123456789 0.987654321))'));
+
+query T nosort
+select ST_AsText(geom) from precise_polygons where id = 1
+----
+POLYGON((0.123456789 0.987654321,1.111111111 0.987654321,1.111111111 1.222222222,0.123456789 1.222222222,0.123456789 0.987654321))
+
+# =============================================================================
+# Filtering and queries on polygon tables
+# =============================================================================
+
+statement ok
+create table regions (id int primary key, name text, boundary geometry(polygon, 4326));
+
+statement ok
+insert into regions values
+  (1, 'small', ST_GeomFromText('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))', 4326)),
+  (2, 'medium', ST_GeomFromText('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))', 4326)),
+  (3, 'large', ST_GeomFromText('POLYGON((0 0, 100 0, 100 100, 0 100, 0 0))', 4326));
+
+query IT nosort
+select id, ST_AsText(boundary) from regions where name = 'medium'
+----
+2
+POLYGON((0 0,10 0,10 10,0 10,0 0))
+
+query IT nosort
+select id, ST_AsEWKT(boundary) from regions where id > 1 order by id
+----
+2
+SRID=4326;POLYGON((0 0,10 0,10 10,0 10,0 0))
+3
+SRID=4326;POLYGON((0 0,100 0,100 100,0 100,0 0))
