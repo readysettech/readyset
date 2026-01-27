@@ -593,7 +593,7 @@ pub struct WorkerOptions {
         long,
         env = "PARSING_PRESET",
         value_enum,
-        default_value = "both-prefer-nom",
+        default_value = "both-prefer-sqlparser",
         hide = true
     )]
     pub parsing_preset: ParsingPreset,

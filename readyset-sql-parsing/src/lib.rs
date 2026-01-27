@@ -131,7 +131,7 @@ impl ParsingPreset {
     /// The default parsing mode to use in the actual server. Usage of this will be replaced with a
     /// runtime-configurable value.
     pub fn for_prod() -> Self {
-        Self::BothPreferNom
+        Self::BothPreferSqlparser
     }
 
     pub fn into_config(self) -> ParsingConfig {
