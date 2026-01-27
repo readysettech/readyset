@@ -1,10 +1,11 @@
 use itertools::Itertools;
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err};
 use readyset_sql::ast::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableBody, Expr, LimitClause, Literal,
-    Relation, SelectStatement, SqlQuery, TableExpr, TableKey,
+    BinaryOperator, Column, ColumnConstraint, Expr, LimitClause, Literal, SelectStatement,
+    SqlQuery, TableExpr, TableKey,
 };
-use std::collections::HashMap;
+
+use crate::BaseSchemasContext;
 
 pub trait OrderLimitRemoval: Sized {
     /// Remove any LIMIT and ORDER statement belonging to a query that is determined to return at
@@ -12,15 +13,12 @@ pub trait OrderLimitRemoval: Sized {
     ///
     /// This past must be run after the expand_implied_tables() pass, because it requires that each
     /// column have an associated table name.
-    fn order_limit_removal(
-        &mut self,
-        base_schemas: &HashMap<&Relation, &CreateTableBody>,
-    ) -> ReadySetResult<&mut Self>;
+    fn order_limit_removal<C: BaseSchemasContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self>;
 }
 
-fn is_unique_or_primary(
+fn is_unique_or_primary<C: BaseSchemasContext>(
     col: &Column,
-    base_schemas: &HashMap<&Relation, &CreateTableBody>,
+    ctx: &C,
     table_exprs: &[TableExpr],
 ) -> ReadySetResult<bool> {
     // This assumes that we will find exactly one table matching col.table and exactly one col
@@ -33,7 +31,7 @@ fn is_unique_or_primary(
         internal_err!("All columns must have an associated table name at this point")
     })?;
 
-    let table = match base_schemas.get(table) {
+    let table = match ctx.base_schema(table) {
         None => {
             // Attempt to resolve alias. Most queries are not likely to do this, so we resolve
             // reactively
@@ -48,8 +46,7 @@ fn is_unique_or_primary(
                     None
                 }
             }) {
-                base_schemas
-                    .get(resolved_table)
+                ctx.base_schema(resolved_table)
                     .ok_or_else(|| internal_err!("Table name must match table in base schema"))?
             } else {
                 return Ok(false);
@@ -93,23 +90,20 @@ fn is_unique_or_primary(
             .any(|c| matches!(c, ColumnConstraint::Unique | ColumnConstraint::PrimaryKey)))
 }
 
-fn compares_unique_key_against_literal(
+fn compares_unique_key_against_literal<C: BaseSchemasContext>(
     expr: &Expr,
-    base_schemas: &HashMap<&Relation, &CreateTableBody>,
+    ctx: &C,
     table_exprs: &[TableExpr],
 ) -> ReadySetResult<bool> {
     match expr {
         Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_ref(), op, rhs.as_ref()) {
             (Expr::Literal(lit), BinaryOperator::Equal, Expr::Column(c))
             | (Expr::Column(c), BinaryOperator::Equal, Expr::Literal(lit)) => {
-                Ok(!matches!(lit, Literal::Null)
-                    && is_unique_or_primary(c, base_schemas, table_exprs)?)
+                Ok(!matches!(lit, Literal::Null) && is_unique_or_primary(c, ctx, table_exprs)?)
             }
             (lhs, BinaryOperator::And, rhs) => {
-                Ok(
-                    compares_unique_key_against_literal(lhs, base_schemas, table_exprs)?
-                        || compares_unique_key_against_literal(rhs, base_schemas, table_exprs)?,
-                )
+                Ok(compares_unique_key_against_literal(lhs, ctx, table_exprs)?
+                    || compares_unique_key_against_literal(rhs, ctx, table_exprs)?)
             }
             _ => Ok(false),
         },
@@ -120,17 +114,14 @@ fn compares_unique_key_against_literal(
 }
 
 impl OrderLimitRemoval for SelectStatement {
-    fn order_limit_removal(
-        &mut self,
-        base_schemas: &HashMap<&Relation, &CreateTableBody>,
-    ) -> ReadySetResult<&mut Self> {
+    fn order_limit_removal<C: BaseSchemasContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self> {
         let has_limit = matches!(
             self.limit_clause,
             LimitClause::LimitOffset { limit: Some(_), .. } | LimitClause::OffsetCommaLimit { .. }
         ) && matches!(
             self.limit_clause.offset(), // OFFSET > 0 implies (>= OFFSET) rows to return, hence do not drop
             None | Some(Literal::Integer(0)) | Some(Literal::UnsignedInteger(0))
-        );
+        ) && !matches!(self.limit_clause.limit(), Some(lit) if lit.is_placeholder());
 
         // If the query uses an equality filter on a column that has a unique or primary key
         // index, remove order and limit
@@ -138,7 +129,7 @@ impl OrderLimitRemoval for SelectStatement {
             && let Some(ref expr) = self.where_clause
             && self.join.is_empty()
             && matches!(self.tables.iter().exactly_one(), Ok(tab) if tab.inner.as_table().is_some())
-            && compares_unique_key_against_literal(expr, base_schemas, &self.tables)?
+            && compares_unique_key_against_literal(expr, &ctx, &self.tables)?
         {
             self.limit_clause = LimitClause::default();
             self.order = None;
@@ -148,12 +139,9 @@ impl OrderLimitRemoval for SelectStatement {
 }
 
 impl OrderLimitRemoval for SqlQuery {
-    fn order_limit_removal(
-        &mut self,
-        base_schemas: &HashMap<&Relation, &CreateTableBody>,
-    ) -> ReadySetResult<&mut Self> {
+    fn order_limit_removal<C: BaseSchemasContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self> {
         if let SqlQuery::Select(stmt) = self {
-            stmt.order_limit_removal(base_schemas)?;
+            stmt.order_limit_removal(ctx)?;
         }
         Ok(self)
     }
@@ -161,6 +149,8 @@ impl OrderLimitRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use readyset_sql::Dialect;
     use readyset_sql::ast::{
         ColumnSpecification, CreateTableBody, IndexKeyPart, Relation, SqlType,
@@ -168,6 +158,16 @@ mod tests {
     use readyset_sql_parsing::parse_query;
 
     use super::*;
+
+    impl BaseSchemasContext for HashMap<Relation, CreateTableBody> {
+        fn base_schemas(&self) -> Box<dyn Iterator<Item = (&Relation, &CreateTableBody)> + '_> {
+            Box::new(self.iter())
+        }
+
+        fn base_schema(&self, relation: &Relation) -> Option<&CreateTableBody> {
+            self.get(relation)
+        }
+    }
 
     fn generate_base_schemas() -> HashMap<Relation, CreateTableBody> {
         let col1 = ColumnSpecification {
@@ -237,8 +237,7 @@ mod tests {
     fn removes_limit_order(input: &str) {
         let mut q = parse_query(Dialect::MySQL, input).unwrap();
         let base_schemas = generate_base_schemas();
-        q.order_limit_removal(&base_schemas.iter().collect())
-            .unwrap();
+        q.order_limit_removal(&base_schemas).unwrap();
         match q {
             SqlQuery::Select(stmt) => {
                 assert!(stmt.order.is_none());
@@ -258,9 +257,7 @@ mod tests {
         let input_query = parse_query(Dialect::MySQL, input).unwrap();
         let base_schemas = generate_base_schemas();
         let mut revised_query = input_query.clone();
-        revised_query
-            .order_limit_removal(&base_schemas.iter().collect())
-            .unwrap();
+        revised_query.order_limit_removal(&base_schemas).unwrap();
         assert_eq!(input_query, revised_query);
     }
 
@@ -319,6 +316,14 @@ mod tests {
     }
 
     #[test]
+    fn placeholder_limit_not_removed() {
+        // A placeholder LIMIT (e.g. LIMIT ?) must not be stripped, because the placeholder could
+        // be 0 at runtime (meaning "return nothing"), and removing it would cause a parameter count
+        // mismatch between client and server.
+        does_not_change_limit_order("SELECT t.c1 FROM t WHERE t.c1 = 1 ORDER BY c1 ASC LIMIT ?")
+    }
+
+    #[test]
     fn compound_keys() {
         // condition on primary/unique key with compound primary/unique key
         let mut base_schema = generate_base_schemas();
@@ -353,9 +358,7 @@ mod tests {
         }]);
         base_schema.get_mut(&Relation::from("t")).unwrap().keys = keys;
         let mut revised_query = input_query.clone();
-        revised_query
-            .order_limit_removal(&base_schema.iter().collect())
-            .unwrap();
+        revised_query.order_limit_removal(&base_schema).unwrap();
         assert_eq!(input_query, revised_query);
         // compound Unique
         let keys = Some(vec![TableKey::UniqueKey {
@@ -368,15 +371,11 @@ mod tests {
         }]);
         base_schema.get_mut(&Relation::from("t")).unwrap().keys = keys;
         let mut revised_query = input_query.clone();
-        revised_query
-            .order_limit_removal(&base_schema.iter().collect())
-            .unwrap();
+        revised_query.order_limit_removal(&base_schema).unwrap();
         assert_eq!(input_query, revised_query);
         // compound unique but col is separately specified to be unique
         let mut revised_query = input_query2.clone();
-        revised_query
-            .order_limit_removal(&base_schema.iter().collect())
-            .unwrap();
+        revised_query.order_limit_removal(&base_schema).unwrap();
         match revised_query {
             SqlQuery::Select(stmt) => {
                 assert!(stmt.order.is_none());
