@@ -53,7 +53,6 @@ pub use crate::detect_unsupported_placeholders::DetectUnsupportedPlaceholders;
 pub use crate::expr::ScalarOptimizeExpressions;
 pub use crate::implied_tables::ImpliedTableExpansion;
 pub use crate::implied_tables::ImpliedTablesContext;
-use crate::inline_leading_derived_table::InlineLeadingDerivedTable;
 pub use crate::inline_literals::InlineLiterals;
 pub use crate::key_def_coalescing::KeyDefinitionCoalescing;
 pub use crate::normalize_topk_with_aggregate::NormalizeTopKWithAggregate;
@@ -219,8 +218,6 @@ impl Rewrite for SelectStatement {
         trace!(parent: &span, pass="expand_stars", query = %self.display(sql_dialect));
         self.expand_implied_tables(&context)?;
         trace!(parent: &span, pass="expand_implied_tables", query = %self.display(sql_dialect));
-        self.inline_leading_derived_table()?;
-        trace!(parent: &span, pass="inline_leading_derived_table", query = %self.display(sql_dialect));
         self.unnest_subqueries(&context)?;
         trace!(parent: &span, pass="unnest_subqueries", query = %self.display(sql_dialect));
         self.normalize_topk_with_aggregate(&context)?;
