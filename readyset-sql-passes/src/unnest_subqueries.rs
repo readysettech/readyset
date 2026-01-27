@@ -24,13 +24,14 @@ use crate::unnest_subqueries_3vl::{
     is_first_field_null_free, is_select_expr_null_free,
 };
 use crate::{
-    RewriteContext, get_local_from_items_iter, get_local_from_items_iter_mut, is_column_of,
+    BaseSchemasContext, get_local_from_items_iter, get_local_from_items_iter_mut, is_column_of,
 };
 use itertools::{Either, Itertools};
 use readyset_errors::{
     ReadySetError, ReadySetResult, internal, invalid_query, invalid_query_err, invariant,
     unsupported,
 };
+
 use readyset_sql::analysis::visit_mut::{VisitorMut, walk_expr};
 use readyset_sql::ast::JoinOperator::{InnerJoin, LeftOuterJoin};
 use readyset_sql::ast::{
@@ -116,11 +117,11 @@ pub(crate) struct UnnestContext<'a> {
 }
 
 pub trait UnnestSubqueries: Sized {
-    fn unnest_subqueries<C: RewriteContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self>;
+    fn unnest_subqueries<C: BaseSchemasContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self>;
 }
 
 impl UnnestSubqueries for SelectStatement {
-    fn unnest_subqueries<C: RewriteContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self> {
+    fn unnest_subqueries<C: BaseSchemasContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self> {
         let schema = NonNullSchemaImpl::from(ctx);
         if unnest_subqueries_main(self, &schema)?.has_rewrites() {
             trace!(target: "unnest_subqueries",
@@ -166,13 +167,13 @@ struct NonNullSchemaImpl {
     nonnull_schema: HashMap<Relation, HashSet<Column>>,
 }
 
-impl<C: RewriteContext> From<C> for NonNullSchemaImpl {
+impl<C: BaseSchemasContext> From<C> for NonNullSchemaImpl {
     fn from(ctx: C) -> Self {
         let mut schema = NonNullSchemaImpl {
             nonnull_schema: HashMap::new(),
         };
 
-        for (rel, body) in ctx.base_schemas().iter() {
+        for (rel, body) in ctx.base_schemas() {
             let nonnull_cols = body
                 .fields
                 .iter()
@@ -187,7 +188,7 @@ impl<C: RewriteContext> From<C> for NonNullSchemaImpl {
                 })
                 .collect::<HashSet<_>>();
             if !nonnull_cols.is_empty() {
-                schema.nonnull_schema.insert((*rel).clone(), nonnull_cols);
+                schema.nonnull_schema.insert(rel.clone(), nonnull_cols);
             }
         }
 

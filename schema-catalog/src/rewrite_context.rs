@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use readyset_data::Dialect;
-use readyset_sql::ast::{NonReplicatedRelation, Relation, SqlIdentifier};
+use readyset_sql::ast::{CreateTableBody, NonReplicatedRelation, Relation, SqlIdentifier};
 use readyset_sql_passes::{
-    CanQuery, ImpliedTablesContext, ResolveSchemasContext, RewriteDialectContext,
-    StarExpansionContext, adapter_rewrites::AdapterRewriteContext,
+    BaseSchemasContext, CanQuery, ImpliedTablesContext, ResolveSchemasContext,
+    RewriteDialectContext, StarExpansionContext, adapter_rewrites::AdapterRewriteContext,
 };
 
 use crate::{SchemaCatalog, SchemaGeneration};
@@ -76,6 +76,16 @@ impl RewriteContext {
     }
 }
 impl AdapterRewriteContext for RewriteContext {}
+
+impl BaseSchemasContext for RewriteContext {
+    fn base_schemas(&self) -> Box<dyn Iterator<Item = (&Relation, &CreateTableBody)> + '_> {
+        Box::new(self.schema_catalog.base_schemas.iter())
+    }
+
+    fn base_schema(&self, relation: &Relation) -> Option<&CreateTableBody> {
+        self.schema_catalog.base_schemas.get(relation)
+    }
+}
 
 impl ResolveSchemasContext for RewriteContext {
     fn add_invalidating_table(&self, _table: Relation) {

@@ -4,7 +4,7 @@ pub(crate) use crate::rewrite_utils::{
     is_column_eq_column, project_columns_if_not_exist_fix_duplicate_aliases,
 };
 use crate::{
-    RewriteContext, as_column, get_local_from_items_iter, get_local_from_items_iter_mut,
+    BaseSchemasContext, as_column, get_local_from_items_iter, get_local_from_items_iter_mut,
     is_column_of,
 };
 use itertools::{Either, Itertools};
@@ -17,11 +17,11 @@ use std::collections::{HashMap, HashSet};
 use std::{iter, mem};
 
 pub trait DropRedundantSelfJoin: Sized {
-    fn drop_redundant_join<C: RewriteContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self>;
+    fn drop_redundant_join<C: BaseSchemasContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self>;
 }
 
 impl DropRedundantSelfJoin for SelectStatement {
-    fn drop_redundant_join<C: RewriteContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self> {
+    fn drop_redundant_join<C: BaseSchemasContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self> {
         let unique_cols_schema = UniqueColumnsSchemaImpl::from(ctx);
         drop_redundant_self_joins_main(self, &unique_cols_schema)?;
         Ok(self)
@@ -42,11 +42,11 @@ impl UniqueColumnsSchema for UniqueColumnsSchemaImpl {
     }
 }
 
-impl<C: RewriteContext> From<C> for UniqueColumnsSchemaImpl {
+impl<C: BaseSchemasContext> From<C> for UniqueColumnsSchemaImpl {
     fn from(ctx: C) -> Self {
         let mut unique_cols_schema = HashMap::new();
 
-        for (rel, body) in ctx.base_schemas().iter() {
+        for (rel, body) in ctx.base_schemas() {
             let mut unique_cols = body
                 .fields
                 .iter()

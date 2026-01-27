@@ -28,8 +28,8 @@ use readyset_sql::DialectDisplay;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteContext;
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{
-    CanQuery, DetectUnsupportedPlaceholders, ImpliedTablesContext, ResolveSchemasContext, Rewrite,
-    RewriteContext, RewriteDialectContext, StarExpansionContext,
+    BaseSchemasContext, CanQuery, DetectUnsupportedPlaceholders, ImpliedTablesContext,
+    ResolveSchemasContext, Rewrite, RewriteContext, RewriteDialectContext, StarExpansionContext,
 };
 use readyset_util::redacted::Sensitive;
 use schema_catalog::{SchemaCatalog, SchemaGeneration};
@@ -1579,13 +1579,23 @@ struct SqlIncorporatorRewriteContext<'a> {
     query_name: Option<&'a str>,
 }
 
+impl BaseSchemasContext for SqlIncorporatorRewriteContext<'_> {
+    fn base_schemas(&self) -> Box<dyn Iterator<Item = (&Relation, &CreateTableBody)> + '_> {
+        Box::new(
+            self.base_schemas
+                .iter()
+                .map(|(relation, body)| (*relation, *body)),
+        )
+    }
+
+    fn base_schema(&self, relation: &Relation) -> Option<&CreateTableBody> {
+        self.base_schemas.get(relation).copied()
+    }
+}
+
 impl RewriteContext for SqlIncorporatorRewriteContext<'_> {
     fn view_schemas(&self) -> &HashMap<Relation, Vec<SqlIdentifier>> {
         &self.this.view_schemas
-    }
-
-    fn base_schemas(&self) -> &HashMap<&Relation, &CreateTableBody> {
-        &self.base_schemas
     }
 
     fn uncompiled_views(&self) -> &[&Relation] {
@@ -1621,7 +1631,7 @@ impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
         };
 
         if self.view_schemas().contains_key(&relation)
-            || self.base_schemas().contains_key(&relation)
+            || self.base_schema(&relation).is_some()
             || self.uncompiled_views().contains(&&relation)
         {
             Some(CanQuery::Yes)
