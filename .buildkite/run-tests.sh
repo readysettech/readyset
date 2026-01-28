@@ -65,7 +65,7 @@ NEXTEST_FILTER=()
 # here use the ':serial:` tag, even though it's used in the groups.
 case "$UPSTREAM_CONFIG" in
   "none"|"default")
-    NEXTEST_FILTER+=("not test(/:(\w+)_upstream:/)") ;;
+    NEXTEST_FILTER+=("(not test(/:(\w+)_upstream:/))") ;;
   mysql8*)
     # If we ever add a `mysql57_upstream` test, this will filter it out, and it can be added in the next case.
     NEXTEST_FILTER+=("(test(/:mysql8\d*_upstream:/) or test(/:mysql_upstream:/))") ;;
@@ -100,7 +100,7 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
     set -x   # print the cargo command
     cargo --locked nextest run --profile ci --hide-progress-bar \
         --workspace --features failure_injection \
-        --filterset "${NEXTEST_FILTER[@]}" \
+        --filterset "${NEXTEST_FILTER[*]}" \
         || upload_artifacts
     set +x
 elif [[ "$TEST_CATEGORY" == "doctest" ]]; then
