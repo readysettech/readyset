@@ -29,18 +29,18 @@ steps:
     matrix:
       setup:
         queue:
-          - "c6a-4xlarge"
-          - "c7g-4xlarge"
+          - "c6a-4xlarge-nospot"
+          - "c7g-4xlarge-nospot"
         arch:
           - "x86"
           - "arm"
       adjustments:
         - with:
-            queue: "c6a-4xlarge"
+            queue: "c6a-4xlarge-nospot"
             arch: "arm"
           skip: true
         - with:
-            queue: "c7g-4xlarge"
+            queue: "c7g-4xlarge-nospot"
             arch: "x86"
           skip: true
 

@@ -41,8 +41,7 @@ steps:
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
-    agents:
-      queue: c7a-xlarge-nospot
+    agents: { queue: c7a-xlarge-nospot }
     retry: *retry_on_agent_kill
 
   - label: ':rust: :lock: Check cargo-deny'
@@ -72,8 +71,7 @@ steps:
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
-    agents:
-      queue: c7a-2xlarge
+    agents: { queue: c7a-2xlarge-nospot }
     retry: *retry_on_agent_kill
     soft_fail:
       - exit_status: 3
@@ -97,8 +95,7 @@ steps:
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
-    agents:
-      queue: c7a-2xlarge
+    agents: { queue: c7a-2xlarge-nospot }
     retry: *retry_on_agent_kill
 
   - label: ":rust: Run tests (nextest, default upstreams, MRBR off): {{ matrix.arch }}"
@@ -143,24 +140,23 @@ steps:
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
-    agents:
-      queue: "{{ matrix.queue }}"
+    agents: { queue: "{{ matrix.queue }}" }
     retry: *retry_on_agent_kill
     matrix:
       setup:
         queue:
-          - "c6a-4xlarge"
-          - "c7g-4xlarge"
+          - "c6a-4xlarge-nospot"
+          - "c7g-4xlarge-nospot"
         arch:
           - "x86"
           - "arm"
       adjustments:
         - with:
-            queue: "c6a-4xlarge"
+            queue: "c6a-4xlarge-nospot"
             arch: "arm"
           skip: true
         - with:
-            queue: "c7g-4xlarge"
+            queue: "c7g-4xlarge-nospot"
             arch: "x86"
           skip: true
 
@@ -206,8 +202,7 @@ steps:
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
-    agents:
-      queue: c6a-4xlarge
+    agents: { queue: c6a-4xlarge-nospot }
     retry: *retry_on_agent_kill
 
   - label: ":junit: Annotate JUnit XML"
@@ -264,8 +259,7 @@ steps:
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
-    agents:
-      queue: c6a-4xlarge
+    agents: { queue: c6a-4xlarge-nospot }
     retry: *retry_on_agent_kill
 
   - label: ":sqlite: Run logictest"
@@ -301,6 +295,5 @@ steps:
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
-    agents:
-      queue: "c6a-4xlarge"
+    agents: { queue: "c6a-4xlarge-nospot" }
     retry: *retry_on_agent_kill
