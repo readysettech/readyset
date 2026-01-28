@@ -186,14 +186,12 @@ mod tests {
         assert!(JoinOperator::Join.is_inner_join());
         assert!(JoinOperator::InnerJoin.is_inner_join());
         assert!(JoinOperator::CrossJoin.is_inner_join());
+        assert!(JoinOperator::StraightJoin.is_inner_join());
 
         // Outer join variants should return false
         assert!(!JoinOperator::LeftJoin.is_inner_join());
         assert!(!JoinOperator::LeftOuterJoin.is_inner_join());
         assert!(!JoinOperator::RightJoin.is_inner_join());
         assert!(!JoinOperator::RightOuterJoin.is_inner_join());
-
-        // MySQL-specific join should return false
-        assert!(!JoinOperator::StraightJoin.is_inner_join());
     }
 }
