@@ -42,6 +42,19 @@ pub use readyset_server::sleep;
 
 static UNIQUE_SERVER_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 
+#[macro_export]
+macro_rules! derive_test_name {
+    () => {
+        std::thread::current()
+            .name()
+            .unwrap()
+            .split_once("::")
+            .unwrap()
+            .0
+            .to_owned()
+    };
+}
+
 /// Wait for a table to be rebuilt (as indicated by a change in its dataflow node id), and for the
 /// leader to report it is ready.
 ///

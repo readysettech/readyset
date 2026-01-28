@@ -407,7 +407,7 @@ where
             accessed_ms: now.into(),
             refreshed_ms: now,
             refreshing: false.into(),
-            ttl_ms: self.ttl_ms.map(|ttl| ttl.saturating_sub(execution_ms)),
+            ttl_ms: self.ttl_ms,
             execution_ms,
         }
     }
@@ -429,27 +429,35 @@ where
         new: CacheValues<V>,
     ) -> (bool, Option<Arc<Mutex<CacheStubInner>>>) {
         let mut waiters = None;
-        let mut was_present = false;
+        let mut start_scheduling = false;
         self.inner
             .entry((self.id, k))
             .and_compute_with(|e| {
-                if let Some(e) = e {
-                    match &**e.value() {
-                        CacheEntry::Present(e) => {
-                            was_present = true;
-                            let acc = e.accessed_ms.load(Ordering::Relaxed);
-                            new.accessed_ms.store(acc, Ordering::Relaxed);
+                match e {
+                    Some(e) => {
+                        match &**e.value() {
+                            CacheEntry::Present(e) => {
+                                let acc = e.accessed_ms.load(Ordering::Relaxed);
+                                new.accessed_ms.store(acc, Ordering::Relaxed);
+                            }
+                            CacheEntry::Loading(stub) => {
+                                start_scheduling = true;
+                                waiters = Some(Arc::clone(&stub.inner));
+                            }
                         }
-                        CacheEntry::Loading(stub) => {
-                            waiters = Some(Arc::clone(&stub.inner));
-                        }
+
+                        let new = Arc::new(CacheEntry::Present(new));
+                        future::ready(Op::Put(new))
+                    }
+                    None => {
+                        // We're late and the entry has already been evicted.
+                        // Drop this insert on the floor.
+                        future::ready(Op::Nop)
                     }
                 }
-                let new = Arc::new(CacheEntry::Present(new));
-                future::ready(Op::Put(new))
             })
             .await;
-        (was_present, waiters)
+        (start_scheduling, waiters)
     }
 
     async fn schedule_refresh(
@@ -478,12 +486,12 @@ where
     ) {
         let metadata = self.dedupe_metadata(metadata);
         let entry = self.make_entry(v, metadata, execution);
-        let (was_present, waiters) = self.insert_entry(k.clone(), entry).await;
+        let (start_scheduling, waiters) = self.insert_entry(k.clone(), entry).await;
         Self::notify_waiters(waiters).await;
 
         if let Some(refresh) = refresh
             && let Some(ref sched) = self.scheduler
-            && !was_present
+            && start_scheduling
         {
             // for scheduled refresh, schedule the first refresh on first insertion
             self.schedule_refresh(k, refresh, sched).await;
@@ -536,10 +544,11 @@ where
             }
             None
         } else {
-            self.inner.get(&k).await.map(|entry| match entry.as_ref() {
+            let e = self.inner.entry(k).or_default().await;
+            match &**e.value() {
                 CacheEntry::Present(values) => self.get_hit(values),
-                CacheEntry::Loading(_) => None, // unreachable, but ignore and return miss
-            })?
+                CacheEntry::Loading(_) => None,
+            }
         }
     }
 
@@ -625,6 +634,14 @@ mod tests {
         )
     }
 
+    async fn mark_fresh_insert_intent(
+        cache: &Arc<Cache<Vec<&str>, Vec<&str>>>,
+        key: &[&'static str],
+    ) {
+        // Insert a guard entry to allow a subsequent insert.
+        assert!(cache.get(key.to_owned()).await.is_none());
+    }
+
     #[tokio::test]
     async fn test_ttl_expiration() {
         let cache = new(
@@ -638,6 +655,7 @@ mod tests {
         let values = vec![vec!["test_value"]];
         let metadata = QueryMetadata::Test;
 
+        mark_fresh_insert_intent(&cache, &key).await;
         cache
             .insert(key.clone(), values.clone(), metadata, ZERO_DURATION, None)
             .await;
@@ -649,7 +667,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_ttl_update() {
+    async fn test_ttl_remains_with_subsequent_inserts() {
         let cache = new(
             None,
             EvictionPolicy::Ttl {
@@ -661,22 +679,18 @@ mod tests {
         let values = vec![vec!["test_value"]];
         let metadata = QueryMetadata::Test;
 
-        for _ in 0..4 {
-            tokio::time::sleep(Duration::from_secs(1)).await;
+        mark_fresh_insert_intent(&cache, &key).await;
+        for _ in 0..2 {
+            let exec = Duration::from_millis(500);
+            tokio::time::sleep(exec).await;
             cache
-                .insert(
-                    key.clone(),
-                    values.clone(),
-                    metadata.clone(),
-                    ZERO_DURATION,
-                    None,
-                )
+                .insert(key.clone(), values.clone(), metadata.clone(), exec, None)
                 .await;
             let result = cache.get(key.clone()).await.unwrap();
             assert_eq!(result.0.values.as_ref(), &values);
         }
 
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
         assert!(cache.get(key).await.is_none());
     }
 
@@ -718,6 +732,7 @@ mod tests {
         let values_1 = vec![vec!["value_from_cache_1"]];
         let metadata = QueryMetadata::Test;
 
+        mark_fresh_insert_intent(&cache_0, &key).await;
         cache_0
             .insert(
                 key.clone(),
@@ -727,6 +742,7 @@ mod tests {
                 None,
             )
             .await;
+        mark_fresh_insert_intent(&cache_1, &key).await;
         cache_1
             .insert(
                 key.clone(),
