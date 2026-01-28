@@ -252,7 +252,11 @@ mod tests {
 
             // Type code - Point (1) with SRID flag if present
             let type_code: u32 = if srid.is_some() { 0x20000001 } else { 1 };
-            bytes.extend_from_slice(&type_code.to_le_bytes());
+            if little_endian {
+                bytes.extend_from_slice(&type_code.to_le_bytes());
+            } else {
+                bytes.extend_from_slice(&type_code.to_be_bytes());
+            }
 
             // SRID if present
             if let Some(srid) = srid {

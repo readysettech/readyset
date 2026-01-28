@@ -250,7 +250,11 @@ mod test {
             bytes.push(if is_little_endian { 0x01 } else { 0x00 });
 
             let type_code: u32 = if srid.is_some() { 0x20000003 } else { 3 };
-            bytes.extend_from_slice(&type_code.to_le_bytes());
+            if is_little_endian {
+                bytes.extend_from_slice(&type_code.to_le_bytes());
+            } else {
+                bytes.extend_from_slice(&type_code.to_be_bytes());
+            }
 
             // Srid
             if let Some(srid) = srid {
