@@ -37,37 +37,16 @@ RUN curl -L https://github.com/docker/compose/releases/download/v2.6.0/docker-co
       -o /usr/local/bin/docker-compose && \
     chmod a+x /usr/local/bin/docker-compose
 
-RUN cargo install --locked \
+# Install cargo-binstall for faster binary installation
+RUN curl -L --proto '=https' --tlsv1.2 -sSf \
+      "https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh" | bash
+
+# Install tools via cargo-binstall
+RUN cargo binstall -y --locked \
       detect_flake \
-      critcmp \
-      cargo-deny
-
-# Install cargo-nextest
-RUN set -eux; \
-    VERSION="0.9.118"; \
-    case "${TARGETARCH}" in \
-      "arm64") PLATFORM="linux-arm";; \
-      "amd64") PLATFORM="linux";; \
-      *) echo "Unsupported architecture: ${TARGETARCH}"; exit 1;; \
-    esac; \
-    # CARGO_HOME is set by the nightly container to be /usr/local/cargo.
-    # This is where it reads configs from for cargo and where cargo installs binaries.
-    curl -LsSf "https://get.nexte.st/${VERSION}/${PLATFORM}" | tar zxf - -C ${CARGO_HOME}/bin
-
-# Install sccache
-RUN set -eux; \
-    SCCACHE_VERSION="v0.10.0"; \
-    case "${TARGETARCH}" in \
-      "arm64") SCCACHE_ARCH="aarch64";; \
-      "amd64") SCCACHE_ARCH="x86_64";; \
-      *) echo "Unsupported architecture: ${TARGETARCH}"; exit 1;; \
-    esac; \
-    SCCACHE_NAME="sccache-${SCCACHE_VERSION}-${SCCACHE_ARCH}-unknown-linux-musl"; \
-    curl -LsSf --retry 5 --retry-delay 10 \
-      "https://github.com/mozilla/sccache/releases/download/${SCCACHE_VERSION}/${SCCACHE_NAME}.tar.gz" | \
-      tar -zx --strip-components=1 -C /usr/local/bin ${SCCACHE_NAME}/sccache && \
-    chmod +x /usr/local/bin/sccache && \
-    sccache --version
+      cargo-deny \
+      cargo-nextest@0.9.124 \
+      sccache@0.13.0
 ENV RUSTC_WRAPPER=sccache
 
 # Set some rustflags.  For info on the graviton flag, see:
