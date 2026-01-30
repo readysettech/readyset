@@ -17,8 +17,8 @@ use readyset_client_test_helpers::{TestBuilder, mysql_helpers};
 use readyset_sql::ast::{EnumVariants, SqlType, SqlTypeArbitraryOptions};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_util::arbitrary::{
-    arbitrary_decimal_bytes_with_digits, arbitrary_json, arbitrary_naive_date_in_range,
-    arbitrary_naive_time_with_seconds_fraction,
+    arbitrary_decimal_bytes_with_digits, arbitrary_json, arbitrary_mysql_point,
+    arbitrary_naive_date_in_range, arbitrary_naive_time_with_seconds_fraction,
 };
 use readyset_util::eventually;
 use test_strategy::proptest;
@@ -238,6 +238,9 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
         | SqlType::Uuid
         | SqlType::QuotedChar
         | SqlType::Interval { .. }
+        | SqlType::PostgisPoint
+        | SqlType::PostgisPolygon
+        | SqlType::Tsvector
         | SqlType::Jsonb => {
             panic!("Type not supported by MySQL: {sql_type:?}")
         }
@@ -323,10 +326,9 @@ fn arbitrary_mysql_value_for_type(sql_type: SqlType) -> impl Strategy<Value = Va
         SqlType::Signed | SqlType::Unsigned | SqlType::UnsignedInteger | SqlType::SignedInteger => {
             unimplemented!("This type is only valid in `CAST` and can't be used as a Column Def")
         }
-        SqlType::Point => unimplemented!("Points aren't implemented yet"),
-        SqlType::PostgisPoint => unimplemented!("Postgis point isn't supported for mysql"),
-        SqlType::PostgisPolygon => unimplemented!("Postgis polygon isn't supported for mysql"),
-        SqlType::Tsvector => unimplemented!("Tsvector isn't supported for mysql"),
+        SqlType::Point => arbitrary_mysql_point()
+            .prop_map(|bytes| bytes.into())
+            .boxed(),
     }
 }
 
@@ -337,6 +339,7 @@ fn round_trip_mysql_type_arbitrary(
         dialect: Dialect::MySQL,
         generate_arrays: false,
         generate_json: true,
+        generate_spatial: true,
         generate_other: false,
         generate_unsupported: false,
     }))]

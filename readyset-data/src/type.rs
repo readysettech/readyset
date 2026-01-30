@@ -11,7 +11,7 @@ use readyset_sql::ast::{EnumVariants, Relation, SqlIdentifier, SqlType};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{Collation, Dialect};
+use crate::{Collation, Dialect, SqlEngine};
 
 /// Metadata about a postgresql enum type, optionally stored inside of `DfType::Enum` for enum types
 /// that originate in postgres
@@ -339,9 +339,21 @@ impl DfType {
             MacAddr => unsupported!("Unsupported type: MacAddr"),
             Inet => unsupported!("Unsupported type: Inet"),
             Citext => Self::Text(Collation::Utf8Ci),
-            Point => Self::Point,
-            PostgisPoint => Self::PostgisPoint,
-            PostgisPolygon => Self::PostgisPolygon,
+            // we don't support the built-in geometric types for postgres, only the postgis versions.
+            Point => match dialect.engine() {
+                SqlEngine::MySQL => Self::Point,
+                SqlEngine::PostgreSQL => unsupported!(
+                    "built-in Point unsupported for postgres, must use postgis version"
+                ),
+            },
+            PostgisPoint => match dialect.engine() {
+                SqlEngine::PostgreSQL => Self::PostgisPoint,
+                SqlEngine::MySQL => unsupported!("PostgisPoint unsupported for mysql"),
+            },
+            PostgisPolygon => match dialect.engine() {
+                SqlEngine::PostgreSQL => Self::PostgisPolygon,
+                SqlEngine::MySQL => unsupported!("PostgisPolygon unsupported for mysql"),
+            },
             Tsvector => Self::Tsvector,
             Other(ref id) => resolve_custom_type(id.clone()).ok_or_else(|| {
                 let id_upper = format!("{}", id.display_unquoted()).to_uppercase();
@@ -920,6 +932,7 @@ mod tests {
             generate_arrays: true,
             generate_json: true,
             generate_other: true,
+            generate_spatial: true,
             generate_unsupported: false
         }))]
         sql_type: SqlType,
@@ -935,6 +948,7 @@ mod tests {
             generate_arrays: true,
             generate_json: true,
             generate_other: true,
+            generate_spatial: true,
             generate_unsupported: false
         }))]
         sql_type: SqlType,

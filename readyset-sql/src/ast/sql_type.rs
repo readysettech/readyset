@@ -437,6 +437,9 @@ pub struct SqlTypeArbitraryOptions {
     /// Enable generation of [`SqlType::Json`] and [`SqlType::Jsonb`]. Defaults to `true`
     pub generate_json: bool,
 
+    /// Enable generation of spatial/geometrics types like [`SqlType::Point`]. Defaults to `false`.
+    pub generate_spatial: bool,
+
     /// Generate unsupported types, i.e. types which would raise an unsupported error in
     /// [`DfType::from_sql_type`] and cause replication to deny a table using this type. Defaults to
     /// `false`.
@@ -452,6 +455,7 @@ impl Default for SqlTypeArbitraryOptions {
             generate_arrays: true,
             generate_other: false,
             generate_json: true,
+            generate_spatial: false,
             generate_unsupported: false,
             dialect: Dialect::MySQL,
         }
@@ -542,6 +546,10 @@ impl Arbitrary for SqlType {
             if args.generate_json {
                 variants.push(Just(Jsonb).boxed());
             }
+
+            if args.generate_spatial {
+                variants.extend([Just(PostgisPoint).boxed(), Just(PostgisPolygon).boxed()]);
+            }
         }
 
         if args.dialect == Dialect::MySQL {
@@ -567,6 +575,10 @@ impl Arbitrary for SqlType {
                 option::of(1..255u16).prop_map(Binary).boxed(),
                 option::of(1..=6u16).prop_map(DateTime).boxed(),
             ]);
+
+            if args.generate_spatial {
+                variants.push(Just(Point).boxed());
+            }
         }
 
         if args.generate_arrays && args.dialect != Dialect::MySQL {
