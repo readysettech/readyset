@@ -1776,7 +1776,7 @@ where
                             Self::send_refresh(&refresh, request);
                         })
                     };
-                    cache.set_refresh(callback);
+                    cache.schedule_refresh(callback).await;
                 }
 
                 Self::execute_upstream(
@@ -3608,7 +3608,7 @@ where
                         };
                         Self::send_refresh(&refresh, req);
                     });
-                    cache.set_refresh(callback);
+                    cache.schedule_refresh(callback).await;
                 };
                 Self::query_fallback(upstream, query, event, Some(cache)).await
             }

@@ -858,7 +858,7 @@ async fn test_periodic_refresh_callback() {
         });
     });
 
-    guard.set_refresh(refresh_callback);
+    guard.schedule_refresh(refresh_callback).await;
     guard.filled().await;
     check_hit_value(
         &manager,
@@ -950,7 +950,7 @@ async fn test_slow_refresh_serves_stale_data() {
         })
     };
 
-    guard.set_refresh(refresh);
+    guard.schedule_refresh(refresh).await;
     guard.filled().await;
 
     sleep(Duration::from_millis(200)).await;

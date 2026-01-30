@@ -126,6 +126,7 @@ impl<K, V> Expiry<K, Arc<CacheEntry<V>>> for CacheExpiration {
         value: &Arc<CacheEntry<V>>,
         _created: Instant,
     ) -> Option<Duration> {
+        // Consider a timeout for stubs that have waited too long for any response.
         match value.as_ref() {
             CacheEntry::Present(values) => values.ttl_ms.map(Duration::from_millis),
             CacheEntry::Loading(_) => None,
@@ -301,11 +302,7 @@ where
         cache
     }
 
-    fn make_guard(
-        cache: Arc<Cache<K, V>>,
-        key: K,
-        refresh: RequestRefresh<K, V>,
-    ) -> CacheInsertGuard<K, V> {
+    fn make_guard(cache: Arc<Cache<K, V>>, key: K) -> CacheInsertGuard<K, V> {
         CacheInsertGuard {
             cache,
             key: Some(key),
@@ -313,7 +310,6 @@ where
             metadata: None,
             filled: false,
             requested: Instant::now(),
-            refresh: Some(refresh),
         }
     }
 
@@ -332,19 +328,17 @@ where
         };
 
         for (key, callback) in due {
-            if let Some(e) = cache.inner.get(&(cache.id, key.clone())).await
-                && let CacheEntry::Present(ref e) = *e
-                && let Some(ttl_ms) = e.ttl_ms
-            {
-                let now = current_timestamp_ms();
-                if e.accessed_ms.load(Ordering::Relaxed) > now - ttl_ms {
+            match cache.inner.get(&(cache.id, key.clone())).await.as_deref() {
+                Some(CacheEntry::Present(..)) | Some(CacheEntry::Loading(..)) => {
+                    // Keep going as long as the entry hasn't been evicted.
                     cache
                         .schedule_refresh(key.clone(), Arc::clone(&callback))
                         .await;
 
-                    let guard = Self::make_guard(Arc::clone(&cache), key, Arc::clone(&callback));
+                    let guard = Self::make_guard(Arc::clone(&cache), key);
                     callback(guard);
                 }
+                None => {}
             }
         }
     }
@@ -423,13 +417,8 @@ where
         }
     }
 
-    async fn insert_entry(
-        &self,
-        k: K,
-        new: CacheValues<V>,
-    ) -> (bool, Option<Arc<Mutex<CacheStubInner>>>) {
+    async fn insert_entry(&self, k: K, new: CacheValues<V>) -> Option<Arc<Mutex<CacheStubInner>>> {
         let mut waiters = None;
-        let mut start_scheduling = false;
         self.inner
             .entry((self.id, k))
             .and_compute_with(|e| {
@@ -441,7 +430,6 @@ where
                                 new.accessed_ms.store(acc, Ordering::Relaxed);
                             }
                             CacheEntry::Loading(stub) => {
-                                start_scheduling = true;
                                 waiters = Some(Arc::clone(&stub.inner));
                             }
                         }
@@ -457,10 +445,10 @@ where
                 }
             })
             .await;
-        (start_scheduling, waiters)
+        waiters
     }
 
-    async fn schedule_refresh(&self, k: K, refresh: RequestRefresh<K, V>) {
+    pub(crate) async fn schedule_refresh(&self, k: K, refresh: RequestRefresh<K, V>) {
         let Some(ref scheduler) = self.scheduler else {
             return;
         };
@@ -480,19 +468,11 @@ where
         v: Vec<V>,
         metadata: QueryMetadata,
         execution: Duration,
-        refresh: Option<RequestRefresh<K, V>>,
     ) {
         let metadata = self.dedupe_metadata(metadata);
         let entry = self.make_entry(v, metadata, execution);
-        let (start_scheduling, waiters) = self.insert_entry(k.clone(), entry).await;
+        let waiters = self.insert_entry(k.clone(), entry).await;
         Self::notify_waiters(waiters).await;
-
-        if let Some(refresh) = refresh
-            && start_scheduling
-        {
-            // for scheduled refresh, schedule the first refresh on first insertion
-            self.schedule_refresh(k, refresh).await;
-        }
     }
 
     fn get_hit(&self, values: &CacheValues<V>) -> Option<(QueryResult<V>, bool)> {
@@ -654,7 +634,7 @@ mod tests {
 
         mark_fresh_insert_intent(&cache, &key).await;
         cache
-            .insert(key.clone(), values.clone(), metadata, ZERO_DURATION, None)
+            .insert(key.clone(), values.clone(), metadata, ZERO_DURATION)
             .await;
         let result = cache.get(key.clone()).await.unwrap();
         assert_eq!(result.0.values.as_ref(), &values);
@@ -681,7 +661,7 @@ mod tests {
             let exec = Duration::from_millis(500);
             tokio::time::sleep(exec).await;
             cache
-                .insert(key.clone(), values.clone(), metadata.clone(), exec, None)
+                .insert(key.clone(), values.clone(), metadata.clone(), exec)
                 .await;
             let result = cache.get(key.clone()).await.unwrap();
             assert_eq!(result.0.values.as_ref(), &values);
@@ -736,7 +716,6 @@ mod tests {
                 values_0.clone(),
                 metadata.clone(),
                 ZERO_DURATION,
-                None,
             )
             .await;
         mark_fresh_insert_intent(&cache_1, &key).await;
@@ -746,7 +725,6 @@ mod tests {
                 values_1.clone(),
                 metadata.clone(),
                 ZERO_DURATION,
-                None,
             )
             .await;
 
@@ -785,9 +763,7 @@ mod tests {
         );
         for i in 0..COUNT {
             let v = vec!["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string()];
-            cache
-                .insert(i, v, QueryMetadata::Test, ZERO_DURATION, None)
-                .await;
+            cache.insert(i, v, QueryMetadata::Test, ZERO_DURATION).await;
         }
         cache.inner.run_pending_tasks().await;
 

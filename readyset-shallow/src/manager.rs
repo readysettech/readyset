@@ -269,7 +269,6 @@ where
             metadata: None,
             filled: false,
             requested: Instant::now(),
-            refresh: None,
         }
     }
 
@@ -369,7 +368,6 @@ where
     pub(crate) metadata: Option<QueryMetadata>,
     pub(crate) filled: bool,
     pub(crate) requested: Instant,
-    pub(crate) refresh: Option<RequestRefresh<K, V>>,
 }
 
 impl<K, V> Debug for CacheInsertGuard<K, V>
@@ -400,8 +398,11 @@ where
         self.metadata = Some(metadata);
     }
 
-    pub fn set_refresh(&mut self, req: RequestRefresh<K, V>) {
-        self.refresh = Some(req);
+    pub async fn schedule_refresh(&mut self, req: RequestRefresh<K, V>) {
+        let Some(key) = self.key.clone() else {
+            return;
+        };
+        self.cache.schedule_refresh(key, req).await;
     }
 
     pub fn is_scheduled(&self) -> bool {
@@ -418,39 +419,20 @@ where
         self.filled = true;
         async {
             if self.filled {
-                let (metadata, cache, key, results, execution, refresh) = self.take();
-                cache
-                    .insert(key, results, metadata, execution, refresh)
-                    .await;
+                let (metadata, cache, key, results, execution) = self.take();
+                cache.insert(key, results, metadata, execution).await;
             }
         }
     }
 
     #[allow(clippy::type_complexity)]
-    fn take(
-        &mut self,
-    ) -> (
-        QueryMetadata,
-        Arc<Cache<K, V>>,
-        K,
-        Vec<V>,
-        Duration,
-        Option<RequestRefresh<K, V>>,
-    ) {
+    fn take(&mut self) -> (QueryMetadata, Arc<Cache<K, V>>, K, Vec<V>, Duration) {
         let metadata = self.metadata.take().expect("no metadata for result set");
         let cache = Arc::clone(&self.cache);
         let key = self.key.take().unwrap();
         let results = self.results.take().unwrap();
         self.filled = false;
-        let refresh = self.refresh.take();
-        (
-            metadata,
-            cache,
-            key,
-            results,
-            self.requested.elapsed(),
-            refresh,
-        )
+        (metadata, cache, key, results, self.requested.elapsed())
     }
 }
 
@@ -461,11 +443,9 @@ where
 {
     fn drop(&mut self) {
         if self.filled {
-            let (metadata, cache, key, results, execution, refresh) = self.take();
+            let (metadata, cache, key, results, execution) = self.take();
             tokio::spawn(async move {
-                cache
-                    .insert(key, results, metadata, execution, refresh)
-                    .await;
+                cache.insert(key, results, metadata, execution).await;
             });
         }
     }
