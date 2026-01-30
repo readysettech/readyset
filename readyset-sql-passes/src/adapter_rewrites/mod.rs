@@ -492,6 +492,7 @@ impl ShallowQueryParameters {
             // Collect IN array values, sort for consistent cache keys, and wrap in Array
             let mut array_values: Vec<DfValue> = merged[start..end].to_vec();
             array_values.sort();
+            array_values.dedup();
             result.push(DfValue::from(array_values));
             src_idx = end;
         }

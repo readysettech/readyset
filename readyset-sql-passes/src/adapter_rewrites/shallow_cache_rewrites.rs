@@ -1125,6 +1125,30 @@ mod tests {
         }
 
         #[test]
+        fn in_clause_values_deduplicated() {
+            // IN (1, 2, 1) should produce same cache key as IN (1, 2)
+            let (keys1, _) =
+                shallow_process_postgres("SELECT * FROM foo WHERE x IN (1, 2, 1)", vec![]);
+            let (keys2, _) =
+                shallow_process_postgres("SELECT * FROM foo WHERE x IN (1, 2)", vec![]);
+            assert_eq!(keys1, keys2);
+        }
+
+        #[test]
+        fn in_clause_placeholders_deduplicated() {
+            // Runtime params with duplicates should dedup
+            let (keys1, _) = shallow_process_mysql(
+                "SELECT * FROM foo WHERE x IN (?, ?, ?)",
+                vec![DfValue::from(10), DfValue::from(20), DfValue::from(10)],
+            );
+            let (keys2, _) = shallow_process_mysql(
+                "SELECT * FROM foo WHERE x IN (?, ?)",
+                vec![DfValue::from(10), DfValue::from(20)],
+            );
+            assert_eq!(keys1, keys2);
+        }
+
+        #[test]
         fn in_clause_placeholders_sorted() {
             // Ensure (20, 10) produces the same cache key as (10, 20)
             let (keys1, _) = shallow_process_mysql(
