@@ -339,7 +339,7 @@ where
                 let now = current_timestamp_ms();
                 if e.accessed_ms.load(Ordering::Relaxed) > now - ttl_ms {
                     cache
-                        .schedule_refresh(key.clone(), Arc::clone(&callback), scheduler)
+                        .schedule_refresh(key.clone(), Arc::clone(&callback))
                         .await;
 
                     let guard = Self::make_guard(Arc::clone(&cache), key, Arc::clone(&callback));
@@ -460,12 +460,10 @@ where
         (start_scheduling, waiters)
     }
 
-    async fn schedule_refresh(
-        &self,
-        k: K,
-        refresh: RequestRefresh<K, V>,
-        scheduler: &Scheduler<K, V>,
-    ) {
+    async fn schedule_refresh(&self, k: K, refresh: RequestRefresh<K, V>) {
+        let Some(ref scheduler) = self.scheduler else {
+            return;
+        };
         let Some(ms) = self.refresh_ms else {
             return;
         };
@@ -490,11 +488,10 @@ where
         Self::notify_waiters(waiters).await;
 
         if let Some(refresh) = refresh
-            && let Some(ref sched) = self.scheduler
             && start_scheduling
         {
             // for scheduled refresh, schedule the first refresh on first insertion
-            self.schedule_refresh(k, refresh, sched).await;
+            self.schedule_refresh(k, refresh).await;
         }
     }
 
