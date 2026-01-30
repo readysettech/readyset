@@ -5444,6 +5444,7 @@ dependencies = [
  "proptest",
  "rand 0.9.2",
  "readyset-decimal",
+ "readyset-spatial",
  "serde",
  "serde_json",
  "tempfile",

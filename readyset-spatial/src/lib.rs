@@ -51,8 +51,8 @@
 //! - <https://github.com/postgis/postgis/blob/master/doc/bnf-wkb.txt> (for wkb)
 //! - <https://dev.mysql.com/doc/refman/8.4/en/gis-data-formats.html> (MySQL WKB format)
 
-mod point;
-mod polygon;
+pub mod point;
+pub mod polygon;
 
 use bitflags::bitflags;
 use point::Point;

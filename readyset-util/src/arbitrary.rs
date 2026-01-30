@@ -18,6 +18,9 @@ use prop::string::bytes_regex;
 use proptest::prelude::*;
 use proptest::sample::SizeRange;
 use readyset_decimal::Decimal;
+use readyset_spatial::point::{make_mysql_point_bytes, make_postgis_point_bytes};
+use readyset_spatial::polygon::make_postgis_polygon_bytes;
+use readyset_spatial::SRID_WGS84;
 use uuid::Uuid;
 
 const NANOS_IN_SEC: u32 = 1_000_000_000;
@@ -324,4 +327,90 @@ pub fn arbitrary_collatable_string() -> impl Strategy<Value = String> {
         )
         .into(),
     )
+}
+
+/// Strategy for generating geometry `point` values for mysql.
+pub fn arbitrary_mysql_point() -> impl Strategy<Value = Vec<u8>> {
+    // Generate random point with optional endianness
+    // Filter to finite f64 values only - NaN/Infinity are invalid
+    let finite_f64 = any::<f64>().prop_filter("finite", |x| x.is_finite());
+    (finite_f64.clone(), finite_f64, any::<bool>()).prop_map(move |(x, y, little_endian)| {
+        // MySQL always requires an SRID
+        make_mysql_point_bytes(x, y, SRID_WGS84, little_endian)
+    })
+}
+
+/// Strategy for generating geometry `point` values for postgresql.
+pub fn arbitrary_postgis_point() -> impl Strategy<Value = Vec<u8>> {
+    // Generate random point with optional SRID and endianness
+    // Filter to finite f64 values only - NaN/Infinity are invalid in PostGIS
+    let finite_f64 = any::<f64>().prop_filter("finite", |x| x.is_finite());
+    (finite_f64.clone(), finite_f64, any::<bool>(), any::<bool>()).prop_map(
+        move |(x, y, has_srid, little_endian)| {
+            let srid = if has_srid { Some(SRID_WGS84) } else { None };
+            make_postgis_point_bytes(x, y, srid, little_endian)
+        },
+    )
+}
+
+/// Strategy for generating geometry `polygon` values for postgresql.
+///
+/// Generates regular polygons (triangles, quadrilaterals, pentagons) with optional
+/// interior holes. Both outer and inner rings are geometrically valid.
+pub fn arbitrary_postgis_polygon() -> impl Strategy<Value = Vec<u8>> {
+    // Filter to finite f64 values only - NaN/Infinity are invalid in PostGIS
+    let finite_f64 = any::<f64>().prop_filter("finite", |x| x.is_finite());
+    (
+        finite_f64.clone(), // cx - center x
+        finite_f64,         // cy - center y
+        5.0f64..20.0f64,    // outer_radius
+        3usize..=5usize,    // num_sides (3=triangle, 4=quad, 5=pentagon)
+        any::<bool>(),      // has_hole
+        any::<bool>(),      // has_srid
+        any::<bool>(),      // little_endian
+    )
+        .prop_map(
+            |(cx, cy, radius, num_sides, has_hole, has_srid, little_endian)| {
+                // Generate outer ring as regular polygon (counter-clockwise)
+                let outer = make_regular_polygon_ring(cx, cy, radius, num_sides, false);
+
+                // Optionally add a hole (clockwise, smaller radius to ensure containment)
+                let holes = if has_hole {
+                    let hole = make_regular_polygon_ring(cx, cy, radius * 0.3, num_sides, true);
+                    Some(vec![hole])
+                } else {
+                    None
+                };
+
+                let srid = if has_srid { Some(SRID_WGS84) } else { None };
+                make_postgis_polygon_bytes(Some(&outer), holes.as_deref(), srid, little_endian)
+            },
+        )
+}
+
+/// Generate vertices for a regular polygon ring.
+///
+/// - `cx`, `cy`: center coordinates
+/// - `radius`: distance from center to vertices
+/// - `sides`: number of sides (3 = triangle, 4 = quadrilateral, etc.)
+/// - `clockwise`: vertex winding order (false = CCW for exterior, true = CW for holes)
+///
+/// Returns a closed ring (first point repeated at end).
+fn make_regular_polygon_ring(
+    cx: f64,
+    cy: f64,
+    radius: f64,
+    sides: usize,
+    clockwise: bool,
+) -> Vec<(f64, f64)> {
+    use std::f64::consts::PI;
+
+    let mut points = Vec::with_capacity(sides + 1);
+    let direction = if clockwise { -1.0 } else { 1.0 };
+    for i in 0..sides {
+        let angle = direction * 2.0 * PI * (i as f64) / (sides as f64);
+        points.push((cx + radius * angle.cos(), cy + radius * angle.sin()));
+    }
+    points.push(points[0]); // close the ring
+    points
 }

@@ -19,6 +19,7 @@ fail = { workspace = true }
 futures = { workspace = true }
 proptest = { workspace = true }
 readyset-decimal = { path = "../readyset-decimal" }
+readyset-spatial = { path = "../readyset-spatial" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
