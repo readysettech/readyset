@@ -63,7 +63,11 @@ fn is_unique_or_primary(
         keys.iter().any(|key| match key {
             // TODO(DAN): Support compound keys
             TableKey::PrimaryKey { columns, .. } | TableKey::UniqueKey { columns, .. } => {
-                columns.len() == 1 && columns.iter().any(|c| c.name == col.name)
+                columns.len() == 1
+                    && columns
+                        .iter()
+                        .filter_map(|c| c.as_column())
+                        .any(|c| c.name == col.name)
             }
             _ => false,
         })
@@ -158,7 +162,9 @@ impl OrderLimitRemoval for SqlQuery {
 #[cfg(test)]
 mod tests {
     use readyset_sql::Dialect;
-    use readyset_sql::ast::{ColumnSpecification, CreateTableBody, Relation, SqlType};
+    use readyset_sql::ast::{
+        ColumnSpecification, CreateTableBody, IndexKeyPart, Relation, SqlType,
+    };
     use readyset_sql_parsing::parse_query;
 
     use super::*;
@@ -211,7 +217,7 @@ mod tests {
                 index_name: None,
                 constraint_name: None,
                 constraint_timing: None,
-                columns: vec![col4.column],
+                columns: vec![IndexKeyPart::Column(col4.column)],
                 index_type: None,
                 nulls_distinct: None,
             },
@@ -219,7 +225,7 @@ mod tests {
                 index_name: None,
                 constraint_name: None,
                 constraint_timing: None,
-                columns: vec![col1.column],
+                columns: vec![IndexKeyPart::Column(col1.column)],
             },
         ]);
 
@@ -340,7 +346,10 @@ mod tests {
             constraint_name: None,
             constraint_timing: None,
             index_name: None,
-            columns: vec![col1.clone(), col2.clone()],
+            columns: vec![
+                IndexKeyPart::Column(col1.clone()),
+                IndexKeyPart::Column(col2.clone()),
+            ],
         }]);
         base_schema.get_mut(&Relation::from("t")).unwrap().keys = keys;
         let mut revised_query = input_query.clone();
@@ -353,7 +362,7 @@ mod tests {
             constraint_name: None,
             constraint_timing: None,
             index_name: None,
-            columns: vec![col1, col2],
+            columns: vec![IndexKeyPart::Column(col1), IndexKeyPart::Column(col2)],
             index_type: None,
             nulls_distinct: None,
         }]);

@@ -89,9 +89,10 @@ use readyset_sql::analysis::{contains_aggregate, ReferredColumns};
 use readyset_sql::ast::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CreateTableBody,
     CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
-    ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause,
-    LimitValue, Literal, NullOrder, OrderBy, OrderClause, OrderType, Relation, SelectStatement,
-    SqlIdentifier, SqlType, SqlTypeArbitraryOptions, TableExpr, TableExprInner, TableKey,
+    IndexKeyPart, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide,
+    LimitClause, LimitValue, Literal, NullOrder, OrderBy, OrderClause, OrderType, Relation,
+    SelectStatement, SqlIdentifier, SqlType, SqlTypeArbitraryOptions, TableExpr, TableExprInner,
+    TableKey,
 };
 use readyset_sql::{Dialect as ParseDialect, TryFromDialect as _, TryIntoDialect as _};
 use readyset_sql_passes::outermost_table_exprs;
@@ -234,10 +235,12 @@ pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecifica
                 .flatten()
                 .find_map(|k| match k {
                     // TODO(aspen): This doesn't support compound primary keys
-                    TableKey::PrimaryKey { columns, .. } => columns.first(),
+                    TableKey::PrimaryKey { columns, .. } => {
+                        columns.first().and_then(|c| c.as_column())
+                    }
                     _ => None,
                 })
-                .and_then(|col| body.fields.iter().find(|f| f.column == *col))
+                .and_then(|col| body.fields.iter().find(|f| &f.column == col))
         })
 }
 
@@ -325,18 +328,26 @@ impl From<CreateTableStatement> for TableSpec {
             .keys
             .into_iter()
             .flatten()
-            .flat_map(|k| match k {
-                    TableKey::PrimaryKey{columns: ks, .. }
-                    | TableKey::UniqueKey { columns: ks, .. }
-                      // HACK(aspen): To get foreign keys filled, we just mark them as unique, which
-                      // given that we (currently) generate the same number of rows for each table
-                      // means we're coincidentally guaranteed to get values matching the other side
-                      // of the fk. This isn't super robust (unsurprisingly) and should probably be
-                      // replaced with something smarter in the future.
-                    | TableKey::ForeignKey { columns: ks, .. } => ks,
+            .flat_map(|k| -> Vec<ColumnName> {
+                match k {
+                    TableKey::PrimaryKey { columns: ks, .. }
+                    | TableKey::UniqueKey { columns: ks, .. } => ks
+                        .iter()
+                        .filter_map(|c| c.as_column())
+                        .map(|c| ColumnName::from(c.name.clone()))
+                        .collect(),
+                    // HACK(aspen): To get foreign keys filled, we just mark them as unique, which
+                    // given that we (currently) generate the same number of rows for each table
+                    // means we're coincidentally guaranteed to get values matching the other side
+                    // of the fk. This isn't super robust (unsurprisingly) and should probably be
+                    // replaced with something smarter in the future.
+                    TableKey::ForeignKey { columns: ks, .. } => ks
+                        .iter()
+                        .map(|c| ColumnName::from(c.name.clone()))
+                        .collect(),
                     _ => vec![],
-                })
-            .map(|c| ColumnName::from(c.name))
+                }
+            })
             .chain(primary_key)
         {
             // Unwrap: Unique key columns come from the CreateTableStatement we just
@@ -393,7 +404,7 @@ impl From<TableSpec> for CreateTableStatement {
                         index_name: None,
                         constraint_name: None,
                         constraint_timing: None,
-                        columns: vec![cn.into()],
+                        columns: vec![IndexKeyPart::Column(cn.into())],
                     }]
                 }),
             }),

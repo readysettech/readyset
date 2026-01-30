@@ -66,7 +66,7 @@ impl<C: RewriteContext> From<C> for UniqueColumnsSchemaImpl {
                 unique_cols.extend(
                     keys.iter()
                         .filter(|key| key.is_primary_key())
-                        .flat_map(|key| key.get_columns().iter().cloned())
+                        .flat_map(|key| key.get_columns().into_iter().cloned())
                         .collect::<HashSet<_>>(),
                 );
             }

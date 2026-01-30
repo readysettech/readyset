@@ -1,4 +1,6 @@
-use readyset_sql::ast::{ColumnConstraint, ColumnSpecification, CreateTableStatement, TableKey};
+use readyset_sql::ast::{
+    ColumnConstraint, ColumnSpecification, CreateTableStatement, IndexKeyPart, TableKey,
+};
 
 pub trait KeyDefinitionCoalescing {
     fn coalesce_key_definitions(&mut self) -> &mut Self;
@@ -15,7 +17,7 @@ impl KeyDefinitionCoalescing for CreateTableStatement {
                 .collect();
             let mut pk = vec![];
             for cs in pkeys {
-                pk.push(cs.column.clone())
+                pk.push(IndexKeyPart::Column(cs.column.clone()))
             }
             if !pk.is_empty() {
                 if let Some(ks) = &mut body.keys {
@@ -45,7 +47,7 @@ impl KeyDefinitionCoalescing for CreateTableStatement {
 
 #[cfg(test)]
 mod tests {
-    use readyset_sql::ast::{Column, CreateTableBody, Relation, SqlType};
+    use readyset_sql::ast::{Column, CreateTableBody, IndexKeyPart, Relation, SqlType};
 
     use super::*;
 
@@ -93,7 +95,7 @@ mod tests {
                 index_name: None,
                 constraint_name: None,
                 constraint_timing: None,
-                columns: vec![Column::from("t.id")]
+                columns: vec![IndexKeyPart::Column(Column::from("t.id"))]
             }])
         );
     }

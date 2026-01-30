@@ -624,21 +624,56 @@ impl SqlToMirConverter {
         let (primary_key, unique_keys) = match keys {
             None => (None, vec![].into()),
             Some(keys) => {
-                let primary_key = keys.iter().find_map(|k| match k {
-                    TableKey::PrimaryKey { columns, .. } => {
-                        Some(columns.iter().map(Column::from).collect::<Box<[Column]>>())
-                    }
-                    _ => None,
-                });
+                // Process keys in a single pass, collecting usable PK and UKs.
+                // A key is usable only if ALL its columns are simple column references
+                // (no functional expressions). Mixed keys are skipped entirely.
+                let mut primary_key: Option<Box<[Column]>> = None;
+                let mut unique_keys_vec: Vec<Box<[Column]>> = Vec::new();
+                let mut has_pk = false;
+                let mut has_uk = false;
 
-                let unique_keys = keys.iter().filter_map(|k| match k {
-                    TableKey::UniqueKey { columns, .. } => {
-                        Some(columns.iter().map(Column::from).collect::<Box<[Column]>>())
+                for key in keys.iter() {
+                    match key {
+                        TableKey::PrimaryKey { columns, .. } => {
+                            has_pk = true;
+                            // Only use PK if it has NO functional expressions
+                            if primary_key.is_none() && !key.has_functional_expressions() {
+                                let cols: Box<[Column]> = columns
+                                    .iter()
+                                    .filter_map(|c| c.as_column())
+                                    .map(Column::from)
+                                    .collect();
+                                if !cols.is_empty() {
+                                    primary_key = Some(cols);
+                                }
+                            }
+                        }
+                        TableKey::UniqueKey { columns, .. } => {
+                            has_uk = true;
+                            // Only use UK if it has NO functional expressions
+                            if !key.has_functional_expressions() {
+                                let cols: Box<[Column]> = columns
+                                    .iter()
+                                    .filter_map(|c| c.as_column())
+                                    .map(Column::from)
+                                    .collect();
+                                if !cols.is_empty() {
+                                    unique_keys_vec.push(cols);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => None,
-                });
+                }
 
-                (primary_key, unique_keys.collect::<Box<[_]>>())
+                // Error if table HAS keys but NONE are usable
+                if (has_pk || has_uk) && primary_key.is_none() && unique_keys_vec.is_empty() {
+                    unsupported!(
+                        "Table has primary/unique keys but all contain functional index expressions"
+                    );
+                }
+
+                (primary_key, unique_keys_vec.into_boxed_slice())
             }
         };
 

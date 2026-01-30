@@ -56,14 +56,14 @@ pub fn index_col_name(
 // Helper for list of index columns
 pub fn index_col_list(
     dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<Column>> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<IndexKeyPart>> {
     move |i| {
         separated_list0(
             ws_sep_comma,
             map(
                 index_col_name(dialect),
                 // XXX(malte): ignores length and order
-                |e| e.0,
+                |e| IndexKeyPart::Column(e.0),
             ),
         )(i)
     }
@@ -1182,7 +1182,7 @@ mod tests {
                         constraint_name: None,
                         constraint_timing: None,
                         index_name: None,
-                        columns: vec![Column::from("id")]
+                        columns: vec![IndexKeyPart::Column(Column::from("id"))]
                     }]),
                 }),
                 like: None,
@@ -1213,7 +1213,7 @@ mod tests {
                         constraint_name: None,
                         constraint_timing: None,
                         index_name: Some("id_k".into()),
-                        columns: vec![Column::from("id")],
+                        columns: vec![IndexKeyPart::Column(Column::from("id"))],
                         index_type: None,
                         nulls_distinct: None,
                     },]),
@@ -1292,7 +1292,7 @@ mod tests {
                             constraint_name: None,
                             constraint_timing: None,
                             index_name: None,
-                            columns: vec!["id".into()],
+                            columns: vec![IndexKeyPart::Column("id".into())],
                         },
                         TableKey::ForeignKey {
                             constraint_name: Some("users_group".into()),
@@ -1513,7 +1513,7 @@ mod tests {
                         constraint_name: None,
                         constraint_timing: None,
                         index_name: Some("id_k".into()),
-                        columns: vec![Column::from("id")],
+                        columns: vec![IndexKeyPart::Column(Column::from("id"))],
                         index_type: Some(IndexType::Hash),
                         nulls_distinct: None,
                     }]),
@@ -1537,7 +1537,7 @@ mod tests {
             res.body.unwrap().keys,
             Some(vec![TableKey::Key {
                 index_name: Some("age_key".into()),
-                columns: vec!["age".into()],
+                columns: vec![IndexKeyPart::Column("age".into())],
                 index_type: Some(IndexType::BTree),
             }])
         );
@@ -2008,34 +2008,37 @@ mod tests {
                         keys: Some(vec![
                             TableKey::FulltextKey {
                                 index_name: Some("index_comments_on_comment".into()),
-                                columns: vec![Column::from("comment")]
+                                columns: vec![IndexKeyPart::Column(Column::from("comment"))]
                             },
                             TableKey::Key {
                                 index_name: Some("confidence_idx".into()),
-                                columns: vec![Column::from("confidence")],
+                                columns: vec![IndexKeyPart::Column(Column::from("confidence"))],
                                 index_type: None
                             },
                             TableKey::UniqueKey {
                                 constraint_name: None,
                                 constraint_timing: None,
                                 index_name: Some("short_id".into()),
-                                columns: vec![Column::from("short_id")],
+                                columns: vec![IndexKeyPart::Column(Column::from("short_id"))],
                                 index_type: None,
                                 nulls_distinct: None,
                             },
                             TableKey::Key {
                                 index_name: Some("story_id_short_id".into()),
-                                columns: vec![Column::from("story_id"), Column::from("short_id")],
+                                columns: vec![
+                                    IndexKeyPart::Column(Column::from("story_id")),
+                                    IndexKeyPart::Column(Column::from("short_id"))
+                                ],
                                 index_type: None
                             },
                             TableKey::Key {
                                 index_name: Some("thread_id".into()),
-                                columns: vec![Column::from("thread_id")],
+                                columns: vec![IndexKeyPart::Column(Column::from("thread_id"))],
                                 index_type: None,
                             },
                             TableKey::Key {
                                 index_name: Some("index_comments_on_user_id".into()),
-                                columns: vec![Column::from("user_id")],
+                                columns: vec![IndexKeyPart::Column(Column::from("user_id"))],
                                 index_type: None
                             },
                         ]),
@@ -2525,34 +2528,37 @@ mod tests {
                         keys: Some(vec![
                             TableKey::FulltextKey {
                                 index_name: Some("index_comments_on_comment".into()),
-                                columns: vec![Column::from("comment")]
+                                columns: vec![IndexKeyPart::Column(Column::from("comment"))]
                             },
                             TableKey::Key {
                                 index_name: Some("confidence_idx".into()),
-                                columns: vec![Column::from("confidence")],
+                                columns: vec![IndexKeyPart::Column(Column::from("confidence"))],
                                 index_type: None
                             },
                             TableKey::UniqueKey {
                                 constraint_name: None,
                                 constraint_timing: None,
                                 index_name: None,
-                                columns: vec![Column::from("short_id")],
+                                columns: vec![IndexKeyPart::Column(Column::from("short_id"))],
                                 index_type: None,
                                 nulls_distinct: None,
                             },
                             TableKey::Key {
                                 index_name: Some("story_id_short_id".into()),
-                                columns: vec![Column::from("story_id"), Column::from("short_id")],
+                                columns: vec![
+                                    IndexKeyPart::Column(Column::from("story_id")),
+                                    IndexKeyPart::Column(Column::from("short_id"))
+                                ],
                                 index_type: None
                             },
                             TableKey::Key {
                                 index_name: Some("thread_id".into()),
-                                columns: vec![Column::from("thread_id")],
+                                columns: vec![IndexKeyPart::Column(Column::from("thread_id"))],
                                 index_type: None
                             },
                             TableKey::Key {
                                 index_name: Some("index_comments_on_user_id".into()),
-                                columns: vec![Column::from("user_id")],
+                                columns: vec![IndexKeyPart::Column(Column::from("user_id"))],
                                 index_type: None
                             },
                         ]),
@@ -2767,24 +2773,24 @@ mod tests {
                             constraint_name: None,
                             constraint_timing: None,
                             index_name: None,
-                            columns: vec!["id".into()]
+                            columns: vec![IndexKeyPart::Column("id".into())]
                         },
                         TableKey::UniqueKey {
                             constraint_name: None,
                             constraint_timing: None,
                             index_name: Some("access_tokens_token_unique".into()),
-                            columns: vec!["token".into()],
+                            columns: vec![IndexKeyPart::Column("token".into())],
                             index_type: None,
                             nulls_distinct: None,
                         },
                         TableKey::Key {
                             index_name: Some("access_tokens_user_id_foreign".into()),
-                            columns: vec!["user_id".into()],
+                            columns: vec![IndexKeyPart::Column("user_id".into())],
                             index_type: None,
                         },
                         TableKey::Key {
                             index_name: Some("access_tokens_type_index".into()),
-                            columns: vec!["type".into()],
+                            columns: vec![IndexKeyPart::Column("type".into())],
                             index_type: None,
                         },
                         TableKey::ForeignKey {
@@ -3030,7 +3036,7 @@ PRIMARY KEY (`id`));";
                         constraint_name: None,
                         constraint_timing: None,
                         index_name: None,
-                        columns: vec!["id".into()]
+                        columns: vec![IndexKeyPart::Column("id".into())]
                     }]),
                 }),
                 like: None,

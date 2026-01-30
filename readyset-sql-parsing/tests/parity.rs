@@ -6,9 +6,9 @@
 use readyset_sql::{
     Dialect, DialectDisplay,
     ast::{
-        AlterTableDefinition, AlterTableStatement, Expr, FieldDefinitionExpr, Literal,
-        MySQLColumnPosition, PostgresParameterScope, SelectStatement, SetPostgresParameter,
-        SetStatement, SetVariables, SqlIdentifier, SqlQuery, VariableScope,
+        AlterTableDefinition, AlterTableStatement, Expr, FieldDefinitionExpr, IndexKeyPart,
+        Literal, MySQLColumnPosition, PostgresParameterScope, SelectStatement,
+        SetPostgresParameter, SetStatement, SetVariables, SqlIdentifier, SqlQuery, VariableScope,
     },
 };
 use readyset_sql_parsing::{ParsingPreset, parse_query_with_config};
@@ -161,29 +161,69 @@ fn mysql_cast_with_array_roundtrip() {
 }
 
 /// MySQL CREATE TABLE with functional index using CAST...ARRAY should parse the CAST...ARRAY
-/// syntax successfully. The functional index itself is rejected for a different reason
-/// (non-column expressions in index columns aren't supported), but critically the CAST...ARRAY
-/// syntax is plumbed through and not rejected at AST conversion time.
+/// syntax successfully. The functional index expression is preserved in the AST as an
+/// `IndexKeyPart::Expr` variant.
 #[test]
 fn mysql_create_table_with_cast_array_functional_index() {
+    // Functional index columns (like CAST...ARRAY) should be preserved as IndexKeyPart::Expr
     let sql = "CREATE TABLE t (j JSON, INDEX idx1 ((CAST(j->'$.id' AS UNSIGNED ARRAY))))";
     let result = parse_query_with_config(ParsingPreset::OnlySqlparser, Dialect::MySQL, sql);
+    let query = result.expect("Functional index should parse successfully");
 
-    // The parse will fail due to functional indices not being supported, but the error
-    // should be about "non-column expression", NOT about "CAST with ARRAY syntax".
-    // This proves the CAST...ARRAY was plumbed through the AST successfully.
-    let err = result.expect_err("Functional indices are not supported in CREATE TABLE");
-    let err_str = err.to_string();
-    assert!(
-        err_str.contains("non-column expression"),
-        "Error should be about non-column expression, not CAST ARRAY: {}",
-        err_str
-    );
-    assert!(
-        !err_str.contains("CAST with ARRAY syntax"),
-        "Error should NOT be about CAST ARRAY syntax (it should parse through): {}",
-        err_str
-    );
+    // Verify the functional index is preserved
+    match query {
+        SqlQuery::CreateTable(stmt) => {
+            let body = stmt.body.expect("Should have parsed body");
+            let keys = body.keys.expect("Should have keys with functional index");
+            assert_eq!(keys.len(), 1, "Should have one key");
+            let key_parts = keys[0].get_key_parts().expect("Should have key parts");
+            assert_eq!(key_parts.len(), 1, "Should have one key part");
+            assert!(
+                matches!(key_parts[0], IndexKeyPart::Expr(_)),
+                "Key part should be an expression: {:?}",
+                key_parts[0]
+            );
+        }
+        _ => panic!("Expected CreateTable, got {:?}", query),
+    }
+}
+
+#[test]
+fn mysql_create_table_with_mixed_functional_index() {
+    // When an index has both regular and functional columns, both are preserved
+    let sql =
+        "CREATE TABLE t (id INT, j JSON, INDEX idx1 (id, (CAST(j->'$.id' AS UNSIGNED ARRAY))))";
+    let result = parse_query_with_config(ParsingPreset::OnlySqlparser, Dialect::MySQL, sql);
+    let query = result.expect("Mixed functional index should parse successfully");
+
+    match query {
+        SqlQuery::CreateTable(stmt) => {
+            let body = stmt.body.expect("Should have parsed body");
+            let keys = body.keys.expect("Should have keys");
+            assert_eq!(keys.len(), 1, "Should have one key");
+            let key_parts = keys[0].get_key_parts().expect("Should have key parts");
+            assert_eq!(key_parts.len(), 2, "Should have two key parts");
+            assert!(
+                matches!(&key_parts[0], IndexKeyPart::Column(c) if c.name.as_str() == "id"),
+                "First key part should be column 'id': {:?}",
+                key_parts[0]
+            );
+            assert!(
+                matches!(&key_parts[1], IndexKeyPart::Expr(_)),
+                "Second key part should be an expression: {:?}",
+                key_parts[1]
+            );
+            // get_columns() should return only simple columns for backward compatibility
+            let key_cols = keys[0].get_columns();
+            assert_eq!(
+                key_cols.len(),
+                1,
+                "get_columns() should return only simple columns"
+            );
+            assert_eq!(key_cols[0].name.as_str(), "id");
+        }
+        _ => panic!("Expected CreateTable, got {:?}", query),
+    }
 }
 
 #[test]
@@ -789,14 +829,31 @@ fn key_part_prefix() {
 
 #[test]
 fn key_part_expression() {
-    check_parse_fails!(
+    // Functional index expressions should be preserved as IndexKeyPart::Expr variants
+    match parse_query_with_config(
+        ParsingPreset::OnlySqlparser,
         Dialect::MySQL,
         r#"CREATE TABLE blobs (
             jsonblob JSON,
             INDEX index_blobs_on_id ((CAST(jsonblob->>'$.id' AS UNSIGNED)))
         );"#,
-        "non-column expression"
-    );
+    )
+    .expect("Functional index should parse successfully")
+    {
+        SqlQuery::CreateTable(stmt) => {
+            let body = stmt.body.expect("Should have parsed body");
+            let keys = body.keys.expect("Should have keys with functional index");
+            assert_eq!(keys.len(), 1, "Should have one key");
+            let key_parts = keys[0].get_key_parts().expect("Should have key parts");
+            assert_eq!(key_parts.len(), 1, "Should have one key part");
+            assert!(
+                matches!(key_parts[0], IndexKeyPart::Expr(_)),
+                "Key part should be a functional expression: {:?}",
+                key_parts[0]
+            );
+        }
+        stmt => panic!("expected CreateTableStatement, got {stmt:?}"),
+    }
     // We should throw away the unsupported part and succeed overall
     match check_parse_mysql!(
         r#"ALTER TABLE blobs ADD INDEX index_blobs_on_id ((CAST(jsonblob->>"$.id" AS UNSIGNED)));"#

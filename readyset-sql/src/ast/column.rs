@@ -104,6 +104,8 @@ impl TryFromDialect<sqlparser::ast::IndexColumn> for Column {
     /// - `table.column` => `table.column`
     /// - `column(10)` => `column`
     /// - `(expr)` => unsupported
+    ///
+    /// This is used for ForeignKey columns which don't support functional expressions.
     fn try_from_dialect(
         value: sqlparser::ast::IndexColumn,
         dialect: Dialect,
@@ -144,6 +146,87 @@ impl TryFromDialect<sqlparser::ast::IndexColumn> for Column {
                 }
             }
             _ => unsupported!("non-column expression used as index column: {expr}"),
+        }
+    }
+}
+
+impl TryFromDialect<sqlparser::ast::IndexColumn> for IndexKeyPart {
+    /// Convert an index column to either a simple column reference or a functional expression.
+    ///
+    /// - `column` => `IndexKeyPart::Column(column)`
+    /// - `table.column` => `IndexKeyPart::Column(table.column)`
+    /// - `column(10)` => `IndexKeyPart::Column(column)` (prefix syntax)
+    /// - `(CAST(col AS UNSIGNED ARRAY))` => `IndexKeyPart::Expr(...)`
+    fn try_from_dialect(
+        value: sqlparser::ast::IndexColumn,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        let sqlparser::ast::IndexColumn {
+            column: sqlparser::ast::OrderByExpr { expr, .. },
+            ..
+        } = value;
+        match expr {
+            // Simple column reference
+            sqlparser::ast::Expr::Identifier(ident) => {
+                Ok(IndexKeyPart::Column(ident.into_dialect(dialect)))
+            }
+            // Qualified column reference (table.column)
+            sqlparser::ast::Expr::CompoundIdentifier(idents) => {
+                Ok(IndexKeyPart::Column(idents.into_dialect(dialect)))
+            }
+            // Function call - might be column prefix or functional expression
+            sqlparser::ast::Expr::Function(sqlparser::ast::Function {
+                name,
+                args:
+                    sqlparser::ast::FunctionArguments::List(sqlparser::ast::FunctionArgumentList {
+                        ref args,
+                        ..
+                    }),
+                ..
+            }) => {
+                // Check if this is a column prefix like `column(10)`
+                if args.len() == 1
+                    && matches!(
+                        args[0],
+                        sqlparser::ast::FunctionArg::Unnamed(
+                            sqlparser::ast::FunctionArgExpr::Expr(sqlparser::ast::Expr::Value(
+                                sqlparser::ast::ValueWithSpan {
+                                    value: sqlparser::ast::Value::Number(..),
+                                    ..
+                                }
+                            ))
+                        )
+                    )
+                {
+                    // Column prefix - extract as Column
+                    Ok(IndexKeyPart::Column(name.try_into_dialect(dialect)?))
+                } else {
+                    // Functional expression - store as Expr
+                    Ok(IndexKeyPart::Expr(Box::new(
+                        sqlparser::ast::Expr::Function(sqlparser::ast::Function {
+                            name,
+                            args: sqlparser::ast::FunctionArguments::List(
+                                sqlparser::ast::FunctionArgumentList {
+                                    args: args.clone(),
+                                    duplicate_treatment: None,
+                                    clauses: vec![],
+                                },
+                            ),
+                            filter: None,
+                            null_treatment: None,
+                            over: None,
+                            within_group: vec![],
+                            parameters: sqlparser::ast::FunctionArguments::None,
+                            uses_odbc_syntax: false,
+                        })
+                        .try_into_dialect(dialect)?,
+                    )))
+                }
+            }
+            // Any other expression (CAST, nested parentheses, etc.) - store as Expr
+            other => Ok(IndexKeyPart::Expr(Box::new(
+                other.try_into_dialect(dialect)?,
+            ))),
         }
     }
 }

@@ -863,7 +863,10 @@ mod tests {
                         constraint_name: None,
                         constraint_timing: None,
                         index_name: Some("posts_likes_post_id_user_id_primary".into()),
-                        columns: vec![Column::from("post_id"), Column::from("user_id"),],
+                        columns: vec![
+                            IndexKeyPart::Column(Column::from("post_id")),
+                            IndexKeyPart::Column(Column::from("user_id"))
+                        ],
                     })]),
                     only: false,
                 }
@@ -880,7 +883,7 @@ mod tests {
                     table: Relation::from("flags"),
                     definitions: Ok(vec![AlterTableDefinition::AddKey(TableKey::Key {
                         index_name: Some("flags_created_at_index".into()),
-                        columns: vec![Column::from("created_at")],
+                        columns: vec![IndexKeyPart::Column(Column::from("created_at"))],
                         index_type: None,
                     })]),
                     only: false,
@@ -1292,7 +1295,17 @@ mod tests {
             assert_eq!(res3.unwrap().1, expected);
         }
 
-        fn setup_alter_key() -> (Option<SqlIdentifier>, Vec<Column>) {
+        fn setup_alter_key() -> (Option<SqlIdentifier>, Vec<IndexKeyPart>) {
+            (
+                Some("key_name".into()),
+                vec![
+                    IndexKeyPart::Column("t1.c1".into()),
+                    IndexKeyPart::Column("t2.c2".into()),
+                ],
+            )
+        }
+
+        fn setup_alter_fk_columns() -> (Option<SqlIdentifier>, Vec<Column>) {
             (
                 Some("key_name".into()),
                 vec!["t1.c1".into(), "t2.c2".into()],
@@ -1438,7 +1451,7 @@ mod tests {
 
         #[test]
         fn parse_alter_add_constraint_foreign_key() {
-            let (index_name, columns) = setup_alter_key();
+            let (index_name, columns) = setup_alter_fk_columns();
             let target_table = Relation {
                 schema: None,
                 name: "t1".into(),

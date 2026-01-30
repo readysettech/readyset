@@ -159,7 +159,7 @@ pub(crate) fn get_primary_key(schema: &CreateTableBody) -> Vec<(usize, &Column)>
                     // Try finding PRIMARY KEY constraints in keys as well:
                     Some(ref keys) => keys.iter().any(|key| match *key {
                         TableKey::PrimaryKey { ref columns, .. } => {
-                            columns.iter().any(|c| c == &cs.column)
+                            columns.iter().any(|c| c.as_column() == Some(&cs.column))
                         }
                         _ => false,
                     }),

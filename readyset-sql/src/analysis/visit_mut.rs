@@ -94,6 +94,13 @@ pub trait VisitorMut<'ast>: Sized {
         walk_column(self, column)
     }
 
+    fn visit_index_key_part(
+        &mut self,
+        key_part: &'ast mut IndexKeyPart,
+    ) -> Result<(), Self::Error> {
+        walk_index_key_part(self, key_part)
+    }
+
     fn visit_variable(&mut self, variable: &'ast mut Variable) -> Result<(), Self::Error> {
         self.visit_sql_identifier(&mut variable.name)
     }
@@ -834,6 +841,16 @@ pub fn walk_column<'ast, V: VisitorMut<'ast>>(
     Ok(())
 }
 
+pub fn walk_index_key_part<'ast, V: VisitorMut<'ast>>(
+    visitor: &mut V,
+    key_part: &'ast mut IndexKeyPart,
+) -> Result<(), V::Error> {
+    match key_part {
+        IndexKeyPart::Column(column) => visitor.visit_column(column),
+        IndexKeyPart::Expr(expr) => visitor.visit_expr(expr),
+    }
+}
+
 pub fn walk_table_expr<'ast, V: VisitorMut<'ast>>(
     visitor: &mut V,
     table_expr: &'ast mut TableExpr,
@@ -985,8 +1002,8 @@ pub fn walk_table_key<'a, V: VisitorMut<'a>>(
                 visitor.visit_sql_identifier(index_name)?;
             }
 
-            for column in columns {
-                visitor.visit_column(column)?;
+            for key_part in columns {
+                visitor.visit_index_key_part(key_part)?;
             }
         }
         TableKey::UniqueKey {
@@ -1003,8 +1020,8 @@ pub fn walk_table_key<'a, V: VisitorMut<'a>>(
             if let Some(index_name) = index_name {
                 visitor.visit_sql_identifier(index_name)?;
             }
-            for column in columns {
-                visitor.visit_column(column)?;
+            for key_part in columns {
+                visitor.visit_index_key_part(key_part)?;
             }
         }
         TableKey::FulltextKey {
@@ -1014,8 +1031,8 @@ pub fn walk_table_key<'a, V: VisitorMut<'a>>(
             if let Some(index_name) = index_name {
                 visitor.visit_sql_identifier(index_name)?;
             }
-            for column in columns {
-                visitor.visit_column(column)?;
+            for key_part in columns {
+                visitor.visit_index_key_part(key_part)?;
             }
         }
         TableKey::Key {
@@ -1026,8 +1043,8 @@ pub fn walk_table_key<'a, V: VisitorMut<'a>>(
             if let Some(index_name) = index_name {
                 visitor.visit_sql_identifier(index_name)?;
             }
-            for column in columns {
-                visitor.visit_column(column)?;
+            for key_part in columns {
+                visitor.visit_index_key_part(key_part)?;
             }
         }
         TableKey::ForeignKey {

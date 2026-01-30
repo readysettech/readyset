@@ -162,6 +162,54 @@ impl fmt::Display for NullsDistinct {
     }
 }
 
+/// Represents a column or expression in an index key definition.
+///
+/// Simple columns are stored as [`IndexKeyPart::Column`], while functional index expressions
+/// (like `CAST(col AS UNSIGNED ARRAY)`) are stored as [`IndexKeyPart::Expr`].
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
+pub enum IndexKeyPart {
+    /// A simple column reference
+    Column(Column),
+    /// A functional index expression (e.g., `CAST(col AS UNSIGNED ARRAY)`)
+    #[weight(0)] // Prefer Column variant in proptest generation
+    Expr(Box<Expr>),
+}
+
+impl IndexKeyPart {
+    /// Returns the column if this is a simple column reference
+    #[must_use]
+    pub fn as_column(&self) -> Option<&Column> {
+        match self {
+            IndexKeyPart::Column(c) => Some(c),
+            IndexKeyPart::Expr(_) => None,
+        }
+    }
+
+    /// Returns a mutable reference to the column if this is a simple column reference
+    #[must_use]
+    pub fn as_column_mut(&mut self) -> Option<&mut Column> {
+        match self {
+            IndexKeyPart::Column(c) => Some(c),
+            IndexKeyPart::Expr(_) => None,
+        }
+    }
+}
+
+impl From<Column> for IndexKeyPart {
+    fn from(col: Column) -> Self {
+        IndexKeyPart::Column(col)
+    }
+}
+
+impl DialectDisplay for IndexKeyPart {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            IndexKeyPart::Column(col) => write!(f, "{}", col.display(dialect)),
+            IndexKeyPart::Expr(expr) => write!(f, "({})", expr.display(dialect)),
+        })
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 #[arbitrary(args = Option<Dialect>)]
 pub enum TableKey {
@@ -171,7 +219,7 @@ pub enum TableKey {
         constraint_timing: Option<ConstraintTiming>,
         index_name: Option<SqlIdentifier>,
         #[any(size_range(1..10).lift())]
-        columns: Vec<Column>,
+        columns: Vec<IndexKeyPart>,
     },
     UniqueKey {
         constraint_name: Option<SqlIdentifier>,
@@ -179,7 +227,7 @@ pub enum TableKey {
         constraint_timing: Option<ConstraintTiming>,
         index_name: Option<SqlIdentifier>,
         #[any(size_range(1..10).lift())]
-        columns: Vec<Column>,
+        columns: Vec<IndexKeyPart>,
         index_type: Option<IndexType>,
         #[strategy(if *args_shared == Some(Dialect::PostgreSQL) { any::<Option<NullsDistinct>>().boxed() } else { Just(None).boxed() })]
         nulls_distinct: Option<NullsDistinct>,
@@ -187,12 +235,12 @@ pub enum TableKey {
     FulltextKey {
         index_name: Option<SqlIdentifier>,
         #[any(size_range(1..10).lift())]
-        columns: Vec<Column>,
+        columns: Vec<IndexKeyPart>,
     },
     Key {
         index_name: Option<SqlIdentifier>,
         #[any(size_range(1..10).lift())]
-        columns: Vec<Column>,
+        columns: Vec<IndexKeyPart>,
         index_type: Option<IndexType>,
     },
     ForeignKey {
@@ -444,27 +492,94 @@ impl TableKey {
         matches!(self, TableKey::Key { .. })
     }
 
-    /// Get the columns that the key is defined on
-    pub fn get_columns(&self) -> &[Column] {
+    /// Get the key parts (columns and expressions) that the key is defined on.
+    ///
+    /// Returns `None` for ForeignKey (which uses plain columns) and CheckConstraint.
+    /// Use [`get_fk_columns`] for ForeignKey columns.
+    #[must_use]
+    pub fn get_key_parts(&self) -> Option<&[IndexKeyPart]> {
         match self {
             TableKey::PrimaryKey { columns, .. }
             | TableKey::UniqueKey { columns, .. }
             | TableKey::FulltextKey { columns, .. }
-            | TableKey::Key { columns, .. }
-            | TableKey::ForeignKey { columns, .. } => columns,
-            TableKey::CheckConstraint { .. } => &[],
+            | TableKey::Key { columns, .. } => Some(columns),
+            TableKey::ForeignKey { .. } | TableKey::CheckConstraint { .. } => None,
         }
     }
 
-    /// Get mutable reference to the columns that the key is defined on
-    pub fn get_columns_mut(&mut self) -> &mut [Column] {
+    /// Get mutable reference to the key parts that the key is defined on.
+    ///
+    /// Returns `None` for ForeignKey (which uses plain columns) and CheckConstraint.
+    #[must_use]
+    pub fn get_key_parts_mut(&mut self) -> Option<&mut [IndexKeyPart]> {
         match self {
             TableKey::PrimaryKey { columns, .. }
             | TableKey::UniqueKey { columns, .. }
             | TableKey::FulltextKey { columns, .. }
-            | TableKey::Key { columns, .. }
-            | TableKey::ForeignKey { columns, .. } => columns,
-            TableKey::CheckConstraint { .. } => &mut [],
+            | TableKey::Key { columns, .. } => Some(columns),
+            TableKey::ForeignKey { .. } | TableKey::CheckConstraint { .. } => None,
+        }
+    }
+
+    /// Get simple column references from the key, filtering out functional expressions.
+    ///
+    /// For backward compatibility with code that expects `&[Column]`.
+    /// For ForeignKey, returns all columns directly.
+    /// For other key types, returns only the simple column references.
+    #[must_use]
+    pub fn get_columns(&self) -> Vec<&Column> {
+        match self {
+            TableKey::PrimaryKey { columns, .. }
+            | TableKey::UniqueKey { columns, .. }
+            | TableKey::FulltextKey { columns, .. }
+            | TableKey::Key { columns, .. } => {
+                columns.iter().filter_map(IndexKeyPart::as_column).collect()
+            }
+            TableKey::ForeignKey { columns, .. } => columns.iter().collect(),
+            TableKey::CheckConstraint { .. } => vec![],
+        }
+    }
+
+    /// Get mutable references to simple column references from the key.
+    ///
+    /// For ForeignKey, returns all columns directly.
+    /// For other key types, returns only the simple column references.
+    #[must_use]
+    pub fn get_columns_mut(&mut self) -> Vec<&mut Column> {
+        match self {
+            TableKey::PrimaryKey { columns, .. }
+            | TableKey::UniqueKey { columns, .. }
+            | TableKey::FulltextKey { columns, .. }
+            | TableKey::Key { columns, .. } => columns
+                .iter_mut()
+                .filter_map(IndexKeyPart::as_column_mut)
+                .collect(),
+            TableKey::ForeignKey { columns, .. } => columns.iter_mut().collect(),
+            TableKey::CheckConstraint { .. } => vec![],
+        }
+    }
+
+    /// Returns true if this key contains any functional index expressions.
+    ///
+    /// Functional expressions are expressions like `CAST(col AS UNSIGNED ARRAY)` rather than
+    /// simple column references. Returns false for ForeignKey and CheckConstraint which don't
+    /// support functional expressions.
+    #[must_use]
+    pub fn has_functional_expressions(&self) -> bool {
+        match self.get_key_parts() {
+            Some(parts) => parts.iter().any(|p| matches!(p, IndexKeyPart::Expr(_))),
+            None => false,
+        }
+    }
+
+    /// Get the columns for a ForeignKey constraint.
+    ///
+    /// Returns `None` for non-ForeignKey constraints.
+    #[must_use]
+    pub fn get_fk_columns(&self) -> Option<&[Column]> {
+        match self {
+            TableKey::ForeignKey { columns, .. } => Some(columns),
+            _ => None,
         }
     }
 
@@ -897,5 +1012,78 @@ impl fmt::Display for TimestampField {
             Self::Week => write!(f, "WEEK"),
             Self::Year => write!(f, "YEAR"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_has_functional_expressions_primary_key_no_exprs() {
+        let pk = TableKey::PrimaryKey {
+            constraint_name: None,
+            constraint_timing: None,
+            index_name: None,
+            columns: vec![IndexKeyPart::Column(Column {
+                name: "id".into(),
+                table: None,
+            })],
+        };
+        assert!(!pk.has_functional_expressions());
+    }
+
+    #[test]
+    fn test_has_functional_expressions_primary_key_with_expr() {
+        let pk = TableKey::PrimaryKey {
+            constraint_name: None,
+            constraint_timing: None,
+            index_name: None,
+            columns: vec![IndexKeyPart::Expr(Box::new(Expr::Literal(
+                Literal::Integer(1),
+            )))],
+        };
+        assert!(pk.has_functional_expressions());
+    }
+
+    #[test]
+    fn test_has_functional_expressions_mixed_columns_and_exprs() {
+        let pk = TableKey::PrimaryKey {
+            constraint_name: None,
+            constraint_timing: None,
+            index_name: None,
+            columns: vec![
+                IndexKeyPart::Column(Column {
+                    name: "id".into(),
+                    table: None,
+                }),
+                IndexKeyPart::Expr(Box::new(Expr::Literal(Literal::Integer(1)))),
+            ],
+        };
+        assert!(pk.has_functional_expressions());
+    }
+
+    #[test]
+    fn test_has_functional_expressions_foreign_key() {
+        let fk = TableKey::ForeignKey {
+            constraint_name: None,
+            columns: vec![Column {
+                name: "id".into(),
+                table: None,
+            }],
+            target_table: Relation {
+                schema: None,
+                name: "other".into(),
+            },
+            target_columns: vec![Column {
+                name: "id".into(),
+                table: None,
+            }],
+            index_name: None,
+            on_delete: None,
+            on_update: None,
+        };
+        // ForeignKey doesn't support functional expressions, should return false
+        assert!(!fk.has_functional_expressions());
     }
 }

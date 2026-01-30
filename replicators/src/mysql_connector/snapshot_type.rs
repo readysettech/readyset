@@ -1,9 +1,45 @@
 use mysql_async::{self as mysql};
 use readyset_errors::ReadySetResult;
-use readyset_sql::ast::{Column, Relation, SqlIdentifier};
+use readyset_sql::ast::{Column, CreateTableBody, Relation, SqlIdentifier, TableKey};
 use readyset_sql::DialectDisplay;
 
 use super::utils::MYSQL_BATCH_SIZE;
+
+/// Find the first unique key with usable columns (no functional expressions).
+/// A key is usable only if ALL its columns are simple column references.
+/// Returns an error if the table has keys but none are usable.
+/// Returns `(vec![], None)` if no keys exist at all (for FullTableScan fallback).
+fn find_usable_unique_key(
+    cts: &CreateTableBody,
+) -> ReadySetResult<(Vec<&Column>, Option<SqlIdentifier>)> {
+    let Some(keys) = &cts.keys else {
+        return Ok((vec![], None));
+    };
+
+    for key in keys.iter() {
+        if let TableKey::UniqueKey { .. } = key {
+            // Only use UK if it has NO functional expressions (all simple columns)
+            if !key.has_functional_expressions() {
+                let cols = key.get_columns();
+                if !cols.is_empty() {
+                    return Ok((cols, key.index_name().clone()));
+                }
+            }
+        }
+    }
+
+    // Check if ANY keys (PK or UK) exist but none are usable
+    let has_keys = keys
+        .iter()
+        .any(|k| matches!(k, TableKey::PrimaryKey { .. } | TableKey::UniqueKey { .. }));
+    if has_keys {
+        Err(readyset_errors::unsupported_err!(
+            "Table has primary/unique keys but all contain functional index expressions"
+        ))
+    } else {
+        Ok((vec![], None))
+    }
+}
 
 /// The type of snapshot to be taken
 /// KeyBased: Snapshot based on the primary key or unique key
@@ -26,33 +62,53 @@ impl SnapshotType {
             }
         };
 
+        // Try to find a usable key:
+        // 1. Try primary key first (if it has NO functional expressions)
+        // 2. Fall back to unique keys (skip any with functional expressions)
+        // 3. Error if keys exist but none are usable
+        // 4. Use FullTableScan if no keys at all
         let (keys, name) = if let Some(pk) = cts.get_primary_key() {
-            (pk.get_columns(), &Some(SqlIdentifier::from("PRIMARY")))
-        } else if let Some(uk) = cts.get_first_unique_key() {
-            (uk.get_columns(), uk.index_name())
+            // Only use PK if ALL columns are simple (no functional expressions)
+            if !pk.has_functional_expressions() {
+                let columns = pk.get_columns();
+                if !columns.is_empty() {
+                    (columns, Some(SqlIdentifier::from("PRIMARY")))
+                } else {
+                    find_usable_unique_key(cts)?
+                }
+            } else {
+                // Primary key has functional expressions, try unique keys
+                find_usable_unique_key(cts)?
+            }
         } else {
-            return Ok(SnapshotType::FullTableScan);
+            // No primary key, try unique keys
+            find_usable_unique_key(cts)?
         };
 
+        // If no usable key was found (empty keys), use FullTableScan
+        if keys.is_empty() {
+            return Ok(SnapshotType::FullTableScan);
+        }
+
         let mut column_indices = Vec::new();
-        for k in keys {
-            let name = k.name.to_lowercase();
+        for k in &keys {
+            let col_name = k.name.to_lowercase();
             let Some(col) = cts.fields.iter().enumerate().find_map(|(i, f)| {
-                if name == f.column.name.to_lowercase() {
+                if col_name == f.column.name.to_lowercase() {
                     Some(i)
                 } else {
                     None
                 }
             }) else {
-                return Err(readyset_errors::ReadySetError::NoSuchColumn(name));
+                return Err(readyset_errors::ReadySetError::NoSuchColumn(col_name));
             };
             column_indices.push(col);
         }
         assert_eq!(keys.len(), column_indices.len());
 
         Ok(SnapshotType::KeyBased {
-            name: name.clone(),
-            keys: keys.to_vec(),
+            name,
+            keys: keys.into_iter().cloned().collect(),
             column_indices,
         })
     }

@@ -206,16 +206,18 @@ impl CreateTableBody {
 
         // check index name for non-foreign keys
         if !new_key.is_foreign_key() && new_key.index_name().is_none() {
-            let first_column = new_key.get_columns().first().unwrap();
-            let base_index_name = first_column.name.as_str().to_string();
-            let mut index_name = base_index_name.clone();
-            // [make_unique_key_name](https://github.com/mysql/mysql-server/blob/mysql-8.0.42/sql/sql_table.cc#L10386)
-            let mut i = 2;
-            while self.is_index_name_in_use(&index_name) {
-                index_name = format!("{base_index_name}_{i}");
-                i += 1;
+            let columns = new_key.get_columns();
+            if let Some(first_column) = columns.first() {
+                let base_index_name = first_column.name.as_str().to_string();
+                let mut index_name = base_index_name.clone();
+                // [make_unique_key_name](https://github.com/mysql/mysql-server/blob/mysql-8.0.42/sql/sql_table.cc#L10386)
+                let mut i = 2;
+                while self.is_index_name_in_use(&index_name) {
+                    index_name = format!("{base_index_name}_{i}");
+                    i += 1;
+                }
+                new_key.set_index_name(index_name.into());
             }
-            new_key.set_index_name(index_name.into());
         }
 
         // special case for foreign keys
@@ -250,12 +252,18 @@ impl CreateTableBody {
                 column.table = Some(table.clone());
             }
         }
-        let columns = new_key.get_columns();
-        if !self.has_key_on_columns(columns) {
+        // For foreign keys, check if we need to add an implicit index
+        if let Some(fk_columns) = new_key.get_fk_columns()
+            && !self.has_key_on_columns(fk_columns)
+        {
             // add a new key of type Key on target columns
             let target_col_new_key = TableKey::Key {
                 index_name: new_key.constraint_name().clone(),
-                columns: columns.to_vec(),
+                columns: fk_columns
+                    .iter()
+                    .cloned()
+                    .map(IndexKeyPart::Column)
+                    .collect(),
                 index_type: None,
             };
             self.add_key(target_col_new_key);
@@ -278,11 +286,15 @@ impl CreateTableBody {
             .find(|key| matches!(key, TableKey::UniqueKey { .. }))
     }
 
-    /// Check if there is an index of type Key covering a list of columns
+    /// Check if there is an index of type Key covering a list of columns.
+    ///
+    /// Keys with functional expressions are excluded since they cannot serve as
+    /// a simple column-based index (e.g., for backing a foreign key constraint).
     pub fn has_key_on_columns(&self, columns: &[Column]) -> bool {
         self.keys.as_ref().unwrap_or(&Vec::new()).iter().any(|key| {
             key.is_key()
-                && key.get_columns().iter().all(|column| {
+                && !key.has_functional_expressions()
+                && key.get_columns().into_iter().all(|column| {
                     columns
                         .iter()
                         .any(|c| c.name.as_str() == column.name.as_str())

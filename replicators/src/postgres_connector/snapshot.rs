@@ -1188,7 +1188,7 @@ impl<'a> PostgresReplicator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use readyset_sql::ast::{Column, SqlQuery, TableKey};
+    use readyset_sql::ast::{Column, IndexKeyPart, SqlQuery, TableKey};
     use readyset_sql::Dialect;
     use readyset_sql_parsing::parse_query;
 
@@ -1238,10 +1238,10 @@ mod tests {
                     constraint_name: None,
                     constraint_timing: None,
                     index_name: None,
-                    columns: vec![Column {
+                    columns: vec![IndexKeyPart::Column(Column {
                         name: "key".into(),
                         table: None,
-                    }],
+                    })],
                 },
                 kind: Some(ConstraintKind::PrimaryKey),
             }],
@@ -1287,7 +1287,7 @@ mod tests {
                 assert!(constraint_timing.is_none());
                 assert!(index_name.is_none());
                 assert_eq!(columns.len(), 1);
-                assert_eq!(columns.first().unwrap().name, "key");
+                assert_eq!(columns.first().unwrap().as_column().unwrap().name, "key");
             }
             _ => panic!(),
         }
