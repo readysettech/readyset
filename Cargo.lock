@@ -1108,6 +1108,7 @@ dependencies = [
  "readyset-data",
  "readyset-decimal",
  "readyset-errors",
+ "readyset-spatial",
  "readyset-sql",
  "readyset-sql-parsing",
  "readyset-util",
@@ -5281,6 +5282,18 @@ dependencies = [
  "seize",
  "tokio",
  "tokio-postgres",
+ "tracing",
+]
+
+[[package]]
+name = "readyset-spatial"
+version = "0.0.1"
+dependencies = [
+ "bitflags 2.10.0",
+ "pretty_assertions",
+ "serde",
+ "test-utils",
+ "thiserror 2.0.17",
  "tracing",
 ]
 

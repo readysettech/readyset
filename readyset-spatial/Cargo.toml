@@ -1,0 +1,20 @@
+[package]
+name = "readyset-spatial"
+version = "0.0.1"
+publish = false
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
+edition = "2024"
+description = "Spatial data type support for Readyset (PostGIS, MySQL geometry)"
+
+[dependencies]
+bitflags = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+test-utils = { path = "../test-utils" }
+
+[lints]
+workspace = true

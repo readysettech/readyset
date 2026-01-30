@@ -22,8 +22,8 @@ use serde_json::Value as JsonValue;
 use test_strategy::Arbitrary;
 use vec1::Vec1;
 
-use crate::eval::spatial::try_get_spatial_text;
 use crate::{BuiltinFunction, Dialect, Expr};
+use readyset_spatial::{try_get_mysql_spatial_text, try_get_postgis_spatial_text};
 
 const MICROS_IN_SECOND: u32 = 1_000_000;
 const MILLIS_IN_SECOND: u32 = 1_000;
@@ -1454,8 +1454,11 @@ impl BuiltinFunction {
                 let df_val = non_null!(expr.eval(record)?);
                 match df_val {
                     DfValue::ByteArray(bytes) => {
-                        // TODO: Support other geometry types
-                        let text = try_get_spatial_text(&bytes, dialect.engine(), false)?;
+                        let text = match dialect.engine() {
+                            SqlEngine::MySQL => try_get_mysql_spatial_text(&bytes),
+                            SqlEngine::PostgreSQL => try_get_postgis_spatial_text(&bytes, false),
+                        }
+                        .map_err(|e| invalid_query_err!("{}", e))?;
                         Ok(DfValue::Text(text.as_str().into()))
                     }
                     _ => Err(invalid_query_err!(
@@ -1467,7 +1470,8 @@ impl BuiltinFunction {
                 let df_val = non_null!(expr.eval(record)?);
                 match df_val {
                     DfValue::ByteArray(bytes) => {
-                        let text = try_get_spatial_text(&bytes, SqlEngine::PostgreSQL, true)?;
+                        let text = try_get_postgis_spatial_text(&bytes, true)
+                            .map_err(|e| invalid_query_err!("{}", e))?;
                         Ok(DfValue::Text(text.as_str().into()))
                     }
                     _ => Err(invalid_query_err!(

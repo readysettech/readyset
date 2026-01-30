@@ -1,7 +1,4 @@
-use super::spatial::extract_srid;
-use super::spatial::Pair;
-use readyset_data::dialect::SqlEngine;
-use readyset_errors::{invalid_query_err, ReadySetError, ReadySetResult};
+use super::{Pair, ReadysetSpatialError, extract_srid};
 
 #[derive(Debug, Clone)]
 /// Polygon structure is composed of one external ring and zero-or-more holes within the external initial ring
@@ -47,14 +44,14 @@ impl Polygon {
     /// Note: we are currently only support 2D Postgis polygons.
     ///
     /// [0]: https://postgis.net/docs/using_postgis_dbmanagement.html#EWKB_EWKT
-    pub(crate) fn try_from_postgis_bytes(bytes: &[u8]) -> ReadySetResult<Self> {
+    pub(crate) fn try_from_postgis_bytes(bytes: &[u8]) -> Result<Self, ReadysetSpatialError> {
         // Empty polygon have 9 Bytes long
         // 01 03 00 00 00 00 00 00 00
         if bytes.len() < 9 {
-            return Err(invalid_query_err!(
+            return Err(ReadysetSpatialError::InvalidInput(format!(
                 "Polygon argument must be at least 9 bytes long, was {:?}",
                 bytes.len()
-            ));
+            )));
         }
 
         // tells us the byte order of the pair fields (X, Y).
@@ -73,13 +70,20 @@ impl Polygon {
         bytes: &[u8],
         is_little_endian: bool,
         start: usize,
-    ) -> ReadySetResult<u32> {
+    ) -> Result<u32, ReadysetSpatialError> {
         let end = start + NUM_OF_BYTES_U32;
         let arr: [u8; 4] = bytes
             .get(start..end)
-            .ok_or_else(|| invalid_query_err!("Insufficient bytes for u32 at offset {}", start))?
+            .ok_or_else(|| {
+                ReadysetSpatialError::InvalidInput(format!(
+                    "Insufficient bytes for u32 at offset {}",
+                    start
+                ))
+            })?
             .try_into()
-            .map_err(|_| invalid_query_err!("Invalid byte slice length for u32"))?;
+            .map_err(|_| {
+                ReadysetSpatialError::InvalidInput("Invalid byte slice length for u32".into())
+            })?;
 
         Ok(if is_little_endian {
             u32::from_le_bytes(arr)
@@ -92,13 +96,20 @@ impl Polygon {
         bytes: &[u8],
         is_little_endian: bool,
         start: usize,
-    ) -> ReadySetResult<f64> {
+    ) -> Result<f64, ReadysetSpatialError> {
         let end = start + NUM_OF_BYTES_F64;
         let arr: [u8; 8] = bytes
             .get(start..end)
-            .ok_or_else(|| invalid_query_err!("Insufficient bytes for f64 at offset {}", start))?
+            .ok_or_else(|| {
+                ReadysetSpatialError::InvalidInput(format!(
+                    "Insufficient bytes for f64 at offset {}",
+                    start
+                ))
+            })?
             .try_into()
-            .map_err(|_| invalid_query_err!("Invalid byte slice length for f64"))?;
+            .map_err(|_| {
+                ReadysetSpatialError::InvalidInput("Invalid byte slice length for f64".into())
+            })?;
 
         Ok(if is_little_endian {
             f64::from_le_bytes(arr)
@@ -111,9 +122,11 @@ impl Polygon {
         bytes: &[u8],
         is_little_endian: bool,
         start_byte: usize,
-    ) -> ReadySetResult<Pair> {
+    ) -> Result<Pair, ReadysetSpatialError> {
         if bytes.len() < start_byte + NUM_OF_BYTES_PAIR {
-            return Err(invalid_query_err!("Invalid polygon byte array size"));
+            return Err(ReadysetSpatialError::InvalidInput(
+                "Invalid polygon byte array size".into(),
+            ));
         }
         let x = Self::extract_bytes_f64(bytes, is_little_endian, start_byte)?;
         let y = Self::extract_bytes_f64(bytes, is_little_endian, start_byte + NUM_OF_BYTES_F64)?;
@@ -124,7 +137,7 @@ impl Polygon {
         bytes: &[u8],
         is_little_endian: bool,
         start_byte: usize,
-    ) -> ReadySetResult<Vec<Pair>> {
+    ) -> Result<Vec<Pair>, ReadysetSpatialError> {
         let num_pairs = Self::extract_bytes_u32(bytes, is_little_endian, start_byte)?; // First 4 bytes
         let mut pairs: Vec<Pair> = Vec::new();
         let mut offset = start_byte + NUM_OF_BYTES_U32;
@@ -140,7 +153,7 @@ impl Polygon {
         bytes: &[u8],
         is_little_endian: bool,
         srid: Option<u32>,
-    ) -> ReadySetResult<(Vec<Pair>, Vec<Vec<Pair>>)> {
+    ) -> Result<(Vec<Pair>, Vec<Vec<Pair>>), ReadysetSpatialError> {
         let mut start_byte: usize = 9;
         if srid.is_none() {
             start_byte = 5;
@@ -178,34 +191,30 @@ impl Polygon {
         }
         ring_str
     }
-    /// Format the polygon as a string. The format is engine-specific.
-    pub fn format(&self, engine: SqlEngine, print_srid: bool) -> Result<String, ReadySetError> {
-        match engine {
-            SqlEngine::PostgreSQL => {
-                let mut polygon_string = String::new();
-                if print_srid {
-                    if let Some(srid) = self.srid {
-                        polygon_string.push_str(&format!("SRID={};", srid));
-                    }
-                }
-                polygon_string.push_str("POLYGON");
 
-                // handle empty polygon
-                if self.exterior_ring.is_empty() {
-                    polygon_string.push_str(" EMPTY");
-                    return Ok(polygon_string);
-                }
-
-                polygon_string.push_str(&format!("(({})", Self::format_ring(&self.exterior_ring)));
-
-                for ring in &self.holes {
-                    polygon_string.push_str(&format!(",({})", Self::format_ring(ring)));
-                }
-                polygon_string.push(')');
-                Ok(polygon_string)
-            }
-            SqlEngine::MySQL => Err(invalid_query_err!("Unsupported")),
+    /// Format the polygon as a PostGIS WKT or EWKT string.
+    ///
+    /// If `print_srid` is true and an SRID is present, returns EWKT format with SRID prefix.
+    pub fn format_postgis(&self, print_srid: bool) -> String {
+        let mut polygon_string = String::new();
+        if let Some(srid) = self.srid.filter(|_| print_srid) {
+            polygon_string.push_str(&format!("SRID={};", srid));
         }
+        polygon_string.push_str("POLYGON");
+
+        // handle empty polygon
+        if self.exterior_ring.is_empty() {
+            polygon_string.push_str(" EMPTY");
+            return polygon_string;
+        }
+
+        polygon_string.push_str(&format!("(({})", Self::format_ring(&self.exterior_ring)));
+
+        for ring in &self.holes {
+            polygon_string.push_str(&format!(",({})", Self::format_ring(ring)));
+        }
+        polygon_string.push(')');
+        polygon_string
     }
 }
 
@@ -297,7 +306,7 @@ mod test {
         fn test_valid_empty_polygon() {
             let bytes = make_polygon_bytes(None, None, None, true);
             let polygon = Polygon::try_from_postgis_bytes(&bytes).unwrap();
-            let format = polygon.format(SqlEngine::PostgreSQL, false).unwrap();
+            let format = polygon.format_postgis(false);
             assert_eq!(format, "POLYGON EMPTY");
         }
 
@@ -305,7 +314,7 @@ mod test {
         fn test_valid_empty_polygon_with_srid() {
             let bytes = make_polygon_bytes(Some(4326), None, None, true);
             let polygon = Polygon::try_from_postgis_bytes(&bytes).unwrap();
-            let format = polygon.format(SqlEngine::PostgreSQL, true).unwrap();
+            let format = polygon.format_postgis(true);
             assert_eq!(format, "SRID=4326;POLYGON EMPTY");
         }
 
@@ -345,8 +354,14 @@ mod test {
             let bytes_be =
                 make_polygon_bytes(None, Some(&external_skelton), Some(&internal_holes), false);
             let polygon_be = Polygon::try_from_postgis_bytes(&bytes_be).unwrap();
-            assert_eq!(polygon_le.format(SqlEngine::PostgreSQL, false).unwrap(), "POLYGON((0 0,0 1000,1000 1000,1000 0,0 0),(200 200,200 800,800 800,800 200,200 200))");
-            assert_eq!(polygon_be.format(SqlEngine::PostgreSQL, false).unwrap(), "POLYGON((0 0,0 1000,1000 1000,1000 0,0 0),(200 200,200 800,800 800,800 200,200 200))");
+            assert_eq!(
+                polygon_le.format_postgis(false),
+                "POLYGON((0 0,0 1000,1000 1000,1000 0,0 0),(200 200,200 800,800 800,800 200,200 200))"
+            );
+            assert_eq!(
+                polygon_be.format_postgis(false),
+                "POLYGON((0 0,0 1000,1000 1000,1000 0,0 0),(200 200,200 800,800 800,800 200,200 200))"
+            );
         }
 
         #[test]
@@ -387,8 +402,14 @@ mod test {
                 false,
             );
             let polygon_be = Polygon::try_from_postgis_bytes(&bytes_be).unwrap();
-            assert_eq!(polygon_le.format(SqlEngine::PostgreSQL, true).unwrap(), "SRID=3857;POLYGON((0 0,0 1000,1000 1000,1000 0,0 0),(200 200,200 800,800 800,800 200,200 200))");
-            assert_eq!(polygon_be.format(SqlEngine::PostgreSQL, true).unwrap(), "SRID=3857;POLYGON((0 0,0 1000,1000 1000,1000 0,0 0),(200 200,200 800,800 800,800 200,200 200))");
+            assert_eq!(
+                polygon_le.format_postgis(true),
+                "SRID=3857;POLYGON((0 0,0 1000,1000 1000,1000 0,0 0),(200 200,200 800,800 800,800 200,200 200))"
+            );
+            assert_eq!(
+                polygon_be.format_postgis(true),
+                "SRID=3857;POLYGON((0 0,0 1000,1000 1000,1000 0,0 0),(200 200,200 800,800 800,800 200,200 200))"
+            );
         }
 
         #[test]

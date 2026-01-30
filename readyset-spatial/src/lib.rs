@@ -1,4 +1,3 @@
-use bitflags::bitflags;
 /// Welcome to spatial data type support in Readyset.
 ///
 /// As of this initial writing (May 2025), the goal with supporting
@@ -29,12 +28,28 @@ use bitflags::bitflags;
 ///
 /// https://github.com/postgis/postgis/blob/master/doc/ZMSgeoms.txt (for ewkb).
 /// https://github.com/postgis/postgis/blob/master/doc/bnf-wkb.txt (for wkb).
-use readyset_data::dialect::SqlEngine;
-use readyset_errors::{invalid_query_err, ReadySetResult};
+use bitflags::bitflags;
+use thiserror::Error;
 
-use super::point::Point;
-use super::polygon::Polygon;
+/// Error type for spatial operations in the readyset-spatial crate.
+#[derive(Debug, Error)]
+pub enum ReadysetSpatialError {
+    /// Invalid input data (malformed bytes, wrong length, etc.)
+    #[error("{0}")]
+    InvalidInput(String),
+    /// Unsupported spatial operation or type
+    #[error("{0}")]
+    Unsupported(String),
+}
 
+mod point;
+mod polygon;
+
+use point::Point;
+use polygon::Polygon;
+
+/// Enumeration of supported spatial types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpatialType {
     PostgisPoint,
     PostgisPolygon,
@@ -73,18 +88,21 @@ bitflags! {
 /// - Has bounding box
 /// - Has Z dimension
 /// - Has M dimension
-pub(crate) fn extract_srid(bytes: &[u8], is_little_endian: bool) -> ReadySetResult<Option<u32>> {
+pub(crate) fn extract_srid(
+    bytes: &[u8],
+    is_little_endian: bool,
+) -> Result<Option<u32>, ReadysetSpatialError> {
     let type_code = if is_little_endian {
         u32::from_le_bytes(
             bytes[1..5]
                 .try_into()
-                .map_err(|_| invalid_query_err!("Invalid spatial type"))?,
+                .map_err(|_| ReadysetSpatialError::InvalidInput("Invalid spatial type".into()))?,
         )
     } else {
         u32::from_be_bytes(
             bytes[1..5]
                 .try_into()
-                .map_err(|_| invalid_query_err!("Invalid spatial type"))?,
+                .map_err(|_| ReadysetSpatialError::InvalidInput("Invalid spatial type".into()))?,
         )
     };
 
@@ -93,17 +111,13 @@ pub(crate) fn extract_srid(bytes: &[u8], is_little_endian: bool) -> ReadySetResu
     // Extract SRID if present - it obeys the byte order of the rest of the data block.
     let srid = if flags.contains(PostgisTypeFlags::HAS_SRID) {
         if is_little_endian {
-            Some(u32::from_le_bytes(
-                bytes[5..9]
-                    .try_into()
-                    .map_err(|_| invalid_query_err!("Invalid SRID"))?,
-            ))
+            Some(u32::from_le_bytes(bytes[5..9].try_into().map_err(
+                |_| ReadysetSpatialError::InvalidInput("Invalid SRID".into()),
+            )?))
         } else {
-            Some(u32::from_be_bytes(
-                bytes[5..9]
-                    .try_into()
-                    .map_err(|_| invalid_query_err!("Invalid SRID"))?,
-            ))
+            Some(u32::from_be_bytes(bytes[5..9].try_into().map_err(
+                |_| ReadysetSpatialError::InvalidInput("Invalid SRID".into()),
+            )?))
         }
     } else {
         None
@@ -111,84 +125,103 @@ pub(crate) fn extract_srid(bytes: &[u8], is_little_endian: bool) -> ReadySetResu
 
     // Validate dimension flags
     if flags.contains(PostgisTypeFlags::HAS_BBOX) {
-        return Err(invalid_query_err!("Not supporting postgis bounding boxes"));
+        return Err(ReadysetSpatialError::InvalidInput(
+            "Not supporting postgis bounding boxes".into(),
+        ));
     }
     if flags.contains(PostgisTypeFlags::HAS_Z) {
-        return Err(invalid_query_err!(
-            "Not supporting postgis geometrical shapes with Z dimensions"
+        return Err(ReadysetSpatialError::InvalidInput(
+            "Not supporting postgis geometrical shapes with Z dimensions".into(),
         ));
     }
     if flags.contains(PostgisTypeFlags::HAS_M) {
-        return Err(invalid_query_err!(
-            "Not supporting postgis geometrical shapes with M dimensions"
+        return Err(ReadysetSpatialError::InvalidInput(
+            "Not supporting postgis geometrical shapes with M dimensions".into(),
         ));
     }
 
     Ok(srid)
 }
 
-fn try_get_spatial_type_from_mysql(bytes: &[u8]) -> ReadySetResult<SpatialType> {
+fn try_get_spatial_type_from_mysql(bytes: &[u8]) -> Result<SpatialType, ReadysetSpatialError> {
     if bytes.len() < 9 {
-        return Err(invalid_query_err!("Input too short for spatial type"));
+        return Err(ReadysetSpatialError::InvalidInput(
+            "Input too short for spatial type".into(),
+        ));
     }
 
-    let wkb_type = u32::from_le_bytes(
-        bytes[5..9]
-            .try_into()
-            .map_err(|_| invalid_query_err!("Invalid spatial type bytes"))?,
-    );
+    let wkb_type =
+        u32::from_le_bytes(bytes[5..9].try_into().map_err(|_| {
+            ReadysetSpatialError::InvalidInput("Invalid spatial type bytes".into())
+        })?);
 
     match wkb_type {
         1 => Ok(SpatialType::MysqlPoint),
-        _ => Err(invalid_query_err!(
+        _ => Err(ReadysetSpatialError::Unsupported(format!(
             "Unsupported spatial type: {:?}",
             wkb_type
-        )),
+        ))),
     }
 }
 
-fn try_get_spatial_type_from_postgres(bytes: &[u8]) -> ReadySetResult<SpatialType> {
+fn try_get_spatial_type_from_postgres(bytes: &[u8]) -> Result<SpatialType, ReadysetSpatialError> {
     if bytes.len() < 5 {
-        return Err(invalid_query_err!("Input too short for spatial type"));
+        return Err(ReadysetSpatialError::InvalidInput(
+            "Input too short for spatial type".into(),
+        ));
     }
     let wkb_type = u32::from_le_bytes(
         bytes[1..5]
             .try_into()
-            .map_err(|_| invalid_query_err!("Invalid spatial type"))?,
+            .map_err(|_| ReadysetSpatialError::InvalidInput("Invalid spatial type".into()))?,
     );
 
     let geometry_type = wkb_type & 0xFF;
     match geometry_type {
         1 => Ok(SpatialType::PostgisPoint),
         3 => Ok(SpatialType::PostgisPolygon),
-        _ => Err(invalid_query_err!(
+        _ => Err(ReadysetSpatialError::Unsupported(format!(
             "Unsupported spatial type: {:?}",
             wkb_type
-        )),
+        ))),
     }
 }
 
-fn try_get_spatial_type(bytes: &[u8], engine: SqlEngine) -> ReadySetResult<SpatialType> {
-    match engine {
-        SqlEngine::MySQL => try_get_spatial_type_from_mysql(bytes),
-        SqlEngine::PostgreSQL => try_get_spatial_type_from_postgres(bytes),
-    }
-}
-
-pub(crate) fn try_get_spatial_text(
-    bytes: &[u8],
-    engine: SqlEngine,
-    flags: bool,
-) -> ReadySetResult<String> {
-    let spatial_type = try_get_spatial_type(bytes, engine)?;
+/// Convert MySQL spatial bytes to text representation (WKT format).
+pub fn try_get_mysql_spatial_text(bytes: &[u8]) -> Result<String, ReadysetSpatialError> {
+    let spatial_type = try_get_spatial_type_from_mysql(bytes)?;
     match spatial_type {
-        SpatialType::MysqlPoint | SpatialType::PostgisPoint => {
-            let point = Point::try_from_bytes(bytes, engine)?;
-            Ok(point.format(engine, flags)?)
+        SpatialType::MysqlPoint => {
+            let point = Point::try_from_mysql_bytes(bytes)?;
+            Ok(point.format_mysql())
+        }
+        _ => Err(ReadysetSpatialError::Unsupported(format!(
+            "Unsupported MySQL spatial type: {:?}",
+            spatial_type
+        ))),
+    }
+}
+
+/// Convert PostGIS spatial bytes to text representation (WKT or EWKT format).
+///
+/// If `print_srid` is true, the output will be in EWKT format with the SRID prefix.
+pub fn try_get_postgis_spatial_text(
+    bytes: &[u8],
+    print_srid: bool,
+) -> Result<String, ReadysetSpatialError> {
+    let spatial_type = try_get_spatial_type_from_postgres(bytes)?;
+    match spatial_type {
+        SpatialType::PostgisPoint => {
+            let point = Point::try_from_postgis_bytes(bytes)?;
+            Ok(point.format_postgis(print_srid))
         }
         SpatialType::PostgisPolygon => {
             let polygon = Polygon::try_from_postgis_bytes(bytes)?;
-            Ok(polygon.format(engine, flags)?)
+            Ok(polygon.format_postgis(print_srid))
         }
+        _ => Err(ReadysetSpatialError::Unsupported(format!(
+            "Unsupported PostGIS spatial type: {:?}",
+            spatial_type
+        ))),
     }
 }
