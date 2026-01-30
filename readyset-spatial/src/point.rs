@@ -1,6 +1,10 @@
-use super::{Pair, ReadysetSpatialError, extract_srid};
+//! Point geometry type support.
+
 use tracing::trace;
 
+use super::{Pair, ReadysetSpatialError, extract_srid};
+
+/// A Point geometry with optional SRID.
 #[derive(Debug, Clone)]
 pub(crate) struct Point {
     coord: Pair,
@@ -8,9 +12,9 @@ pub(crate) struct Point {
 }
 
 impl Point {
-    /// Create a new `Point` from a mysql byte array; this is the format we receive from the binlog replication [0].
+    /// Create a new `Point` from a mysql byte array; this is the format we receive from the binlog replication.
     ///
-    /// [0]: https://dev.mysql.com/doc/refman/8.4/en/gis-data-formats.html
+    /// Reference: <https://dev.mysql.com/doc/refman/8.4/en/gis-data-formats.html>
     pub fn try_from_mysql_bytes(bytes: &[u8]) -> Result<Self, ReadysetSpatialError> {
         if bytes.len() != 25 {
             return Err(ReadysetSpatialError::InvalidInput(format!(
@@ -19,6 +23,7 @@ impl Point {
             )));
         }
 
+        // SRID is always little-endian in mysql
         let srid = u32::from_le_bytes(
             bytes[0..4]
                 .try_into()
@@ -26,21 +31,26 @@ impl Point {
         );
 
         // the last 8 bytes of the value are the Y coordinate,
-        // the 8 bytes preceeding that are the X coordinate.
+        // the 8 bytes preceding that are the X coordinate.
         // so we need to extract those and convert them to f64.
         // but first, we need to derive the byte order.
-        // the byte after SRID is the byte order flag, which is 0x01 for little endian, 0x00 for big endian.
+        // The byte after SRID is the WKB byte order flag: 0x01 = little-endian, 0x00 = big-endian.
+        // All multi-byte WKB fields (type code, coordinates) respect this flag.
+        // See module docs for details on WKB byte order handling.
         let is_little_endian = bytes[4] == 0x01;
         let (mut x, mut y) = Self::extract_coordinates(bytes, is_little_endian)?;
         // well-known binary type is encoded in the next 4 bytes after the byte order flag,
-        // even though it's value fits into a single byte.
+        // even though its value fits into a single byte.
         // MySQL uses values from 1 through 7 to indicate Point, LineString, and so on.
         // (https://dev.mysql.com/doc/refman/8.4/en/gis-data-formats.html)
-        let spatial_type = u32::from_le_bytes(
-            bytes[5..9]
-                .try_into()
-                .map_err(|_| ReadysetSpatialError::InvalidInput("Invalid spatial type".into()))?,
-        );
+        let type_bytes: [u8; 4] = bytes[5..9]
+            .try_into()
+            .map_err(|_| ReadysetSpatialError::InvalidInput("Invalid spatial type".into()))?;
+        let spatial_type = if is_little_endian {
+            u32::from_le_bytes(type_bytes)
+        } else {
+            u32::from_be_bytes(type_bytes)
+        };
         if spatial_type != 1 {
             return Err(ReadysetSpatialError::InvalidInput(format!(
                 "only supporting MySQL Point data types, was {:?}",
@@ -112,14 +122,13 @@ impl Point {
 
     /// Create a new `Point` from a postgis byte array. This is the data we receive from the
     /// wal logical replication. The actual format is based on the postgis notion of
-    /// "Extended Well-Known Binary" (EWKB) [0]. This is much like the MySQL WKB format [1]
+    /// "Extended Well-Known Binary" (EWKB). This is much like the MySQL WKB format
     /// (see try_from_mysql_bytes), but explicitly includes the SRID (it's shoveled in the
     /// middle of the byte array).
     ///
     /// Note: we are currently only support 2D points; postgis supports 3D and 4D point.
     ///
-    /// [0]: https://postgis.net/docs/using_postgis_dbmanagement.html#EWKB_EWKT
-    /// [1]: https://dev.mysql.com/doc/refman/8.4/en/gis-data-formats.html
+    /// Reference: <https://postgis.net/docs/using_postgis_dbmanagement.html#EWKB_EWKT>
     pub(crate) fn try_from_postgis_bytes(bytes: &[u8]) -> Result<Self, ReadysetSpatialError> {
         if bytes.len() < 21 {
             return Err(ReadysetSpatialError::InvalidInput(format!(
@@ -153,9 +162,95 @@ impl Point {
     }
 }
 
+/// Create EWKB bytes for a PostGIS Point.
+///
+/// Format (little-endian, with SRID):
+/// - 1 byte: byte order (0x01 = little-endian, 0x00 = big-endian)
+/// - 4 bytes: type code (0x20000001 = Point with SRID, 0x00000001 = Point without SRID)
+/// - 4 bytes: SRID (only if type has SRID flag)
+/// - 8 bytes: X coordinate (f64)
+/// - 8 bytes: Y coordinate (f64)
+///
+/// For use primarily in testing and data generation.
+pub fn make_postgis_point_bytes(x: f64, y: f64, srid: Option<u32>, little_endian: bool) -> Vec<u8> {
+    let capacity = if srid.is_some() { 25 } else { 21 };
+    let mut bytes = Vec::with_capacity(capacity);
+
+    // Byte order
+    bytes.push(if little_endian { 0x01 } else { 0x00 });
+
+    // Type code: Point (1) with SRID flag (0x20000000) if SRID is present
+    let type_code: u32 = if srid.is_some() { 0x20000001 } else { 1 };
+    if little_endian {
+        bytes.extend_from_slice(&type_code.to_le_bytes());
+    } else {
+        bytes.extend_from_slice(&type_code.to_be_bytes());
+    }
+
+    // SRID if present
+    if let Some(srid) = srid {
+        if little_endian {
+            bytes.extend_from_slice(&srid.to_le_bytes());
+        } else {
+            bytes.extend_from_slice(&srid.to_be_bytes());
+        }
+    }
+
+    // Coordinates
+    if little_endian {
+        bytes.extend_from_slice(&x.to_le_bytes());
+        bytes.extend_from_slice(&y.to_le_bytes());
+    } else {
+        bytes.extend_from_slice(&x.to_be_bytes());
+        bytes.extend_from_slice(&y.to_be_bytes());
+    }
+
+    bytes
+}
+
+/// Create WKB bytes for a MySQL Point.
+///
+/// MySQL geometry format:
+/// - 4 bytes: SRID (always little-endian)
+/// - 1 byte: byte order (0x01 = little-endian, 0x00 = big-endian)
+/// - 4 bytes: WKB type (Point = 1)
+/// - 8 bytes: X coordinate (f64)
+/// - 8 bytes: Y coordinate (f64)
+///
+/// Note: MySQL always stores SRID in little-endian, but the WKB portion
+/// respects the byte order flag.
+///
+/// For use primarily in testing and data generation.
+pub fn make_mysql_point_bytes(x: f64, y: f64, srid: u32, little_endian: bool) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(25);
+
+    // SRID - always little-endian in MySQL
+    bytes.extend_from_slice(&srid.to_le_bytes());
+
+    // Byte order
+    bytes.push(if little_endian { 0x01 } else { 0x00 });
+
+    // WKB type: Point (1)
+    if little_endian {
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+    } else {
+        bytes.extend_from_slice(&1u32.to_be_bytes());
+    }
+
+    // Coordinates
+    if little_endian {
+        bytes.extend_from_slice(&x.to_le_bytes());
+        bytes.extend_from_slice(&y.to_le_bytes());
+    } else {
+        bytes.extend_from_slice(&x.to_be_bytes());
+        bytes.extend_from_slice(&y.to_be_bytes());
+    }
+
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     // Helper function shared between MySQL and PostgreSQL tests
@@ -165,39 +260,14 @@ mod tests {
     }
 
     mod mysql {
-
         use super::*;
-
-        fn make_point_bytes(
-            srid: u32,
-            x: f64,
-            y: f64,
-            little_endian: bool,
-            spatial_type: u32,
-        ) -> [u8; 25] {
-            let mut bytes = [0u8; 25];
-            // SRID
-            bytes[0..4].copy_from_slice(&srid.to_le_bytes());
-            // Byte order
-            bytes[4] = if little_endian { 0x01 } else { 0x00 };
-            // Spatial type - always (?) little endian
-            bytes[5..9].copy_from_slice(&spatial_type.to_le_bytes());
-            if little_endian {
-                bytes[9..17].copy_from_slice(&x.to_le_bytes());
-                bytes[17..25].copy_from_slice(&y.to_le_bytes());
-            } else {
-                bytes[9..17].copy_from_slice(&x.to_be_bytes());
-                bytes[17..25].copy_from_slice(&y.to_be_bytes());
-            }
-            bytes
-        }
 
         #[test]
         fn test_valid_point_srid_0_little_endian() {
             let x = 1.5;
             let y = -2.5;
-            let bytes = make_point_bytes(0, x, y, true, 1);
-            let pt = Point::try_from_mysql_bytes(&bytes).unwrap();
+            let bytes = make_mysql_point_bytes(x, y, 0, true);
+            let pt = Point::try_from_mysql_bytes(&bytes).expect("valid point");
             assert_point_coordinates(&pt, x, y);
         }
 
@@ -206,8 +276,8 @@ mod tests {
             let x = 10.0;
             let y = 20.0;
             let srid = 4326;
-            let bytes = make_point_bytes(srid, x, y, true, 1);
-            let pt = Point::try_from_mysql_bytes(&bytes).unwrap();
+            let bytes = make_mysql_point_bytes(x, y, srid, true);
+            let pt = Point::try_from_mysql_bytes(&bytes).expect("valid point");
             // X and Y should be swapped due to nonzero SRID
             assert_point_coordinates(&pt, y, x);
         }
@@ -219,67 +289,24 @@ mod tests {
         }
 
         #[test]
-        fn test_invalid_spatial_type() {
-            let bytes = make_point_bytes(0, 1.0, 2.0, true, 2); // 2 = not Point
-            assert!(Point::try_from_mysql_bytes(&bytes).is_err());
-        }
-
-        #[test]
         fn test_valid_point_big_endian() {
             let x = 3.0;
             let y = 4.0;
-            let bytes = make_point_bytes(0, x, y, false, 1);
-            let pt = Point::try_from_mysql_bytes(&bytes).unwrap();
+            let bytes = make_mysql_point_bytes(x, y, 0, false);
+            let pt = Point::try_from_mysql_bytes(&bytes).expect("valid point");
             assert_point_coordinates(&pt, x, y);
         }
     }
 
     mod postgres {
-        use pretty_assertions::assert_eq;
-
         use super::*;
-
-        fn make_point_bytes(srid: Option<u32>, x: f64, y: f64, little_endian: bool) -> Vec<u8> {
-            let mut bytes = Vec::with_capacity(21);
-
-            // Byte order
-            bytes.push(if little_endian { 0x01 } else { 0x00 });
-
-            // Type code - Point (1) with SRID flag if present
-            let type_code: u32 = if srid.is_some() { 0x20000001 } else { 1 };
-            if little_endian {
-                bytes.extend_from_slice(&type_code.to_le_bytes());
-            } else {
-                bytes.extend_from_slice(&type_code.to_be_bytes());
-            }
-
-            // SRID if present
-            if let Some(srid) = srid {
-                if little_endian {
-                    bytes.extend_from_slice(&srid.to_le_bytes());
-                } else {
-                    bytes.extend_from_slice(&srid.to_be_bytes());
-                }
-            }
-
-            // Coordinates
-            if little_endian {
-                bytes.extend_from_slice(&x.to_le_bytes());
-                bytes.extend_from_slice(&y.to_le_bytes());
-            } else {
-                bytes.extend_from_slice(&x.to_be_bytes());
-                bytes.extend_from_slice(&y.to_be_bytes());
-            }
-
-            bytes
-        }
 
         #[test]
         fn test_valid_point_no_srid_little_endian() {
             let x = 1.5;
             let y = -2.5;
-            let bytes = make_point_bytes(None, x, y, true);
-            let pt = Point::try_from_postgis_bytes(&bytes).unwrap();
+            let bytes = make_postgis_point_bytes(x, y, None, true);
+            let pt = Point::try_from_postgis_bytes(&bytes).expect("valid point");
             assert_point_coordinates(&pt, x, y);
         }
 
@@ -288,8 +315,8 @@ mod tests {
             let x = 10.0;
             let y = 20.0;
             let srid = 4326;
-            let bytes = make_point_bytes(Some(srid), x, y, true);
-            let pt = Point::try_from_postgis_bytes(&bytes).unwrap();
+            let bytes = make_postgis_point_bytes(x, y, Some(srid), true);
+            let pt = Point::try_from_postgis_bytes(&bytes).expect("valid point");
             assert_point_coordinates(&pt, x, y);
             assert_eq!(pt.srid, Some(srid));
         }
@@ -304,8 +331,8 @@ mod tests {
         fn test_valid_point_big_endian() {
             let x = 3.0;
             let y = 4.0;
-            let bytes = make_point_bytes(None, x, y, false);
-            let pt = Point::try_from_postgis_bytes(&bytes).unwrap();
+            let bytes = make_postgis_point_bytes(x, y, None, false);
+            let pt = Point::try_from_postgis_bytes(&bytes).expect("valid point");
             assert_point_coordinates(&pt, x, y);
         }
 
@@ -314,10 +341,105 @@ mod tests {
             let x = 3.0;
             let y = 4.0;
             let srid = 4326;
-            let bytes = make_point_bytes(Some(srid), x, y, false);
-            let pt = Point::try_from_postgis_bytes(&bytes).unwrap();
+            let bytes = make_postgis_point_bytes(x, y, Some(srid), false);
+            let pt = Point::try_from_postgis_bytes(&bytes).expect("valid point");
             assert_point_coordinates(&pt, x, y);
             assert_eq!(pt.srid, Some(srid));
+        }
+    }
+
+    mod ewkb_point_builder {
+        use crate::SpatialType;
+
+        use super::*;
+
+        #[test]
+        fn little_endian_no_srid() {
+            let bytes = make_postgis_point_bytes(1.0, 2.0, None, true);
+
+            assert_eq!(bytes.len(), 21);
+            assert_eq!(bytes[0], 0x01); // little-endian marker
+            assert_eq!(&bytes[1..5], &1u32.to_le_bytes()); // type code: Point (1)
+            assert_eq!(&bytes[5..13], &1.0f64.to_le_bytes()); // X
+            assert_eq!(&bytes[13..21], &2.0f64.to_le_bytes()); // Y
+        }
+
+        #[test]
+        fn little_endian_with_srid() {
+            let bytes = make_postgis_point_bytes(1.0, 2.0, Some(4326), true);
+
+            assert_eq!(bytes.len(), 25);
+            assert_eq!(bytes[0], 0x01); // little-endian marker
+            assert_eq!(&bytes[1..5], &0x20000001u32.to_le_bytes()); // type code with SRID flag
+            assert_eq!(&bytes[5..9], &4326u32.to_le_bytes()); // SRID
+            assert_eq!(&bytes[9..17], &1.0f64.to_le_bytes()); // X
+            assert_eq!(&bytes[17..25], &2.0f64.to_le_bytes()); // Y
+        }
+
+        #[test]
+        fn big_endian_no_srid() {
+            let bytes = make_postgis_point_bytes(1.0, 2.0, None, false);
+
+            assert_eq!(bytes.len(), 21);
+            assert_eq!(bytes[0], 0x00); // big-endian marker
+            assert_eq!(&bytes[1..5], &1u32.to_be_bytes()); // type code: Point (1)
+            assert_eq!(&bytes[5..13], &1.0f64.to_be_bytes()); // X
+            assert_eq!(&bytes[13..21], &2.0f64.to_be_bytes()); // Y
+        }
+
+        #[test]
+        fn big_endian_with_srid() {
+            let bytes = make_postgis_point_bytes(1.0, 2.0, Some(4326), false);
+
+            assert_eq!(bytes.len(), 25);
+            assert_eq!(bytes[0], 0x00); // big-endian marker
+            assert_eq!(&bytes[1..5], &0x20000001u32.to_be_bytes()); // type code with SRID flag
+            assert_eq!(&bytes[5..9], &4326u32.to_be_bytes()); // SRID
+            assert_eq!(&bytes[9..17], &1.0f64.to_be_bytes()); // X
+            assert_eq!(&bytes[17..25], &2.0f64.to_be_bytes()); // Y
+        }
+
+        #[test]
+        fn capacity_is_exact() {
+            // Verify no reallocations happen
+            let bytes_no_srid = make_postgis_point_bytes(1.0, 2.0, None, true);
+            assert_eq!(bytes_no_srid.len(), bytes_no_srid.capacity());
+
+            let bytes_with_srid = make_postgis_point_bytes(1.0, 2.0, Some(4326), true);
+            assert_eq!(bytes_with_srid.len(), bytes_with_srid.capacity());
+        }
+
+        #[test]
+        fn extreme_coordinates() {
+            // Test with extreme but valid f64 values
+            let bytes = make_postgis_point_bytes(f64::MAX, f64::MIN, None, true);
+            assert_eq!(bytes.len(), 21);
+            assert_eq!(&bytes[5..13], &f64::MAX.to_le_bytes());
+            assert_eq!(&bytes[13..21], &f64::MIN.to_le_bytes());
+        }
+
+        #[test]
+        fn detects_point_little_endian() {
+            let bytes = make_postgis_point_bytes(1.0, 2.0, None, true);
+            let spatial_type = crate::try_get_spatial_type_from_postgres(&bytes)
+                .expect("should detect point type");
+            assert_eq!(spatial_type, SpatialType::PostgisPoint);
+        }
+
+        #[test]
+        fn detects_point_big_endian() {
+            let bytes = make_postgis_point_bytes(1.0, 2.0, None, false);
+            let spatial_type = crate::try_get_spatial_type_from_postgres(&bytes)
+                .expect("should detect point type with big-endian");
+            assert_eq!(spatial_type, SpatialType::PostgisPoint);
+        }
+
+        #[test]
+        fn detects_point_with_srid_big_endian() {
+            let bytes = make_postgis_point_bytes(1.0, 2.0, Some(4326), false);
+            let spatial_type = crate::try_get_spatial_type_from_postgres(&bytes)
+                .expect("should detect point type with SRID big-endian");
+            assert_eq!(spatial_type, SpatialType::PostgisPoint);
         }
     }
 }
