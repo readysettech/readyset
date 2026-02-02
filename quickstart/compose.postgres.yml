@@ -19,7 +19,7 @@ services:
       DEPLOYMENT: docker_compose_deployment
       LISTEN_ADDRESS: 0.0.0.0:5433
       UPSTREAM_DB_URL: postgresql://postgres:readyset@postgres/testdb
-      CONTROLLER_ADDRESS: 0.0.0.0
+      CONTROLLER_ADDRESS: 0.0.0.0:6033
       # We don't have control over whether users are using a password or not for the
       # demo/quickstart, so use the more permissive mode.
       ALLOW_UNAUTHENTICATED_CONNECTIONS: true

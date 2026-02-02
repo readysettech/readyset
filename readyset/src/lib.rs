@@ -410,9 +410,10 @@ pub struct Options {
     cleanup: bool,
 
     /// In [`DeploymentMode::Standalone`] or  [`DeploymentMode::EmbeddedReaders`] mode,
-    /// the IP address on which the ReadySet will listen.
+    /// the address (host:port) on which the internal ReadySet server will listen.
+    /// Example: 0.0.0.0:6033
     #[arg(long, env = "CONTROLLER_ADDRESS", hide = true)]
-    controller_address: Option<IpAddr>,
+    controller_address: Option<SocketAddr>,
 
     /// The number of queries that will be retained and eligible to be returned by `show caches`
     /// and `show proxied queries`.
@@ -1354,10 +1355,11 @@ where
             builder.set_telemetry_sender(telemetry_sender.clone());
 
             if let Some(addr) = options.controller_address {
-                builder.set_listen_addr(addr);
-            }
-
-            if let Some(external_addr) = options.external_address.or(options.controller_address) {
+                builder.set_listen_addr(addr.ip());
+                // Use external_address IP if set, otherwise use controller_address IP
+                let external_ip = options.external_address.unwrap_or(addr.ip());
+                builder.set_external_addr(SocketAddr::new(external_ip, addr.port()));
+            } else if let Some(external_addr) = options.external_address {
                 builder.set_external_addr(SocketAddr::new(external_addr, 0));
             }
 

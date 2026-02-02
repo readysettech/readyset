@@ -22,7 +22,7 @@ services:
       # demo/quickstart, so use the more permissive mode.
       ALLOW_UNAUTHENTICATED_CONNECTIONS: true
       UPSTREAM_DB_URL: mysql://root:readyset@mysql/testdb
-      CONTROLLER_ADDRESS: 0.0.0.0
+      CONTROLLER_ADDRESS: 0.0.0.0:6033
     volumes:
       - "readyset:/state"
     healthcheck:
