@@ -1056,12 +1056,29 @@ impl AuthorityLeaderElectionState {
             let update_res = self
                 .authority
                 .update_controller_state(
-                    |state: Option<ControllerState>| -> Result<ControllerState, ()> {
+                    |state: Option<ControllerState>| -> Result<ControllerState, Option<ReadySetError>> {
                         match state {
                             None => {
                                 Ok(ControllerState::new(self.config.clone(), self.permissive_writes, self.dialect))
                             },
                             Some(mut state) => {
+                                // Validate that immutable config fields have not changed.
+                                // These fields cannot be changed on restart with existing state.
+                                if state.config.sharding != self.config.sharding {
+                                    return Err(Some(ReadySetError::Internal(format!(
+                                        "Cannot change sharding on restart with existing state. \
+                                         Existing: {:?}, New: {:?}.",
+                                        state.config.sharding, self.config.sharding
+                                    ))));
+                                }
+                                if state.config.mir_config != self.config.mir_config {
+                                    return Err(Some(ReadySetError::Internal(format!(
+                                        "Cannot change MIR config on restart with existing state. \
+                                         Existing: {:?}, New: {:?}.",
+                                        state.config.mir_config, self.config.mir_config
+                                    ))));
+                                }
+
                                 // check that running config is compatible with the new
                                 // configuration.
                                 if state.config != self.config {
@@ -1073,6 +1090,8 @@ impl AuthorityLeaderElectionState {
                                 }
                                 state.dataflow_state.domain_config = self.config.domain_config.clone();
                                 state.dataflow_state.replication_strategy = self.config.replication_strategy;
+                                state.dataflow_state.materializations.set_config(self.config.materialization_config.clone());
+                                state.dataflow_state.persistence = self.config.persistence.clone();
                                 state.config = self.config.clone();
                                 Ok(state)
                             }
@@ -1089,7 +1108,8 @@ impl AuthorityLeaderElectionState {
 
             let (state, cache_ddl) = match update_res {
                 Ok(Ok(state)) => (state, None),
-                Ok(Err(_)) => return Ok(()),
+                Ok(Err(Some(e))) => return Err(e),
+                Ok(Err(None)) => return Ok(()),
                 Err(error) if error.caused_by_serialization_failed() => {
                     warn!(
                         %error,

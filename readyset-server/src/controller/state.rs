@@ -114,7 +114,10 @@ pub struct DfState {
     ///     once the `Controller` is dropped. Useful for tests.
     ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory. Useful for
     ///     baseline numbers.
-    persistence: PersistenceParameters,
+    ///
+    /// Note: `pub(super)` visibility is required for syncing this field from CLI config during
+    /// leader election with existing state (see `AuthorityLeaderElectionState::update_leader_state`).
+    pub(super) persistence: PersistenceParameters,
     pub(super) materializations: Materializations,
 
     /// Current recipe
