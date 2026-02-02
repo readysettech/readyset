@@ -423,7 +423,7 @@
               "Value #Readyset QPS": true,
               "cache name": true,
               "count": true,
-              "properties": true,
+              "properties": false,
               "properties results": true,
               "name results": true
             },
