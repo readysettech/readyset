@@ -143,16 +143,18 @@ impl Point {
         match engine {
             SqlEngine::MySQL => Ok(format!("POINT({} {})", self.coord.x, self.coord.y)),
             SqlEngine::PostgreSQL => {
+                let mut point_string = String::new();
                 if print_srid {
                     if let Some(srid) = self.srid {
-                        // EWKT format
-                        return Ok(format!(
-                            "SRID={};POINT({} {})",
-                            srid, self.coord.x, self.coord.y
-                        ));
+                        point_string.push_str(&format!("SRID={};", srid));
                     }
                 }
-                Ok(format!("POINT({} {})", self.coord.x, self.coord.y))
+                if self.coord.x.is_nan() && self.coord.y.is_nan() {
+                    point_string.push_str("POINT EMPTY");
+                } else {
+                    point_string.push_str(&format!("POINT({} {})", self.coord.x, self.coord.y));
+                }
+                Ok(point_string)
             }
         }
     }
@@ -240,6 +242,7 @@ mod tests {
     }
 
     mod postgres {
+        use core::f64;
         use pretty_assertions::assert_eq;
 
         use super::*;
@@ -323,6 +326,22 @@ mod tests {
             let pt = Point::try_from_bytes(&bytes, SqlEngine::PostgreSQL).unwrap();
             assert_point_coordinates(&pt, x, y);
             assert_eq!(pt.srid, Some(srid));
+        }
+
+        #[test]
+        fn test_valid_empty_point() {
+            let bytes = make_point_bytes(None, f64::NAN, f64::NAN, true);
+            let point = Point::try_from_bytes(&bytes, SqlEngine::PostgreSQL).unwrap();
+            let format = point.format(SqlEngine::PostgreSQL, false).unwrap();
+            assert_eq!(format, "POINT EMPTY");
+        }
+
+        #[test]
+        fn test_valid_empty_point_with_srid() {
+            let bytes = make_point_bytes(Some(4326), f64::NAN, f64::NAN, true);
+            let point = Point::try_from_bytes(&bytes, SqlEngine::PostgreSQL).unwrap();
+            let format = point.format(SqlEngine::PostgreSQL, true).unwrap();
+            assert_eq!(format, "SRID=4326;POINT EMPTY");
         }
     }
 }
