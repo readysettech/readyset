@@ -244,6 +244,14 @@ pub mod recorded {
     pub const SHALLOW_REFRESH_QUEUE_EXCEEDED: &str =
         "readyset_shallow.shallow_refresh_queue_exceeded";
 
+    /// Histogram: The amount of time in microseconds spent executing the upstream query during a
+    /// shallow cache refresh. Only recorded for successful queries.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | query_id | The query ID for the cached query being refreshed. |
+    pub const SHALLOW_REFRESH_QUERY_TIME: &str = "readyset_shallow.shallow_refresh_query_time_us";
+
     /// Histogram: The amount of time in microseconds spent waiting for an upquery during a read
     /// request.
     pub const SERVER_VIEW_UPQUERY_DURATION: &str = "readyset_server.view_query_upquery_duration_us";

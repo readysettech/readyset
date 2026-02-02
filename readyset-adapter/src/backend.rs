@@ -87,7 +87,9 @@ use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use readyset_adapter_types::{DeallocateId, ParsedCommand, PreparedStatementType};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
-use readyset_client::metrics::recorded::{SHALLOW_REFRESH, SHALLOW_REFRESH_QUEUE_EXCEEDED};
+use readyset_client::metrics::recorded::{
+    SHALLOW_REFRESH, SHALLOW_REFRESH_QUERY_TIME, SHALLOW_REFRESH_QUEUE_EXCEEDED,
+};
 use readyset_client::recipe::CacheExpr;
 use readyset_client::results::Results;
 use readyset_client::status::CacheProperties;
@@ -4567,13 +4569,22 @@ where
                 }
             }
 
+            let query_start = std::time::Instant::now();
             let result = match shallow_exec_meta {
                 Some(ref exec_meta) => conn.query_ext(&query, exec_meta.borrow()).await,
                 None => conn.query(&query).await,
             };
 
             let result = match result {
-                Ok(result) => result,
+                Ok(result) => {
+                    let query_time = query_start.elapsed();
+                    metrics::histogram!(
+                        SHALLOW_REFRESH_QUERY_TIME,
+                        "query_id" => query_id.to_string()
+                    )
+                    .record(query_time.as_micros() as f64);
+                    result
+                }
                 Err(e) => {
                     rate_limit(true, ADAPTER_SHALLOW_REFRESH_RUN, || {
                         warn!(
