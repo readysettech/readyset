@@ -8,7 +8,7 @@
 //!
 //! [0]: https://dev.mysql.com/doc/internals/en/secure-password-authentication.html
 
-use getrandom::getrandom;
+use getrandom::fill;
 use sha1::{Digest, Sha1};
 
 use crate::error::MsqlSrvError;
@@ -27,7 +27,7 @@ fn xor_slice_mut<const N: usize>(b1: &mut [u8; N], b2: &[u8; N]) {
 /// level documentation)
 pub fn generate_auth_data() -> Result<AuthData, MsqlSrvError> {
     let mut buf = [0u8; 20];
-    match getrandom(&mut buf) {
+    match fill(&mut buf) {
         Ok(_) => {
             // MySQL's auth data must be printable ASCII characters
             for byte in &mut buf {
