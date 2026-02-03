@@ -1148,8 +1148,26 @@ fn build_key(row: &[DfValue], columns: &[usize]) -> PointKey {
 /// `serialize_key` is responsible for serializing the underlying PointKey tuple
 /// directly, plus any extra information as described above.
 fn serialize_key<K: Serialize, E: Serialize>(k: K, extra: E) -> Vec<u8> {
-    let size: u64 = bincode::options().serialized_size(&k).unwrap();
-    bincode::options().serialize(&(size, k, extra)).unwrap()
+    // Use serialize_into to avoid bincode::serialize()'s internal serialized_size() call,
+    // which would traverse the entire key structure twice (once for size, once for data).
+    // This is particularly expensive for string keys with ICU collation.
+    let mut key_bytes = Vec::with_capacity(64);
+    bincode::options()
+        .serialize_into(&mut key_bytes, &k)
+        .unwrap();
+    let key_len = key_bytes.len() as u64;
+
+    // Build result: [key_len (varint)] [key_bytes] [extra]
+    let mut result = Vec::with_capacity(10 + key_bytes.len() + 32);
+    bincode::options()
+        .serialize_into(&mut result, &key_len)
+        .unwrap();
+    result.extend_from_slice(&key_bytes);
+    // For the common case where extra is (), this is a no-op (serialize_unit returns immediately)
+    bincode::options()
+        .serialize_into(&mut result, &extra)
+        .unwrap();
+    result
 }
 
 fn serialize_range(range: RangeKey) -> BoundedRange<Vec<u8>> {
@@ -2743,6 +2761,40 @@ mod tests {
     use readyset_decimal::Decimal;
 
     use super::*;
+
+    // Verify new serialize_key produces identical bytes to the old implementation
+    #[test]
+    fn serialize_key_byte_compatibility() {
+        fn old_serialize_key<K: Serialize, E: Serialize>(k: K, extra: E) -> Vec<u8> {
+            let size: u64 = bincode::options().serialized_size(&k).unwrap();
+            bincode::options().serialize(&(size, k, extra)).unwrap()
+        }
+
+        // Test with PointKey::Single
+        let pk1 = PointKey::Single(DfValue::from(42i32));
+        let old1 = old_serialize_key(&pk1, ());
+        let new1 = serialize_key(&pk1, ());
+        assert_eq!(old1, new1, "PointKey::Single with () extra");
+
+        // Test with PointKey::Double
+        let pk2 = PointKey::Double((DfValue::from(1i32), DfValue::from(2i32)));
+        let old2 = old_serialize_key(&pk2, ());
+        let new2 = serialize_key(&pk2, ());
+        assert_eq!(old2, new2, "PointKey::Double with () extra");
+
+        // Test with extra data (simulating non-unique primary key)
+        let pk3 = PointKey::Single(DfValue::from(100i32));
+        let extra = (1u64, 2u64);
+        let old3 = old_serialize_key(&pk3, extra);
+        let new3 = serialize_key(&pk3, extra);
+        assert_eq!(old3, new3, "PointKey::Single with (u64, u64) extra");
+
+        // Test with string key
+        let pk4 = PointKey::Single(DfValue::from("hello"));
+        let old4 = old_serialize_key(&pk4, ());
+        let new4 = serialize_key(&pk4, ());
+        assert_eq!(old4, new4, "PointKey::Single with string");
+    }
 
     fn insert<S: State>(state: &mut S, row: Vec<DfValue>) {
         let record: Record = row.into();
