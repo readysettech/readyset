@@ -2113,6 +2113,13 @@ impl PersistentState {
             let mut opts = rocksdb::ReadOptions::default();
             opts.set_total_order_seek(true); // because not doing a prefix seek
 
+            // Don't pollute block cache - avoid evicting hot data used by concurrent queries
+            opts.fill_cache(false);
+            // Large readahead for sequential scan - amortizes I/O latency, especially on remote volumes
+            opts.set_readahead_size(4 * 1024 * 1024);
+            // Async I/O via io_uring - overlaps prefetch with CPU work
+            opts.set_async_io(true);
+
             let pk_cf = inner.db.cf_handle(PK_CF).unwrap();
             let mut iter = inner.db.raw_iterator_cf_opt(pk_cf, opts);
             iter.seek_to_first();
