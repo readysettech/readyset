@@ -164,7 +164,6 @@ skip-tree = [
     { name = "rusty-fork", version = "0.3.0" },
     { name = "tower", version = "0.4.13" },
     { name = "unicode-width", version = "0.1.14" },
-    { name = "windows", version = "0.48.0" },
     { name = "windows-core", version = "0.61.2" },
     { name = "windows-result", version = "0.3.4" },
     { name = "windows-strings", version = "0.4.2" },
