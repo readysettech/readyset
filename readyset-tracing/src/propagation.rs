@@ -48,7 +48,7 @@ impl RequestContext {
     pub fn set_spans_parent(&self, span: &mut Span) {
         let propagator = TraceContextPropagator::new();
         let context = propagator.extract(self);
-        span.set_parent(context);
+        let _ = span.set_parent(context);
     }
 }
 
