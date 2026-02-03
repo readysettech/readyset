@@ -34,8 +34,10 @@ impl RewriteContext {
     }
 }
 
-impl AdapterRewriteContext for RewriteContext {
-    fn schema_generation(&self) -> u64 {
+impl RewriteContext {
+    pub fn schema_generation(&self) -> u64 {
         self.schema_catalog.generation
     }
 }
+
+impl AdapterRewriteContext for RewriteContext {}

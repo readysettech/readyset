@@ -555,6 +555,7 @@ impl Change {
         adapter_rewrite_params: AdapterRewriteParams,
         adapter_rewrite_context: &C,
         parsing_preset: ParsingPreset,
+        schema_generation: u64,
     ) -> ReadySetResult<Self> {
         match parse_query_with_config(
             parsing_preset.into_config().log_on_mismatch(true).rate_limit_logging(false),
@@ -594,7 +595,7 @@ impl Change {
                     name,
                     statement,
                     always,
-                    schema_generation_used: adapter_rewrite_context.schema_generation(),
+                    schema_generation_used: schema_generation,
                 }))
             },
             SqlQuery::DropCache(dcs) => Ok(Change::Drop {

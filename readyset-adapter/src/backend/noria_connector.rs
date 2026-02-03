@@ -28,9 +28,7 @@ use readyset_sql::ast::{
     UpdateStatement,
 };
 use readyset_sql::{DialectDisplay, TryFromDialect as _, TryIntoDialect as _};
-use readyset_sql_passes::adapter_rewrites::{
-    self, AdapterRewriteContext as _, AdapterRewriteParams, DfQueryParameters,
-};
+use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams, DfQueryParameters};
 use readyset_util::redacted::Sensitive;
 use readyset_util::shared_cache::{self, LocalCache};
 use schema_catalog::RewriteContext;

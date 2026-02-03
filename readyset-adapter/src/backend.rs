@@ -109,8 +109,8 @@ use readyset_sql::ast::{
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::{
-    AdapterRewriteContext as _, AdapterRewriteParams, DfQueryParameters, QueryParameters,
-    ShallowQueryParameters, convert_placeholders_to_question_marks,
+    AdapterRewriteParams, DfQueryParameters, QueryParameters, ShallowQueryParameters,
+    convert_placeholders_to_question_marks,
 };
 use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};

@@ -913,6 +913,7 @@ impl Controller {
                             adapter_rewrite_params,
                             &rewrite_context,
                             self.parsing_preset,
+                            rewrite_context.schema_generation(),
                         )
                     },
                     Ok(Change::Drop { .. })
@@ -936,6 +937,7 @@ impl Controller {
                             adapter_rewrite_params,
                             &rewrite_context,
                             self.parsing_preset,
+                            rewrite_context.schema_generation(),
                         )
                     },
                     Ok(Change::Drop { .. })
@@ -959,6 +961,7 @@ impl Controller {
                             adapter_rewrite_params,
                             &rewrite_context,
                             self.parsing_preset,
+                            rewrite_context.schema_generation(),
                         )
                     },
                     Ok(Change::CreateCache(_))
@@ -984,6 +987,7 @@ impl Controller {
                 adapter_rewrite_params,
                 &rewrite_context,
                 self.parsing_preset,
+                rewrite_context.schema_generation(),
             ) {
                 Ok(change) => {
                     let is_drop = matches!(change, Change::Drop { .. });

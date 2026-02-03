@@ -1556,11 +1556,7 @@ impl RewriteContext for SqlIncorporatorRewriteContext<'_> {
     }
 }
 
-impl AdapterRewriteContext for SqlIncorporatorRewriteContext<'_> {
-    fn schema_generation(&self) -> u64 {
-        0
-    }
-}
+impl AdapterRewriteContext for SqlIncorporatorRewriteContext<'_> {}
 
 impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
     fn add_invalidating_table(&self, table: Relation) {
