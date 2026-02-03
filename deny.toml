@@ -167,8 +167,6 @@ skip-tree = [
     { name = "windows-core", version = "0.61.2" },
     { name = "windows-result", version = "0.3.4" },
     { name = "windows-strings", version = "0.4.2" },
-    # winreg 0.50 (used by reqwest 0.11) pulls older windows-sys versions
-    { name = "windows-sys", version = "0.48.0" },
     { name = "windows-sys", version = "0.52.0" },
     { name = "winnow", version = "0.6.26" },
 ]

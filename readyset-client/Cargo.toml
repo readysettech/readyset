@@ -16,7 +16,7 @@ anyhow = { workspace = true }
 async-bincode = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 fail = { workspace = true }
-hyper = { workspace = true, features = ["stream", "client", "http2"] }
+hyper = { workspace = true, features = ["stream", "client", "http2", "tcp", "runtime"] }
 serde = { workspace = true, features = ["rc", "derive"] }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 rmp-serde = { workspace = true }

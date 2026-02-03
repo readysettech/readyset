@@ -24,7 +24,7 @@ metrics-exporter-prometheus = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-hyper = { workspace = true, features = ["stream", "server"] }
+hyper = { workspace = true, features = ["stream", "server", "http1"] }
 tokio-stream = { workspace = true, features = ["net"] }
 tower = { workspace = true, features = ["util"] }
 dashmap = { workspace = true }

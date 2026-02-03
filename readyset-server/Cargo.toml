@@ -39,7 +39,7 @@ enum-kinds = { workspace = true }
 fail = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
-hyper = { workspace = true, features = ["stream", "server"] }
+hyper = { workspace = true, features = ["stream", "server", "http1"] }
 indexmap = { workspace = true }
 itertools = { workspace = true }
 lazy_static = { workspace = true }

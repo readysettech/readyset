@@ -16,8 +16,7 @@ where
     T: DeserializeOwned,
     R: Serialize + Debug,
 {
-    let body = hyper::Body::from(bincode::serialize(&req)?);
-    let http_req = http.post(url.clone()).body(body);
+    let http_req = http.post(url.clone()).body(bincode::serialize(&req)?);
     let resp =
         http_req
             .timeout(timeout)

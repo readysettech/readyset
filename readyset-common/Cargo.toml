@@ -17,7 +17,6 @@ rlimit = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
-hyper = { workspace = true }
 reqwest = { workspace = true }
 bincode = { workspace = true }
 metrics = { workspace = true }
