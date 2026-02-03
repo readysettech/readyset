@@ -357,7 +357,7 @@ pub struct Options {
     /// These workers are responsible for refreshing shallow caches by running queries on the
     /// upstream database.  When all workers are busy, expect this many additional connections to
     /// the upstream.
-    #[arg(long, env = "SHALLOW_REFRESH_WORKERS", default_value = "100")]
+    #[arg(long, env = "SHALLOW_REFRESH_WORKERS", default_value = "40")]
     shallow_refresh_workers: usize,
 
     #[command(flatten)]
