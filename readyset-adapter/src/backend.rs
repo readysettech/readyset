@@ -131,7 +131,7 @@ use crate::status_reporter::ReadySetStatusReporter;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::utils::{create_dummy_column, time_or_null};
 use crate::{QueryHandler, UpstreamDatabase, UpstreamDestination, create_dummy_schema};
-use schema_catalog::{RewriteContext, SchemaCatalogHandle};
+use schema_catalog::{RewriteContext, SchemaCatalogHandle, SchemaGeneration};
 
 pub mod noria_connector;
 
@@ -950,7 +950,7 @@ enum ShouldTrySelect {
     Yes {
         status: QueryStatus,
         params: DfQueryParameters,
-        schema_generation: u64,
+        schema_generation: SchemaGeneration,
     },
     /// We should not attempt to select from ReadySet, and should proxy if there is an upstream. If
     /// there is no upstream, we should return an error. If there is no error, it is because we are
@@ -2312,7 +2312,7 @@ where
         shallow: ReadySetResult<ShallowViewRequest>,
         always: bool,
         concurrently: bool,
-        schema_generation: u64,
+        schema_generation: SchemaGeneration,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let deep = deep?;
         let (query_id, name, requested_name) = self.make_name_and_id(name, QueryId::from(&deep));
@@ -2381,7 +2381,7 @@ where
         shallow: ReadySetResult<ShallowViewRequest>,
         always: bool,
         concurrently: bool,
-        schema_generation: u64,
+        schema_generation: SchemaGeneration,
         ddl_req: Option<CacheDDLRequest>,
         quiet: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
@@ -2517,7 +2517,7 @@ where
     ) -> ReadySetResult<(
         ReadySetResult<ViewCreateRequest>,
         ReadySetResult<ShallowViewRequest>,
-        u64,
+        SchemaGeneration,
     )> {
         match inner {
             CacheInner::Statement { deep, shallow } => {
@@ -2566,12 +2566,13 @@ where
                     Query::Parsed(deep) => Ok((
                         Ok((*deep).clone()),
                         Err(ReadySetError::NoQueryForId { id: id.to_string() }),
-                        0, // TODO(mvzink): Possibly this needs to be moved into the `CreateViewRequest`
+                        // TODO(mvzink): Possibly this needs to be moved into the `CreateViewRequest`
+                        SchemaGeneration::INITIAL,
                     )),
                     Query::ShallowParsed(shallow) => Ok((
                         Err(ReadySetError::NoQueryForId { id: id.to_string() }),
                         Ok((*shallow).clone()),
-                        0,
+                        SchemaGeneration::INITIAL,
                     )),
                     Query::ParseFailed(_, e) => Err(ReadySetError::UnparseableQuery(e)),
                 },
@@ -2587,7 +2588,7 @@ where
     ) -> ReadySetResult<(
         ReadySetResult<ViewCreateRequest>,
         ReadySetResult<ShallowViewRequest>,
-        u64,
+        SchemaGeneration,
     )> {
         let ExplainStatement::CreateCache { inner, .. } = explain else {
             internal!("Unexpected EXPLAIN: {explain:?}");
@@ -2602,7 +2603,7 @@ where
         deep: &ReadySetResult<ViewCreateRequest>,
         cache_mode: CacheMode,
         cache_type: Option<CacheType>,
-        schema_generation: u64,
+        schema_generation: SchemaGeneration,
     ) -> MigrationState {
         let deep = match deep {
             Ok(deep) => deep,
@@ -3641,7 +3642,7 @@ where
         query: &'a str,
         mut view_request: ViewCreateRequest,
         params: QueryParameters,
-        schema_generation: u64,
+        schema_generation: SchemaGeneration,
         event: &mut QueryExecutionEvent,
         sampler_tx: Option<
             &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
@@ -3698,7 +3699,7 @@ where
         mut status: QueryStatus,
         event: &mut QueryExecutionEvent,
         params: DfQueryParameters,
-        schema_generation: u64,
+        schema_generation: SchemaGeneration,
         sampler_tx: Option<
             &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
         >,
@@ -3738,11 +3739,6 @@ where
 
         event.destination = Some(QueryDestination::Readyset(None));
         let create_if_missing = settings.migration_mode == MigrationMode::InRequestPath;
-        let schema_generation = if create_if_missing {
-            schema_generation
-        } else {
-            0
-        };
 
         let ctx = ExecuteSelectContext::AdHoc {
             statement: &view_request.statement,
@@ -3857,7 +3853,7 @@ where
         q: &mut ViewCreateRequest,
         rewrite_params: AdapterRewriteParams,
         params: QueryParameters,
-        schema_generation: u64,
+        schema_generation: SchemaGeneration,
     ) -> ShouldTrySelect {
         match adapter_rewrites::rewrite_for_readyset(&mut q.statement, rewrite_params, params) {
             Ok(params) => {
@@ -3899,7 +3895,7 @@ where
         q: &mut ViewCreateRequest,
         rewrite_params: AdapterRewriteParams,
         params: QueryParameters,
-        schema_generation: u64,
+        schema_generation: SchemaGeneration,
     ) -> ShouldTrySelect {
         // if the cache is not yet created, it's probably better
         // to let the adapter try the other path.
@@ -3954,7 +3950,7 @@ where
         state: &BackendState<DB>,
         q: &mut ViewCreateRequest,
         params: QueryParameters,
-        schema_generation: u64,
+        schema_generation: SchemaGeneration,
     ) -> ShouldTrySelect {
         let mut rewrite_params = noria.rewrite_params();
 

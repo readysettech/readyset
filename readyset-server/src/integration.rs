@@ -8886,7 +8886,7 @@ async fn multiple_simultaneous_migrations() {
                         .unwrap()
                 ),
                 always: false,
-                schema_generation_used: 0,
+                schema_generation_used: None,
             }),
             Dialect::DEFAULT_MYSQL
         )),
@@ -8898,7 +8898,7 @@ async fn multiple_simultaneous_migrations() {
                         .unwrap()
                 ),
                 always: false,
-                schema_generation_used: 0,
+                schema_generation_used: None,
             }),
             Dialect::DEFAULT_MYSQL
         ))
@@ -9338,7 +9338,7 @@ async fn views_out_of_order() {
             "q",
             parse_select(readyset_sql::Dialect::MySQL, "SELECT x FROM v2").unwrap(),
             false,
-            0,
+            None,
         ),
         Dialect::DEFAULT_MYSQL,
     ))
@@ -9368,7 +9368,7 @@ async fn evict_single() {
             "q",
             parse_select(readyset_sql::Dialect::MySQL, "SELECT x FROM t1 where y = ?").unwrap(),
             false,
-            0,
+            None,
         ),
         Dialect::DEFAULT_MYSQL,
     ))
@@ -9436,7 +9436,7 @@ async fn evict_single_intermediate_state() {
             )
             .unwrap(),
             false,
-            0,
+            None,
         ),
         Dialect::DEFAULT_MYSQL,
     ))

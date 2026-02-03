@@ -5,6 +5,9 @@ use readyset_sql::ast::{CreateTableBody, NonReplicatedRelation, Relation, SqlIde
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+mod generation;
+pub use generation::SchemaGeneration;
+
 // Only the synchronizer in the `handle` module can update the catalog (through the handle); we
 // reexport the public types here so that the `handle` module can be private.
 mod handle;
@@ -26,12 +29,12 @@ pub struct SchemaCatalog {
     /// Used to detect when cache creation attempts are using stale schema information.
     ///
     /// # Semantics
-    /// - Starts at 0 and increments after each successful DDL migration
+    /// - Starts at [`SchemaGeneration::INITIAL`] (1) and increments after each successful DDL
+    ///   migration
     /// - CreateCache-only migrations do NOT increment the generation
-    /// - A value of 0 is treated as "missing/unset" in some contexts
     /// - The generation from this catalog should be attached to cache creation requests
     ///   so the controller can validate the adapter's schema view matches its own
-    pub generation: u64,
+    pub generation: SchemaGeneration,
     /// Base table schemas, mapping relation names to their CREATE TABLE definitions.
     pub base_schemas: HashMap<Relation, CreateTableBody>,
     /// Views that have been declared but not yet compiled into the dataflow graph.

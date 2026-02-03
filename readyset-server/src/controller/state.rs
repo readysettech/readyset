@@ -59,7 +59,7 @@ use readyset_sql::ast::{NonReplicatedRelation, Relation, SqlIdentifier};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
-use schema_catalog::SchemaCatalogUpdate;
+use schema_catalog::{SchemaCatalogUpdate, SchemaGeneration};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -130,15 +130,11 @@ pub struct DfState {
     /// Used to detect when cache creation attempts are using stale schema information.
     ///
     /// # Semantics
-    /// - Initialized to 0 on first boot
+    /// - Initialized to `SchemaGeneration::INITIAL` (1) on first boot
     /// - Incremented after each successful DDL migration (but NOT for CreateCache-only migrations)
-    /// - A value of 0 in `CreateCache::schema_generation_used` is treated as "missing/unset"
-    /// - Uses `wrapping_add` for increment (wraps to 0 after u64::MAX)
-    ///
-    /// # Known Limitations to be fixed in a follow-up CL
-    /// - Generation 0 being both "initial value" and "missing sentinel" is a semantic conflict
-    /// - After u64::MAX migrations (practically impossible), wrap-around to 0 could cause issues
-    schema_generation: u64,
+    /// - `None` in `CreateCache::schema_generation_used` indicates "missing/unset"
+    /// - Wraps from u64::MAX back to 1 (never 0)
+    schema_generation: SchemaGeneration,
     /// Placement restrictions for nodes and the domains they are placed into.
     #[serde_as(as = "Vec<(_, _)>")]
     pub(super) node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
@@ -189,7 +185,7 @@ impl DfState {
             materializations,
             recipe,
             schema_replication_offset,
-            schema_generation: 0,
+            schema_generation: SchemaGeneration::INITIAL,
             node_restrictions,
             domains: Default::default(),
             domain_nodes: Default::default(),
@@ -211,7 +207,7 @@ impl DfState {
     /// Note: This is here instead of on [`SqlIncorporator`] only because we ([`DfState`]) are more
     /// suited to ensuring we increment the generation number on every migration commit (see
     /// [`DfState::apply_recipe`]).
-    pub(super) fn schema_generation(&self) -> u64 {
+    pub(super) fn schema_generation(&self) -> SchemaGeneration {
         self.schema_generation
     }
 
@@ -1631,7 +1627,9 @@ impl DfState {
             .changes()
             .find_map(|change| match change {
                 Change::CreateCache(create_cache)
-                    if create_cache.schema_generation_used != self.schema_generation =>
+                    if create_cache
+                        .schema_generation_used
+                        .is_some_and(|g| g != self.schema_generation) =>
                 {
                     Some(create_cache)
                 }
@@ -1639,8 +1637,8 @@ impl DfState {
             })
         {
             let err = ReadySetError::SchemaGenerationMismatch {
-                used: Some(create_cache.schema_generation_used),
-                current: self.schema_generation,
+                used: create_cache.schema_generation_used.map(|g| g.get()),
+                current: self.schema_generation.get(),
             };
             warn!(%err, ?create_cache, "Schema generation mismatch");
         }
@@ -1660,9 +1658,9 @@ impl DfState {
                     offset.try_max_into(&mut self.schema_replication_offset)?
                 }
                 if !dry_run && should_increment_schema_generation {
-                    self.schema_generation = self.schema_generation.wrapping_add(1);
+                    self.schema_generation = self.schema_generation.next();
                     trace!(
-                        schema_generation = self.schema_generation,
+                        schema_generation = %self.schema_generation,
                         "Incremented schema generation after successful migration"
                     );
                 }
@@ -2072,13 +2070,19 @@ impl DfStateHandle {
         drop(state_guard);
 
         if let Some(notifier) = &self.schema_change_notifier {
+            // XXX(mvzink): Currently we always send complete schema catalog updates, and
+            // `SchemaCatalogSynchronizer` always applies them. The generation check in the
+            // synchronizer is telemetry-only (warns if updates arrive out of strict sequence). If
+            // partial updates are ever added, they would need strict sequencing via `precedes()`,
+            // and this code should send a complete update whenever the generation is not a strict
+            // increment of the previous one.
             if new_state.schema_generation() != previous_generation {
                 let catalog = new_state
                     .recipe
                     .schema_catalog(new_state.schema_generation());
                 match SchemaCatalogUpdate::try_from(&catalog) {
                     Ok(update) => notifier.send(ControllerEvent::SchemaCatalogUpdate(update)),
-                    Err(error) => warn!(%error, "Failed to serialize schema catalog update"),
+                    Err(error) => error!(%error, "Failed to serialize schema catalog update"),
                 }
             }
         }

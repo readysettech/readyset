@@ -48,6 +48,7 @@ use readyset_sql::ast::{
 use readyset_sql::DialectDisplay;
 use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteContext, AdapterRewriteParams};
+use schema_catalog::SchemaGeneration;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 use tracing::{debug, error};
@@ -226,7 +227,7 @@ impl ChangeList {
                         name,
                         statement,
                         always,
-                        schema_generation_used: 0,
+                        schema_generation_used: None,
                     }))
                 }
                 SqlQuery::AlterTable(ats) => changes.push(Change::AlterTable(ats)),
@@ -296,11 +297,11 @@ impl ChangeList {
     }
 
     /// Construct a new `ChangeList` from `self`, but with the given schema generation
-    pub fn with_schema_generation(self, schema_generation: u64) -> Self {
+    pub fn with_schema_generation(self, schema_generation: SchemaGeneration) -> Self {
         let mut this = self;
         for change in &mut this.changes {
             if let Change::CreateCache(cache) = change {
-                cache.schema_generation_used = schema_generation;
+                cache.schema_generation_used = Some(schema_generation);
             }
         }
         this
@@ -309,7 +310,7 @@ impl ChangeList {
     /// Returns true if any `CreateCache` in this changelist is missing a schema generation.
     pub fn has_missing_schema_generation(&self) -> bool {
         self.changes.iter().any(|change| match change {
-            Change::CreateCache(cache) => cache.schema_generation_used == 0,
+            Change::CreateCache(cache) => cache.schema_generation_used.is_none(),
             _ => false,
         })
     }
@@ -317,17 +318,17 @@ impl ChangeList {
     /// Fill only missing schema generations for `CreateCache` changes.
     ///
     /// Returns true if any fields were filled.
-    pub fn fill_missing_schema_generation(&mut self, schema_generation: u64) -> bool {
+    pub fn fill_missing_schema_generation(&mut self, schema_generation: SchemaGeneration) -> bool {
         let mut filled = false;
         for change in &mut self.changes {
             if let Change::CreateCache(cache) = change {
-                if cache.schema_generation_used == 0 {
+                if cache.schema_generation_used.is_none() {
                     debug!(
-                        generation = schema_generation,
+                        generation = %schema_generation,
                         query = %cache.statement.display(self.dialect.into()),
                         "Filling missing schema generation for CreateCache"
                     );
-                    cache.schema_generation_used = schema_generation;
+                    cache.schema_generation_used = Some(schema_generation);
                     filled = true;
                 }
             }
@@ -376,11 +377,11 @@ pub struct CreateCache {
     /// by the adapter. The controller validates this matches its current generation before
     /// performing the migration.
     ///
-    /// # Special Values
-    /// - A value of 0 indicates the generation was not set (e.g., in tests or legacy paths)
-    /// - `has_missing_schema_generation()` treats 0 as "missing"
-    /// - `fix_changelist_schema_generation()` will fill in 0s with the current generation
-    pub schema_generation_used: u64,
+    /// # Values
+    /// - `None` indicates the generation was not set (e.g., in tests or legacy paths)
+    /// - `has_missing_schema_generation()` treats `None` as "missing"
+    /// - `fill_missing_schema_generation()` will fill in `None` with the current generation
+    pub schema_generation_used: Option<SchemaGeneration>,
 }
 
 /// Metadata about a PostgreSQL table
@@ -472,7 +473,7 @@ impl Change {
         name: N,
         statement: SelectStatement,
         always: bool,
-        schema_generation_used: u64,
+        schema_generation_used: Option<SchemaGeneration>,
     ) -> Self
     where
         N: Into<Relation>,
@@ -555,7 +556,7 @@ impl Change {
         adapter_rewrite_params: AdapterRewriteParams,
         adapter_rewrite_context: &C,
         parsing_preset: ParsingPreset,
-        schema_generation: u64,
+        schema_generation: Option<SchemaGeneration>,
     ) -> ReadySetResult<Self> {
         match parse_query_with_config(
             parsing_preset.into_config().log_on_mismatch(true).rate_limit_logging(false),

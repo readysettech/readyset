@@ -133,7 +133,7 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
 
     async fn apply_update(&self, catalog: SchemaCatalog) {
         trace!(
-            generation = catalog.generation,
+            generation = %catalog.generation,
             base_tables = ?catalog.base_schemas.keys().collect::<Vec<_>>(),
             uncompiled_views = ?catalog.uncompiled_views,
             custom_types = ?catalog.custom_types.keys().collect::<Vec<_>>(),
@@ -147,26 +147,18 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
             cache.as_ref().map(|c| c.generation)
         };
 
-        if let Some(current) = current_generation {
-            if catalog.generation < current {
-                warn!(
-                    new_generation = catalog.generation,
-                    current_generation = current,
-                    "Skipping schema catalog update with older generation"
-                );
-                return;
-            }
-            if catalog.generation == current {
-                trace!(
-                    generation = catalog.generation,
-                    "Skipping schema catalog update with unchanged generation"
-                );
-                return;
-            }
+        if let Some(current) = current_generation
+            && !current.precedes(catalog.generation)
+        {
+            warn!(
+                new_generation = %catalog.generation,
+                current_generation = %current,
+                "Schema update had unexpected generation"
+            );
         }
 
         debug!(
-            generation = catalog.generation,
+            generation = %catalog.generation,
             base_tables = catalog.base_schemas.len(),
             uncompiled_views = catalog.uncompiled_views.len(),
             custom_types = catalog.custom_types.len(),
@@ -258,6 +250,7 @@ impl Clone for SchemaCatalogHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SchemaGeneration;
     use async_trait::async_trait;
     use futures_util::stream;
     use readyset_util::shutdown;
@@ -276,7 +269,7 @@ mod tests {
             Self {
                 should_fail,
                 catalog: SchemaCatalog {
-                    generation: 42,
+                    generation: SchemaGeneration::new(42).unwrap(),
                     base_schemas: HashMap::new(),
                     uncompiled_views: Vec::new(),
                     custom_types: HashMap::new(),

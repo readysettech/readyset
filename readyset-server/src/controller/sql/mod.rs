@@ -31,7 +31,7 @@ use readyset_sql_passes::{
     RewriteContext, RewriteDialectContext, StarExpansionContext,
 };
 use readyset_util::redacted::Sensitive;
-use schema_catalog::SchemaCatalog;
+use schema_catalog::{SchemaCatalog, SchemaGeneration};
 use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
 
@@ -1489,7 +1489,7 @@ impl SqlIncorporator {
     /// minimizes cloning (but there's still some), whereas the [`SchemaCatalog`] is aimed at easy
     /// serialization/synchronization with the adapter and doesn't need (and likely can't safely
     /// duplicate) the complete picture that `SqlIncorporator` has.
-    pub(crate) fn schema_catalog(&self, generation: u64) -> SchemaCatalog {
+    pub(crate) fn schema_catalog(&self, generation: SchemaGeneration) -> SchemaCatalog {
         let base_schemas = self
             .base_schemas
             .iter()

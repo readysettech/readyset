@@ -22,7 +22,7 @@ use readyset_sql::{DialectDisplay, ast::Literal};
 use readyset_sql_passes::InlineLiterals;
 use readyset_util::redacted::Sensitive;
 use readyset_util::shutdown::ShutdownReceiver;
-use schema_catalog::{RewriteContext, SchemaCatalogHandle};
+use schema_catalog::{RewriteContext, SchemaCatalogHandle, SchemaGeneration};
 use tokio::select;
 use tracing::{debug, error, info, warn};
 
@@ -189,7 +189,7 @@ impl MigrationHandler {
                         query.query().clone(),
                         /* always */ false,
                         /* concurrently */ false,
-                        0, // TODO: pass actual schema generation
+                        SchemaGeneration::INITIAL, // TODO: pass actual schema generation
                     )
                     .await;
                 // Inform the query status cache of completed migrations
@@ -321,7 +321,7 @@ impl MigrationHandler {
 
         // TODO(mvzink): Pass actual schema generation
         self.noria
-            .handle_create_cached_query(None, req, false, false, 0)
+            .handle_create_cached_query(None, req, false, false, SchemaGeneration::INITIAL)
             .await?;
         Ok(())
     }
@@ -371,7 +371,7 @@ impl MigrationHandler {
                 qname,
                 view_request.statement.clone(),
                 false,
-                schema_generation,
+                Some(schema_generation),
             ),
             self.dialect,
         )

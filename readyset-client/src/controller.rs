@@ -820,7 +820,7 @@ impl ReadySetHandle {
             let generation = self.schema_catalog().await?.generation;
             if changes.fill_missing_schema_generation(generation) {
                 warn!(
-                    generation,
+                    generation = %generation,
                     "Filled missing schema generation for CreateCache in ChangeList (should only happen in tests)"
                 );
             }

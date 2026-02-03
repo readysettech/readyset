@@ -4,7 +4,7 @@ use readyset_data::Dialect;
 use readyset_sql::ast::SqlIdentifier;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteContext;
 
-use crate::SchemaCatalog;
+use crate::{SchemaCatalog, SchemaGeneration};
 
 pub struct RewriteContext {
     _dialect: Dialect,
@@ -35,7 +35,7 @@ impl RewriteContext {
 }
 
 impl RewriteContext {
-    pub fn schema_generation(&self) -> u64 {
+    pub fn schema_generation(&self) -> SchemaGeneration {
         self.schema_catalog.generation
     }
 }

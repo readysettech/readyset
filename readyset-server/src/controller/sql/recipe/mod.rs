@@ -10,7 +10,7 @@ use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{Relation, SelectStatement};
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_util::hash::hash;
-use schema_catalog::SchemaCatalog;
+use schema_catalog::{SchemaCatalog, SchemaGeneration};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use tracing::warn;
@@ -247,7 +247,7 @@ impl Recipe {
     ///
     /// This creates a snapshot of the schema information that can be shared
     /// between Readyset components.
-    pub(crate) fn schema_catalog(&self, generation: u64) -> SchemaCatalog {
+    pub(crate) fn schema_catalog(&self, generation: SchemaGeneration) -> SchemaCatalog {
         self.inc.schema_catalog(generation)
     }
 }
