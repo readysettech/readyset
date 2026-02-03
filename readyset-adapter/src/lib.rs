@@ -7,6 +7,7 @@ pub mod proxied_queries_reporter;
 mod query_handler;
 pub mod query_status_cache;
 pub mod sampler;
+pub mod shallow_refresh_pool;
 mod status_reporter;
 pub mod table_extraction_visitor;
 pub mod upstream_database;

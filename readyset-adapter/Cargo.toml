@@ -10,7 +10,6 @@ edition = "2024"
 [dependencies]
 ahash = { workspace = true }
 anyhow = { workspace = true }
-async-channel = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 fail = { workspace = true }
 futures-util = { workspace = true }

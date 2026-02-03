@@ -33,6 +33,7 @@ use readyset_adapter::metrics_handle::MetricsHandle;
 use readyset_adapter::migration_handler::MigrationHandler;
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
+use readyset_adapter::shallow_refresh_pool::ShallowRefreshPool;
 use readyset_adapter::views_synchronizer::ViewsSynchronizer;
 use readyset_adapter::{
     Backend, BackendBuilder, DeploymentMode, QueryHandler, ReadySetStatusReporter, UpstreamDatabase,
@@ -1403,12 +1404,11 @@ where
                 error!("Failed to recreate shallow caches: {}", e);
             }
         }
-        let shallow_refresh_sender =
-            Backend::<H::UpstreamDatabase, H>::start_shallow_refresh_workers(
-                rt.handle(),
-                &upstream_config,
-                options.shallow_refresh_workers,
-            );
+        let shallow_refresh_pool = ShallowRefreshPool::<H::UpstreamDatabase>::new(
+            rt.handle(),
+            &upstream_config,
+            options.shallow_refresh_workers,
+        );
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let client_addr = s.peer_addr()?;
@@ -1424,7 +1424,7 @@ where
             let view_cache = view_cache.clone();
             let mut connection_handler = self.connection_handler.clone();
             let shallow = shallow.clone();
-            let shallow_refresh_sender = shallow_refresh_sender.clone();
+            let shallow_refresh_pool = shallow_refresh_pool.clone();
             // If cache_ddl_address is not set, allow cache ddl from all addresses.
             let local_addr = s.local_addr()?;
             let allow_cache_ddl = options
@@ -1516,7 +1516,7 @@ where
                                         status_reporter_clone,
                                         adapter_start_time,
                                         shallow,
-                                        Some(shallow_refresh_sender),
+                                        Some(shallow_refresh_pool),
                                     );
                                 connection_handler.process_connection(s, backend).await;
                             }

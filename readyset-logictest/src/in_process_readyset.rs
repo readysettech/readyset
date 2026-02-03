@@ -14,8 +14,9 @@ use mysql_srv::MySqlIntermediary;
 use readyset_adapter::{
     backend::{noria_connector::ReadBehavior, MigrationMode, NoriaConnector},
     query_status_cache::QueryStatusCache,
+    shallow_refresh_pool::ShallowRefreshPool,
     upstream_database::LazyUpstream,
-    Backend, BackendBuilder, ReadySetStatusReporter, UpstreamDatabase,
+    BackendBuilder, ReadySetStatusReporter, UpstreamDatabase,
 };
 use readyset_client::ReadySetHandle;
 use readyset_data::{
@@ -169,15 +170,13 @@ async fn setup_adapter(
                     Vec::new(),
                 );
                 let shallow = Arc::new(CacheManager::new(None));
-                let shallow_refresh_sender =
+                let shallow_refresh_pool =
                     if let Some(config) = replication_url.map(UpstreamConfig::from_url) {
-                        Some(
-                            Backend::<$upstream, $handler>::start_shallow_refresh_workers(
-                                &tokio::runtime::Handle::current(),
-                                &config,
-                                100,
-                            ),
-                        )
+                        Some(ShallowRefreshPool::<LazyUpstream<$upstream>>::new(
+                            &tokio::runtime::Handle::current(),
+                            &config,
+                            100,
+                        ))
                     } else {
                         None
                     };
@@ -194,7 +193,7 @@ async fn setup_adapter(
                         status_reporter,
                         adapter_start_time,
                         shallow,
-                        shallow_refresh_sender,
+                        shallow_refresh_pool,
                     )
             }};
         }

@@ -14,6 +14,7 @@ use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode, QueryDestination, QueryInfo};
 use readyset_adapter::metrics_handle::MetricsHandle;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
+use readyset_adapter::shallow_refresh_pool::ShallowRefreshPool;
 use readyset_adapter::{
     Backend, QueryHandler, ReadySetStatusReporter, UpstreamConfig, UpstreamDatabase,
     ViewsSynchronizer,
@@ -441,14 +442,12 @@ impl TestBuilder {
             UpstreamConfig::default()
         };
         let shallow = Arc::new(CacheManager::new(None));
-        let shallow_refresh_sender = if cdc_url.is_some() {
-            Some(
-                Backend::<A::Upstream, A::Handler>::start_shallow_refresh_workers(
-                    &tokio::runtime::Handle::current(),
-                    &cdc_upstream_config,
-                    100,
-                ),
-            )
+        let shallow_refresh_pool = if cdc_url.is_some() {
+            Some(ShallowRefreshPool::<A::Upstream>::new(
+                &tokio::runtime::Handle::current(),
+                &cdc_upstream_config,
+                100,
+            ))
         } else {
             None
         };
@@ -531,7 +530,7 @@ impl TestBuilder {
                             status_reporter,
                             adapter_start_time,
                             shallow.clone(),
-                            shallow_refresh_sender.clone(),
+                            shallow_refresh_pool.clone(),
                         );
 
                     let mut backend_shutdown_rx_clone = backend_shutdown_rx_connection.clone();
