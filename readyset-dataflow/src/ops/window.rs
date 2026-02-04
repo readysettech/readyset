@@ -1,6 +1,5 @@
 use crate::ops::utils::Order;
 use crate::prelude::*;
-use crate::processing::ColumnMiss;
 use crate::LookupIndex;
 
 use dataflow_state::PointKey;
@@ -809,56 +808,24 @@ impl Ingredient for Window {
             });
         }
 
-        if non_output_cols.is_empty() {
-            // Only the output column was requested. We can't create an index on just the
-            // generated column, so we need a full replay
-            return ColumnSource::RequiresFullReplay(vec1![self.src.as_global()]);
-        }
-
-        // Check if the non-output columns are a subset of lookup_key (group_by + partition_by).
-        // If yes ->    we can use partial materialization via handle_upquery.
-        // If no  ->    we need a full replay because the state isn't keyed appropriately.
-        let all_in_lookup_key = non_output_cols
-            .iter()
-            .all(|col| self.lookup_key.contains(col));
-
-        if all_in_lookup_key {
-            let our_index = self
-                .our_index
-                .expect("our_index not set, should have been set in on_commit")
-                .as_global();
-
-            ColumnSource::GeneratedFromColumns(vec1![ColumnRef {
-                node: our_index,
-                columns: non_output_cols,
-            }])
-        } else {
-            ColumnSource::RequiresFullReplay(vec1![self.src.as_global()])
-        }
-    }
-
-    fn handle_upquery(&mut self, miss: ColumnMiss) -> ReadySetResult<Vec<ColumnMiss>> {
-        let index = *self
-            .our_index
-            .expect("our_index not set, should have been set in on_commit");
-
-        let output_pos = miss
-            .column_indices
-            .iter()
-            .position(|ci| *ci == self.output_col_index)
-            .expect("handle_upquery called but output column not in missed columns");
-
-        Ok(vec![ColumnMiss {
-            node: index,
-            column_indices: self.lookup_key.clone(),
-            missed_keys: miss.missed_keys.mapped(|k| {
-                k.map_endpoints(|mut r| {
-                    r.remove(output_pos)
-                        .expect("output column position out of bounds in key");
-                    r
-                })
-            }),
-        }])
+        // If the output column is in the requested columns, we need a full replay.
+        //
+        // Partial materialization (GeneratedFromColumns) would require:
+        // 1. Prefix-matching partial index support in dataflow-state
+        // 2. Careful upquery remapping to avoid contract violations
+        // 3. Validation that BTreeMap prefix matching doesn't break join operators
+        //
+        // For now, full replay is simpler and avoids migration planning bugs.
+        // Memory impact: loads entire parent table for queries like WHERE rn <= ?
+        //
+        // TODO(REA-6327): Re-enable partial materialization once dataflow-state
+        // supports prefix-matching indexes (see branch change-11630).
+        tracing::debug!(
+            requested_cols = ?cols,
+            output_col = self.output_col_index,
+            "Window using full replay for query with output column filter"
+        );
+        ColumnSource::RequiresFullReplay(vec1![self.src.as_global()])
     }
 
     fn description(&self) -> String {
@@ -1472,24 +1439,6 @@ mod tests {
         assert_eq!(src, ColumnSource::RequiresFullReplay(vec1![s.as_global()]));
     }
 
-    /// Test that column_source returns GeneratedFromColumns when the output column is requested
-    /// along with columns that ARE in lookup_key (group_by + partition_by).
-    /// This enables partial materialization via handle_upquery, which is faster than a full replay.
-    #[test]
-    fn column_source_output_with_lookup_key_cols_generated() {
-        let (g, _s) = setup_row_number(vec![0], vec![1]);
-        // Request the partition column (1) and output column (4)
-        // Column 1 is in lookup_key (group_by=[0], partition_by=[1] => lookup_key=[0,1])
-        let src = g.node().column_source(&[1, 4]);
-        assert_eq!(
-            src,
-            ColumnSource::GeneratedFromColumns(vec1![ColumnRef {
-                node: g.node_index().as_global(),
-                columns: vec![1], // non-output columns
-            }])
-        );
-    }
-
     /// Test that column_source returns RequiresFullReplay when the output column is requested
     /// along with columns that are NOT in lookup_key.
     #[test]
@@ -1500,6 +1449,14 @@ mod tests {
         let src = g.node().column_source(&[2, 4]);
         assert_eq!(src, ColumnSource::RequiresFullReplay(vec1![s.as_global()]));
     }
+
+    // NOTE: Tests for GeneratedFromColumns and handle_upquery were deleted
+    // when switching to RequiresFullReplay for queries with output column filters.
+    // The deleted tests were:
+    // - column_source_output_with_lookup_key_cols_generated
+    // - handle_upquery_for_output_col_query
+    // These tested partial materialization paths that required prefix-matching
+    // partial index support (see REA-6327, branch change-11630).
 
     /// Test that column_source returns ExactCopy for non-output columns.
     #[test]
@@ -1513,35 +1470,6 @@ mod tests {
                 node: s.as_global(),
                 columns: vec![2],
             })
-        );
-    }
-
-    /// Test that handle_upquery correctly remaps an upquery for generated columns.
-    /// It should strip out the output column value and remap to lookup_key columns.
-    #[test]
-    fn handle_upquery_for_output_col_query() {
-        let (g, _s) = setup_row_number(vec![0], vec![1]);
-        // Upquery for columns [1, 4] (partition_by col and output col)
-        // with key ["A", 3] (partition value "A", row_number 3)
-        let res = g
-            .node_mut()
-            .handle_upquery(ColumnMiss {
-                node: *g.node_index(),
-                column_indices: vec![1, 4],
-                missed_keys: vec1![vec1![DfValue::from("A"), DfValue::from(3)].into()],
-            })
-            .unwrap();
-
-        assert_eq!(res.len(), 1);
-        // Should remap to lookup_key columns [0, 1] with just the partition value ["A"]
-        // (output column value stripped)
-        assert_eq!(
-            *res.first().unwrap(),
-            ColumnMiss {
-                node: *g.node_index(),
-                column_indices: vec![0, 1], // lookup_key
-                missed_keys: vec1![vec1![DfValue::from("A")].into()]  // output col value stripped
-            }
         );
     }
 

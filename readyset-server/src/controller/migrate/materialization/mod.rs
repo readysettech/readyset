@@ -864,44 +864,6 @@ impl Materializations {
                                                         // so we'll be okay.
                                                         continue 'outer;
                                                     }
-
-                                                    // For BTreeMap, a superset index can satisfy
-                                                    // prefix queries. This happens when a node
-                                                    // returns GeneratedFromColumns for some columns
-                                                    // (e.g., Window generating row_number), causing
-                                                    // the replay path's index to have fewer columns
-                                                    // than the actual index in self.have.
-                                                    //
-                                                    // Example: Window with `[category, rn]` where rn
-                                                    // is the generated col from `ROW_NUMBER()`.
-                                                    // column_source returns columns `[category]`
-                                                    // (filtering out generated rn), so
-                                                    // the replay path has BTreeMap[category]. But
-                                                    // self.have has BTreeMap[category, rn].
-                                                    //
-                                                    // This is safe because:
-                                                    // 1. BTreeMap supports prefix scans, so looking up
-                                                    //    by [category] returns all rows for that
-                                                    //    category regardless of rn value.
-                                                    // 2. This over-fetching is intentional as nodes
-                                                    //    like Window need the full partition to
-                                                    //    recompute generated columns.
-                                                    if other_idx.index_type == IndexType::BTreeMap
-                                                        && child_index.index_type
-                                                            == IndexType::BTreeMap
-                                                        && child_index.columns.len()
-                                                            <= other_idx.columns.len()
-                                                        && child_index
-                                                            .columns
-                                                            .iter()
-                                                            .zip(&other_idx.columns)
-                                                            .all(|(c, o)| c == o)
-                                                    {
-                                                        // child_index columns are a prefix of
-                                                        // other_idx columns, so BTreeMap can
-                                                        // satisfy the lookup via prefix scan.
-                                                        continue 'outer;
-                                                    }
                                                 }
                                                 // If we get here, we've somehow managed to not
                                                 // index the
