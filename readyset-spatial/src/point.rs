@@ -154,11 +154,17 @@ impl Point {
     ///
     /// If `print_srid` is true and an SRID is present, returns EWKT format with SRID prefix.
     pub fn format_postgis(&self, print_srid: bool) -> String {
+        let mut point_string = String::new();
         if let Some(srid) = self.srid.filter(|_| print_srid) {
             // EWKT format
-            return format!("SRID={};POINT({} {})", srid, self.coord.x, self.coord.y);
+            point_string.push_str(&format!("SRID={};", srid));
         }
-        format!("POINT({} {})", self.coord.x, self.coord.y)
+        if self.coord.x.is_nan() && self.coord.y.is_nan() {
+            point_string.push_str("POINT EMPTY");
+        } else {
+            point_string.push_str(&format!("POINT({} {})", self.coord.x, self.coord.y));
+        }
+        point_string
     }
 }
 
@@ -345,6 +351,22 @@ mod tests {
             let pt = Point::try_from_postgis_bytes(&bytes).expect("valid point");
             assert_point_coordinates(&pt, x, y);
             assert_eq!(pt.srid, Some(srid));
+        }
+
+        #[test]
+        fn test_valid_empty_point() {
+            let bytes = make_postgis_point_bytes(f64::NAN, f64::NAN, None, true);
+            let point = Point::try_from_postgis_bytes(&bytes).expect("valid point");
+            let format = point.format_postgis(false);
+            assert_eq!(format, "POINT EMPTY");
+        }
+
+        #[test]
+        fn test_valid_empty_point_with_srid() {
+            let bytes = make_postgis_point_bytes(f64::NAN, f64::NAN, Some(4326), true);
+            let point = Point::try_from_postgis_bytes(&bytes).expect("valid point");
+            let format = point.format_postgis(true);
+            assert_eq!(format, "SRID=4326;POINT EMPTY");
         }
     }
 
