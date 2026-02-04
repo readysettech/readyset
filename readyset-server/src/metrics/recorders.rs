@@ -12,9 +12,9 @@ use indexmap::IndexMap;
 use metrics::HistogramFn;
 use metrics::{Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder, SharedString, Unit};
 use metrics_exporter_prometheus::formatting::{
-    key_to_parts, sanitize_metric_name, write_help_line, write_metric_line, write_type_line,
+    sanitize_metric_name, write_help_line, write_metric_line, write_type_line,
 };
-use metrics_exporter_prometheus::{BuildError, Distribution, DistributionBuilder};
+use metrics_exporter_prometheus::{BuildError, Distribution, DistributionBuilder, LabelSet};
 use metrics_util::registry::{Recency, Registry};
 use metrics_util::MetricKindMask;
 use metrics_util::{registry::GenerationalStorage, storage::AtomicBucket};
@@ -51,9 +51,9 @@ impl Clear for MetricsRecorder {
 }
 
 struct Snapshot {
-    pub counters: HashMap<String, HashMap<Vec<String>, u64>>,
-    pub gauges: HashMap<String, HashMap<Vec<String>, f64>>,
-    pub distributions: HashMap<String, IndexMap<Vec<String>, Distribution>>,
+    pub counters: HashMap<String, HashMap<LabelSet, u64>>,
+    pub gauges: HashMap<String, HashMap<LabelSet, f64>>,
+    pub distributions: HashMap<String, IndexMap<LabelSet, Distribution>>,
 }
 
 pub type GenerationalAtomicStorage = GenerationalStorage<AtomicStorage>;
@@ -109,14 +109,14 @@ impl HistogramFn for AtomicBucketInstant<f64> {
 pub(crate) struct Inner {
     pub registry: Registry<Key, GenerationalAtomicStorage>,
     pub recency: Recency<Key>,
-    pub distributions: RwLock<HashMap<String, IndexMap<Vec<String>, Distribution>>>,
+    pub distributions: RwLock<HashMap<String, IndexMap<LabelSet, Distribution>>>,
     pub distribution_builder: DistributionBuilder,
     pub descriptions: RwLock<HashMap<String, SharedString>>,
     pub global_labels: IndexMap<String, String>,
 }
 
 impl Inner {
-    fn counters<F>(&self, filter: Option<F>) -> HashMap<String, HashMap<Vec<String>, u64>>
+    fn counters<F>(&self, filter: Option<F>) -> HashMap<String, HashMap<LabelSet, u64>>
     where
         F: Fn(&str) -> bool,
     {
@@ -128,7 +128,8 @@ impl Inner {
                 continue;
             }
 
-            let (name, labels) = key_to_parts(&key, Some(&self.global_labels));
+            let name = sanitize_metric_name(key.name());
+            let labels = LabelSet::from_key_and_global(&key, &self.global_labels);
             if filter.as_ref().map(|f| f(&name)).unwrap_or(true) {
                 let value = counter.get_inner().load(Ordering::Acquire);
                 let entry = counters
@@ -142,7 +143,7 @@ impl Inner {
         counters
     }
 
-    fn gauges<F>(&self, filter: Option<F>) -> HashMap<String, HashMap<Vec<String>, f64>>
+    fn gauges<F>(&self, filter: Option<F>) -> HashMap<String, HashMap<LabelSet, f64>>
     where
         F: Fn(&str) -> bool,
     {
@@ -154,7 +155,8 @@ impl Inner {
                 continue;
             }
 
-            let (name, labels) = key_to_parts(&key, Some(&self.global_labels));
+            let name = sanitize_metric_name(key.name());
+            let labels = LabelSet::from_key_and_global(&key, &self.global_labels);
             if filter.as_ref().map(|f| f(&name)).unwrap_or(true) {
                 let value = f64::from_bits(gauge.get_inner().load(Ordering::Acquire));
                 let entry = gauges
@@ -171,7 +173,7 @@ impl Inner {
     fn distributions<F>(
         &self,
         filter: Option<F>,
-    ) -> HashMap<String, IndexMap<Vec<String>, Distribution>>
+    ) -> HashMap<String, IndexMap<LabelSet, Distribution>>
     where
         F: Fn(&str) -> bool,
     {
@@ -188,7 +190,8 @@ impl Inner {
                 // Since we store aggregated distributions directly, when we're told that a metric
                 // is not recent enough and should be/was deleted from the registry, we also need to
                 // delete it on our side as well.
-                let (name, labels) = key_to_parts(&key, Some(&self.global_labels));
+                let name = sanitize_metric_name(key.name());
+                let labels = LabelSet::from_key_and_global(&key, &self.global_labels);
                 let mut wg = self
                     .distributions
                     .write()
@@ -238,7 +241,8 @@ impl Inner {
     fn drain_histograms_to_distributions(&self) {
         let histogram_handles = self.registry.get_histogram_handles();
         for (key, histogram) in histogram_handles {
-            let (name, labels) = key_to_parts(&key, Some(&self.global_labels));
+            let name = sanitize_metric_name(key.name());
+            let labels = LabelSet::from_key_and_global(&key, &self.global_labels);
 
             let mut wg = self
                 .distributions
@@ -271,10 +275,10 @@ impl Inner {
 
         for (name, mut by_labels) in counters.drain() {
             if let Some(desc) = descriptions.get(name.as_str()) {
-                write_help_line(&mut output, name.as_str(), desc);
+                write_help_line(&mut output, name.as_str(), None, None, desc);
             }
 
-            write_type_line(&mut output, name.as_str(), "counter");
+            write_type_line(&mut output, name.as_str(), None, None, "counter");
             for (labels, value) in by_labels.drain() {
                 write_metric_line::<&str, u64>(
                     &mut output,
@@ -291,10 +295,10 @@ impl Inner {
 
         for (name, mut by_labels) in gauges.drain() {
             if let Some(desc) = descriptions.get(name.as_str()) {
-                write_help_line(&mut output, name.as_str(), desc);
+                write_help_line(&mut output, name.as_str(), None, None, desc);
             }
 
-            write_type_line(&mut output, name.as_str(), "gauge");
+            write_type_line(&mut output, name.as_str(), None, None, "gauge");
             for (labels, value) in by_labels.drain() {
                 write_metric_line::<&str, f64>(
                     &mut output,
@@ -311,15 +315,16 @@ impl Inner {
 
         for (name, mut by_labels) in distributions.drain() {
             if let Some(desc) = descriptions.get(name.as_str()) {
-                write_help_line(&mut output, name.as_str(), desc);
+                write_help_line(&mut output, name.as_str(), None, None, desc);
             }
 
             let distribution_type = self
                 .distribution_builder
                 .get_distribution_type(name.as_str());
-            write_type_line(&mut output, name.as_str(), distribution_type);
+            write_type_line(&mut output, name.as_str(), None, None, distribution_type);
             for (labels, distribution) in by_labels.drain(..) {
                 let (sum, count) = match distribution {
+                    Distribution::NativeHistogram(_) => continue,
                     Distribution::Summary(summary, quantiles, sum) => {
                         let snapshot = summary.snapshot(Instant::now());
                         for quantile in quantiles.iter() {
@@ -501,7 +506,7 @@ impl PrometheusHandle {
 
     /// Returns a snapshot of the counters held by [`Self`]. Optionally filters the returned
     /// counters by `filter`.
-    pub fn counters<F>(&self, filter: Option<F>) -> HashMap<String, HashMap<Vec<String>, u64>>
+    pub fn counters<F>(&self, filter: Option<F>) -> HashMap<String, HashMap<LabelSet, u64>>
     where
         F: Fn(&str) -> bool,
     {
@@ -510,7 +515,7 @@ impl PrometheusHandle {
 
     /// Returns a snapshot of the gauges held by [`Self`]. Optionally filters the returned gauges
     /// by `filter`.
-    pub fn gauges<F>(&self, filter: Option<F>) -> HashMap<String, HashMap<Vec<String>, f64>>
+    pub fn gauges<F>(&self, filter: Option<F>) -> HashMap<String, HashMap<LabelSet, f64>>
     where
         F: Fn(&str) -> bool,
     {
@@ -522,7 +527,7 @@ impl PrometheusHandle {
     pub fn distributions<F>(
         &self,
         filter: Option<F>,
-    ) -> HashMap<String, IndexMap<Vec<String>, Distribution>>
+    ) -> HashMap<String, IndexMap<LabelSet, Distribution>>
     where
         F: Fn(&str) -> bool,
     {
@@ -672,7 +677,7 @@ impl PrometheusBuilder {
             registry: Registry::new(GenerationalStorage::new(AtomicStorage)),
             recency: Recency::new(quanta::Clock::new(), MetricKindMask::NONE, None),
             distributions: RwLock::new(HashMap::new()),
-            distribution_builder: DistributionBuilder::new(quantiles, None, None, None, None),
+            distribution_builder: DistributionBuilder::new(quantiles, None, None, None, None, None),
             descriptions: RwLock::new(HashMap::new()),
             global_labels: self.global_labels.unwrap_or_default(),
         });

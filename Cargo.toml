@@ -168,7 +168,7 @@ machine-uid = "0.5"
 moka = { version = "0.12", features = ["future"] }
 md5 = "0.8.0"
 metrics = "0.24.0"
-metrics-exporter-prometheus = { version = "0.17.2", default-features = false }
+metrics-exporter-prometheus = { version = "0.18.1", default-features = false }
 metrics-util = "0.20.0"
 mysql_common = "0.35"
 native-tls = "0.2.11"

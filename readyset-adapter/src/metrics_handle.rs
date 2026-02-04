@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 use metrics::SharedString;
-use metrics_exporter_prometheus::Distribution;
 use metrics_exporter_prometheus::formatting::{sanitize_label_key, sanitize_label_value};
+use metrics_exporter_prometheus::{Distribution, LabelSet};
 use readyset_client_metrics::DatabaseType;
 use readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_COUNT;
 use readyset_server::PrometheusHandle;
@@ -32,7 +32,7 @@ impl MetricsHandle {
     pub fn counters<F: Fn(&str) -> bool>(
         &self,
         filter: Option<F>,
-    ) -> HashMap<String, HashMap<Vec<String>, u64>> {
+    ) -> HashMap<String, HashMap<LabelSet, u64>> {
         self.inner.counters(filter)
     }
 
@@ -40,7 +40,7 @@ impl MetricsHandle {
     pub fn gauges<F: Fn(&str) -> bool>(
         &self,
         filter: Option<F>,
-    ) -> HashMap<String, HashMap<Vec<String>, f64>> {
+    ) -> HashMap<String, HashMap<LabelSet, f64>> {
         self.inner.gauges(filter)
     }
 
@@ -49,7 +49,7 @@ impl MetricsHandle {
     pub fn histograms<F: Fn(&str) -> bool>(
         &self,
         filter: Option<F>,
-    ) -> HashMap<String, IndexMap<Vec<String>, Distribution>> {
+    ) -> HashMap<String, IndexMap<LabelSet, Distribution>> {
         self.inner.distributions(filter)
     }
 
@@ -69,7 +69,7 @@ impl MetricsHandle {
                 h.into_iter()
                     .filter_map(|(k, count)| {
                         let mut query_id_tag = None;
-                        for tag in k {
+                        for tag in k.to_strings() {
                             if tag.starts_with("query_id") {
                                 query_id_tag = Some(tag);
                             } else if tag.starts_with("database_type") && !tag.contains(&db_type) {
