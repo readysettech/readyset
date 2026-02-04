@@ -1,3 +1,4 @@
+<!-- CLA test: please ignore -->
 <p align="center">
   <img src="https://readyset.io/images/Brand_Logo_Dark.svg" width='80%'>
 </p>
