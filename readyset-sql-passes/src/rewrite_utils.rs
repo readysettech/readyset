@@ -950,6 +950,38 @@ pub(crate) fn add_expression_to_join_constraint(
 }
 
 /// Collect all top-level expressions (SELECT items, JOIN ON, WHERE, HAVING, GROUP BY,
+/// ORDER BY) for immutable analysis.
+pub(crate) fn outermost_expression(stmt: &SelectStatement) -> impl Iterator<Item = &Expr> {
+    stmt.fields
+        .iter()
+        .filter_map(|fde| match fde {
+            FieldDefinitionExpr::Expr { expr, .. } => Some(expr),
+            FieldDefinitionExpr::All | FieldDefinitionExpr::AllInTable(_) => None,
+        })
+        .chain(stmt.join.iter().filter_map(|join| match &join.constraint {
+            JoinConstraint::On(expr) => Some(expr),
+            JoinConstraint::Using(_) => None,
+            JoinConstraint::Empty => None,
+        }))
+        .chain(&stmt.where_clause)
+        .chain(&stmt.having)
+        .chain(stmt.group_by.iter().flat_map(|gb| {
+            gb.fields.iter().filter_map(|f| match f {
+                FieldReference::Expr(expr) => Some(expr),
+                _ => None,
+            })
+        }))
+        .chain(stmt.order.iter().flat_map(|oc| {
+            oc.order_by
+                .iter()
+                .filter_map(|OrderBy { field, .. }| match field {
+                    FieldReference::Expr(expr) => Some(expr),
+                    _ => None,
+                })
+        }))
+}
+
+/// Collect all top-level expressions (SELECT items, JOIN ON, WHERE, HAVING, GROUP BY,
 /// ORDER BY) for mutation/analysis.
 pub(crate) fn outermost_expression_mut(
     stmt: &mut SelectStatement,

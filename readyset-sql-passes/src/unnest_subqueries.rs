@@ -1215,7 +1215,7 @@ fn is_supported_scalar_comparison_against_subquery(
 // EXISTS, NOT EXISTS, IN, NOT IN, SCALAR
 // **NOTE**: This function just checks on the input expression shape,
 // w/o cloning or deeper analysis, hence cheap to execute.
-fn is_supported_subquery_predicate(expr: &Expr) -> bool {
+pub(crate) fn is_supported_subquery_predicate(expr: &Expr) -> bool {
     match expr {
         Expr::UnaryOp {
             op: UnaryOperator::Not,
