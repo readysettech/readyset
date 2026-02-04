@@ -41,6 +41,21 @@ fn caches(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
     }
 }
 
+fn shallow_cache_entries(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("shallow")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("cache")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("entries")(i)?;
+        let (i, query_id) = opt(preceded(whitespace1, where_query_id(dialect)))(i)?;
+        let (i, limit) = opt(preceded(whitespace1, limit(dialect)))(i)?;
+        Ok((i, ShowStatement::ShallowCacheEntries { query_id, limit }))
+    }
+}
+
 pub fn limit(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], u64> {
     move |i| {
         let (i, _) = tag_no_case("limit")(i)?;
@@ -152,6 +167,8 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
         let (i, _) = tag_no_case("show")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, statement) = alt((
+            // shallow_cache_entries must come before caches to parse "SHOW SHALLOW CACHE ENTRIES" correctly
+            shallow_cache_entries(dialect),
             caches(dialect),
             proxied_queries(dialect),
             show_rls(dialect),
@@ -544,5 +561,91 @@ mod tests {
             assert_eq!(res1, ShowStatement::ReplayPaths);
             assert_eq!(res2, ShowStatement::ReplayPaths);
         }
+    }
+
+    #[test]
+    fn show_shallow_cache_entries() {
+        for &dialect in Dialect::ALL {
+            let res = show(dialect)(LocatedSpan::new(b"SHOW SHALLOW CACHE ENTRIES"))
+                .unwrap()
+                .1;
+            assert_eq!(
+                res,
+                ShowStatement::ShallowCacheEntries {
+                    query_id: None,
+                    limit: None
+                }
+            );
+
+            let res = show(dialect)(LocatedSpan::new(b"SHOW\tSHALLOW\tCACHE\tENTRIES"))
+                .unwrap()
+                .1;
+            assert_eq!(
+                res,
+                ShowStatement::ShallowCacheEntries {
+                    query_id: None,
+                    limit: None
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn show_shallow_cache_entries_where() {
+        for &dialect in Dialect::ALL {
+            let res = show(dialect)(LocatedSpan::new(
+                b"SHOW SHALLOW CACHE ENTRIES WHERE query_id = 'q_abc123'",
+            ))
+            .unwrap()
+            .1;
+            assert_eq!(
+                res,
+                ShowStatement::ShallowCacheEntries {
+                    query_id: Some("q_abc123".to_string()),
+                    limit: None
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn show_shallow_cache_entries_limit() {
+        for &dialect in Dialect::ALL {
+            let res = show(dialect)(LocatedSpan::new(b"SHOW SHALLOW CACHE ENTRIES LIMIT 100"))
+                .unwrap()
+                .1;
+            assert_eq!(
+                res,
+                ShowStatement::ShallowCacheEntries {
+                    query_id: None,
+                    limit: Some(100)
+                }
+            );
+
+            let res = show(dialect)(LocatedSpan::new(
+                b"SHOW SHALLOW CACHE ENTRIES WHERE query_id = 'q_abc123' LIMIT 50",
+            ))
+            .unwrap()
+            .1;
+            assert_eq!(
+                res,
+                ShowStatement::ShallowCacheEntries {
+                    query_id: Some("q_abc123".to_string()),
+                    limit: Some(50)
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn show_shallow_caches_still_works() {
+        // Ensure that SHOW SHALLOW CACHES still parses correctly after adding SHOW SHALLOW CACHE ENTRIES
+        let res = show(Dialect::MySQL)(LocatedSpan::new(b"SHOW SHALLOW CACHES"))
+            .unwrap()
+            .1;
+        assert_eq!(
+            res,
+            ShowStatement::CachedQueries(Some(CacheType::Shallow), None)
+        );
     }
 }

@@ -251,3 +251,109 @@ async fn scheduled_refresh_starts_immediately() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[test]
+#[tags(serial, slow, mysql_upstream)]
+async fn show_shallow_cache_entries() {
+    init_test_logging();
+
+    let test_name = derive_test_name!();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+
+    upstream
+        .query_drop("CREATE TABLE users (id INT, name TEXT)")
+        .await
+        .unwrap();
+    upstream
+        .query_drop("INSERT INTO users VALUES (1, 'alice'), (2, 'bob')")
+        .await
+        .unwrap();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    // Create a shallow cache
+    readyset
+        .query_drop(
+            "CREATE SHALLOW CACHE
+               POLICY TTL 60 SECONDS
+               REFRESH EVERY 30 SECONDS
+               FROM SELECT id, name FROM users WHERE id = ?",
+        )
+        .await
+        .unwrap();
+
+    // Execute query to populate cache entries
+    readyset
+        .query_drop("SELECT id, name FROM users WHERE id = 1")
+        .await
+        .unwrap();
+    readyset
+        .query_drop("SELECT id, name FROM users WHERE id = 2")
+        .await
+        .unwrap();
+
+    // Test SHOW SHALLOW CACHE ENTRIES returns all entries
+    let entries: Vec<(String, String, u64, u64, u64)> =
+        readyset.query("SHOW SHALLOW CACHE ENTRIES").await.unwrap();
+    assert_eq!(entries.len(), 2, "Should have 2 cache entries");
+
+    // Get the query_id from one of the entries
+    let query_id = &entries[0].0;
+
+    // Test SHOW SHALLOW CACHE ENTRIES WHERE query_id = '...'
+    let filtered: Vec<(String, String, u64, u64, u64)> = readyset
+        .query(format!(
+            "SHOW SHALLOW CACHE ENTRIES WHERE query_id = '{query_id}'"
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        filtered.len(),
+        2,
+        "Filtered by query_id should return both entries for this cache"
+    );
+
+    // Test SHOW SHALLOW CACHE ENTRIES LIMIT 1
+    let limited: Vec<(String, String, u64, u64, u64)> = readyset
+        .query("SHOW SHALLOW CACHE ENTRIES LIMIT 1")
+        .await
+        .unwrap();
+    assert_eq!(limited.len(), 1, "LIMIT 1 should return only 1 entry");
+
+    // Test SHOW SHALLOW CACHE ENTRIES WHERE query_id = '...' LIMIT 1
+    let filtered_limited: Vec<(String, String, u64, u64, u64)> = readyset
+        .query(format!(
+            "SHOW SHALLOW CACHE ENTRIES WHERE query_id = '{query_id}' LIMIT 1"
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        filtered_limited.len(),
+        1,
+        "Combined WHERE and LIMIT should return 1 entry"
+    );
+
+    // Test filtering with non-existent query_id returns empty
+    let non_existent: Vec<(String, String, u64, u64, u64)> = readyset
+        .query("SHOW SHALLOW CACHE ENTRIES WHERE query_id = 'q_nonexistent'")
+        .await
+        .unwrap();
+    assert!(
+        non_existent.is_empty(),
+        "Non-existent query_id should return empty results"
+    );
+
+    shutdown_tx.shutdown().await;
+}

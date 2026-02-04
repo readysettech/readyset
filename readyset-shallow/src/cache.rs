@@ -37,11 +37,11 @@ fn current_timestamp_ms() -> u64 {
 pub(crate) struct CacheValues<V> {
     values: Arc<Vec<V>>,
     metadata: Option<Arc<QueryMetadata>>,
-    accessed_ms: AtomicU64,
-    refreshed_ms: u64,
+    pub(crate) accessed_ms: AtomicU64,
+    pub(crate) refreshed_ms: u64,
     refreshing: AtomicBool,
     ttl_ms: Option<u64>,
-    execution_ms: u64,
+    pub(crate) execution_ms: u64,
 }
 
 #[derive(Debug, Default)]
@@ -166,6 +166,23 @@ pub struct CacheInfo {
     pub ddl_req: CacheDDLRequest,
     pub always: bool,
     pub schedule: bool,
+}
+
+/// Information about a specific cached entry (parameter set) within a shallow cache.
+///
+/// Used by `SHOW SHALLOW CACHE ENTRIES` to display cache entry metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheEntryInfo {
+    /// The query_id of the cache this entry belongs to.
+    pub query_id: Option<QueryId>,
+    /// A hash of the entry's parameters, serving as a unique identifier within the cache.
+    pub entry_id: u64,
+    /// Last access time in milliseconds since UNIX_EPOCH.
+    pub last_accessed_ms: u64,
+    /// When this entry was last refreshed (data inserted), in milliseconds since UNIX_EPOCH.
+    pub last_refreshed_ms: u64,
+    /// How long the last refresh query took to execute, in milliseconds.
+    pub refresh_time_ms: u64,
 }
 
 impl From<CacheInfo> for CreateCacheStatement {

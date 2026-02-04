@@ -204,6 +204,7 @@ enum ReadysetKeyword {
     DEEP,
     DOMAINS,
     ENTER,
+    ENTRIES,
     EVICTION,
     EXIT,
     MAINTENANCE,
@@ -235,6 +236,7 @@ impl ReadysetKeyword {
             Self::DEEP => "DEEP",
             Self::DOMAINS => "DOMAINS",
             Self::ENTER => "ENTER",
+            Self::ENTRIES => "ENTRIES",
             Self::EVICTION => "EVICTION",
             Self::EXIT => "EXIT",
             Self::MAINTENANCE => "MAINTENANCE",
@@ -834,6 +836,36 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
         parse_show_caches(parser, None)
     } else if parse_readyset_keywords(parser, &[ReadysetKeyword::DEEP, ReadysetKeyword::CACHES]) {
         parse_show_caches(parser, Some(CacheType::Deep))
+    } else if parse_readyset_keywords(
+        parser,
+        &[
+            ReadysetKeyword::SHALLOW,
+            ReadysetKeyword::Standard(Keyword::CACHE),
+            ReadysetKeyword::ENTRIES,
+        ],
+    ) {
+        let query_id = if parser.parse_keyword(Keyword::WHERE) {
+            let lhs = parser.parse_identifier()?;
+            if lhs.value != "query_id" {
+                return Err(ReadysetParsingError::ReadysetParsingError(format!(
+                    "expected 'query_id' after WHERE, found '{}'",
+                    lhs.value
+                )));
+            }
+            parser.expect_token(&Token::Eq)?;
+            // Use parse_literal_string to match nom-sql's string_literal() behavior
+            Some(parser.parse_literal_string()?)
+        } else {
+            None
+        };
+        let limit = if parser.parse_keyword(Keyword::LIMIT) {
+            Some(parser.parse_literal_uint()?)
+        } else {
+            None
+        };
+        Ok(SqlQuery::Show(
+            readyset_sql::ast::ShowStatement::ShallowCacheEntries { query_id, limit },
+        ))
     } else if parse_readyset_keywords(parser, &[ReadysetKeyword::SHALLOW, ReadysetKeyword::CACHES])
     {
         parse_show_caches(parser, Some(CacheType::Shallow))

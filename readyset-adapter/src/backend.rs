@@ -3171,6 +3171,51 @@ where
         ))
     }
 
+    /// Responds to a `SHOW SHALLOW CACHE ENTRIES` query
+    async fn show_shallow_entries(
+        &self,
+        query_id: Option<&str>,
+        limit: Option<u64>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let query_id = query_id.map(|q| q.parse()).transpose()?;
+        let limit = limit.map(|l| l as usize);
+        let shallow = Arc::clone(&self.shallow);
+
+        let rows: Vec<Vec<DfValue>> = tokio::task::spawn_blocking(move || {
+            let entries = shallow.list_entries(query_id, limit);
+            entries
+                .into_iter()
+                .map(|entry| {
+                    vec![
+                        entry
+                            .query_id
+                            .map(|id| id.to_string().into())
+                            .unwrap_or(DfValue::None),
+                        DfValue::from(format!("{:016x}", entry.entry_id)),
+                        time_or_null(Some(entry.last_accessed_ms)).into(),
+                        time_or_null(Some(entry.last_refreshed_ms)).into(),
+                        DfValue::from(entry.refresh_time_ms as i64),
+                    ]
+                })
+                .collect()
+        })
+        .await
+        .map_err(|e| internal_err!("spawn_blocking failed: {}", e))?;
+
+        let select_schema = create_dummy_schema!(
+            "query id",
+            "entry id",
+            "last accessed",
+            "last refreshed",
+            "refresh time ms"
+        );
+
+        Ok(noria_connector::QueryResult::from_owned(
+            select_schema,
+            vec![Results::new(rows)],
+        ))
+    }
+
     fn readyset_adapter_status(&self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let mut statuses = match self.metrics_handle.as_ref() {
             Some(handle) => handle.readyset_status(),
@@ -3445,6 +3490,9 @@ where
                 }
 
                 self.show_caches(*cache_type, query_id.as_deref()).await
+            }
+            SqlQuery::Show(ShowStatement::ShallowCacheEntries { query_id, limit }) => {
+                self.show_shallow_entries(query_id.as_deref(), *limit).await
             }
             SqlQuery::Show(ShowStatement::ReadySetStatus) => Ok(self
                 .status_reporter

@@ -7,7 +7,7 @@ mod manager;
 
 use readyset_util::SizeOf;
 
-pub use cache::CacheInfo;
+pub use cache::{CacheEntryInfo, CacheInfo};
 pub use manager::{CacheInsertGuard, CacheManager, CacheResult, RequestRefresh};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

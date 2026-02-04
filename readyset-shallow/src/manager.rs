@@ -2,6 +2,7 @@ use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use metrics::counter;
@@ -18,8 +19,9 @@ use readyset_errors::{ReadySetError, ReadySetResult, internal};
 use readyset_sql::ast::{Relation, ShallowCacheQuery, SqlIdentifier};
 use readyset_util::SizeOf;
 
-use crate::cache::{Cache, CacheExpiration, CacheInfo, InnerCache};
+use crate::cache::{Cache, CacheEntry, CacheEntryInfo, CacheExpiration, CacheInfo, InnerCache};
 use crate::{EvictionPolicy, QueryMetadata};
+use readyset_util::hash::hash;
 
 pub type RequestRefresh<K, V> = Arc<dyn Fn(CacheInsertGuard<K, V>) + Send + Sync>;
 
@@ -245,6 +247,66 @@ where
             .collect()
     }
 
+    /// List all entries across shallow caches.
+    ///
+    /// Iterates the shared inner cache once (O(N) where N is total entries) instead of
+    /// iterating per-cache which would be O(M*N) where M is the number of caches.
+    ///
+    /// Optionally, `query_id` filters results to a specific cache.
+    /// Optionally, `limit` caps the number of results returned.
+    pub fn list_entries(
+        &self,
+        query_id: Option<QueryId>,
+        limit: Option<usize>,
+    ) -> Vec<CacheEntryInfo> {
+        // If filtering by query_id, resolve the cache_id directly via the query_ids map
+        let filter_cache_id: Option<u64> = match query_id.as_ref() {
+            Some(qid) => {
+                let guard = self.query_ids.pin();
+                match guard.get(qid) {
+                    Some(id) => Some(*id),
+                    None => return Vec::new(),
+                }
+            }
+            None => None,
+        };
+
+        let caches = self.caches.pin();
+
+        let iter = self.inner.iter().filter_map(|(key, entry)| {
+            let cache_id = key.0;
+
+            if let Some(target_id) = filter_cache_id
+                && cache_id != target_id
+            {
+                return None;
+            }
+
+            // Look up the query_id from the Cache struct itself
+            let cache = caches.get(&cache_id)?;
+            let cache_query_id = *cache.query_id();
+
+            match entry.as_ref() {
+                CacheEntry::Present(values) => {
+                    let entry_id = hash(&key.1);
+                    Some(CacheEntryInfo {
+                        query_id: cache_query_id,
+                        entry_id,
+                        last_accessed_ms: values.accessed_ms.load(Ordering::Relaxed),
+                        last_refreshed_ms: values.refreshed_ms,
+                        refresh_time_ms: values.execution_ms,
+                    })
+                }
+                CacheEntry::Loading(_) => None,
+            }
+        });
+
+        match limit {
+            Some(n) => iter.take(n).collect(),
+            None => iter.collect(),
+        }
+    }
+
     pub fn get(
         &self,
         name: Option<&Relation>,
@@ -448,5 +510,310 @@ where
                 cache.insert(key, results, metadata, execution).await;
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use readyset_client::consensus::CacheDDLRequest;
+    use readyset_client::query::QueryId;
+    use readyset_sql::ast::ShallowCacheQuery;
+
+    use super::*;
+    use crate::EvictionPolicy;
+
+    fn test_ddl_req() -> CacheDDLRequest {
+        CacheDDLRequest {
+            unparsed_stmt: "CREATE SHALLOW CACHE test AS SELECT 1".to_string(),
+            schema_search_path: vec![],
+            dialect: readyset_sql::Dialect::PostgreSQL.into(),
+        }
+    }
+
+    fn default_policy() -> EvictionPolicy {
+        EvictionPolicy::Ttl {
+            ttl: Duration::from_secs(60),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_list_entries_empty_manager() {
+        let manager: CacheManager<String, String> = CacheManager::new(None);
+        let entries = manager.list_entries(None, None);
+        assert!(entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_entries_returns_all_entries() {
+        let manager: CacheManager<Vec<&str>, Vec<&str>> = CacheManager::new(None);
+
+        let query_id_1 = QueryId::from_unparsed_select("SELECT 1");
+        let query_id_2 = QueryId::from_unparsed_select("SELECT 2");
+
+        // Create two caches
+        manager
+            .create_cache(
+                None,
+                Some(query_id_1),
+                ShallowCacheQuery::default(),
+                vec![],
+                default_policy(),
+                test_ddl_req(),
+                false,
+                None,
+            )
+            .unwrap();
+
+        manager
+            .create_cache(
+                None,
+                Some(query_id_2),
+                ShallowCacheQuery::default(),
+                vec![],
+                default_policy(),
+                test_ddl_req(),
+                false,
+                None,
+            )
+            .unwrap();
+
+        // Insert entries into both caches
+        let cache_1 = manager.get(None, Some(&query_id_1)).unwrap();
+        let cache_2 = manager.get(None, Some(&query_id_2)).unwrap();
+
+        // Mark intent and insert for cache 1
+        let _ = cache_1.get(vec!["key1"]).await;
+        cache_1
+            .insert(
+                vec!["key1"],
+                vec![vec!["value1"]],
+                crate::QueryMetadata::Test,
+                Duration::ZERO,
+            )
+            .await;
+
+        // Mark intent and insert for cache 2
+        let _ = cache_2.get(vec!["key2"]).await;
+        cache_2
+            .insert(
+                vec!["key2"],
+                vec![vec!["value2"]],
+                crate::QueryMetadata::Test,
+                Duration::ZERO,
+            )
+            .await;
+
+        // List all entries without filter
+        let entries = manager.list_entries(None, None);
+        assert_eq!(entries.len(), 2);
+
+        // Verify both query_ids are present
+        let query_ids: Vec<_> = entries.iter().filter_map(|e| e.query_id).collect();
+        assert!(query_ids.contains(&query_id_1));
+        assert!(query_ids.contains(&query_id_2));
+    }
+
+    #[tokio::test]
+    async fn test_list_entries_filters_by_query_id() {
+        let manager: CacheManager<Vec<&str>, Vec<&str>> = CacheManager::new(None);
+
+        let query_id_1 = QueryId::from_unparsed_select("SELECT 1");
+        let query_id_2 = QueryId::from_unparsed_select("SELECT 2");
+
+        // Create two caches
+        manager
+            .create_cache(
+                None,
+                Some(query_id_1),
+                ShallowCacheQuery::default(),
+                vec![],
+                default_policy(),
+                test_ddl_req(),
+                false,
+                None,
+            )
+            .unwrap();
+
+        manager
+            .create_cache(
+                None,
+                Some(query_id_2),
+                ShallowCacheQuery::default(),
+                vec![],
+                default_policy(),
+                test_ddl_req(),
+                false,
+                None,
+            )
+            .unwrap();
+
+        // Insert entries into both caches
+        let cache_1 = manager.get(None, Some(&query_id_1)).unwrap();
+        let cache_2 = manager.get(None, Some(&query_id_2)).unwrap();
+
+        let _ = cache_1.get(vec!["key1"]).await;
+        cache_1
+            .insert(
+                vec!["key1"],
+                vec![vec!["value1"]],
+                crate::QueryMetadata::Test,
+                Duration::ZERO,
+            )
+            .await;
+
+        let _ = cache_2.get(vec!["key2"]).await;
+        cache_2
+            .insert(
+                vec!["key2"],
+                vec![vec!["value2"]],
+                crate::QueryMetadata::Test,
+                Duration::ZERO,
+            )
+            .await;
+
+        // Filter by query_id_1
+        let entries = manager.list_entries(Some(query_id_1), None);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].query_id, Some(query_id_1));
+
+        // Filter by query_id_2
+        let entries = manager.list_entries(Some(query_id_2), None);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].query_id, Some(query_id_2));
+    }
+
+    #[tokio::test]
+    async fn test_list_entries_nonexistent_query_id() {
+        let manager: CacheManager<Vec<&str>, Vec<&str>> = CacheManager::new(None);
+
+        let query_id_1 = QueryId::from_unparsed_select("SELECT 1");
+        let nonexistent = QueryId::from_unparsed_select("SELECT nonexistent");
+
+        // Create one cache
+        manager
+            .create_cache(
+                None,
+                Some(query_id_1),
+                ShallowCacheQuery::default(),
+                vec![],
+                default_policy(),
+                test_ddl_req(),
+                false,
+                None,
+            )
+            .unwrap();
+
+        let cache = manager.get(None, Some(&query_id_1)).unwrap();
+        let _ = cache.get(vec!["key"]).await;
+        cache
+            .insert(
+                vec!["key"],
+                vec![vec!["value"]],
+                crate::QueryMetadata::Test,
+                Duration::ZERO,
+            )
+            .await;
+
+        // Filter by non-existent query_id should return empty
+        let entries = manager.list_entries(Some(nonexistent), None);
+        assert!(entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_entries_respects_limit() {
+        let manager: CacheManager<String, String> = CacheManager::new(None);
+
+        let query_id = QueryId::from_unparsed_select("SELECT 1");
+
+        manager
+            .create_cache(
+                None,
+                Some(query_id),
+                ShallowCacheQuery::default(),
+                vec![],
+                default_policy(),
+                test_ddl_req(),
+                false,
+                None,
+            )
+            .unwrap();
+
+        let cache = manager.get(None, Some(&query_id)).unwrap();
+
+        // Insert multiple entries with different keys
+        for i in 0..5 {
+            let key = format!("key{}", i);
+            let _ = cache.get(key.clone()).await;
+            cache
+                .insert(
+                    key,
+                    vec!["value".to_string()],
+                    crate::QueryMetadata::Test,
+                    Duration::ZERO,
+                )
+                .await;
+        }
+
+        // Without limit, should return all 5
+        let entries = manager.list_entries(None, None);
+        assert_eq!(entries.len(), 5);
+
+        // With limit 2, should return only 2
+        let entries = manager.list_entries(None, Some(2));
+        assert_eq!(entries.len(), 2);
+
+        // With limit 0, should return empty
+        let entries = manager.list_entries(None, Some(0));
+        assert!(entries.is_empty());
+
+        // With limit larger than count, should return all
+        let entries = manager.list_entries(None, Some(100));
+        assert_eq!(entries.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_list_entries_skips_loading_entries() {
+        let manager: CacheManager<Vec<&str>, Vec<&str>> = CacheManager::new(None);
+
+        let query_id = QueryId::from_unparsed_select("SELECT 1");
+
+        manager
+            .create_cache(
+                None,
+                Some(query_id),
+                ShallowCacheQuery::default(),
+                vec![],
+                default_policy(),
+                test_ddl_req(),
+                false,
+                None,
+            )
+            .unwrap();
+
+        let cache = manager.get(None, Some(&query_id)).unwrap();
+
+        // Create a Loading entry by calling get without inserting
+        let _ = cache.get(vec!["loading_key"]).await;
+
+        // The Loading entry should not appear in list_entries
+        let entries = manager.list_entries(None, None);
+        assert!(entries.is_empty());
+
+        // Now insert a real entry
+        let _ = cache.get(vec!["real_key"]).await;
+        cache
+            .insert(
+                vec!["real_key"],
+                vec![vec!["value"]],
+                crate::QueryMetadata::Test,
+                Duration::ZERO,
+            )
+            .await;
+
+        // Should only see the real entry
+        let entries = manager.list_entries(None, None);
+        assert_eq!(entries.len(), 1);
     }
 }

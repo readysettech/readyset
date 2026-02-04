@@ -27,6 +27,11 @@ pub enum ShowStatement {
     Databases,
     Rls(Option<Relation>),
     ReplayPaths,
+    /// SHOW SHALLOW CACHE ENTRIES [WHERE query_id = 'xxx'] [LIMIT n]
+    ShallowCacheEntries {
+        query_id: Option<String>,
+        limit: Option<u64>,
+    },
 }
 
 impl DialectDisplay for ShowStatement {
@@ -81,6 +86,16 @@ impl DialectDisplay for ShowStatement {
                     }
                 }
                 Self::ReplayPaths => write!(f, "REPLAY PATHS"),
+                Self::ShallowCacheEntries { query_id, limit } => {
+                    write!(f, "SHALLOW CACHE ENTRIES")?;
+                    if let Some(query_id) = query_id {
+                        write!(f, " WHERE query_id = '{query_id}'")?;
+                    }
+                    if let Some(limit) = limit {
+                        write!(f, " LIMIT {limit}")?;
+                    }
+                    Ok(())
+                }
             }
         })
     }

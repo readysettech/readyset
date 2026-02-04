@@ -340,7 +340,8 @@ impl SqlQuery {
                 | ShowStatement::ReadySetTables(..)
                 | ShowStatement::Connections
                 | ShowStatement::Rls(_)
-                | ShowStatement::ReplayPaths => true,
+                | ShowStatement::ReplayPaths
+                | ShowStatement::ShallowCacheEntries { .. } => true,
             },
             SqlQuery::CreateRls(_) | SqlQuery::DropRls(_) => true,
             SqlQuery::CreateDatabase(_)

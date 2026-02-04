@@ -209,7 +209,8 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
             | ShowStatement::Connections
             | ShowStatement::Databases
             | ShowStatement::Rls(..)
-            | ShowStatement::ReplayPaths => {}
+            | ShowStatement::ReplayPaths
+            | ShowStatement::ShallowCacheEntries { .. } => {}
         }
         Ok(())
     }
