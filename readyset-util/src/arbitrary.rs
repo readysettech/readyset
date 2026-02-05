@@ -331,26 +331,38 @@ pub fn arbitrary_collatable_string() -> impl Strategy<Value = String> {
 
 /// Strategy for generating geometry `point` values for mysql.
 pub fn arbitrary_mysql_point() -> impl Strategy<Value = Vec<u8>> {
-    // Generate random point with optional endianness
     // Filter to finite f64 values only - NaN/Infinity are invalid
     let finite_f64 = any::<f64>().prop_filter("finite", |x| x.is_finite());
-    (finite_f64.clone(), finite_f64, any::<bool>()).prop_map(move |(x, y, little_endian)| {
-        // MySQL always requires an SRID
-        make_mysql_point_bytes(x, y, SRID_WGS84, little_endian)
-    })
+
+    // SRID 0: Cartesian — any finite coordinates are valid.
+    let srid_0 =
+        (finite_f64.clone(), finite_f64).prop_map(|(x, y)| make_mysql_point_bytes(x, y, 0, true));
+
+    // SRID 4326 (WGS 84): MySQL validates geographic bounds.
+    //   longitude (X) in (-180.0, 180.0]
+    //   latitude  (Y) in [-90.0, 90.0]
+    let srid_4326 = (-180.0f64..=180.0f64, -90.0f64..=90.0f64)
+        .prop_map(|(x, y)| make_mysql_point_bytes(x, y, SRID_WGS84, true));
+
+    prop_oneof![srid_0, srid_4326]
 }
 
 /// Strategy for generating geometry `point` values for postgresql.
 pub fn arbitrary_postgis_point() -> impl Strategy<Value = Vec<u8>> {
-    // Generate random point with optional SRID and endianness
     // Filter to finite f64 values only - NaN/Infinity are invalid in PostGIS
     let finite_f64 = any::<f64>().prop_filter("finite", |x| x.is_finite());
-    (finite_f64.clone(), finite_f64, any::<bool>(), any::<bool>()).prop_map(
-        move |(x, y, has_srid, little_endian)| {
-            let srid = if has_srid { Some(SRID_WGS84) } else { None };
-            make_postgis_point_bytes(x, y, srid, little_endian)
-        },
-    )
+
+    // No SRID: any finite coordinates are valid.
+    let no_srid = (finite_f64.clone(), finite_f64, any::<bool>())
+        .prop_map(|(x, y, le)| make_postgis_point_bytes(x, y, None, le));
+
+    // SRID 4326 (WGS 84): PostGIS validates geographic bounds.
+    //   longitude (X) in [-180.0, 180.0]
+    //   latitude  (Y) in [-90.0, 90.0]
+    let srid_4326 = (-180.0f64..=180.0f64, -90.0f64..=90.0f64, any::<bool>())
+        .prop_map(|(x, y, le)| make_postgis_point_bytes(x, y, Some(SRID_WGS84), le));
+
+    prop_oneof![no_srid, srid_4326]
 }
 
 /// Strategy for generating geometry `polygon` values for postgresql.
@@ -360,32 +372,74 @@ pub fn arbitrary_postgis_point() -> impl Strategy<Value = Vec<u8>> {
 pub fn arbitrary_postgis_polygon() -> impl Strategy<Value = Vec<u8>> {
     // Filter to finite f64 values only - NaN/Infinity are invalid in PostGIS
     let finite_f64 = any::<f64>().prop_filter("finite", |x| x.is_finite());
-    (
-        finite_f64.clone(), // cx - center x
-        finite_f64,         // cy - center y
+
+    // No SRID: any finite center coordinates are valid.
+    let no_srid = (
+        finite_f64.clone(), // cx
+        finite_f64,         // cy
         5.0f64..20.0f64,    // outer_radius
-        3usize..=5usize,    // num_sides (3=triangle, 4=quad, 5=pentagon)
+        3usize..=5usize,    // num_sides
         any::<bool>(),      // has_hole
-        any::<bool>(),      // has_srid
         any::<bool>(),      // little_endian
     )
-        .prop_map(
-            |(cx, cy, radius, num_sides, has_hole, has_srid, little_endian)| {
-                // Generate outer ring as regular polygon (counter-clockwise)
-                let outer = make_regular_polygon_ring(cx, cy, radius, num_sides, false);
+        .prop_map(|(cx, cy, radius, num_sides, has_hole, little_endian)| {
+            make_polygon(cx, cy, radius, num_sides, has_hole, None, little_endian)
+        });
 
-                // Optionally add a hole (clockwise, smaller radius to ensure containment)
-                let holes = if has_hole {
-                    let hole = make_regular_polygon_ring(cx, cy, radius * 0.3, num_sides, true);
-                    Some(vec![hole])
-                } else {
-                    None
-                };
+    // SRID 4326 (WGS 84): all vertices must stay within geographic bounds.
+    // Generate radius first, then constrain center so center +/- radius fits within
+    // longitude [-180, 180] and latitude [-90, 90].
+    let srid_4326 = (
+        5.0f64..20.0f64,
+        3usize..=5usize,
+        any::<bool>(),
+        any::<bool>(),
+    )
+        .prop_flat_map(|(radius, num_sides, has_hole, little_endian)| {
+            let max_cx = 180.0 - radius;
+            let max_cy = 90.0 - radius;
+            (
+                (-max_cx..=max_cx),
+                (-max_cy..=max_cy),
+                Just(radius),
+                Just(num_sides),
+                Just(has_hole),
+                Just(little_endian),
+            )
+        })
+        .prop_map(|(cx, cy, radius, num_sides, has_hole, little_endian)| {
+            make_polygon(
+                cx,
+                cy,
+                radius,
+                num_sides,
+                has_hole,
+                Some(SRID_WGS84),
+                little_endian,
+            )
+        });
 
-                let srid = if has_srid { Some(SRID_WGS84) } else { None };
-                make_postgis_polygon_bytes(Some(&outer), holes.as_deref(), srid, little_endian)
-            },
-        )
+    prop_oneof![no_srid, srid_4326]
+}
+
+/// Helper to build PostGIS polygon bytes from regular polygon parameters.
+fn make_polygon(
+    cx: f64,
+    cy: f64,
+    radius: f64,
+    num_sides: usize,
+    has_hole: bool,
+    srid: Option<u32>,
+    little_endian: bool,
+) -> Vec<u8> {
+    let outer = make_regular_polygon_ring(cx, cy, radius, num_sides, false);
+    let holes = if has_hole {
+        let hole = make_regular_polygon_ring(cx, cy, radius * 0.3, num_sides, true);
+        Some(vec![hole])
+    } else {
+        None
+    };
+    make_postgis_polygon_bytes(Some(&outer), holes.as_deref(), srid, little_endian)
 }
 
 /// Generate vertices for a regular polygon ring.
