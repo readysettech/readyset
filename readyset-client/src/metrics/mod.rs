@@ -456,6 +456,26 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | max_qps | The number of times the sampler has hit the max QPS |
     pub const QUERY_SAMPLER_MAX_QPS_HIT: &str = "readyset_query_sampler_max_qps_hit";
+
+    /// Counter: Incremented each time schema generation advances after a successful DDL migration.
+    pub const SCHEMA_CATALOG_GENERATION_INCREMENTED: &str =
+        "readyset_schema_catalog_generation_incremented";
+
+    /// Counter: Incremented each time a schema catalog update is broadcast via SSE.
+    pub const SCHEMA_CATALOG_UPDATE_SENT: &str = "readyset_schema_catalog_update_sent";
+
+    /// Counter: Incremented when serializing a schema catalog update fails.
+    pub const SCHEMA_CATALOG_UPDATE_SERIALIZATION_FAILED: &str =
+        "readyset_schema_catalog_update_serialization_failed";
+
+    /// Counter: Incremented when a CreateCache request has a stale schema generation.
+    pub const SCHEMA_GENERATION_MISMATCH: &str = "readyset_schema_generation_mismatch";
+
+    /// Counter: Incremented each time the SSE client connects to the controller successfully.
+    pub const CONTROLLER_EVENTS_CONNECTED: &str = "readyset_controller_events_connected";
+
+    /// Counter: Incremented each time the SSE stream closes or errors.
+    pub const CONTROLLER_EVENTS_DISCONNECTED: &str = "readyset_controller_events_disconnected";
 }
 
 /// A dumped metric's kind.

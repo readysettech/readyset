@@ -6026,6 +6026,7 @@ dependencies = [
  "fail",
  "failpoint-macros",
  "futures-util",
+ "metrics",
  "readyset-data",
  "readyset-errors",
  "readyset-sql",

@@ -325,9 +325,13 @@ impl ControllerEventsClient {
                         tracing::info!("Event stream closed permanently");
                         break;
                     }
+                    metrics::counter!(crate::metrics::recorded::CONTROLLER_EVENTS_DISCONNECTED)
+                        .increment(1);
                     tracing::info!("Event stream closed, attempting to reconnect");
                 }
                 Err(e) => {
+                    metrics::counter!(crate::metrics::recorded::CONTROLLER_EVENTS_DISCONNECTED)
+                        .increment(1);
                     tracing::warn!("Error connecting to event stream: {}, retrying", e);
                 }
             }
@@ -380,6 +384,7 @@ impl ControllerEventsClient {
             );
         }
 
+        metrics::counter!(crate::metrics::recorded::CONTROLLER_EVENTS_CONNECTED).increment(1);
         tracing::debug!("Connected to SSE endpoint successfully");
 
         // Process the event stream

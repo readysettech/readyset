@@ -15,6 +15,7 @@ readyset-util = { path = "../readyset-util" }
 serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+metrics = { workspace = true }
 failpoint-macros = { path = "../failpoint-macros" }
 futures-util = { workspace = true }
 base64 = { workspace = true }

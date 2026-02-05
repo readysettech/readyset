@@ -70,13 +70,16 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                                 initial_poll_pending = false;
                             }
                             Err(error) => {
+                                metrics::counter!(crate::metrics::SCHEMA_CATALOG_DECODE_FAILED).increment(1);
                                 warn!(%error, "Failed to decode schema catalog update during initial sync");
                             }
                         },
                         None => {
+                            metrics::counter!(crate::metrics::SCHEMA_CATALOG_STREAM_RECONNECTED).increment(1);
                             warn!("Schema catalog update stream ended during initial sync; re-subscribing");
                             if initial_poll_pending {
                                 if let Err(error) = self.poll().await {
+                                    metrics::counter!(crate::metrics::SCHEMA_CATALOG_POLL_FAILED).increment(1);
                                     warn!(%error, "Schema catalog fetch after stream end failed during initial sync");
                                 } else {
                                     initial_poll_pending = false;
@@ -88,6 +91,7 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                 }
                 res = async { self.poll().await }, if initial_poll_pending => {
                     if let Err(error) = res {
+                        metrics::counter!(crate::metrics::SCHEMA_CATALOG_POLL_FAILED).increment(1);
                         warn!(%error, "Schema Catalog Synchronizer initial sync fetch failed");
                     }
                     initial_poll_pending = false;
@@ -109,12 +113,15 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                                 self.apply_update(catalog).await;
                             }
                             Err(error) => {
+                                metrics::counter!(crate::metrics::SCHEMA_CATALOG_DECODE_FAILED).increment(1);
                                 warn!(%error, "Failed to decode schema catalog update");
                             }
                         },
                         None => {
+                            metrics::counter!(crate::metrics::SCHEMA_CATALOG_STREAM_RECONNECTED).increment(1);
                             warn!("Schema catalog update stream ended; re-subscribing");
                             if let Err(error) = self.poll().await {
+                                metrics::counter!(crate::metrics::SCHEMA_CATALOG_POLL_FAILED).increment(1);
                                 warn!(%error, "Schema catalog fetch after stream end failed");
                             }
                             updates_stream = self.controller.schema_catalog_update_stream();
@@ -150,6 +157,7 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
         if let Some(current) = current_generation
             && !current.precedes(catalog.generation)
         {
+            metrics::counter!(crate::metrics::SCHEMA_CATALOG_UNEXPECTED_GENERATION).increment(1);
             warn!(
                 new_generation = %catalog.generation,
                 current_generation = %current,
@@ -176,6 +184,9 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
 
         let mut cache = self.handle.inner.write().await;
         if cache.as_deref() != Some(&catalog) {
+            metrics::counter!(crate::metrics::SCHEMA_CATALOG_UPDATE_APPLIED).increment(1);
+            metrics::gauge!(crate::metrics::SCHEMA_CATALOG_CURRENT_GENERATION)
+                .set(catalog.generation.get() as f64);
             *cache = Some(Arc::new(catalog));
         }
     }

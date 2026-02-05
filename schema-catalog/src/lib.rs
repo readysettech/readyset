@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 mod generation;
+pub mod metrics;
+
 pub use generation::SchemaGeneration;
 
 // Only the synchronizer in the `handle` module can update the catalog (through the handle); we

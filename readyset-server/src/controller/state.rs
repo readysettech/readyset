@@ -31,7 +31,7 @@ use dataflow::{
 use failpoint_macros::set_failpoint;
 use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryFutureExt, TryStream};
-use metrics::{gauge, histogram};
+use metrics::{counter, gauge, histogram};
 use petgraph::visit::{Bfs, IntoNodeReferences};
 use petgraph::Direction;
 use rand::Rng;
@@ -1640,6 +1640,7 @@ impl DfState {
                 used: create_cache.schema_generation_used.map(|g| g.get()),
                 current: self.schema_generation.get(),
             };
+            counter!(recorded::SCHEMA_GENERATION_MISMATCH).increment(1);
             warn!(%err, ?create_cache, "Schema generation mismatch");
         }
 
@@ -1659,6 +1660,7 @@ impl DfState {
                 }
                 if !dry_run && should_increment_schema_generation {
                     self.schema_generation = self.schema_generation.next();
+                    counter!(recorded::SCHEMA_CATALOG_GENERATION_INCREMENTED).increment(1);
                     trace!(
                         schema_generation = %self.schema_generation,
                         "Incremented schema generation after successful migration"
@@ -2081,8 +2083,14 @@ impl DfStateHandle {
                     .recipe
                     .schema_catalog(new_state.schema_generation());
                 match SchemaCatalogUpdate::try_from(&catalog) {
-                    Ok(update) => notifier.send(ControllerEvent::SchemaCatalogUpdate(update)),
-                    Err(error) => error!(%error, "Failed to serialize schema catalog update"),
+                    Ok(update) => {
+                        notifier.send(ControllerEvent::SchemaCatalogUpdate(update));
+                        counter!(recorded::SCHEMA_CATALOG_UPDATE_SENT).increment(1);
+                    }
+                    Err(error) => {
+                        counter!(recorded::SCHEMA_CATALOG_UPDATE_SERIALIZATION_FAILED).increment(1);
+                        error!(%error, "Failed to serialize schema catalog update");
+                    }
                 }
             }
         }
