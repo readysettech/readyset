@@ -619,6 +619,7 @@ impl DfValue {
                     let s = std::str::from_utf8(bytes.as_ref())?;
                     DfValue::from_str_and_collation(s, *collation).coerce_to(to_ty, from_ty)
                 }
+                DfType::Point | DfType::PostgisPoint | DfType::PostgisPolygon => Ok(self.clone()),
                 _ => Err(mk_err()),
             },
             DfValue::Default | DfValue::Max => Err(mk_err()),
@@ -4042,6 +4043,31 @@ mod tests {
         }
 
         #[test]
+        fn byte_array_to_mysql_point() {
+            let bytes = DfValue::ByteArray(Arc::new(vec![0u8; 25]));
+            let result = bytes.coerce_to(&DfType::Point, &DfType::Unknown).unwrap();
+            assert_eq!(result, bytes);
+        }
+
+        #[test]
+        fn byte_array_to_postgis_point() {
+            let bytes = DfValue::ByteArray(Arc::new(vec![0u8; 21]));
+            let result = bytes
+                .coerce_to(&DfType::PostgisPoint, &DfType::Unknown)
+                .unwrap();
+            assert_eq!(result, bytes);
+        }
+
+        #[test]
+        fn byte_array_to_postgis_polygon() {
+            let bytes = DfValue::ByteArray(Arc::new(vec![0u8; 50]));
+            let result = bytes
+                .coerce_to(&DfType::PostgisPolygon, &DfType::Unknown)
+                .unwrap();
+            assert_eq!(result, bytes);
+        }
+
+        #[test]
         fn int_to_unknown() {
             assert_eq!(
                 DfValue::from(1u64)
@@ -4107,6 +4133,18 @@ mod tests {
             //     DfValue::Int(42),
             //     DfValue::UnsignedInt(42),
             // );
+        }
+
+        #[test]
+        fn byte_array_coerce_for_comparison_spatial_types() {
+            let point_bytes = DfValue::ByteArray(Arc::new(vec![0u8; 25]));
+            check_comparison!(point_bytes.clone(), DfType::Point, point_bytes.clone());
+            check_comparison!(
+                point_bytes.clone(),
+                DfType::PostgisPoint,
+                point_bytes.clone()
+            );
+            check_comparison!(point_bytes.clone(), DfType::PostgisPolygon, point_bytes);
         }
     }
 }
