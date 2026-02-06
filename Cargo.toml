@@ -13,6 +13,7 @@ members = [
     "concrete-iter",
     "data-generator",
     "database-utils",
+    "ddl-stress",
     "dataflow-expression",
     "dataflow-state",
     "failpoint-macros",
