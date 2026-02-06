@@ -164,6 +164,12 @@ impl Leader {
         telemetry_sender: TelemetrySender,
         mut shutdown_rx: ShutdownReceiver,
     ) {
+        if !self.replicator_config.replication_enabled {
+            let _ = controller_tx.send(ControllerMessage::SnapshotDone);
+            info!("Replication disabled; skipping snapshotting and replication");
+            return;
+        }
+
         if self.replicator_config.cdc_db_url.is_none()
             && self.replicator_config.upstream_db_url.is_none()
         {

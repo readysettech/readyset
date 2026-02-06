@@ -83,6 +83,12 @@ pub struct UpstreamConfig {
     #[serde(default)]
     pub disable_create_publication: bool,
 
+    /// Whether replication and snapshotting are enabled. When false, the server will not attempt
+    /// to connect to the upstream database for CDC replication or initial snapshotting.
+    #[arg(skip = true)]
+    #[serde(default = "default_replication_enabled")]
+    pub replication_enabled: bool,
+
     /// Server ID to use when registering as a replication follower with the upstream db
     ///
     /// This can be used to differentiate different Readyset deployments connected to the same
@@ -322,6 +328,10 @@ fn parse_repl_server_id(s: &str) -> Result<ReplicationServerId, String> {
     Ok(ReplicationServerId(s.to_string()))
 }
 
+fn default_replication_enabled() -> bool {
+    true
+}
+
 fn default_replicator_restart_timeout() -> Duration {
     UpstreamConfig::default().replicator_restart_timeout
 }
@@ -351,6 +361,7 @@ impl Default for UpstreamConfig {
             disable_upstream_ssl_verification: false,
             disable_setup_ddl_replication: false,
             disable_create_publication: false,
+            replication_enabled: true,
             replication_server_id: Default::default(),
             replication_server_uuid: Default::default(),
             replica_report_host: Default::default(),

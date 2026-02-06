@@ -353,7 +353,7 @@ impl ControllerEventsClient {
                 Err(e) => {
                     metrics::counter!(crate::metrics::recorded::CONTROLLER_EVENTS_DISCONNECTED)
                         .increment(1);
-                    tracing::warn!("Error connecting to event stream: {}, retrying", e);
+                    tracing::info!("Error connecting to event stream: {}, retrying", e);
                 }
             }
 

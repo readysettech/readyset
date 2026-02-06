@@ -15,8 +15,19 @@ fn main() -> anyhow::Result<()> {
     #[cfg(feature = "failure_injection")]
     let _fail_scenario = FailScenario::setup();
 
-    let options = Options::parse();
+    let mut options = Options::parse();
     let rt = init_adapter_runtime()?;
+
+    // When cache_mode is shallow, replication and the query sampler are not needed
+    // since shallow caches don't use dataflow.
+    if options.cache_mode == readyset_client::CacheMode::Shallow {
+        options
+            .server_worker_options
+            .replicator_config
+            .replication_enabled = false;
+        options.sampler_sample_rate = 0.0;
+    }
+
     let maybe_tracing_guard = match options.verify {
         true => None,
         false => Some(init_adapter_tracing(&rt, &options)?),

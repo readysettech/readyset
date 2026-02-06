@@ -416,24 +416,32 @@ pub async fn verify(options: &Options) -> Result<()> {
         add_err!(e);
     }
 
+    let replication_enabled = options
+        .server_worker_options
+        .replicator_config
+        .replication_enabled;
+
     let verification = add_err!(verify_tls(options).await);
     add_err!(verify_database_type(options));
-    let cdc_url = add_err!(verify_cdc_url(options));
     let upstream_url = add_err!(verify_upstream_url(options));
 
-    let conn = if let (Some(verification), Some(cdc_url)) = (&verification, &cdc_url) {
-        add_err!(verify_connection(cdc_url, verification, Some("CDC")).await)
-    } else {
-        None
-    };
     if let (Some(verification), Some(upstream_url)) = (&verification, &upstream_url) {
         add_err!(verify_users(upstream_url, Arc::clone(verification), options).await);
     }
-    if let Some(mut conn) = conn {
-        add_err!(verify_version(&mut conn).await);
-        add_err!(verify_replication(&mut conn).await);
-        add_err!(verify_permissions(&mut conn, options).await);
-        add_err!(verify_disk_space(&mut conn, options).await);
+
+    if replication_enabled {
+        let cdc_url = add_err!(verify_cdc_url(options));
+        let conn = if let (Some(verification), Some(cdc_url)) = (&verification, &cdc_url) {
+            add_err!(verify_connection(cdc_url, verification, Some("CDC")).await)
+        } else {
+            None
+        };
+        if let Some(mut conn) = conn {
+            add_err!(verify_version(&mut conn).await);
+            add_err!(verify_replication(&mut conn).await);
+            add_err!(verify_permissions(&mut conn, options).await);
+            add_err!(verify_disk_space(&mut conn, options).await);
+        }
     }
 
     if errors.is_empty() {

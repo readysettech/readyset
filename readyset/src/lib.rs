@@ -453,7 +453,7 @@ pub struct Options {
 
     /// Specifies the sample rate for the background query sampler. 0 means no sampling.
     #[arg(long, env = "SAMPLER_SAMPLE_RATE", default_value = "0.01")]
-    sampler_sample_rate: f64,
+    pub sampler_sample_rate: f64,
 
     /// Specifies the maximum queue size for the background query sampler.
     /// Exceeding this size will cause the adaptor to not add new queries to the sampler queue.
