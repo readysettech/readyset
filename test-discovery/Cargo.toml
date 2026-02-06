@@ -4,5 +4,11 @@ version = "0.1.0"
 publish = false
 edition = "2024"
 
+[dependencies]
+toml = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true
