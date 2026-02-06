@@ -9,6 +9,8 @@
 use std::collections::HashMap;
 use std::mem;
 
+use crate::controller::Migration;
+use crate::manual::ops::grouped::aggregate::Aggregation;
 use common::DfValue;
 use dataflow::node::Column as DfColumn;
 use dataflow::ops::grouped::accumulator::Accumulator;
@@ -34,10 +36,6 @@ use readyset_errors::{
 };
 use readyset_sql::ast::{self, ColumnSpecification, Expr, NullOrder, OrderType, Relation};
 use readyset_sql::TryIntoDialect as _;
-use serde_json::json;
-
-use crate::controller::Migration;
-use crate::manual::ops::grouped::aggregate::Aggregation;
 
 /// Sets the names of dataflow columns using the names determined in MIR to ensure aliases are used
 fn set_names(names: &[&str], columns: &mut [DfColumn]) -> ReadySetResult<()> {
@@ -381,37 +379,73 @@ pub(super) fn mir_node_to_flow_parts(
 }
 
 macro_rules! record_reachable {
-    ($node_type:expr) => {{
-        antithesis_sdk::assert_reachable!(
-            "Create dataflow node",
-            &json!({"node_type": $node_type})
-        );
-    }};
+    ($msg:literal) => {
+        antithesis_sdk::assert_reachable!($msg)
+    };
 }
 
 fn record_reachable(node: &MirNodeInner) {
-    let node_type: &'static str = node.into();
     match node {
-        MirNodeInner::Accumulator { .. } => record_reachable!(node_type),
-        MirNodeInner::Aggregation { .. } => record_reachable!(node_type),
-        MirNodeInner::Base { .. } => record_reachable!(node_type),
-        MirNodeInner::Window { .. } => record_reachable!(node_type),
-        MirNodeInner::Extremum { .. } => record_reachable!(node_type),
-        MirNodeInner::Filter { .. } => record_reachable!(node_type),
-        MirNodeInner::Identity => record_reachable!(node_type),
-        MirNodeInner::Join { .. } => record_reachable!(node_type),
-        MirNodeInner::JoinAggregates => record_reachable!(node_type),
-        MirNodeInner::LeftJoin { .. } => record_reachable!(node_type),
-        MirNodeInner::DependentJoin { .. } => record_reachable!(node_type),
-        MirNodeInner::DependentLeftJoin { .. } => record_reachable!(node_type),
-        MirNodeInner::ViewKey { .. } => record_reachable!(node_type),
-        MirNodeInner::Project { .. } => record_reachable!(node_type),
-        MirNodeInner::Union { .. } => record_reachable!(node_type),
-        MirNodeInner::Paginate { .. } => record_reachable!(node_type),
-        MirNodeInner::TopK { .. } => record_reachable!(node_type),
-        MirNodeInner::Distinct { .. } => record_reachable!(node_type),
-        MirNodeInner::AliasTable { .. } => record_reachable!(node_type),
-        MirNodeInner::Leaf { .. } => record_reachable!(node_type),
+        MirNodeInner::Accumulator { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Accumulator"}"#)
+        }
+        MirNodeInner::Aggregation { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Aggregation"}"#)
+        }
+        MirNodeInner::Base { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Base"}"#)
+        }
+        MirNodeInner::Window { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Window"}"#)
+        }
+        MirNodeInner::Extremum { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Extremum"}"#)
+        }
+        MirNodeInner::Filter { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Filter"}"#)
+        }
+        MirNodeInner::Identity => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Identity"}"#)
+        }
+        MirNodeInner::Join { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Join"}"#)
+        }
+        MirNodeInner::JoinAggregates => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"JoinAggregates"}"#)
+        }
+        MirNodeInner::LeftJoin { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"LeftJoin"}"#)
+        }
+        MirNodeInner::DependentJoin { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"DependentJoin"}"#)
+        }
+        MirNodeInner::DependentLeftJoin { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"DependentLeftJoin"}"#)
+        }
+        MirNodeInner::ViewKey { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"ViewKey"}"#)
+        }
+        MirNodeInner::Project { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Project"}"#)
+        }
+        MirNodeInner::Union { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Union"}"#)
+        }
+        MirNodeInner::Paginate { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Paginate"}"#)
+        }
+        MirNodeInner::TopK { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"TopK"}"#)
+        }
+        MirNodeInner::Distinct { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Distinct"}"#)
+        }
+        MirNodeInner::AliasTable { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"AliasTable"}"#)
+        }
+        MirNodeInner::Leaf { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Leaf"}"#)
+        }
     }
 }
 

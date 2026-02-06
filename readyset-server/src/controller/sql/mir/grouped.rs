@@ -10,7 +10,6 @@ use readyset_sql::{
     analysis::{is_aggregate, ReferredColumns},
     DialectDisplay,
 };
-use serde_json::json;
 use FunctionExpr::*;
 
 use crate::controller::sql::mir::join::make_joins_for_aggregates;
@@ -296,37 +295,73 @@ fn joinable_aggregate_nodes(
 }
 
 macro_rules! record_reachable {
-    ($fn_name:expr) => {{
-        antithesis_sdk::assert_reachable!(
-            "[exclude-nightly] Lowered post-lookup aggregate function",
-            &json!({"function": $fn_name})
-        );
-    }};
+    ($msg:literal) => {
+        antithesis_sdk::assert_reachable!($msg)
+    };
 }
 
 fn record_reachable(function: &FunctionExpr) {
-    let fn_name: &'static str = function.into();
     match function {
-        ArrayAgg { .. } => record_reachable!(fn_name),
-        Avg { .. } => record_reachable!(fn_name),
-        Count { .. } => record_reachable!(fn_name),
-        CountStar => record_reachable!(fn_name),
-        Extract { .. } => record_reachable!(fn_name),
-        Lower { .. } => record_reachable!(fn_name),
-        Upper { .. } => record_reachable!(fn_name),
-        Sum { .. } => record_reachable!(fn_name),
-        Max(..) => record_reachable!(fn_name),
-        Min(..) => record_reachable!(fn_name),
-        GroupConcat { .. } => record_reachable!(fn_name),
-        RowNumber => record_reachable!(fn_name),
-        Rank => record_reachable!(fn_name),
-        DenseRank => record_reachable!(fn_name),
-        StringAgg { .. } => record_reachable!(fn_name),
-        Bucket { .. } => record_reachable!(fn_name),
-        Substring { .. } => record_reachable!(fn_name),
-        JsonObjectAgg { .. } => record_reachable!(fn_name),
-        Call { .. } => record_reachable!(fn_name),
-        Udf { .. } => record_reachable!(fn_name),
+        ArrayAgg { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"ArrayAgg","tags":["exclude-nightly"]}"#
+        ),
+        Avg { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Avg","tags":["exclude-nightly"]}"#
+        ),
+        Count { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Count","tags":["exclude-nightly"]}"#
+        ),
+        CountStar => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"CountStar","tags":["exclude-nightly"]}"#
+        ),
+        Extract { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Extract","tags":["exclude-nightly"]}"#
+        ),
+        Lower { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Lower","tags":["exclude-nightly"]}"#
+        ),
+        Upper { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Upper","tags":["exclude-nightly"]}"#
+        ),
+        Sum { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Sum","tags":["exclude-nightly"]}"#
+        ),
+        Max(..) => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Max","tags":["exclude-nightly"]}"#
+        ),
+        Min(..) => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Min","tags":["exclude-nightly"]}"#
+        ),
+        GroupConcat { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"GroupConcat","tags":["exclude-nightly"]}"#
+        ),
+        RowNumber => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"RowNumber","tags":["exclude-nightly"]}"#
+        ),
+        Rank => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Rank","tags":["exclude-nightly"]}"#
+        ),
+        DenseRank => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"DenseRank","tags":["exclude-nightly"]}"#
+        ),
+        StringAgg { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"StringAgg","tags":["exclude-nightly"]}"#
+        ),
+        Bucket { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Bucket","tags":["exclude-nightly"]}"#
+        ),
+        Substring { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Substring","tags":["exclude-nightly"]}"#
+        ),
+        JsonObjectAgg { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"JsonObjectAgg","tags":["exclude-nightly"]}"#
+        ),
+        Call { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Call","tags":["exclude-nightly"]}"#
+        ),
+        Udf { .. } => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Udf","tags":["exclude-nightly"]}"#
+        ),
     }
 }
 

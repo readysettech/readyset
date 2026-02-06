@@ -2,16 +2,14 @@
 
 use std::collections::HashMap;
 
+use crate::node::{AuxiliaryNodeState, Node};
+use crate::ops::grouped::{GroupedOperation, GroupedOperator};
+use crate::prelude::*;
 use common::DfValue;
 use dataflow_expression::grouped::accumulator::{AccumulationOp, AccumulatorData};
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{internal_err, invariant_eq, ReadySetResult};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-
-use crate::node::{AuxiliaryNodeState, Node};
-use crate::ops::grouped::{GroupedOperation, GroupedOperator};
-use crate::prelude::*;
 
 use super::{hash_grouped_records, GroupHash};
 
@@ -44,11 +42,28 @@ impl Accumulator {
         over_col_ty: &DfType,
         _dialect: &Dialect,
     ) -> ReadySetResult<GroupedOperator<Accumulator>> {
-        let op_name: &'static str = op.clone().into();
-        antithesis_sdk::assert_reachable!(
-            "[exclude-nightly] Accumulation",
-            &json!({"op": op_name})
-        );
+        match &op {
+            AccumulationOp::ArrayAgg { .. } => {
+                antithesis_sdk::assert_reachable!(
+                    r#"{"id":"Accumulation","sub":"ArrayAgg","tags":["exclude-nightly"]}"#
+                );
+            }
+            AccumulationOp::GroupConcat { .. } => {
+                antithesis_sdk::assert_reachable!(
+                    r#"{"id":"Accumulation","sub":"GroupConcat","tags":["exclude-nightly"]}"#
+                );
+            }
+            AccumulationOp::JsonObjectAgg { .. } => {
+                antithesis_sdk::assert_reachable!(
+                    r#"{"id":"Accumulation","sub":"JsonObjectAgg","tags":["exclude-nightly"]}"#
+                );
+            }
+            AccumulationOp::StringAgg { .. } => {
+                antithesis_sdk::assert_reachable!(
+                    r#"{"id":"Accumulation","sub":"StringAgg","tags":["exclude-nightly"]}"#
+                );
+            }
+        }
         let collation = over_col_ty.collation().unwrap_or(Collation::Utf8);
 
         let out_ty = match &op {
