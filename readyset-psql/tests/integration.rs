@@ -18,8 +18,6 @@ use readyset_util::shutdown::ShutdownSender;
 
 use crate::common::setup_standalone_with_authority;
 
-mod common;
-
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
     readyset_tracing::init_test_logging();
     TestBuilder::default()
@@ -1612,7 +1610,8 @@ mod multiple_create_and_drop {
     use readyset_util::eventually;
     use tokio_postgres::Client;
 
-    use crate::setup;
+    // `super::` instead of `crate::` — see test-discovery crate documentation
+    use super::setup;
 
     async fn create_query(conn: &Client, query_name: &str, query: &str) {
         conn.simple_query(&format!("CREATE CACHE {query_name} FROM {query}"))

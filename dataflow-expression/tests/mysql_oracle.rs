@@ -8,9 +8,7 @@ use readyset_sql_parsing::parse_sql_type;
 use readyset_util::retry_with_exponential_backoff;
 use test_utils::tags;
 
-use self::common::parse_lower_eval;
-
-mod common;
+use crate::common::parse_lower_eval;
 
 fn opts() -> Opts {
     OptsBuilder::default()

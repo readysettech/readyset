@@ -3,8 +3,6 @@ use readyset_sql_parsing::{ParsingPreset, parse_query_with_config};
 use test_strategy::proptest;
 use test_utils::tags;
 
-mod utils;
-
 #[tags(slow)]
 #[proptest]
 #[ignore = "WIP REA-5456"]

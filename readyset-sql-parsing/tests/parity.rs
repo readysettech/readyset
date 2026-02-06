@@ -13,8 +13,6 @@ use readyset_sql::{
 };
 use readyset_sql_parsing::{ParsingPreset, parse_query_with_config};
 
-mod utils;
-
 #[test]
 fn select_query_parsing() {
     let sql = "SELECT * FROM users WHERE age > 18;";

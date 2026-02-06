@@ -3,8 +3,6 @@
 use readyset_sql::Dialect;
 use readyset_sql_parsing::{ParsingPreset, parse_query_with_config};
 
-mod utils;
-
 #[test]
 fn postgres_like_escape_char() {
     for query in &[

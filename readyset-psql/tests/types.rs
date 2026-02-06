@@ -4,8 +4,6 @@ use readyset_server::{DurabilityMode, Handle};
 use readyset_util::shutdown::ShutdownSender;
 use test_utils::tags;
 
-mod common;
-
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
     TestBuilder::default()
         .fallback(true)
@@ -15,6 +13,7 @@ async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
         .await
 }
 
+#[allow(clippy::module_inception, reason = "pre-existing structure; only triggers after test-discovery consolidation")]
 mod types {
     use std::panic::{AssertUnwindSafe, RefUnwindSafe};
     use std::time::Duration;

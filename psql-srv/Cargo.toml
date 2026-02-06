@@ -4,9 +4,16 @@ version = "0.1.0"
 publish = false
 authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
-
+autotests = false
 description = "Bindings for emulating a PostgreSQL server"
 readme = "README.md"
+
+[[test]]
+name = "tests"
+path = "tests.rs"
+
+[build-dependencies]
+test-discovery = { path = "../test-discovery" }
 
 [dependencies]
 base64 = { workspace = true }

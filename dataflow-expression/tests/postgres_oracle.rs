@@ -12,9 +12,7 @@ use readyset_sql::ast::TimestampField;
 use readyset_util::arbitrary::{arbitrary_date_time_timezone, arbitrary_timestamp_naive_date_time};
 use test_utils::tags;
 
-use self::common::parse_lower_eval;
-
-mod common;
+use crate::common::parse_lower_eval;
 
 fn config() -> Config {
     let mut config = Config::new();

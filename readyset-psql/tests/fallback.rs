@@ -18,8 +18,7 @@ use readyset_util::failpoints;
 use readyset_util::shutdown::ShutdownSender;
 use test_utils::tags;
 
-mod common;
-use common::setup_standalone_with_authority;
+use crate::common::setup_standalone_with_authority;
 use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use tokio_postgres::{Client, CommandCompleteContents, SimpleQueryMessage};
 
@@ -2046,7 +2045,8 @@ mod failure_injection_tests {
     use tracing::debug;
 
     use super::*;
-    use crate::Handle;
+    // `super::` instead of `crate::` — see test-discovery crate documentation
+    use super::Handle;
 
     async fn assert_query_hits_readyset(conn: &Client, query: &'static str) {
         eventually! {

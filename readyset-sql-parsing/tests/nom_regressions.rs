@@ -1,8 +1,6 @@
 use readyset_sql::Dialect;
 use readyset_sql_parsing::{ParsingPreset, parse_expr, parse_query_with_config};
 
-mod utils;
-
 #[test]
 fn alter_both() {
     check_parse_both!("ALTER TABLE employees ADD Email varchar(255), ADD snailmail TEXT");

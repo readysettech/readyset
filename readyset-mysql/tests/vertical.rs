@@ -502,26 +502,11 @@ impl Table {
 
 /// The result of running a single [`Operation`] against either MySQL or ReadySet.
 #[derive(Debug)]
+#[allow(dead_code, reason = "Err variant preserves the original error for debugging")]
 pub enum OperationResult {
     Err(mysql_async::Error),
     Rows(Vec<mysql_async::Row>),
     NoResults,
-}
-
-impl OperationResult {
-    /// Returns `true` if the operation result is [`Err`].
-    ///
-    /// [`Err`]: OperationResult::Err
-    pub fn is_err(&self) -> bool {
-        matches!(self, Self::Err(..))
-    }
-
-    pub fn err(&self) -> Option<&mysql_async::Error> {
-        match self {
-            Self::Err(v) => Some(v),
-            _ => None,
-        }
-    }
 }
 
 fn compare_rows(r1: &mysql_async::Row, r2: &mysql_async::Row) -> Ordering {
