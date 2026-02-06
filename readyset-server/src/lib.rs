@@ -413,9 +413,7 @@ use readyset_sql_parsing::ParsingPreset;
 
 pub use crate::builder::Builder;
 pub use crate::handle::Handle;
-pub use crate::metrics::{
-    NoriaMetricsRecorder, PrometheusBuilder, PrometheusHandle, PrometheusRecorder,
-};
+pub use crate::metrics::{PrometheusBuilder, PrometheusHandle, PrometheusRecorder};
 
 pub mod manual {
     pub use dataflow::node::special::Base;

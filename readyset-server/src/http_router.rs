@@ -27,7 +27,7 @@ use tracing::{info, warn};
 
 use crate::controller::events::EventsHandle;
 use crate::controller::ControllerRequest;
-use crate::metrics::{get_global_recorder, Clear, RecorderType};
+use crate::metrics::{get_global_recorder, Render};
 use crate::worker::WorkerRequest;
 
 /// Routes requests from an HTTP server to noria server workers and controllers.
@@ -153,7 +153,7 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                 Box::pin(async move { Ok(res.unwrap()) })
             }
             (&Method::GET, "/metrics") => {
-                let render = get_global_recorder().and_then(|r| r.render(RecorderType::Prometheus));
+                let render = get_global_recorder().map(|r| r.render());
                 let res = res.header(CONTENT_TYPE, "text/plain");
                 let res = match render {
                     Some(metrics) => res.body(hyper::Body::from(metrics)),
@@ -180,28 +180,6 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
 
                     Ok(res.unwrap())
                 })
-            }
-            (&Method::POST, "/metrics_dump") => {
-                let render = get_global_recorder().and_then(|r| r.render(RecorderType::Noria));
-                let res = match render {
-                    Some(metrics) => res
-                        .header(CONTENT_TYPE, "application/json")
-                        .body(hyper::Body::from(metrics)),
-                    None => res
-                        .status(StatusCode::NOT_FOUND)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from("Noria metrics were not enabled. To fix this, run Noria with --noria-metrics".to_string())),
-                };
-                Box::pin(async move { Ok(res.unwrap()) })
-            }
-            (&Method::POST, "/reset_metrics") => {
-                if let Some(r) = get_global_recorder() {
-                    r.clear();
-                }
-                let res = res
-                    .header(CONTENT_TYPE, "application/json")
-                    .body(hyper::Body::from(vec![]));
-                Box::pin(async move { Ok(res.unwrap()) })
             }
             (&Method::POST, "/worker_request") => {
                 metrics::counter!(recorded::SERVER_WORKER_REQUESTS).increment(1);

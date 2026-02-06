@@ -4,18 +4,13 @@ use std::time::Duration;
 
 use dataflow::{DurabilityMode, PersistenceParameters};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
-use readyset_client::metrics::client::MetricsClient;
-use readyset_client::metrics::{DumpedMetric, DumpedMetricValue, MetricsDump};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::Relation;
 use readyset_sql::Dialect;
 use readyset_util::shutdown::ShutdownSender;
 
-use crate::metrics::{
-    get_global_recorder, install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
-    NoriaMetricsRecorder,
-};
-use crate::{Builder, Handle, ReuseConfigType};
+use crate::metrics::{get_global_recorder, install_global_recorder};
+use crate::{Builder, Handle, PrometheusBuilder, ReuseConfigType};
 
 pub const DEFAULT_SHARDING: usize = 2;
 
@@ -130,32 +125,7 @@ pub async fn build_custom(
 /// register its metrics with the correct recorder, and none will be recorded
 pub fn register_metric_recorder() {
     if get_global_recorder().is_none() {
-        let rec = CompositeMetricsRecorder::with_recorders(vec![MetricsRecorder::Noria(
-            NoriaMetricsRecorder::new(),
-        )]);
-        install_global_recorder(rec);
-    }
-}
-
-/// Creates the metrics client for a given local deployment.
-pub async fn initialize_metrics(handle: &mut Handle) -> MetricsClient {
-    let mut metrics_client = MetricsClient::new(handle.c.clone().unwrap()).unwrap();
-    let res = metrics_client.reset_metrics().await;
-    res.unwrap();
-
-    metrics_client
-}
-
-/// Get the counter value for `metric` from the current process. If tests
-/// are run in the same process this may include values from across several
-/// tests.
-pub fn get_counter(metric: &str, metrics_dump: &MetricsDump) -> f64 {
-    let dumped_metric: &DumpedMetric = &metrics_dump.metrics.get(metric).unwrap()[0];
-
-    if let DumpedMetricValue::Counter(v) = dumped_metric.value {
-        v
-    } else {
-        panic!("{metric} is not a counter");
+        install_global_recorder(PrometheusBuilder::new().build_recorder());
     }
 }
 

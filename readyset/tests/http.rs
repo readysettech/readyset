@@ -44,7 +44,6 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
         &upstream_db_url,
         "--eviction-policy",
         "lru",
-        "--noria-metrics",
         "--metrics-address",
         TEST_METRICS_ADDRESS,
     ];

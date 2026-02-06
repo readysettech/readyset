@@ -4,17 +4,13 @@
 //! metrics recorder.
 
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::slice;
 
-use assert_approx_eq::assert_approx_eq;
 use common::Index;
 use dataflow::node::special::Base;
 use dataflow::ops::union::{self, Union};
 use dataflow::utils::make_columns;
 use readyset_client::consensus::StandaloneAuthority;
-use readyset_client::get_metric;
-use readyset_client::metrics::{recorded, DumpedMetricValue, MetricsDump};
 use readyset_client::recipe::changelist::ChangeList;
 use readyset_data::{DfValue, Dialect};
 use readyset_sql::Dialect as SqlDialect;
@@ -48,14 +44,6 @@ rusty_fork_test! {
         rt.block_on(it_works_basic_standalone_impl());
     }
 
-    #[test]
-    fn test_metrics_client(){
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(test_metrics_client_impl());
-    }
 }
 
 async fn it_works_basic_impl() {
@@ -94,7 +82,6 @@ async fn it_works_basic_impl() {
             (a, b)
         })
         .await;
-    let mut metrics_client = initialize_metrics(&mut g).await;
 
     let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table_by_index(a).await.unwrap();
@@ -130,29 +117,6 @@ async fn it_works_basic_impl() {
         vec![vec![1.into(), 2.into()]]
     );
 
-    let metrics = metrics_client.get_metrics().await.unwrap();
-    let metrics_dump = &metrics[0].metrics;
-    assert_approx_eq!(
-        get_counter(recorded::BASE_TABLE_LOOKUP_REQUESTS, metrics_dump),
-        1.0
-    );
-    assert_approx_eq!(
-        get_counter(recorded::EGRESS_NODE_DROPPED_PACKETS, metrics_dump),
-        2.0
-    );
-    assert_approx_eq!(
-        get_counter(recorded::EGRESS_NODE_SENT_PACKETS, metrics_dump),
-        1.0
-    );
-    assert_eq!(
-        get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_MISS),
-        Some(DumpedMetricValue::Counter(1.0))
-    );
-    assert_eq!(
-        get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_HIT),
-        Some(DumpedMetricValue::Counter(0.0))
-    );
-
     // update value again
     mutb.insert(vec![id.clone(), DfValue::from(4i32)])
         .await
@@ -182,19 +146,6 @@ async fn it_works_basic_impl() {
     assert!(res
         .iter()
         .any(|r| get_col!(cq, r, "b", DfValue) == 4.into()));
-
-    // This request does not hit the base table.
-    let metrics = metrics_client.get_metrics().await.unwrap();
-    let metrics_dump = &metrics[0].metrics;
-    assert_approx_eq!(
-        get_counter(recorded::BASE_TABLE_LOOKUP_REQUESTS, metrics_dump),
-        1.0
-    );
-    // TODO(vlad): add a metric for embedded view cache hit instead
-    /*assert_eq!(
-        get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_HIT),
-        Some(DumpedMetricValue::Counter(1.0))
-    );*/
 
     // Delete first record
     muta.delete(vec![id.clone()]).await.unwrap();
@@ -330,41 +281,6 @@ async fn it_works_basic_standalone_impl() {
         res,
         vec![vec![id.clone(), 2.into()], vec![id.clone(), 4.into()]]
     );
-
-    shutdown_tx.shutdown().await;
-}
-
-fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
-    get_counter(recorded::SERVER_CONTROLLER_REQUESTS, metrics_dump)
-}
-
-// FIXME(eta): this test is now slightly hacky after we started making more
-//             external requests as part of the RPC refactor.
-async fn test_metrics_client_impl() {
-    // Start a local instance of noria and connect the metrics client to it.
-    // We assign it a different port than the rest of the tests to prevent
-    // other tests impacting the metrics collected.
-    register_metric_recorder();
-    let builder = builder_for_tests();
-    let (mut g, shutdown_tx) = builder.start_local().await.unwrap();
-    let mut client = initialize_metrics(&mut g).await;
-
-    let metrics = client.get_metrics().await.unwrap();
-    let metrics_dump = &metrics[0].metrics;
-    let count = get_external_requests_count(metrics_dump);
-    assert!(get_external_requests_count(metrics_dump) > 0.0);
-
-    // Verify that this value is incrementing.
-    let metrics = client.get_metrics().await.unwrap();
-    let metrics_dump = &metrics[0].metrics;
-    let second_count = get_external_requests_count(metrics_dump);
-    assert!(get_external_requests_count(metrics_dump) > count);
-
-    // Reset the metrics and verify the metrics actually reset.
-    client.reset_metrics().await.unwrap();
-    let metrics = client.get_metrics().await.unwrap();
-    let metrics_dump = &metrics[0].metrics;
-    assert!(get_external_requests_count(metrics_dump) < second_count);
 
     shutdown_tx.shutdown().await;
 }

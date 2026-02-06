@@ -31,7 +31,6 @@ use crate::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use crate::debug::stats;
 use crate::events::{ControllerEvent, ControllerEventsClient};
 use crate::internal::{DomainIndex, ReplicaAddress};
-use crate::metrics::MetricsDump;
 use crate::query::QueryId;
 use crate::recipe::changelist::ChangeList;
 use crate::recipe::{CacheExpr, ExprInfo, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
@@ -1003,13 +1002,6 @@ impl ReadySetHandle {
             // TODO: this should likely take a view name, and we should verify that it's a Reader.
             view: NodeIndex,
         ) -> ()
-    );
-
-    simple_request!(
-        /// Fetch a dump of metrics values from the running noria instance
-        ///
-        /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-        metrics_dump() -> MetricsDump
     );
 
     simple_request!(

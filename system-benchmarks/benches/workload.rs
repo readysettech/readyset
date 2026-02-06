@@ -28,11 +28,11 @@ use database_utils::tls::ServerCertVerification;
 use database_utils::{
     DatabaseConnection, DatabaseStatement, DatabaseType, DatabaseURL, QueryableConnection, TlsMode,
 };
+use prometheus_parse::Scrape;
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
 use readyset::{init_adapter_runtime, init_adapter_tracing, NoriaAdapter, Options};
-use readyset_client::get_metric;
-use readyset_client::metrics::{recorded, MetricsDump};
+use readyset_client::metrics::recorded;
 use readyset_data::DfValue;
 use readyset_psql::AuthenticationMethod;
 use readyset_server::FrontierStrategy;
@@ -300,8 +300,6 @@ impl Benchmark {
             }
 
             let mut do_bench = |param: &str, pool: &mut PreparedPool| -> anyhow::Result<()> {
-                reset_metrics()?;
-
                 if args.flamegraph {
                     AdapterCommand::BeginProfiling.send(&mut hdl.write_hdl)?;
                 };
@@ -435,29 +433,35 @@ fn get_allocated_mib() -> anyhow::Result<f64> {
     Ok(get_allocated_bytes()? as f64 / 1024. / 1024.)
 }
 
-fn get_metrics() -> anyhow::Result<MetricsDump> {
+fn get_metrics() -> anyhow::Result<String> {
     let client = reqwest::blocking::Client::new();
-    let body = client.post(rpc_url("metrics_dump")).send()?.bytes()?;
-    Ok(serde_json::from_slice(&body[..])?)
+    let body = client.get(rpc_url("metrics")).send()?.text()?;
+    Ok(body)
+}
+
+macro_rules! get_metric_value {
+    ($metrics:expr, $metric:expr) => {{
+        $metrics
+            .samples
+            .iter()
+            .find(|s| s.metric == $metric)
+            .map(|s| match s.value {
+                prometheus_parse::Value::Counter(v) | prometheus_parse::Value::Gauge(v) => v,
+                _ => unreachable!(),
+            })
+            .ok_or_else(|| anyhow!("Could not find metric {}", $metric))?
+    }};
 }
 
 fn get_cache_hit_ratio() -> anyhow::Result<f64> {
     let metrics = get_metrics()?;
-    let hit = match get_metric!(metrics, recorded::SERVER_VIEW_QUERY_HIT).unwrap() {
-        readyset_client::metrics::DumpedMetricValue::Counter(hit) => hit,
-        _ => unreachable!(),
-    };
-    let miss = match get_metric!(metrics, recorded::SERVER_VIEW_QUERY_MISS).unwrap() {
-        readyset_client::metrics::DumpedMetricValue::Counter(miss) => miss,
-        _ => unreachable!(),
-    };
-    Ok(hit / (hit + miss))
-}
+    let lines: Vec<_> = metrics.lines().map(|l| Ok(l.to_string())).collect();
+    let parsed = Scrape::parse(lines.into_iter())?;
 
-fn reset_metrics() -> anyhow::Result<()> {
-    let client = reqwest::blocking::Client::new();
-    client.post(rpc_url("reset_metrics")).send()?;
-    Ok(())
+    let hit = get_metric_value!(parsed, recorded::SERVER_VIEW_QUERY_HIT);
+    let miss = get_metric_value!(parsed, recorded::SERVER_VIEW_QUERY_MISS);
+
+    Ok(hit / (hit + miss))
 }
 
 fn set_memory_limit_bytes(limit: Option<usize>) -> anyhow::Result<()> {
@@ -699,7 +703,6 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
         &log_level,
         "--eviction-policy",
         "lru",
-        "--noria-metrics",
         &database_type_flag,
         &materialization_frontier,
     ];

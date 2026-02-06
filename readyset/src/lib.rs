@@ -19,7 +19,7 @@ use std::{io, process};
 
 use anyhow::{anyhow, bail, ensure};
 use clap::builder::NonEmptyStringValueParser;
-use clap::{ArgAction, ArgGroup, Parser};
+use clap::{ArgAction, Parser};
 use crossbeam_skiplist::SkipSet;
 use database_utils::{DatabaseType, DatabaseURL, TlsMode, UpstreamConfig};
 use failpoint_macros::set_failpoint;
@@ -48,7 +48,6 @@ use readyset_common::ulimit::maybe_increase_nofile_limit;
 use readyset_data::upstream_system_props::{init_system_props, UpstreamSystemProperties};
 use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
-use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use readyset_server::{PrometheusBuilder, WorkerOptions};
 use readyset_shallow::CacheManager;
@@ -133,11 +132,7 @@ where
 }
 
 #[derive(Parser, Debug)]
-#[command(group(
-    ArgGroup::new("metrics")
-        .multiple(true)
-        .args(&["prometheus_metrics", "noria_metrics"]),
-), version = VERSION_STR_PRETTY)]
+#[command(version = VERSION_STR_PRETTY)]
 #[group(skip)]
 pub struct Options {
     /// IP:PORT to listen on
@@ -254,6 +249,8 @@ pub struct Options {
     #[arg(long, env = "PROMETHEUS_METRICS", default_value = "true", hide = true)]
     prometheus_metrics: bool,
 
+    /// Deprecated: noria metrics have been removed. This flag is accepted for backwards
+    /// compatibility but has no effect and will be removed in a future release.
     #[arg(long, hide = true)]
     noria_metrics: bool,
 
@@ -262,7 +259,7 @@ pub struct Options {
     #[arg(
         long,
         env = "QUERY_LOG_MODE",
-        requires = "metrics",
+        requires = "prometheus_metrics",
         default_value = "enabled",
         default_value_if("prometheus_metrics", "true", Some("enabled")),
         hide = true
@@ -1028,7 +1025,10 @@ where
             std::time::Duration::from_millis(schema_polling_interval),
         );
 
-        let mut recorders = Vec::new();
+        if options.noria_metrics {
+            warn!("--noria-metrics is deprecated and has no effect. It will be removed in a future release.");
+        }
+
         let prometheus_handle = if options.prometheus_metrics {
             let _guard = rt.enter();
             let database_label = match self.database_type {
@@ -1042,23 +1042,11 @@ where
                 .build_recorder();
 
             let handle = recorder.handle();
-            recorders.push(MetricsRecorder::Prometheus(recorder));
+            readyset_server::metrics::install_global_recorder(recorder);
             Some(handle)
         } else {
             None
         };
-
-        if options.noria_metrics {
-            recorders.push(MetricsRecorder::Noria(
-                readyset_server::NoriaMetricsRecorder::new(),
-            ));
-        }
-
-        if !recorders.is_empty() {
-            readyset_server::metrics::install_global_recorder(
-                CompositeMetricsRecorder::with_recorders(recorders),
-            );
-        }
 
         rs_connect.in_scope(|| info!("PrometheusHandle created"));
 

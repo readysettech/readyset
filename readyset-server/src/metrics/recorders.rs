@@ -21,34 +21,7 @@ use metrics_util::{registry::GenerationalStorage, storage::AtomicBucket};
 use quanta::Instant;
 use tracing::error;
 
-use crate::metrics::noria_recorder::NoriaMetricsRecorder;
-use crate::metrics::{Clear, Render};
-
-/// The name for the Recorder as stored in CompositeMetricsRecorder.
-pub enum MetricsRecorder {
-    /// A recorder for ReadySet-style metrics.
-    Noria(NoriaMetricsRecorder),
-    /// A recorder for Prometheus.
-    Prometheus(PrometheusRecorder),
-}
-
-impl Render for MetricsRecorder {
-    fn render(&self) -> String {
-        match self {
-            MetricsRecorder::Noria(nmr) => nmr.render(),
-            MetricsRecorder::Prometheus(pr) => pr.render(),
-        }
-    }
-}
-
-impl Clear for MetricsRecorder {
-    fn clear(&self) -> bool {
-        match self {
-            MetricsRecorder::Noria(nmr) => nmr.clear(),
-            MetricsRecorder::Prometheus(pr) => pr.clear(),
-        }
-    }
-}
+use crate::metrics::Render;
 
 struct Snapshot {
     pub counters: HashMap<String, HashMap<LabelSet, u64>>,
@@ -471,12 +444,6 @@ impl Recorder for PrometheusRecorder {
 impl Render for PrometheusRecorder {
     fn render(&self) -> String {
         self.inner.render()
-    }
-}
-
-impl Clear for PrometheusRecorder {
-    fn clear(&self) -> bool {
-        false
     }
 }
 

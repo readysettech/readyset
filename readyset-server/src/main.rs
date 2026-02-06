@@ -11,14 +11,11 @@ use futures_util::future::{self, Either};
 use readyset_alloc::ThreadBuildWrapper;
 use readyset_client::metrics::recorded;
 use readyset_server::consensus::AuthorityType;
-use readyset_server::metrics::{
-    install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
-};
-use readyset_server::PrometheusBuilder;
-use readyset_server::{resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions};
+use readyset_server::metrics::{install_global_recorder, PrometheusBuilder};
+use readyset_server::{resolve_addr, Builder, WorkerOptions};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer};
 use readyset_version::*;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 // readyset_alloc initializes the global allocator
 extern crate readyset_alloc;
@@ -128,9 +125,10 @@ struct Options {
     #[arg(long, env = "PROMETHEUS_METRICS")]
     prometheus_metrics: bool,
 
-    /// Output noria metrics
+    /// Deprecated: noria metrics have been removed. This flag is accepted for backwards
+    /// compatibility but has no effect and will be removed in a future release.
     #[arg(long, hide = true)]
-    pub noria_metrics: bool,
+    noria_metrics: bool,
 
     #[command(flatten)]
     tracing: readyset_tracing::Options,
@@ -185,22 +183,21 @@ fn main() -> anyhow::Result<()> {
         Either::Right(future::ok(opts.external_address.unwrap_or(opts.address)))
     };
 
-    let mut recs = Vec::new();
     if opts.noria_metrics {
-        recs.push(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
+        warn!("--noria-metrics is deprecated and has no effect. It will be removed in a future release.");
     }
+
     if opts.prometheus_metrics {
         // `PrometheusBuilder::build_recorder` spawns an upkeep task, so we need to execute it in
         // the context of the runtime
         rt.block_on(async {
-            recs.push(MetricsRecorder::Prometheus(
+            install_global_recorder(
                 PrometheusBuilder::new()
                     .add_global_label("deployment", &opts.deployment)
                     .build_recorder(),
-            ));
-        })
+            );
+        });
     }
-    install_global_recorder(CompositeMetricsRecorder::with_recorders(recs));
 
     metrics::gauge!(
         recorded::READYSET_SERVER_VERSION,
@@ -209,7 +206,6 @@ fn main() -> anyhow::Result<()> {
             ("commit_id", READYSET_VERSION.commit_id),
             ("platform", READYSET_VERSION.platform),
             ("rustc_version", READYSET_VERSION.rustc_version),
-            ("profile", READYSET_VERSION.profile),
             ("profile", READYSET_VERSION.profile),
             ("opt_level", READYSET_VERSION.opt_level),
         ]

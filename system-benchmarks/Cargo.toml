@@ -39,6 +39,7 @@ regex = { workspace = true }
 bincode = { workspace = true }
 libc = { workspace = true }
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
+prometheus-parse = { workspace = true }
 
 [[bin]]
 name = "regressions"
