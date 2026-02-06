@@ -63,6 +63,7 @@ members = [
     "schema-catalog",
     "support",
     "system-benchmarks",
+    "test-discovery",
     "test-utils",
     "tinylb",
     "tournament-kway",

@@ -1,0 +1,8 @@
+[package]
+name = "test-discovery"
+version = "0.1.0"
+publish = false
+edition = "2024"
+
+[lints]
+workspace = true
