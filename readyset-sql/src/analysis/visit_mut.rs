@@ -1149,7 +1149,8 @@ pub fn walk_alter_readyset_statement<'a, V: VisitorMut<'a>>(
         AlterReadysetStatement::EnterMaintenanceMode
         | AlterReadysetStatement::ExitMaintenanceMode
         | AlterReadysetStatement::SetLogLevel(_)
-        | AlterReadysetStatement::SetEviction(_) => Ok(()),
+        | AlterReadysetStatement::SetEviction(_)
+        | AlterReadysetStatement::ChangeUpstream(_) => Ok(()),
     }
 }
 

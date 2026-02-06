@@ -6,9 +6,9 @@ use clap::ValueEnum;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{
     AddTablesStatement, AlterReadysetStatement, AlterTableStatement, CacheInner, CacheType,
-    CreateCacheStatement, CreateTableStatement, CreateViewStatement, DropCacheStatement,
-    EvictionPolicy, Expr, ResnapshotTableStatement, SelectStatement, SetEviction,
-    ShallowCacheQuery, SqlQuery, SqlType, TableKey,
+    ChangeUpstreamStatement, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
+    DropCacheStatement, EvictionPolicy, Expr, ResnapshotTableStatement, SelectStatement,
+    SetEviction, ShallowCacheQuery, SqlQuery, SqlType, TableKey,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -224,6 +224,7 @@ enum ReadysetKeyword {
     SIMPLIFIED,
     SUPPORTED,
     TTL,
+    UPSTREAM,
     /// To match both Readyset and sqlparser keywords in one go, we want to be able to accept both
     /// in the same function. So here we just allow falling back to a sqlparser keyword.
     Standard(sqlparser::keywords::Keyword),
@@ -256,6 +257,7 @@ impl ReadysetKeyword {
             Self::SIMPLIFIED => "SIMPLIFIED",
             Self::SUPPORTED => "SUPPORTED",
             Self::TTL => "TTL",
+            Self::UPSTREAM => "UPSTREAM",
             Self::Standard(_) => panic!(
                 "Standard sqlparser keywords should only be used with `parse_keyword`, not string comparison"
             ),
@@ -411,6 +413,19 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
 
             Ok(SqlQuery::AlterReadySet(
                 AlterReadysetStatement::SetEviction(SetEviction { limit, period }),
+            ))
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::Standard(Keyword::CHANGE),
+                ReadysetKeyword::UPSTREAM,
+            ],
+        ) {
+            parser.expect_keyword(Keyword::TO)?;
+            let url = parser.parse_literal_string()?;
+
+            Ok(SqlQuery::AlterReadySet(
+                AlterReadysetStatement::ChangeUpstream(ChangeUpstreamStatement { url }),
             ))
         } else {
             Err(ReadysetParsingError::ReadysetParsingError(

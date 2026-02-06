@@ -484,6 +484,26 @@ pub fn set_eviction_statement(
     }
 }
 
+pub fn change_upstream_statement(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("change")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("upstream")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("to")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, url) = dialect.utf8_string_literal()(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((
+            i,
+            AlterReadysetStatement::ChangeUpstream(ChangeUpstreamStatement { url }),
+        ))
+    }
+}
+
 pub fn alter_readyset_statement(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
@@ -499,6 +519,7 @@ pub fn alter_readyset_statement(
             exit_maintenance_mode_statement(),
             set_eviction_statement(dialect),
             set_log_level_statement(dialect),
+            change_upstream_statement(dialect),
         ))(i)?;
 
         Ok((i, statement))
@@ -1709,6 +1730,18 @@ mod tests {
 
             let qstring = b"ALTER READYSET SET EVICTION;";
             test_parse_expect_err!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+        }
+
+        #[test]
+        fn alter_readyset_change_upstream() {
+            let qstring = b"ALTER READYSET CHANGE UPSTREAM TO 'mysql://host/db';";
+            let res = test_parse!(alter_readyset_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::ChangeUpstream(ChangeUpstreamStatement {
+                    url: "mysql://host/db".to_string(),
+                })
+            );
         }
     }
 }

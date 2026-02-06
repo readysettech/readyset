@@ -488,6 +488,12 @@ pub struct SetEviction {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct ChangeUpstreamStatement {
+    /// The new upstream URL.
+    pub url: String,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterReadysetStatement {
     ResnapshotTable(ResnapshotTableStatement),
     AddTables(AddTablesStatement),
@@ -495,6 +501,7 @@ pub enum AlterReadysetStatement {
     ExitMaintenanceMode,
     SetLogLevel(String),
     SetEviction(SetEviction),
+    ChangeUpstream(ChangeUpstreamStatement),
 }
 
 impl DialectDisplay for AlterReadysetStatement {
@@ -528,6 +535,9 @@ impl DialectDisplay for AlterReadysetStatement {
                     write!(f, " PERIOD {}", period)?;
                 }
                 Ok(())
+            }
+            Self::ChangeUpstream(stmt) => {
+                write!(f, "CHANGE UPSTREAM TO '{}'", stmt.url)
             }
         })
     }

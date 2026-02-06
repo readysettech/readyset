@@ -186,6 +186,7 @@ fn alter_readyset() {
         "ALTER READYSET SET EVICTION;",
         "expected MEMORY LIMIT or PERIOD after SET EVICTION"
     );
+    check_parse_both!("ALTER READYSET CHANGE UPSTREAM TO 'mysql://host/db';");
 }
 
 #[test]

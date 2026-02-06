@@ -1163,7 +1163,8 @@ pub fn walk_alter_readyset_statement<'a, V: Visitor<'a>>(
         AlterReadysetStatement::EnterMaintenanceMode
         | AlterReadysetStatement::ExitMaintenanceMode
         | AlterReadysetStatement::SetLogLevel(_)
-        | AlterReadysetStatement::SetEviction(_) => Ok(()),
+        | AlterReadysetStatement::SetEviction(_)
+        | AlterReadysetStatement::ChangeUpstream(_) => Ok(()),
     }
 }
 
