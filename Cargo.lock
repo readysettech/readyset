@@ -5001,6 +5001,7 @@ dependencies = [
  "readyset-tracing",
  "readyset-util",
  "schema-catalog",
+ "test-discovery",
  "test-strategy",
  "test-utils",
  "tokio",

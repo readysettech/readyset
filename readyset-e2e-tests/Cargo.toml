@@ -4,6 +4,14 @@ version = "0.1.0"
 publish = false
 authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2024"
+autotests = false
+
+[[test]]
+name = "tests"
+path = "tests.rs"
+
+[build-dependencies]
+test-discovery = { path = "../test-discovery" }
 
 [dev-dependencies]
 chrono = { workspace = true }
