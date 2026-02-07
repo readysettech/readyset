@@ -44,3 +44,8 @@ test-group = 'serial-mysql'
 [[profile.default.overrides]]
 filter = 'test(/:proptest:/)'
 retries = 0
+
+# Vertical tests are long-running proptest suites that can take tens of minutes.
+# No termination timeout; warn after 45 minutes.
+[profile.vertical]
+slow-timeout = "2700s"
