@@ -264,7 +264,7 @@ tokio-stream = { version = "0.1.15", features = ["sync"] }
 tokio-test = { version = "0.4.4" }
 tokio-tower = "0.5.1"
 tokio-util = "0.7.12"
-toml = "0.8"
+toml = "0.9"
 tower = "0.4.13"
 tower-service = "0.3.2"
 tracing = "0.1.40"
