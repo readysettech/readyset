@@ -7,7 +7,7 @@
 //! new bugs); to run it locally run:
 //!
 //! ```notrust
-//! cargo test -p readyset-mysql --features vertical_tests --test vertical
+//! cargo nextest run --cargo-profile release --profile vertical -p readyset-mysql --features vertical_tests --test tests -E "test(vertical)"
 //! ```
 //!
 //! This test suite will connect to a local mysql database, which can be set up with all the correct

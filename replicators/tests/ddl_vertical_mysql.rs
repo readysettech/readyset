@@ -7,7 +7,7 @@
 //! new bugs); to run it locally run:
 //!
 //! ```notrust
-//! cargo test -p replicators --features vertical_tests --test ddl_vertical_mysql
+//! cargo nextest run --cargo-profile release --profile vertical -p replicators --features vertical_tests --test tests -E "test(ddl_vertical_mysql)"
 //! ```
 //!
 //! This test suite will connect to a local MySQL database, which can be set up with all the

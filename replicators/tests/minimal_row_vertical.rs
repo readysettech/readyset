@@ -16,7 +16,7 @@
 //! find new bugs); to run it locally run:
 //!
 //! ```notrust
-//! cargo test -p replicators --features vertical_tests --test minimal_row_vertical
+//! cargo nextest run --cargo-profile release --profile vertical -p replicators --features vertical_tests --test tests -E "test(minimal_row_vertical)"
 //! ```
 //!
 //! This test suite will connect to a local MySQL database, will create tables and run DML on this tables

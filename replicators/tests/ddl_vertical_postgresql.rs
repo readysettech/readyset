@@ -7,7 +7,7 @@
 //! new bugs); to run it locally run:
 //!
 //! ```notrust
-//! cargo test -p replicators --features vertical_tests --test ddl_vertical
+//! cargo nextest run --cargo-profile release --profile vertical -p replicators --features vertical_tests --test tests -E "test(ddl_vertical_postgresql)"
 //! ```
 //!
 //! This test suite will connect to a local Postgres database, which can be set up with all the
