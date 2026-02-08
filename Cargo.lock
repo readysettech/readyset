@@ -6854,8 +6854,12 @@ name = "test-utils-proc-macros"
 version = "0.0.0"
 dependencies = [
  "proc-macro2",
+ "proptest",
  "quote",
  "syn 2.0.114",
+ "test-strategy",
+ "test-utils",
+ "tokio",
 ]
 
 [[package]]

@@ -75,24 +75,88 @@ pub fn skip_flaky_finder(_args: TokenStream, item: TokenStream) -> TokenStream {
     result.into_token_stream().into()
 }
 
+/// Generate a separate copy of a test for each upstream database variant.
+///
+/// Each variant becomes a nested module, making it filterable via nextest:
+///
+/// ```sh
+/// cargo nextest run -E 'test(/:mysql80:/)'
+/// ```
+///
+/// When combined with [`tags`], `#[tags(...)]` must be outermost so it runs first.
+///
+/// ```rust,ignore
+/// #[upstream(mysql80, mysql84)]
+/// #[tokio::test(flavor = "multi_thread")]
+/// async fn my_test() { /* body */ }
+///
+/// // Expands to:
+/// pub mod my_test {
+///     pub mod mysql80 {
+///         use super::*;
+///         #[tokio::test(flavor = "multi_thread")]
+///         async fn my_test() { /* body */ }
+///     }
+///     pub mod mysql84 { /* ... same ... */ }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn upstream(args: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as proc_macro2::TokenStream);
+    let item = parse_macro_input!(item as ItemFn);
+
+    let variants: Vec<Ident> = args
+        .into_iter()
+        .filter_map(|tt| match tt {
+            TokenTree::Ident(ident) => Some(ident),
+            _ => None,
+        })
+        .collect();
+
+    let fn_name = &item.sig.ident;
+    let attrs = &item.attrs;
+    let asyncness = &item.sig.asyncness;
+    let ret_type = &item.sig.output;
+    let inputs = &item.sig.inputs;
+    let body = &item.block;
+
+    let variant_modules = variants.iter().map(|variant| {
+        quote! {
+            pub mod #variant {
+                use super::*;
+                // Explicit import so it takes priority over both the glob import and the
+                // prelude, avoiding the ambiguity that `use super::*` + prelude causes.
+                #[allow(unused_imports)]
+                use ::test_utils::pretty_assertions::assert_eq;
+                #(#attrs)*
+                #asyncness fn #fn_name(#inputs) #ret_type #body
+            }
+        }
+    });
+
+    // If #[tags] already wrapped us, fn_name is "test" and the outer module exists.
+    if fn_name == "test" {
+        quote! { #(#variant_modules)* }.into()
+    } else {
+        quote! {
+            pub mod #fn_name {
+                use super::*;
+                #(#variant_modules)*
+            }
+        }
+        .into()
+    }
+}
+
 /// List of valid test that can be used with the `tags` attribute. See descriptions in [`tags`].
-const VALID_TAGS: &[&str] = &[
-    "serial",
-    "no_retry",
-    "slow",
-    "very_slow",
-    "mysql_upstream",
-    "mysql8_upstream",
-    "postgres_upstream",
-    "postgres15_upstream",
-];
+const VALID_TAGS: &[&str] = &["serial", "no_retry", "slow", "very_slow"];
 
 /// "Tag" a test by moving it into a module. This is a lightweight version of the [test-tag] crate
 /// with special support for the `serial` tag.
 ///
 /// ```rust,ignore
 /// // This:
-/// #[tags(serial, mysql8_upstream)]
+/// #[tags(serial, slow)]
 /// #[test]
 /// fn test_foobar() {
 ///     // Test code here
@@ -101,7 +165,7 @@ const VALID_TAGS: &[&str] = &[
 /// // Will turn into this:
 /// pub mod test_foobar {
 ///     pub mod serial {
-///         pub mod mysql8_upstream {
+///         pub mod slow {
 ///             #[test]
 ///             fn test() {
 ///                 // Test code here
@@ -114,8 +178,8 @@ const VALID_TAGS: &[&str] = &[
 /// This allows test runs to target specific tags using the `:tag:` pattern, like so:
 ///
 /// ```sh
-/// cargo test -- :mysql8_upstream:
-/// cargo nextest run -E 'test(/:mysql8_upstream:/)'
+/// cargo test -- :serial:
+/// cargo nextest run -E 'test(/:serial:/)'
 /// ```
 ///
 /// If one of the tags is `serial`, we add the [`serial_test::serial`] attribute so this can be run
@@ -128,6 +192,10 @@ const VALID_TAGS: &[&str] = &[
 /// they will always be identifiable as `:tag:`, not requiring `:tag` for the last or `tag:` for the
 /// first.
 ///
+/// When combined with [`upstream`], `#[tags(...)]` must be the outermost (topmost) attribute so
+/// that it runs first and renames the function to `test`. The `#[upstream]` macro detects this
+/// and skips creating a redundant outer module.
+///
 /// ## Supported Tags
 ///
 /// The following tags are supported (defined in [`VALID_TAGS`]):
@@ -138,10 +206,6 @@ const VALID_TAGS: &[&str] = &[
 /// - `slow`: For tests that are expected to take a long time to run. See [`slow`]
 /// - `very_slow`: For tests that are extremely slow; these are prioritized to run first so they
 ///   don't become long-pole tests that delay CI completion
-/// - `mysql_upstream`: For tests that can run against any supported MySQL version
-/// - `mysql8_upstream`: For tests that specifically target MySQL 8.x features or behavior
-/// - `postgres_upstream`: For tests that can run against any supported PostgreSQL version
-/// - `postgres15_upstream`: For tests that specifically target PostgreSQL 15.x features or behavior
 ///
 /// [test-tag]: https://crates.io/crates/test-tag
 #[proc_macro_attribute]
@@ -225,7 +289,7 @@ pub fn tags(args: TokenStream, item: TokenStream) -> TokenStream {
     // might want to do, as a final step, the same thing test-tag does here:
     //
     // ```
-    // use example_exprs_eval_same_as_mysql::serial::mysql_upstream::test as example_exprs_eval_same_as_mysql;
+    // use example_exprs_eval_same_as_mysql::serial::test as example_exprs_eval_same_as_mysql;
     // ```
     out.into_token_stream().into()
 }

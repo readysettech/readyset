@@ -12,7 +12,7 @@ use std::env;
 
 use ndarray::{ArrayD, IxDyn};
 use readyset_data::{Array, DfValue};
-use test_utils::tags;
+use test_utils::{tags, upstream};
 use tokio_postgres::NoTls;
 
 fn config() -> tokio_postgres::Config {
@@ -65,13 +65,15 @@ mod arrays {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[tags(serial, postgres_upstream)]
+    #[tags(serial)]
+    #[upstream(postgres13, postgres15)]
     async fn empty_array_to_from_sql() {
         round_trip("text[]", Array::from(vec![])).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[tags(serial, postgres_upstream)]
+    #[tags(serial)]
+    #[upstream(postgres13, postgres15)]
     async fn one_d_array_to_from_sql() {
         round_trip(
             "int[]",
@@ -81,7 +83,8 @@ mod arrays {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[tags(serial, postgres_upstream)]
+    #[tags(serial)]
+    #[upstream(postgres13, postgres15)]
     async fn two_d_array_to_from_sql() {
         round_trip(
             "int[][]",
@@ -102,7 +105,8 @@ mod arrays {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[tags(serial, postgres_upstream)]
+    #[tags(serial)]
+    #[upstream(postgres13, postgres15)]
     async fn two_d_array_with_alternate_lower_bounds_to_from_sql() {
         round_trip(
             "int[][]",
@@ -125,7 +129,8 @@ mod arrays {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[tags(serial, postgres_upstream)]
+    #[tags(serial)]
+    #[upstream(postgres13, postgres15)]
     async fn two_d_string_array_to_from_sql() {
         round_trip(
             "text[][]",

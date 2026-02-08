@@ -6,7 +6,7 @@ use pretty_assertions::assert_eq;
 use readyset_data::{DfType, DfValue};
 use readyset_sql_parsing::parse_sql_type;
 use readyset_util::retry_with_exponential_backoff;
-use test_utils::tags;
+use test_utils::{tags, upstream};
 
 use crate::common::parse_lower_eval;
 
@@ -101,7 +101,8 @@ async fn compare_eval(expr: &str, conn: &mut Conn) {
 }
 
 #[tokio::test]
-#[tags(serial, mysql_upstream)]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn example_exprs_eval_same_as_mysql() {
     let mut conn = connect().await;
 
@@ -202,7 +203,8 @@ async fn example_exprs_eval_same_as_mysql() {
 }
 
 #[tokio::test]
-#[tags(serial, mysql8_upstream)]
+#[tags(serial)]
+#[upstream(mysql80, mysql84)]
 async fn example_exprs_eval_same_as_mysql8() {
     let mut conn = connect().await;
 

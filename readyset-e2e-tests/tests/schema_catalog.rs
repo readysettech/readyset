@@ -10,7 +10,7 @@ use readyset_server::Handle;
 use readyset_util::failpoints;
 use readyset_util::{eventually, shutdown::ShutdownSender};
 use std::time::Duration;
-use test_utils::tags;
+use test_utils::{tags, upstream};
 use tokio::time::sleep;
 
 // Delay the next schema catalog update long enough to test behavior when the adapter is stale
@@ -112,7 +112,8 @@ macro_rules! assert_schema_generation_error {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn create_cache_errors_when_catalog_is_stale() {
     let mut harness = SchemaGenerationRace::new().await;
 
@@ -137,7 +138,8 @@ async fn create_cache_errors_when_catalog_is_stale() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn explain_create_cache_errors_when_catalog_is_stale() {
     let mut harness = SchemaGenerationRace::new().await;
 
@@ -182,7 +184,8 @@ async fn explain_create_cache_errors_when_catalog_is_stale() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn create_cache_concurrently_errors_when_catalog_is_stale() {
     let mut harness = SchemaGenerationRace::new().await;
 
@@ -254,7 +257,8 @@ async fn create_cache_concurrently_errors_when_catalog_is_stale() {
 /// the server's. During this window `CREATE CACHE` is rejected. After the delay expires, the
 /// adapter catches up and the same command succeeds.
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn schema_generation_mismatch_recovered_after_delayed_sse_update() {
     readyset_tracing::init_test_logging();
     let failpoint_guard = FailScenario::setup();
@@ -345,7 +349,8 @@ async fn schema_generation_mismatch_recovered_after_delayed_sse_update() {
 /// 6. Wait for SSE reconnection (snapshot delivers latest catalog)
 /// 7. Verify CREATE CACHE succeeds
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn schema_catalog_recovers_after_sse_stream_disconnect() {
     readyset_tracing::init_test_logging();
     let failpoint_guard = FailScenario::setup();
@@ -388,8 +393,11 @@ async fn schema_catalog_recovers_after_sse_stream_disconnect() {
     // 2. Delay the subsequent reconnection by 15s
     fail::cfg(failpoints::CONTROLLER_EVENTS_SSE_DISCONNECT, "1*return")
         .expect("failed to set SSE force-disconnect failpoint");
-    fail::cfg(failpoints::CONTROLLER_EVENTS_SSE_CONNECT_DELAY, "1*return(15000)")
-        .expect("failed to set SSE connect delay failpoint");
+    fail::cfg(
+        failpoints::CONTROLLER_EVENTS_SSE_CONNECT_DELAY,
+        "1*return(15000)",
+    )
+    .expect("failed to set SSE connect delay failpoint");
 
     // Give time for the force-disconnect to fire (~1s tick interval + processing).
     sleep(Duration::from_secs(3)).await;

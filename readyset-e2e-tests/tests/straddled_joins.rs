@@ -5,11 +5,12 @@ use readyset_client_test_helpers::mysql_helpers::{
     self, MySQLAdapter, assert_materializations_have_key, last_query_info,
 };
 use readyset_client_test_helpers::{TestBuilder, sleep};
-use test_utils::tags;
+use test_utils::{tags, upstream};
 
 /// REA-6145: no tag found for value
 #[tokio::test]
-#[tags(serial, mysql_upstream)]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn test_sj_eviction_no_remapping() {
     readyset_tracing::init_test_logging();
     let db_name = "sj_eviction_no_remapping";

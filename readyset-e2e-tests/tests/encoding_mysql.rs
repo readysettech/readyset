@@ -7,7 +7,7 @@ use readyset_client_test_helpers::{
 };
 use readyset_util::eventually;
 use std::time::Duration;
-use test_utils::tags;
+use test_utils::{tags, upstream};
 
 macro_rules! check_rows {
     ($my_rows:expr_2021, $rs_rows:expr_2021, $($format_args:tt)*) => {
@@ -335,13 +335,15 @@ macro_rules! test_encoding_replication {
     ($name:ident, $coltype:expr_2021, $charset:expr_2021, $range:expr_2021) => {
         paste::paste! {
             #[tokio::test]
-            #[tags(serial, slow, mysql_upstream)]
+            #[tags(serial, slow)]
+            #[upstream(mysql57, mysql80, mysql84)]
             async fn [<test_ $name _snapshot>]() {
                 test_snapshot_encoding(stringify!($name), $coltype, $charset, $range).await;
             }
 
             #[tokio::test]
-            #[tags(serial, slow, mysql_upstream)]
+            #[tags(serial, slow)]
+            #[upstream(mysql57, mysql80, mysql84)]
             async fn [<test_ $name _streaming>]() {
                 test_streaming_encoding(stringify!($name), $coltype, $charset, $range).await;
             }
@@ -353,13 +355,15 @@ macro_rules! test_encoding_replication_very_slow {
     ($name:ident, $coltype:expr_2021, $charset:expr_2021, $range:expr_2021) => {
         paste::paste! {
             #[tokio::test]
-            #[tags(serial, very_slow, mysql_upstream)]
+            #[tags(serial, very_slow)]
+            #[upstream(mysql57, mysql80, mysql84)]
             async fn [<test_ $name _snapshot>]() {
                 test_snapshot_encoding(stringify!($name), $coltype, $charset, $range).await;
             }
 
             #[tokio::test]
-            #[tags(serial, very_slow, mysql_upstream)]
+            #[tags(serial, very_slow)]
+            #[upstream(mysql57, mysql80, mysql84)]
             async fn [<test_ $name _streaming>]() {
                 test_streaming_encoding(stringify!($name), $coltype, $charset, $range).await;
             }

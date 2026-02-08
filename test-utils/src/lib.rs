@@ -1,7 +1,7 @@
 //! Inspired by the crate of the same name in rust-analyzer.
 //! https://github.com/rust-analyzer/rust-analyzer/blob/master/crates/test_utils/src/lib.rs
 
-pub use test_utils_proc_macros::{skip_flaky_finder, slow, tags};
+pub use test_utils_proc_macros::{skip_flaky_finder, slow, tags, upstream};
 
 // Re-export serial_test so we only need to add `readyset_utils` to `Cargo.toml` for packages that
 // use it.

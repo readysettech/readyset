@@ -54,7 +54,7 @@ use readyset_server::Handle;
 use readyset_util::arbitrary::arbitrary_collatable_string;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
-use test_utils::tags;
+use test_utils::{tags, upstream};
 
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
@@ -502,7 +502,10 @@ impl Table {
 
 /// The result of running a single [`Operation`] against either MySQL or ReadySet.
 #[derive(Debug)]
-#[allow(dead_code, reason = "Err variant preserves the original error for debugging")]
+#[allow(
+    dead_code,
+    reason = "Err variant preserves the original error for debugging"
+)]
 pub enum OperationResult {
     Err(mysql_async::Error),
     Rows(Vec<mysql_async::Row>),
@@ -707,7 +710,8 @@ macro_rules! vertical_tests {
                 }
             }
 
-            #[tags(serial, mysql8_upstream)]
+            #[tags(serial)]
+            #[upstream(mysql80, mysql84)]
             #[test]
             #[cfg_attr(not(feature = "vertical_tests"), ignore)]
             fn $name() {

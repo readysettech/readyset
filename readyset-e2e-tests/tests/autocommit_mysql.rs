@@ -1,15 +1,15 @@
 use assert_matches::assert_matches;
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Row};
+use readyset_adapter::BackendBuilder;
 use readyset_adapter::backend::{MigrationMode, QueryInfo, UnsupportedSetMode};
 use readyset_adapter::query_status_cache::QueryStatusCache;
-use readyset_adapter::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
-use readyset_client_test_helpers::{sleep, TestBuilder};
+use readyset_client_test_helpers::{TestBuilder, sleep};
 use readyset_server::Handle;
 use readyset_util::shutdown::ShutdownSender;
-use test_utils::tags;
+use test_utils::{tags, upstream};
 
 async fn setup_fallback() -> (mysql_async::Opts, Handle, ShutdownSender) {
     readyset_tracing::init_test_logging();
@@ -39,7 +39,8 @@ async fn setup_with_cache(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn set_autocommit() {
     let (opts, _handle, shutdown_tx) = setup_fallback().await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -73,13 +74,8 @@ async fn set_autocommit() {
 // 8. Shutdown
 async fn autocommit_lifecycle(set_mode: UnsupportedSetMode) {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle, shutdown_tx) = setup_with_cache(
-        query_status_cache,
-        true,
-        MigrationMode::OutOfBand,
-        set_mode,
-    )
-    .await;
+    let (opts, _handle, shutdown_tx) =
+        setup_with_cache(query_status_cache, true, MigrationMode::OutOfBand, set_mode).await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
         .await
@@ -157,21 +153,24 @@ async fn autocommit_lifecycle(set_mode: UnsupportedSetMode) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn autocommit_state_query() {
     autocommit_lifecycle(UnsupportedSetMode::Proxy).await;
 }
 
 // Verify that SET autocommit=0/1 works under the default Error mode, not just Proxy mode.
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn autocommit_error_mode_query_routing() {
     autocommit_lifecycle(UnsupportedSetMode::Error).await;
 }
 
 // Verify that SET autocommit=0/1 works under Allow mode.
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn autocommit_allow_mode_query_routing() {
     autocommit_lifecycle(UnsupportedSetMode::Allow).await;
 }
@@ -179,7 +178,8 @@ async fn autocommit_allow_mode_query_routing() {
 // Verify that SET autocommit=1 during an explicit transaction (BEGIN) returns to Fallback.
 // MySQL treats SET autocommit=1 inside a transaction as an implicit COMMIT.
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn autocommit_on_during_transaction() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle, shutdown_tx) = setup_with_cache(
@@ -257,7 +257,8 @@ async fn autocommit_on_during_transaction() {
 /// hanging. If the execute completes at all, the bug is fixed; the old behavior was an
 /// indefinite hang.
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn prepared_stmt_execute_no_hang() {
     let (opts, _handle, shutdown_tx) = setup_fallback().await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -314,7 +315,8 @@ async fn prepared_stmt_execute_no_hang() {
 // SERVER_STATUS_IN_TRANS) in response packets accurately reflect the connection's
 // transaction and autocommit state across all relevant transitions.
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn server_status_flags_reflect_transaction_state() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle, shutdown_tx) = setup_with_cache(
@@ -482,7 +484,8 @@ async fn server_status_flags_reflect_transaction_state() {
 // to ReadySet after being in InTransaction or AutocommitOff states.
 // Regression test for the fix in commit a8fc1a346a (REA-6333).
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn reset_connection_restores_proxy_state() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle, shutdown_tx) = setup_with_cache(

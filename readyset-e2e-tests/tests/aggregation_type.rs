@@ -9,7 +9,7 @@ use readyset_client_test_helpers::{
 use readyset_sql::{Dialect, DialectDisplay, ast::SqlType};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
-use test_utils::tags;
+use test_utils::{tags, upstream};
 
 async fn test_aggregation_type_inner_postgres(
     expr: &str,
@@ -163,12 +163,29 @@ async fn test_aggregation_type_inner_mysql(
     shutdown_tx.shutdown().await;
 }
 macro_rules! test_aggregation_type {
-    ($upstream:ident, $name:ident, $expr:expr, $coltype:expr) => {
+    (postgres, $name:ident, $expr:expr, $coltype:expr) => {
         paste::paste! {
             #[tokio::test]
-            #[tags(serial, slow, [<$upstream _upstream>])]
-            async fn [<$name _ $upstream>]() {
-                [<test_aggregation_type_inner_ $upstream>](
+            #[tags(serial, slow)]
+            #[upstream(postgres13, postgres15)]
+            async fn [<$name _postgres>]() {
+                test_aggregation_type_inner_postgres(
+                    $expr,
+                    $coltype,
+                    &[],
+                    false
+                )
+                .await;
+            }
+        }
+    };
+    (mysql, $name:ident, $expr:expr, $coltype:expr) => {
+        paste::paste! {
+            #[tokio::test]
+            #[tags(serial, slow)]
+            #[upstream(mysql57, mysql80, mysql84)]
+            async fn [<$name _mysql>]() {
+                test_aggregation_type_inner_mysql(
                     $expr,
                     $coltype,
                     &[],
@@ -184,7 +201,8 @@ macro_rules! test_window_aggregation_type {
     (postgres, $name:ident, $expr:expr, $coltype:expr, [$($value:expr),+ $(,)?]) => {
         paste::paste! {
             #[tokio::test]
-            #[tags(serial, slow, postgres_upstream)]
+            #[tags(serial, slow)]
+            #[upstream(postgres13, postgres15)]
             async fn [<$name _window_postgres>]() {
                 test_aggregation_type_inner_postgres(
                     $expr,
@@ -199,7 +217,8 @@ macro_rules! test_window_aggregation_type {
     (mysql, $name:ident, $expr:expr, $coltype:expr, [$($value:expr),+ $(,)?]) => {
         paste::paste! {
             #[tokio::test]
-            #[tags(serial, slow, mysql8_upstream)]
+            #[tags(serial, slow)]
+            #[upstream(mysql80, mysql84)]
             async fn [<$name _window_mysql>]() {
                 test_aggregation_type_inner_mysql(
                     $expr,

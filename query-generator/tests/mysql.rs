@@ -5,7 +5,7 @@ use mysql_async::Params;
 use query_generator::{GeneratorState, QuerySeed};
 use readyset_sql::{ast::CreateTableStatement, Dialect, DialectDisplay};
 use test_strategy::proptest;
-use test_utils::tags;
+use test_utils::{tags, upstream};
 
 async fn mysql_connection() -> mysql_async::Conn {
     let db_name = env::var("MYSQL_DB").unwrap_or_else(|_| "test".to_owned());
@@ -43,7 +43,8 @@ async fn mysql_connection() -> mysql_async::Conn {
     conn
 }
 
-#[tags(serial, no_retry, mysql_upstream)]
+#[tags(serial, no_retry)]
+#[upstream(mysql57, mysql80, mysql84)]
 #[proptest]
 #[ignore = "Currently failing"]
 fn queries_work_in_mysql(seed: QuerySeed) {

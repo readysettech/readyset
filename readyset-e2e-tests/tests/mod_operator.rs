@@ -9,7 +9,7 @@ use readyset_client_test_helpers::{
 use readyset_sql::{Dialect, DialectDisplay, ast::SqlType};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
-use test_utils::tags;
+use test_utils::{tags, upstream};
 
 // ---------------------------------------------------------------------------
 // PostgreSQL output type verification
@@ -93,31 +93,36 @@ async fn test_mod_type_inner_postgres(
 }
 
 #[tokio::test]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, slow)]
+#[upstream(postgres13, postgres15)]
 async fn mod_smallint_smallint_postgres() {
     test_mod_type_inner_postgres(SqlType::Int2, SqlType::Int2, "7", "3").await;
 }
 
 #[tokio::test]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, slow)]
+#[upstream(postgres13, postgres15)]
 async fn mod_smallint_integer_postgres() {
     test_mod_type_inner_postgres(SqlType::Int2, SqlType::Int(None), "7", "3").await;
 }
 
 #[tokio::test]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, slow)]
+#[upstream(postgres13, postgres15)]
 async fn mod_integer_bigint_postgres() {
     test_mod_type_inner_postgres(SqlType::Int(None), SqlType::BigInt(None), "7", "3").await;
 }
 
 #[tokio::test]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, slow)]
+#[upstream(postgres13, postgres15)]
 async fn mod_bigint_bigint_postgres() {
     test_mod_type_inner_postgres(SqlType::BigInt(None), SqlType::BigInt(None), "7", "3").await;
 }
 
 #[tokio::test]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, slow)]
+#[upstream(postgres13, postgres15)]
 async fn mod_bigint_smallint_postgres() {
     test_mod_type_inner_postgres(SqlType::BigInt(None), SqlType::Int2, "7", "3").await;
 }
@@ -144,7 +149,8 @@ async fn test_mod_type_inner_mysql(
     readyset_tracing::init_test_logging();
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
         .parsing_preset(ParsingPreset::OnlySqlparser)
-        .build::<MySQLAdapter>().await;
+        .build::<MySQLAdapter>()
+        .await;
     let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some("noria"));
@@ -189,31 +195,36 @@ async fn test_mod_type_inner_mysql(
 }
 
 #[tokio::test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn mod_int_int_mysql() {
     test_mod_type_inner_mysql(SqlType::Int(None), SqlType::Int(None), "7", "3").await;
 }
 
 #[tokio::test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn mod_bigint_int_mysql() {
     test_mod_type_inner_mysql(SqlType::BigInt(None), SqlType::Int(None), "7", "3").await;
 }
 
 #[tokio::test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn mod_int_bigint_mysql() {
     test_mod_type_inner_mysql(SqlType::Int(None), SqlType::BigInt(None), "7", "3").await;
 }
 
 #[tokio::test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn mod_float_int_mysql() {
     test_mod_type_inner_mysql(SqlType::Float, SqlType::Int(None), "7.5", "3").await;
 }
 
 #[tokio::test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn mod_double_int_mysql() {
     test_mod_type_inner_mysql(SqlType::Double, SqlType::Int(None), "7.5", "3").await;
 }
@@ -231,7 +242,8 @@ async fn mod_double_int_mysql() {
 /// 3. Verifies that ReadySet returns the same rows as upstream for multiple
 ///    parameter values.
 #[tokio::test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn mod_correctness_through_cache_mysql() {
     readyset_tracing::init_test_logging();
     let db_name = "mod_correctness_cache";
@@ -322,7 +334,8 @@ async fn mod_correctness_through_cache_mysql() {
 /// Test that a cached query using the MOD operator returns correct results
 /// against a PostgreSQL upstream.
 #[tokio::test]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, slow)]
+#[upstream(postgres13, postgres15)]
 async fn mod_correctness_through_cache_postgres() {
     readyset_tracing::init_test_logging();
 

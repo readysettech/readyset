@@ -3,7 +3,7 @@ use std::panic::AssertUnwindSafe;
 use readyset_client_test_helpers::{TestBuilder, psql_helpers};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
-use test_utils::tags;
+use test_utils::{tags, upstream};
 
 /// Creates the shared test table and inserts rows via the upstream connection.
 async fn setup_array_table(upstream_conn: &tokio_postgres::Client) {
@@ -28,7 +28,8 @@ async fn setup_array_table(upstream_conn: &tokio_postgres::Client) {
 
 /// Tests array comparison operators: =, <>, <, >, <=, >=
 #[tokio::test]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, slow)]
+#[upstream(postgres13, postgres15)]
 async fn array_comparison_postgres() {
     readyset_tracing::init_test_logging();
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
@@ -52,22 +53,13 @@ async fn array_comparison_postgres() {
             "SELECT id FROM t WHERE arr = '{1,2}'::int[]",
             "equality with cast string literal",
         ),
-        (
-            "SELECT id FROM t WHERE arr <> ARRAY[1, 2]",
-            "inequality",
-        ),
-        (
-            "SELECT id FROM t WHERE arr > ARRAY[1, 2]",
-            "greater-than",
-        ),
+        ("SELECT id FROM t WHERE arr <> ARRAY[1, 2]", "inequality"),
+        ("SELECT id FROM t WHERE arr > ARRAY[1, 2]", "greater-than"),
         (
             "SELECT id FROM t WHERE arr >= ARRAY[1, 2]",
             "greater-than-or-equal",
         ),
-        (
-            "SELECT id FROM t WHERE arr < ARRAY[1, 2, 3]",
-            "less-than",
-        ),
+        ("SELECT id FROM t WHERE arr < ARRAY[1, 2, 3]", "less-than"),
         (
             "SELECT id FROM t WHERE arr <= ARRAY[1, 2, 3]",
             "less-than-or-equal",
@@ -103,7 +95,8 @@ async fn array_comparison_postgres() {
 
 /// Tests array containment operators: @> and <@
 #[tokio::test]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, slow)]
+#[upstream(postgres13, postgres15)]
 async fn array_containment_postgres() {
     readyset_tracing::init_test_logging();
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
@@ -166,7 +159,8 @@ async fn array_containment_postgres() {
 
 /// Tests string concatenation with the `||` operator
 #[tokio::test]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, slow)]
+#[upstream(postgres13, postgres15)]
 async fn string_concat_postgres() {
     readyset_tracing::init_test_logging();
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()

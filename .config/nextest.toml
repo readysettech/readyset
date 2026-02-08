@@ -5,10 +5,13 @@
 #
 # - `test_large_packet_write` is absurdly long locally even compared to other tests marked slow, and
 #   not very valuable unless you're working on related code.
-default-filter = 'not test(test_large_packet_write)'
+# - Only mysql80 and postgres15 upstream tests run by default. Other upstream versions (mysql57,
+#   mysql84, postgres13) are excluded to keep local test runs fast. The `ci` profile runs all of them.
+default-filter = 'not test(test_large_packet_write) and not (test(/:mysql\d+:/) and not test(/:mysql80:/)) and not (test(/:postgres\d+:/) and not test(/:postgres15:/))'
 slow-timeout = { period = "180s", terminate-after = 1, grace-period = "20s" }
 
 [profile.ci]
+default-filter = 'all()'
 fail-fast = false
 retries = 1
 failure-output = "immediate-final"
@@ -30,15 +33,15 @@ filter = 'test(/:very_slow:/)'
 priority = 100
 
 [[profile.default.overrides]]
-filter = 'test(/:serial:/) and not (test(/:postgres\d*_upstream:/) or test(/:mysql\d*_upstream:/))'
+filter = 'test(/:serial:/) and not (test(/:postgres\d+:/) or test(/:mysql\d+:/))'
 test-group = 'serial'
 
 [[profile.default.overrides]]
-filter = 'test(/:serial:/) and test(/:postgres\d*_upstream:/)'
+filter = 'test(/:serial:/) and test(/:postgres\d+:/)'
 test-group = 'serial-postgres'
 
 [[profile.default.overrides]]
-filter = 'test(/:serial:/) and test(/:mysql\d*_upstream:/)'
+filter = 'test(/:serial:/) and test(/:mysql\d+:/)'
 test-group = 'serial-mysql'
 
 [[profile.default.overrides]]

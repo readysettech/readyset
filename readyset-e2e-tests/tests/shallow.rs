@@ -12,13 +12,14 @@ use readyset_client_test_helpers::{
     psql_helpers::{self, PostgreSQLAdapter},
 };
 use readyset_tracing::init_test_logging;
-use test_utils::tags;
+use test_utils::{tags, upstream};
 use tokio::sync::RwLock;
 use tokio::{test, time::sleep};
 use tokio_postgres::SimpleQueryMessage;
 
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn scheduled_refresh_expiration() {
     init_test_logging();
 
@@ -91,7 +92,8 @@ async fn scheduled_refresh_expiration() {
 }
 
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn execution_longer_than_ttl_is_cacheable() {
     init_test_logging();
 
@@ -163,7 +165,8 @@ async fn execution_longer_than_ttl_is_cacheable() {
 }
 
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn scheduled_refresh_starts_immediately() {
     init_test_logging();
 
@@ -259,7 +262,8 @@ async fn scheduled_refresh_starts_immediately() {
 }
 
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn show_shallow_cache_entries() {
     init_test_logging();
 
@@ -365,7 +369,8 @@ async fn show_shallow_cache_entries() {
 }
 
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn mysql_change_upstream() {
     init_test_logging();
 
@@ -418,11 +423,9 @@ async fn mysql_change_upstream() {
     let mut rs = mysql_async::Conn::new(rs_opts.clone()).await.unwrap();
     rs.query_drop(format!("USE {db_a}")).await.unwrap();
 
-    rs.query_drop(
-        "CREATE SHALLOW CACHE POLICY TTL 2 SECONDS FROM SELECT b FROM foo WHERE a = ?",
-    )
-    .await
-    .expect("create shallow cache");
+    rs.query_drop("CREATE SHALLOW CACHE POLICY TTL 2 SECONDS FROM SELECT b FROM foo WHERE a = ?")
+        .await
+        .expect("create shallow cache");
 
     // First query goes upstream to db_a.
     let row: (i32,) = rs
@@ -487,7 +490,8 @@ async fn mysql_change_upstream() {
 
 /// Verify that a `/*rs+ CREATE SHALLOW CACHE */` hint creates a shallow cache and returns results.
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn hint_creates_shallow_cache() {
     init_test_logging();
 
@@ -544,7 +548,8 @@ async fn hint_creates_shallow_cache() {
 
 /// Verify that a `/*rs+ CREATE SHALLOW CACHE */` hint works on a UNION query.
 #[test]
-#[tags(serial, mysql_upstream)]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn hint_creates_shallow_cache_union() {
     init_test_logging();
 
@@ -599,7 +604,8 @@ async fn hint_creates_shallow_cache_union() {
 
 /// Verify that a `/*rs+ CREATE SHALLOW CACHE */` hint works with a CTE.
 #[test]
-#[tags(serial, mysql8_upstream)]
+#[tags(serial)]
+#[upstream(mysql80, mysql84)]
 async fn hint_creates_shallow_cache_cte() {
     init_test_logging();
 
@@ -631,9 +637,7 @@ async fn hint_creates_shallow_cache_cte() {
 
     // CTE with hint on the outer SELECT.
     readyset
-        .query_drop(
-            "WITH cte AS (SELECT 1 AS x) SELECT /*rs+ CREATE SHALLOW CACHE */ * FROM cte",
-        )
+        .query_drop("WITH cte AS (SELECT 1 AS x) SELECT /*rs+ CREATE SHALLOW CACHE */ * FROM cte")
         .await
         .unwrap();
     assert_eq!(
@@ -656,7 +660,8 @@ async fn hint_creates_shallow_cache_cte() {
 
 /// Verify that a `/*rs+ CREATE SHALLOW CACHE */` hint works with a window function.
 #[test]
-#[tags(serial, mysql8_upstream)]
+#[tags(serial)]
+#[upstream(mysql80, mysql84)]
 async fn hint_creates_shallow_cache_window_function() {
     init_test_logging();
 
@@ -713,7 +718,8 @@ async fn hint_creates_shallow_cache_window_function() {
 
 /// Verify that a `/*rs+ CREATE SHALLOW CACHE */` hint works with a derived table (subquery).
 #[test]
-#[tags(serial, mysql_upstream)]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn hint_creates_shallow_cache_subquery() {
     init_test_logging();
 
@@ -745,9 +751,7 @@ async fn hint_creates_shallow_cache_subquery() {
 
     // Subquery (derived table) with hint.
     readyset
-        .query_drop(
-            "SELECT /*rs+ CREATE SHALLOW CACHE */ * FROM (SELECT id FROM t) AS sub",
-        )
+        .query_drop("SELECT /*rs+ CREATE SHALLOW CACHE */ * FROM (SELECT id FROM t) AS sub")
         .await
         .unwrap();
     assert_eq!(
@@ -776,7 +780,8 @@ fn first_row_col(rows: &[SimpleQueryMessage], col: usize) -> &str {
 }
 
 #[test]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, slow)]
+#[upstream(postgres13, postgres15)]
 async fn pg_change_upstream() {
     init_test_logging();
 
@@ -909,7 +914,8 @@ async fn pg_change_upstream() {
 
 /// Verify that the same query without a hint uses the cache created by a hint.
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn hint_query_id_matches_without_hint() {
     init_test_logging();
 
@@ -960,7 +966,8 @@ async fn hint_query_id_matches_without_hint() {
 
 /// Verify that a second hinted query is idempotent when the cache already exists.
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn hint_idempotent_when_cache_exists() {
     init_test_logging();
 
@@ -1017,7 +1024,8 @@ async fn hint_idempotent_when_cache_exists() {
 /// We create a cache with a short TTL (no refresh) and verify that the entry expires
 /// after the TTL elapses, proving the policy was applied.
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn hint_ttl_option_applies() {
     init_test_logging();
 
@@ -1089,7 +1097,8 @@ async fn hint_ttl_option_applies() {
 /// Verify that a hinted prepared statement creates a shallow cache and executes correctly
 /// via the binary protocol (plan_prepare + execute path).
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn hint_prepared_statement_creates_cache() {
     init_test_logging();
 
@@ -1172,7 +1181,8 @@ async fn hint_prepared_statement_creates_cache() {
 /// Verify that when `allow_cache_ddl` is false, hints do not create caches.
 /// The query should fall through to normal execution without error.
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn hint_skipped_when_cache_ddl_disabled() {
     use readyset_adapter::BackendBuilder;
 
@@ -1196,12 +1206,11 @@ async fn hint_skipped_when_cache_ddl_disabled() {
     let backend_builder = BackendBuilder::default()
         .require_authentication(false)
         .allow_cache_ddl(false);
-    let (readyset_opts, _readyset_handle, shutdown_tx) =
-        TestBuilder::new(backend_builder)
-            .recreate_database(false)
-            .fallback(true)
-            .build::<MySQLAdapter>()
-            .await;
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::new(backend_builder)
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
     let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
     readyset
         .query_drop(format!("USE {test_name}"))
@@ -1245,7 +1254,8 @@ async fn hint_skipped_when_cache_ddl_disabled() {
 /// Verify that a malformed hint (unrecognized text) does not prevent query execution.
 /// The query should fall through to normal execution and return correct results.
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn malformed_hint_falls_through() {
     init_test_logging();
 
@@ -1299,7 +1309,8 @@ async fn malformed_hint_falls_through() {
 /// Verify that queries with different extra `/*rs+` hints all hit the same shallow cache,
 /// rather than creating duplicate cache entries.
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn multiple_hints_produce_same_cache() {
     init_test_logging();
 
@@ -1331,9 +1342,7 @@ async fn multiple_hints_produce_same_cache() {
 
     // First query with a single valid hint — creates the cache.
     readyset
-        .query_drop(
-            "SELECT /*rs+ CREATE SHALLOW CACHE */ id, val FROM t_multi WHERE id = 1",
-        )
+        .query_drop("SELECT /*rs+ CREATE SHALLOW CACHE */ id, val FROM t_multi WHERE id = 1")
         .await
         .unwrap();
     assert_eq!(
@@ -1377,7 +1386,8 @@ async fn multiple_hints_produce_same_cache() {
 /// discard the successfully-parsed inner query on hint-parse failure, causing
 /// the cache lookup to be skipped entirely.
 #[test]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn malformed_hint_does_not_bypass_existing_cache() {
     init_test_logging();
 

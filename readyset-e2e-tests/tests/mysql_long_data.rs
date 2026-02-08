@@ -3,9 +3,10 @@ use mysql_async::prelude::Queryable;
 use mysql_common::Value;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
-use test_utils::tags;
+use test_utils::{tags, upstream};
 
-#[tags(serial, slow, mysql8_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql80, mysql84)]
 #[test]
 fn mysql_send_long_data() {
     readyset_tracing::init_test_logging();

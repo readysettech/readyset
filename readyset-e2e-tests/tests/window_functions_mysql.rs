@@ -24,11 +24,12 @@ use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::{TestBuilder, sleep};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
-use test_utils::tags;
+use test_utils::{tags, upstream};
 
 /// Window function queries that filter on the generated output column.
 #[tokio::test]
-#[tags(serial, mysql_upstream)]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn test_window_output_column_filter_patterns() {
     readyset_tracing::init_test_logging();
     let db_name = "window_output_column_filter_patterns";

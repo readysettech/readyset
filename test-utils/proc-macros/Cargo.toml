@@ -20,5 +20,11 @@ syn = { workspace = true, features = [
     "clone-impls",
 ] }
 
+[dev-dependencies]
+test-utils = { path = ".." }
+test-strategy = { workspace = true }
+proptest = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
 [lints]
 workspace = true

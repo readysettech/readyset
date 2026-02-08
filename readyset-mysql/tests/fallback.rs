@@ -14,7 +14,7 @@ use readyset_sql::ast::Relation;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use test_utils::skip_flaky_finder;
-use test_utils::tags;
+use test_utils::{tags, upstream};
 
 async fn setup_with(
     backend_builder: BackendBuilder,
@@ -45,7 +45,8 @@ async fn query_drop_with_schema_retry(conn: &mut Conn, stmt: &str) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn create_table() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -70,7 +71,8 @@ async fn create_table() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn add_column() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -109,7 +111,8 @@ async fn add_column() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 #[ignore = "REA-4099"]
 async fn json_column_insert_read() {
     let (opts, _handle, shutdown_tx) = setup().await;
@@ -139,7 +142,8 @@ async fn json_column_insert_read() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn json_column_partial_update() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -168,7 +172,8 @@ async fn json_column_partial_update() {
 
 // TODO: remove this once we support range queries again
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn range_query() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -192,7 +197,8 @@ async fn range_query() {
 
 // TODO: remove this once we support aggregates on parameterized IN
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn aggregate_in() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -217,7 +223,8 @@ async fn aggregate_in() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn proxy_unsupported_sets() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
@@ -259,7 +266,8 @@ async fn proxy_unsupported_sets() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn proxy_unsupported_sets_prep_exec() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
@@ -291,7 +299,8 @@ async fn proxy_unsupported_sets_prep_exec() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn prepare_in_tx_select_out() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
@@ -321,7 +330,8 @@ async fn prepare_in_tx_select_out() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn prep_and_select_in_tx() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
@@ -352,7 +362,8 @@ async fn prep_and_select_in_tx() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn prep_then_select_in_tx() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
@@ -383,7 +394,8 @@ async fn prep_then_select_in_tx() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn prep_then_always_select_in_tx() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
@@ -417,7 +429,8 @@ async fn prep_then_always_select_in_tx() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn always_should_bypass_tx() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
@@ -452,7 +465,8 @@ async fn always_should_bypass_tx() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn prep_select() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
@@ -479,7 +493,8 @@ async fn prep_select() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn set_then_prep_and_select() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
@@ -506,7 +521,8 @@ async fn set_then_prep_and_select() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn always_should_never_proxy() {
     let (opts, mut handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
@@ -535,7 +551,8 @@ async fn always_should_never_proxy() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn always_should_never_proxy_exec() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
@@ -571,7 +588,8 @@ async fn always_should_never_proxy_exec() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn prep_then_set_then_select_proxy() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
@@ -598,7 +616,8 @@ async fn prep_then_set_then_select_proxy() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn proxy_mode_should_allow_commands() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
@@ -644,7 +663,8 @@ async fn proxy_mode_should_allow_commands() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn drop_then_recreate_table_with_query() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -673,7 +693,8 @@ async fn drop_then_recreate_table_with_query() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 #[skip_flaky_finder]
 async fn transaction_proxies() {
     let (opts, _handle, shutdown_tx) = setup().await;
@@ -706,7 +727,8 @@ async fn transaction_proxies() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn show_caches_index_hints() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -785,7 +807,8 @@ async fn show_caches_index_hints() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 #[ignore = "Add failpoint to readyset-sql-parsing"]
 async fn valid_sql_parsing_failed_shows_proxied() {
     let (opts, _handle, shutdown_tx) = setup().await;
@@ -816,7 +839,8 @@ async fn valid_sql_parsing_failed_shows_proxied() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn invalid_sql_parsing_failed_doesnt_show_proxied() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -834,7 +858,8 @@ async fn invalid_sql_parsing_failed_doesnt_show_proxied() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 #[skip_flaky_finder]
 async fn switch_database_with_use() {
     let (opts, _handle, shutdown_tx) = setup().await;
@@ -864,7 +889,8 @@ async fn switch_database_with_use() {
 
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn replication_failure_ignores_table() {
     readyset_tracing::init_test_logging();
     use mysql_common::serde_json;
@@ -988,7 +1014,8 @@ async fn replication_failure_ignores_table() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn reset_user() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -1013,7 +1040,8 @@ async fn reset_user() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 #[ignore = "REA-3933 (see comments on ticket)"]
 async fn show_proxied_queries_show_caches_query_text_matches() {
     readyset_tracing::init_test_logging();
@@ -1074,7 +1102,8 @@ async fn assert_last_statement_matches(table: &str, dest: &str, status: &str, cl
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn it_change_user() {
     let mut users = std::collections::HashMap::new();
     users.insert("root".to_string(), "noria".to_string());
@@ -1127,7 +1156,8 @@ async fn it_change_user() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn select_version_comment() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -1142,7 +1172,8 @@ async fn select_version_comment() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn resnapshot_table_command() {
     async fn get_table_index<T: AsRef<str>>(
         handle: &mut Handle,
@@ -1185,7 +1216,8 @@ async fn resnapshot_table_command() {
 /// Tests that ROLLBACK TO SAVEPOINT does not end transaction state tracking,
 /// and that we proxy the TO SAVEPOINT clause correctly to upstream.
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
+#[tags(serial, slow)]
+#[upstream(mysql57, mysql80, mysql84)]
 async fn rollback_to_savepoint_preserves_transaction() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = Conn::new(opts).await.unwrap();

@@ -65,16 +65,17 @@ NEXTEST_FILTER=()
 # here use the ':serial:` tag, even though it's used in the groups.
 case "$UPSTREAM_CONFIG" in
   "none"|"default")
-    NEXTEST_FILTER+=("(not test(/:(\w+)_upstream:/))") ;;
-  mysql8*)
-    # If we ever add a `mysql57_upstream` test, this will filter it out, and it can be added in the next case.
-    NEXTEST_FILTER+=("(test(/:mysql8\d*_upstream:/) or test(/:mysql_upstream:/))") ;;
+    NEXTEST_FILTER+=("(not (test(/:mysql\d+:/) or test(/:postgres\d+:/)))") ;;
   "mysql57")
-    NEXTEST_FILTER+=("test(/:mysql_upstream:/)") ;;
-  "postgres15")
-    NEXTEST_FILTER+=("test(/:postgres\d*_upstream:/)") ;;
+    NEXTEST_FILTER+=("test(/:mysql57:/)") ;;
+  "mysql80")
+    NEXTEST_FILTER+=("test(/:mysql80:/)") ;;
+  "mysql84")
+    NEXTEST_FILTER+=("test(/:mysql84:/)") ;;
   "postgres13")
-    NEXTEST_FILTER+=("test(/:postgres_upstream:/)") ;;
+    NEXTEST_FILTER+=("test(/:postgres13:/)") ;;
+  "postgres15")
+    NEXTEST_FILTER+=("test(/:postgres15:/)") ;;
   *)
     ;;
 esac

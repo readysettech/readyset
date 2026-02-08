@@ -1,6 +1,6 @@
 use assert_matches::assert_matches;
 use chrono::{NaiveDate, NaiveDateTime};
-use test_utils::tags;
+use test_utils::{tags, upstream};
 use tokio_postgres::{CommandCompleteContents, SimpleQueryMessage};
 
 use database_utils::tls::ServerCertVerification;
@@ -2062,7 +2062,8 @@ WHERE
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, postgres_upstream)]
+#[tags(serial, slow)]
+#[upstream(postgres13, postgres15)]
 async fn trunc_in_trx() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
@@ -2191,7 +2192,8 @@ async fn left_join_on_computed_predicate_filters_right_side() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, postgres_upstream)]
+#[tags(serial)]
+#[upstream(postgres13, postgres15)]
 async fn shallow_cache_scheduled_refresh() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
@@ -2282,7 +2284,8 @@ async fn shallow_cache_scheduled_refresh() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, postgres_upstream)]
+#[tags(serial)]
+#[upstream(postgres13, postgres15)]
 async fn shallow_cache_protocol_crossing() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
@@ -2353,7 +2356,8 @@ async fn shallow_cache_protocol_crossing() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, postgres_upstream)]
+#[tags(serial)]
+#[upstream(postgres13, postgres15)]
 async fn shallow_cache_prepared_statement_without_parameters() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
@@ -2394,7 +2398,8 @@ async fn shallow_cache_prepared_statement_without_parameters() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[tags(serial, postgres_upstream)]
+#[tags(serial)]
+#[upstream(postgres13, postgres15)]
 async fn shallow_cache_equality_and_in_clause() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
