@@ -3802,21 +3802,19 @@ where
         Some((shallow, params))
     }
 
-    /// Check whether a shallow cache exists for this query and should be used
-    /// for routing.  If no cache exists and a `CreateCache` hint directive is
-    /// present, attempt to create one first.  Returns `(query_id, always)`
-    /// when the query should be served from the shallow cache, `None`
+    /// Check whether a shallow cache exists for this query and should be used for routing.  If no
+    /// cache exists and a `CreateCache` hint directive is present, attempt to create one first.
+    /// Returns `(query_id, always)` when the query should be served from the shallow cache, `None`
     /// otherwise.
+    ///
+    /// If we haven't seen this query before, add it as pending to the query status cache.
     async fn should_query_shallow(
         &mut self,
         shallow: &ShallowViewRequest,
         hint_directive: Option<ReadysetHintDirective>,
     ) -> Option<(QueryId, bool)> {
-        let (query_id, migration) = self
-            .state
-            .query_status_cache
-            .try_query_migration_state(shallow);
-        if migration != Some(MigrationState::Successful(CacheType::Shallow)) {
+        let (query_id, migration) = self.state.query_status_cache.query_migration_state(shallow);
+        if migration != MigrationState::Successful(CacheType::Shallow) {
             // No cache yet — try hint-based creation and use the resulting state.
             let migration = self
                 .create_shallow_cache_from_hint(shallow, hint_directive)
