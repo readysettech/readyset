@@ -10,10 +10,10 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+use crate::BinaryOperator;
+use crate::DfType;
 use std::collections::HashMap;
 use std::sync::OnceLock;
-
-use crate::{BinaryOperator, DfType};
 
 pub(crate) fn output_type(left: &DfType, op: &BinaryOperator, right: &DfType) -> Option<DfType> {
     static MAP: OnceLock<HashMap<(DfType, BinaryOperator, DfType), DfType>> = OnceLock::new();
@@ -72,6 +72,38 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::BigInt,
     );
     map.insert(
+        (DfType::SmallInt, BinaryOperator::Add, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::SmallInt, BinaryOperator::Subtract, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::SmallInt, BinaryOperator::Multiply, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::SmallInt, BinaryOperator::Divide, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::SmallInt, BinaryOperator::Add, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::SmallInt, BinaryOperator::Subtract, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::SmallInt, BinaryOperator::Multiply, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::SmallInt, BinaryOperator::Divide, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
         (DfType::Int, BinaryOperator::Add, DfType::SmallInt),
         DfType::Int,
     );
@@ -115,6 +147,38 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     map.insert(
         (DfType::Int, BinaryOperator::Divide, DfType::BigInt),
         DfType::BigInt,
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Add, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Subtract, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Multiply, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Divide, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Add, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Subtract, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Multiply, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Divide, DfType::Double),
+        DfType::Double,
     );
     map.insert(
         (DfType::BigInt, BinaryOperator::Add, DfType::SmallInt),
@@ -163,6 +227,198 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     map.insert(
         (DfType::BigInt, BinaryOperator::Divide, DfType::BigInt),
         DfType::BigInt,
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Add, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Subtract, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Multiply, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Divide, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Add, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Subtract, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Multiply, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Divide, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Add, DfType::SmallInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Subtract, DfType::SmallInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Multiply, DfType::SmallInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Divide, DfType::SmallInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Add, DfType::Int),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Subtract, DfType::Int),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Multiply, DfType::Int),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Divide, DfType::Int),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Add, DfType::BigInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Subtract, DfType::BigInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Multiply, DfType::BigInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Divide, DfType::BigInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Add, DfType::Float),
+        DfType::Float,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Subtract, DfType::Float),
+        DfType::Float,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Multiply, DfType::Float),
+        DfType::Float,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Divide, DfType::Float),
+        DfType::Float,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Add, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Subtract, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Multiply, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Divide, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Add, DfType::SmallInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Subtract, DfType::SmallInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Multiply, DfType::SmallInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Divide, DfType::SmallInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Add, DfType::Int),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Subtract, DfType::Int),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Multiply, DfType::Int),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Divide, DfType::Int),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Add, DfType::BigInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Subtract, DfType::BigInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Multiply, DfType::BigInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Divide, DfType::BigInt),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Add, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Subtract, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Multiply, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Divide, DfType::Float),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Add, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Subtract, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Multiply, DfType::Double),
+        DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Divide, DfType::Double),
+        DfType::Double,
     );
     map
 }

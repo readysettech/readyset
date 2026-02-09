@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::iter::zip;
 
-const PSQL_TYPES: &[&str] = &["smallint", "integer", "bigint"];
+const PSQL_TYPES: &[&str] = &["smallint", "integer", "bigint", "real", "double precision"];
 const PSQL_OPS: &[&str] = &["+", "-", "*", "/"];
-const READYSET_TYPES: &[&str] = &["SmallInt", "Int", "BigInt"];
+const READYSET_TYPES: &[&str] = &["SmallInt", "Int", "BigInt", "Float", "Double"];
 const READYSET_OPS: &[&str] = &["Add", "Subtract", "Multiply", "Divide"];
 
 async fn test(
@@ -23,7 +23,7 @@ async fn test(
         .await
         .unwrap();
     client
-        .simple_query(&format!("create table t2 (b {})", PSQL_TYPES[b],))
+        .simple_query(&format!("create table t2 (b {})", PSQL_TYPES[b]))
         .await
         .unwrap();
     client
@@ -63,7 +63,6 @@ async fn main() {
     for (&my, &rs) in zip(PSQL_TYPES, READYSET_TYPES) {
         map.insert(my, rs);
     }
-
     let mut config = tokio_postgres::Config::new();
     config.host("127.0.0.1").user("postgres").password("noria");
     let (client1, conn) = config.connect(tokio_postgres::NoTls).await.unwrap();
