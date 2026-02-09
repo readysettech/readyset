@@ -131,36 +131,24 @@ impl PersistentStatusCacheHandle {
 
     fn proxied_list(&self, style: MigrationStyle) -> Vec<ProxiedQuery> {
         let statuses = self.statuses.read();
-        match style {
-            MigrationStyle::Async | MigrationStyle::InRequestPath => statuses
-                .iter()
-                .filter_map(|(query_id, (query, status))| {
-                    if status.is_unsupported() {
-                        Some(ProxiedQuery {
-                            id: *query_id,
-                            query: query.clone(),
-                            status: status.clone(),
-                        })
-                    } else {
-                        None
-                    }
+        statuses
+            .iter()
+            .filter_map(|(query_id, (query, status))| {
+                if matches!(style, MigrationStyle::Async | MigrationStyle::InRequestPath)
+                    && !status.is_unsupported()
+                {
+                    return None;
+                }
+                if matches!(style, MigrationStyle::Explicit) && !status.is_proxied() {
+                    return None;
+                }
+                Some(ProxiedQuery {
+                    id: *query_id,
+                    query: query.clone(),
+                    status: status.clone(),
                 })
-                .collect::<Vec<_>>(),
-            MigrationStyle::Explicit => statuses
-                .iter()
-                .filter_map(|(query_id, (query, status))| {
-                    if status.is_proxied() {
-                        Some(ProxiedQuery {
-                            id: *query_id,
-                            query: query.clone(),
-                            status: status.clone(),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>(),
-        }
+            })
+            .collect()
     }
 }
 
