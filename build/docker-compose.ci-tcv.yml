@@ -1,0 +1,50 @@
+# TCV-enabled CI configuration
+# Two containers: tcv daemon (has docker socket) and app (runs tests)
+
+services:
+  tcv:
+    # tcv pinned version should match public/build/Dockerfile
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/test-container-vendor:87c75e439d6169669fd06f036c328e8df873cbee"
+    stop_grace_period: 60s
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    environment:
+      - TCV_NETWORK=tcv-test-network
+    healthcheck:
+      test: ["CMD", "tcv", "health"]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+
+  app:
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}"
+    ulimits:
+      nofile:
+        soft: "65536"
+        hard: "65536"
+    working_dir: /workdir/public
+    volumes:
+      - "target:/workdir/target"
+      - "cargo-registry:/usr/local/cargo/registry"
+      - "${BUILDKITE_BUILD_CHECKOUT_PATH}:/workdir"
+    environment:
+      - TCV_SERVER_HOST=tcv
+      - TCV_NETWORK=tcv-test-network
+      - ALLOW_UNAUTHENTICATED_CONNECTIONS=true
+      # Version/config env vars (inherited from pipeline)
+      - MYSQL_MRBR
+      # disabled because we would have to log in to ECR within the tcv container:
+      # - PUBLIC_REPO_BASE
+    depends_on:
+      tcv:
+        condition: service_healthy
+
+networks:
+  default:
+    name: tcv-test-network
+
+volumes:
+  target:
+    external: true
+  cargo-registry:
+    external: true

@@ -11,19 +11,21 @@ WORKDIR /tmp
 RUN set -eux; \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        docker.io \
-        ca-certificates \
         build-essential \
-        llvm \
+        ca-certificates \
         clang \
-        libclang-dev \
-        lld \
         cmake \
-        libssl-dev \
-        liblz4-dev \
         curl \
-        protobuf-compiler \
+        docker.io \
         jq \
+        libclang-dev \
+        liblz4-dev \
+        libssl-dev \
+        lld \
+        llvm \
+        mariadb-client \
+        postgresql-client \
+        protobuf-compiler \
         rsync && \
     rm -rf /var/lib/apt/lists/*
 
@@ -48,6 +50,9 @@ RUN cargo binstall -y --locked \
       cargo-nextest@0.9.124 \
       sccache@0.13.0
 ENV RUSTC_WRAPPER=sccache
+
+# tcv pinned version should match public/build/docker-compose.ci-tcv.yml
+COPY --from=305232526136.dkr.ecr.us-east-2.amazonaws.com/test-container-vendor:87c75e439d6169669fd06f036c328e8df873cbee /usr/local/bin/tcv /usr/local/bin/tcv
 
 # Set some rustflags.  For info on the graviton flag, see:
 #   https://github.com/aws/aws-graviton-getting-started/blob/main/rust.md

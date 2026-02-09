@@ -7,20 +7,8 @@
 #   not very valuable unless you're working on related code.
 # - Only mysql80 and postgres15 upstream tests run by default. Other upstream versions (mysql57,
 #   mysql84, postgres13) are excluded to keep local test runs fast. The `ci` profile runs all of them.
-default-filter = 'not test(test_large_packet_write) and not (test(/:mysql\d+:/) and not test(/:mysql80:/)) and not (test(/:postgres\d+:/) and not test(/:postgres15:/))'
-slow-timeout = { period = "180s", terminate-after = 1, grace-period = "20s" }
-
-[profile.ci]
-default-filter = 'all()'
-fail-fast = false
-retries = 1
-failure-output = "immediate-final"
-slow-timeout = { period = "60s", terminate-after = 5, grace-period = "20s" }
-
-[profile.ci.junit]
-path = "junit.xml"
-store-success-output = true
-store-failure-output = true
+default-filter = 'not test(/:very_slow:/) and not (test(/:mysql\d+:/) and not test(/:mysql80:/)) and not (test(/:postgres\d+:/) and not test(/:postgres15:/))'
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "20s" }
 
 [test-groups]
 serial = { max-threads = 1 }

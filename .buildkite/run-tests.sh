@@ -1,46 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+upload_junit() {
+    local junit_dir="target/nextest/${NEXTEST_PROFILE}"
+    local job_id="${BUILDKITE_JOB_ID:-local}"
+    # Rename JUnit XML with unique suffix before uploading so the
+    # junit-annotate plugin (which globs junit-*.xml) can find it.
+    if [[ -f "${junit_dir}/junit.xml" ]]; then
+        mv "${junit_dir}/junit.xml" \
+           "${junit_dir}/junit-${job_id}.xml"
+    fi
+    # Upload any JUnit files that exist
+    for f in "${junit_dir}"/junit*.xml; do
+        if [[ -f "$f" ]]; then
+            buildkite-agent artifact upload "$f"
+        fi
+    done
+}
+
 upload_artifacts() {
+    upload_junit
+
     echo "--- Uploading proptest-regressions to buildkite artifacts"
     buildkite-agent artifact upload '**/proptest-regressions/*.txt'
     buildkite-agent artifact upload '**/*.proptest-regressions'
-    mv target/nextest/ci/junit.xml "target/nextest/ci/junit-buildkite-job-$BUILDKITE_JOB_ID.xml"
-    buildkite-agent artifact upload "target/nextest/ci/junit-buildkite-job-$BUILDKITE_JOB_ID.xml"
     exit 1
-}
-
-enable_mrbr() {
-    echo "+++ :mysql: Configure minimal row based replication"
-
-    # Need a mysql-client to set binlog_row_image:
-    if ! command -v mysql &> /dev/null; then
-        echo "'mysql' command not found. Installing MySQL client..."
-        apt-get update
-        apt-get install -y --no-install-recommends default-mysql-client
-    fi
-
-    # For minimal row based replication testing, we must set `binlog_row_image=MINIMAL` on the mysql
-    # database.  However, it might not be up yet, so attempt it in a retry loop:
-    max_attempts=10
-    attempt=1
-    interval=3
-    while [ $attempt -le $max_attempts ]; do
-        if (mysql -h mysql --password=noria \
-              --disable-ssl-verify-server-cert \
-              -e "SET GLOBAL binlog_row_image=MINIMAL;"); then
-            echo "mysql 'SET GLOBAL binlog_row_image=MINIMAL' succeeded."
-            break
-        else
-            echo "mysql 'SET GLOBAL binlog_row_image=MINIMAL' failed.  Retrying..."
-            attempt=$((attempt + 1))
-            sleep $interval
-        fi
-    done
-    if [ $attempt -gt $max_attempts ]; then
-        echo "mysql 'SET GLOBAL binlog_row_image=MINIMAL' failed after $max_attempts attempts."
-        exit 1
-    fi
 }
 
 export DISABLE_TELEMETRY=true
@@ -48,66 +32,41 @@ export PROPTEST_MAX_SHRINK_TIME=600000
 export CARGO_TERM_PROGRESS_WHEN=never
 
 : "${TEST_CATEGORY:=nextest}"
-: "${UPSTREAM_CONFIG:=default}"
-: "${MYSQL_MRBR:=off}"
-
-NEXTEST_FILTER=()
-
-# We use $UPSTREAM_CONFIG to determine which tests to run; the appropriate docker containers and
-# images should already have been set up by the pipeline step. The `default` config has mysql8,
-# postgres15, postgres13, and redis which is used for some non-upstream tests. We shouldn't need to
-# filter down to a subset of the tests in that case. For specific upstreams, we run only the tests
-# that run against that particular upstream.
-#
-# The filter sets should generally match the groups defined in .config/nextest.toml, but we can't
-# just identify a group to run. Besides, down the line these tests may become parallelizable and we
-# won't have need for nextest mutual exclusion groups (for all tests); for this reason, we don't
-# here use the ':serial:` tag, even though it's used in the groups.
-case "$UPSTREAM_CONFIG" in
-  "none"|"default")
-    NEXTEST_FILTER+=("(not (test(/:mysql\d+:/) or test(/:postgres\d+:/)))") ;;
-  "mysql57")
-    NEXTEST_FILTER+=("test(/:mysql57:/)") ;;
-  "mysql80")
-    NEXTEST_FILTER+=("test(/:mysql80:/)") ;;
-  "mysql84")
-    NEXTEST_FILTER+=("test(/:mysql84:/)") ;;
-  "postgres13")
-    NEXTEST_FILTER+=("test(/:postgres13:/)") ;;
-  "postgres15")
-    NEXTEST_FILTER+=("test(/:postgres15:/)") ;;
-  *)
-    ;;
-esac
-
-if [[ -z "${RUN_SLOW_TESTS+x}" ]]; then
-    if [[ ${#NEXTEST_FILTER[@]} -gt 0 ]]; then
-        NEXTEST_FILTER+=("and")
-    fi
-    NEXTEST_FILTER+=("(not (test(/:slow:/) or test(/:very_slow:/)))")
-fi
+: "${NEXTEST_PROFILE:=ci}"
 
 if [[ "$TEST_CATEGORY" == "nextest" ]]; then
-    if [[ "$MYSQL_MRBR" == "on" ]]; then
-        if [[ "$UPSTREAM_CONFIG" != "mysql"* ]]; then
-            echo "MRBR configured for non-MySQL upstream"
-            exit 1
-        fi
-        enable_mrbr
+    NEXTEST_ARGS=(
+        --config-file ../hacks/nextest-tcv/nextest.toml
+        --profile "$NEXTEST_PROFILE"
+        --hide-progress-bar
+        --workspace --features failure_injection
+    )
+
+    if [[ "${MYSQL_MRBR:-off}" == "on" ]]; then
+        echo "+++ :rust: Run tests (MySQL MRBR on)"
+        NEXTEST_ARGS+=(--filterset 'test(/:mysql\d+:/)')
+    elif [[ -n "${NEXTEST_FILTERSET:-}" ]]; then
+        echo "+++ :rust: Run tests (nextest, filterset: $NEXTEST_FILTERSET)"
+        NEXTEST_ARGS+=(--filterset "$NEXTEST_FILTERSET")
+    else
+        echo "+++ :rust: Run tests (nextest)"
     fi
 
-    echo "+++ :rust: Run tests (nextest $UPSTREAM_CONFIG, MRBR $MYSQL_MRBR)"
+    # Skip mysql57 on ARM — no native ARM64 image, QEMU emulation is unreliable
+    if [[ "$(uname -m)" == "aarch64" ]]; then
+        echo "--- Excluding mysql57 tests (no native ARM64 image)"
+        NEXTEST_ARGS+=(--filterset 'not test(/:mysql57:/)')
+    fi
 
-    set -x   # print the cargo command
-    cargo --locked nextest run --profile ci --hide-progress-bar \
-        --workspace --features failure_injection \
-        --filterset "${NEXTEST_FILTER[*]}" \
-        || upload_artifacts
+    set -x
+    cargo --locked nextest run "${NEXTEST_ARGS[@]}" || upload_artifacts
     set +x
+
+    upload_junit
+
 elif [[ "$TEST_CATEGORY" == "doctest" ]]; then
-    # Run doctests, because at this time nextest does not support doctests
     echo "+++ :rust: Run tests (doctest)"
-    set -x   # print the cargo command
+    set -x
     cargo --locked test --doc \
         --workspace --features failure_injection \
         || upload_artifacts
