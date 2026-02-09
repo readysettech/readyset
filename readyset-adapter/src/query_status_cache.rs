@@ -14,7 +14,7 @@ use dashmap::mapref::entry::Entry;
 use lru::LruCache;
 use metrics::gauge;
 use parking_lot::RwLock;
-use tracing::{error, warn};
+use tracing::warn;
 
 use readyset_client::metrics::recorded;
 use readyset_client::query::*;
@@ -363,16 +363,10 @@ impl QueryStatusCache {
         let status = match q {
             Query::Parsed { .. } => status,
             Query::ShallowParsed { .. } => status,
-            Query::ParseFailed(_, ref reason) => {
-                let mut status = status;
-                if !matches!(status.migration_state, MigrationState::Unsupported(_)) {
-                    error!(
-                        "Cannot set migration state to anything other than Unsupported for a Query::ParseFailed"
-                    );
-                    status.migration_state = MigrationState::Unsupported(reason.clone());
-                }
-                status
-            }
+            Query::ParseFailed(_, ref reason) => QueryStatus {
+                migration_state: MigrationState::Unsupported(reason.clone()),
+                ..status
+            },
         };
         let id = QueryId::from(&q);
         self.id_to_status.insert(id, status.clone());
@@ -641,34 +635,26 @@ impl QueryStatusCache {
 
     /// Updates the query's always flag, indicating whether the query should be served from
     /// ReadySet regardless of autocommit state.
-    /// Will not apply the always flag to unsupported queries, or try to insert a query if it has
-    /// not already been registered.
+    /// Will not try to insert a query if it has not already been registered.
     pub fn always_attempt_readyset<Q>(&self, q: &Q, always: bool)
     where
         Q: QueryStatusKey,
     {
-        q.with_mut_status(self, |s| match s {
-            Some(s) if !matches!(s.migration_state, MigrationState::Unsupported(_)) => {
+        q.with_mut_status(self, |s| {
+            if let Some(s) = s {
                 s.always = always;
             }
-            _ => {}
         })
     }
 
     /// Updates a queries status to `status` unless the queries migration state was
-    /// `MigrationState::Unsupported`. An unsupported query cannot currently become supported once
-    /// again.
     pub fn update_query_status<Q>(&self, q: &Q, status: QueryStatus)
     where
         Q: QueryStatusKey,
     {
         let should_insert = q.with_mut_status(self, |s| match s {
-            Some(s) if !matches!(s.migration_state, MigrationState::Unsupported(_)) => {
-                s.migration_state.clone_from(&status.migration_state);
-                s.execution_info.clone_from(&status.execution_info);
-                false
-            }
             Some(s) => {
+                s.migration_state.clone_from(&status.migration_state);
                 s.execution_info.clone_from(&status.execution_info);
                 false
             }
