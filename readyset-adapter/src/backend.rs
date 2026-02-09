@@ -3139,7 +3139,7 @@ where
         only_supported: bool,
         limit: Option<u64>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let mut queries = self.state.query_status_cache.proxied_list();
+        let mut queries = self.state.query_status_cache.proxied_list(CacheType::Deep);
         if let Some(q_id) = query_id {
             queries.retain(|q| &q.id.to_string() == q_id);
         }

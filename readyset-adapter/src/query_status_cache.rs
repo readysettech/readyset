@@ -129,7 +129,7 @@ impl PersistentStatusCacheHandle {
             .collect::<Vec<_>>()
     }
 
-    fn proxied_list(&self, style: MigrationStyle) -> Vec<ProxiedQuery> {
+    fn proxied_list(&self, style: MigrationStyle, cache_type: CacheType) -> Vec<ProxiedQuery> {
         let statuses = self.statuses.read();
         statuses
             .iter()
@@ -142,6 +142,15 @@ impl PersistentStatusCacheHandle {
                 if matches!(style, MigrationStyle::Explicit) && !status.is_proxied() {
                     return None;
                 }
+                if cache_type == CacheType::Shallow && !matches!(query, Query::ShallowParsed(..)) {
+                    return None;
+                }
+                if cache_type == CacheType::Deep
+                    && !matches!(query, Query::Parsed(..) | Query::ParseFailed(..))
+                {
+                    return None;
+                }
+
                 Some(ProxiedQuery {
                     id: *query_id,
                     query: query.clone(),
@@ -807,8 +816,8 @@ impl QueryStatusCache {
     }
 
     /// Returns a list of queries that are proxied.
-    pub fn proxied_list(&self) -> Vec<ProxiedQuery> {
-        self.persistent_handle.proxied_list(self.style)
+    pub fn proxied_list(&self, cache_type: CacheType) -> Vec<ProxiedQuery> {
+        self.persistent_handle.proxied_list(self.style, cache_type)
     }
 
     /// Returns a query given a query hash
@@ -1015,7 +1024,7 @@ mod tests {
         cache.update_query_migration_state(&query, MigrationState::Pending, None);
         assert_eq!(cache.pending_migration().len(), 1);
         assert_eq!(cache.cached_list().len(), 0);
-        assert_eq!(cache.proxied_list().len(), 0);
+        assert_eq!(cache.proxied_list(CacheType::Deep).len(), 0);
 
         cache.update_query_migration_state(
             &query,
@@ -1024,7 +1033,7 @@ mod tests {
         );
         assert_eq!(cache.pending_migration().len(), 0);
         assert_eq!(cache.cached_list().len(), 1);
-        assert_eq!(cache.proxied_list().len(), 0);
+        assert_eq!(cache.proxied_list(CacheType::Deep).len(), 0);
     }
 
     #[test]
@@ -1039,12 +1048,12 @@ mod tests {
         cache.update_query_migration_state(&query, MigrationState::Pending, None);
         assert_eq!(cache.pending_migration().len(), 1);
         assert_eq!(cache.cached_list().len(), 0);
-        assert_eq!(cache.proxied_list().len(), 0);
+        assert_eq!(cache.proxied_list(CacheType::Deep).len(), 0);
 
         cache.update_query_migration_state(&query, MigrationState::Unsupported("".into()), None);
         assert_eq!(cache.pending_migration().len(), 0);
         assert_eq!(cache.cached_list().len(), 0);
-        assert_eq!(cache.proxied_list().len(), 1);
+        assert_eq!(cache.proxied_list(CacheType::Deep).len(), 1);
     }
 
     #[test]
@@ -1059,12 +1068,12 @@ mod tests {
         cache.update_query_migration_state(&query, MigrationState::Pending, None);
         assert_eq!(cache.pending_migration().len(), 1);
         assert_eq!(cache.cached_list().len(), 0);
-        assert_eq!(cache.proxied_list().len(), 1);
+        assert_eq!(cache.proxied_list(CacheType::Deep).len(), 1);
 
         cache.update_query_migration_state(&query, MigrationState::Unsupported("".into()), None);
         assert_eq!(cache.pending_migration().len(), 0);
         assert_eq!(cache.cached_list().len(), 0);
-        assert_eq!(cache.proxied_list().len(), 1);
+        assert_eq!(cache.proxied_list(CacheType::Deep).len(), 1);
     }
 
     #[test]
@@ -1387,11 +1396,11 @@ mod tests {
             None,
         );
         assert_eq!(cache.cached_list().len(), 2);
-        assert_eq!(cache.proxied_list().len(), 2);
+        assert_eq!(cache.proxied_list(CacheType::Deep).len(), 2);
 
         cache.clear_proxied_queries();
         assert_eq!(cache.cached_list().len(), 2);
-        assert_eq!(cache.proxied_list().len(), 0);
+        assert_eq!(cache.proxied_list(CacheType::Deep).len(), 0);
     }
 
     #[test]

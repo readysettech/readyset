@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use readyset_client::query::{MigrationState, ProxiedQuery, QueryId};
+use readyset_sql::ast::CacheType;
 use readyset_sql_passes::anonymize::Anonymizer;
 use readyset_telemetry_reporter::{
     PeriodicReport, ReporterResult as Result, Telemetry, TelemetryBuilder, TelemetryEvent,
@@ -68,7 +69,7 @@ impl ProxiedQueriesReporter {
 impl PeriodicReport for ProxiedQueriesReporter {
     async fn report(&self) -> Result<Vec<(TelemetryEvent, Telemetry)>> {
         debug!("running report for proxied queries");
-        let mut proxied_queries = self.query_status_cache.proxied_list();
+        let mut proxied_queries = self.query_status_cache.proxied_list(CacheType::Deep);
         Ok(futures::future::join_all(
             proxied_queries
                 .iter_mut()
