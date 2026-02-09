@@ -4,38 +4,41 @@ use std::iter::zip;
 use mysql_async::Value;
 use mysql_async::prelude::Queryable;
 
-const MYSQL_TYPES: &[&str] = &["tinyint", "smallint", "mediumint", "int", "bigint"];
-const MYSQL_SIGNED: &[&str] = &["", "unsigned"];
+// Float and double are included without unsigned variants. MySQL deprecated UNSIGNED for FLOAT,
+// DOUBLE, and DECIMAL as of 8.0.17 (see https://dev.mysql.com/doc/refman/8.0/en/numeric-type-syntax.html),
+// and ReadySet has no UnsignedFloat/UnsignedDouble variants.
+#[rustfmt::skip]
+const MYSQL_TYPES: &[&str] = &[
+    "tinyint", "smallint", "mediumint", "int", "bigint",
+    "tinyint unsigned", "smallint unsigned", "mediumint unsigned", "int unsigned", "bigint unsigned",
+    "float", "double",
+];
 const MYSQL_OPS: &[&str] = &["+", "-", "*", "/"];
-const READYSET_TYPES: &[&str] = &["TinyInt", "SmallInt", "MediumInt", "Int", "BigInt"];
-const READYSET_SIGNED: &[&str] = &["", "Unsigned"];
+#[rustfmt::skip]
+const READYSET_TYPES: &[&str] = &[
+    "TinyInt", "SmallInt", "MediumInt", "Int", "BigInt",
+    "UnsignedTinyInt", "UnsignedSmallInt", "UnsignedMediumInt", "UnsignedInt", "UnsignedBigInt",
+    "Float", "Double",
+];
 const READYSET_OPS: &[&str] = &["Add", "Subtract", "Multiply", "Divide"];
 
 async fn test(
     conn: &mut mysql_async::Conn,
-    map: &HashMap<&str, &str>,
+    type_map: &HashMap<&str, &str>,
     a: usize,
-    a_sign: usize,
     op: usize,
     b: usize,
-    b_sign: usize,
 ) -> String {
     conn.query_drop("drop table if exists t1, t2, t3")
         .await
         .unwrap();
 
-    conn.query_drop(format!(
-        "create table t1 (a {} {})",
-        MYSQL_TYPES[a], MYSQL_SIGNED[a_sign]
-    ))
-    .await
-    .unwrap();
-    conn.query_drop(format!(
-        "create table t2 (b {} {})",
-        MYSQL_TYPES[b], MYSQL_SIGNED[b_sign]
-    ))
-    .await
-    .unwrap();
+    conn.query_drop(format!("create table t1 (a {})", MYSQL_TYPES[a]))
+        .await
+        .unwrap();
+    conn.query_drop(format!("create table t2 (b {})", MYSQL_TYPES[b]))
+        .await
+        .unwrap();
     conn.query_drop(format!(
         "create table t3 as select a {} b as c from t1, t2",
         MYSQL_OPS[op]
@@ -60,10 +63,18 @@ async fn test(
     let ty = res.next().unwrap(); // type; rest is [unsigned] DEFAULT NULL
     let mut unsigned = res.next().unwrap() == "unsigned";
 
-    let out = if let Some(ty) = map.get(ty) {
+    // MySQL's UNSIGNED attribute is deprecated for FLOAT, DOUBLE, and DECIMAL as of 8.0.17
+    // (see https://dev.mysql.com/doc/refman/8.0/en/numeric-type-syntax.html).
+    // ReadySet has no UnsignedFloat/UnsignedDouble/UnsignedNumeric variants, so we drop the
+    // unsigned flag for these types.
+    if ty == "float" || ty == "double" {
+        unsigned = false;
+    }
+
+    let out = if let Some(ty) = type_map.get(ty) {
         ty.to_string()
     } else if ty.starts_with("decimal") {
-        unsigned = false; // XXX we have no unsigned numeric
+        unsigned = false;
         let ty = &ty[8..ty.len() - 1]; // remove leading "decimal(" and trailing ")"
         let mut ty = ty.split(',');
         let (x, y) = (ty.next().unwrap(), ty.next().unwrap());
@@ -72,15 +83,10 @@ async fn test(
         panic!("unknown type: {ty}");
     };
 
+    let unsigned_prefix = if unsigned { "Unsigned" } else { "" };
     format!(
-        "(DfType::{}{}, BinaryOperator::{}, DfType::{}{}), DfType::{}{}",
-        READYSET_SIGNED[a_sign],
-        READYSET_TYPES[a],
-        READYSET_OPS[op],
-        READYSET_SIGNED[b_sign],
-        READYSET_TYPES[b],
-        READYSET_SIGNED[unsigned as usize],
-        out,
+        "(DfType::{}, BinaryOperator::{}, DfType::{}), DfType::{}{}",
+        READYSET_TYPES[a], READYSET_OPS[op], READYSET_TYPES[b], unsigned_prefix, out,
     )
 }
 
@@ -93,9 +99,9 @@ async fn main() {
         .prefer_socket(false);
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
-    let mut map = HashMap::new();
+    let mut type_map = HashMap::new();
     for (&my, &rs) in zip(MYSQL_TYPES, READYSET_TYPES) {
-        map.insert(my, rs);
+        type_map.insert(my, rs);
     }
 
     conn.query_drop("create database if not exists rstest")
@@ -137,12 +143,8 @@ async fn main() {
     for a in 0..MYSQL_TYPES.len() {
         for b in 0..MYSQL_TYPES.len() {
             for op in 0..MYSQL_OPS.len() {
-                for a_sign in 0..MYSQL_SIGNED.len() {
-                    for b_sign in 0..MYSQL_SIGNED.len() {
-                        let args = test(&mut conn, &map, a, a_sign, op, b, b_sign).await;
-                        println!("map.insert({args});");
-                    }
-                }
+                let args = test(&mut conn, &type_map, a, op, b).await;
+                println!("map.insert({args});");
             }
         }
     }

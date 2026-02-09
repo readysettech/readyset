@@ -87,6 +87,10 @@ pub enum DfType {
     /// This is either:
     /// - [MySQL `float`](https://dev.mysql.com/doc/refman/8.0/en/floating-point-types.html).
     /// - [PostgreSQL `real`](https://www.postgresql.org/docs/current/datatype-numeric.html#DATATYPE-FLOAT)
+    ///
+    /// Note: there is no `UnsignedFloat` variant. MySQL deprecated `UNSIGNED` for `FLOAT`,
+    /// `DOUBLE`, and `DECIMAL` as of 8.0.17 (see
+    /// <https://dev.mysql.com/doc/refman/8.0/en/numeric-type-syntax.html>).
     Float,
 
     /// [`f64`]: a IEEE 754 floating-point 64-bit real value.
@@ -94,6 +98,8 @@ pub enum DfType {
     /// This is either:
     /// - [MySQL `double precision`](https://dev.mysql.com/doc/refman/8.0/en/floating-point-types.html).
     /// - [PostgreSQL `double precision`](https://www.postgresql.org/docs/current/datatype-numeric.html#DATATYPE-FLOAT).
+    ///
+    /// Note: there is no `UnsignedDouble` variant. See [`Float`](Self::Float) for rationale.
     Double,
 
     /// The `DECIMAL` or `NUMERIC` type.
