@@ -173,11 +173,11 @@ run_script() {
       echo ''
       show_docker_info
       echo ''
-      echo '🪵 Readyset logs:'
-      docker logs readyset-cache-1
+      echo '🪵 Compose service logs:'
+      docker compose -f readyset.compose.yml logs --no-color 2>&1
       echo ''
       echo 'Stopping Docker'
-      docker-compose -f readyset.compose.yml down -v > /dev/null 2>&1
+      docker compose -f readyset.compose.yml down -v > /dev/null 2>&1
       # The return code could have been 0, so exit with 1 explicitly
       exit 1
     fi
@@ -206,8 +206,8 @@ show_docker_info() {
 # stopping the containers and removing the associated volumes.
 reset_deployment_state() {
   if [ -f "readyset.compose.yml" ]; then
-    echo "'readyset.compose.yml' found. Running 'docker-compose down' to reset the environment."
-    docker-compose -f readyset.compose.yml down -v > /dev/null 2>&1
+    echo "'readyset.compose.yml' found. Running 'docker compose down' to reset the environment."
+    docker compose -f readyset.compose.yml down -v > /dev/null 2>&1
   else
     echo "'readyset.compose.yml' not found. Proceeding with the tests."
   fi
