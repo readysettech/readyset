@@ -6,9 +6,10 @@ use clap::ValueEnum;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{
     AddTablesStatement, AlterReadysetStatement, AlterTableStatement, CacheInner, CacheType,
-    ChangeUpstreamStatement, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
-    DropCacheStatement, EvictionPolicy, Expr, ResnapshotTableStatement, SelectStatement,
-    SetEviction, ShallowCacheQuery, SqlQuery, SqlType, TableKey,
+    ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement, CreateTableStatement,
+    CreateViewStatement, DropCacheStatement, EvictionPolicy, Expr, ReadysetHintDirective,
+    ResnapshotTableStatement, SelectStatement, SetEviction, ShallowCacheQuery, SqlQuery, SqlType,
+    TableKey,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -437,33 +438,16 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
     }
 }
 
-/// Expects `CREATE CACHE` was already parsed. Attempts to parse a Readyset-specific create cache
-/// statement. Will simply error if it fails, since there's no relevant standard SQL to fall back
-/// to.
+/// Parse cache options (POLICY, TTL, REFRESH, COALESCE, ALWAYS, CONCURRENTLY) from the token
+/// stream. The `CREATE [DEEP|SHALLOW] CACHE` keywords must already be consumed.
 ///
-/// CREATE [type] CACHE
-///     [POLICY TTL <num> SECONDS [REFRESH [EVERY] <num> SECONDS] [COALESCE <num> SECONDS]]
-///     [cache_option [, cache_option] ...]
-///     [<name>]
-///     FROM
-///     [<SELECT statement> | <query id>]
-///
-/// type:
-///     | DEEP
-///     | SHALLOW
-///     | // empty -> default cache type (default default is DEEP)
-///
-/// cache_options:
-///     | ALWAYS
-///     | CONCURRENTLY
-fn parse_create_cache(
+/// This is shared between `CREATE CACHE` DDL parsing and hint directive parsing.
+/// Syntax is identical in both contexts:
+///     `POLICY TTL <n> SECONDS [REFRESH [EVERY] <n> SECONDS] [COALESCE <n> SECONDS]`
+fn parse_cache_options(
     parser: &mut Parser,
-    dialect: Dialect,
-    input: impl AsRef<str>,
-) -> Result<SqlQuery, ReadysetParsingError> {
-    let cache_type = parse_create_cache_keywords(parser)?;
-
-    // Parse optional policy (POLICY TTL N SECONDS [REFRESH [EVERY] M SECONDS])
+    cache_type: Option<CacheType>,
+) -> Result<CreateCacheOptions, ReadysetParsingError> {
     let policy = if parse_readyset_keyword(parser, ReadysetKeyword::POLICY) {
         if cache_type != Some(CacheType::Shallow) {
             return Err(ReadysetParsingError::ReadysetParsingError(
@@ -487,7 +471,12 @@ fn parse_create_cache(
         let policy = if parse_readyset_keyword(parser, ReadysetKeyword::REFRESH) {
             let scheduled_refresh = parser.parse_keyword(Keyword::EVERY);
             match parser.parse_literal_uint() {
-                Ok(refresh_secs) if parser.parse_keyword(Keyword::SECONDS) => {
+                Ok(refresh_secs) => {
+                    if !parser.parse_keyword(Keyword::SECONDS) {
+                        return Err(ReadysetParsingError::ReadysetParsingError(
+                            "Expected SECONDS after REFRESH duration".into(),
+                        ));
+                    }
                     if refresh_secs >= ttl_secs {
                         return Err(ReadysetParsingError::ReadysetParsingError(
                             "REFRESH period must be less than TTL".into(),
@@ -550,6 +539,43 @@ fn parse_create_cache(
         }
         _ => {}
     }
+
+    Ok(CreateCacheOptions {
+        always,
+        concurrently,
+        cache_type,
+        policy,
+        coalesce_ms,
+    })
+}
+
+/// Expects `CREATE CACHE` was already parsed. Attempts to parse a Readyset-specific create cache
+/// statement. Will simply error if it fails, since there's no relevant standard SQL to fall back
+/// to.
+///
+/// CREATE [type] CACHE
+///     [POLICY TTL <num> SECONDS [REFRESH [EVERY] <num> SECONDS] [COALESCE <num> SECONDS]]
+///     [cache_option [, cache_option] ...]
+///     [<name>]
+///     FROM
+///     [<SELECT statement> | <query id>]
+///
+/// type:
+///     | DEEP
+///     | SHALLOW
+///     | // empty -> default cache type (default default is DEEP)
+///
+/// cache_options:
+///     | ALWAYS
+///     | CONCURRENTLY
+fn parse_create_cache(
+    parser: &mut Parser,
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<SqlQuery, ReadysetParsingError> {
+    let cache_type = parse_create_cache_keywords(parser)?;
+    let opts = parse_cache_options(parser, cache_type)?;
+
     let from = parser.parse_keyword(Keyword::FROM);
     let name = if !from {
         let name = parser
@@ -581,14 +607,56 @@ fn parse_create_cache(
     let inner = parse_query_for_create_cache(parser, dialect, remaining_query);
     Ok(SqlQuery::CreateCache(CreateCacheStatement {
         name,
-        cache_type,
-        policy,
-        coalesce_ms,
+        cache_type: opts.cache_type,
+        policy: opts.policy,
+        coalesce_ms: opts.coalesce_ms,
         inner,
         unparsed_create_cache_statement: Some(input.as_ref().trim().to_string()),
-        always,
-        concurrently,
+        always: opts.always,
+        concurrently: opts.concurrently,
     }))
+}
+
+/// Parse a readyset hint text (without `/*rs+` and `*/` markers) into a directive.
+///
+/// Uses the same `parse_cache_options()` infrastructure as `CREATE CACHE` DDL parsing,
+/// so any new options added to `CREATE CACHE` are automatically supported in hints.
+///
+/// Returns `Ok(None)` for unrecognized directives (future-proof).
+/// Returns `Err(...)` for recognized but malformed directives.
+pub fn parse_hint_directive(
+    dialect: Dialect,
+    text: &str,
+) -> Result<Option<ReadysetHintDirective>, ReadysetParsingError> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+
+    let sqlparser_dialect = sqlparser_dialect_from_readyset_dialect(dialect);
+    let mut parser = Parser::new(sqlparser_dialect.as_ref())
+        .try_with_sql(text)
+        .map_err(|e| ReadysetParsingError::ReadysetParsingError(e.to_string()))?;
+
+    // Try parsing as CREATE [DEEP|SHALLOW] CACHE using the same function as DDL.
+    // If the first token isn't CREATE, this is an unrecognized directive.
+    let directive = match parse_create_cache_keywords(&mut parser) {
+        Ok(cache_type) => {
+            let opts = parse_cache_options(&mut parser, cache_type)?;
+            ReadysetHintDirective::CreateCache(opts)
+        }
+        Err(_) => return Ok(None),
+    };
+
+    // Ensure all hint text was consumed
+    if parser.peek_token() != Token::EOF {
+        return Err(ReadysetParsingError::ReadysetParsingError(format!(
+            "Unexpected token in CREATE CACHE hint: {}",
+            parser.peek_token()
+        )));
+    }
+
+    Ok(Some(directive))
 }
 
 fn peek_create_cache(parser: &mut Parser) -> bool {
@@ -937,20 +1005,30 @@ fn parse_drop(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
 }
 
 /// Parse a SQL statement as a bare sqlparser AST [`sqlparser::ast::Query`],
-/// without converting to the Readyset AST.
+/// without converting to the Readyset AST, extracting and stripping any
+/// `/*rs+ ... */` hint directive.
 ///
 /// This is intended for shallow-cache matching and should be preferred over calling sqlparser
 /// directly outside this crate.
+///
+/// Returns the hint-stripped query (for stable QueryId) and the parsed directive if present.
 pub fn parse_shallow_query(
     dialect: Dialect,
     input: impl AsRef<str>,
-) -> Result<ShallowCacheQuery, ReadysetParsingError> {
-    parse_sqlparser_inner(dialect, input, |parser, _dialect, _input| {
-        parser
-            .parse_query()
-            .map(|boxed| (*boxed).into())
-            .map_err(ReadysetParsingError::SqlparserError)
-    })
+) -> Result<(ShallowCacheQuery, Option<ReadysetHintDirective>), ReadysetParsingError> {
+    let mut query: ShallowCacheQuery =
+        parse_sqlparser_inner(dialect, input, |parser, _dialect, _input| {
+            parser
+                .parse_query()
+                .map(|boxed| (*boxed).into())
+                .map_err(ReadysetParsingError::SqlparserError)
+        })?;
+    let hint = query.take_readyset_hint();
+    let directive = match hint {
+        Some(h) => parse_hint_directive(dialect, &h.text)?,
+        None => None,
+    };
+    Ok((query, directive))
 }
 
 /// Attempts to parse a Readyset-specific statement, and falls back to [`Parser::parse_statement`] if it fails.

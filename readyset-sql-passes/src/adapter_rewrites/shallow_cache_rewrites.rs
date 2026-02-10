@@ -714,7 +714,8 @@ mod tests {
     use crate::anonymize::Anonymizer;
 
     fn parse_query(dialect: Dialect, sql: &str) -> ShallowCacheQuery {
-        parse_shallow_query(dialect, sql).expect("Failed to parse query")
+        let (query, _) = parse_shallow_query(dialect, sql).expect("Failed to parse query");
+        query
     }
 
     #[test]

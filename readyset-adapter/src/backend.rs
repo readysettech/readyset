@@ -4674,7 +4674,9 @@ where
 
     fn parse_shallow_query(&self, query: &str) -> ReadySetResult<ShallowCacheQuery> {
         trace!(%query, "Parsing shallow query");
-        readyset_sql_parsing::parse_shallow_query(self.settings.dialect, query).map_err(Into::into)
+        let (query, _directive) =
+            readyset_sql_parsing::parse_shallow_query(self.settings.dialect, query)?;
+        Ok(query)
     }
 
     pub fn does_require_authentication(&self) -> bool {
