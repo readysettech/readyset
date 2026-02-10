@@ -618,6 +618,8 @@ pub enum BinaryOperator {
     Multiply,
     /// `/`
     Divide,
+    /// `%`
+    Modulo,
 
     /// `?`
     ///
@@ -728,6 +730,7 @@ impl Arbitrary for BinaryOperator {
                 Just(Self::HashSubtract),
                 Just(Self::Multiply),
                 Just(Self::Divide),
+                Just(Self::Modulo),
                 Just(Self::QuestionMark),
                 Just(Self::QuestionMarkPipe),
                 Just(Self::QuestionMarkAnd),
@@ -793,7 +796,7 @@ impl TryFrom<sqlparser::ast::BinaryOperator> for BinaryOperator {
             BinOp::Lt => Self::Less,
             BinOp::LtEq => Self::LessOrEqual,
             BinOp::Minus => Self::Subtract,
-            BinOp::Modulo => unsupported!("% {value:?}")?,
+            BinOp::Modulo => Self::Modulo,
             BinOp::Multiply => Self::Multiply,
             BinOp::MyIntegerDivide => unsupported!("MySQL DIV {value:?}")?,
             BinOp::NotEq => Self::NotEqual,
@@ -866,6 +869,7 @@ impl fmt::Display for BinaryOperator {
             Self::HashSubtract => "#-",
             Self::Multiply => "*",
             Self::Divide => "/",
+            Self::Modulo => "%",
             Self::QuestionMark => "?",
             Self::QuestionMarkPipe => "?|",
             Self::QuestionMarkAnd => "?&",
@@ -2053,6 +2057,14 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 expr: next_expr()?,
                 distinct,
             })
+        } else if is_builtin && ident.value.eq_ignore_ascii_case("MOD") {
+            let lhs = next_expr()?;
+            let rhs = next_expr()?;
+            Self::BinaryOp {
+                lhs,
+                op: BinaryOperator::Modulo,
+                rhs,
+            }
         } else if is_builtin && ident.value.eq_ignore_ascii_case("UPPER") {
             let expr = next_expr()?;
             match *expr {
@@ -2676,4 +2688,104 @@ pub enum OperatorSuffix {
     Any,
     Some,
     All,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Dialect, TryIntoDialect};
+
+    /// Helper to parse a SQL expression string via sqlparser and convert it to the readyset
+    /// [`Expr`] type.
+    fn parse_expr(dialect: Dialect, input: &str) -> Expr {
+        let sqlparser_dialect: Box<dyn sqlparser::dialect::Dialect> = match dialect {
+            Dialect::PostgreSQL => Box::new(sqlparser::dialect::PostgreSqlDialect {}),
+            Dialect::MySQL => Box::new(sqlparser::dialect::MySqlDialect {}),
+        };
+        let mut parser = sqlparser::parser::Parser::new(sqlparser_dialect.as_ref())
+            .try_with_sql(input)
+            .expect("failed to create sqlparser parser");
+        let sqlparser_expr = parser.parse_expr().expect("failed to parse expression");
+        sqlparser_expr
+            .try_into_dialect(dialect)
+            .expect("failed to convert sqlparser Expr to readyset Expr")
+    }
+
+    /// Test that MOD(x, y) function call desugars to a BinaryOp with Modulo operator.
+    #[test]
+    fn mod_function_desugars_to_binary_op() {
+        let expr = parse_expr(Dialect::MySQL, "MOD(x, y)");
+
+        match expr {
+            Expr::BinaryOp { lhs, op, rhs } => {
+                assert_eq!(op, BinaryOperator::Modulo);
+                assert!(
+                    matches!(lhs.as_ref(), Expr::Column(col) if col.name == "x"),
+                    "expected lhs to be column 'x', got {:?}",
+                    lhs
+                );
+                assert!(
+                    matches!(rhs.as_ref(), Expr::Column(col) if col.name == "y"),
+                    "expected rhs to be column 'y', got {:?}",
+                    rhs
+                );
+            }
+            other => panic!(
+                "expected Expr::BinaryOp with Modulo operator, got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// Test that the `%` operator binds tighter than `+`, i.e. `1 + 2 % 3` parses as
+    /// `1 + (2 % 3)`. The outer expression should be Add with the RHS being a Modulo expression.
+    #[test]
+    fn modulo_operator_precedence() {
+        let expr = parse_expr(Dialect::MySQL, "1 + 2 % 3");
+
+        match expr {
+            Expr::BinaryOp { lhs, op, rhs } => {
+                assert_eq!(
+                    op,
+                    BinaryOperator::Add,
+                    "outer operator should be Add, got {:?}",
+                    op
+                );
+                assert!(
+                    matches!(lhs.as_ref(), Expr::Literal(Literal::Integer(1))),
+                    "expected lhs to be literal 1, got {:?}",
+                    lhs
+                );
+                match rhs.as_ref() {
+                    Expr::BinaryOp {
+                        lhs: inner_lhs,
+                        op: inner_op,
+                        rhs: inner_rhs,
+                    } => {
+                        assert_eq!(
+                            inner_op,
+                            &BinaryOperator::Modulo,
+                            "inner operator should be Modulo, got {:?}",
+                            inner_op
+                        );
+                        assert!(
+                            matches!(inner_lhs.as_ref(), Expr::Literal(Literal::Integer(2))),
+                            "expected inner lhs to be literal 2, got {:?}",
+                            inner_lhs
+                        );
+                        assert!(
+                            matches!(inner_rhs.as_ref(), Expr::Literal(Literal::Integer(3))),
+                            "expected inner rhs to be literal 3, got {:?}",
+                            inner_rhs
+                        );
+                    }
+                    other => panic!(
+                        "expected rhs to be Expr::BinaryOp with Modulo, got {:?}",
+                        other
+                    ),
+                }
+            }
+            other => panic!("expected outer Expr::BinaryOp with Add, got {:?}", other),
+        }
+    }
 }

@@ -47,6 +47,7 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
         Subtract => Ok((non_null!(left) - non_null!(right))?),
         Multiply => Ok((non_null!(left) * non_null!(right))?),
         Divide => Ok((non_null!(left) / non_null!(right))?),
+        Modulo => Ok((non_null!(left) % non_null!(right))?),
         And => Ok((non_null!(left).is_truthy() && non_null!(right).is_truthy()).into()),
         Or => Ok((non_null!(left).is_truthy() || non_null!(right).is_truthy()).into()),
         Equal => Ok((non_null!(left) == non_null!(right)).into()),
@@ -471,6 +472,103 @@ mod tests {
         assert_eq!(
             expr.eval(&[DfValue::from(1), DfValue::from(2)]).unwrap(),
             6.into()
+        );
+    }
+
+    #[test]
+    fn eval_mod() {
+        // (10 % 7) * 3 = 9
+        let expr = Op {
+            left: Box::new(Op {
+                left: Box::new(make_column(0)),
+                right: Box::new(make_column(1)),
+                op: BinaryOperator::Modulo,
+                ty: DfType::Unknown,
+            }),
+            right: Box::new(make_literal(3.into())),
+            op: BinaryOperator::Multiply,
+            ty: DfType::Unknown,
+        };
+        assert_eq!(
+            expr.eval(&[DfValue::from(10), DfValue::from(7)]).unwrap(),
+            9.into()
+        );
+    }
+
+    #[test]
+    fn eval_mod_by_zero() {
+        let expr = Op {
+            left: Box::new(make_column(0)),
+            right: Box::new(make_column(1)),
+            op: BinaryOperator::Modulo,
+            ty: DfType::Unknown,
+        };
+        // Integer modulo by zero returns NULL (via checked_rem returning None).
+        assert_eq!(
+            expr.eval(&[DfValue::from(10), DfValue::from(0)]).unwrap(),
+            DfValue::None
+        );
+        // Unsigned integer modulo by zero also returns NULL.
+        assert_eq!(
+            expr.eval(&[DfValue::from(10u64), DfValue::from(0u64)])
+                .unwrap(),
+            DfValue::None
+        );
+    }
+
+    #[test]
+    fn eval_mod_negative_operands() {
+        let expr = Op {
+            left: Box::new(make_column(0)),
+            right: Box::new(make_column(1)),
+            op: BinaryOperator::Modulo,
+            ty: DfType::Unknown,
+        };
+        // Rust (and MySQL/PostgreSQL) remainder preserves the sign of the dividend.
+        assert_eq!(
+            expr.eval(&[DfValue::from(-10), DfValue::from(3)]).unwrap(),
+            DfValue::from(-1)
+        );
+        assert_eq!(
+            expr.eval(&[DfValue::from(10), DfValue::from(-3)]).unwrap(),
+            DfValue::from(1)
+        );
+        assert_eq!(
+            expr.eval(&[DfValue::from(-10), DfValue::from(-3)]).unwrap(),
+            DfValue::from(-1)
+        );
+    }
+
+    #[test]
+    fn eval_mod_unsigned() {
+        let expr = Op {
+            left: Box::new(make_column(0)),
+            right: Box::new(make_column(1)),
+            op: BinaryOperator::Modulo,
+            ty: DfType::Unknown,
+        };
+        assert_eq!(
+            expr.eval(&[DfValue::from(10u64), DfValue::from(3u64)])
+                .unwrap(),
+            DfValue::from(1u64)
+        );
+    }
+
+    #[test]
+    fn eval_mod_null_operand() {
+        let expr = Op {
+            left: Box::new(make_column(0)),
+            right: Box::new(make_column(1)),
+            op: BinaryOperator::Modulo,
+            ty: DfType::Unknown,
+        };
+        assert_eq!(
+            expr.eval(&[DfValue::None, DfValue::from(3)]).unwrap(),
+            DfValue::None
+        );
+        assert_eq!(
+            expr.eval(&[DfValue::from(10), DfValue::None]).unwrap(),
+            DfValue::None
         );
     }
 

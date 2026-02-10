@@ -55,6 +55,9 @@ pub enum BinaryOperator {
     /// `/`
     Divide,
 
+    /// `%`
+    Modulo,
+
     /// `?`
     JsonExists,
 
@@ -130,6 +133,7 @@ impl fmt::Display for BinaryOperator {
             Self::JsonSubtractPath => "#-",
             Self::Multiply => "*",
             Self::Divide => "/",
+            Self::Modulo => "%",
             Self::JsonExists => "?",
             Self::JsonAnyExists => "?|",
             Self::JsonAllExists => "?&",

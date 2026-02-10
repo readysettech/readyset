@@ -347,6 +347,7 @@ where
             Prefix(Neg) => Affix::Prefix(Precedence(14)),
             Infix(Multiply) => Affix::Infix(Precedence(12), Associativity::Left),
             Infix(Divide) => Affix::Infix(Precedence(12), Associativity::Left),
+            Infix(Modulo) => Affix::Infix(Precedence(12), Associativity::Left),
             Infix(Add) => Affix::Infix(Precedence(11), Associativity::Left),
             Infix(Subtract) => Affix::Infix(Precedence(11), Associativity::Left),
             // All JSON operators have the same precedence.

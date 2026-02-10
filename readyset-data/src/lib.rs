@@ -4,7 +4,7 @@ use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
 use std::mem::{size_of, size_of_val};
-use std::ops::{Add, Div, Mul, Sub};
+use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{fmt, io, str};
@@ -2254,6 +2254,14 @@ impl<'a> Div<&'a DfValue> for &'_ DfValue {
 
     fn div(self, other: &'a DfValue) -> Self::Output {
         Ok(arithmetic_operation!(/, checked_div, self, other))
+    }
+}
+
+impl<'a> Rem<&'a DfValue> for &'_ DfValue {
+    type Output = ReadySetResult<DfValue>;
+
+    fn rem(self, other: &'a DfValue) -> Self::Output {
+        Ok(arithmetic_operation!(%, checked_rem, self, other))
     }
 }
 

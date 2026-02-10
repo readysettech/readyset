@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::iter::zip;
 
 const PSQL_TYPES: &[&str] = &["smallint", "integer", "bigint", "real", "double precision"];
-const PSQL_OPS: &[&str] = &["+", "-", "*", "/"];
+const PSQL_OPS: &[&str] = &["+", "-", "*", "/", "%"];
 const READYSET_TYPES: &[&str] = &["SmallInt", "Int", "BigInt", "Float", "Double"];
-const READYSET_OPS: &[&str] = &["Add", "Subtract", "Multiply", "Divide"];
+const READYSET_OPS: &[&str] = &["Add", "Subtract", "Multiply", "Divide", "Modulo"];
 
 async fn test(
     client: &tokio_postgres::Client,
@@ -26,29 +26,39 @@ async fn test(
         .simple_query(&format!("create table t2 (b {})", PSQL_TYPES[b]))
         .await
         .unwrap();
-    client
+    // PostgreSQL rejects some operator/type combinations (e.g. `smallint % real`).
+    // When that happens, emit DfType::Unknown so that ReadySet can produce the same error.
+    let result = client
         .simple_query(&format!(
             "create table t3 as select a {} b as c from t1, t2",
             PSQL_OPS[op]
         ))
-        .await
-        .unwrap();
+        .await;
 
-    let rows = client
-        .query(
-            "select pg_catalog.format_type(a.atttypid, a.atttypmod)
-            from pg_catalog.pg_attribute a
-            where a.attrelid = (select oid from pg_class where relname = 't3') and a.attnum > 0",
-            &[],
-        )
-        .await
-        .unwrap();
-    let ty: String = rows[0].get(0);
+    let out = match result {
+        Ok(_) => {
+            let rows = client
+                .query(
+                    "select pg_catalog.format_type(a.atttypid, a.atttypmod)
+                    from pg_catalog.pg_attribute a
+                    where a.attrelid = (select oid from pg_class where relname = 't3')
+                      and a.attnum > 0",
+                    &[],
+                )
+                .await
+                .unwrap();
+            let ty: String = rows[0].get(0);
 
-    let out = if let Some(ty) = map.get(ty.as_str()) {
-        ty.to_string()
-    } else {
-        panic!("unknown type: {ty}");
+            if let Some(ty) = map.get(ty.as_str()) {
+                ty.to_string()
+            } else {
+                panic!("unknown type: {ty}");
+            }
+        }
+        Err(e) if e.code() == Some(&tokio_postgres::error::SqlState::UNDEFINED_FUNCTION) => {
+            "Unknown".to_string()
+        }
+        Err(e) => panic!("unexpected error: {e}"),
     };
 
     format!(

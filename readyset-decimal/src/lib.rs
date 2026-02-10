@@ -271,6 +271,23 @@ impl Decimal {
         }
     }
 
+    /// Compute the remainder of two decimals. See comment on [`Decimal::checked_add`].
+    ///
+    /// Like [`Decimal::checked_div`], this returns [`None`] if the divisor (`other`) is zero.
+    pub fn checked_rem(&self, other: &Self) -> Option<Self> {
+        use Decimal::*;
+        match (self, other) {
+            (Infinity, _) => Some(NaN),
+            (NegativeInfinity, _) => Some(NaN),
+            (NaN, _) => Some(NaN),
+            (_, NaN) => Some(NaN),
+            (_, Infinity) => Some(self.clone()),
+            (_, NegativeInfinity) => Some(self.clone()),
+            (_, Number(b)) if b.is_zero() => None,
+            (Number(a), Number(b)) => Some(Number(a % b)),
+        }
+    }
+
     /// Multiply two decimals. See comment on [`Decimal::checked_add`].
     pub fn checked_mul(&self, other: &Self) -> Option<Self> {
         use Decimal::*;

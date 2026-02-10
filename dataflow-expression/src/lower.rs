@@ -979,6 +979,7 @@ impl BinaryOperator {
             HashSubtract => Ok((Self::JsonSubtractPath, false)),
             Multiply => Ok((Self::Multiply, false)),
             Divide => Ok((Self::Divide, false)),
+            Modulo => Ok((Self::Modulo, false)),
             Like => Ok((Self::Like, false)),
             NotLike => Ok((Self::Like, true)),
             ILike => Ok((Self::ILike, false)),
@@ -1055,8 +1056,8 @@ impl BinaryOperator {
 
         use BinaryOperator::*;
         match self {
-            Add | Subtract | Multiply | Divide | And | Or | Greater | GreaterOrEqual | Less
-            | LessOrEqual | Is => match dialect.engine() {
+            Add | Subtract | Multiply | Divide | Modulo | And | Or | Greater | GreaterOrEqual
+            | Less | LessOrEqual | Is => match dialect.engine() {
                 SqlEngine::PostgreSQL => Ok((None, None)),
                 SqlEngine::MySQL => {
                     let ty = mysql_type_conversion(left_type, right_type);
@@ -1159,6 +1160,19 @@ impl BinaryOperator {
                 crate::promotion::psql::output_type(left_type, self, right_type)
             }
         } {
+            // DfType::Unknown is the sentinel value used by the promotion maps to indicate
+            // that a particular operator/type combination is not supported by the database
+            // (e.g., PostgreSQL does not support `%` with floating-point operands).  These
+            // entries are generated automatically by the output-type binaries when the
+            // database rejects the operation.
+            if matches!(ty, DfType::Unknown) {
+                return Err(invalid_query_err!(
+                    "operator does not exist: {} {} {}",
+                    left_type,
+                    self,
+                    right_type
+                ));
+            }
             return Ok(ty);
         }
 

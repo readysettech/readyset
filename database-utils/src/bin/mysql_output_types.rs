@@ -13,14 +13,14 @@ const MYSQL_TYPES: &[&str] = &[
     "tinyint unsigned", "smallint unsigned", "mediumint unsigned", "int unsigned", "bigint unsigned",
     "float", "double",
 ];
-const MYSQL_OPS: &[&str] = &["+", "-", "*", "/"];
+const MYSQL_OPS: &[&str] = &["+", "-", "*", "/", "%"];
 #[rustfmt::skip]
 const READYSET_TYPES: &[&str] = &[
     "TinyInt", "SmallInt", "MediumInt", "Int", "BigInt",
     "UnsignedTinyInt", "UnsignedSmallInt", "UnsignedMediumInt", "UnsignedInt", "UnsignedBigInt",
     "Float", "Double",
 ];
-const READYSET_OPS: &[&str] = &["Add", "Subtract", "Multiply", "Divide"];
+const READYSET_OPS: &[&str] = &["Add", "Subtract", "Multiply", "Divide", "Modulo"];
 
 async fn test(
     conn: &mut mysql_async::Conn,

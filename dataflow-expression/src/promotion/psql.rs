@@ -40,6 +40,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::SmallInt,
     );
     map.insert(
+        (DfType::SmallInt, BinaryOperator::Modulo, DfType::SmallInt),
+        DfType::SmallInt,
+    );
+    map.insert(
         (DfType::SmallInt, BinaryOperator::Add, DfType::Int),
         DfType::Int,
     );
@@ -53,6 +57,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     );
     map.insert(
         (DfType::SmallInt, BinaryOperator::Divide, DfType::Int),
+        DfType::Int,
+    );
+    map.insert(
+        (DfType::SmallInt, BinaryOperator::Modulo, DfType::Int),
         DfType::Int,
     );
     map.insert(
@@ -72,6 +80,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::BigInt,
     );
     map.insert(
+        (DfType::SmallInt, BinaryOperator::Modulo, DfType::BigInt),
+        DfType::BigInt,
+    );
+    map.insert(
         (DfType::SmallInt, BinaryOperator::Add, DfType::Float),
         DfType::Double,
     );
@@ -86,6 +98,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     map.insert(
         (DfType::SmallInt, BinaryOperator::Divide, DfType::Float),
         DfType::Double,
+    );
+    map.insert(
+        (DfType::SmallInt, BinaryOperator::Modulo, DfType::Float),
+        DfType::Unknown,
     );
     map.insert(
         (DfType::SmallInt, BinaryOperator::Add, DfType::Double),
@@ -104,6 +120,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Double,
     );
     map.insert(
+        (DfType::SmallInt, BinaryOperator::Modulo, DfType::Double),
+        DfType::Unknown,
+    );
+    map.insert(
         (DfType::Int, BinaryOperator::Add, DfType::SmallInt),
         DfType::Int,
     );
@@ -119,6 +139,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         (DfType::Int, BinaryOperator::Divide, DfType::SmallInt),
         DfType::Int,
     );
+    map.insert(
+        (DfType::Int, BinaryOperator::Modulo, DfType::SmallInt),
+        DfType::Int,
+    );
     map.insert((DfType::Int, BinaryOperator::Add, DfType::Int), DfType::Int);
     map.insert(
         (DfType::Int, BinaryOperator::Subtract, DfType::Int),
@@ -130,6 +154,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     );
     map.insert(
         (DfType::Int, BinaryOperator::Divide, DfType::Int),
+        DfType::Int,
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Modulo, DfType::Int),
         DfType::Int,
     );
     map.insert(
@@ -149,6 +177,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::BigInt,
     );
     map.insert(
+        (DfType::Int, BinaryOperator::Modulo, DfType::BigInt),
+        DfType::BigInt,
+    );
+    map.insert(
         (DfType::Int, BinaryOperator::Add, DfType::Float),
         DfType::Double,
     );
@@ -163,6 +195,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     map.insert(
         (DfType::Int, BinaryOperator::Divide, DfType::Float),
         DfType::Double,
+    );
+    map.insert(
+        (DfType::Int, BinaryOperator::Modulo, DfType::Float),
+        DfType::Unknown,
     );
     map.insert(
         (DfType::Int, BinaryOperator::Add, DfType::Double),
@@ -181,6 +217,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Double,
     );
     map.insert(
+        (DfType::Int, BinaryOperator::Modulo, DfType::Double),
+        DfType::Unknown,
+    );
+    map.insert(
         (DfType::BigInt, BinaryOperator::Add, DfType::SmallInt),
         DfType::BigInt,
     );
@@ -194,6 +234,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     );
     map.insert(
         (DfType::BigInt, BinaryOperator::Divide, DfType::SmallInt),
+        DfType::BigInt,
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Modulo, DfType::SmallInt),
         DfType::BigInt,
     );
     map.insert(
@@ -213,6 +257,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::BigInt,
     );
     map.insert(
+        (DfType::BigInt, BinaryOperator::Modulo, DfType::Int),
+        DfType::BigInt,
+    );
+    map.insert(
         (DfType::BigInt, BinaryOperator::Add, DfType::BigInt),
         DfType::BigInt,
     );
@@ -226,6 +274,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     );
     map.insert(
         (DfType::BigInt, BinaryOperator::Divide, DfType::BigInt),
+        DfType::BigInt,
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Modulo, DfType::BigInt),
         DfType::BigInt,
     );
     map.insert(
@@ -245,6 +297,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Double,
     );
     map.insert(
+        (DfType::BigInt, BinaryOperator::Modulo, DfType::Float),
+        DfType::Unknown,
+    );
+    map.insert(
         (DfType::BigInt, BinaryOperator::Add, DfType::Double),
         DfType::Double,
     );
@@ -259,6 +315,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     map.insert(
         (DfType::BigInt, BinaryOperator::Divide, DfType::Double),
         DfType::Double,
+    );
+    map.insert(
+        (DfType::BigInt, BinaryOperator::Modulo, DfType::Double),
+        DfType::Unknown,
     );
     map.insert(
         (DfType::Float, BinaryOperator::Add, DfType::SmallInt),
@@ -277,6 +337,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Double,
     );
     map.insert(
+        (DfType::Float, BinaryOperator::Modulo, DfType::SmallInt),
+        DfType::Unknown,
+    );
+    map.insert(
         (DfType::Float, BinaryOperator::Add, DfType::Int),
         DfType::Double,
     );
@@ -291,6 +355,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     map.insert(
         (DfType::Float, BinaryOperator::Divide, DfType::Int),
         DfType::Double,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Modulo, DfType::Int),
+        DfType::Unknown,
     );
     map.insert(
         (DfType::Float, BinaryOperator::Add, DfType::BigInt),
@@ -309,6 +377,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Double,
     );
     map.insert(
+        (DfType::Float, BinaryOperator::Modulo, DfType::BigInt),
+        DfType::Unknown,
+    );
+    map.insert(
         (DfType::Float, BinaryOperator::Add, DfType::Float),
         DfType::Float,
     );
@@ -323,6 +395,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     map.insert(
         (DfType::Float, BinaryOperator::Divide, DfType::Float),
         DfType::Float,
+    );
+    map.insert(
+        (DfType::Float, BinaryOperator::Modulo, DfType::Float),
+        DfType::Unknown,
     );
     map.insert(
         (DfType::Float, BinaryOperator::Add, DfType::Double),
@@ -341,6 +417,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Double,
     );
     map.insert(
+        (DfType::Float, BinaryOperator::Modulo, DfType::Double),
+        DfType::Unknown,
+    );
+    map.insert(
         (DfType::Double, BinaryOperator::Add, DfType::SmallInt),
         DfType::Double,
     );
@@ -355,6 +435,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     map.insert(
         (DfType::Double, BinaryOperator::Divide, DfType::SmallInt),
         DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Modulo, DfType::SmallInt),
+        DfType::Unknown,
     );
     map.insert(
         (DfType::Double, BinaryOperator::Add, DfType::Int),
@@ -373,6 +457,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Double,
     );
     map.insert(
+        (DfType::Double, BinaryOperator::Modulo, DfType::Int),
+        DfType::Unknown,
+    );
+    map.insert(
         (DfType::Double, BinaryOperator::Add, DfType::BigInt),
         DfType::Double,
     );
@@ -387,6 +475,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     map.insert(
         (DfType::Double, BinaryOperator::Divide, DfType::BigInt),
         DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Modulo, DfType::BigInt),
+        DfType::Unknown,
     );
     map.insert(
         (DfType::Double, BinaryOperator::Add, DfType::Float),
@@ -405,6 +497,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
         DfType::Double,
     );
     map.insert(
+        (DfType::Double, BinaryOperator::Modulo, DfType::Float),
+        DfType::Unknown,
+    );
+    map.insert(
         (DfType::Double, BinaryOperator::Add, DfType::Double),
         DfType::Double,
     );
@@ -419,6 +515,10 @@ fn build_map() -> HashMap<(DfType, BinaryOperator, DfType), DfType> {
     map.insert(
         (DfType::Double, BinaryOperator::Divide, DfType::Double),
         DfType::Double,
+    );
+    map.insert(
+        (DfType::Double, BinaryOperator::Modulo, DfType::Double),
+        DfType::Unknown,
     );
     map
 }
