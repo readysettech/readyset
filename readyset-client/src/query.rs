@@ -294,18 +294,16 @@ impl QueryStatus {
         matches!(self.migration_state, MigrationState::Unsupported(_))
     }
 
-    /// Returns true if this query status represents a [successfully dry-run][] query
-    ///
-    /// [successfully dry-run]: MigrationState::DryRunSucceeded
+    /// Returns true if this query status is supported
     #[must_use]
-    pub fn is_dry_run_succeeded(&self) -> bool {
-        self.migration_state == MigrationState::DryRunSucceeded
+    pub fn is_supported(&self) -> bool {
+        self.migration_state == MigrationState::Supported
     }
 
     /// Returns true if the query should be proxied.
     #[must_use]
     pub fn is_proxied(&self) -> bool {
-        self.is_unsupported() || self.is_pending() || self.is_dry_run_succeeded()
+        self.is_unsupported() || self.is_pending() || self.is_supported()
     }
 }
 
@@ -387,9 +385,10 @@ pub enum MigrationState {
     Inlined(InlinedState),
     /// This query is not supported and should not be tried against ReadySet.
     Unsupported(String),
-    /// Indicates that a dry run of the query has succeeded. It's very likely but not guaranteed
-    /// that migration of the query will succeed if it's attempted.
-    DryRunSucceeded,
+    /// For deep caches, indicates that a dry run of the query has succeeded.  It's very likely but
+    /// not guaranteed that migration of the query will succeed if it's attempted.  For shallow
+    /// caches, indicates that we successfully prepared this query on the upstream.
+    Supported,
 }
 
 impl MigrationState {
@@ -419,7 +418,7 @@ impl MigrationState {
     pub fn is_supported(&self) -> bool {
         matches!(
             self,
-            MigrationState::DryRunSucceeded | MigrationState::Successful(_)
+            MigrationState::Supported | MigrationState::Successful(_)
         )
     }
 }
@@ -433,7 +432,7 @@ impl Display for MigrationState {
                 write!(f, "unsupported: reason unknown")
             }
             MigrationState::Unsupported(reason) => write!(f, "unsupported: {reason}"),
-            MigrationState::DryRunSucceeded => write!(f, "dry run succeeded"),
+            MigrationState::Supported => write!(f, "supported"),
             MigrationState::Inlined(InlinedState { epoch, .. }) => match epoch {
                 0u64 => write!(f, "pending inlining"),
                 _ => write!(f, "successfully inlined"),

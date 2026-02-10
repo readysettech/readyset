@@ -1186,11 +1186,8 @@ mod tests {
             cache.query_migration_state(&q).1,
             MigrationState::Unsupported("Failed".into())
         );
-        cache.update_query_migration_state(&q, MigrationState::DryRunSucceeded, None);
-        assert_eq!(
-            cache.query_migration_state(&q).1,
-            MigrationState::DryRunSucceeded
-        );
+        cache.update_query_migration_state(&q, MigrationState::Supported, None);
+        assert_eq!(cache.query_migration_state(&q).1, MigrationState::Supported);
     }
 
     #[test]

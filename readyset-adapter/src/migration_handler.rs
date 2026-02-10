@@ -388,7 +388,7 @@ impl MigrationHandler {
                 self.query_status_cache
                     .with_mut_migration_state(view_request, |status| {
                         if status.is_pending() {
-                            *status = MigrationState::DryRunSucceeded;
+                            *status = MigrationState::Supported;
                         }
                     });
             }

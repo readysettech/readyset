@@ -146,7 +146,7 @@ impl ViewsSynchronizer {
         self.report_metrics().await;
         let (queries, hashes): (Vec<_>, Vec<_>) = self
             .query_status_cache
-            .queries_with_statuses(&[MigrationState::DryRunSucceeded, MigrationState::Pending])
+            .queries_with_statuses(&[MigrationState::Supported, MigrationState::Pending])
             .into_iter()
             .filter_map(|(q, _)| {
                 q.into_parsed().and_then(|p| {

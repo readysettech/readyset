@@ -2834,7 +2834,7 @@ where
 
         // We don't yet know the migration state and are considering a deep cache.
         match self.noria.handle_dry_run(id, deep, schema_generation).await {
-            Ok(()) => MigrationState::DryRunSucceeded,
+            Ok(()) => MigrationState::Supported,
             Err(e) if e.is_transient() => MigrationState::Pending,
             Err(e) => {
                 MigrationState::Unsupported(e.unsupported_cause().unwrap_or_else(|| e.to_string()))
@@ -2900,7 +2900,7 @@ where
                 let deep = deep?;
                 let supported = match migration_state {
                     MigrationState::Successful(..) => "cached",
-                    MigrationState::DryRunSucceeded => "yes",
+                    MigrationState::Supported => "yes",
                     MigrationState::Unsupported(ref e) => &format!("no: {e}"),
                     MigrationState::Inlined(..) | MigrationState::Pending => "pending",
                 };
@@ -2926,13 +2926,13 @@ where
                     MigrationState::Inlined(..) | MigrationState::Pending if defaults_deep => {
                         (Some(deep?), None, "pending")
                     }
-                    MigrationState::DryRunSucceeded if defaults_deep => (Some(deep?), None, "yes"),
+                    MigrationState::Supported if defaults_deep => (Some(deep?), None, "yes"),
                     MigrationState::Unsupported(ref e) if cache_mode.is_deep() => {
                         (Some(deep?), None, &format!("no: {e}"))
                     }
                     MigrationState::Inlined(..)
                     | MigrationState::Pending
-                    | MigrationState::DryRunSucceeded
+                    | MigrationState::Supported
                     | MigrationState::Unsupported(..) => {
                         let shallow = shallow?;
                         if let Err(e) = self.upstream_supports(&shallow).await {
@@ -3176,9 +3176,7 @@ where
             .into_iter()
             .map(|ProxiedQuery { id, query, status }| {
                 let s = match status.migration_state {
-                    MigrationState::DryRunSucceeded | MigrationState::Successful(_) => {
-                        "yes".to_string()
-                    }
+                    MigrationState::Supported | MigrationState::Successful(_) => "yes".to_string(),
                     MigrationState::Pending | MigrationState::Inlined(_) => "pending".to_string(),
                     MigrationState::Unsupported(reason) if reason.is_empty() => {
                         "unsupported: unknown reason".to_string()
