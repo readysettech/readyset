@@ -523,12 +523,13 @@ impl ReadySetHandle {
     }
 
     pub fn subscribe_to_events(&mut self) -> broadcast::Receiver<ControllerEvent> {
-        if self.controller_events_client.is_none() {
-            let client = self.make_events_client();
-            client.start();
-            self.controller_events_client = Some(client);
+        if let Some(client) = &self.controller_events_client {
+            return client.subscribe();
         }
-        self.controller_events_client.as_ref().unwrap().subscribe()
+        let client = self.make_events_client();
+        let receiver = client.subscribe_and_start();
+        self.controller_events_client = Some(client);
+        receiver
     }
 
     /// Issues a POST request to the given path with no body.

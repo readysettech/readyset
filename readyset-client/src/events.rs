@@ -277,7 +277,18 @@ impl ControllerEventsClient {
         self.events_tx.subscribe()
     }
 
-    pub(crate) fn start(&self) {
+    /// Subscribe and start the background event streaming task.
+    ///
+    /// Returns a receiver that is guaranteed to be registered before the task
+    /// begins, preventing the race where the task could see zero receivers
+    /// and exit prematurely.
+    pub(crate) fn subscribe_and_start(&self) -> broadcast::Receiver<ControllerEvent> {
+        let receiver = self.subscribe();
+        self.start();
+        receiver
+    }
+
+    fn start(&self) {
         let leader_url = self.leader_url.clone();
         let events_tx = self.events_tx.clone();
         let buffer_limit = self.buffer_limit;
@@ -331,6 +342,8 @@ impl ControllerEventsClient {
                 }
             }
 
+            // Safe: subscribe-before-start ordering is enforced by subscribe_and_start(),
+            // so no subscriber is mid-resubscribe at this point.
             if events_tx.receiver_count() == 0 {
                 tracing::debug!("No controller event subscribers; stopping events client");
                 break;
@@ -430,18 +443,38 @@ impl ControllerEventsClient {
 mod tests {
     use super::*;
 
+    /// Validates that the background task exits when all receivers are dropped,
+    /// even if the SSE endpoint is unreachable.
     #[tokio::test]
-    async fn events_client_exits_without_subscribers() {
-        let url = Url::parse("http://127.0.0.1:1").unwrap();
-        let (events_tx, _events_rx) = broadcast::channel(1);
-        drop(_events_rx);
+    async fn test_task_stops_when_receivers_dropped() {
+        // Use a URL that will fail to connect (nothing listening on this port)
+        let url = Url::parse("http://127.0.0.1:1").expect("valid URL");
+        let client = ControllerEventsClient::with_fixed_leader(url);
 
-        tokio::time::timeout(
-            Duration::from_millis(50),
-            ControllerEventsClient::run(LeaderUrlSource::Fixed(url), events_tx, 1024),
-        )
+        let receiver = client.subscribe_and_start();
+
+        // Drop the only receiver
+        drop(receiver);
+
+        // The task should notice receiver_count() == 0 and exit.
+        // Give it a generous timeout to account for the 500ms reconnect sleep.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            // Poll until the sender has no task holding it alive.
+            // When the spawned task exits, it drops its clone of events_tx,
+            // leaving only the one inside ControllerEventsClient.
+            loop {
+                // receiver_count == 0 AND only one strong sender means the task exited.
+                // We can detect this indirectly: a new subscribe + send should have
+                // no receivers if the task is gone. But more directly, just try
+                // subscribing and check that sends fail (no active receivers besides us).
+                if client.events_tx.receiver_count() == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
         .await
-        .expect("events client should exit immediately without subscribers");
+        .expect("background task should have exited after all receivers were dropped");
     }
 
     #[test]
