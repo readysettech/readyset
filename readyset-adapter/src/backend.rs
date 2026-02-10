@@ -103,9 +103,10 @@ use readyset_errors::{ReadySetResult, internal, internal_err, unsupported, unsup
 use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
     self, AlterReadysetStatement, CacheInner, CacheType, ChangeUpstreamStatement,
-    CreateCacheStatement, DeallocateStatement, DropAllCachesStatement, DropCacheStatement,
-    ExplainStatement, Relation, SelectStatement, SetStatement, ShallowCacheQuery, ShowStatement,
-    SqlIdentifier, SqlQuery, StatementIdentifier, UseStatement,
+    CreateCacheOptions, CreateCacheStatement, DeallocateStatement, DropAllCachesStatement,
+    DropCacheStatement, ExplainStatement, ReadysetHintDirective, Relation, SelectStatement,
+    SetStatement, ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier,
+    UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
@@ -1426,29 +1427,33 @@ where
         query: &str,
         event: &mut QueryExecutionEvent,
     ) -> ReadySetResult<PrepareMeta> {
-        let (parsed, shallow_parsed) = match self.state.parsed_query_cache.get(query) {
-            Some(cached_query) => {
-                let _t = event.start_parse_timer();
-                (Ok(cached_query.clone()), self.parse_shallow_query(query))
-            }
-            None => {
-                let (parsed, shallow_parsed) = {
+        let (parsed, (shallow_parsed, hint_directive)) =
+            match self.state.parsed_query_cache.get(query) {
+                Some(cached_query) => {
                     let _t = event.start_parse_timer();
-                    (self.parse_query(query), self.parse_shallow_query(query))
-                };
-                if let Ok(parsed) = &parsed {
-                    self.state
-                        .parsed_query_cache
-                        .put(query.to_string(), parsed.clone());
+                    (Ok(cached_query.clone()), self.parse_shallow_query(query))
                 }
-                (parsed, shallow_parsed)
-            }
-        };
+                None => {
+                    let (parsed, shallow_parsed) = {
+                        let _t = event.start_parse_timer();
+                        (self.parse_query(query), self.parse_shallow_query(query))
+                    };
+                    if let Ok(parsed) = &parsed {
+                        self.state
+                            .parsed_query_cache
+                            .put(query.to_string(), parsed.clone());
+                    }
+                    (parsed, shallow_parsed)
+                }
+            };
 
-        if let Some((query_id, stmt, params, always)) = self.should_query_shallow(shallow_parsed) {
+        if let Some((shallow, params)) = self.prepare_shallow_query(shallow_parsed)
+            && let Some((query_id, always)) =
+                self.should_query_shallow(&shallow, hint_directive).await
+        {
             return Ok(PrepareMeta::ShallowSelect(PrepareShallowSelectMeta {
                 query_id,
-                stmt,
+                stmt: shallow,
                 params,
                 always,
             }));
@@ -2531,9 +2536,9 @@ where
             return Err(ReadySetError::CreateCacheError(e.to_string()));
         }
 
-        let (query_id, name, requested_name) =
+        // DDL-specific: drop collisions before creating.
+        let (query_id, _, requested_name) =
             self.make_name_and_id(&mut name, QueryId::from(&shallow));
-
         self.drop_caches_on_collision(Some(query_id), requested_name.as_ref())
             .await?;
         if let Ok(deep) = deep {
@@ -2541,12 +2546,52 @@ where
                 .await?;
         }
 
+        // Propagate upstream-validation and DDL-persistence errors to the
+        // caller. ViewAlreadyExists from a concurrent race is not a real
+        // failure — treat it the same as success.
+        match self
+            .create_shallow_cache_core(
+                name,
+                &shallow,
+                policy,
+                always,
+                coalesce_ms,
+                ddl_req,
+                requested_name,
+                false,
+            )
+            .await
+        {
+            Ok(()) | Err(ReadySetError::ViewAlreadyExists(_)) => {
+                Ok(noria_connector::QueryResult::Empty)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Shared creation logic for shallow caches: DDL persistence,
+    /// `shallow.create_cache()`, status updates, and error cleanup.
+    #[allow(clippy::too_many_arguments)]
+    async fn create_shallow_cache_core(
+        &mut self,
+        mut name: Option<Relation>,
+        shallow: &ShallowViewRequest,
+        policy: Option<ast::EvictionPolicy>,
+        always: bool,
+        coalesce_ms: Option<Duration>,
+        ddl_req: CacheDDLRequest,
+        requested_name: Option<Relation>,
+        quiet: bool,
+    ) -> ReadySetResult<()> {
         self.authority
             .add_shallow_cache_ddl_request(ddl_req.clone())
             .await?;
 
+        let (query_id, cache_name, _) = self.make_name_and_id(&mut name, QueryId::from(shallow));
+        let cache_name = cache_name.clone();
+
         let res = self.shallow.create_cache(
-            Some(name.clone()),
+            Some(cache_name),
             Some(query_id),
             shallow.query.clone(),
             shallow.schema_search_path.clone(),
@@ -2556,29 +2601,49 @@ where
             resolve_coalesce(coalesce_ms, self.settings.default_coalesce_ms),
         );
 
-        if res.is_ok() {
-            self.state.query_status_cache.update_query_migration_state(
-                &shallow,
-                MigrationState::Successful(CacheType::Shallow),
-                None,
-            );
-            self.state
-                .query_status_cache
-                .always_attempt_readyset(&shallow, always);
+        match &res {
+            Ok(()) | Err(ReadySetError::ViewAlreadyExists(_)) => {
+                // Success or concurrent creation race — update status cache
+                // either way. ViewAlreadyExists is not a real failure: the
+                // cache exists, so we must NOT remove the DDL.
+                self.state.query_status_cache.update_query_migration_state(
+                    shallow,
+                    MigrationState::Successful(CacheType::Shallow),
+                    None,
+                );
+                self.state
+                    .query_status_cache
+                    .always_attempt_readyset(shallow, always);
+            }
+            Err(_) => {
+                remove_ddl_on_error(
+                    &res,
+                    &self.authority,
+                    Some(ddl_req),
+                    requested_name,
+                    "shallow",
+                    |auth, req| async move { auth.remove_shallow_cache_ddl_request(req).await },
+                    quiet,
+                )
+                .await;
+            }
         }
 
-        remove_ddl_on_error(
-            &res,
-            &self.authority,
-            Some(ddl_req),
-            requested_name,
-            "shallow",
-            |auth, req| async move { auth.remove_shallow_cache_ddl_request(req).await },
-            false,
-        )
-        .await;
+        res
+    }
 
-        Ok(noria_connector::QueryResult::Empty)
+    /// Build a synthetic `CREATE SHALLOW CACHE ...` DDL string for hint-based creation.
+    fn build_hint_ddl_string(&self, opts: &CreateCacheOptions, query_text: &str) -> String {
+        use std::fmt::Write;
+        let mut ddl = String::from("CREATE SHALLOW CACHE ");
+        if let Some(policy) = &opts.policy {
+            let _ = write!(ddl, "{} ", policy.display(DB::SQL_DIALECT));
+        }
+        if opts.always {
+            ddl.push_str("ALWAYS ");
+        }
+        let _ = write!(ddl, "FROM {query_text}");
+        ddl
     }
 
     /// Determines via running PREPARE if the upstream can support this query.
@@ -3701,13 +3766,11 @@ where
         res
     }
 
-    /// Determine if this query should be routed to a shallow cache.
-    ///
-    /// Return query and parameters if it should; otherwise return None.
-    fn should_query_shallow(
+    /// Rewrite and wrap a shallow query into a [`ShallowViewRequest`].
+    fn prepare_shallow_query(
         &self,
         shallow: Result<ShallowCacheQuery, ReadySetError>,
-    ) -> Option<(QueryId, ShallowViewRequest, ShallowQueryParameters, bool)> {
+    ) -> Option<(ShallowViewRequest, ShallowQueryParameters)> {
         let Ok(mut shallow) = shallow else {
             return None;
         };
@@ -3716,28 +3779,104 @@ where
         else {
             return None;
         };
-
         let shallow = ShallowViewRequest::new(shallow, self.noria.schema_search_path().to_owned());
+        Some((shallow, params))
+    }
+
+    /// Check whether a shallow cache exists for this query and should be used
+    /// for routing.  If no cache exists and a `CreateCache` hint directive is
+    /// present, attempt to create one first.  Returns `(query_id, always)`
+    /// when the query should be served from the shallow cache, `None`
+    /// otherwise.
+    async fn should_query_shallow(
+        &mut self,
+        shallow: &ShallowViewRequest,
+        hint_directive: Option<ReadysetHintDirective>,
+    ) -> Option<(QueryId, bool)> {
         let (query_id, migration) = self
             .state
             .query_status_cache
-            .try_query_migration_state(&shallow);
+            .try_query_migration_state(shallow);
         if migration != Some(MigrationState::Successful(CacheType::Shallow)) {
-            // Shallow cache doesn't exist.
-            return None;
+            // No cache yet — try hint-based creation and use the resulting state.
+            let migration = self
+                .create_shallow_cache_from_hint(shallow, hint_directive)
+                .await;
+            if migration != Some(MigrationState::Successful(CacheType::Shallow)) {
+                return None;
+            }
         }
-
         let always = self
             .state
             .query_status_cache
-            .try_query_status(&shallow)
+            .try_query_status(shallow)
             .is_some_and(|status| status.always);
         if self.state.proxy_state.should_proxy() && !always {
-            // Shallow cache exists, but we're proxying anyway.
+            return None;
+        }
+        Some((query_id, always))
+    }
+
+    /// If a `CreateCache` hint directive is present, attempt to create a
+    /// shallow cache via [`create_shallow_cache_core`] and return the
+    /// resulting migration state.
+    async fn create_shallow_cache_from_hint(
+        &mut self,
+        shallow: &ShallowViewRequest,
+        hint_directive: Option<ReadysetHintDirective>,
+    ) -> Option<MigrationState> {
+        let Some(ReadysetHintDirective::CreateCache(opts)) = hint_directive else {
+            return None;
+        };
+        if !self.allow_cache_ddl {
+            warn!("Hint-based cache creation skipped: cache DDL is disabled");
+            return None;
+        }
+        let wants_shallow = match opts.cache_type {
+            Some(CacheType::Shallow) => true,
+            Some(CacheType::Deep) => false,
+            None => self.settings.cache_mode.is_shallow(),
+        };
+        if !wants_shallow {
             return None;
         }
 
-        Some((query_id, shallow, params, always))
+        if let Err(e) = self.upstream_supports(shallow).await {
+            warn!(error = %e, "Hint-based shallow cache creation failed: upstream unsupported");
+            return None;
+        }
+
+        let query_text = shallow.query.display(DB::SQL_DIALECT).to_string();
+        let ddl_stmt = self.build_hint_ddl_string(&opts, &query_text);
+        let ddl_req = CacheDDLRequest {
+            unparsed_stmt: ddl_stmt,
+            schema_search_path: self.noria.schema_search_path().to_owned(),
+            dialect: self.settings.dialect.into(),
+        };
+
+        match self
+            .create_shallow_cache_core(
+                None,
+                shallow,
+                opts.policy,
+                opts.always,
+                opts.coalesce_ms,
+                ddl_req,
+                None,
+                true,
+            )
+            .await
+        {
+            Ok(()) | Err(ReadySetError::ViewAlreadyExists(_)) => {}
+            Err(e) => {
+                warn!(error = %e, "Hint-based shallow cache creation failed");
+            }
+        }
+
+        self.state
+            .query_status_cache
+            .try_query_migration_state(shallow)
+            .1
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -4401,12 +4540,14 @@ where
         let query_log_sender = self.query_log_sender.clone();
         let slowlog = self.settings.slowlog;
 
-        let (parsed, shallow_parsed) = {
+        let (parsed, (shallow_parsed, hint_directive)) = {
             let _t = event.start_parse_timer();
             (self.parse_query(query), self.parse_shallow_query(query))
         };
 
-        if let Some((query_id, shallow, params, _)) = self.should_query_shallow(shallow_parsed) {
+        if let Some((shallow, params)) = self.prepare_shallow_query(shallow_parsed)
+            && let Some((query_id, _)) = self.should_query_shallow(&shallow, hint_directive).await
+        {
             let result = Self::query_shallow(
                 &mut self.noria,
                 self.upstream.as_mut(),
@@ -4672,11 +4813,18 @@ where
         .map_err(Into::into)
     }
 
-    fn parse_shallow_query(&self, query: &str) -> ReadySetResult<ShallowCacheQuery> {
+    fn parse_shallow_query(
+        &self,
+        query: &str,
+    ) -> (
+        ReadySetResult<ShallowCacheQuery>,
+        Option<ReadysetHintDirective>,
+    ) {
         trace!(%query, "Parsing shallow query");
-        let (query, _directive) =
-            readyset_sql_parsing::parse_shallow_query(self.settings.dialect, query)?;
-        Ok(query)
+        match readyset_sql_parsing::parse_shallow_query(self.settings.dialect, query) {
+            Ok((q, directive)) => (Ok(q), directive),
+            Err(e) => (Err(e.into()), None),
+        }
     }
 
     pub fn does_require_authentication(&self) -> bool {
