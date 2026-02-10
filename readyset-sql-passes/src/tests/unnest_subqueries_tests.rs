@@ -6415,13 +6415,13 @@ ORDER BY
     AND ("EDE"."rs_string" = '8155b6bf-c60a-431c-8741-7c439b25d8f2'))) AS "INNER" WHERE ("INNER"."__rn" <= 41)) AS "inner"
     LEFT OUTER JOIN (SELECT coalesce("array_subq"."agg_result", ARRAY[]) AS "tags", "array_subq"."tag_id" AS "tag_id",
     "array_subq"."jn" AS "jn" FROM (SELECT array_agg("inner_subq"."ext_tg_id" ORDER BY "inner_subq"."ext_tg_id" ASC NULLS LAST) AS "agg_result",
-    "inner_subq"."tag_id" AS "tag_id", "inner_subq"."jn" AS "jn" FROM (SELECT "TFE"."ext_tg_id", "TFE"."tag_id" AS "tag_id",
+    "inner_subq"."tag_id" AS "tag_id", "inner_subq"."jn" AS "jn" FROM (SELECT "TFE"."ext_tg_id" AS "ext_tg_id", "TFE"."tag_id" AS "tag_id",
     "TFE"."jn" AS "jn" FROM (SELECT "TFM_0"."pn" AS "tag_id", "TFM_0"."pname" AS "ext_tg_id", "TFM_0"."jn" AS "jn" FROM "p" AS "TFM_0") AS "TFE"
     ORDER BY "TFE"."ext_tg_id" ASC NULLS LAST) AS "inner_subq" GROUP BY "inner_subq"."tag_id", "inner_subq"."jn") AS "array_subq") AS "tags"
     ON (("inner"."_o1" = "tags"."jn") AND ("inner"."rs_string" = "tags"."tag_id")) LEFT OUTER JOIN
     (SELECT coalesce("array_subq"."agg_result", ARRAY[]) AS "cnc", "array_subq"."pn" AS "pn", "array_subq"."jn" AS "jn"
     FROM (SELECT array_agg("inner_subq"."cnc_ext_id" ORDER BY "inner_subq"."cnc_ext_id" ASC NULLS LAST) AS "agg_result",
-    "inner_subq"."pn" AS "pn", "inner_subq"."jn" AS "jn" FROM (SELECT "CFE"."cnc_ext_id", "CFE"."pn" AS "pn", "CFE"."jn" AS "jn"
+    "inner_subq"."pn" AS "pn", "inner_subq"."jn" AS "jn" FROM (SELECT "CFE"."cnc_ext_id" AS "cnc_ext_id", "CFE"."pn" AS "pn", "CFE"."jn" AS "jn"
     FROM (SELECT "CFM_0"."jname" AS "cnc_ext_id", "CFM_0"."pn" AS "pn", "CFM_0"."jn" AS "jn" FROM "j" AS "CFM_0") AS "CFE"
     ORDER BY "CFE"."cnc_ext_id" ASC NULLS LAST) AS "inner_subq" GROUP BY "inner_subq"."pn", "inner_subq"."jn") AS "array_subq") AS "cnc"
     ON (("inner"."_o1" = "cnc"."jn") AND ("inner"."rs_string" = "cnc"."pn")) INNER JOIN

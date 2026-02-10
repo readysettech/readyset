@@ -1526,7 +1526,7 @@ mod tests {
         JOIN "qa"."spj" AS "spj" ON ("spj"."sn" = "s"."sn") CROSS JOIN LATERAL
         (SELECT coalesce("array_subq"."agg_result", ARRAY[]) AS "tags" FROM
         (SELECT array_agg("inner_subq"."pn" ORDER BY "inner_subq"."pn" ASC NULLS LAST) AS "agg_result" FROM
-        (SELECT "p"."pn" FROM "qa"."p" AS "p" WHERE ("p"."jn" = "s"."jn") ORDER BY "p"."pn" ASC NULLS LAST)
+        (SELECT "p"."pn" AS "pn" FROM "qa"."p" AS "p" WHERE ("p"."jn" = "s"."jn") ORDER BY "p"."pn" ASC NULLS LAST)
         AS "inner_subq") AS "array_subq") AS "tags"  GROUP BY "s"."sn", "s"."jn", "tags"."tags" ORDER BY "s"."sn" ASC NULLS LAST,
         "s"."jn" ASC NULLS LAST LIMIT 20"#;
         test_it("test8", original, expected);
@@ -1560,7 +1560,7 @@ mod tests {
         JOIN "qa"."spj" AS "spj" ON ("spj"."sn" = "s"."sn") GROUP BY "s"."sn", "s"."jn" ORDER BY "_o0" ASC NULLS LAST,
         "_o1" ASC NULLS LAST LIMIT 20) AS "inner", LATERAL (SELECT coalesce("array_subq"."agg_result", ARRAY[]) AS "tags"
         FROM (SELECT array_agg("inner_subq"."pn" ORDER BY "inner_subq"."pn" ASC NULLS LAST) AS "agg_result" FROM
-        (SELECT "p"."pn" FROM "qa"."p" AS "p" WHERE ("p"."jn" = "inner"."jn") ORDER BY "p"."pn" ASC NULLS LAST)
+        (SELECT "p"."pn" AS "pn" FROM "qa"."p" AS "p" WHERE ("p"."jn" = "inner"."jn") ORDER BY "p"."pn" ASC NULLS LAST)
         AS "inner_subq") AS "array_subq") AS "tags" WHERE ("inner"."sum_qty" > 10) ORDER BY "inner"."_o0" ASC NULLS LAST,
         "inner"."_o1" ASC NULLS LAST"#;
         test_it("test9", original, expected);
@@ -1601,10 +1601,10 @@ mod tests {
         FROM "qa"."s" AS "s" INNER JOIN "qa"."datatypes1" AS "d1" ON ("d1"."test_integer" = "s"."status")
         CROSS JOIN LATERAL (SELECT coalesce("array_subq"."agg_result", ARRAY[]) AS "tags" FROM
         (SELECT array_agg("inner_subq"."pn" ORDER BY "inner_subq"."pn" ASC NULLS LAST) AS "agg_result" FROM
-        (SELECT "p"."pn" FROM "qa"."p" AS "p" WHERE ("p"."jn" = "s"."jn")
+        (SELECT "p"."pn" AS "pn" FROM "qa"."p" AS "p" WHERE ("p"."jn" = "s"."jn")
         ORDER BY "p"."pn" ASC NULLS LAST) AS "inner_subq") AS "array_subq") AS "tags"  CROSS JOIN LATERAL
         (SELECT coalesce("array_subq"."agg_result", ARRAY[]) AS "concepts" FROM (SELECT array_agg("inner_subq"."sn"
-        ORDER BY "inner_subq"."sn" ASC NULLS LAST) AS "agg_result" FROM (SELECT "spj"."sn" FROM "qa"."spj" AS "spj"
+        ORDER BY "inner_subq"."sn" ASC NULLS LAST) AS "agg_result" FROM (SELECT "spj"."sn" AS "sn" FROM "qa"."spj" AS "spj"
         WHERE ("spj"."pn" = "s"."pn") ORDER BY "spj"."sn" ASC NULLS LAST) AS "inner_subq") AS "array_subq") AS "concepts"
         WHERE (("s"."city" != 'PARIS') AND ("s"."pn" >= 'P00000'))
         ORDER BY "d1"."test_varchar" ASC NULLS LAST, "s"."sn" ASC NULLS LAST LIMIT 41"#;

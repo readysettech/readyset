@@ -54,11 +54,11 @@ select array(select tag from tags where d_id = d.id) from dogs d where d.id = 1;
 ----
 {bbb,aaa,ccc,bbb}
 
-# simple query with a semi-interesting expression in the subquery
-# query T
-# select array(select concat(tag::text, '::woohoo') as woohoo_tags from tags where d_id = d.id) from dogs d where d.id = 1;
-# ----
-# {ccc::woohoo,aaa::woohoo,bbb::woohoo,aaa::woohoo}
+# simple query with a semi-interesting expression in the subquery (REA-6200)
+query T
+select array(select concat(tag::text, '::woohoo') from tags where d_id = d.id) from dogs d where d.id = 1;
+----
+{bbb::woohoo,aaa::woohoo,ccc::woohoo,bbb::woohoo}
 
 # simple query (with NULLs in data)
 # Note: array_agg() _does_ include nulls in the output
@@ -360,4 +360,14 @@ select array(select tag from tags where d_id = d.id order by tag asc limit 0) fr
 ----
 {}
 
+
+#####
+# REA-6200: expression fields in array constructor subquery
+####
+
+# correlated: expression field (function call)
+query T
+select array(select upper(tag) from tags where d_id = d.id) from dogs d where d.id = 1;
+----
+{BBB,AAA,CCC,BBB,NULL,AAA,NULL}
 

@@ -306,7 +306,7 @@ fn validate_no_disallowed_array_constructors(stmt: &SelectStatement) -> ReadySet
 ///   which a `coalesce()` around the alias to the subquery.
 /// - `TableExpr` - a derived table that be joined to the `stmt` FROM clause.
 fn rewrite_single_array_constructor(
-    query: Box<SelectStatement>,
+    mut query: Box<SelectStatement>,
     alias: Option<SqlIdentifier>,
     stmt: &SelectStatement,
     existing_aliases: &[Relation],
@@ -321,6 +321,18 @@ fn rewrite_single_array_constructor(
     // Extract field info and process ORDER BY from the original subquery
     let inner_field_alias = extract_array_subquery_field_info(&query)?;
     let inner_order_by = extract_array_subquery_order_by_clause(&query, &inner_subq_alias)?;
+
+    // Ensure the subquery's select field has an explicit alias so that the outer
+    // array_agg() can reference it as `inner_subq.<alias>`. Without this, expression
+    // fields like `(weight * 454)` produce an anonymous column (PostgreSQL names it
+    // `?column?`) that cannot be referenced by the derived alias name.
+    if let Some(FieldDefinitionExpr::Expr {
+        alias: alias @ None,
+        ..
+    }) = query.fields.first_mut()
+    {
+        *alias = Some(inner_field_alias.clone());
+    }
 
     // Build array_agg with DISTINCT and ORDER BY that match the query.
     // DISTINCT and ORDER BY and retained in the query to ensure TopK correctness.
@@ -960,5 +972,107 @@ mod tests {
             FROM dogs d
         "#;
         test_validation_succeeds(sql);
+    }
+
+    fn test_rewrite(sql: &str) -> SelectStatement {
+        let mut stmt = match parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, sql) {
+            Ok(stmt) => stmt,
+            Err(e) => panic!("PARSE ERROR: {e}"),
+        };
+        stmt.rewrite_array_constructors()
+            .expect("rewrite should succeed");
+        stmt
+    }
+
+    /// Extract the inner subquery's field alias from the rewritten statement.
+    /// The lateral join is added via stmt.join[0], containing:
+    ///   SELECT array_agg(...) FROM (<original subquery>) inner_subq
+    fn get_inner_subquery_field(stmt: &SelectStatement) -> &FieldDefinitionExpr {
+        let join = &stmt.join[0];
+        let lateral_table = match &join.right {
+            JoinRightSide::Table(t) => t,
+            other => panic!("Expected table, got: {other:?}"),
+        };
+        let lateral_subquery = match &lateral_table.inner {
+            TableExprInner::Subquery(sq) => sq,
+            other => panic!("Expected subquery, got: {other:?}"),
+        };
+        let inner_table = &lateral_subquery.tables[0];
+        let inner_subquery = match &inner_table.inner {
+            TableExprInner::Subquery(sq) => sq,
+            other => panic!("Expected subquery, got: {other:?}"),
+        };
+        &inner_subquery.fields[0]
+    }
+
+    /// Regression test for REA-6200: ARRAY(SELECT expr ...) must assign an explicit alias
+    /// to the expression field so that the outer array_agg() can reference it by name.
+    #[test]
+    fn test_rewrite_expression_field_gets_alias() {
+        let sql = r#"
+            SELECT ARRAY(SELECT (weight * 454) FROM p) AS gmwt FROM p
+        "#;
+        let stmt = test_rewrite(sql);
+        match get_inner_subquery_field(&stmt) {
+            FieldDefinitionExpr::Expr { alias, .. } => {
+                assert!(
+                    alias.is_some(),
+                    "Expression field in inner subquery must have an explicit alias after rewrite"
+                );
+            }
+            other => panic!("Expected expression field, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_rewrite_simple_column_field_gets_alias() {
+        let sql = r#"
+            SELECT ARRAY(SELECT tag FROM tags WHERE d_id = d.id) FROM dogs d
+        "#;
+        let stmt = test_rewrite(sql);
+        match get_inner_subquery_field(&stmt) {
+            FieldDefinitionExpr::Expr { alias, .. } => {
+                assert!(
+                    alias.is_some(),
+                    "Column field in inner subquery must have an explicit alias after rewrite"
+                );
+            }
+            other => panic!("Expected expression field, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_rewrite_preserves_existing_alias() {
+        let sql = r#"
+            SELECT ARRAY(SELECT (weight * 454) AS computed FROM p) AS gmwt FROM p
+        "#;
+        let stmt = test_rewrite(sql);
+        match get_inner_subquery_field(&stmt) {
+            FieldDefinitionExpr::Expr { alias, .. } => {
+                assert_eq!(
+                    alias.as_deref(),
+                    Some("computed"),
+                    "Existing alias should be preserved"
+                );
+            }
+            other => panic!("Expected expression field, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_rewrite_function_call_field_gets_alias() {
+        let sql = r#"
+            SELECT ARRAY(SELECT concat(tag, '::suffix') FROM tags WHERE d_id = d.id) FROM dogs d
+        "#;
+        let stmt = test_rewrite(sql);
+        match get_inner_subquery_field(&stmt) {
+            FieldDefinitionExpr::Expr { alias, .. } => {
+                assert!(
+                    alias.is_some(),
+                    "Function call field in inner subquery must have an explicit alias after rewrite"
+                );
+            }
+            other => panic!("Expected expression field, got: {other:?}"),
+        }
     }
 }
