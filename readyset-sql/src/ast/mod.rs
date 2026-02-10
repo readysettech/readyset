@@ -134,7 +134,7 @@ impl Default for ShallowCacheQuery {
             having: None,
             qualify: None,
             named_window: vec![],
-            connect_by: None,
+            connect_by: vec![],
             exclude: None,
             flavor: SelectFlavor::Standard,
             select_token: AttachedToken::empty(),
@@ -143,6 +143,7 @@ impl Default for ShallowCacheQuery {
             window_before_qualify: false,
             value_table_mode: None,
             select_modifiers: Default::default(),
+            optimizer_hints: vec![],
         };
 
         Self(Query {

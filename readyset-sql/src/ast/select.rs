@@ -559,7 +559,7 @@ impl TryFromDialect<sqlparser::ast::Select> for SelectStatement {
         }
 
         // CONNECT BY hierarchical queries
-        if value.connect_by.is_some() {
+        if !value.connect_by.is_empty() {
             unsupported!("CONNECT BY not supported; use WITH RECURSIVE instead")?;
         }
 
