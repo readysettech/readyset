@@ -25,7 +25,7 @@ use schema_catalog::SchemaCatalogUpdate;
 use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
 use tokio::sync::broadcast;
-use tokio::time::{sleep, MissedTickBehavior};
+use tokio::time::sleep;
 use url::Url;
 
 use crate::consensus::{Authority, AuthorityControl};
@@ -297,11 +297,6 @@ impl ControllerEventsClient {
             .build(http_connector);
 
         loop {
-            if events_tx.receiver_count() == 0 {
-                tracing::debug!("No controller event subscribers; stopping events client");
-                break;
-            }
-
             let Some(url) = leader_url.url().await else {
                 tracing::warn!("Leader URL not available, waiting before retry");
                 // TODO: exponential backoff and/or don't hardcode this
@@ -322,7 +317,7 @@ impl ControllerEventsClient {
             match Self::connect_and_stream(&events_url, &client, &events_tx, buffer_limit).await {
                 Ok(should_reconnect) => {
                     if !should_reconnect {
-                        tracing::info!("Event stream closed permanently");
+                        tracing::debug!("Event stream closed permanently");
                         break;
                     }
                     metrics::counter!(crate::metrics::recorded::CONTROLLER_EVENTS_DISCONNECTED)
@@ -354,11 +349,7 @@ impl ControllerEventsClient {
         events_tx: &broadcast::Sender<ControllerEvent>,
         buffer_limit: usize,
     ) -> ReadySetResult<bool> {
-        if events_tx.receiver_count() == 0 {
-            return Ok(false);
-        }
-
-        tracing::debug!("Connecting to SSE endpoint: {}", url);
+        tracing::debug!(%url, "Connecting to SSE endpoint");
 
         let req = Request::builder()
             .uri(url.as_str())
@@ -385,44 +376,27 @@ impl ControllerEventsClient {
         }
 
         metrics::counter!(crate::metrics::recorded::CONTROLLER_EVENTS_CONNECTED).increment(1);
-        tracing::debug!("Connected to SSE endpoint successfully");
+        tracing::debug!("Connected to SSE endpoint");
 
         // Process the event stream
         let mut processor = SseStreamProcessor::new(buffer_limit);
 
         let mut body_stream = res.into_body();
-        let mut receiver_check_interval = tokio::time::interval(Duration::from_secs(1));
-        receiver_check_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        // The first `tick` completes immediately; consume it so checks are actually periodic.
-        receiver_check_interval.tick().await;
 
-        loop {
-            tokio::select! {
-                chunk_opt = body_stream.next() => {
-                    let Some(chunk_result) = chunk_opt else {
-                        break;
-                    };
+        while let Some(chunk_result) = body_stream.next().await {
+            let chunk = chunk_result.map_err(|e| internal_err!("Failed to read chunk: {e}"))?;
+            let events = processor.process_chunk(&chunk)?;
 
-                    let chunk = chunk_result.map_err(|e| internal_err!("Failed to read chunk: {e}"))?;
-                    let events = processor.process_chunk(&chunk)?;
-
-                    for (event_type, data) in events {
-                        match Self::parse_controller_event(&event_type, &data) {
-                            Ok(event) => {
-                                if events_tx.send(event).is_err() {
-                                    // All receivers have been dropped, we can stop
-                                    return Ok(false);
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to parse controller event: {}", e);
-                            }
+            for (event_type, data) in events {
+                match Self::parse_controller_event(&event_type, &data) {
+                    Ok(event) => {
+                        if events_tx.send(event).is_err() {
+                            // All receivers have been dropped, we can stop
+                            return Ok(false);
                         }
                     }
-                }
-                _ = receiver_check_interval.tick() => {
-                    if events_tx.receiver_count() == 0 {
-                        return Ok(false);
+                    Err(e) => {
+                        tracing::warn!("Failed to parse controller event: {}", e);
                     }
                 }
             }
