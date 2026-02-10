@@ -45,6 +45,7 @@ steps:
     retry: *retry_on_agent_kill
 
   - label: ':rust: :lock: Check cargo-deny'
+    key: check-deny
     command: |
       [ -d public ] && cd public
       export RUST_BACKTRACE=full
@@ -75,6 +76,13 @@ steps:
     retry: *retry_on_agent_kill
     soft_fail:
       - exit_status: 3
+    notify:
+      - slack:
+          channels: ["#builds"]
+          message: ":warning: cargo-deny found security advisories"
+        if: |
+          step.outcome == "soft_failed" &&
+          build.branch == "refs/heads/main"
 
   - label: ':clippy: Check clippy'
     key: check-clippy
