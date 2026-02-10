@@ -113,8 +113,7 @@ async fn setup_adapter(
 
     let mut rh = ReadySetHandle::new(authority.clone()).await;
 
-    let (schema_catalog_synchronizer, schema_catalog) =
-        SchemaCatalogSynchronizer::new(rh.clone(), Duration::from_millis(100));
+    let (schema_catalog_synchronizer, schema_catalog) = SchemaCatalogSynchronizer::new(rh.clone());
     let (shutdown_tx, shutdown_rx) = shutdown::channel();
     tokio::spawn(schema_catalog_synchronizer.run(shutdown_rx));
 

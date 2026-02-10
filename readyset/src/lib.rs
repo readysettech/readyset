@@ -299,15 +299,6 @@ pub struct Options {
     #[arg(long, env = "VIEWS_POLLING_INTERVAL", default_value = "5", hide = true)]
     views_polling_interval: u64,
 
-    /// Specifies the polling interval in milliseconds for schema catalog synchronization.
-    #[arg(
-        long,
-        env = "SCHEMA_CATALOG_POLLING_INTERVAL_MS",
-        default_value = "100",
-        hide = true
-    )]
-    schema_catalog_polling_interval_ms: u64,
-
     /// The time to wait before canceling a migration request. Defaults to 0 (unlimited).
     #[arg(
         long,
@@ -1011,20 +1002,9 @@ where
 
         let (shutdown_tx, shutdown_rx) = shutdown::channel();
 
-        // Spawn schema catalog synchronizer to periodically fetch schema information from the server
         rs_connect.in_scope(|| info!("Spawning schema catalog synchronizer task"));
-        let schema_polling_interval = options.schema_catalog_polling_interval_ms;
-        // TODO(mvzink): Start the synchronizer task immediately after REA-6107 is implemented. We
-        // initialize the schema catalog handle here so we can pass it to the out of band migration
-        // task and the query logger, but we don't actually kick off the synchronizer polling task
-        // until after we've started the server, so that the initial poll request is more likely to
-        // succeed. This mitigates the risk of having adapter rewrites fail due to the catalog not
-        // being initialized yet for the initial 100 ms (default) polling period, which is probably
-        // only a problem it tests.
-        let (schema_catalog_synchronizer, schema_catalog) = SchemaCatalogSynchronizer::new(
-            rh.clone(),
-            std::time::Duration::from_millis(schema_polling_interval),
-        );
+        let (schema_catalog_synchronizer, schema_catalog) =
+            SchemaCatalogSynchronizer::new(rh.clone());
 
         if options.noria_metrics {
             warn!("--noria-metrics is deprecated and has no effect. It will be removed in a future release.");

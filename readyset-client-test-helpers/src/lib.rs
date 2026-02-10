@@ -221,7 +221,6 @@ pub struct TestBuilder {
     topk: bool,
     straddled_joins: bool,
     parsing_preset: ParsingPreset,
-    schema_catalog_polling_interval: Duration,
 }
 
 impl Default for TestBuilder {
@@ -260,12 +259,6 @@ impl TestBuilder {
             topk: false,
             straddled_joins: false,
             parsing_preset: ParsingPreset::for_tests(),
-            schema_catalog_polling_interval: Duration::from_millis(
-                env::var("SCHEMA_CATALOG_POLLING_INTERVAL_MS")
-                    .unwrap_or_else(|_| "100".to_string())
-                    .parse()
-                    .unwrap(),
-            ),
         }
     }
 
@@ -367,11 +360,6 @@ impl TestBuilder {
         self
     }
 
-    pub fn schema_catalog_polling_interval(mut self, interval: Duration) -> Self {
-        self.schema_catalog_polling_interval = interval;
-        self
-    }
-
     pub async fn build<A>(self) -> (A::ConnectionOpts, Handle, ShutdownSender)
     where
         A: Adapter + 'static,
@@ -449,7 +437,7 @@ impl TestBuilder {
         }
 
         let (schema_catalog_synchronizer, schema_catalog) =
-            SchemaCatalogSynchronizer::new(handle.clone(), self.schema_catalog_polling_interval);
+            SchemaCatalogSynchronizer::new(handle.clone());
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let view_name_cache = SharedCache::new();

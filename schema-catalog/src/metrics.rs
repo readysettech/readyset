@@ -18,6 +18,3 @@ pub const SCHEMA_CATALOG_DECODE_FAILED: &str = "readyset_schema_catalog_decode_f
 
 /// Counter: Incremented when the update stream ends and we re-subscribe.
 pub const SCHEMA_CATALOG_STREAM_RECONNECTED: &str = "readyset_schema_catalog_stream_reconnected";
-
-/// Counter: Incremented when an ad-hoc fetch fails.
-pub const SCHEMA_CATALOG_POLL_FAILED: &str = "readyset_schema_catalog_poll_failed";

@@ -1,9 +1,9 @@
 //! This private module is basically just here to cordon off updates to the schema catalog, making
 //! it only possible for the synchronizer to update it.
 
-use std::error::Error;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 #[cfg(feature = "failure_injection")]
@@ -20,12 +20,9 @@ use crate::{SchemaCatalog, SchemaCatalogUpdate};
 /// A schema catalog provider that can be used to fetch the latest version of the schema catalog.
 #[async_trait]
 pub trait SchemaCatalogProvider: Send + Sync {
-    /// Ad-hoc fetch of the current schema catalog, used for initial poll.
-    async fn fetch_schema_catalog(&mut self)
-    -> Result<SchemaCatalog, Box<dyn Error + Send + Sync>>;
-
     /// Streaming source for schema catalog updates (e.g., via SSE). Returns a stream that yields
-    /// [`SchemaCatalogUpdate`] messages.
+    /// [`SchemaCatalogUpdate`] messages. Implementors must ensure the first event on a new stream
+    /// is a complete snapshot of the current catalog, so no separate fetch/poll is needed.
     fn schema_catalog_update_stream(
         &mut self,
     ) -> Pin<Box<dyn futures_util::Stream<Item = SchemaCatalogUpdate> + Send>>;
@@ -41,7 +38,7 @@ pub struct SchemaCatalogSynchronizer<P: SchemaCatalogProvider> {
 }
 
 impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
-    pub fn new(controller: P, _poll_interval: std::time::Duration) -> (Self, SchemaCatalogHandle) {
+    pub fn new(controller: P) -> (Self, SchemaCatalogHandle) {
         let handle = SchemaCatalogHandle::new();
         let synchronizer = SchemaCatalogSynchronizer {
             controller,
@@ -51,65 +48,24 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
     }
 
     pub async fn run(mut self, mut shutdown_recv: ShutdownReceiver) {
-        let mut updates_stream = self.controller.schema_catalog_update_stream();
-        let mut initial_poll_pending = true;
+        const BASE_RECONNECT_DELAY: Duration = Duration::from_millis(500);
+        const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 
-        // Initial sync: accept either the first successful fetch or any stream update.
-        while !self.handle.has_catalog().await {
-            select! {
-                biased;
-                _ = shutdown_recv.recv() => {
-                    info!("Schema Catalog Synchronizer shutting down before initial sync");
-                    return;
-                }
-                update = updates_stream.next() => {
-                    match update {
-                        Some(update) => match SchemaCatalog::try_from(update) {
-                            Ok(catalog) => {
-                                self.apply_update(catalog).await;
-                                initial_poll_pending = false;
-                            }
-                            Err(error) => {
-                                metrics::counter!(crate::metrics::SCHEMA_CATALOG_DECODE_FAILED).increment(1);
-                                warn!(%error, "Failed to decode schema catalog update during initial sync");
-                            }
-                        },
-                        None => {
-                            metrics::counter!(crate::metrics::SCHEMA_CATALOG_STREAM_RECONNECTED).increment(1);
-                            warn!("Schema catalog update stream ended during initial sync; re-subscribing");
-                            if initial_poll_pending {
-                                if let Err(error) = self.poll().await {
-                                    metrics::counter!(crate::metrics::SCHEMA_CATALOG_POLL_FAILED).increment(1);
-                                    warn!(%error, "Schema catalog fetch after stream end failed during initial sync");
-                                } else {
-                                    initial_poll_pending = false;
-                                }
-                            }
-                            updates_stream = self.controller.schema_catalog_update_stream();
-                        }
-                    }
-                }
-                res = async { self.poll().await }, if initial_poll_pending => {
-                    if let Err(error) = res {
-                        metrics::counter!(crate::metrics::SCHEMA_CATALOG_POLL_FAILED).increment(1);
-                        warn!(%error, "Schema Catalog Synchronizer initial sync fetch failed");
-                    }
-                    initial_poll_pending = false;
-                }
-            }
-        }
+        let mut updates_stream = self.controller.schema_catalog_update_stream();
+        let mut reconnect_delay = BASE_RECONNECT_DELAY;
 
         loop {
             select! {
                 biased;
                 _ = shutdown_recv.recv() => {
-                    info!("Schema Catalog Synchronizer shutting down after shutdown signal received");
+                    info!("Schema Catalog Synchronizer shutting down");
                     return;
                 }
                 update = updates_stream.next() => {
                     match update {
                         Some(update) => match SchemaCatalog::try_from(update) {
                             Ok(catalog) => {
+                                reconnect_delay = BASE_RECONNECT_DELAY;
                                 self.apply_update(catalog).await;
                             }
                             Err(error) => {
@@ -119,23 +75,19 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                         },
                         None => {
                             metrics::counter!(crate::metrics::SCHEMA_CATALOG_STREAM_RECONNECTED).increment(1);
-                            warn!("Schema catalog update stream ended; re-subscribing");
-                            if let Err(error) = self.poll().await {
-                                metrics::counter!(crate::metrics::SCHEMA_CATALOG_POLL_FAILED).increment(1);
-                                warn!(%error, "Schema catalog fetch after stream end failed");
-                            }
+                            warn!(
+                                delay_ms = reconnect_delay.as_millis() as u64,
+                                "Schema catalog update stream ended; re-subscribing after backoff"
+                            );
+                            tokio::time::sleep(reconnect_delay).await;
+                            reconnect_delay =
+                                (reconnect_delay * 2).min(MAX_RECONNECT_DELAY);
                             updates_stream = self.controller.schema_catalog_update_stream();
                         }
                     }
                 }
             }
         }
-    }
-
-    async fn poll(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let catalog = self.controller.fetch_schema_catalog().await?;
-        self.apply_update(catalog).await;
-        Ok(())
     }
 
     async fn apply_update(&self, catalog: SchemaCatalog) {
@@ -230,13 +182,9 @@ impl SchemaCatalogHandle {
             .ok_or_else(|| internal_err!("SchemaCatalog not initialized"))
     }
 
-    /// A retrying wrapper around [`get_catalog`] for convenience, based on the default 100 ms
-    /// polling interval.
-    ///
-    /// Likely can be removed after REA-6107 is implemented.
-    ///
-    /// We should only retry here if the the polling task makes its initial attempt before the
-    /// server has finished starting and is able to respond.
+    /// A retrying wrapper around [`get_catalog`] for convenience. The catalog is populated by the
+    /// SSE stream from the server; this retries in case the first stream event hasn't arrived yet
+    /// (e.g., the server is still starting).
     pub async fn get_catalog_retrying(&self) -> ReadySetResult<Arc<SchemaCatalog>> {
         retry_with_exponential_backoff!(
             { self.get_catalog().await },
@@ -275,19 +223,15 @@ mod tests {
     use futures_util::stream;
     use readyset_util::shutdown;
     use std::collections::{HashMap, HashSet};
-    use std::error::Error;
     use std::time::Duration;
 
-    // Mock ReadySetHandle for testing
-    struct MockReadySetHandle {
-        should_fail: bool,
+    struct MockProvider {
         catalog: SchemaCatalog,
     }
 
-    impl MockReadySetHandle {
-        fn new(should_fail: bool) -> Self {
+    impl MockProvider {
+        fn new() -> Self {
             Self {
-                should_fail,
                 catalog: SchemaCatalog {
                     generation: SchemaGeneration::new(42).unwrap(),
                     base_schemas: HashMap::new(),
@@ -301,17 +245,20 @@ mod tests {
     }
 
     #[async_trait]
-    impl SchemaCatalogProvider for MockReadySetHandle {
-        async fn fetch_schema_catalog(
+    impl SchemaCatalogProvider for MockProvider {
+        fn schema_catalog_update_stream(
             &mut self,
-        ) -> Result<SchemaCatalog, Box<dyn Error + Send + Sync>> {
-            if self.should_fail {
-                Err("Mock error".into())
-            } else {
-                Ok(self.catalog.clone())
-            }
+        ) -> Pin<Box<dyn futures_util::Stream<Item = SchemaCatalogUpdate> + Send>> {
+            let update =
+                SchemaCatalogUpdate::try_from(&self.catalog).expect("serialization failed");
+            Box::pin(stream::once(async move { update }))
         }
+    }
 
+    struct EmptyStreamProvider;
+
+    #[async_trait]
+    impl SchemaCatalogProvider for EmptyStreamProvider {
         fn schema_catalog_update_stream(
             &mut self,
         ) -> Pin<Box<dyn futures_util::Stream<Item = SchemaCatalogUpdate> + Send>> {
@@ -340,60 +287,42 @@ mod tests {
 
     #[tokio::test]
     async fn test_synchronizer_creation() {
-        let mock_handle = MockReadySetHandle::new(false);
-        let poll_interval = Duration::from_millis(100);
-
-        // Create synchronizer - this should work without panicking
-        let (_synchronizer, handle) = SchemaCatalogSynchronizer::new(mock_handle, poll_interval);
+        let mock = MockProvider::new();
+        let (_synchronizer, handle) = SchemaCatalogSynchronizer::new(mock);
         assert!(!handle.has_catalog().await);
     }
 
     #[tokio::test]
-    async fn test_synchronizer_poll_success() {
-        let mock_handle = MockReadySetHandle::new(false);
-        let poll_interval = Duration::from_millis(10);
-
-        let (mut synchronizer, handle) = SchemaCatalogSynchronizer::new(mock_handle, poll_interval);
-
-        assert!(!handle.has_catalog().await);
-
-        // Initial poll
-        let _ = synchronizer.poll().await;
-
-        assert!(handle.has_catalog().await);
-        handle.get_catalog().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_synchronizer_poll_failure() {
-        let mock_handle = MockReadySetHandle::new(true);
-        let poll_interval = Duration::from_millis(10);
-
-        let (mut synchronizer, handle) = SchemaCatalogSynchronizer::new(mock_handle, poll_interval);
-
-        assert!(!handle.has_catalog().await);
-
-        let _ = synchronizer.poll().await;
-
-        assert!(!handle.has_catalog().await);
-    }
-
-    #[tokio::test]
-    async fn test_synchronizer_run_and_shutdown() {
-        let mock_handle = MockReadySetHandle::new(false);
-        let poll_interval = Duration::from_millis(10);
-        let (synchronizer, handle) = SchemaCatalogSynchronizer::new(mock_handle, poll_interval);
+    async fn test_synchronizer_run_receives_stream_update() {
+        let mock = MockProvider::new();
+        let (synchronizer, handle) = SchemaCatalogSynchronizer::new(mock);
 
         assert!(!handle.has_catalog().await);
 
         let (shutdown_tx, shutdown_rx) = shutdown::channel();
         tokio::spawn(synchronizer.run(shutdown_rx));
 
-        // The initial poll happens before the loop.
-        // We need to wait for the task to have run that part.
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        // The stream delivers one update; wait for the synchronizer to apply it.
+        tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(handle.has_catalog().await);
+        let catalog = handle.get_catalog().await.unwrap();
+        assert_eq!(catalog.generation, SchemaGeneration::new(42).unwrap());
 
         shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_synchronizer_shutdown_before_update() {
+        let mock = EmptyStreamProvider;
+        let (synchronizer, handle) = SchemaCatalogSynchronizer::new(mock);
+
+        let (shutdown_tx, shutdown_rx) = shutdown::channel();
+        let join = tokio::spawn(synchronizer.run(shutdown_rx));
+
+        // Shut down before any update arrives
+        shutdown_tx.shutdown().await;
+        join.await.unwrap();
+
+        assert!(!handle.has_catalog().await);
     }
 }

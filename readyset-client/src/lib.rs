@@ -256,7 +256,6 @@ pub mod replay_path;
 
 use std::convert::TryFrom;
 use std::default::Default;
-use std::error::Error;
 use std::fmt::Display;
 use std::future::Future;
 use std::hash::Hash;
@@ -268,7 +267,7 @@ use readyset_data::{DfType, DfValue};
 use readyset_sql::ast::Relation;
 use readyset_tracing::propagation::Instrumented;
 use replication_offset::ReplicationOffset;
-use schema_catalog::{SchemaCatalog, SchemaCatalogProvider, SchemaCatalogUpdate};
+use schema_catalog::{SchemaCatalogProvider, SchemaCatalogUpdate};
 use serde::{Deserialize, Serialize};
 use tokio::task_local;
 use tokio_stream::wrappers::BroadcastStream;
@@ -504,12 +503,6 @@ impl CacheMode {
 
 #[async_trait]
 impl SchemaCatalogProvider for ReadySetHandle {
-    async fn fetch_schema_catalog(
-        &mut self,
-    ) -> Result<SchemaCatalog, Box<dyn Error + Send + Sync>> {
-        self.schema_catalog().await.map_err(|e| e.into())
-    }
-
     fn schema_catalog_update_stream(
         &mut self,
     ) -> Pin<Box<dyn futures_util::Stream<Item = SchemaCatalogUpdate> + Send>> {
