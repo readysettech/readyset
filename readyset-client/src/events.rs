@@ -325,6 +325,21 @@ impl ControllerEventsClient {
                 }
             };
 
+            // Use fail::eval instead of set_failpoint! so we can do an async sleep.
+            // The fail crate's built-in sleep action uses std::thread::sleep, which blocks the
+            // tokio worker thread and can stall the timer driver.
+            // Configure with "return(delay_ms)" to trigger, e.g. "1*return(15000)".
+            #[cfg(feature = "failure_injection")]
+            if let Some(delay_ms) = fail::eval(
+                readyset_util::failpoints::CONTROLLER_EVENTS_SSE_CONNECT,
+                |v| v.and_then(|s| s.parse::<u64>().ok()),
+            )
+            .flatten()
+            {
+                tracing::info!(delay_ms, "SSE connect failpoint: delaying connection");
+                sleep(Duration::from_millis(delay_ms)).await;
+            }
+
             match Self::connect_and_stream(&events_url, &client, &events_tx, buffer_limit).await {
                 Ok(should_reconnect) => {
                     if !should_reconnect {
@@ -413,6 +428,12 @@ impl ControllerEventsClient {
                     }
                 }
             }
+
+            #[cfg(feature = "failure_injection")]
+            failpoint_macros::set_failpoint!(
+                readyset_util::failpoints::CONTROLLER_EVENTS_SSE_FORCE_DISCONNECT,
+                |_| Ok(true)
+            );
         }
 
         // The stream ended normally, we should try to reconnect

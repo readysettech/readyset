@@ -55,3 +55,8 @@ pub const READER_BEFORE_BLOCKING: &str = "reader-before-blocking";
 pub const UPQUERY_START: &str = "upquery-start";
 /// Delay application of the next schema catalog update in the adapter's synchronizer
 pub const SCHEMA_CATALOG_SYNCHRONIZER_DELAY: &str = "schema-catalog-synchronizer-delay";
+/// Delay the controller events SSE client before its first connection attempt
+pub const CONTROLLER_EVENTS_SSE_CONNECT: &str = "controller-events-sse-connect";
+/// Force-disconnect the controller events SSE stream mid-session, causing the client to
+/// reconnect. The reconnection delivers a snapshot with the latest schema catalog.
+pub const CONTROLLER_EVENTS_SSE_FORCE_DISCONNECT: &str = "controller-events-sse-force-disconnect";

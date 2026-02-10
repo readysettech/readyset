@@ -334,3 +334,121 @@ async fn schema_generation_mismatch_recovered_after_delayed_sse_update() {
     shutdown_tx.shutdown().await;
     drop(failpoint_guard);
 }
+
+/// Tests that a mid-session SSE stream disconnect followed by reconnection recovers the
+/// adapter's schema catalog. With polling removed, SSE is the sole mechanism for schema catalog
+/// updates, so reconnection recovery is the critical path when the stream drops.
+///
+/// Flow:
+/// 1. Start ReadySet, let SSE connect normally, create table, verify adapter syncs it
+/// 2. Force-disconnect the SSE stream (fires once via failpoint)
+/// 3. Delay the reconnection by 15s (via SSE_CONNECT failpoint)
+/// 4. ALTER TABLE on upstream during the disconnect window
+/// 5. Verify CREATE CACHE fails (adapter is stale — no SSE stream to relay the update)
+/// 6. Wait for SSE reconnection (snapshot delivers latest catalog)
+/// 7. Verify CREATE CACHE succeeds
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow, mysql_upstream)]
+async fn schema_catalog_recovers_after_sse_stream_disconnect() {
+    readyset_tracing::init_test_logging();
+    let failpoint_guard = FailScenario::setup();
+
+    let (rs_opts, mut handle, shutdown_tx) =
+        TestBuilder::default().build::<MySQLAdapter>().await;
+
+    let db_name = rs_opts.db_name().unwrap().to_string();
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+
+    // Create a table and wait for the adapter to pick it up over the healthy SSE stream.
+    upstream_conn
+        .query_drop("CREATE TABLE sse_disconnect (id INT PRIMARY KEY, value INT)")
+        .await
+        .unwrap();
+
+    // Wait for the server to replicate the CREATE TABLE before checking the adapter.
+    let initial_generation = handle.schema_catalog().await.unwrap().generation;
+    wait_for_schema_generation_change(&mut handle, initial_generation).await;
+
+    // The adapter syncs its schema catalog from the server via SSE, which is asynchronous.
+    // Poll until the adapter can resolve the table.
+    let mut rs_conn = mysql_async::Conn::new(rs_opts.clone()).await.unwrap();
+    eventually!(
+        attempts: 40,
+        sleep: Duration::from_millis(500),
+        message: "adapter did not resolve sse_disconnect table".to_string(),
+        {
+            rs_conn
+                .query_drop("SELECT * FROM sse_disconnect WHERE id = 1")
+                .await
+                .is_ok()
+        }
+    );
+
+    let start_generation = handle.schema_catalog().await.unwrap().generation;
+
+    // Arm failpoints:
+    // 1. Force-disconnect the SSE stream once (fires inside connect_and_stream's loop)
+    // 2. Delay the subsequent reconnection by 15s
+    fail::cfg(
+        failpoints::CONTROLLER_EVENTS_SSE_FORCE_DISCONNECT,
+        "1*return",
+    )
+    .expect("failed to set SSE force-disconnect failpoint");
+    fail::cfg(
+        failpoints::CONTROLLER_EVENTS_SSE_CONNECT,
+        "1*return(15000)",
+    )
+    .expect("failed to set SSE connect delay failpoint");
+
+    // Give time for the force-disconnect to fire (~1s tick interval + processing).
+    sleep(Duration::from_secs(3)).await;
+
+    // ALTER TABLE on upstream while the SSE stream is disconnected. The server processes the
+    // DDL and broadcasts the update, but no SSE stream is active to relay it to the adapter.
+    upstream_conn
+        .query_drop("ALTER TABLE sse_disconnect ADD COLUMN bonus BIGINT DEFAULT 0")
+        .await
+        .unwrap();
+
+    // Server has processed the DDL; its generation has advanced.
+    wait_for_schema_generation_change(&mut handle, start_generation).await;
+
+    // The adapter's schema catalog is stale — CREATE CACHE should fail.
+    let err = rs_conn
+        .query::<Row, _>("CREATE CACHE FROM SELECT * FROM sse_disconnect WHERE id = 1")
+        .await
+        .expect_err("expected schema generation mismatch when SSE stream is disconnected");
+    assert_schema_generation_error!(err);
+
+    // Wait for SSE reconnection to deliver the schema catalog snapshot, then verify
+    // CREATE CACHE succeeds. The reconnection is delayed by the SSE_CONNECT failpoint
+    // (~15s), so use generous polling bounds.
+    eventually!(
+        attempts: 60,
+        sleep: Duration::from_millis(500),
+        run_test: {
+            // Clear stale cached rewrites each attempt so CREATE CACHE uses the
+            // latest schema catalog. Needed until REA-6108 is fixed.
+            rs_conn.query_drop("DROP ALL PROXIED QUERIES").await.unwrap();
+            rs_conn
+                .query::<Row, _>("CREATE CACHE FROM SELECT * FROM sse_disconnect WHERE id = 1")
+                .await
+                .map_err(|e| e.to_string())
+        },
+        then_assert: |result| {
+            result.expect("CREATE CACHE should succeed after SSE reconnection");
+        }
+    );
+
+    // Confirm the server generation advanced (sanity check — the successful CREATE CACHE
+    // already proves the adapter's generation matches, since the server rejects mismatches).
+    let final_gen = handle.schema_catalog().await.unwrap().generation;
+    assert_ne!(
+        final_gen, start_generation,
+        "server generation should have advanced past {start_generation}"
+    );
+
+    shutdown_tx.shutdown().await;
+    drop(failpoint_guard);
+}
