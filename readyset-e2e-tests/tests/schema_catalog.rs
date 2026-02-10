@@ -247,3 +247,90 @@ async fn create_cache_concurrently_errors_when_catalog_is_stale() {
 
     harness.teardown().await;
 }
+
+/// Verifies that a delayed SSE schema catalog update causes a schema generation mismatch error
+/// and that the adapter recovers once the update is applied. Uses a failpoint to delay the
+/// adapter's `apply_update()` call, creating a window where the adapter's generation is behind
+/// the server's. During this window `CREATE CACHE` is rejected. After the delay expires, the
+/// adapter catches up and the same command succeeds.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow, mysql_upstream)]
+async fn schema_generation_mismatch_recovered_after_delayed_sse_update() {
+    readyset_tracing::init_test_logging();
+    let failpoint_guard = FailScenario::setup();
+
+    let (rs_opts, mut handle, shutdown_tx) =
+        TestBuilder::default().build::<MySQLAdapter>().await;
+
+    let db_name = rs_opts.db_name().unwrap().to_string();
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+
+    // Create a table and wait for the adapter to serve queries against it, confirming the
+    // initial SSE snapshot was received and the schema catalog is initialized.
+    upstream_conn
+        .query_drop("CREATE TABLE sse_race (id INT PRIMARY KEY, value INT)")
+        .await
+        .unwrap();
+
+    let mut rs_conn = mysql_async::Conn::new(rs_opts.clone()).await.unwrap();
+    let warmup_deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let mut attempt = 0u64;
+    loop {
+        attempt += 1;
+        let query = format!(
+            "SELECT * FROM sse_race WHERE id = 1 /* warmup:{attempt} */"
+        );
+        if rs_conn.query_drop(query).await.is_ok() {
+            break;
+        }
+        if tokio::time::Instant::now() >= warmup_deadline {
+            panic!("Timed out waiting for adapter to accept queries against sse_race");
+        }
+        sleep(Duration::from_millis(200)).await;
+    }
+
+    // Delay the next schema catalog update application. The SSE event will be received by the
+    // synchronizer but apply_update() will be blocked by the failpoint.
+    const DELAY_MS: u64 = 15_000;
+    fail::cfg(
+        failpoints::SCHEMA_CATALOG_SYNCHRONIZER_DELAY,
+        &format!("1*sleep({DELAY_MS})"),
+    )
+    .expect("failed to set schema catalog synchronizer delay failpoint");
+
+    let start_generation = handle.schema_catalog().await.unwrap().generation;
+
+    // DDL on upstream advances the server's generation. The SSE event is delivered but the
+    // synchronizer's apply_update is stalled by the failpoint.
+    upstream_conn
+        .query_drop("ALTER TABLE sse_race ADD COLUMN extra INT")
+        .await
+        .unwrap();
+
+    // Server has processed the DDL; its generation has advanced.
+    wait_for_schema_generation_change(&mut handle, start_generation).await;
+
+    // The adapter's schema catalog is still at the old generation because the synchronizer
+    // is delayed. CREATE CACHE is rejected with a schema generation mismatch.
+    let err = rs_conn
+        .query::<Row, _>("CREATE CACHE FROM SELECT * FROM sse_race WHERE id = 1")
+        .await
+        .expect_err("expected schema generation mismatch when adapter is stale");
+    assert_schema_generation_error!(err);
+
+    // Wait for the failpoint delay to expire so the adapter catches up.
+    sleep(Duration::from_millis(DELAY_MS + 2_000)).await;
+
+    rs_conn
+        .query_drop("DROP ALL PROXIED QUERIES")
+        .await
+        .unwrap();
+    rs_conn
+        .query::<Row, _>("CREATE CACHE FROM SELECT * FROM sse_race WHERE id = 1")
+        .await
+        .expect("expected success after adapter caught up");
+
+    shutdown_tx.shutdown().await;
+    drop(failpoint_guard);
+}

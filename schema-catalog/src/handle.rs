@@ -155,6 +155,7 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
         };
 
         if let Some(current) = current_generation
+            && current != catalog.generation
             && !current.precedes(catalog.generation)
         {
             metrics::counter!(crate::metrics::SCHEMA_CATALOG_UNEXPECTED_GENERATION).increment(1);
@@ -184,6 +185,14 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
 
         let mut cache = self.handle.inner.write().await;
         if cache.as_deref() != Some(&catalog) {
+            if let Some(ref current) = *cache
+                && current.generation == catalog.generation
+            {
+                warn!(
+                    generation = %catalog.generation,
+                    "Schema catalog content changed without generation advancing"
+                );
+            }
             metrics::counter!(crate::metrics::SCHEMA_CATALOG_UPDATE_APPLIED).increment(1);
             metrics::gauge!(crate::metrics::SCHEMA_CATALOG_CURRENT_GENERATION)
                 .set(catalog.generation.get() as f64);

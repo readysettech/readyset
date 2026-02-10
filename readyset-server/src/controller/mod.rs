@@ -552,6 +552,15 @@ impl Controller {
                 gauge!(recorded::CONTROLLER_IS_LEADER).set(1f64);
                 let background_task_failed_tx = self.background_task_failed_tx.clone();
                 self.table_statuses.init(&state.dataflow_state).await;
+                // Extract the initial catalog before `state` is moved into
+                // `Leader::new()`. Although `leader.start()` spawns the replicator
+                // (which may detect DDL), no migrations are processed until this
+                // function returns and the event loop resumes, so the catalog
+                // cannot advance before `events_handle.start()` installs it.
+                let initial_catalog = state
+                    .dataflow_state
+                    .recipe
+                    .schema_catalog(state.dataflow_state.schema_generation());
                 let mut leader = Leader::new(
                     state,
                     self.our_descriptor.controller_uri.clone(),
@@ -588,7 +597,7 @@ impl Controller {
                     .await?;
                 self.cache_ddl = cache_ddl;
 
-                self.events_handle.start();
+                self.events_handle.start(initial_catalog);
             }
             AuthorityUpdate::NewWorkers(w) => {
                 let mut guard = self.inner.write().await;

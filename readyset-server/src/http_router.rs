@@ -15,9 +15,11 @@ use readyset_alloc::{
     activate_prof, deactivate_prof, dump_prof_to_string, dump_stats,
     print_memory_and_per_thread_stats,
 };
+use readyset_client::events::ControllerEvent;
 use readyset_client::metrics::recorded;
 use readyset_errors::ReadySetError;
 use readyset_util::shutdown::ShutdownReceiver;
+use schema_catalog::SchemaCatalogUpdate;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::{BroadcastStream, TcpListenerStream};
@@ -341,13 +343,38 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
             }),
             // SSE endpoint for schema catalog updates (or whatever events the server publishes)
             (&Method::GET, "/events/stream") => {
-                let res = if let Some(events_rx) = self.events_handle.subscribe() {
-                    let stream =
+                let res = if let Some((events_rx, snapshot)) =
+                    self.events_handle.subscribe_with_snapshot()
+                {
+                    // Emit the current schema catalog as the first SSE event so that
+                    // clients which connect after a broadcast don't miss it. If
+                    // serialization fails, return 500 rather than silently
+                    // degrading to the pre-fix race condition.
+                    let initial_sse = match SchemaCatalogUpdate::try_from(&*snapshot)
+                        .and_then(|update| ControllerEvent::SchemaCatalogUpdate(update).to_sse())
+                    {
+                        Ok(sse) => sse,
+                        Err(error) => {
+                            return Box::pin(async move {
+                                Ok(res
+                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                    .header(CONTENT_TYPE, "text/plain")
+                                    .body(hyper::Body::from(format!(
+                                        "Failed to serialize schema catalog snapshot: {error}"
+                                    )))
+                                    .unwrap())
+                            });
+                        }
+                    };
+                    let live_stream =
                         BroadcastStream::new(events_rx).filter_map(move |event| match event {
                             Ok(event) => match event.to_sse() {
                                 Ok(s) => Some(Ok::<String, ReadySetError>(s)),
                                 Err(error) => {
-                                    warn!(%error, "Failed to serialize controller event for SSE");
+                                    warn!(
+                                        %error,
+                                        "Failed to serialize controller event for SSE"
+                                    );
                                     None
                                 }
                             },
@@ -356,7 +383,10 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                                 None
                             }
                         });
-                    let body = hyper::Body::wrap_stream(stream);
+                    let combined =
+                        tokio_stream::iter(Some(Ok::<String, ReadySetError>(initial_sse)))
+                            .chain(live_stream);
+                    let body = hyper::Body::wrap_stream(combined);
                     res.status(StatusCode::OK)
                         .header(CONTENT_TYPE, "text/event-stream")
                         .header(CACHE_CONTROL, "no-cache")

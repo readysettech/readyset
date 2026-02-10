@@ -41,7 +41,6 @@ use readyset_client::builders::{
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
-use readyset_client::events::ControllerEvent;
 use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
 use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
@@ -59,7 +58,7 @@ use readyset_sql::ast::{NonReplicatedRelation, Relation, SqlIdentifier};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
-use schema_catalog::{SchemaCatalogUpdate, SchemaGeneration};
+use schema_catalog::SchemaGeneration;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -2073,19 +2072,14 @@ impl DfStateHandle {
         drop(state_guard);
 
         if let Some(notifier) = &self.schema_change_notifier {
-            // XXX(mvzink): Currently we always send complete schema catalog updates, and
-            // `SchemaCatalogSynchronizer` always applies them. The generation check in the
-            // synchronizer is telemetry-only (warns if updates arrive out of strict sequence). If
-            // partial updates are ever added, they would need strict sequencing via `precedes()`,
-            // and this code should send a complete update whenever the generation is not a strict
-            // increment of the previous one.
+            // The snapshot stored by `EventsHandle` is a complete `SchemaCatalog`, so partial
+            // deltas (if ever added) cannot be accidentally cached.
             if new_state.schema_generation() != previous_generation {
                 let catalog = new_state
                     .recipe
                     .schema_catalog(new_state.schema_generation());
-                match SchemaCatalogUpdate::try_from(&catalog) {
-                    Ok(update) => {
-                        notifier.send(ControllerEvent::SchemaCatalogUpdate(update));
+                match notifier.send_schema_catalog_update(catalog) {
+                    Ok(()) => {
                         counter!(recorded::SCHEMA_CATALOG_UPDATE_SENT).increment(1);
                     }
                     Err(error) => {
