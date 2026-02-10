@@ -15,6 +15,7 @@ test-discovery = { path = "../test-discovery" }
 
 [dev-dependencies]
 chrono = { workspace = true }
+database-utils = { path = "../database-utils" }
 dataflow-state = { path = "../dataflow-state" }
 futures = { workspace = true }
 itertools = { workspace = true }

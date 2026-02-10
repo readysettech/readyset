@@ -5015,6 +5015,7 @@ name = "readyset-e2e-tests"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "database-utils",
  "dataflow-state",
  "fail",
  "futures",
