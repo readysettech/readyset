@@ -412,10 +412,7 @@ impl MigrationState {
 
     /// Returns true if the migration state of the query indicates that we are still processing it
     pub fn is_pending(&self) -> bool {
-        matches!(
-            self,
-            MigrationState::Pending | MigrationState::DryRunSucceeded
-        )
+        matches!(self, MigrationState::Pending)
     }
 
     /// Returns true if the query should be considered "supported"
