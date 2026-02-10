@@ -177,6 +177,25 @@ impl DialectDisplay for ShallowCacheQuery {
     }
 }
 
+impl ShallowCacheQuery {
+    /// Extracts and removes the `readyset_hint` from the inner `Select` AST node.
+    ///
+    /// This must be called before hashing or comparing `ShallowCacheQuery` values,
+    /// because `Select::Display` includes the hint in its output. Without stripping,
+    /// a hinted query would get a different `QueryId` than the same query without a hint.
+    pub fn take_readyset_hint(&mut self) -> Option<sqlparser::ast::OptimizerHint> {
+        if let sqlparser::ast::SetExpr::Select(ref mut select) = *self.0.body {
+            let pos = select
+                .optimizer_hints
+                .iter()
+                .position(|h| h.prefix == "rs")?;
+            Some(select.optimizer_hints.remove(pos))
+        } else {
+            None
+        }
+    }
+}
+
 impl From<sqlparser::ast::Query> for ShallowCacheQuery {
     fn from(query: sqlparser::ast::Query) -> Self {
         ShallowCacheQuery(query)

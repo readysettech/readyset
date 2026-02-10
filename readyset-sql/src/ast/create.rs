@@ -1035,7 +1035,7 @@ impl From<SelectStatement> for CacheInner {
 }
 
 /// Optional `CREATE CACHE` arguments. This struct is only used for parsing.
-#[derive(Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CreateCacheOptions {
     pub always: bool,
     pub concurrently: bool,
@@ -1136,4 +1136,14 @@ impl DialectDisplay for CreateCacheStatement {
             write!(f, "{}", self.inner.display(dialect))
         })
     }
+}
+
+/// Parsed representation of a `/*rs+ ... */` hint directive.
+///
+/// Parsing is done by `parse_hint_directive()` in `readyset-sql-parsing`, which reuses
+/// the same `parse_cache_options()` infrastructure as `CREATE CACHE` DDL parsing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadysetHintDirective {
+    /// `/*rs+ CREATE CACHE [TTL n] [REFRESH n] [ALWAYS] */`
+    CreateCache(CreateCacheOptions),
 }
