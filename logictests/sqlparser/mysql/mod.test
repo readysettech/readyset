@@ -1,0 +1,103 @@
+# Tests for the MOD operator and MOD() function in MySQL
+
+statement ok
+create table t (a int, b int);
+
+statement ok
+insert into t values
+  (10, 3),
+  (17, 5),
+  (20, 7),
+  (100, 9),
+  (0, 4);
+
+# basic modulo using % operator
+query I rowsort
+select a % b from t;
+----
+0
+1
+1
+2
+6
+
+# MOD() function form
+query I rowsort
+select MOD(a, b) from t;
+----
+0
+1
+1
+2
+6
+
+# % operator in WHERE clause
+query II rowsort
+select a, b from t where a % b = 1;
+----
+10
+3
+100
+9
+
+# MOD() function in WHERE clause
+query II nosort
+select a, b from t where MOD(a, b) = 2;
+----
+17
+5
+
+# division by zero returns NULL in MySQL
+query I rowsort
+select a % 0 from t;
+----
+NULL
+NULL
+NULL
+NULL
+NULL
+
+# MOD() with zero divisor returns NULL in MySQL
+query I rowsort
+select MOD(a, 0) from t;
+----
+NULL
+NULL
+NULL
+NULL
+NULL
+
+# operator precedence: a % b + 1 should be (a % b) + 1
+query I rowsort
+select a % b + 1 from t;
+----
+1
+2
+2
+3
+7
+
+# modulo with negative values
+statement ok
+insert into t values (-10, 3), (10, -3), (-10, -3);
+
+query I rowsort
+select a % b from t where a < 0 or b < 0;
+----
+-1
+-1
+1
+
+# modulo with NULL values
+statement ok
+insert into t values (10, NULL), (NULL, 3);
+
+query I nosort
+select a % b from t where a = 10 and b is null;
+----
+NULL
+
+query I nosort
+select a % b from t where a is null and b = 3;
+----
+NULL
