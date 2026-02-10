@@ -12,6 +12,7 @@ keywords = ["database", "dataflow", "backend", "storage", "sql"]
 categories = ["api-bindings", "database"]
 
 [dependencies]
+antithesis_sdk = { workspace = true }
 anyhow = { workspace = true }
 async-bincode = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }

@@ -116,6 +116,13 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                 current_generation = %current,
                 "Schema update had unexpected generation"
             );
+            antithesis_sdk::assert_unreachable!(
+                "Schema catalog received unexpected generation",
+                &serde_json::json!({
+                    "new_generation": catalog.generation.get(),
+                    "current_generation": current.get(),
+                })
+            );
         }
 
         debug!(

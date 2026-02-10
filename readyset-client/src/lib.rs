@@ -270,6 +270,7 @@ use replication_offset::ReplicationOffset;
 use schema_catalog::{SchemaCatalogProvider, SchemaCatalogUpdate};
 use serde::{Deserialize, Serialize};
 use tokio::task_local;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use tokio_tower::multiplex;
@@ -510,7 +511,16 @@ impl SchemaCatalogProvider for ReadySetHandle {
         let stream = BroadcastStream::new(events_rx).filter_map(|evt| match evt {
             Ok(ControllerEvent::SchemaCatalogUpdate(update)) => Some(update),
             Ok(_) => None,
-            Err(_) => None,
+            Err(BroadcastStreamRecvError::Lagged(skipped)) => {
+                tracing::warn!(skipped, "Schema catalog event receiver lagged behind");
+                {
+                    antithesis_sdk::assert_unreachable!(
+                        "Schema catalog broadcast receiver lagged",
+                        &serde_json::json!({"skipped": skipped})
+                    );
+                }
+                None
+            }
         });
         Box::pin(stream)
     }

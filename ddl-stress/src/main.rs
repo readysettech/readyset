@@ -15,7 +15,7 @@ extern crate readyset_alloc;
 
 const TABLES: &[&str] = &["stress_a", "stress_b", "stress_c"];
 const MAX_RETRY_SECS: u64 = 10;
-const RETRY_SLEEP_MS: u64 = 100;
+const RETRY_SLEEP_MS: u64 = 50;
 
 #[derive(Parser)]
 #[command(name = "ddl-stress")]
@@ -119,7 +119,7 @@ async fn run_setup(mysql: &MysqlOpts) -> Result<()> {
     let mut conn = pool.get_conn().await?;
     info!("Connected to MySQL");
 
-    assert_sometimes!(true, "Connected to upstream MySQL during setup", &json!({}));
+    assert_reachable!("Connected to upstream MySQL during setup", &json!({}));
 
     let mut all_ok = true;
     for &table in TABLES {
@@ -185,7 +185,7 @@ async fn run_ddl(mysql: &MysqlOpts, duration_secs: u64) -> Result<()> {
                 );
                 let r = conn.query_drop(&sql).await;
                 if r.is_ok() {
-                    assert_sometimes!(true, "Executed CREATE TABLE", &json!({}));
+                    assert_reachable!("Executed CREATE TABLE", &json!({}));
                 }
                 r
             }
@@ -194,7 +194,7 @@ async fn run_ddl(mysql: &MysqlOpts, duration_secs: u64) -> Result<()> {
                 let sql = format!("ALTER TABLE `{table}` ADD COLUMN `extra_{col_suffix}` INT");
                 let r = conn.query_drop(&sql).await;
                 if r.is_ok() {
-                    assert_sometimes!(true, "Executed ALTER TABLE ADD COLUMN", &json!({}));
+                    assert_reachable!("Executed ALTER TABLE ADD COLUMN", &json!({}));
                 }
                 r
             }
@@ -204,7 +204,7 @@ async fn run_ddl(mysql: &MysqlOpts, duration_secs: u64) -> Result<()> {
                     let sql = format!("ALTER TABLE `{table}` DROP COLUMN `{col_name}`");
                     let r = conn.query_drop(&sql).await;
                     if r.is_ok() {
-                        assert_sometimes!(true, "Executed ALTER TABLE DROP COLUMN", &json!({}));
+                        assert_reachable!("Executed ALTER TABLE DROP COLUMN", &json!({}));
                     }
                     r
                 } else {
@@ -216,7 +216,7 @@ async fn run_ddl(mysql: &MysqlOpts, duration_secs: u64) -> Result<()> {
                 let sql = format!("DROP TABLE IF EXISTS `{table}`");
                 let r = conn.query_drop(&sql).await;
                 if r.is_ok() {
-                    assert_sometimes!(true, "Executed DROP TABLE", &json!({}));
+                    assert_reachable!("Executed DROP TABLE", &json!({}));
                 }
                 r
             }
@@ -226,7 +226,7 @@ async fn run_ddl(mysql: &MysqlOpts, duration_secs: u64) -> Result<()> {
         match result {
             Ok(()) => {
                 info!(iteration, op_name, table, "DDL succeeded");
-                assert_sometimes!(true, "Successfully executed DDL operation", &json!({}));
+                assert_reachable!("Successfully executed DDL operation", &json!({}));
             }
             Err(e) => {
                 info!(%e, iteration, op_name, table, "DDL failed (expected)");
@@ -315,8 +315,8 @@ async fn run_query(mysql: &MysqlOpts, readyset: &ReadysetOpts, duration_secs: u6
             match retry_on_schema_mismatch(&pool, &sql).await {
                 Ok(()) => {
                     info!(cycle, table, method, "Cache creation succeeded");
-                    assert_sometimes!(true, "Successfully created cache", &json!({}));
-                    assert_sometimes!(true, "Connected to Readyset", &json!({}));
+                    assert_reachable!("Successfully created cache", &json!({}));
+                    assert_reachable!("Connected to Readyset", &json!({}));
                 }
                 Err(e) => {
                     warn!(%e, cycle, table, method, "Cache creation failed");
@@ -334,7 +334,7 @@ async fn run_query(mysql: &MysqlOpts, readyset: &ReadysetOpts, duration_secs: u6
             match retry_on_schema_mismatch(&pool, &sql).await {
                 Ok(()) => {
                     info!(cycle, table, "Cache dropped");
-                    assert_sometimes!(true, "Successfully dropped cache", &json!({}));
+                    assert_reachable!("Successfully dropped cache", &json!({}));
                 }
                 Err(e) => {
                     // DROP CACHE for a nonexistent cache is expected when the
@@ -361,23 +361,16 @@ async fn retry_on_schema_mismatch(pool: &Pool, sql: &str) -> Result<()> {
     let start = Instant::now();
     let mut saw_mismatch = false;
     loop {
-        let mut conn = match pool.get_conn().await {
-            Ok(c) => c,
-            Err(e) => {
-                warn!(%e, "Failed to acquire Readyset connection");
-                return Ok(());
-            }
-        };
+        let mut conn = pool.get_conn().await?;
 
         match conn.query_drop(sql).await {
             Ok(()) => {
                 if saw_mismatch {
                     let elapsed_ms = start.elapsed().as_millis();
                     info!(elapsed_ms, sql, "Schema mismatch resolved after retries");
-                    assert_sometimes!(
-                        true,
+                    assert_reachable!(
                         "Schema mismatch resolved within retry window",
-                        &json!({"elapsed_ms": elapsed_ms})
+                        &json!({"elapsed_ms": elapsed_ms, "sql": sql})
                     );
                 }
                 return Ok(());
@@ -386,9 +379,9 @@ async fn retry_on_schema_mismatch(pool: &Pool, sql: &str) -> Result<()> {
                 let msg = e.to_string();
                 if msg.contains("Schema generation mismatch") {
                     saw_mismatch = true;
-                    assert_sometimes!(true, "Encountered schema generation mismatch", &json!({}));
-                    let elapsed_ms = start.elapsed().as_millis() as u64;
-                    if elapsed_ms >= MAX_RETRY_SECS * 1000 {
+                    assert_reachable!("Encountered schema generation mismatch", &json!({}));
+                    if start.elapsed() >= Duration::from_secs(MAX_RETRY_SECS) {
+                        let elapsed_ms = start.elapsed().as_millis();
                         assert_unreachable!(
                             "Schema mismatch retry timed out",
                             &json!({"elapsed_ms": elapsed_ms, "sql": sql})
@@ -398,17 +391,47 @@ async fn retry_on_schema_mismatch(pool: &Pool, sql: &str) -> Result<()> {
                         );
                     }
                     debug!(
-                        elapsed_ms,
+                        elapsed_ms = start.elapsed().as_millis(),
                         sql, "Schema mismatch, retrying in {RETRY_SLEEP_MS}ms"
                     );
                     tokio::time::sleep(Duration::from_millis(RETRY_SLEEP_MS)).await;
-                } else {
-                    // Non-mismatch SQL errors are expected (e.g. table dropped by DDL
-                    // driver, or Readyset proxied a command to MySQL). Log and continue.
-                    info!(%e, sql, "SQL error (non-mismatch, ignored)");
+                } else if msg.contains("The leader is not ready") {
+                    // Leader not ready is expected during DDL stress; retry like a mismatch
+                    if start.elapsed() >= Duration::from_secs(MAX_RETRY_SECS) {
+                        anyhow::bail!("Leader not ready after {MAX_RETRY_SECS}s for: {sql}");
+                    }
+                    debug!(
+                        elapsed_ms = start.elapsed().as_millis(),
+                        sql, "Leader not ready, retrying"
+                    );
+                    tokio::time::sleep(Duration::from_millis(RETRY_SLEEP_MS)).await;
+                } else if is_expected_error(&msg) {
+                    info!(%e, sql, "SQL error (expected, non-mismatch)");
                     return Ok(());
+                } else {
+                    warn!(%e, sql, "SQL error (unexpected, non-mismatch)");
+                    assert_unreachable!(
+                        "Unexpected SQL error in retry_on_schema_mismatch",
+                        &json!({"sql": sql, "error": msg})
+                    );
+                    anyhow::bail!("Unexpected SQL error for {sql}: {msg}");
                 }
             }
         }
     }
+}
+
+/// Returns true for errors that are expected during normal DDL stress test operation,
+/// such as tables being dropped concurrently by the DDL driver.
+fn is_expected_error(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+    lower.contains("doesn't exist")
+        || lower.contains("does not exist")
+        || lower.contains("unknown table")
+        || lower.contains("not replicated")
+        || lower.contains("no cache named")
+        || lower.contains("no query found")
+        || lower.contains("table already exists")
+        || lower.contains("cache already exists")
+        || lower.contains("could not find table")
 }
