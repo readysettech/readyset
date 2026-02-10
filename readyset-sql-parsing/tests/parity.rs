@@ -964,6 +964,10 @@ fn show_proxied_queries() {
     check_parse_both!("SHOW PROXIED SUPPORTED QUERIES LIMIT 10");
     check_parse_both!("SHOW PROXIED SUPPORTED QUERIES WHERE query_id = 'q_29697d90bc73217f'");
     check_parse_both!("SHOW PROXIED QUERIES WHERE query_id = 'q_29697d90bc7317f' LIMIT 1000");
+    check_parse_both!("SHOW PROXIED SHALLOW QUERIES");
+    check_parse_both!("SHOW PROXIED DEEP QUERIES");
+    check_parse_both!("SHOW PROXIED SUPPORTED SHALLOW QUERIES");
+    check_parse_both!("SHOW PROXIED SUPPORTED DEEP QUERIES");
 }
 
 #[test]

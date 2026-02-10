@@ -56,6 +56,9 @@ impl DialectDisplay for ShowStatement {
                     if options.only_supported {
                         write!(f, "SUPPORTED ")?;
                     }
+                    if let Some(cache_type) = options.cache_type {
+                        write!(f, "{} ", cache_type.display(dialect))?;
+                    }
                     write!(f, "QUERIES")?;
                     if let Some(query_id) = &options.query_id {
                         write!(f, " WHERE query_id = '{query_id}'")?;
@@ -107,6 +110,7 @@ pub struct ProxiedQueriesOptions {
     pub query_id: Option<String>,
     pub only_supported: bool,
     pub limit: Option<u64>,
+    pub cache_type: Option<CacheType>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]

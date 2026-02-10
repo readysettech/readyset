@@ -690,6 +690,16 @@ fn peek_create_cache(parser: &mut Parser) -> bool {
     false
 }
 
+fn parse_optional_cache_type(parser: &mut Parser) -> Option<CacheType> {
+    if parse_readyset_keyword(parser, ReadysetKeyword::DEEP) {
+        Some(CacheType::Deep)
+    } else if parse_readyset_keyword(parser, ReadysetKeyword::SHALLOW) {
+        Some(CacheType::Shallow)
+    } else {
+        None
+    }
+}
+
 fn parse_create_cache_keywords(
     parser: &mut Parser,
 ) -> Result<Option<CacheType>, ReadysetParsingError> {
@@ -699,13 +709,7 @@ fn parse_create_cache_keywords(
         ));
     }
 
-    let cache_type = if parse_readyset_keyword(parser, ReadysetKeyword::DEEP) {
-        Some(CacheType::Deep)
-    } else if parse_readyset_keyword(parser, ReadysetKeyword::SHALLOW) {
-        Some(CacheType::Shallow)
-    } else {
-        None
-    };
+    let cache_type = parse_optional_cache_type(parser);
 
     if !parser.parse_keyword(Keyword::CACHE) {
         return Err(ReadysetParsingError::ReadysetParsingError(
@@ -841,8 +845,8 @@ fn parse_show_caches(
 ///     | STATUS
 ///     | ALL TABLES
 /// SHOW
-///     | CACHES
-///     | PROXIED QUERIES
+///     | [DEEP|SHALLOW] CACHES
+///     | PROXIED [SUPPORTED] [DEEP|SHALLOW] QUERIES [WHERE query_id = <query_id>] [LIMIT <n>]
 ///     | REPLAY PATHS
 fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keyword(parser, ReadysetKeyword::READYSET) {
@@ -885,9 +889,10 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
         }
     } else if parse_readyset_keyword(parser, ReadysetKeyword::PROXIED) {
         let only_supported = parse_readyset_keyword(parser, ReadysetKeyword::SUPPORTED);
+        let cache_type = parse_optional_cache_type(parser);
         if !parse_readyset_keyword(parser, ReadysetKeyword::QUERIES) {
             return Err(ReadysetParsingError::ReadysetParsingError(
-                "expected QUERIES after PROXIED [SUPPORTED]".into(),
+                "expected QUERIES after PROXIED [SUPPORTED] [DEEP|SHALLOW]".into(),
             ));
         }
         let query_id = if parser.parse_keyword(Keyword::WHERE) {
@@ -913,6 +918,7 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
                     query_id,
                     only_supported,
                     limit,
+                    cache_type,
                 },
             ),
         ))
@@ -920,6 +926,9 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
         parse_show_caches(parser, None)
     } else if parse_readyset_keywords(parser, &[ReadysetKeyword::DEEP, ReadysetKeyword::CACHES]) {
         parse_show_caches(parser, Some(CacheType::Deep))
+    } else if parse_readyset_keywords(parser, &[ReadysetKeyword::SHALLOW, ReadysetKeyword::CACHES])
+    {
+        parse_show_caches(parser, Some(CacheType::Shallow))
     } else if parse_readyset_keywords(
         parser,
         &[
@@ -950,9 +959,6 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
         Ok(SqlQuery::Show(
             readyset_sql::ast::ShowStatement::ShallowCacheEntries { query_id, limit },
         ))
-    } else if parse_readyset_keywords(parser, &[ReadysetKeyword::SHALLOW, ReadysetKeyword::CACHES])
-    {
-        parse_show_caches(parser, Some(CacheType::Shallow))
     } else if parse_readyset_keywords(parser, &[ReadysetKeyword::REPLAY, ReadysetKeyword::PATHS]) {
         Ok(SqlQuery::Show(
             readyset_sql::ast::ShowStatement::ReplayPaths,
@@ -982,13 +988,7 @@ fn parse_drop(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
             readyset_sql::ast::DropAllProxiedQueriesStatement {},
         ))
     } else if parser.parse_keyword(Keyword::ALL) {
-        let cache_type = if parse_readyset_keyword(parser, ReadysetKeyword::DEEP) {
-            Some(CacheType::Deep)
-        } else if parse_readyset_keyword(parser, ReadysetKeyword::SHALLOW) {
-            Some(CacheType::Shallow)
-        } else {
-            None
-        };
+        let cache_type = parse_optional_cache_type(parser);
         if !parse_readyset_keyword(parser, ReadysetKeyword::CACHES) {
             return Err(ReadysetParsingError::ReadysetParsingError(
                 "expected CACHES".into(),

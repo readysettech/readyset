@@ -105,9 +105,9 @@ use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
     self, AlterReadysetStatement, CacheInner, CacheType, ChangeUpstreamStatement,
     CreateCacheOptions, CreateCacheStatement, DeallocateStatement, DropAllCachesStatement,
-    DropCacheStatement, ExplainStatement, ReadysetHintDirective, Relation, SelectStatement,
-    SetStatement, ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier,
-    UseStatement,
+    DropCacheStatement, ExplainStatement, ProxiedQueriesOptions, ReadysetHintDirective, Relation,
+    SelectStatement, SetStatement, ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery,
+    StatementIdentifier, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
@@ -3138,8 +3138,12 @@ where
         query_id: &Option<String>,
         only_supported: bool,
         limit: Option<u64>,
+        cache_type: Option<CacheType>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let mut queries = self.state.query_status_cache.proxied_list(CacheType::Deep);
+        let mut queries = self
+            .state
+            .query_status_cache
+            .proxied_list(cache_type.unwrap_or(CacheType::Deep));
         if let Some(q_id) = query_id {
             queries.retain(|q| &q.id.to_string() == q_id);
         }
@@ -3688,7 +3692,12 @@ where
                 self.noria.table_statuses(options.all).await
             }
             SqlQuery::Show(ShowStatement::Connections) => self.show_connections(),
-            SqlQuery::Show(ShowStatement::ProxiedQueries(proxied_queries_options)) => {
+            SqlQuery::Show(ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
+                query_id,
+                only_supported,
+                limit,
+                cache_type,
+            })) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
                     if let Err(e) = telemetry_sender.send_event(TelemetryEvent::ShowProxiedQueries)
@@ -3699,12 +3708,8 @@ where
                     trace!("No telemetry sender. not sending metric for SHOW PROXIED QUERIES");
                 }
 
-                self.show_proxied_queries(
-                    &proxied_queries_options.query_id,
-                    proxied_queries_options.only_supported,
-                    proxied_queries_options.limit,
-                )
-                .await
+                self.show_proxied_queries(query_id, *only_supported, *limit, *cache_type)
+                    .await
             }
             SqlQuery::Show(ShowStatement::ReplayPaths) => self.show_replay_paths().await,
             SqlQuery::Show(ShowStatement::Rls(_maybe_table)) => {

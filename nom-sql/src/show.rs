@@ -82,6 +82,14 @@ fn proxied_queries(
             opt(tuple((whitespace1, tag_no_case("supported")))),
             |only_supported| only_supported.is_some(),
         )(i)?;
+        let (i, cache_type) = opt(alt((
+            map(preceded(whitespace1, tag_no_case("deep")), |_| {
+                CacheType::Deep
+            }),
+            map(preceded(whitespace1, tag_no_case("shallow")), |_| {
+                CacheType::Shallow
+            }),
+        )))(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("queries")(i)?;
         let (i, query_id) = opt(preceded(whitespace1, where_query_id(dialect)))(i)?;
@@ -93,6 +101,7 @@ fn proxied_queries(
                 query_id,
                 only_supported,
                 limit,
+                cache_type,
             }),
         ))
     }
@@ -385,26 +394,60 @@ mod tests {
 
     #[test]
     fn show_proxied_queries() {
-        let proxied_queries_test = |qstring: &str, only_supported: bool, limit: Option<u64>| {
-            let res = show(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()))
-                .unwrap()
-                .1;
-            assert_eq!(
-                res,
-                ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
-                    query_id: None,
-                    only_supported,
-                    limit,
-                })
-            );
-        };
+        let proxied_queries_test =
+            |qstring: &str,
+             only_supported: bool,
+             limit: Option<u64>,
+             cache_type: Option<CacheType>| {
+                let res = show(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()))
+                    .unwrap()
+                    .1;
+                assert_eq!(
+                    res,
+                    ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
+                        query_id: None,
+                        only_supported,
+                        limit,
+                        cache_type,
+                    })
+                );
+            };
 
-        proxied_queries_test("SHOW PROXIED QUERIES", false, None);
-        proxied_queries_test("SHOW\tPROXIED\tQUERIES", false, None);
-        proxied_queries_test("SHOW PROXIED SUPPORTED QUERIES", true, None);
-        proxied_queries_test("SHOW\tPROXIED\tSUPPORTED\tQUERIES", true, None);
-        proxied_queries_test("SHOW PROXIED QUERIES LIMIT 10", false, Some(10));
-        proxied_queries_test("SHOW\tPROXIED\tSUPPORTED\tQUERIES LIMIT 20", true, Some(20));
+        proxied_queries_test("SHOW PROXIED QUERIES", false, None, None);
+        proxied_queries_test("SHOW\tPROXIED\tQUERIES", false, None, None);
+        proxied_queries_test("SHOW PROXIED SUPPORTED QUERIES", true, None, None);
+        proxied_queries_test("SHOW\tPROXIED\tSUPPORTED\tQUERIES", true, None, None);
+        proxied_queries_test("SHOW PROXIED QUERIES LIMIT 10", false, Some(10), None);
+        proxied_queries_test(
+            "SHOW\tPROXIED\tSUPPORTED\tQUERIES LIMIT 20",
+            true,
+            Some(20),
+            None,
+        );
+        proxied_queries_test(
+            "SHOW PROXIED SHALLOW QUERIES",
+            false,
+            None,
+            Some(CacheType::Shallow),
+        );
+        proxied_queries_test(
+            "SHOW PROXIED DEEP QUERIES",
+            false,
+            None,
+            Some(CacheType::Deep),
+        );
+        proxied_queries_test(
+            "SHOW PROXIED SUPPORTED DEEP QUERIES",
+            true,
+            None,
+            Some(CacheType::Deep),
+        );
+        proxied_queries_test(
+            "SHOW PROXIED SUPPORTED SHALLOW QUERIES",
+            true,
+            None,
+            Some(CacheType::Shallow),
+        );
     }
 
     #[test]
@@ -420,6 +463,7 @@ mod tests {
                         query_id: query_id.map(String::from),
                         only_supported,
                         limit,
+                        cache_type: None,
                     })
                 );
             };
