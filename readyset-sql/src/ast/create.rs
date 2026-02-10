@@ -1144,6 +1144,6 @@ impl DialectDisplay for CreateCacheStatement {
 /// the same `parse_cache_options()` infrastructure as `CREATE CACHE` DDL parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReadysetHintDirective {
-    /// `/*rs+ CREATE CACHE [TTL n] [REFRESH n] [ALWAYS] */`
+    /// `/*rs+ CREATE SHALLOW CACHE [TTL n] [REFRESH n] [ALWAYS] */`
     CreateCache(CreateCacheOptions),
 }
