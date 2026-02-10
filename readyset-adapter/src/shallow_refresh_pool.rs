@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use database_utils::UpstreamConfig;
 use readyset_client::metrics::recorded::{
@@ -11,11 +11,12 @@ use readyset_data::DfValue;
 use readyset_shallow::CacheInsertGuard;
 use readyset_sql::ast::SqlIdentifier;
 use readyset_util::logging::*;
-use tokio::sync::Mutex;
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::timeout;
 use tracing::warn;
 
+use crate::ROUTING_CHECK_INTERVAL;
 use crate::upstream_database::{Refresh, UpstreamDatabase};
 
 const CHANNEL_CAPACITY: usize = 5;
@@ -44,7 +45,7 @@ where
 /// round-robined among busy workers' channels. If all channels are full, the request is dropped.
 pub struct ShallowRefreshPool<DB: UpstreamDatabase> {
     inner: Mutex<PoolInner<DB>>,
-    upstream_config: UpstreamConfig,
+    upstream_config: Arc<RwLock<UpstreamConfig>>,
     rt: tokio::runtime::Handle,
     worker_limit: usize,
 }
@@ -69,7 +70,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
     /// Create a new pool. No workers are spawned until the first request.
     pub fn new(
         rt: &tokio::runtime::Handle,
-        config: &UpstreamConfig,
+        upstream_config: Arc<RwLock<UpstreamConfig>>,
         worker_limit: usize,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -78,7 +79,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 idle_stack: Vec::new(),
                 next_rr: 0,
             }),
-            upstream_config: config.clone(),
+            upstream_config,
             rt: rt.clone(),
             worker_limit,
         })
@@ -234,8 +235,10 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         mut rx: Receiver<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
         idx: usize,
     ) {
-        let mut upstream: Option<DB> = None;
-        let mut reset = false;
+        let mut upstream = None;
+        let mut reconnect = false;
+        let mut config = pool.upstream_config.read().await.clone();
+        let mut last_config_check = Instant::now();
 
         loop {
             let request = match timeout(WORKER_TIMEOUT, rx.recv()).await {
@@ -243,9 +246,18 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 Ok(None) | Err(_) => break,
             };
 
-            if upstream.is_none() || reset {
-                reset = false;
-                match DB::connect(pool.upstream_config.clone(), None, None).await {
+            if last_config_check.elapsed() >= ROUTING_CHECK_INTERVAL {
+                last_config_check = Instant::now();
+                let c = pool.upstream_config.read().await;
+                if config != *c {
+                    upstream = None;
+                    config = (*c).clone();
+                }
+            }
+
+            if upstream.is_none() || reconnect {
+                reconnect = false;
+                match DB::connect(config.clone(), None, None).await {
                     Ok(conn) => upstream = Some(conn),
                     Err(e) => {
                         rate_limit(true, ADAPTER_SHALLOW_REFRESH_OPEN, || {
@@ -283,7 +295,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                             "Failed to set schema path for refresh",
                         )
                     });
-                    reset = true;
+                    reconnect = true;
                     Self::mark_idle(&pool, idx).await;
                     continue;
                 }
@@ -313,7 +325,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                             "Failed to refresh cached query",
                         )
                     });
-                    reset = true;
+                    reconnect = true;
                     Self::mark_idle(&pool, idx).await;
                     continue;
                 }

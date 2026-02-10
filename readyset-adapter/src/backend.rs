@@ -81,6 +81,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::bail;
 use clap::ValueEnum;
 use crossbeam_skiplist::SkipSet;
+use database_utils::{DatabaseURL, UpstreamConfig};
 use futures::future::{self, OptionFuture};
 use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
@@ -101,10 +102,10 @@ use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{ReadySetResult, internal, internal_err, unsupported, unsupported_err};
 use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
-    self, AlterReadysetStatement, CacheInner, CacheType, CreateCacheStatement, DeallocateStatement,
-    DropAllCachesStatement, DropCacheStatement, ExplainStatement, Relation, SelectStatement,
-    SetStatement, ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier,
-    UseStatement,
+    self, AlterReadysetStatement, CacheInner, CacheType, ChangeUpstreamStatement,
+    CreateCacheStatement, DeallocateStatement, DropAllCachesStatement, DropCacheStatement,
+    ExplainStatement, Relation, SelectStatement, SetStatement, ShallowCacheQuery, ShowStatement,
+    SqlIdentifier, SqlQuery, StatementIdentifier, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
@@ -119,6 +120,7 @@ use readyset_util::redacted::{RedactedString, Sensitive};
 use readyset_util::retry_with_exponential_backoff;
 use readyset_version::READYSET_VERSION;
 use slab::Slab;
+use tokio::sync::RwLock;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
@@ -146,6 +148,7 @@ const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned thro
 /// Unique identifier for a prepared statement, local to a single [`Backend`].
 pub type StatementId = u32;
 
+use crate::ROUTING_CHECK_INTERVAL;
 use crate::shallow_refresh_pool::ShallowRefreshPool;
 pub use crate::shallow_refresh_pool::ShallowRefreshRequest;
 
@@ -328,6 +331,8 @@ pub struct BackendBuilder {
     cache_mode: CacheMode,
     default_ttl_ms: u64,
     default_coalesce_ms: u64,
+    upstream_config: Option<Arc<RwLock<UpstreamConfig>>>,
+    replication_enabled: bool,
 }
 
 impl Default for BackendBuilder {
@@ -355,6 +360,8 @@ impl Default for BackendBuilder {
             cache_mode: CacheMode::default(),
             default_ttl_ms: 10_000,
             default_coalesce_ms: 5_000,
+            upstream_config: None,
+            replication_enabled: true,
         }
     }
 }
@@ -365,7 +372,7 @@ impl BackendBuilder {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn build<DB: UpstreamDatabase + 'static, Handler: 'static>(
+    pub async fn build<DB: UpstreamDatabase + 'static, Handler: 'static>(
         self,
         noria: NoriaConnector,
         upstream: Option<DB>,
@@ -419,6 +426,7 @@ impl BackendBuilder {
                 cache_mode: self.cache_mode,
                 default_ttl_ms: self.default_ttl_ms,
                 default_coalesce_ms: self.default_coalesce_ms,
+                replication_enabled: self.replication_enabled,
             },
             telemetry_sender: self.telemetry_sender,
             authority,
@@ -432,6 +440,13 @@ impl BackendBuilder {
             shallow,
             shallow_refresh_pool,
             db_version: self.db_version,
+            last_upstream_url: match &self.upstream_config {
+                Some(config) => config.read().await.upstream_db_url.clone(),
+                None => None,
+            },
+            upstream_config: self.upstream_config,
+            last_routing_check: Instant::now(),
+            routing_changed: false,
             _query_handler: PhantomData,
         }
     }
@@ -554,6 +569,20 @@ impl BackendBuilder {
     pub fn default_coalesce_ms(mut self, default_coalesce_ms: u64) -> Self {
         self.default_coalesce_ms = default_coalesce_ms;
         self
+    }
+
+    pub fn upstream_config(mut self, upstream_config: Option<Arc<RwLock<UpstreamConfig>>>) -> Self {
+        self.upstream_config = upstream_config;
+        self
+    }
+
+    pub fn replication_enabled(mut self, replication_enabled: bool) -> Self {
+        self.replication_enabled = replication_enabled;
+        self
+    }
+
+    pub fn get_upstream_config(&self) -> Option<&Arc<RwLock<UpstreamConfig>>> {
+        self.upstream_config.as_ref()
     }
 }
 
@@ -695,6 +724,19 @@ where
     /// Memoized upstream database version,
     db_version: Option<String>,
 
+    /// Shared upstream config, updated by ALTER READYSET CHANGE UPSTREAM.
+    upstream_config: Option<Arc<RwLock<UpstreamConfig>>>,
+
+    /// The upstream URL this connection last connected to, used to detect routing changes.
+    last_upstream_url: Option<RedactedString>,
+
+    /// When we last checked the shared config for upstream changes (rate-limited to once/sec).
+    last_routing_check: Instant,
+
+    /// Set to true when routing changes are detected; causes all subsequent operations to error
+    /// so the client disconnects and reconnects to the new upstream.
+    routing_changed: bool,
+
     _query_handler: PhantomData<Handler>,
 }
 
@@ -749,6 +791,8 @@ struct BackendSettings {
     default_ttl_ms: u64,
     /// Specifies the default coalesce interval for shallow caches when none is specified.
     default_coalesce_ms: u64,
+    /// Whether replication is enabled. When true, CHANGE UPSTREAM is disallowed.
+    replication_enabled: bool,
 }
 
 /// QueryInfo holds information regarding the last query that was sent along this connection
@@ -984,8 +1028,47 @@ where
             .unwrap_or_else(|| DB::DEFAULT_DB_VERSION.to_string())
     }
 
+    /// Check if the upstream URL has changed and close the connection if so.
+    ///
+    /// When a routing change is detected, this returns an error to force the client to
+    /// disconnect and reconnect, picking up the new upstream on the fresh connection.
+    /// Rate-limited to at most once per second for the initial detection.
+    async fn check_routing(&mut self) -> Result<(), DB::Error> {
+        let err = || -> DB::Error {
+            ReadySetError::ConnectionClosed(
+                "upstream routing changed; reconnect to reach the new upstream".into(),
+            )
+            .into()
+        };
+
+        if self.routing_changed {
+            return Err(err());
+        }
+
+        if self.upstream_config.is_none()
+            || self.upstream.is_none()
+            || self.last_routing_check.elapsed() < ROUTING_CHECK_INTERVAL
+        {
+            return Ok(());
+        }
+        self.last_routing_check = Instant::now();
+
+        let shared = self
+            .upstream_config
+            .as_ref()
+            .ok_or_else(|| internal_err!("upstream config is not configured"))?;
+        let current_config = shared.read().await;
+        if current_config.upstream_db_url == self.last_upstream_url {
+            return Ok(());
+        }
+
+        self.routing_changed = true;
+        Err(err())
+    }
+
     /// Send ping on the upstream connection, if it exists
     pub async fn ping(&mut self) -> Result<(), DB::Error> {
+        self.check_routing().await?;
         if let Some(upstream) = &mut self.upstream {
             upstream.ping().await
         } else {
@@ -994,6 +1077,7 @@ where
     }
     /// Reset the current upstream connection
     pub async fn reset(&mut self) -> Result<(), DB::Error> {
+        self.check_routing().await?;
         if let Some(upstream) = &mut self.upstream {
             upstream.reset().await
         } else {
@@ -1006,6 +1090,7 @@ where
     /// Internally, this will set the schema search path to a single-element vector with the
     /// database, and send a `USE` command to the upstream, if any.
     pub async fn set_database(&mut self, db: &str) -> Result<(), DB::Error> {
+        self.check_routing().await?;
         if let Some(upstream) = &mut self.upstream {
             upstream
                 .query(
@@ -1028,17 +1113,20 @@ where
         user: &str,
         password: RedactedString,
     ) -> Result<(), DB::Error> {
+        self.check_routing().await?;
         if let Some(upstream) = &mut self.upstream {
             let _ = upstream.set_user(user, password).await;
         }
         Ok(())
     }
+
     pub async fn change_user(
         &mut self,
         user: &str,
         password: &str,
         database: &str,
     ) -> Result<(), DB::Error> {
+        self.check_routing().await?;
         if let Some(upstream) = &mut self.upstream {
             upstream.change_user(user, password, database).await?;
         }
@@ -1073,6 +1161,7 @@ where
         &'a mut self,
         query: &'a str,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        self.check_routing().await?;
         let upstream = self.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("Simple query requires an upstream".to_string())
         })?;
@@ -1088,6 +1177,7 @@ where
         data: DB::PrepareData<'_>,
         statement_type: PreparedStatementType,
     ) -> Result<UpstreamPrepare<DB>, DB::Error> {
+        self.check_routing().await?;
         let upstream = self.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("Prepare fallback requires an upstream".to_string())
         })?;
@@ -1107,6 +1197,7 @@ where
         statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
+        self.check_routing().await?;
         let rewrite_context = self.rewrite_context(None).await?;
         let up_prep: OptionFuture<_> = self
             .upstream
@@ -1215,6 +1306,7 @@ where
         statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
+        self.check_routing().await?;
         event.sql_type = SqlQueryType::Write;
         if let Some(ref mut upstream) = self.upstream {
             let _t = event.start_upstream_timer();
@@ -1258,6 +1350,8 @@ where
         statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
+        self.check_routing().await?;
+
         // if `handle_set()` returns an error, we aren't supposed to process
         // the SET anyway, so propagating the error is expected.
         // Then we need to determine if we're actually going to proxy to the upstream.
@@ -1554,6 +1648,7 @@ where
         data: DB::PrepareData<'_>,
         statement_type: PreparedStatementType,
     ) -> Result<&PrepareResult<DB>, DB::Error> {
+        self.check_routing().await?;
         // early return if we're preparing an unnamed statement that we already have the metadata for.
         // Also, don't bother to record an event for this query as it's not really useful data.
         if matches!(statement_type, PreparedStatementType::Unnamed)
@@ -1937,6 +2032,7 @@ where
         params: &[DfValue],
         exec_meta: &'a DB::ExecMeta,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        self.check_routing().await?;
         self.last_query = None;
         // The rewrite context isn't needed until we have looked up the statement and checked its
         // migration status, but it requires an immutable borrow of the backend while looking up the
@@ -3565,6 +3661,30 @@ where
                 self.noria.set_eviction(period, limit).await?;
                 Ok(noria_connector::QueryResult::Empty)
             }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::ChangeUpstream(
+                ChangeUpstreamStatement { url },
+            )) => {
+                if self.settings.replication_enabled {
+                    unsupported!("CHANGE UPSTREAM is only allowed when replication is disabled");
+                }
+                let parsed: DatabaseURL = url
+                    .parse()
+                    .map_err(|e| internal_err!("invalid upstream URL: {e}"))?;
+                if parsed.dialect() != self.settings.dialect {
+                    internal!("wrong database type for upstream");
+                }
+                let url = url.clone();
+                let redacted = RedactedString::from(url.clone());
+                let config = self
+                    .upstream_config
+                    .as_ref()
+                    .ok_or_else(|| internal_err!("upstream config is not configured"))?;
+                let mut config = config.write().await;
+                config.upstream_db_url = Some(url.into());
+                drop(config);
+                info!(url = %redacted, "Changed upstream configuration");
+                Ok(noria_connector::QueryResult::Empty)
+            }
             SqlQuery::CreateRls(_create_rls) => {
                 unsupported!("CREATE RLS statement is not yet supported")
             }
@@ -4276,6 +4396,7 @@ where
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
     #[inline]
     pub async fn query<'a>(&'a mut self, query: &'a str) -> Result<QueryResult<'a, DB>, DB::Error> {
+        self.check_routing().await?;
         let mut event = QueryExecutionEvent::new(EventType::Query);
         let query_log_sender = self.query_log_sender.clone();
         let slowlog = self.settings.slowlog;

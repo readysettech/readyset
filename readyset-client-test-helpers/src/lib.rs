@@ -480,10 +480,15 @@ impl TestBuilder {
             UpstreamConfig::default()
         };
         let shallow = Arc::new(CacheManager::new(None));
+        let shared_upstream_config = self
+            .backend_builder
+            .get_upstream_config()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(RwLock::new(cdc_upstream_config.clone())));
         let shallow_refresh_pool = if cdc_url.is_some() {
             Some(ShallowRefreshPool::<A::Upstream>::new(
                 &tokio::runtime::Handle::current(),
-                &cdc_upstream_config,
+                Arc::clone(&shared_upstream_config),
                 100,
             ))
         } else {
@@ -499,7 +504,12 @@ impl TestBuilder {
                     let backend_builder = self.backend_builder.clone();
                     let auto_increments = auto_increments.clone();
 
-                    let mut cdc_upstream = if let Some(url) = &cdc_url {
+                    let upstream_url =
+                        match shared_upstream_config.read().await.upstream_db_url.clone() {
+                            Some(url) => Some(url.to_string()),
+                            None => cdc_url.clone(),
+                        };
+                    let mut cdc_upstream = if let Some(url) = &upstream_url {
                         Some(A::make_upstream(url.clone()).await)
                     } else {
                         None
@@ -572,7 +582,8 @@ impl TestBuilder {
                             adapter_start_time,
                             shallow.clone(),
                             shallow_refresh_pool.clone(),
-                        );
+                        )
+                        .await;
 
                     let mut backend_shutdown_rx_clone = backend_shutdown_rx_connection.clone();
                     tokio::spawn(async move {

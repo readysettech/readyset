@@ -182,7 +182,7 @@ async fn setup_adapter(
                     if let Some(config) = replication_url.as_ref().map(UpstreamConfig::from_url) {
                         Some(ShallowRefreshPool::<LazyUpstream<$upstream>>::new(
                             &tokio::runtime::Handle::current(),
-                            &config,
+                            Arc::new(RwLock::new(config)),
                             100,
                         ))
                     } else {
@@ -204,6 +204,7 @@ async fn setup_adapter(
                         shallow,
                         shallow_refresh_pool,
                     )
+                    .await
             }};
         }
 

@@ -367,6 +367,13 @@ macro_rules! handle_error {
                     "upstream connection closed",
                 ))
             }
+            Error::ReadySet(ReadySetError::ConnectionClosed(ref msg)) => {
+                error!(%msg, "connection closed");
+                Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    msg.clone(),
+                ))
+            }
             Error::Io(e)
             | Error::MySql(mysql_async::Error::Io(mysql_async::IoError::Io(e)))
             | Error::MsqlSrv(MsqlSrvError::IoError(e)) => {
@@ -651,6 +658,13 @@ where
                     "upstream connection closed",
                 ));
             }
+            Err(Error::ReadySet(ReadySetError::ConnectionClosed(ref msg))) => {
+                error!(%msg, "connection closed");
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    msg.clone(),
+                ));
+            }
             Err(Error::Io(e))
             | Err(Error::MySql(mysql_async::Error::Io(mysql_async::IoError::Io(e))))
             | Err(Error::MsqlSrv(MsqlSrvError::IoError(e))) => {
@@ -875,6 +889,10 @@ async fn handle_column_write_err<S: AsyncRead + AsyncWrite + Unpin>(
                 "upstream connection closed",
             ))
         }
+        Error::ReadySet(ReadySetError::ConnectionClosed(ref msg)) => Err(io::Error::new(
+            io::ErrorKind::ConnectionAborted,
+            msg.clone(),
+        )),
         _ => rw.error(e.error_kind(), e.to_string().as_bytes()).await,
     }
 }

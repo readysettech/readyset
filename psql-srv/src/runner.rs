@@ -147,9 +147,13 @@ impl<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
             };
 
             if let Err(e) = result {
+                let close = matches!(&e, Error::ConnectionClosed(_));
                 self.handle_error(e)
                     .await
                     .unwrap_or_else(|e| eprintln!("{e}"));
+                if close {
+                    break;
+                }
                 continue;
             }
 

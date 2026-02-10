@@ -1428,9 +1428,11 @@ where
                 error!("Failed to recreate shallow caches: {}", e);
             }
         }
+        let replication_enabled = upstream_config.replication_enabled;
+        let upstream_config = Arc::new(RwLock::new(upstream_config));
         let shallow_refresh_pool = ShallowRefreshPool::<H::UpstreamDatabase>::new(
             rt.handle(),
-            &upstream_config,
+            Arc::clone(&upstream_config),
             options.shallow_refresh_workers,
         );
 
@@ -1477,7 +1479,9 @@ where
                 .set_placeholder_inlining(options.feature_placeholder_inlining)
                 .connections(connections.clone())
                 .metrics_handle(prometheus_handle.clone().map(MetricsHandle::new))
-                .sampler_tx(global_sampler_tx.clone());
+                .sampler_tx(global_sampler_tx.clone())
+                .upstream_config(Some(Arc::clone(&upstream_config)))
+                .replication_enabled(replication_enabled);
             let telemetry_sender = telemetry_sender.clone();
 
             // Initialize the reader layer for the adapter.
@@ -1489,13 +1493,13 @@ where
                 ReadRequestHandler::new(readers.clone(), tx, Duration::from_secs(5))
             });
 
-            let upstream_config = upstream_config.clone();
+            let upstream_config = Arc::clone(&upstream_config);
             let sys_props = Arc::clone(&sys_props);
             let status_reporter_clone = status_reporter.clone();
             let schema_catalog_clone = schema_catalog.clone();
             let fut = async move {
                 let upstream_res = connect_upstream::<H::UpstreamDatabase>(
-                    upstream_config.clone(),
+                    upstream_config.read().await.clone(),
                     no_upstream_connections,
                 )
                 .await
@@ -1543,7 +1547,8 @@ where
                                         adapter_start_time,
                                         shallow,
                                         Some(shallow_refresh_pool),
-                                    );
+                                    )
+                                    .await;
                                 connection_handler.process_connection(s, backend).await;
                             }
                             Err(error) => {

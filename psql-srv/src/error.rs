@@ -69,6 +69,9 @@ pub enum Error {
 
     #[error(transparent)]
     PostgresError(#[from] tokio_postgres::error::Error),
+
+    #[error("connection closed: {0}")]
+    ConnectionClosed(String),
 }
 
 impl From<Error> for BackendMessage {
@@ -78,6 +81,13 @@ impl From<Error> for BackendMessage {
                 return BackendMessage::error(
                     ErrorSeverity::Fatal,
                     SqlState::INVALID_AUTHORIZATION_SPECIFICATION,
+                    message,
+                )
+            }
+            Error::ConnectionClosed(message) => {
+                return BackendMessage::error(
+                    ErrorSeverity::Fatal,
+                    SqlState::ADMIN_SHUTDOWN,
                     message,
                 )
             }
@@ -129,7 +139,9 @@ impl From<Error> for BackendMessage {
             | Error::UnsupportedType(_) => SqlState::FEATURE_NOT_SUPPORTED,
             Error::UnexpectedMessage(_) | Error::Scram(_) => SqlState::PROTOCOL_VIOLATION,
             Error::PostgresError(_) => SqlState::INTERNAL_ERROR,
-            Error::InvalidAuthorizationSpecification(_) => unreachable!(),
+            Error::InvalidAuthorizationSpecification(_) | Error::ConnectionClosed(_) => {
+                unreachable!()
+            }
         };
 
         BackendMessage::error(ErrorSeverity::Error, sqlstate, error.to_string())

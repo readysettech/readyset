@@ -16,6 +16,7 @@ pub mod views_synchronizer;
 
 use std::fmt::{Display, Formatter, Result};
 use std::str::FromStr;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use clap::ValueEnum;
@@ -27,6 +28,9 @@ pub use crate::upstream_database::{
     UpstreamConfig, UpstreamDatabase, UpstreamDestination, UpstreamPrepare,
 };
 pub use crate::views_synchronizer::ViewsSynchronizer;
+
+/// How often each connection checks the shared config for upstream changes.
+pub(crate) const ROUTING_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 /// If ReadySet should run in standalone mode with just the adapter.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum)]

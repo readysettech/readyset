@@ -355,6 +355,10 @@ pub enum ReadySetError {
     #[error("Internal error: {0}")]
     Internal(String),
 
+    /// The client connection should be closed (e.g., upstream routing changed).
+    #[error("Connection closed: {0}")]
+    ConnectionClosed(String),
+
     /// An error has occurred during an HTTP request
     #[error("{0}")]
     HttpError(String),
