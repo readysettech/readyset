@@ -218,28 +218,6 @@ async fn aggregate_in() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow, mysql_upstream)]
-async fn set_autocommit() {
-    let (opts, _handle, shutdown_tx) = setup().await;
-    let mut conn = Conn::new(opts).await.unwrap();
-    // We do not support SET autocommit = 0;
-    conn.query_drop("SET @@SESSION.autocommit = 1;")
-        .await
-        .unwrap();
-    conn.query_drop("SET @@SESSION.autocommit = 0;")
-        .await
-        .unwrap_err();
-    conn.query_drop("SET @@LOCAL.autocommit = 1;")
-        .await
-        .unwrap();
-    conn.query_drop("SET @@LOCAL.autocommit = 0;")
-        .await
-        .unwrap_err();
-
-    shutdown_tx.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow, mysql_upstream)]
 async fn proxy_unsupported_sets() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()

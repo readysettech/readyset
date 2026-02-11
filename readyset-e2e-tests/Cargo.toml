@@ -14,6 +14,7 @@ path = "tests.rs"
 test-discovery = { path = "../test-discovery" }
 
 [dev-dependencies]
+assert_matches = { workspace = true }
 chrono = { workspace = true }
 database-utils = { path = "../database-utils" }
 dataflow-state = { path = "../dataflow-state" }

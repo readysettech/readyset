@@ -165,118 +165,6 @@ async fn out_of_band_query_with_fallback() {
     shutdown_tx.shutdown().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[tags(serial, mysql_upstream)]
-async fn autocommit_state_query() {
-    let _query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle, shutdown_tx) = setup(
-        _query_status_cache,
-        true, // fallback enabled
-        MigrationMode::OutOfBand,
-        UnsupportedSetMode::Proxy,
-    )
-    .await;
-    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
-    conn.query_drop("CREATE TABLE test (x int, y int)")
-        .await
-        .unwrap();
-    sleep().await;
-
-    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 2)")
-        .await
-        .unwrap();
-    sleep().await;
-
-    conn.query_drop("CREATE CACHE FROM SELECT * FROM test")
-        .await
-        .unwrap();
-    conn.query_drop("CREATE CACHE ALWAYS FROM SELECT y FROM test where x = ?")
-        .await
-        .unwrap();
-    sleep().await;
-
-    conn.query_drop("SELECT * FROM test").await.unwrap();
-    sleep().await;
-
-    // We should initially go to ReadySet because no unsupported SET has been sent, and we can
-    // support this query.
-    let destination: QueryInfo = conn
-        .query_first("EXPLAIN LAST STATEMENT")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_matches!(destination.destination, QueryDestination::Readyset(_));
-
-    conn.query_drop("SELECT y FROM test where x = 4")
-        .await
-        .unwrap();
-    sleep().await;
-
-    let destination: QueryInfo = conn
-        .query_first("EXPLAIN LAST STATEMENT")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_matches!(destination.destination, QueryDestination::Readyset(_));
-
-    conn.query_drop("SET autocommit=0").await.unwrap();
-    sleep().await;
-
-    conn.query_drop("SELECT * FROM test").await.unwrap();
-    sleep().await;
-
-    // After turning off autocommit we should send to upstream because this is unsupported.
-    let destination: QueryInfo = conn
-        .query_first("EXPLAIN LAST STATEMENT")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(destination.destination, QueryDestination::Upstream);
-
-    // However our ALWAYS query should still go to ReadySet.
-    conn.query_drop("SELECT y FROM test where x = 4")
-        .await
-        .unwrap();
-    sleep().await;
-
-    let destination: QueryInfo = conn
-        .query_first("EXPLAIN LAST STATEMENT")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_matches!(destination.destination, QueryDestination::Readyset(_));
-
-    conn.query_drop("SET autocommit=1").await.unwrap();
-    sleep().await;
-
-    conn.query_drop("SELECT * FROM test").await.unwrap();
-    sleep().await;
-
-    // Turning autocommit back on should cause us to then send back to ReadySet.
-    let destination: QueryInfo = conn
-        .query_first("EXPLAIN LAST STATEMENT")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_matches!(destination.destination, QueryDestination::Readyset(_));
-
-    // Same for our ALWAYS query.
-    conn.query_drop("SELECT y from test where x = 4")
-        .await
-        .unwrap();
-    sleep().await;
-
-    // Turning autocommit back on should cause us to then send back to ReadySet.
-    let destination: QueryInfo = conn
-        .query_first("EXPLAIN LAST STATEMENT")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_matches!(destination.destination, QueryDestination::Readyset(_));
-
-    shutdown_tx.shutdown().await;
-}
-
 // This is particularly challenging to test because the way that mysql_async works, is if the
 // statement has ever been prepared on the connection, it will refuse to prepare it again and
 // re-use the old prepare. This makes sense from an efficiency perspective but makes it challenging
@@ -286,9 +174,9 @@ async fn autocommit_state_query() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, mysql_upstream)]
 async fn autocommit_prepare_execute() {
-    let _query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle, shutdown_tx) = setup(
-        _query_status_cache,
+        query_status_cache,
         true, // fallback enabled
         MigrationMode::OutOfBand,
         UnsupportedSetMode::Proxy,

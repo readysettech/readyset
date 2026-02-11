@@ -217,10 +217,17 @@ pub enum UnsupportedSetMode {
 /// digraph ProxyState {
 ///     Never -> Never;
 ///
-///     Upstream -> InTransaction;
-///     InTransaction -> Upstream;
-///     Upstream -> ProxyAlways;
-///     InTransaction -> ProxyAlways;
+///     Fallback -> InTransaction   [label="BEGIN"];
+///     InTransaction -> Fallback   [label="COMMIT/ROLLBACK"];
+///
+///     Fallback -> AutocommitOff   [label="SET autocommit=0"];
+///     InTransaction -> AutocommitOff [label="SET autocommit=0"];
+///     AutocommitOff -> Fallback   [label="SET autocommit=1"];
+///     AutocommitOff -> AutocommitOff [label="COMMIT/ROLLBACK"];
+///
+///     Fallback -> ProxyAlways     [label="unsupported SET (Proxy mode)"];
+///     InTransaction -> ProxyAlways [label="unsupported SET (Proxy mode)"];
+///     AutocommitOff -> ProxyAlways [label="unsupported SET (Proxy mode)"];
 /// }
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4338,6 +4345,10 @@ where
             set_results_encoding,
         } = Handler::handle_set_statement(set);
 
+        // NOTE: The unsupported check runs before autocommit processing intentionally.
+        // A compound SET like `SET autocommit=0, unknown_var=1` is rejected atomically
+        // in Error mode — the autocommit state change is not applied. This matches
+        // MySQL's all-or-nothing SET semantics.
         if unsupported {
             match settings.unsupported_set_mode {
                 UnsupportedSetMode::Error => {
@@ -4364,32 +4375,22 @@ where
             }
         }
         if let Some(enabled) = set_autocommit {
-            if !enabled {
-                warn!(
-                    set = %set.display(settings.dialect),
-                    "Disabling autocommit is an anti-pattern for use with Readyset, as all queries would then be proxied upstream."
-                );
-            }
-
-            match settings.unsupported_set_mode {
-                UnsupportedSetMode::Error => {
-                    if enabled {
-                        state.proxy_state.set_autocommit(enabled);
-                    } else {
-                        let e = ReadySetError::SetDisallowed {
-                            statement: query.to_string(),
-                        };
-                        if has_upstream {
-                            event.set_noria_error(&e);
-                        }
-                        return Err(e.into());
-                    }
+            let prev = state.proxy_state;
+            state.proxy_state.set_autocommit(enabled);
+            if state.proxy_state != prev {
+                if matches!(state.proxy_state, ProxyState::AutocommitOff) {
+                    debug!(
+                        set = %set.display(settings.dialect),
+                        "Autocommit disabled; all queries will be proxied upstream"
+                    );
+                    metrics::counter!(recorded::SET_AUTOCOMMIT_DISABLED).increment(1);
+                } else if matches!(prev, ProxyState::AutocommitOff) {
+                    debug!(
+                        set = %set.display(settings.dialect),
+                        "Autocommit re-enabled"
+                    );
+                    metrics::counter!(recorded::SET_AUTOCOMMIT_ENABLED).increment(1);
                 }
-                UnsupportedSetMode::Proxy => {
-                    state.proxy_state.set_autocommit(enabled);
-                }
-                // TODO: I'm not sure this is correct ....
-                UnsupportedSetMode::Allow => {}
             }
         }
         if let Some(search_path) = set_search_path {

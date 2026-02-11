@@ -84,6 +84,12 @@ pub const QUERY_LOG_PARSE_ERRORS: &str = "readyset_query_log_parse_errors";
 /// Counter: The number of SET statements that were disallowed.
 pub const QUERY_LOG_SET_DISALLOWED: &str = "readyset_query_log_set_disallowed";
 
+/// Counter: The number of times autocommit was disabled via SET autocommit=0.
+pub const SET_AUTOCOMMIT_DISABLED: &str = "readyset_set_autocommit_disabled";
+
+/// Counter: The number of times autocommit was re-enabled via SET autocommit=1.
+pub const SET_AUTOCOMMIT_ENABLED: &str = "readyset_set_autocommit_enabled";
+
 /// Counter: The number of requests for views that were not found
 pub const QUERY_LOG_VIEW_NOT_FOUND: &str = "readyset_query_log_view_not_found";
 
