@@ -305,7 +305,7 @@ async fn show_shallow_cache_entries() {
         .unwrap();
 
     // Test SHOW SHALLOW CACHE ENTRIES returns all entries
-    let entries: Vec<(String, String, u64, u64, u64)> =
+    let entries: Vec<(String, String, String, String, String)> =
         readyset.query("SHOW SHALLOW CACHE ENTRIES").await.unwrap();
     assert_eq!(entries.len(), 2, "Should have 2 cache entries");
 
@@ -313,7 +313,7 @@ async fn show_shallow_cache_entries() {
     let query_id = &entries[0].0;
 
     // Test SHOW SHALLOW CACHE ENTRIES WHERE query_id = '...'
-    let filtered: Vec<(String, String, u64, u64, u64)> = readyset
+    let filtered: Vec<(String, String, String, String, String)> = readyset
         .query(format!(
             "SHOW SHALLOW CACHE ENTRIES WHERE query_id = '{query_id}'"
         ))
@@ -326,14 +326,14 @@ async fn show_shallow_cache_entries() {
     );
 
     // Test SHOW SHALLOW CACHE ENTRIES LIMIT 1
-    let limited: Vec<(String, String, u64, u64, u64)> = readyset
+    let limited: Vec<(String, String, String, String, String)> = readyset
         .query("SHOW SHALLOW CACHE ENTRIES LIMIT 1")
         .await
         .unwrap();
     assert_eq!(limited.len(), 1, "LIMIT 1 should return only 1 entry");
 
     // Test SHOW SHALLOW CACHE ENTRIES WHERE query_id = '...' LIMIT 1
-    let filtered_limited: Vec<(String, String, u64, u64, u64)> = readyset
+    let filtered_limited: Vec<(String, String, String, String, String)> = readyset
         .query(format!(
             "SHOW SHALLOW CACHE ENTRIES WHERE query_id = '{query_id}' LIMIT 1"
         ))
@@ -346,7 +346,7 @@ async fn show_shallow_cache_entries() {
     );
 
     // Test filtering with non-existent query_id returns empty
-    let non_existent: Vec<(String, String, u64, u64, u64)> = readyset
+    let non_existent: Vec<(String, String, String, String, String)> = readyset
         .query("SHOW SHALLOW CACHE ENTRIES WHERE query_id = 'q_nonexistent'")
         .await
         .unwrap();
