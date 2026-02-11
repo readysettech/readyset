@@ -347,7 +347,7 @@ async fn show_shallow_cache_entries() {
 
     // Test filtering with non-existent query_id returns empty
     let non_existent: Vec<(String, String, String, String, String)> = readyset
-        .query("SHOW SHALLOW CACHE ENTRIES WHERE query_id = 'q_nonexistent'")
+        .query("SHOW SHALLOW CACHE ENTRIES WHERE query_id = 'q_12345'")
         .await
         .unwrap();
     assert!(
