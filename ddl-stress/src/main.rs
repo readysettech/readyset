@@ -3,12 +3,14 @@ use std::time::{Duration, Instant};
 use antithesis_sdk::prelude::*;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
+use failpoint_client::FailpointClient;
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Pool};
 use rand::Rng as _;
 use readyset_tracing::init_test_logging;
+use readyset_util::failpoints;
 use serde_json::json;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 // readyset_alloc initializes the global allocator
 extern crate readyset_alloc;
@@ -42,6 +44,8 @@ enum Command {
     Ddl,
     /// Query workload against Readyset
     Query,
+    /// Periodically activate SSE failpoints on Readyset to test recovery
+    Chaos,
 }
 
 #[derive(Args, Clone)]
@@ -64,6 +68,8 @@ struct ReadysetOpts {
     readyset_host: String,
     #[arg(long, env = "READYSET_PORT", default_value_t = 3307)]
     readyset_port: u16,
+    #[arg(long, env = "READYSET_HTTP_PORT", default_value_t = 6033)]
+    readyset_http_port: u16,
 }
 
 impl MysqlOpts {
@@ -104,6 +110,7 @@ fn main() -> Result<()> {
             Command::Setup => run_setup(&opts.mysql).await,
             Command::Ddl => run_ddl(&opts.mysql, opts.duration_secs).await,
             Command::Query => run_query(&opts.mysql, &opts.readyset, opts.duration_secs).await,
+            Command::Chaos => run_chaos(&opts.readyset).await,
         }
     })
 }
@@ -377,32 +384,34 @@ async fn retry_on_schema_mismatch(pool: &Pool, sql: &str) -> Result<()> {
             }
             Err(e) => {
                 let msg = e.to_string();
-                if msg.contains("Schema generation mismatch") {
-                    saw_mismatch = true;
-                    assert_reachable!("Encountered schema generation mismatch", &json!({}));
+                let is_schema_mismatch = msg.contains("Schema generation mismatch");
+                let is_leader_not_ready = msg.contains("The leader is not ready");
+
+                if is_schema_mismatch || is_leader_not_ready {
+                    if is_schema_mismatch {
+                        saw_mismatch = true;
+                        assert_reachable!("Encountered schema generation mismatch", &json!({}));
+                    }
                     if start.elapsed() >= Duration::from_secs(MAX_RETRY_SECS) {
-                        let elapsed_ms = start.elapsed().as_millis();
-                        assert_unreachable!(
-                            "Schema mismatch retry timed out",
-                            &json!({"elapsed_ms": elapsed_ms, "sql": sql})
-                        );
-                        anyhow::bail!(
-                            "Schema generation mismatch not resolved within {MAX_RETRY_SECS}s for: {sql}"
-                        );
+                        if is_schema_mismatch {
+                            let elapsed_ms = start.elapsed().as_millis();
+                            assert_unreachable!(
+                                "Schema mismatch retry timed out",
+                                &json!({"elapsed_ms": elapsed_ms, "sql": sql})
+                            );
+                            anyhow::bail!(
+                                "Schema generation mismatch not resolved within {MAX_RETRY_SECS}s for: {sql}"
+                            );
+                        } else {
+                            anyhow::bail!("Leader not ready after {MAX_RETRY_SECS}s for: {sql}");
+                        }
                     }
                     debug!(
                         elapsed_ms = start.elapsed().as_millis(),
-                        sql, "Schema mismatch, retrying in {RETRY_SLEEP_MS}ms"
-                    );
-                    tokio::time::sleep(Duration::from_millis(RETRY_SLEEP_MS)).await;
-                } else if msg.contains("The leader is not ready") {
-                    // Leader not ready is expected during DDL stress; retry like a mismatch
-                    if start.elapsed() >= Duration::from_secs(MAX_RETRY_SECS) {
-                        anyhow::bail!("Leader not ready after {MAX_RETRY_SECS}s for: {sql}");
-                    }
-                    debug!(
-                        elapsed_ms = start.elapsed().as_millis(),
-                        sql, "Leader not ready, retrying"
+                        sql,
+                        is_schema_mismatch,
+                        is_leader_not_ready,
+                        "Retryable error, retrying in {RETRY_SLEEP_MS}ms"
                     );
                     tokio::time::sleep(Duration::from_millis(RETRY_SLEEP_MS)).await;
                 } else if is_expected_error(&msg) {
@@ -419,6 +428,56 @@ async fn retry_on_schema_mismatch(pool: &Pool, sql: &str) -> Result<()> {
             }
         }
     }
+}
+
+/// Failpoint definitions used by the chaos driver: (failpoint name, action string).
+const CHAOS_FAILPOINTS: &[(&str, &str)] = &[
+    (failpoints::CONTROLLER_EVENTS_SSE_DISCONNECT, "1*return"),
+    (
+        failpoints::CONTROLLER_EVENTS_SSE_CONNECT_DELAY,
+        "1*return(1500)",
+    ),
+    (
+        failpoints::CONTROLLER_EVENTS_SSE_SEND_DELAY,
+        "1*return(1000)",
+    ),
+    (
+        failpoints::SCHEMA_CATALOG_SYNCHRONIZER_DELAY,
+        "1*sleep(2000)",
+    ),
+];
+
+async fn run_chaos(readyset: &ReadysetOpts) -> Result<()> {
+    let base_url = format!(
+        "http://{}:{}",
+        readyset.readyset_host, readyset.readyset_http_port
+    );
+
+    let client = FailpointClient::new(&base_url);
+    let mut rng = rand::rng();
+    let idx = rng.random_range(0..CHAOS_FAILPOINTS.len());
+    let (name, action) = CHAOS_FAILPOINTS[idx];
+
+    info!(failpoint = name, action, "Activating failpoint");
+    match client.set(name, action).await {
+        Ok(()) => {
+            info!(failpoint = name, "Failpoint activated successfully");
+            assert_reachable!(
+                "Chaos driver activated failpoint",
+                &json!({"failpoint": name})
+            );
+        }
+        Err(e) => {
+            error!(%e, failpoint = name, "Failed to activate failpoint");
+            assert_unreachable!(
+                "Failpoint HTTP request failed",
+                &json!({"failpoint": name, "error": e.to_string()})
+            );
+            anyhow::bail!("Failed to activate failpoint {name}: {e}");
+        }
+    }
+
+    Ok(())
 }
 
 /// Returns true for errors that are expected during normal DDL stress test operation,

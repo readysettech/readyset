@@ -1,6 +1,9 @@
 //! Failpoints
 //!
-//! A collection of failpoints that can be enabled if the `failure_injection` feature is set.
+//! Failpoint name constants for use with the `fail` crate. The constants are always available so
+//! that external test binaries (e.g. `ddl-stress`) can reference them when activating failpoints
+//! over HTTP. The actual `set_failpoint!` / `fail::fail_point!` instrumentation is gated behind
+//! the `failure_injection` feature at each call site.
 //!
 //! See **[Failure Injection](../docs/src/failure_injection.md)** for much more details.
 
@@ -57,8 +60,14 @@ pub const UPQUERY_START: &str = "upquery-start";
 pub const SCHEMA_CATALOG_SYNCHRONIZER_DELAY: &str = "schema-catalog-synchronizer-delay";
 /// Injects a failure when the adapter sets the active database (e.g. during MySQL handshake)
 pub const SET_DATABASE: &str = "set-database";
-/// Delay the controller events SSE client before its first connection attempt
-pub const CONTROLLER_EVENTS_SSE_CONNECT: &str = "controller-events-sse-connect";
 /// Force-disconnect the controller events SSE stream mid-session, causing the client to
 /// reconnect. The reconnection delivers a snapshot with the latest schema catalog.
-pub const CONTROLLER_EVENTS_SSE_FORCE_DISCONNECT: &str = "controller-events-sse-force-disconnect";
+pub const CONTROLLER_EVENTS_SSE_DISCONNECT: &str = "controller-events-sse-disconnect";
+/// Delay the SSE client before its connection attempt (client side). Uses `fail::eval` with
+/// `return(delay_ms)` to extract the delay value and performs a `tokio::time::sleep`. Configure
+/// with e.g. `"1*return(15000)"` to delay one connection attempt by 15 seconds.
+pub const CONTROLLER_EVENTS_SSE_CONNECT_DELAY: &str = "controller-events-sse-connect-delay";
+/// Delay event broadcast on the server side. Uses `fail::eval` with `return(delay_ms)` to
+/// extract the delay value and performs a `std::thread::sleep` outside the lock scope. Configure
+/// with e.g. `"1*return(3000)"` to delay one broadcast by 3 seconds.
+pub const CONTROLLER_EVENTS_SSE_SEND_DELAY: &str = "controller-events-sse-send-delay";

@@ -192,6 +192,21 @@ impl EventsHandle {
 
     /// Broadcast an event to all active subscribers. Does nothing if we are not the leader.
     fn broadcast(&self, event: ControllerEvent) {
+        // Use fail::eval instead of set_failpoint! so we can sleep *outside* the lock scope.
+        // The fail crate's built-in sleep action uses std::thread::sleep, which would block the
+        // tokio worker thread while holding the events_tx read lock.
+        // Configure with "return(delay_ms)" to trigger, e.g. "1*return(3000)".
+        #[cfg(feature = "failure_injection")]
+        if let Some(delay_ms) = fail::eval(
+            readyset_util::failpoints::CONTROLLER_EVENTS_SSE_SEND_DELAY,
+            |v| v.and_then(|s| s.parse::<u64>().ok()),
+        )
+        .flatten()
+        {
+            tracing::info!(delay_ms, "SSE send failpoint: delaying broadcast");
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        }
+
         let events_tx = self.events_tx.read().expect("events_tx lock poisoned");
         if let Some(tx) = events_tx.as_ref() {
             // This can only be an error if there are no active receivers; we don't care about

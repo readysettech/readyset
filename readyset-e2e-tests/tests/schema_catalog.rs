@@ -259,8 +259,7 @@ async fn schema_generation_mismatch_recovered_after_delayed_sse_update() {
     readyset_tracing::init_test_logging();
     let failpoint_guard = FailScenario::setup();
 
-    let (rs_opts, mut handle, shutdown_tx) =
-        TestBuilder::default().build::<MySQLAdapter>().await;
+    let (rs_opts, mut handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
 
     let db_name = rs_opts.db_name().unwrap().to_string();
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
@@ -278,9 +277,7 @@ async fn schema_generation_mismatch_recovered_after_delayed_sse_update() {
     let mut attempt = 0u64;
     loop {
         attempt += 1;
-        let query = format!(
-            "SELECT * FROM sse_race WHERE id = 1 /* warmup:{attempt} */"
-        );
+        let query = format!("SELECT * FROM sse_race WHERE id = 1 /* warmup:{attempt} */");
         if rs_conn.query_drop(query).await.is_ok() {
             break;
         }
@@ -353,8 +350,7 @@ async fn schema_catalog_recovers_after_sse_stream_disconnect() {
     readyset_tracing::init_test_logging();
     let failpoint_guard = FailScenario::setup();
 
-    let (rs_opts, mut handle, shutdown_tx) =
-        TestBuilder::default().build::<MySQLAdapter>().await;
+    let (rs_opts, mut handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
 
     let db_name = rs_opts.db_name().unwrap().to_string();
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
@@ -390,16 +386,10 @@ async fn schema_catalog_recovers_after_sse_stream_disconnect() {
     // Arm failpoints:
     // 1. Force-disconnect the SSE stream once (fires inside connect_and_stream's loop)
     // 2. Delay the subsequent reconnection by 15s
-    fail::cfg(
-        failpoints::CONTROLLER_EVENTS_SSE_FORCE_DISCONNECT,
-        "1*return",
-    )
-    .expect("failed to set SSE force-disconnect failpoint");
-    fail::cfg(
-        failpoints::CONTROLLER_EVENTS_SSE_CONNECT,
-        "1*return(15000)",
-    )
-    .expect("failed to set SSE connect delay failpoint");
+    fail::cfg(failpoints::CONTROLLER_EVENTS_SSE_DISCONNECT, "1*return")
+        .expect("failed to set SSE force-disconnect failpoint");
+    fail::cfg(failpoints::CONTROLLER_EVENTS_SSE_CONNECT_DELAY, "1*return(15000)")
+        .expect("failed to set SSE connect delay failpoint");
 
     // Give time for the force-disconnect to fire (~1s tick interval + processing).
     sleep(Duration::from_secs(3)).await;

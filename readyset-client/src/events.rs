@@ -17,6 +17,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use failpoint_macros::set_failpoint;
 use futures_util::StreamExt;
 use hyper::client::HttpConnector;
 use hyper::{Body, Client, Method, Request, StatusCode};
@@ -331,7 +332,7 @@ impl ControllerEventsClient {
             // Configure with "return(delay_ms)" to trigger, e.g. "1*return(15000)".
             #[cfg(feature = "failure_injection")]
             if let Some(delay_ms) = fail::eval(
-                readyset_util::failpoints::CONTROLLER_EVENTS_SSE_CONNECT,
+                readyset_util::failpoints::CONTROLLER_EVENTS_SSE_CONNECT_DELAY,
                 |v| v.and_then(|s| s.parse::<u64>().ok()),
             )
             .flatten()
@@ -412,6 +413,10 @@ impl ControllerEventsClient {
         let mut body_stream = res.into_body();
 
         while let Some(chunk_result) = body_stream.next().await {
+            set_failpoint!(
+                readyset_util::failpoints::CONTROLLER_EVENTS_SSE_DISCONNECT,
+                |_| Err(internal_err!("failpoint: SSE stream disconnect"))
+            );
             let chunk = chunk_result.map_err(|e| internal_err!("Failed to read chunk: {e}"))?;
             let events = processor.process_chunk(&chunk)?;
 
@@ -428,12 +433,6 @@ impl ControllerEventsClient {
                     }
                 }
             }
-
-            #[cfg(feature = "failure_injection")]
-            failpoint_macros::set_failpoint!(
-                readyset_util::failpoints::CONTROLLER_EVENTS_SSE_FORCE_DISCONNECT,
-                |_| Ok(true)
-            );
         }
 
         // The stream ended normally, we should try to reconnect
