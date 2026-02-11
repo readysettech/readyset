@@ -219,6 +219,7 @@ pub enum UnsupportedSetMode {
 ///
 ///     Fallback -> InTransaction   [label="BEGIN"];
 ///     InTransaction -> Fallback   [label="COMMIT/ROLLBACK"];
+///     InTransaction -> Fallback   [label="SET autocommit=1"];
 ///
 ///     Fallback -> AutocommitOff   [label="SET autocommit=0"];
 ///     InTransaction -> AutocommitOff [label="SET autocommit=0"];
@@ -292,13 +293,14 @@ impl ProxyState {
     }
 
     /// Sets the autocommit state accordingly. If turning autocommit on, will set ProxyState to
-    /// Fallback as long as current state is AutocommitOff.
+    /// Fallback as long as current state is AutocommitOff or InTransaction (the latter models
+    /// MySQL's implicit COMMIT on `SET autocommit=1` during an active transaction).
     ///
     /// If turning autocommit off, will set state to AutocommitOff as long as state is not
     /// currently ProxyAlways or Never, as these states should not be overwritten.
     fn set_autocommit(&mut self, on: bool) {
         if on {
-            if matches!(self, Self::AutocommitOff) {
+            if matches!(self, Self::AutocommitOff | Self::InTransaction) {
                 *self = ProxyState::Fallback;
             }
         } else if !matches!(self, Self::ProxyAlways | Self::Never) {

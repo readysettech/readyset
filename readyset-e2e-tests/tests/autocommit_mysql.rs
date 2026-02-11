@@ -175,3 +175,70 @@ async fn autocommit_error_mode_query_routing() {
 async fn autocommit_allow_mode_query_routing() {
     autocommit_lifecycle(UnsupportedSetMode::Allow).await;
 }
+
+// Verify that SET autocommit=1 during an explicit transaction (BEGIN) returns to Fallback.
+// MySQL treats SET autocommit=1 inside a transaction as an implicit COMMIT.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, mysql_upstream)]
+async fn autocommit_on_during_transaction() {
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
+    let (opts, _handle, shutdown_tx) = setup_with_cache(
+        query_status_cache,
+        true,
+        MigrationMode::OutOfBand,
+        UnsupportedSetMode::Error,
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t_ac (x int)").await.unwrap();
+    sleep().await;
+
+    conn.query_drop("INSERT INTO t_ac (x) VALUES (1)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM t_ac")
+        .await
+        .unwrap();
+    sleep().await;
+
+    // Verify initial query goes to ReadySet.
+    conn.query_drop("SELECT * FROM t_ac").await.unwrap();
+    sleep().await;
+
+    let destination: QueryInfo = conn
+        .query_first("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
+
+    // Start an explicit transaction — queries should go upstream.
+    conn.query_drop("BEGIN").await.unwrap();
+    conn.query_drop("SELECT * FROM t_ac").await.unwrap();
+    sleep().await;
+
+    let destination: QueryInfo = conn
+        .query_first("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(destination.destination, QueryDestination::Upstream);
+
+    // SET autocommit=1 during transaction should implicitly commit and return to Fallback.
+    conn.query_drop("SET autocommit=1").await.unwrap();
+    sleep().await;
+
+    conn.query_drop("SELECT * FROM t_ac").await.unwrap();
+    sleep().await;
+
+    let destination: QueryInfo = conn
+        .query_first("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
+
+    shutdown_tx.shutdown().await;
+}
