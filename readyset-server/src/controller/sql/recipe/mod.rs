@@ -121,6 +121,17 @@ impl Recipe {
         res
     }
 
+    /// Reset this recipe to a blank state, preserving configuration (dialect, sql config,
+    /// mir config, permissive_writes).
+    pub(crate) fn reset(&mut self) {
+        *self = Recipe::with_config(
+            self.dialect(),
+            self.inc.config.clone(),
+            self.inc.mir_config().clone(),
+            self.inc.permissive_writes,
+        );
+    }
+
     /// Set the MIR configuration for this recipe
     pub(crate) fn set_mir_config(&mut self, mir_config: super::mir::Config) {
         self.inc.set_mir_config(mir_config)
@@ -149,6 +160,11 @@ impl Recipe {
     /// Returns a set of all *original names* for all caches in the recipe (not including aliases)
     pub(in crate::controller) fn cache_names(&self) -> impl Iterator<Item = &Relation> + '_ {
         self.inc.registry.cache_names()
+    }
+
+    /// Returns a set of all *original names* for all tables in the recipe (not including aliases)
+    pub(in crate::controller) fn table_names(&self) -> impl Iterator<Item = &Relation> + '_ {
+        self.inc.registry.table_names()
     }
 
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.

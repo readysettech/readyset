@@ -489,6 +489,15 @@ impl ExprRegistry {
         })
     }
 
+    /// Returns an iterator over all *original names* for all tables in the recipe (not including
+    /// aliases)
+    pub(super) fn table_names(&self) -> impl Iterator<Item = &Relation> + '_ {
+        self.expressions.values().filter_map(|expr| match expr {
+            RecipeExpr::Table { name, .. } => Some(name),
+            _ => None,
+        })
+    }
+
     /// Removes the [`RecipeExpr`] associated with the given name (or alias), if
     /// it exists, and all the [`RecipeExpr`]s that depend on it.
     /// Returns the removed [`RecipeExpr`] if it was present, or `None` otherwise.

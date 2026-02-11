@@ -16,16 +16,18 @@ use std::cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::ops::Deref;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
 use array2::Array2;
 use common::{IndexPair, Tag};
 use dataflow::domain::replay_paths::ReplayPath;
+use dataflow::node::{self, Column};
 use dataflow::payload::{packets::Evict, Eviction};
 use dataflow::prelude::{ChannelCoordinator, DomainIndex, DomainNodes, Graph, NodeIndex};
 use dataflow::{
-    BaseTableState, DomainBuilder, DomainConfig, DomainRequest, NodeMap, Packet,
+    BaseTableState, DomainBuilder, DomainConfig, DomainRequest, DurabilityMode, NodeMap, Packet,
     PersistenceParameters, Sharding,
 };
 use failpoint_macros::set_failpoint;
@@ -62,6 +64,7 @@ use schema_catalog::SchemaGeneration;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use tokio::fs;
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, trace, warn};
 use vec1::{vec1, Vec1};
@@ -1713,6 +1716,90 @@ impl DfState {
             None,
         )
         .await
+    }
+
+    /// Reset the dataflow state to empty, removing all base tables, caches, views, and domain
+    /// state. Preserves configuration (dialect, sql/mir config, persistence, sharding, etc.).
+    ///
+    /// This bypasses the migration system entirely because no domains are running at this point
+    /// (called on startup before worker recovery).
+    ///
+    /// Returns `true` if tables were actually removed, `false` if state was already empty.
+    pub(super) fn remove_all_tables(&mut self) -> bool {
+        if self.recipe.table_names().next().is_none() {
+            return false;
+        }
+
+        self.recipe.reset();
+        let recipe = self.recipe.clone();
+
+        let mut g = Graph::new();
+        let source = g.add_node(node::Node::new::<_, _, Vec<Column>, _>(
+            "source",
+            Vec::new(),
+            node::special::Source,
+        ));
+
+        let mut materializations = Materializations::new();
+        materializations.set_config(self.materializations.config.clone());
+
+        *self = DfState::new(
+            g,
+            source,
+            0,
+            self.sharding,
+            self.domain_config.clone(),
+            self.persistence.clone(),
+            materializations,
+            recipe,
+            None,
+            HashMap::new(),
+            Arc::new(ChannelCoordinator::new()),
+            self.replication_strategy,
+        );
+
+        true
+    }
+
+    /// Remove any persistent state on disk (RocksDB databases) from the storage directory
+    /// and the working temp directory (if configured and different from storage_dir).
+    ///
+    /// This is called unconditionally when replication is disabled (shallow-only mode) because
+    /// stale files may exist on disk even if the authority state has no tables (e.g. fresh
+    /// authority or deserialization failure).
+    pub(super) async fn remove_persistent_state(&self) {
+        if self.persistence.mode != DurabilityMode::Permanent {
+            return;
+        }
+
+        if let Some(ref storage_dir) = self.persistence.storage_dir {
+            Self::remove_dir(storage_dir).await;
+        }
+
+        if let Some(ref working_dir) = self.persistence.working_temp_dir {
+            if self.persistence.storage_dir.as_ref() != Some(working_dir) {
+                Self::remove_dir(working_dir).await;
+            }
+        }
+    }
+
+    /// Remove a directory and all its contents, logging on success or failure.
+    async fn remove_dir(path: &Path) {
+        match fs::try_exists(path).await {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(e) => {
+                error!(path = %path.display(), error = %e, "Failed to access directory");
+                return;
+            }
+        }
+        if let Err(e) = fs::remove_dir_all(path).await {
+            error!(
+                path = %path.display(),
+                error = %e,
+                "Failed to clean up directory"
+            );
+        }
     }
 
     /// Remove all references to the given [`WorkerIdentifier`] from the runtime state of the

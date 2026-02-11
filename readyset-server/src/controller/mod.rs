@@ -545,11 +545,30 @@ impl Controller {
                     .await?;
             }
             AuthorityUpdate::WonLeaderElection(LeaderElectionResults {
-                controller_state: state,
+                controller_state: mut state,
                 cache_ddl,
             }) => {
                 info!("won leader election, creating Leader");
                 gauge!(recorded::CONTROLLER_IS_LEADER).set(1f64);
+
+                // If replication is disabled (shallow-only mode), clean up any deep
+                // state left over from a previous replication-enabled run.  Disk
+                // cleanup is unconditional because stale RocksDB files may exist
+                // even when the authority state has no tables (e.g. fresh authority
+                // or deserialization failure).  This must happen before Leader::new
+                // so that worker recovery never sees stale domains.
+                if !self.config.replicator_config.replication_enabled {
+                    info!(
+                        "Removing all dataflow state and persistent storage for shallow-only mode"
+                    );
+                    state.dataflow_state.remove_persistent_state().await;
+                    if state.dataflow_state.remove_all_tables() {
+                        self.authority
+                            .overwrite_controller_state(state.clone())
+                            .await?;
+                    }
+                }
+
                 let background_task_failed_tx = self.background_task_failed_tx.clone();
                 self.table_statuses.init(&state.dataflow_state).await;
                 // Extract the initial catalog before `state` is moved into
@@ -595,7 +614,11 @@ impl Controller {
                         CONTROLLER_REQUEST_TIMEOUT,
                     )
                     .await?;
-                self.cache_ddl = cache_ddl;
+                self.cache_ddl = if self.config.replicator_config.replication_enabled {
+                    cache_ddl
+                } else {
+                    None
+                };
 
                 self.events_handle.start(initial_catalog);
             }
