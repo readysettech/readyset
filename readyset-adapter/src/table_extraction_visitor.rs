@@ -29,6 +29,9 @@ impl<'ast> Visitor<'ast> for TableReferenceCollector {
             readyset_sql::ast::TableExprInner::Subquery(_) => {
                 // Let the visitor handle subqueries recursively
             }
+            readyset_sql::ast::TableExprInner::Values { .. } => {
+                // VALUES clauses are constant data, no table references to collect
+            }
         }
 
         // Continue walking the table expression for nested structures

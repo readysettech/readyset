@@ -860,6 +860,12 @@ fn table_expr_name(table_expr: &TableExpr) -> ReadySetResult<Relation> {
             .ok_or_else(|| invalid_query_err!("All subqueries must have an alias"))?
             .clone()
             .into()),
+        TableExprInner::Values { .. } => Ok(table_expr
+            .alias
+            .as_ref()
+            .ok_or_else(|| invalid_query_err!("All VALUES clauses must have an alias"))?
+            .clone()
+            .into()),
     }
 }
 
@@ -986,6 +992,9 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                 }
 
                 Ok(rel)
+            }
+            TableExprInner::Values { .. } => {
+                unsupported!("VALUES clauses are not yet supported in query graphs")
             }
         }
     };

@@ -103,7 +103,7 @@ pub(crate) fn subquery_schemas<'a>(
                     TableExprInner::Subquery(sq) => {
                         te.alias.as_ref().map(|alias| (alias, sq.as_mut()))
                     }
-                    TableExprInner::Table(_) => None,
+                    TableExprInner::Table(_) | TableExprInner::Values { .. } => None,
                 }),
         )
         .map(|(name, stmt)| {

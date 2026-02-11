@@ -104,7 +104,9 @@ impl<'ast, S: ImpliedTablesContext> VisitorMut<'ast> for ExpandImpliedTablesVisi
                     Some((
                         match &tbl.inner {
                             TableExprInner::Table(t) => t.clone(),
-                            TableExprInner::Subquery(_) => tbl.alias.clone()?.into(),
+                            TableExprInner::Subquery(_) | TableExprInner::Values { .. } => {
+                                tbl.alias.clone()?.into()
+                            }
                         },
                         tbl.alias
                             .clone()

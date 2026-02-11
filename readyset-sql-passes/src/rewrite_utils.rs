@@ -240,6 +240,11 @@ pub(crate) fn get_from_item_reference_name(tab_expr: &TableExpr) -> ReadySetResu
             inner: TableExprInner::Subquery(_),
             ..
         } => invalid_query!("All subqueries must have an alias"),
+        // Reject unaliased VALUES clauses.
+        TableExpr {
+            inner: TableExprInner::Values { .. },
+            ..
+        } => invalid_query!("All VALUES clauses must have an alias"),
     }
 }
 

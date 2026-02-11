@@ -2158,5 +2158,72 @@ mod tests {
 
             test_parse_expect_err!(selection(Dialect::PostgreSQL), qstr.as_bytes());
         }
+
+        #[test]
+        fn values_clause_in_join() {
+            let qstr = "SELECT v.category, c.name \
+                         FROM (VALUES ('Electronics'), ('Books'), ('Toys')) AS v(category) \
+                         LEFT JOIN categories c ON v.category = c.name";
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr.as_bytes());
+            assert_eq!(res.tables.len(), 1);
+            assert!(matches!(
+                &res.tables[0].inner,
+                TableExprInner::Values { rows } if rows.len() == 3
+            ));
+            assert_eq!(res.tables[0].alias, Some("v".into()));
+            assert_eq!(
+                res.tables[0].column_aliases,
+                vec![SqlIdentifier::from("category")]
+            );
+            assert_eq!(res.join.len(), 1);
+        }
+
+        #[test]
+        fn values_clause_multi_column() {
+            let qstr = "SELECT v.id, v.cat \
+                         FROM (VALUES (1, 'Electronics'), (2, 'Books')) AS v(id, cat) \
+                         JOIN products p ON v.id = p.id";
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr.as_bytes());
+            assert!(matches!(
+                &res.tables[0].inner,
+                TableExprInner::Values { rows } if rows.len() == 2 && rows[0].len() == 2
+            ));
+            assert_eq!(
+                res.tables[0].column_aliases,
+                vec![SqlIdentifier::from("id"), SqlIdentifier::from("cat"),]
+            );
+        }
+
+        #[test]
+        fn values_clause_on_right_side_of_join() {
+            let qstr = "SELECT c.name, v.category \
+                         FROM categories c \
+                         LEFT JOIN (VALUES ('Electronics'), ('Books')) AS v(category) \
+                         ON c.name = v.category";
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr.as_bytes());
+            assert_eq!(res.tables.len(), 1);
+            assert!(matches!(&res.tables[0].inner, TableExprInner::Table(_)));
+            assert_eq!(res.join.len(), 1);
+            match &res.join[0].right {
+                JoinRightSide::Table(te) => {
+                    assert!(
+                        matches!(&te.inner, TableExprInner::Values { rows } if rows.len() == 2)
+                    );
+                    assert_eq!(te.alias, Some("v".into()));
+                    assert_eq!(te.column_aliases, vec![SqlIdentifier::from("category")]);
+                }
+                _ => panic!("expected Table join right side"),
+            }
+        }
+
+        #[test]
+        fn values_clause_no_column_aliases() {
+            let qstr = "SELECT v.column1 \
+                         FROM (VALUES ('Electronics'), ('Books')) AS v \
+                         LEFT JOIN categories c ON v.column1 = c.name";
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr.as_bytes());
+            assert_eq!(res.tables[0].alias, Some("v".into()));
+            assert!(res.tables[0].column_aliases.is_empty());
+        }
     }
 }

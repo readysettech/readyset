@@ -834,6 +834,13 @@ pub fn walk_table_expr<'ast, V: Visitor<'ast>>(
     match &table_expr.inner {
         TableExprInner::Table(table) => visitor.visit_table(table)?,
         TableExprInner::Subquery(sq) => visitor.visit_select_statement(sq)?,
+        TableExprInner::Values { rows } => {
+            for row in rows {
+                for expr in row {
+                    visitor.visit_expr(expr)?;
+                }
+            }
+        }
     }
     if let Some(ref alias) = table_expr.alias {
         visitor.visit_sql_identifier(alias)?;

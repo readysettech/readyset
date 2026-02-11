@@ -158,6 +158,13 @@ pub enum TableExprInner {
     // TODO: re-enable after SelectStatement round-trips
     #[weight(0)]
     Subquery(Box<SelectStatement>),
+    /// A VALUES clause used as a table source (e.g., `VALUES ('a'), ('b')`)
+    /// https://www.postgresql.org/docs/current/queries-values.html
+    #[weight(0)]
+    Values {
+        /// The rows of the VALUES clause, each row is a list of expressions
+        rows: Vec<Vec<Expr>>,
+    },
 }
 
 impl TableExprInner {
@@ -188,6 +195,16 @@ impl DialectDisplay for TableExprInner {
                 if sq.lateral { "LATERAL " } else { "" },
                 sq.display(dialect)
             ),
+            TableExprInner::Values { rows } => {
+                write!(f, "(VALUES ")?;
+                for (i, row) in rows.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "({})", CommaSeparatedList::from(row).display(dialect))?;
+                }
+                write!(f, ")")
+            }
         })
     }
 }
@@ -220,8 +237,12 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
         value: sqlparser::ast::TableFactor,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        use sqlparser::ast::{TableAlias, TableFactor};
+        use sqlparser::ast::{SetExpr, TableAlias, TableFactor};
         match value {
+            TableFactor::Table {
+                alias: Some(TableAlias { columns, .. }),
+                ..
+            } if !columns.is_empty() => unsupported!("Table alias with column renaming")?,
             TableFactor::Table {
                 name,
                 alias,
@@ -239,6 +260,23 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
                 if !partitions.is_empty() {
                     unsupported!("PARTITION clause")?;
                 }
+                Ok(Self {
+                    inner: TableExprInner::Table(name.try_into_dialect(dialect)?),
+                    alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)),
+                    column_aliases: Vec::new(),
+                })
+            }
+            // VALUES clause: (VALUES ('a'), ('b')) AS t(col1)
+            TableFactor::Derived {
+                subquery,
+                alias,
+                lateral: false,
+                sample: None,
+            } if matches!(*subquery.body, SetExpr::Values(_)) => {
+                let SetExpr::Values(values) = *subquery.body else {
+                    unreachable!()
+                };
+                let rows: Vec<Vec<Expr>> = values.rows.try_into_dialect(dialect)?;
                 let (table_alias, column_aliases) = match alias {
                     Some(TableAlias { name, columns, .. }) => (
                         Some(name.into_dialect(dialect)),
@@ -250,41 +288,34 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
                     None => (None, Vec::new()),
                 };
                 Ok(Self {
-                    inner: TableExprInner::Table(name.try_into_dialect(dialect)?),
+                    inner: TableExprInner::Values { rows },
                     alias: table_alias,
                     column_aliases,
                 })
             }
+            // Regular derived table (subquery)
+            TableFactor::Derived {
+                alias: Some(TableAlias { columns, .. }),
+                ..
+            } if !columns.is_empty() => unsupported!("Table alias with column renaming")?,
             TableFactor::Derived {
                 subquery,
                 alias,
                 lateral,
                 sample: None,
-            } => {
-                let (table_alias, column_aliases) = match alias {
-                    Some(TableAlias { name, columns, .. }) => (
-                        Some(name.into_dialect(dialect)),
-                        columns
-                            .into_iter()
-                            .map(|c| c.name.into_dialect(dialect))
-                            .collect(),
-                    ),
-                    None => (None, Vec::new()),
-                };
-                match subquery.try_into_dialect(dialect)? {
-                    crate::ast::SqlQuery::Select(mut subselect) => {
-                        subselect.lateral = lateral;
-                        Ok(Self {
-                            inner: TableExprInner::Subquery(Box::new(subselect)),
-                            alias: table_alias,
-                            column_aliases,
-                        })
-                    }
-                    _ => {
-                        failed!("unexpected non-SELECT subquery in table expression")
-                    }
+            } => match subquery.try_into_dialect(dialect)? {
+                crate::ast::SqlQuery::Select(mut subselect) => {
+                    subselect.lateral = lateral;
+                    Ok(Self {
+                        inner: TableExprInner::Subquery(Box::new(subselect)),
+                        alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)),
+                        column_aliases: Vec::new(),
+                    })
                 }
-            }
+                _ => {
+                    failed!("unexpected non-SELECT subquery in table expression")
+                }
+            },
             sqlparser::ast::TableFactor::NestedJoin { .. } => unsupported!("Nested join"),
             _ => unsupported!("table expression {value:?}"),
         }

@@ -130,6 +130,10 @@ fn check_select_statement<'a>(
                                 &ctes,
                             )?));
                         }
+                        TableExprInner::Values { .. } => {
+                            // VALUES clauses are constant - no self-join concerns
+                            break;
+                        }
                     }
                     break;
                 }
