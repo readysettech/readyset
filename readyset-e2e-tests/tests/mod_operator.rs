@@ -4,7 +4,7 @@ use mysql_async::{Conn, Row, prelude::Queryable};
 use readyset_client_test_helpers::{
     TestBuilder,
     mysql_helpers::{self, MySQLAdapter},
-    psql_helpers, sleep,
+    psql_helpers,
 };
 use readyset_sql::{Dialect, DialectDisplay, ast::SqlType};
 use readyset_sql_parsing::ParsingPreset;
@@ -271,15 +271,17 @@ async fn mod_correctness_through_cache_mysql() {
         .await;
     let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
 
-    sleep().await;
-
     // Cache keyed on `id`; modulo is evaluated in the projection.
-    rs_conn
-        .query_drop("CREATE CACHE mod_cache FROM SELECT a, b, a % b FROM t1 WHERE id = ?")
-        .await
-        .unwrap();
-
-    sleep().await;
+    // Retry in case the adapter's schema catalog hasn't caught up with the
+    // server yet (schema generation mismatch).
+    eventually!(run_test: {
+        let res = rs_conn
+            .query_drop("CREATE CACHE mod_cache FROM SELECT a, b, a % b FROM t1 WHERE id = ?")
+            .await;
+        AssertUnwindSafe(|| { res })
+    }, then_assert: |result| {
+        result().unwrap();
+    });
 
     // Verify several rows: (10 % 3 = 1), (20 % 7 = 6), (21 % 7 = 0)
     for row_id in [1, 2, 4] {
@@ -360,10 +362,16 @@ async fn mod_correctness_through_cache_postgres() {
         .unwrap();
 
     // Cache keyed on `id`; modulo is evaluated in the projection.
-    rs_conn
-        .simple_query("CREATE CACHE mod_cache FROM SELECT a, b, a % b FROM t1 WHERE id = $1")
-        .await
-        .unwrap();
+    // Retry in case the adapter's schema catalog hasn't caught up with the
+    // server yet (schema generation mismatch).
+    eventually!(run_test: {
+        let res = rs_conn
+            .simple_query("CREATE CACHE mod_cache FROM SELECT a, b, a % b FROM t1 WHERE id = $1")
+            .await;
+        AssertUnwindSafe(move || res)
+    }, then_assert: |result| {
+        result().unwrap();
+    });
 
     // Verify several rows: (10 % 3 = 1), (20 % 7 = 6), (21 % 7 = 0)
     for &row_id in &[1i32, 2, 4] {
