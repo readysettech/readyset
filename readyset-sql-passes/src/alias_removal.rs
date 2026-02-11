@@ -171,7 +171,10 @@ impl<'ast> VisitorMut<'ast> for RemoveAliasesVisitor<'_> {
             table_expr.inner = TableExprInner::Table(table.clone());
         }
 
-        if !matches!(&table_expr.inner, TableExprInner::Subquery(_)) {
+        if !matches!(
+            &table_expr.inner,
+            TableExprInner::Subquery(_) | TableExprInner::Values { .. }
+        ) {
             table_expr.alias = None;
         }
 

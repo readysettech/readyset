@@ -52,147 +52,170 @@ fn check_select_statement<'a>(
             };
         }
 
-        if let Some(TableExpr {
-            inner: TableExprInner::Table(tbl),
-            ..
-        }) = stmt.tables.iter().find(|t| table_matches(t))
-        {
-            Ok(once_ok!(tbl.clone(), col.name.as_str()))
-        } else {
-            let ctes = cte_ctx
-                .iter()
-                .map(|(k, v)| (*k, *v))
-                .chain(stmt.ctes.iter().map(|cte| (&cte.name, &cte.statement)))
-                .collect::<HashMap<_, _>>();
-
-            fn trace_subquery<'a>(
-                stmt: &'a SelectStatement,
-                table: Relation,
-                col_name: &'a str,
-                ctes: &HashMap<&'a SqlIdentifier, &'a SelectStatement>,
-            ) -> ReadySetResult<
-                impl Iterator<Item = ReadySetResult<(Relation, &'a str)>> + 'a + use<'a>,
-            > {
-                check_select_statement(stmt, ctes)?;
-                let expr = stmt
-                    .fields
+        match stmt.tables.iter().find(|t| table_matches(t)) {
+            Some(TableExpr {
+                inner: TableExprInner::Table(tbl),
+                ..
+            }) => Ok(once_ok!(tbl.clone(), col.name.as_str())),
+            Some(TableExpr {
+                inner: TableExprInner::Values { .. },
+                alias,
+                ..
+            }) => Ok(once_ok!(
+                Relation::from(alias.clone().unwrap_or("".into()).to_string()),
+                col.name.as_str()
+            )),
+            _ => {
+                let ctes = cte_ctx
                     .iter()
-                    .find_map(|field| match field {
-                        FieldDefinitionExpr::Expr {
-                            expr,
-                            alias: Some(alias),
-                        } if *alias == col_name => Some(expr),
-                        FieldDefinitionExpr::Expr {
-                            expr: expr @ Expr::Column(Column { name, .. }),
-                            alias: None,
-                        } if *name == col_name => Some(expr),
-                        _ => None,
-                    })
-                    .ok_or_else(|| {
-                        invalid_query_err!(
-                            "Could not resolve column reference {}.{}",
-                            table.display_unquoted(),
-                            col_name
-                        )
-                    })?;
-                let ctes = ctes.clone();
-                Ok(expr
-                    .recursive_subexpressions()
-                    .chain(iter::once(expr))
-                    .map(move |expr| match expr {
-                        Expr::Column(col) => {
-                            Ok(Either::Left(Box::new(dependent_columns(col, stmt, &ctes)?)
-                                as Box<dyn Iterator<Item = Result<_, _>>>))
-                        }
-                        _ => Ok(Either::Right(iter::empty())),
-                    })
-                    .flatten_ok()
-                    .map(
-                        |r: Result<Result<_, _>, _>| -> Result<(Relation, &str), _> {
-                            r.and_then(std::convert::identity)
-                        },
-                    ))
-            }
+                    .map(|(k, v)| (*k, *v))
+                    .chain(stmt.ctes.iter().map(|cte| (&cte.name, &cte.statement)))
+                    .collect::<HashMap<_, _>>();
 
-            let mut res = None;
-            for te in &stmt.tables {
-                if table_matches(te) {
-                    match &te.inner {
-                        TableExprInner::Table(t) => {
-                            res = Some(once_ok!(t.clone(), col.name.as_str()));
-                            break;
-                        }
-                        TableExprInner::Subquery(sq) => {
-                            res = Some(Either::Right(trace_subquery(
-                                sq.as_ref(),
-                                table.clone(),
-                                &col.name,
-                                &ctes,
-                            )?));
-                        }
-                        TableExprInner::Values { .. } => {
-                            // VALUES clauses are constant - no self-join concerns
-                            break;
-                        }
-                    }
-                    break;
-                }
-            }
-            if res.is_none() {
-                for j in &stmt.join {
-                    match &j.right {
-                        JoinRightSide::Table(
-                            te @ TableExpr {
-                                inner: TableExprInner::Table(t),
-                                ..
+                fn trace_subquery<'a>(
+                    stmt: &'a SelectStatement,
+                    table: Relation,
+                    col_name: &'a str,
+                    ctes: &HashMap<&'a SqlIdentifier, &'a SelectStatement>,
+                ) -> ReadySetResult<
+                    impl Iterator<Item = ReadySetResult<(Relation, &'a str)>> + 'a + use<'a>,
+                > {
+                    check_select_statement(stmt, ctes)?;
+                    let expr = stmt
+                        .fields
+                        .iter()
+                        .find_map(|field| match field {
+                            FieldDefinitionExpr::Expr {
+                                expr,
+                                alias: Some(alias),
+                            } if *alias == col_name => Some(expr),
+                            FieldDefinitionExpr::Expr {
+                                expr: expr @ Expr::Column(Column { name, .. }),
+                                alias: None,
+                            } if *name == col_name => Some(expr),
+                            _ => None,
+                        })
+                        .ok_or_else(|| {
+                            invalid_query_err!(
+                                "Could not resolve column reference {}.{}",
+                                table.display_unquoted(),
+                                col_name
+                            )
+                        })?;
+                    let ctes = ctes.clone();
+                    Ok(expr
+                        .recursive_subexpressions()
+                        .chain(iter::once(expr))
+                        .map(move |expr| match expr {
+                            Expr::Column(col) => {
+                                Ok(Either::Left(Box::new(dependent_columns(col, stmt, &ctes)?)
+                                    as Box<dyn Iterator<Item = Result<_, _>>>))
+                            }
+                            _ => Ok(Either::Right(iter::empty())),
+                        })
+                        .flatten_ok()
+                        .map(
+                            |r: Result<Result<_, _>, _>| -> Result<(Relation, &str), _> {
+                                r.and_then(std::convert::identity)
                             },
-                        ) if table_matches(te) => {
-                            res = Some(once_ok!(t.clone(), col.name.as_str()));
-                            break;
-                        }
-                        JoinRightSide::Table(TableExpr {
-                            inner: TableExprInner::Subquery(sq),
-                            alias: Some(alias),
-                            ..
-                        }) if table.schema.is_none() && *alias == table.name => {
-                            res = Some(Either::Right(trace_subquery(
-                                sq,
-                                table.clone(),
-                                &col.name,
-                                &ctes,
-                            )?));
-                            break;
-                        }
-                        JoinRightSide::Tables(ts) => {
-                            if let Some(TableExpr {
-                                inner: TableExprInner::Table(tbl),
-                                ..
-                            }) = ts.iter().find(|t| table_matches(t))
-                            {
-                                res = Some(once_ok!(tbl.clone(), col.name.as_str()));
+                        ))
+                }
+
+                let mut res = None;
+                for te in &stmt.tables {
+                    if table_matches(te) {
+                        match &te.inner {
+                            TableExprInner::Table(t) => {
+                                res = Some(once_ok!(t.clone(), col.name.as_str()));
+                                break;
+                            }
+                            TableExprInner::Subquery(sq) => {
+                                res = Some(Either::Right(trace_subquery(
+                                    sq.as_ref(),
+                                    table.clone(),
+                                    &col.name,
+                                    &ctes,
+                                )?));
+                            }
+                            TableExprInner::Values { .. } => {
+                                // VALUES clauses are constant - no self-join concerns
                                 break;
                             }
                         }
-                        _ => {}
+                        break;
                     }
                 }
-            }
-
-            Ok(Either::Right(
-                res.ok_or_else(|| {
-                    unsupported_err!("Could not resolve table alias {}", table.display_unquoted())
-                })?
-                .map(move |c| {
-                    let (tbl, cn) = c?;
-                    if let (true, Some(cte)) = (tbl.schema.is_none(), ctes.get(&tbl.name)) {
-                        Ok(Either::Right(trace_subquery(cte, tbl, cn, &ctes)?))
-                    } else {
-                        Ok(once_ok!((tbl, cn)))
+                if res.is_none() {
+                    for j in &stmt.join {
+                        match &j.right {
+                            JoinRightSide::Table(
+                                te @ TableExpr {
+                                    inner: TableExprInner::Table(t),
+                                    ..
+                                },
+                            ) if table_matches(te) => {
+                                res = Some(once_ok!(t.clone(), col.name.as_str()));
+                                break;
+                            }
+                            JoinRightSide::Table(TableExpr {
+                                inner: TableExprInner::Values { .. },
+                                alias,
+                                ..
+                            }) if table.schema.is_none() && alias.as_ref() == Some(&table.name) => {
+                                // VALUES clauses on the right side of JOIN
+                                res = Some(once_ok!(
+                                    Relation::from(alias.clone().unwrap_or("".into()).to_string()),
+                                    col.name.as_str()
+                                ));
+                                break;
+                            }
+                            JoinRightSide::Table(TableExpr {
+                                inner: TableExprInner::Subquery(sq),
+                                alias: Some(alias),
+                                ..
+                            }) if table.schema.is_none() && *alias == table.name => {
+                                res = Some(Either::Right(trace_subquery(
+                                    sq,
+                                    table.clone(),
+                                    &col.name,
+                                    &ctes,
+                                )?));
+                                break;
+                            }
+                            JoinRightSide::Tables(ts) => {
+                                if let Some(TableExpr {
+                                    inner: TableExprInner::Table(tbl),
+                                    ..
+                                }) = ts.iter().find(|t| table_matches(t))
+                                {
+                                    res = Some(once_ok!(tbl.clone(), col.name.as_str()));
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
                     }
-                })
-                .flatten_ok()
-                .map(|r| r.and_then(std::convert::identity)),
-            ))
+                }
+
+                Ok(Either::Right(
+                    res.ok_or_else(|| {
+                        unsupported_err!(
+                            "Could not resolve table alias {}",
+                            table.display_unquoted()
+                        )
+                    })?
+                    .map(move |c| {
+                        let (tbl, cn) = c?;
+                        if let (true, Some(cte)) = (tbl.schema.is_none(), ctes.get(&tbl.name)) {
+                            Ok(Either::Right(trace_subquery(cte, tbl, cn, &ctes)?))
+                        } else {
+                            Ok(once_ok!((tbl, cn)))
+                        }
+                    })
+                    .flatten_ok()
+                    .map(|r| r.and_then(std::convert::identity)),
+                ))
+            }
         }
     }
 

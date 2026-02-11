@@ -90,32 +90,79 @@ pub(crate) fn subquery_schemas<'a>(
     join: &'a mut [JoinClause],
     dialect: readyset_sql::Dialect,
 ) -> ReadySetResult<HashMap<&'a SqlIdentifier, Vec<&'a SqlIdentifier>>> {
-    ctes.iter_mut()
-        .map(|cte| (&cte.name, &mut cte.statement))
-        .chain(
-            tables
-                .iter_mut()
-                .chain(join.iter_mut().flat_map(|join| match &mut join.right {
-                    JoinRightSide::Table(t) => Either::Left(iter::once(t)),
-                    JoinRightSide::Tables(ts) => Either::Right(ts.iter_mut()),
-                }))
-                .filter_map(|te| match &mut te.inner {
-                    TableExprInner::Subquery(sq) => {
-                        te.alias.as_ref().map(|alias| (alias, sq.as_mut()))
-                    }
-                    TableExprInner::Table(_) | TableExprInner::Values { .. } => None,
-                }),
-        )
-        .map(|(name, stmt)| {
-            Ok((
-                name,
-                field_names(stmt, dialect)?
-                    .into_iter()
-                    .map(|x| &*x)
-                    .collect::<Vec<&SqlIdentifier>>(),
-            ))
-        })
-        .collect()
+    // First pass: populate auto-generated column aliases for VALUES clauses that don't have
+    // explicit column names (e.g., `(VALUES (1, 'a')) AS v` gets columns `column1`, `column2`).
+    for table in tables.iter_mut() {
+        populate_values_column_aliases(table);
+    }
+    for jc in join.iter_mut() {
+        match &mut jc.right {
+            JoinRightSide::Table(te) => populate_values_column_aliases(te),
+            JoinRightSide::Tables(tes) => {
+                for te in tes {
+                    populate_values_column_aliases(te);
+                }
+            }
+        }
+    }
+
+    // Second pass: collect schemas from CTEs, subqueries, and VALUES clauses.
+    let mut schemas = HashMap::new();
+
+    for cte in ctes.iter_mut() {
+        schemas.insert(
+            &cte.name,
+            field_names(&mut cte.statement, dialect)?
+                .into_iter()
+                .map(|x| &*x)
+                .collect(),
+        );
+    }
+
+    for te in tables
+        .iter_mut()
+        .chain(join.iter_mut().flat_map(|j| match &mut j.right {
+            JoinRightSide::Table(t) => Either::Left(iter::once(t)),
+            JoinRightSide::Tables(ts) => Either::Right(ts.iter_mut()),
+        }))
+    {
+        match &mut te.inner {
+            TableExprInner::Subquery(sq) => {
+                if let Some(alias) = &te.alias {
+                    schemas.insert(
+                        alias,
+                        field_names(sq.as_mut(), dialect)?
+                            .into_iter()
+                            .map(|x| &*x)
+                            .collect(),
+                    );
+                }
+            }
+            TableExprInner::Values { .. } => {
+                if let Some(alias) = &te.alias {
+                    schemas.insert(alias, te.column_aliases.iter().collect());
+                }
+            }
+            TableExprInner::Table(_) => {}
+        }
+    }
+
+    Ok(schemas)
+}
+
+/// Populate auto-generated column aliases (`column1`, `column2`, etc.) for VALUES table
+/// expressions that don't have explicit column names, and auto-generate a table alias
+/// (`"*VALUES*"`) if none is provided (matching PostgreSQL's internal naming).
+fn populate_values_column_aliases(te: &mut TableExpr) {
+    if let TableExprInner::Values { rows } = &te.inner
+        && te.column_aliases.is_empty()
+    {
+        let num_cols = rows.first().map(|r| r.len()).unwrap_or(0);
+        for i in 1..=num_cols {
+            te.column_aliases
+                .push(SqlIdentifier::from(format!("column{}", i)));
+        }
+    }
 }
 
 // Built-in function names that are allowed in expressions containing aggregates.

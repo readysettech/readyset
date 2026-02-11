@@ -1,8 +1,14 @@
 use readyset_errors::{ReadySetError, ReadySetResult, unsupported};
 use readyset_sql::analysis::visit_mut::{VisitorMut, walk_select_statement};
-use readyset_sql::ast::{Expr, FieldDefinitionExpr, SelectStatement, SqlQuery};
+use readyset_sql::ast::{
+    Expr, FieldDefinitionExpr, JoinRightSide, SelectStatement, SqlQuery, TableExprInner,
+};
 
-/// Visitor that traverses a `SelectStatement` and errors if `ROW` is found in the projection.
+/// Visitor that errors if `ROW` is found in the projection or in VALUES clause expressions.
+///
+/// ROW in the projection cannot be serialized back to the client. ROW in VALUES clauses would
+/// create ROW-typed columns that also hit serialization issues when projected.
+/// ROW is allowed in other positions like predicates (e.g. `WHERE (a, b) IN ((1, 2))`).
 struct DisallowRowVisitor;
 
 impl<'ast> VisitorMut<'ast> for DisallowRowVisitor {
@@ -21,19 +27,43 @@ impl<'ast> VisitorMut<'ast> for DisallowRowVisitor {
                 unsupported!("ROW constructor not allowed in select");
             }
         }
+
+        // Check VALUES clauses in FROM tables and JOINs for ROW expressions.
+        // ROW/tuple expressions like VALUES((1,1), (1,2)) create ROW-typed columns
+        // that cannot be serialized when projected.
+        for te in stmt
+            .tables
+            .iter()
+            .chain(stmt.join.iter().flat_map(|j| match &j.right {
+                JoinRightSide::Table(t) => std::slice::from_ref(t),
+                JoinRightSide::Tables(ts) => ts.as_slice(),
+            }))
+        {
+            if let TableExprInner::Values { rows } = &te.inner {
+                for expr in rows.iter().flatten() {
+                    if matches!(expr, Expr::Row { .. }) {
+                        unsupported!("ROW/tuple expressions in VALUES clauses are not supported");
+                    }
+                }
+            }
+        }
+
         // Recurse into subqueries
         walk_select_statement(self, stmt)
     }
 }
 
-/// This is a temporary rule that throws an error if it sees the `ROW` constructor (implicit or
-/// explicit) in the projection. Row is allowed in other places like predicates; this is only for
-/// the projection.
+/// Checks for `ROW` constructor usage in positions that would cause serialization issues:
+/// the SELECT projection and VALUES clause expressions.
+///
+/// ROW is allowed in other positions like predicates.
 pub trait DisallowRow {
-    /// Checks if the `ROW` constructor is used in the projection of a query and throws an error if found.
+    /// Checks if the `ROW` constructor is used in the projection or VALUES clauses and
+    /// throws an error if found.
     ///
     /// ```sql
-    /// SELECT ROW(1, 2, 3) FROM t; -- This will result in an error
+    /// SELECT ROW(1, 2, 3) FROM t; -- Error: ROW in projection
+    /// SELECT * FROM (VALUES((1,2))) AS v(c) JOIN t ON ...; -- Error: ROW in VALUES
     /// ```
     ///
     /// Row is allowed in predicates:
@@ -133,6 +163,18 @@ mod tests {
         let mut query = parse_query(
             Dialect::PostgreSQL,
             "SELECT * FROM (SELECT ROW(1, 2) FROM t) sub;",
+        )
+        .unwrap();
+        assert!(query.disallow_row().is_err());
+    }
+
+    #[test]
+    fn test_disallow_row_in_values() {
+        // Double-paren VALUES produces ROW expressions — must be rejected
+        let mut query = parse_query_with_config(
+            ParsingPreset::OnlySqlparser,
+            Dialect::PostgreSQL,
+            "SELECT * FROM (VALUES((1, 1), (1, 2))) AS v(c1, c2) JOIN t ON v.c1 = t.id",
         )
         .unwrap();
         assert!(query.disallow_row().is_err());

@@ -30,7 +30,7 @@ impl<'ast> Visitor<'ast> for TableReferenceCollector {
                 // Let the visitor handle subqueries recursively
             }
             readyset_sql::ast::TableExprInner::Values { .. } => {
-                // VALUES clauses are constant data, no table references to collect
+                // VALUES clauses don't reference tables
             }
         }
 
