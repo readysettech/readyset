@@ -365,6 +365,7 @@ fn rewrite_single_array_constructor(
         tables: vec![TableExpr {
             inner: TableExprInner::Subquery(query),
             alias: Some(inner_subq_alias.clone()),
+            column_aliases: vec![],
         }],
         lateral: !stmt.lateral && !in_lateral_context, // Only set lateral if not already lateral context
         ..Default::default()
@@ -373,6 +374,7 @@ fn rewrite_single_array_constructor(
     let lateral_table = TableExpr {
         inner: TableExprInner::Subquery(Box::new(lateral_subquery)),
         alias: Some(lateral_alias.clone()),
+        column_aliases: vec![],
     };
 
     // In the outer SELECT, reference the aggregated result from the lateral join

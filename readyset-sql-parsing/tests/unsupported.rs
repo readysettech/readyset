@@ -134,17 +134,6 @@ fn time_with_timezone_unsupported() {
 }
 
 #[test]
-fn table_alias_column_renaming_unsupported() {
-    // Test that table alias with column renaming is rejected
-    for query in &[
-        "SELECT * FROM users AS u(user_id, user_name)",
-        "SELECT * FROM (SELECT id, name FROM users) AS u(user_id, user_name)",
-    ] {
-        check_parse_fails!(Dialect::PostgreSQL, query, "column renaming");
-    }
-}
-
-#[test]
 fn create_table_unsupported_clauses() {
     // Test that unsupported CREATE TABLE clauses are rejected
     for query in &[

@@ -7,7 +7,9 @@ use std::mem::size_of;
 use proptest::arbitrary::Arbitrary;
 use readyset_util::SizeOf;
 
-use crate::{AstConversionError, Dialect, FromDialect, IntoDialect, TryFromDialect};
+use crate::{
+    AstConversionError, Dialect, DialectDisplay, FromDialect, IntoDialect, TryFromDialect,
+};
 
 const TINYTEXT_WIDTH: usize = 14;
 
@@ -20,6 +22,12 @@ pub struct SqlIdentifier(IdentInner);
 enum IdentInner {
     Tiny(TinyText),
     Text(Text),
+}
+
+impl DialectDisplay for SqlIdentifier {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        dialect.quote_identifier(self)
+    }
 }
 
 impl Clone for IdentInner {

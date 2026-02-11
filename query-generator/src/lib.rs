@@ -848,6 +848,7 @@ impl<'a> QueryState<'a> {
                 query.tables.push(TableExpr {
                     inner: TableExprInner::Table(table.name.clone().into()),
                     alias: None,
+                    column_aliases: vec![],
                 });
                 table
             }
@@ -3116,6 +3117,7 @@ impl Subquery {
                 JoinRightSide::Table(TableExpr {
                     inner: TableExprInner::Subquery(Box::new(subquery)),
                     alias: Some(subquery_name.clone()),
+                    column_aliases: vec![],
                 }),
                 operator,
             ),

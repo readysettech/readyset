@@ -333,6 +333,7 @@ fn collect_relations<'a>(
         } else if let TableExpr {
             inner: TableExprInner::Table(base_table),
             alias: Some(alias),
+            ..
         } = tab_expr
         {
             alias_to_base.insert(alias.into(), base_table.clone());

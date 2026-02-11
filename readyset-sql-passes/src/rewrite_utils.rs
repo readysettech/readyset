@@ -1701,6 +1701,7 @@ pub(crate) fn construct_projecting_wrapper(
             ..Default::default()
         })),
         alias: Some(stmt_alias),
+        column_aliases: vec![],
     })
 }
 
@@ -1783,6 +1784,7 @@ fn project_row_number_field(
         let mut dt = construct_projecting_wrapper(TableExpr {
             inner: TableExprInner::Subquery(Box::new(mem::take(stmt))),
             alias: Some(stmt_alias.clone()),
+            column_aliases: vec![],
         })?;
 
         let (wrapper_stmt, _) = expect_sub_query_with_alias_mut(&mut dt);
@@ -1982,6 +1984,7 @@ fn rewrite_top_k_in_place_impl(
     let mut outer_derived_table = construct_projecting_wrapper(TableExpr {
         inner: TableExprInner::Subquery(Box::new(mem::take(stmt))),
         alias: Some(INNER_STMT_ALIAS.into()),
+        column_aliases: vec![],
     })?;
     let (outer_stmt, _) = expect_sub_query_with_alias_mut(&mut outer_derived_table);
     *stmt = mem::take(outer_stmt);

@@ -1499,3 +1499,42 @@ fn alter_table_add_column_position_after_special_chars() {
         panic!("Expected AlterTable");
     }
 }
+
+#[test]
+fn table_alias_with_column_renaming() {
+    for (query, expected_aliases) in &[
+        (
+            "SELECT * FROM users AS u(user_id, user_name)",
+            vec!["user_id", "user_name"],
+        ),
+        (
+            "SELECT * FROM (SELECT id, name FROM users) AS u(user_id, user_name)",
+            vec!["user_id", "user_name"],
+        ),
+    ] {
+        let result = parse_query_with_config(
+            ParsingPreset::BothErrorOnMismatch,
+            Dialect::PostgreSQL,
+            query,
+        )
+        .unwrap_or_else(|e| panic!("Failed to parse {:?}: {}", query, e));
+
+        let select = match result {
+            SqlQuery::Select(s) => s,
+            _ => panic!("Expected SELECT statement"),
+        };
+
+        let table_expr = select.tables.first().expect("Expected at least one table");
+        assert_eq!(
+            table_expr.alias.as_ref().map(|a| a.as_str()),
+            Some("u"),
+        );
+
+        let aliases: Vec<&str> = table_expr
+            .column_aliases
+            .iter()
+            .map(|a| a.as_str())
+            .collect();
+        assert_eq!(aliases, *expected_aliases);
+    }
+}

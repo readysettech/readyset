@@ -97,6 +97,7 @@ mod tests {
                     name: SqlIdentifier::from("test_table"),
                 }),
                 alias: None,
+                column_aliases: vec![],
             }],
             ..Default::default()
         };
@@ -128,6 +129,7 @@ mod tests {
                     name: SqlIdentifier::from("test_table"),
                 }),
                 alias: None,
+                column_aliases: vec![],
             }],
             ..Default::default()
         };
@@ -186,6 +188,7 @@ mod tests {
                     name: SqlIdentifier::from("test_table"),
                 }),
                 alias: None,
+                column_aliases: vec![],
             }],
             ..Default::default()
         };
@@ -232,6 +235,7 @@ mod tests {
                     name: SqlIdentifier::from("test_table"),
                 }),
                 alias: None,
+                column_aliases: vec![],
             }],
             ..Default::default()
         };
@@ -295,6 +299,7 @@ mod tests {
                     name: SqlIdentifier::from("events"),
                 }),
                 alias: None,
+                column_aliases: vec![],
             }],
             where_clause: Some(where_condition),
             ..Default::default()

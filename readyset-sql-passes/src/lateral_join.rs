@@ -163,6 +163,7 @@ fn extract_correlated_subquery(
             let mut tab_expr = TableExpr {
                 inner: TableExprInner::Subquery(Box::new(stmt)),
                 alias: Some(stmt_alias.clone()),
+                column_aliases: vec![],
             };
 
             project_local_columns(&mut tab_expr, &mut correlated_expr, outer_from_items)?;

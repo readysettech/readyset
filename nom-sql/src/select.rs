@@ -599,6 +599,7 @@ mod tests {
                         name: "PaperTag".into(),
                     }),
                     alias: Some("t".into()),
+                    column_aliases: vec![],
                 }],
                 fields: vec![FieldDefinitionExpr::All],
                 ..Default::default()
@@ -622,6 +623,7 @@ mod tests {
                         schema: Some("db1".into()),
                     }),
                     alias: Some("t".into()),
+                    column_aliases: vec![],
                 },],
                 fields: vec![FieldDefinitionExpr::All],
                 ..Default::default()
@@ -1390,6 +1392,7 @@ mod tests {
                         ..Default::default()
                     })),
                     alias: Some("sq".into()),
+                    column_aliases: vec![],
                 }],
                 fields: columns(&["x"]),
                 where_clause: Some(Expr::BinaryOp {
@@ -1432,6 +1435,7 @@ mod tests {
                 right: JoinRightSide::Table(TableExpr {
                     inner: TableExprInner::Subquery(Box::new(inner_select)),
                     alias: Some("ids".into()),
+                    column_aliases: vec![],
                 }),
                 constraint: JoinConstraint::On(Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(Column::from("orders.o_id"))),
@@ -1786,6 +1790,7 @@ mod tests {
                         right: JoinRightSide::Table(TableExpr {
                             inner: TableExprInner::Table("t2".into()),
                             alias: None,
+                            column_aliases: vec![],
                         }),
                         constraint: JoinConstraint::On(Expr::Column("x".into()))
                     },
@@ -1794,6 +1799,7 @@ mod tests {
                         right: JoinRightSide::Table(TableExpr {
                             inner: TableExprInner::Table("t3".into()),
                             alias: None,
+                            column_aliases: vec![],
                         }),
                         constraint: JoinConstraint::On(Expr::Column("z".into()))
                     },
@@ -1982,6 +1988,7 @@ mod tests {
                         name: "User".into(),
                     }),
                     alias: None,
+                    column_aliases: vec![],
                 }]
             );
         }

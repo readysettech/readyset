@@ -5,6 +5,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
+use crate::dialect_display::CommaSeparatedList;
 use crate::{
     AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, TryIntoDialect,
     ast::*,
@@ -196,6 +197,11 @@ impl DialectDisplay for TableExprInner {
 pub struct TableExpr {
     pub inner: TableExprInner,
     pub alias: Option<SqlIdentifier>,
+    /// Optional column aliases for the table expression
+    /// (used with VALUES clauses, or subqueries)
+    /// e.g., `(VALUES ('a')) AS t(col1)` where `col1` is a column alias
+    #[weight(0)]
+    pub column_aliases: Vec<SqlIdentifier>,
 }
 
 /// Constructs a [`TableExpr`] with no alias
@@ -204,6 +210,7 @@ impl From<Relation> for TableExpr {
         Self {
             inner: TableExprInner::Table(table),
             alias: None,
+            column_aliases: Vec::new(),
         }
     }
 }
@@ -215,14 +222,6 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
     ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::{TableAlias, TableFactor};
         match value {
-            TableFactor::Table {
-                alias: Some(TableAlias { columns, .. }),
-                ..
-            } if !columns.is_empty() => unsupported!("Table alias with column renaming")?,
-            TableFactor::Derived {
-                alias: Some(TableAlias { columns, .. }),
-                ..
-            } if !columns.is_empty() => unsupported!("Table alias with column renaming")?,
             TableFactor::Table {
                 name,
                 alias,
@@ -240,9 +239,20 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
                 if !partitions.is_empty() {
                     unsupported!("PARTITION clause")?;
                 }
+                let (table_alias, column_aliases) = match alias {
+                    Some(TableAlias { name, columns, .. }) => (
+                        Some(name.into_dialect(dialect)),
+                        columns
+                            .into_iter()
+                            .map(|c| c.name.into_dialect(dialect))
+                            .collect(),
+                    ),
+                    None => (None, Vec::new()),
+                };
                 Ok(Self {
                     inner: TableExprInner::Table(name.try_into_dialect(dialect)?),
-                    alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)),
+                    alias: table_alias,
+                    column_aliases,
                 })
             }
             TableFactor::Derived {
@@ -250,18 +260,31 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
                 alias,
                 lateral,
                 sample: None,
-            } => match subquery.try_into_dialect(dialect)? {
-                crate::ast::SqlQuery::Select(mut subselect) => {
-                    subselect.lateral = lateral;
-                    Ok(Self {
-                        inner: TableExprInner::Subquery(Box::new(subselect)),
-                        alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)),
-                    })
+            } => {
+                let (table_alias, column_aliases) = match alias {
+                    Some(TableAlias { name, columns, .. }) => (
+                        Some(name.into_dialect(dialect)),
+                        columns
+                            .into_iter()
+                            .map(|c| c.name.into_dialect(dialect))
+                            .collect(),
+                    ),
+                    None => (None, Vec::new()),
+                };
+                match subquery.try_into_dialect(dialect)? {
+                    crate::ast::SqlQuery::Select(mut subselect) => {
+                        subselect.lateral = lateral;
+                        Ok(Self {
+                            inner: TableExprInner::Subquery(Box::new(subselect)),
+                            alias: table_alias,
+                            column_aliases,
+                        })
+                    }
+                    _ => {
+                        failed!("unexpected non-SELECT subquery in table expression")
+                    }
                 }
-                _ => {
-                    failed!("unexpected non-SELECT subquery in table expression")
-                }
-            },
+            }
             sqlparser::ast::TableFactor::NestedJoin { .. } => unsupported!("Nested join"),
             _ => unsupported!("table expression {value:?}"),
         }
@@ -275,6 +298,15 @@ impl DialectDisplay for TableExpr {
 
             if let Some(alias) = &self.alias {
                 write!(f, " AS {}", dialect.quote_identifier(alias))?;
+            }
+
+            // Write column aliases if present: AS t(col1, col2)
+            if !self.column_aliases.is_empty() {
+                write!(
+                    f,
+                    "({})",
+                    CommaSeparatedList::from(&self.column_aliases).display(dialect)
+                )?;
             }
 
             Ok(())

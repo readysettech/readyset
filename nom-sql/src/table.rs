@@ -2,7 +2,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
-use nom::sequence::terminated;
+use nom::sequence::{delimited, preceded, terminated};
 use nom_locate::LocatedSpan;
 use readyset_sql::{ast::*, Dialect};
 
@@ -65,8 +65,20 @@ pub fn table_expr(
     move |i| {
         let (i, inner) = table_expr_inner(dialect)(i)?;
         let (i, alias) = opt(as_alias(dialect))(i)?;
+        let (i, column_aliases) = opt(delimited(
+            terminated(tag("("), whitespace0),
+            separated_list1(ws_sep_comma, dialect.identifier()),
+            preceded(whitespace0, tag(")")),
+        ))(i)?;
         let (i, _) = opt(index_hint_list(dialect))(i)?;
-        Ok((i, TableExpr { inner, alias }))
+        Ok((
+            i,
+            TableExpr {
+                inner,
+                alias,
+                column_aliases: column_aliases.unwrap_or_default(),
+            },
+        ))
     }
 }
 

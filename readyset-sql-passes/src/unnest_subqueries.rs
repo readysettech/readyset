@@ -1043,6 +1043,7 @@ pub(crate) fn as_joinable_derived_table_with_opts(
     let mut derived_table = TableExpr {
         inner: TableExprInner::Subquery(Box::new(mem::take(stmt))),
         alias: Some(stmt_alias),
+        column_aliases: vec![],
     };
 
     if matches!(ctx, SubqueryContext::Exists) {

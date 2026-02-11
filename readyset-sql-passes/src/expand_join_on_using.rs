@@ -107,6 +107,8 @@ impl<'a, C: StarExpansionContext> FieldNamesCache<'a, C> {
             TableExpr {
                 inner: TableExprInner::Subquery(_),
                 alias: Some(alias),
+                // TODO: Support derived table aliases, if needed
+                column_aliases: _,
             } => FieldKey::Alias(alias.clone()),
             TableExpr {
                 inner: TableExprInner::Table(table),

@@ -677,6 +677,7 @@ fn hoist_lhsmost_from_item(
         TableExpr {
             inner: TableExprInner::Table("$being_inlined$".into()),
             alias: lhs_dt.alias.clone(),
+            column_aliases: vec![],
         },
     );
 
@@ -796,6 +797,7 @@ fn is_exactly_one_subquery(dt: &TableExpr) -> ReadySetResult<bool> {
     Ok(matches!(dt, TableExpr {
         inner: TableExprInner::Subquery(rhs_stmt),
         alias: Some(_),
+        ..
     } if is_exactly_one_card(rhs_stmt)?))
 }
 
@@ -803,6 +805,7 @@ fn is_at_most_one_subquery(dt: &TableExpr) -> ReadySetResult<bool> {
     Ok(matches!(dt, TableExpr {
         inner: TableExprInner::Subquery(rhs_stmt),
         alias: Some(_),
+        ..
     } if is_at_most_one_card(rhs_stmt)?))
 }
 
@@ -1352,6 +1355,7 @@ fn hoist_lhsmost_derived_table_rewrite_impl(
     if let Some(TableExpr {
         inner: TableExprInner::Subquery(inner_stmt),
         alias: Some(_),
+        ..
     }) = stmt.tables.first_mut()
     {
         // Normalize the inner left-spine only; do not repeat per-iteration.

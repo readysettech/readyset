@@ -726,6 +726,7 @@ mod tests {
                     tables: vec![TableExpr {
                         inner: TableExprInner::Table("t1".into()),
                         alias: None,
+                        column_aliases: vec![],
                     }],
                     ..Default::default()
                 })

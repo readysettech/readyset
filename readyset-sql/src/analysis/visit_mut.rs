@@ -862,6 +862,9 @@ pub fn walk_table_expr<'ast, V: VisitorMut<'ast>>(
     if let Some(ref mut alias) = table_expr.alias {
         visitor.visit_sql_identifier(alias)?;
     }
+    for col_alias in &mut table_expr.column_aliases {
+        visitor.visit_sql_identifier(col_alias)?;
+    }
     Ok(())
 }
 
@@ -1582,6 +1585,7 @@ mod tests {
                     name: "users".into(),
                 }),
                 alias: None,
+                column_aliases: vec![],
             }],
             ..Default::default()
         });
@@ -1614,6 +1618,7 @@ mod tests {
                     name: "users".into(),
                 }),
                 alias: None,
+                column_aliases: vec![],
             }],
             ..Default::default()
         });
@@ -1648,6 +1653,7 @@ mod tests {
                     name: "users".into(),
                 }),
                 alias: None,
+                column_aliases: vec![],
             }],
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
@@ -1669,10 +1675,12 @@ mod tests {
                                 name: "users".into(),
                             }),
                             alias: None,
+                            column_aliases: vec![],
                         }],
                         ..Default::default()
                     })),
                     alias: Some("s".into()),
+                    column_aliases: vec![],
                 }),
                 constraint: JoinConstraint::On(Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(Column {
@@ -1723,6 +1731,7 @@ mod tests {
                     name: "users".into(),
                 }),
                 alias: None,
+                column_aliases: vec![],
             }],
             limit_clause: LimitClause::LimitOffset {
                 limit: Some(LimitValue::Literal(Literal::Integer(3))),
@@ -1759,6 +1768,7 @@ mod tests {
                     name: "users".into(),
                 }),
                 alias: None,
+                column_aliases: vec![],
             }],
             limit_clause: LimitClause::LimitOffset {
                 limit: Some(LimitValue::Literal(Literal::Integer(3))),
@@ -1795,6 +1805,7 @@ mod tests {
                     name: "users".into(),
                 }),
                 alias: None,
+                column_aliases: vec![],
             }],
             limit_clause: LimitClause::OffsetCommaLimit {
                 limit: LimitValue::Literal(Literal::Integer(3)),
