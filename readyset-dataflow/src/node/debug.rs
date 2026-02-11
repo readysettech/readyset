@@ -18,6 +18,7 @@ impl fmt::Debug for Node {
             NodeType::Sharder(ref s) => write!(f, "sharder [{}] node", s.sharded_by()),
             NodeType::Reader(..) => write!(f, "reader node"),
             NodeType::Base(..) => write!(f, "B"),
+            NodeType::Constant(..) => write!(f, "C"),
             NodeType::Internal(ref i) => write!(f, "internal {} node", i.description()),
         }
     }
@@ -124,6 +125,17 @@ impl Node {
             NodeType::Base(..) => {
                 s.push_str(&format!(
                     "<tr><td>{} / {}</td> <td>base</td> <td>{} {}</td></tr> ",
+                    addr,
+                    encode_text(&self.name().display_unquoted().to_string()),
+                    materialized,
+                    key_count,
+                ));
+                out_columns(&mut s, 3, self);
+                out_sharding(&mut s, 3, &sharding);
+            }
+            NodeType::Constant(..) => {
+                s.push_str(&format!(
+                    "<tr><td>{} / {}</td> <td>constant</td> <td>{} {}</td></tr> ",
                     addr,
                     encode_text(&self.name().display_unquoted().to_string()),
                     materialized,

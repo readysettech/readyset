@@ -1720,6 +1720,34 @@ impl Domain {
         let strict = strict_indices.into_iter().map(|x| (x, None)).collect();
         let weak = weak_indices.into_iter().collect();
         state.add_index_multi(strict, weak);
+
+        // If this is a Constant node, populate its state with the constant rows.
+        // Guard against double-population if initialize_state is called more than once.
+        if state.row_count() == 0 {
+            // Build Records from the constant rows while holding the node borrow,
+            // then drop the borrow before calling process_records.
+            let records = self.nodes.get(node).and_then(|n| {
+                let node_ref = n.borrow();
+                node_ref.constant_rows().map(|rows| {
+                    let mut records = Records::default();
+                    for row in rows {
+                        // this clone is unfortunate
+                        records.push((row.clone(), true).into());
+                    }
+                    records
+                })
+            });
+            if let Some(mut records) = records {
+                let num_rows = records.len();
+                state.process_records(&mut records, None, None)?;
+                trace!(
+                    local = node.id(),
+                    "populated constant node with {} initial rows",
+                    num_rows
+                );
+            }
+        }
+
         Ok(())
     }
 

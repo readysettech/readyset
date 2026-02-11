@@ -134,6 +134,13 @@ impl Node {
                 let tag = m.tag();
                 materialize(m.data_mut(), None, tag, env.state.get_mut(addr))?;
             }
+            NodeType::Constant(_) => {
+                // Constant nodes are materialized during replay via on_input
+                // During normal processing, they just pass through their materialized state
+                let m = m.as_mut().unwrap();
+                let tag = m.tag();
+                materialize(m.data_mut(), None, tag, env.state.get_mut(addr))?;
+            }
             NodeType::Base(ref mut b) => {
                 // NOTE: bases only accept BaseOperations
                 match m.take() {
@@ -461,6 +468,9 @@ impl Node {
         let addr = self.local_addr();
         match self.inner {
             NodeType::Base(..) => {}
+            NodeType::Constant(_) => {
+                // Constants are fully materialized and never evict
+            }
             NodeType::Egress(Some(ref mut e)) => {
                 e.process(
                     &mut Some(Packet::Evict(Evict {

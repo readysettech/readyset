@@ -539,8 +539,13 @@ impl Join {
         // Only do a lookup into a weak index if we're processing regular updates,
         // not if we're processing a replay, since regular updates should represent
         // all rows that won't hit holes downstream but replays need to have *all*
-        // rows
-        let lookup_mode = if is_replay {
+        // rows.
+        // Also use Strict mode if the other side is a Constant node, since Constant
+        // nodes are fully materialized and don't support weak indices.
+        let from_is_constant = nodes[from].borrow().is_constant();
+        let other_is_constant = nodes[other].borrow().is_constant();
+
+        let lookup_mode = if is_replay || from_is_constant || other_is_constant {
             LookupMode::Strict
         } else {
             LookupMode::Weak

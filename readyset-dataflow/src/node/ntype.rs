@@ -11,6 +11,7 @@ use crate::processing::Ingredient;
 pub enum NodeType {
     Ingress,
     Base(special::Base),
+    Constant(special::Constant),
     Internal(ops::NodeOperator),
     Egress(Option<special::Egress>),
     Sharder(special::Sharder),
@@ -25,6 +26,7 @@ impl NodeType {
     pub(super) fn take(&mut self) -> Self {
         match self {
             NodeType::Base(b) => NodeType::Base(b.take()),
+            NodeType::Constant(c) => NodeType::Constant(c.take()),
             NodeType::Egress(e) => NodeType::Egress(e.take()),
             NodeType::Reader(r) => NodeType::Reader(r.take()),
             NodeType::Sharder(s) => NodeType::Sharder(s.take()),
@@ -41,6 +43,7 @@ impl NodeType {
     /// --------|-------------
     ///    ⊥    |  Source
     ///    B    |  Base
+    ///    C    |  Constant
     ///    ||   |  Concat
     ///    ⧖    |  Latest
     ///    γ    |  Group by
@@ -57,6 +60,7 @@ impl NodeType {
     pub(super) fn description(&self) -> String {
         match self {
             NodeType::Base(_) => "B".to_string(),
+            NodeType::Constant(c) => c.description(),
             NodeType::Egress(_) => "|→".to_string(),
             NodeType::Reader(_) => "R".to_string(),
             NodeType::Sharder(_) => "÷".to_string(),
@@ -73,6 +77,7 @@ impl fmt::Display for NodeType {
         match self {
             NodeType::Ingress => write!(f, "Ingress"),
             NodeType::Base(_) => write!(f, "Base"),
+            NodeType::Constant(_) => write!(f, "Constant"),
             NodeType::Internal(o) => write!(f, "Internal ({o})"),
             NodeType::Egress(_) => write!(f, "Egress"),
             NodeType::Sharder(_) => write!(f, "Sharder"),
@@ -92,6 +97,12 @@ impl From<ops::NodeOperator> for NodeType {
 impl From<special::Base> for NodeType {
     fn from(b: special::Base) -> Self {
         NodeType::Base(b)
+    }
+}
+
+impl From<special::Constant> for NodeType {
+    fn from(c: special::Constant) -> Self {
+        NodeType::Constant(c)
     }
 }
 

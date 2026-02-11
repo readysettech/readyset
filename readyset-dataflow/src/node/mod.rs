@@ -359,6 +359,7 @@ impl Node {
             },
             NodeType::Ingress
             | NodeType::Base(_)
+            | NodeType::Constant(_)
             | NodeType::Egress(_)
             | NodeType::Sharder(_)
             | NodeType::Reader(_)
@@ -678,6 +679,19 @@ impl Node {
     /// Returns `true` if self is a base table node
     pub fn is_base(&self) -> bool {
         matches!(self.inner, NodeType::Base(..))
+    }
+
+    /// Returns `true` if self is a constant node (VALUES clause)
+    pub fn is_constant(&self) -> bool {
+        matches!(self.inner, NodeType::Constant(..))
+    }
+
+    /// Get the constant rows if this is a Constant node
+    pub fn constant_rows(&self) -> Option<&[Vec<DfValue>]> {
+        match &self.inner {
+            NodeType::Constant(c) => Some(c.rows()),
+            _ => None,
+        }
     }
 
     pub fn is_union(&self) -> bool {

@@ -1,4 +1,5 @@
 pub(crate) mod base;
+pub(crate) mod constant;
 mod egress;
 mod packet_filter;
 pub(crate) mod reader;
@@ -10,6 +11,7 @@ pub struct Ingress;
 pub struct Source;
 
 pub use self::base::Base;
+pub use self::constant::Constant;
 pub use self::egress::{Egress, EgressTx};
 pub use self::packet_filter::PacketFilter;
 pub use self::reader::Reader;
