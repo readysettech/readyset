@@ -37,6 +37,17 @@ use readyset_errors::{
 use readyset_sql::ast::{self, ColumnSpecification, Expr, NullOrder, OrderType, Relation};
 use readyset_sql::TryIntoDialect as _;
 
+/// Check whether a MIR node is backed by a Constant, looking through AliasTable wrappers.
+fn is_constant_backed(graph: &MirGraph, node: MirNodeIndex) -> bool {
+    match &graph[node].inner {
+        MirNodeInner::Constant { .. } => true,
+        MirNodeInner::AliasTable { .. } => graph
+            .neighbors_directed(node, Direction::Incoming)
+            .any(|parent| matches!(graph[parent].inner, MirNodeInner::Constant { .. })),
+        _ => false,
+    }
+}
+
 /// Sets the names of dataflow columns using the names determined in MIR to ensure aliases are used
 fn set_names(names: &[&str], columns: &mut [DfColumn]) -> ReadySetResult<()> {
     invariant_eq!(columns.len(), names.len());
@@ -371,6 +382,17 @@ pub(super) fn mir_node_to_flow_parts(
                         mig,
                     )?)
                 }
+                MirNodeInner::Constant {
+                    rows,
+                    column_names,
+                    column_types,
+                } => Some(make_constant_node(
+                    name,
+                    rows,
+                    column_names,
+                    column_types,
+                    mig,
+                )?),
                 MirNodeInner::AliasTable { .. } => None,
             };
             if let MirNodeInner::Leaf {
@@ -409,6 +431,9 @@ fn record_reachable(node: &MirNodeInner) {
         }
         MirNodeInner::Base { .. } => {
             record_reachable!(r#"{"id":"Create dataflow node","sub":"Base"}"#)
+        }
+        MirNodeInner::Constant { .. } => {
+            record_reachable!(r#"{"id":"Create dataflow node","sub":"Constant"}"#)
         }
         MirNodeInner::Window { .. } => {
             record_reachable!(r#"{"id":"Create dataflow node","sub":"Window"}"#)
@@ -567,6 +592,28 @@ fn make_base_node(
     };
 
     Ok(DfNodeIndex::new(mig.add_base(name, columns, base)))
+}
+
+fn make_constant_node(
+    name: Relation,
+    rows: &[Vec<DfValue>],
+    column_names: &[readyset_sql::ast::SqlIdentifier],
+    column_types: &[DfType],
+    mig: &mut Migration<'_>,
+) -> ReadySetResult<DfNodeIndex> {
+    use dataflow::node::special::Constant;
+
+    // Create column definitions from column names and types
+    let columns: Vec<DfColumn> = column_names
+        .iter()
+        .zip(column_types.iter())
+        .map(|(col_name, col_type)| DfColumn::new(col_name.clone(), col_type.clone(), None))
+        .collect();
+
+    let constant = Constant::new(rows.to_vec());
+
+    // Use add_constant() which handles Constant nodes like Base nodes
+    Ok(DfNodeIndex::new(mig.add_constant(name, columns, constant)))
 }
 
 fn make_union_node(
@@ -1024,23 +1071,30 @@ fn make_join_node(
         })
         .collect::<ReadySetResult<Vec<_>>>()?;
 
-    let (left, right) = match should_swap_join_sides(left_cols, right_cols, &on_idxs) {
-        Ok(true) => {
-            if kind == JoinType::Inner {
-                mem::swap(&mut left_na, &mut right_na);
-                mem::swap(&mut left_cols, &mut right_cols);
-                for item in on_idxs.iter_mut() {
-                    *item = (item.1, item.0);
+    // Skip join side swapping for Constant nodes — they are always small
+    let (left, right) = if is_constant_backed(graph, left) || is_constant_backed(graph, right) {
+        (left, right)
+    } else {
+        match should_swap_join_sides(left_cols, right_cols, &on_idxs) {
+            Ok(true) => {
+                if kind == JoinType::Inner {
+                    mem::swap(&mut left_na, &mut right_na);
+                    mem::swap(&mut left_cols, &mut right_cols);
+                    for item in on_idxs.iter_mut() {
+                        *item = (item.1, item.0);
+                    }
+                    (right, left)
+                } else {
+                    unsupported!(
+                        "Swapping join sides is currently only supported for inner joins."
+                    );
                 }
-                (right, left)
-            } else {
-                unsupported!("Swapping join sides is currently only supported for inner joins.");
             }
+            Err(e) => {
+                return Err(e);
+            }
+            _ => (left, right),
         }
-        Err(e) => {
-            return Err(e);
-        }
-        _ => (left, right),
     };
 
     let mut emit = Vec::with_capacity(proj_cols.len());
@@ -1187,26 +1241,32 @@ fn make_join_aggregates_node(
         )
         .collect::<Vec<_>>();
 
-    match should_swap_join_sides(left_cols, right_cols, &on) {
-        Ok(true) => {
-            mem::swap(&mut left_na, &mut right_na);
-            mem::swap(&mut left_cols, &mut right_cols);
-            for item in on.iter_mut() {
-                *item = (item.1, item.0);
+    // Skip join side swapping for Constant nodes — they are always small
+    if !is_constant_backed(graph, left) && !is_constant_backed(graph, right) {
+        // Note: This function is only used for joins that are part of aggregations,
+        // which are typically inner joins. If we encounter a non-inner join here,
+        // we just skip the swap rather than erroring.
+        match should_swap_join_sides(left_cols, right_cols, &on) {
+            Ok(true) => {
+                mem::swap(&mut left_na, &mut right_na);
+                mem::swap(&mut left_cols, &mut right_cols);
+                for item in on.iter_mut() {
+                    *item = (item.1, item.0);
+                }
+                for item in project.iter_mut() {
+                    item.0 = if item.0 == Side::Left {
+                        Side::Right
+                    } else {
+                        Side::Left
+                    };
+                }
             }
-            for item in project.iter_mut() {
-                item.0 = if item.0 == Side::Left {
-                    Side::Right
-                } else {
-                    Side::Left
-                };
+            Err(e) => {
+                return Err(e);
             }
-        }
-        Err(e) => {
-            return Err(e);
-        }
-        _ => {}
-    };
+            _ => {}
+        };
+    }
 
     let mut cols = project
         .iter()

@@ -5129,6 +5129,7 @@ dependencies = [
  "petgraph",
  "readyset-client",
  "readyset-common",
+ "readyset-data",
  "readyset-dataflow",
  "readyset-errors",
  "readyset-sql",

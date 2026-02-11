@@ -65,7 +65,7 @@ pub fn shard(
             }
             graph.node_weight_mut(node).unwrap().shard_by(s);
             continue;
-        } else if graph[node].is_source() {
+        } else if graph[node].is_graph_root() {
             continue;
         } else {
             // non-internal nodes are always pass-through
@@ -409,7 +409,7 @@ pub fn shard(
             };
 
             // a sharder should never be placed right under the source node
-            invariant!(!graph[p].is_source());
+            invariant!(!graph[p].is_graph_root());
 
             // and that its children must be sharded somehow (otherwise what is the sharder doing?)
             let col = graph[n].as_sharder().unwrap().sharded_by();
@@ -613,7 +613,7 @@ pub fn shard(
     let mut topo_list = Vec::with_capacity(new.len());
     let mut topo = petgraph::visit::Topo::new(&*graph);
     while let Some(node) = topo.next(&*graph) {
-        if graph[node].is_source() || graph[node].is_dropped() {
+        if graph[node].is_graph_root() || graph[node].is_dropped() {
             continue;
         }
         if !new.contains(&node) {
@@ -636,7 +636,7 @@ fn reshard(
     dst: NodeIndex,
     to: Sharding,
 ) -> ReadySetResult<()> {
-    invariant!(!graph[src].is_source());
+    invariant!(!graph[src].is_graph_root());
 
     if graph[src].sharded_by().is_none() && to.is_none() {
         debug!(
@@ -710,7 +710,7 @@ pub fn validate(
 
         let inputs: Vec<_> = graph
             .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-            .filter(|ni| !graph[*ni].is_source())
+            .filter(|ni| !graph[*ni].is_graph_root())
             .collect();
 
         let remap = |nd: &Node, pni: NodeIndex, ps: Sharding| -> ReadySetResult<Sharding> {

@@ -34,6 +34,7 @@ fn commutes_with(conditions: &Expr, inner: &MirNodeInner) -> bool {
         | MirNodeInner::Leaf { .. } => true,
 
         MirNodeInner::Base { .. }
+        | MirNodeInner::Constant { .. }
         | MirNodeInner::LeftJoin { .. }
         | MirNodeInner::DependentLeftJoin { .. } => false,
     }

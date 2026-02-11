@@ -408,7 +408,7 @@ pub mod test {
             // we're now committing to testing this op
             // add all nodes to the same domain
             for node in self.graph.node_weights_mut() {
-                if node.is_source() {
+                if node.is_graph_root() {
                     continue;
                 }
                 node.add_to(0.into());

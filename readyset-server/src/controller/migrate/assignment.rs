@@ -96,13 +96,14 @@ pub fn assign(dataflow_state: &mut DfState, new_nodes: &[NodeIndex]) -> ReadySet
                 return next_domain();
             }
 
-            if n.is_base() {
-                // bases are in a little bit of an awkward position becuase they can't just blindly
-                // join in domains of other bases in the face of sharding. consider the case of two
-                // bases, A and B, where A is sharded by A[0] and B by B[0]. Can they share a
-                // domain? The way we deal with this is that we walk *down* from the base until we
-                // hit any sharders or shard mergers, and then we walk *up* from each node visited
-                // on the way down until we hit a base without traversing a sharding.
+            if n.is_source() {
+                // bases and constants are in a little bit of an awkward position becuase
+                // they can't just blindly join in domains of other bases in the face of
+                // sharding. consider the case of two bases, A and B, where A is sharded by
+                // A[0] and B by B[0]. Can they share a domain? The way we deal with this is
+                // that we walk *down* from the base/constant until we hit any sharders or
+                // shard mergers, and then we walk *up* from each node visited on the way
+                // down until we hit a base/constant without traversing a sharding.
                 // XXX: maybe also do this extended walk for non-bases?
                 let mut children_same_shard = Vec::new();
                 let mut frontier: Vec<_> = graph
@@ -135,10 +136,10 @@ pub fn assign(dataflow_state: &mut DfState, new_nodes: &[NodeIndex]) -> ReadySet
                         }
 
                         let p = &graph[pni];
-                        if p.is_base() && p.has_domain() {
+                        if p.is_source() && p.has_domain() {
                             friendly_base = Some(p);
                             break 'search;
-                        } else if !p.is_source() && !p.is_sharder() && !p.is_shard_merger() {
+                        } else if !p.is_graph_root() && !p.is_sharder() && !p.is_shard_merger() {
                             invariant_eq!(n.sharded_by().is_none(), p.sharded_by().is_none());
                             frontier.extend(
                                 graph.neighbors_directed(pni, petgraph::EdgeDirection::Incoming),
@@ -231,7 +232,7 @@ pub fn assign(dataflow_state: &mut DfState, new_nodes: &[NodeIndex]) -> ReadySet
                     .filter(move |&p| prime(&graph[p]))
                     .collect();
                 while let Some(p) = stack.pop() {
-                    if graph[p].is_source() {
+                    if graph[p].is_graph_root() {
                         continue;
                     }
                     if check(&graph[p]) {
@@ -249,7 +250,7 @@ pub fn assign(dataflow_state: &mut DfState, new_nodes: &[NodeIndex]) -> ReadySet
 
             let mut assignment = None;
             for &(_, p) in &parents {
-                if p.is_source() {
+                if p.is_graph_root() {
                     // the source isn't a useful source of truth
                     continue;
                 }

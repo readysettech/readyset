@@ -97,6 +97,7 @@ fn push_view_key(query: &mut MirQuery<'_>, node_idx: NodeIndex) -> ReadySetResul
             query.remove_node(node_idx)?;
         }
         MirNodeInner::Base { .. } => internal!("Encountered Base node with a parent (???)"),
+        MirNodeInner::Constant { .. } => internal!("Encountered Constant node with a parent (???)"),
     }
 
     Ok(())

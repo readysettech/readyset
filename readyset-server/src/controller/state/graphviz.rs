@@ -71,7 +71,7 @@ impl Display for Graphviz<'_> {
             }
             for index in nodes {
                 let node = &self.graph[index];
-                if node.is_source() {
+                if node.is_graph_root() {
                     continue;
                 }
                 let materialization_status = self.materializations.get_status(index, node);
@@ -90,7 +90,7 @@ impl Display for Graphviz<'_> {
 
         // edges.
         for edge in self.graph.raw_edges() {
-            if self.graph[edge.source()].is_source() {
+            if self.graph[edge.source()].is_graph_root() {
                 continue;
             }
             if !(nodes.contains(&edge.source()) && nodes.contains(&edge.target())) {

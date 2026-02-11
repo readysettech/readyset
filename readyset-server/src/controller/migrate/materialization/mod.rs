@@ -297,8 +297,8 @@ impl Materializations {
                     .collect()
             };
 
-            if indices.is_empty() && n.is_base() {
-                // we must *always* materialize base nodes
+            if indices.is_empty() && n.is_source() {
+                // we must *always* materialize base and constant nodes
                 // so, just make up some column to index on
                 indices.insert(
                     ni,
@@ -341,8 +341,8 @@ impl Materializations {
                             .iter()
                             .map(|&col| {
                                 if !n.is_internal() {
-                                    if n.is_base() {
-                                        internal!("map_indices called with base table");
+                                    if n.is_source() {
+                                        internal!("map_indices called with base or constant table");
                                     }
                                     return Ok(col);
                                 }
@@ -460,7 +460,7 @@ impl Materializations {
         let mut ordered = Vec::with_capacity(graph.node_count());
         let mut topo = petgraph::visit::Topo::new(graph as &Graph);
         while let Some(node) = topo.next(graph as &Graph) {
-            if graph[node].is_source() {
+            if graph[node].is_graph_root() {
                 continue;
             }
             if graph[node].is_dropped() {
@@ -491,8 +491,8 @@ impl Materializations {
             let mut able = self.config.partial_enabled;
             let mut add = HashMap::new();
 
-            // bases can't be partial
-            if graph[ni].is_base() {
+            // bases and constants can't be partial
+            if graph[ni].is_source() {
                 able = false;
             }
 
@@ -1023,7 +1023,7 @@ impl Materializations {
         let mut make = Vec::with_capacity(new.len());
         let mut topo = petgraph::visit::Topo::new(&*graph);
         while let Some(node) = topo.next(&*graph) {
-            if graph[node].is_source() {
+            if graph[node].is_graph_root() {
                 continue;
             }
             if graph[node].is_dropped() {
@@ -1215,8 +1215,9 @@ impl Materializations {
         }
 
         if n.is_base() {
-            // a new base must be empty, so we can materialize it immediately
-            debug!(node = %ni.index(), "no need to replay empty new base");
+            // a new base table must be empty (or already populated), so we can
+            // materialize it immediately
+            debug!(node = %ni.index(), "no need to replay empty new base table");
             assert!(!self.partial.contains(&ni));
             return Ok(());
         }

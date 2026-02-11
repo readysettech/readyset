@@ -158,15 +158,34 @@ pub struct Parameter {
     pub placeholder_idx: Option<PlaceholderIdx>,
 }
 
+/// The source of data for a query graph relation.
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+pub enum RelationSource {
+    /// A base table — data comes from an existing table in the schema.
+    Table,
+    /// A subquery — data comes from an inline SELECT.
+    Subquery(Box<QueryGraph>),
+    /// A VALUES clause — data comes from inline constant rows.
+    Values(ValuesClause),
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct QueryGraphNode {
     pub relation: Relation,
     pub predicates: Vec<Expr>,
     pub columns: Vec<Column>,
     pub parameters: Vec<Parameter>,
-    /// If this query graph relation refers to a subquery, the graph of that subquery and the AST
-    /// for the query itself
-    pub subgraph: Option<Box<QueryGraph>>,
+    /// The source of data for this relation (base table, subquery, or VALUES clause)
+    pub source: RelationSource,
+}
+
+/// Represents a VALUES clause with its rows and column aliases
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+pub struct ValuesClause {
+    /// The constant rows (each row is a vector of expressions that evaluate to constants)
+    pub rows: Vec<Vec<Literal>>,
+    /// The column names (from the column aliases)
+    pub column_names: Vec<SqlIdentifier>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -943,7 +962,7 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                 .flatten()
                 .collect(),
             parameters: Vec::new(),
-            subgraph: None,
+            source: RelationSource::Table,
         })
     };
 
@@ -982,7 +1001,10 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                 );
                 if let Entry::Vacant(e) = relations.entry(rel.clone()) {
                     let mut node = new_node(rel.clone(), vec![], &stmt.fields)?;
-                    node.subgraph = Some(Box::new(to_query_graph((**sq).clone(), dialect)?));
+                    node.source = RelationSource::Subquery(Box::new(to_query_graph(
+                        (**sq).clone(),
+                        dialect,
+                    )?));
                     e.insert(node);
                 } else {
                     invalid_query!(
@@ -993,8 +1015,122 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
 
                 Ok(rel)
             }
-            TableExprInner::Values { .. } => {
-                unsupported!("VALUES clauses are not yet supported in query graphs")
+            TableExprInner::Values { rows } => {
+                /// Maximum number of rows allowed in a VALUES clause
+                const MAX_VALUES_ROWS: usize = 2_000;
+
+                let rel = Relation::from(
+                    table_expr
+                        .alias
+                        .as_ref()
+                        .ok_or_else(|| invalid_query_err!("All VALUES clauses must have an alias"))?
+                        .clone(),
+                );
+
+                if rows.is_empty() {
+                    return Err(invalid_query_err!(
+                        "VALUES clause must have at least one row"
+                    ));
+                }
+
+                if rows.len() > MAX_VALUES_ROWS {
+                    return Err(unsupported_err!(
+                        "VALUES clause with {} rows exceeds maximum of {}",
+                        rows.len(),
+                        MAX_VALUES_ROWS
+                    ));
+                }
+
+                let expected_cols = rows[0].len();
+                for (i, row) in rows.iter().enumerate().skip(1) {
+                    if row.len() != expected_cols {
+                        return Err(invalid_query_err!(
+                            "VALUES row {} has {} columns, expected {}",
+                            i + 1,
+                            row.len(),
+                            expected_cols
+                        ));
+                    }
+                }
+
+                // Reject more aliases than columns (matches PostgreSQL behavior).
+                if table_expr.column_aliases.len() > expected_cols {
+                    return Err(invalid_query_err!(
+                        "VALUES clause has {} columns but {} aliases were specified",
+                        expected_cols,
+                        table_expr.column_aliases.len()
+                    ));
+                }
+
+                // Reject duplicate column aliases to avoid panics downstream.
+                // PostgreSQL allows this but ReadySet requires unique column names.
+                {
+                    let mut seen = HashSet::new();
+                    for alias in &table_expr.column_aliases {
+                        if !seen.insert(alias) {
+                            return Err(unsupported_err!(
+                                "Duplicate column alias '{}' in VALUES clause",
+                                alias
+                            ));
+                        }
+                    }
+                }
+
+                // Get column names from column_aliases, or generate default names.
+                // If fewer aliases than columns are provided, pad with defaults.
+                // Uses "column1", "column2" etc. to match PostgreSQL's naming.
+                let mut column_names: Vec<SqlIdentifier> = if table_expr.column_aliases.is_empty() {
+                    (1..=expected_cols)
+                        .map(|i| format!("column{}", i).into())
+                        .collect()
+                } else {
+                    table_expr.column_aliases.clone()
+                };
+                for i in (column_names.len() + 1)..=expected_cols {
+                    column_names.push(format!("column{}", i).into());
+                }
+
+                // Convert expressions to literals
+                let literal_rows: Vec<Vec<Literal>> = rows
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|expr| match expr {
+                                Expr::Literal(lit) => Ok(lit.clone()),
+                                _ => unsupported!(
+                                    "Only literal values are supported in VALUES clause"
+                                ),
+                            })
+                            .collect::<ReadySetResult<Vec<_>>>()
+                    })
+                    .collect::<ReadySetResult<Vec<_>>>()?;
+
+                if let Entry::Vacant(e) = relations.entry(rel.clone()) {
+                    let node = QueryGraphNode {
+                        relation: rel.clone(),
+                        predicates: vec![],
+                        columns: column_names
+                            .iter()
+                            .map(|name| Column {
+                                name: name.clone(),
+                                table: Some(rel.clone()),
+                            })
+                            .collect(),
+                        parameters: Vec::new(),
+                        source: RelationSource::Values(ValuesClause {
+                            rows: literal_rows,
+                            column_names,
+                        }),
+                    };
+                    e.insert(node);
+                } else {
+                    invalid_query!(
+                        "Table name {} specified more than once",
+                        rel.display_unquoted()
+                    );
+                }
+
+                Ok(rel)
             }
         }
     };
@@ -1014,6 +1150,26 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
             }
             JoinRightSide::Tables(_) => unsupported!("JoinRightSide::Tables not yet implemented"),
         };
+    }
+
+    // Reject queries where VALUES clauses are the only data sources.
+    // - Standalone VALUES (single VALUES, no other tables/joins): not useful without a join
+    // - All-VALUES queries (multiple VALUES, no base tables): ReadySet requires at least one
+    //   base table to track upstream changes for cache invalidation.
+    // Note: comma-style cross joins (e.g. `FROM vals, categories`) put both in `stmt.tables`
+    // not `stmt.join`, so we check `relations` not `stmt.join.is_empty()`.
+    if relations
+        .values()
+        .all(|node| matches!(node.source, RelationSource::Values(_)))
+    {
+        if relations.len() == 1 {
+            unsupported!("VALUES clauses must be used in a JOIN");
+        } else {
+            unsupported!(
+                "Queries with only VALUES clauses are not supported; \
+                 at least one base table is required"
+            );
+        }
     }
 
     // 2. Add edges for each pair of joined relations. Note that we must keep track of the join
@@ -1687,7 +1843,7 @@ mod tests {
         );
 
         let subquery_rel = qg.relations.get(&Relation::from("sq")).unwrap();
-        assert!(subquery_rel.subgraph.is_some());
+        assert!(matches!(subquery_rel.source, RelationSource::Subquery(_)));
     }
 
     #[test]
@@ -2188,6 +2344,38 @@ mod tests {
                  WHERE J.aid = ?",
             );
             result.unwrap();
+        }
+    }
+
+    mod values_row_limit {
+        use super::*;
+
+        /// Build the query graph for a VALUES query using PostgreSQL dialect.
+        fn try_values_query_graph(num_rows: usize) -> ReadySetResult<QueryGraph> {
+            let rows: String = (1..=num_rows)
+                .map(|i| format!("({i})"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT v.x, t.id FROM (VALUES {rows}) AS v(x) \
+                 JOIN t ON t.id = v.x"
+            );
+            let stmt = parse_select(Dialect::PostgreSQL, &sql).unwrap();
+            to_query_graph(stmt, readyset_data::Dialect::DEFAULT_MYSQL)
+        }
+
+        #[test]
+        fn values_at_max_rows_succeeds() {
+            try_values_query_graph(2_000).unwrap();
+        }
+
+        #[test]
+        fn values_exceeding_max_rows_fails() {
+            let err = try_values_query_graph(2_001).unwrap_err();
+            assert!(
+                err.to_string().contains("exceeds maximum of 2000"),
+                "unexpected error: {err}"
+            );
         }
     }
 }

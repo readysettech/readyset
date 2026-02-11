@@ -378,6 +378,9 @@ impl MirGraph {
                 // nobody cares about that column, so just give it a throwaway name here
                 .chain(iter::once(MirColumn::named("__distinct_count")))
                 .collect(),
+            MirNodeInner::Constant { column_names, .. } => {
+                column_names.iter().map(MirColumn::named).collect()
+            }
         }
     }
 

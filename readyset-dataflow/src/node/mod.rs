@@ -174,7 +174,7 @@ impl DanglingDomainNode {
             .collect();
         n.parents = graph
             .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
-            .filter(|&c| !graph[c].is_source() && graph[c].domain() == dm)
+            .filter(|&c| !graph[c].is_graph_root() && graph[c].domain() == dm)
             .map(|ni| graph[ni].local_addr())
             .collect();
         n
@@ -663,7 +663,11 @@ impl Node {
         matches!(self.inner, NodeType::Internal(..))
     }
 
-    pub fn is_source(&self) -> bool {
+    /// Returns `true` if this is the singular graph root node (`NodeType::Source`).
+    ///
+    /// The graph root has a single outgoing edge to every base table node. It is not a data source
+    /// itself — see [`is_source`](Self::is_source) for base tables and constants.
+    pub fn is_graph_root(&self) -> bool {
         matches!(self.inner, NodeType::Source)
     }
 
@@ -684,6 +688,12 @@ impl Node {
     /// Returns `true` if self is a constant node (VALUES clause)
     pub fn is_constant(&self) -> bool {
         matches!(self.inner, NodeType::Constant(..))
+    }
+
+    /// Returns `true` if self is a data source node — a base table or constant that originates
+    /// data rather than transforming it from upstream.
+    pub fn is_source(&self) -> bool {
+        self.is_base() || self.is_constant()
     }
 
     /// Get the constant rows if this is a Constant node

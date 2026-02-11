@@ -750,6 +750,36 @@ impl<'df> Migration<'df> {
         ni
     }
 
+    /// Add a constant node (for VALUES clauses) to the graph.
+    /// Like base tables, constant nodes are special source nodes.
+    pub fn add_constant<N, C, CS>(
+        &mut self,
+        name: N,
+        columns: CS,
+        c: node::special::Constant,
+    ) -> NodeIndex
+    where
+        N: Into<Relation>,
+        C: Into<Column>,
+        CS: IntoIterator<Item = C>,
+    {
+        // add to the graph
+        let ni = self
+            .dataflow_state
+            .ingredients
+            .add_node(node::Node::new(name, columns, c));
+        debug!(node = ni.index(), "adding new constant");
+
+        // keep track of the fact that it's new
+        self.changes.add_node(ni);
+        // insert it into the graph
+        self.dataflow_state
+            .ingredients
+            .add_edge(self.dataflow_state.source, ni, ());
+        // and tell the caller its id
+        ni
+    }
+
     /// Mark the given node as being beyond the materialization frontier.
     ///
     /// When a node is marked as such, it will quickly evict state after it is no longer

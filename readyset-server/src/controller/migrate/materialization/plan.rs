@@ -468,6 +468,13 @@ impl<'a> Plan<'a> {
             for (i, IndexRef { node, index }) in
                 path.segments_with_extension().iter().cloned().enumerate()
             {
+                // Source nodes don't have domains assigned. They can appear in replay
+                // paths for Constant nodes (which are direct children of Source, like
+                // Base nodes). Skip them since they have no state to replay through.
+                if self.graph[node].is_graph_root() {
+                    continue;
+                }
+
                 let domain = self.graph[node].domain();
 
                 #[allow(clippy::unwrap_used)]
@@ -830,13 +837,16 @@ impl<'a> Plan<'a> {
                 self.dmp.add_message(domain, setup)?;
             }
 
-            if !self.partial && !self.graph[self.node].is_base() {
+            if !self.partial
+                && !self.graph[self.node].is_base()
+                && !self.graph[self.node].is_constant()
+            {
                 // this path requires doing a replay and then waiting for the replay to finish
                 if let Some(pending) = pending {
                     self.pending.push(pending);
                 } else {
                     internal!(
-                        "no replay planned for fully materialized non-base node {}!",
+                        "no replay planned for fully materialized non-base, non-constant node {}!",
                         self.node.index()
                     );
                 }

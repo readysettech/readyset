@@ -318,8 +318,8 @@ where
 {
     let current_colref = current.last().clone();
 
-    if stop_at(current_colref.node) || graph[current_colref.node].is_base() {
-        // do not continue resolving past the current node
+    if stop_at(current_colref.node) || graph[current_colref.node].is_source() {
+        // do not continue resolving past the current node (source nodes like Base and Constant)
         return Ok(vec![RawReplayPath::from_trace(current)]);
     }
 
@@ -486,8 +486,8 @@ fn trace(
 
     let n = &graph[node];
 
-    // have we reached a base node?
-    if n.is_base() {
+    // have we reached a base or constant node?
+    if n.is_source() {
         return Ok(vec![path]);
     }
 

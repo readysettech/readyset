@@ -69,7 +69,7 @@ pub fn add(
         // domain of the current node. if there aren't any, we make one. if there are, we only need
         // to redirect the node's parent edge to the ingress.
         for parent in parents {
-            if dataflow_state.ingredients[parent].is_source()
+            if dataflow_state.ingredients[parent].is_graph_root()
                 || dataflow_state.ingredients[parent].domain() == domain
             {
                 continue;
@@ -380,7 +380,7 @@ pub(in crate::controller) fn connect(
                         replication,
                     },
                 )?;
-            } else if sender_node.is_source() {
+            } else if sender_node.is_graph_root() {
             } else {
                 internal!("ingress parent is not a sender");
             }

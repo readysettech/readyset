@@ -404,6 +404,18 @@ impl GraphViz for MirNodeInner {
                     args.iter().join(", ")
                 )
             }
+            MirNodeInner::Constant {
+                ref rows,
+                ref column_names,
+                ..
+            } => {
+                write!(
+                    f,
+                    "C | {} | {} rows",
+                    column_names.iter().join(", "),
+                    rows.len()
+                )
+            }
         }
     }
 }

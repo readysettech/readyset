@@ -323,6 +323,7 @@ pub(crate) fn convert_filters_to_join_keys(
                     trace!(join_idx = %ancestor_idx.index(), "Will make filter a join key");
                 }
                 MirNodeInner::Base { .. }
+                | MirNodeInner::Constant { .. }
                 | MirNodeInner::Filter { .. }
                 | MirNodeInner::Identity
                 | MirNodeInner::JoinAggregates

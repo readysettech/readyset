@@ -279,13 +279,13 @@ impl DfState {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
-                let base = &self.ingredients[n];
+                let node = &self.ingredients[n];
 
-                if base.is_dropped() {
+                if node.is_dropped() || node.is_constant() {
                     None
                 } else {
-                    assert!(base.is_base());
-                    Some((base.name().clone(), n))
+                    assert!(node.is_base());
+                    Some((node.name().clone(), n))
                 }
             })
             .collect()

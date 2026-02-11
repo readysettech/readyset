@@ -10,6 +10,7 @@ use dataflow_expression::grouped::accumulator::AccumulationOp;
 use derive_more::From;
 use itertools::Itertools;
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
+use readyset_data::DfType;
 use readyset_errors::{internal, ReadySetResult};
 use readyset_sql::ast::{
     BinaryOperator, ColumnSpecification, Expr, NullOrder, OrderType, Relation, SqlIdentifier,
@@ -122,6 +123,19 @@ pub enum MirNodeInner {
         column_specs: Vec<ColumnSpecification>,
         primary_key: Option<Box<[Column]>>,
         unique_keys: Box<[Box<[Column]>]>,
+    },
+    /// Constant table node from a VALUES clause.
+    ///
+    /// Converted to [`Constant`] when lowering to dataflow.
+    ///
+    /// [`Constant`]: dataflow::node::special::constant::Constant
+    Constant {
+        /// The constant rows
+        rows: Vec<Vec<DfValue>>,
+        /// Column names for the values
+        column_names: Vec<SqlIdentifier>,
+        /// Column types inferred from the data
+        column_types: Vec<DfType>,
     },
     /// Node that evaluates Window Functions over a window.
     /// PARTITIONS and ORDER BY can be expressions, but should
@@ -716,6 +730,17 @@ impl MirNodeInner {
             }
             MirNodeInner::AliasTable { ref table } => {
                 format!("AliasTable [{}]", table.display_unquoted())
+            }
+            MirNodeInner::Constant {
+                ref rows,
+                ref column_names,
+                ..
+            } => {
+                format!(
+                    "C [{}; {} rows]",
+                    column_names.iter().join(", "),
+                    rows.len()
+                )
             }
         }
     }

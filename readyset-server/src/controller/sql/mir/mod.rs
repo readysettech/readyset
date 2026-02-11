@@ -34,7 +34,7 @@ use readyset_sql::ast::{
     InValue, LimitClause, Literal, NonReplicatedRelation, NullOrder, OrderBy, OrderClause,
     OrderType, Relation, SelectStatement, SqlIdentifier, TableExprInner, TableKey, UnaryOperator,
 };
-use readyset_sql::DialectDisplay;
+use readyset_sql::{DialectDisplay, TryIntoDialect as _};
 use readyset_sql_passes::{is_correlated, outermost_table_exprs};
 use readyset_util::redacted::Sensitive;
 use tracing::{debug, trace};
@@ -47,7 +47,7 @@ use crate::controller::sql::mir::grouped::{
 };
 use crate::controller::sql::mir::join::{make_cross_joins, make_joins};
 use crate::controller::sql::query_graph::{
-    to_query_graph, ExprColumn, OutputColumn, Pagination, QueryGraph,
+    to_query_graph, ExprColumn, OutputColumn, Pagination, QueryGraph, RelationSource,
 };
 use crate::controller::sql::query_signature::Signature;
 use crate::sql::query_graph::WindowFunction;
@@ -2337,26 +2337,73 @@ impl SqlToMirConverter {
             let mut sorted_rels: Vec<&Relation> = query_graph.relations.keys().collect();
             sorted_rels.sort_unstable();
             for rel in &sorted_rels {
-                let base_for_rel = if let Some(subquery) = &query_graph.relations[*rel].subgraph {
-                    let correlated = subquery.is_correlated;
-                    let subquery_leaf = self.named_query_to_mir(
-                        query_name,
-                        subquery,
-                        &HashMap::new(),
-                        LeafBehavior::Anonymous,
-                    )?;
-                    if correlated {
-                        correlated_relations.insert(subquery_leaf);
+                let qg_node = &query_graph.relations[*rel];
+                let base_for_rel = match &qg_node.source {
+                    RelationSource::Subquery(subquery) => {
+                        let correlated = subquery.is_correlated;
+                        let subquery_leaf = self.named_query_to_mir(
+                            query_name,
+                            subquery,
+                            &HashMap::new(),
+                            LeafBehavior::Anonymous,
+                        )?;
+                        if correlated {
+                            correlated_relations.insert(subquery_leaf);
+                        }
+                        subquery_leaf
                     }
-                    subquery_leaf
-                } else {
-                    match self.get_relation(rel) {
+                    RelationSource::Values(values) => {
+                        // Convert VALUES clause to Constant MIR node
+                        // (Standalone VALUES are already rejected in query_graph.rs)
+                        let sql_dialect: readyset_sql::Dialect = self.dialect.into();
+
+                        let rows: Vec<Vec<readyset_data::DfValue>> = values
+                            .rows
+                            .iter()
+                            .map(|row| {
+                                row.iter()
+                                    .map(|lit| lit.try_into_dialect(sql_dialect))
+                                    .collect::<Result<Vec<_>, _>>()
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+
+                        // Infer column types from the converted values, scanning all
+                        // rows to find the first non-Unknown type for each column.
+                        //
+                        // Column aliases should have the exact same length as the
+                        // actual data because of the rewrite pass and the invariant
+                        // check in query_graph.rs.
+                        let num_cols = values.column_names.len();
+                        let mut column_types = vec![readyset_data::DfType::Unknown; num_cols];
+                        for row in &rows {
+                            for (i, val) in row.iter().enumerate() {
+                                if matches!(column_types[i], readyset_data::DfType::Unknown) {
+                                    let inferred = val.infer_dataflow_type();
+                                    if !matches!(inferred, readyset_data::DfType::Unknown) {
+                                        column_types[i] = inferred;
+                                    }
+                                }
+                            }
+                        }
+
+                        let constant_node = MirNode::new(
+                            (*rel).clone(),
+                            MirNodeInner::Constant {
+                                rows,
+                                column_names: values.column_names.clone(),
+                                column_types,
+                            },
+                        );
+
+                        self.add_query_node(query_name.clone(), constant_node, &[])
+                    }
+                    RelationSource::Table => match self.get_relation(rel) {
                         Some(node_idx) => node_idx,
                         None => anon_queries
                             .get(rel)
                             .copied()
                             .ok_or_else(|| self.table_not_found_err(rel))?,
-                    }
+                    },
                 };
 
                 self.mir_graph[base_for_rel].add_owner(query_name.clone());
