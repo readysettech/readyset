@@ -6322,7 +6322,7 @@ FROM s;
     test_it("test235", original_text, expected_text);
 }
 
-// Expected to drop the LEFT JOIN as redundant
+// Expected to error out, b/c the COALESCE-able "cnc"."cnc" is referenced outside the select list
 #[test]
 fn test236() {
     let original_text = r#"
@@ -6403,30 +6403,7 @@ ORDER BY
     "inner"."_o0" ASC NULLS LAST,
     "inner"."_o1" ASC NULLS LAST;
 "#;
-    let expected_text = r#"SELECT "inner"."id" AS "id", "inner"."rs_integer" AS "rs_integer", "inner"."_o1" AS "e_ext_id",
-    "inner"."rs_string" AS "env_id", "inner"."rs_date" AS "arch_at", "inner"."rs_timestamp" AS "upd_at", "tags"."tags",
-    "cnc"."cnc" FROM (SELECT "INNER"."id" AS "id", "INNER"."_o0" AS "_o0", "INNER"."_o1" AS "_o1", "INNER"."rs_date" AS "rs_date",
-    "INNER"."rs_integer" AS "rs_integer", "INNER"."rs_string" AS "rs_string", "INNER"."rs_timestamp" AS "rs_timestamp"
-    FROM (SELECT "EDE"."rownum" AS "id", "_om0"."rs_string" AS "_o0", "EDE"."rs_text" AS "_o1", "EDE"."rs_date" AS "rs_date",
-    "EDE"."rs_integer" AS "rs_integer", "EDE"."rs_string" AS "rs_string", "EDE"."rs_timestamp" AS "rs_timestamp",
-    ROW_NUMBER() OVER(ORDER BY "_om0"."rs_string" ASC NULLS LAST, "EDE"."rs_text" ASC NULLS LAST) AS "__rn"
-    FROM "rsdatatypes" AS "EDE" LEFT JOIN "rsdatatypesmm" AS "_om0" ON ((("_om0"."rs_integer" = "EDE"."rs_integer")
-    AND ("_om0"."rs_text" = 'en-US')) AND (length("_om0"."rs_text") <= 256)) WHERE (("EDE"."rs_text" = 'asset_redirect')
-    AND ("EDE"."rs_string" = '8155b6bf-c60a-431c-8741-7c439b25d8f2'))) AS "INNER" WHERE ("INNER"."__rn" <= 41)) AS "inner"
-    LEFT OUTER JOIN (SELECT coalesce("array_subq"."agg_result", ARRAY[]) AS "tags", "array_subq"."tag_id" AS "tag_id",
-    "array_subq"."jn" AS "jn" FROM (SELECT array_agg("inner_subq"."ext_tg_id" ORDER BY "inner_subq"."ext_tg_id" ASC NULLS LAST) AS "agg_result",
-    "inner_subq"."tag_id" AS "tag_id", "inner_subq"."jn" AS "jn" FROM (SELECT "TFE"."ext_tg_id" AS "ext_tg_id", "TFE"."tag_id" AS "tag_id",
-    "TFE"."jn" AS "jn" FROM (SELECT "TFM_0"."pn" AS "tag_id", "TFM_0"."pname" AS "ext_tg_id", "TFM_0"."jn" AS "jn" FROM "p" AS "TFM_0") AS "TFE"
-    ORDER BY "TFE"."ext_tg_id" ASC NULLS LAST) AS "inner_subq" GROUP BY "inner_subq"."tag_id", "inner_subq"."jn") AS "array_subq") AS "tags"
-    ON (("inner"."_o1" = "tags"."jn") AND ("inner"."rs_string" = "tags"."tag_id")) LEFT OUTER JOIN
-    (SELECT coalesce("array_subq"."agg_result", ARRAY[]) AS "cnc", "array_subq"."pn" AS "pn", "array_subq"."jn" AS "jn"
-    FROM (SELECT array_agg("inner_subq"."cnc_ext_id" ORDER BY "inner_subq"."cnc_ext_id" ASC NULLS LAST) AS "agg_result",
-    "inner_subq"."pn" AS "pn", "inner_subq"."jn" AS "jn" FROM (SELECT "CFE"."cnc_ext_id" AS "cnc_ext_id", "CFE"."pn" AS "pn", "CFE"."jn" AS "jn"
-    FROM (SELECT "CFM_0"."jname" AS "cnc_ext_id", "CFM_0"."pn" AS "pn", "CFM_0"."jn" AS "jn" FROM "j" AS "CFM_0") AS "CFE"
-    ORDER BY "CFE"."cnc_ext_id" ASC NULLS LAST) AS "inner_subq" GROUP BY "inner_subq"."pn", "inner_subq"."jn") AS "array_subq") AS "cnc"
-    ON (("inner"."_o1" = "cnc"."jn") AND ("inner"."rs_string" = "cnc"."pn")) INNER JOIN
-    (SELECT DISTINCT "spj"."pn" AS "pn", "spj"."jn" AS "jn" FROM "spj") AS "GNL" ON ("cnc"."cnc" = "GNL"."pn")
-    WHERE ("GNL"."jn" = "inner"."_o1") ORDER BY "inner"."_o0" ASC NULLS LAST, "inner"."_o1" ASC NULLS LAST"#;
+    let expected_text = r#""#;
     test_it("test236", original_text, expected_text);
 }
 
@@ -6493,4 +6470,64 @@ WHERE EXISTS (
     FROM (SELECT "EDE"."rownum" FROM "rsdatatypes" AS "EDE") AS "shadow"
     WHERE ("shadow"."rownum" > 0)) AS "GNL""#;
     test_it("test238", original_text, expected_text);
+}
+
+#[test]
+fn test239() {
+    let original_text = r#"
+SELECT
+    "inner"."sn",
+    "inner"."pn",
+    "inner"."jn",
+    "tags"."tags" AS "tags"
+FROM
+    (
+        SELECT
+            DISTINCT "s"."sn",
+            "s"."pn",
+            "s"."jn"
+        FROM
+            "qa"."s" AS "s"
+    ) AS "inner",
+    LATERAL (
+        SELECT
+            coalesce("array_subq"."agg_result", ARRAY[]) AS "tags"
+        FROM
+            (
+              select
+                array_subq.agg_result
+              from
+                (
+                    SELECT
+                        array_agg(
+                            "inner_subq"."pn"
+                            ORDER BY
+                                "inner_subq"."pn" ASC NULLS LAST
+                        ) AS "agg_result"
+                    FROM
+                        (
+                            SELECT
+                                "p"."pn"
+                            FROM
+                                "qa"."p" AS "p"
+                            WHERE
+                                ("p"."jn" = "inner"."jn")
+                            ORDER BY
+                                "p"."pn" ASC NULLS LAST
+                        ) AS "inner_subq"
+                ) AS "array_subq"
+            ) as array_subq
+    ) AS "tags"
+ORDER BY
+    "tags" NULLS LAST;
+"#;
+    let expected_text = r#"SELECT "inner"."sn", "inner"."pn", "inner"."jn", coalesce("tags"."tags", '{}') AS "tags"
+    FROM (SELECT DISTINCT "s"."sn", "s"."pn", "s"."jn" FROM "qa"."s" AS "s") AS "inner" LEFT OUTER JOIN
+    (SELECT coalesce("array_subq"."agg_result", ARRAY[]) AS "tags", "array_subq"."jn" AS "jn" FROM
+    (SELECT "array_subq"."agg_result", "array_subq"."jn" AS "jn" FROM (SELECT array_agg("inner_subq"."pn"
+    ORDER BY "inner_subq"."pn" ASC NULLS LAST) AS "agg_result", "inner_subq"."jn" AS "jn" FROM
+    (SELECT "p"."pn", "p"."jn" AS "jn" FROM "qa"."p" AS "p" ORDER BY "p"."pn" ASC NULLS LAST) AS "inner_subq"
+    GROUP BY "inner_subq"."jn") AS "array_subq") AS "array_subq") AS "tags" ON ("tags"."jn" = "inner"."jn")
+    ORDER BY "tags" NULLS LAST"#;
+    test_it("test239", original_text, expected_text);
 }

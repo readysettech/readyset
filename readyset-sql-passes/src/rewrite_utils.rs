@@ -1260,26 +1260,56 @@ pub(crate) fn analyse_lone_aggregates_subquery_fields(
 ) -> ReadySetResult<()> {
     for fe in &stmt.fields {
         let (f_expr, f_alias) = expect_field_as_expr(fe);
-        if let Some(f_alias) = f_alias {
-            match calculate_aggregate_only_expression_for_empty_data_set(f_expr.clone())? {
-                Expr::Literal(lit) if !matches!(lit, Literal::Null) => {
-                    let f_col = Column {
-                        name: f_alias.clone(),
-                        table: Some(stmt_alias.clone().into()),
-                    };
-                    fields_map.insert(
-                        f_col.clone(),
-                        Ok(Expr::Call(FunctionExpr::Call {
-                            name: "coalesce".into(),
-                            arguments: Some(vec![Expr::Column(f_col), Expr::Literal(lit)]),
-                        })),
-                    );
-                }
-                _ => {}
+        let f_alias = alias_for_expr(f_expr, f_alias);
+        match calculate_aggregate_only_expression_for_empty_data_set(f_expr.clone())? {
+            Expr::Literal(lit) if !matches!(lit, Literal::Null) => {
+                let f_col = Column {
+                    name: f_alias.clone(),
+                    table: Some(stmt_alias.clone().into()),
+                };
+                fields_map.insert(
+                    f_col.clone(),
+                    Ok(Expr::Call(FunctionExpr::Call {
+                        name: "coalesce".into(),
+                        arguments: Some(vec![Expr::Column(f_col), Expr::Literal(lit)]),
+                    })),
+                );
             }
+            _ => {}
         }
     }
     Ok(())
+}
+
+fn is_exactly_one_statement(stmt: &SelectStatement) -> ReadySetResult<bool> {
+    Ok(if is_aggregate_only_without_group_by(stmt)? {
+        // Aggregate-only SELECT produce at most one row. Any OFFSET > 0 or LIMIT 0
+        // eliminates that single row, so the cardinality is ExactlyZero.
+        if matches!(stmt.limit_clause.limit(), Some(Literal::Integer(0)))
+            || matches!(stmt.limit_clause.offset(), Some(Literal::Integer(n)) if *n > 0)
+        {
+            false
+        } else {
+            matches!(
+                stmt.having,
+                None | Some(Expr::Literal(Literal::Boolean(true)))
+            )
+        }
+    } else {
+        false
+    })
+}
+
+fn make_aggregate_fallback_for_expr(mut fallback_expr: Expr) -> Option<Expr> {
+    // Use the non-preserving variant intentionally -- this needs to fully reduce
+    // the expression to a literal for fallback value computation.
+    constant_fold_expr(&mut fallback_expr, dialect::Dialect::DEFAULT_POSTGRESQL);
+
+    if matches!(fallback_expr, Expr::Literal(ref literal) if !matches!(literal, Literal::Null)) {
+        Some(fallback_expr)
+    } else {
+        None
+    }
 }
 
 /// **IMPORTANT**: this function is safe to call only if structural verification for `current_stmt` returned ExactlyOne.
@@ -1296,6 +1326,12 @@ pub(crate) fn extract_aggregate_fallback_for_expr(
     expr: &Expr,
     current_stmt: &SelectStatement,
 ) -> ReadySetResult<Option<Expr>> {
+    // Fast path: do not descend bellow the actual ExactlyOne statement
+    if is_exactly_one_statement(current_stmt)? {
+        let fallback_expr = calculate_aggregate_only_expression_for_empty_data_set(expr.clone())?;
+        return Ok(make_aggregate_fallback_for_expr(fallback_expr));
+    }
+
     // If this SELECT is a single projecting wrapper over a subquery, get its inner.
     let inner = expect_only_subquery_from_with_alias(current_stmt).ok();
 
@@ -1356,10 +1392,15 @@ pub(crate) fn extract_aggregate_fallback_for_expr(
                     let _ = mem::replace(expr, zero_expr.clone());
                 } else if let Some(inner_stmt) = self.stmt
                     && let Some(inner_expr) = resolve_field_expr_by_alias(inner_stmt, &column.name)
-                    && let Ok(Some(zero_expr)) =
-                        extract_aggregate_fallback_for_expr(inner_expr, inner_stmt)
                 {
-                    let _ = mem::replace(expr, zero_expr);
+                    let repl_expr = if let Ok(Some(zero_expr)) =
+                        extract_aggregate_fallback_for_expr(inner_expr, inner_stmt)
+                    {
+                        zero_expr
+                    } else {
+                        Expr::Literal(Literal::Null)
+                    };
+                    let _ = mem::replace(expr, repl_expr);
                 }
                 Ok(())
             } else {
@@ -1380,15 +1421,7 @@ pub(crate) fn extract_aggregate_fallback_for_expr(
     }
     .visit_expr(&mut expr)?;
 
-    // Use the non-preserving variant intentionally -- this needs to fully reduce
-    // the expression to a literal for fallback value computation.
-    constant_fold_expr(&mut expr, dialect::Dialect::DEFAULT_POSTGRESQL);
-
-    Ok(if matches!(expr, Expr::Literal(_)) {
-        Some(expr)
-    } else {
-        None
-    })
+    Ok(make_aggregate_fallback_for_expr(expr))
 }
 
 pub(crate) fn resolve_field_expr_by_alias<'a>(

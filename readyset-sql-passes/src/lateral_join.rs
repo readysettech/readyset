@@ -343,18 +343,23 @@ fn get_join_operator_for_lateral(
     let have_prehoist_effective_one = ctx.pre_hoist_lateral_exactly_one.contains(&rel);
     let prehoist_on_trivial = ctx.lateral_trivial_on.contains(&rel);
 
-    // Classify local agg-only/no-GBY cardinality.
-    let is_local_exactly_one = matches!(
+    // True when the RHS is structurally ExactlyOne: either an aggregate-only/no-GROUP-BY core that
+    // returns one row, or a chain of projection-only single-subquery wrappers around such a core.
+    let rhs_is_structurally_exactly_one = matches!(
         agg_only_no_gby_cardinality(stmt)?,
         Some(AggNoGbyCardinality::ExactlyOne)
     );
 
-    // Build COUNT→COALESCE projection mappings **unconditionally** so wrappers like
-    // `SELECT inner.cn + 15 AS cn` can be recognized even when this level is not
-    // aggregate-only. Application of the map still depends on effective ExactlyOne
-    // and join constraint shape (see below).
+    // Build COUNT/literal → fallback mappings only when the RHS is effectively ExactlyOne.
+    //
+    // This relies on the structural ExactlyOne classifier (`agg_only_no_gby_cardinality`) and/or
+    // the pre-hoist ExactlyOne hint collected in Pass 2. When neither is true, we must not attempt
+    // to infer empty-input fallbacks through wrappers (see `extract_aggregate_fallback_for_expr`’s
+    // safety contract).
     let mut prehoist_fields_map = HashMap::new();
-    build_select_count_zero_mappings_recursive(stmt, alias.clone(), &mut prehoist_fields_map)?;
+    if have_prehoist_effective_one || rhs_is_structurally_exactly_one {
+        build_select_count_zero_mappings_recursive(stmt, alias.clone(), &mut prehoist_fields_map)?;
+    }
 
     if have_prehoist_effective_one && prehoist_on_trivial {
         fields_map.extend(prehoist_fields_map);
@@ -364,7 +369,7 @@ fn get_join_operator_for_lateral(
     // Reject only when ON references a mapped COUNT field **and** the RHS is
     // effectively ExactlyOne (pre-hoist hint or local classification).
     // For AtMostOne (e.g., HAVING present), no mapping is applied and ON over the field is legitimate.
-    if (have_prehoist_effective_one || is_local_exactly_one)
+    if (have_prehoist_effective_one || rhs_is_structurally_exactly_one)
         && !prehoist_fields_map.is_empty()
         && let JoinConstraint::On(join_expr) = join_constraint
         && columns_iter(join_expr)
@@ -374,7 +379,7 @@ fn get_join_operator_for_lateral(
         unsupported!("LATERAL join condition references a column requiring mapping to COALESCE")
     }
 
-    if is_local_exactly_one {
+    if rhs_is_structurally_exactly_one {
         return Ok(match join_constraint {
             JoinConstraint::Empty | JoinConstraint::On(Expr::Literal(Literal::Boolean(true))) => {
                 fields_map.extend(prehoist_fields_map);
@@ -1375,5 +1380,118 @@ FROM
         (SELECT (count("j"."city") + 100) AS "cn", "j"."sn" AS "sn" FROM "qa"."j" AS "j" GROUP BY "j"."sn") AS "inner") AS "l"
         ON ("l"."sn" = "u"."sn")"#;
         test_it("test26", original_text, expected_text);
+    }
+
+    // Two projection wrappers around a correlated COUNT core, with alias hops.
+    // ON TRUE => must still inject COALESCE with the fully-folded empty-input constant.
+    #[test]
+    fn test27() {
+        let original_text = r#"
+        SELECT u.sn, l.cn
+        FROM qa.s AS u
+        JOIN LATERAL (
+            SELECT mid.cn + 15 AS cn
+            FROM (
+                SELECT inner0.cn AS cn
+                FROM (
+                    SELECT COUNT(j.city) + 100 AS cn
+                    FROM qa.j AS j
+                    WHERE j.sn = u.sn
+                ) AS inner0
+            ) AS mid
+        ) AS l ON TRUE;
+        "#;
+        // Empty-input for the COUNT core: 0 + 100 = 100; outer + 15 => 115
+        let expected_text = r#"SELECT "u"."sn", coalesce("l"."cn", 115) FROM "qa"."s" AS "u" LEFT OUTER JOIN
+        (SELECT ("mid"."cn" + 15) AS "cn", "mid"."sn" AS "sn" FROM
+            (SELECT "inner0"."cn" AS "cn", "inner0"."sn" AS "sn" FROM
+                (SELECT (count("j"."city") + 100) AS "cn", "j"."sn" AS "sn"
+                 FROM "qa"."j" AS "j" GROUP BY "j"."sn") AS "inner0"
+            ) AS "mid"
+        ) AS "l"
+        ON ("l"."sn" = "u"."sn")"#;
+        test_it("test27", original_text, expected_text);
+    }
+
+    // Wrapped COUNT through a non-linear projection that should still fold on empty-input.
+    // This is a “killer” case because the wrapper expression is not a plain Column.
+    // ON TRUE => expect COALESCE with literal fallback.
+    #[test]
+    fn test28() {
+        let original_text = r#"
+        SELECT u.sn, l.cn
+        FROM qa.s AS u
+        JOIN LATERAL (
+            SELECT CASE WHEN inner0.cnt > 0 THEN inner0.cnt ELSE 0 END AS cn
+            FROM (
+                SELECT COUNT(*) AS cnt
+                FROM qa.j AS j
+                WHERE j.sn = u.sn
+            ) AS inner0
+        ) AS l ON TRUE;
+        "#;
+        // Empty-input constant: COUNT(*) -> 0, CASE -> 0
+        let expected_text = r#"SELECT "u"."sn", coalesce("l"."cn", 0) FROM "qa"."s" AS "u" LEFT OUTER JOIN
+        (SELECT CASE WHEN ("inner0"."cnt" > 0) THEN "inner0"."cnt" ELSE 0 END AS "cn", "inner0"."sn" AS "sn" FROM
+            (SELECT count(*) AS "cnt", "j"."sn" AS "sn" FROM "qa"."j" AS "j" GROUP BY "j"."sn") AS "inner0"
+        ) AS "l"
+        ON ("l"."sn" = "u"."sn")"#;
+        test_it("test28", original_text, expected_text);
+    }
+
+    // Wrapper with an extra WHERE can break the “projection-only wrapper chain” classification.
+    // In this query, the outer subquery remains aggregate-only/no-GROUP-BY, so it still returns
+    // exactly one row per outer key (with NULL cn when the WHERE filters everything out).
+    //
+    // Expect: we must still use LEFT OUTER JOIN for ON TRUE/CROSS semantics (as implemented),
+    // but NO COALESCE mapping is applied because the RHS is not structurally ExactlyOne via
+    // projection-only wrappers.
+    #[test]
+    fn test29() {
+        let original_text = r#"
+        SELECT u.sn, l.cn
+        FROM qa.s AS u
+        JOIN LATERAL (
+            SELECT max(inner0.cn) + 20 AS cn
+            FROM (
+                SELECT COUNT(*) + 100 AS cn
+                FROM qa.j AS j
+                WHERE j.sn = u.sn
+            ) AS inner0
+            WHERE inner0.cn = 3
+        ) AS l ON TRUE;
+        "#;
+        // The WHERE makes this non-projection-only, so `rhs_is_structurally_exactly_one` is false and
+        // we must not inject a COALESCE fallback. However, the aggregate-only/no-GROUP-BY outer layer
+        // still produces one row per key (NULL on empty), so preserving ON TRUE/CROSS semantics via a
+        // LEFT OUTER JOIN is correct.
+        let expected_text = r#"SELECT "u"."sn", "l"."cn" FROM "qa"."s" AS "u" LEFT OUTER JOIN
+        (SELECT (max("inner0"."cn") + 20) AS "cn", "inner0"."sn" AS "sn" FROM
+            (SELECT (count(*) + 100) AS "cn", "j"."sn" AS "sn" FROM "qa"."j" AS "j" GROUP BY "j"."sn") AS "inner0"
+         WHERE ("inner0"."cn" = 3) GROUP BY "inner0"."sn"
+        ) AS "l"
+        ON ("l"."sn" = "u"."sn")"#;
+        test_it("test29", original_text, expected_text);
+    }
+
+    // Negative: wrapped COUNT field is referenced by ON condition.
+    // Must reject (same class as test22, but through wrapper output).
+    #[test]
+    fn test30() {
+        let original_text = r#"
+        SELECT u.sn, l.cn
+        FROM qa.s AS u
+        JOIN LATERAL (
+            SELECT inner0.cnt + 1 AS cn
+            FROM (
+                SELECT COUNT(*) AS cnt
+                FROM qa.j AS j
+                WHERE j.sn = u.sn
+            ) AS inner0
+        ) AS l ON l.cn = u.sn;
+        "#;
+        // Join condition references a column that would require COALESCE mapping => unsupported.
+        let expected_text = r#""#;
+        test_it("test30", original_text, expected_text);
     }
 }
