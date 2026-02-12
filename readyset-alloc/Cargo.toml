@@ -20,7 +20,7 @@ rustc-hash = { workspace = true }
 lazy_static = { workspace = true }
 libc = { workspace = true }
 tempfile = { workspace = true }
-tikv-jemalloc-ctl = { workspace = true }
+tikv-jemalloc-ctl = { workspace = true, features = ["stats"] }
 tikv-jemalloc-sys = { workspace = true, features = ["stats"] }
 tikv-jemallocator = { workspace = true, features = [
     "unprefixed_malloc_on_supported_platforms",

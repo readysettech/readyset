@@ -217,7 +217,7 @@ reqwest = { version = "0.13.1", default-features = false, features = ["native-tl
 ringbuf = "0.4.8"
 rlimit = "0.11.0"
 rmp-serde = "1.2.0"
-rocksdb = { version = "0.22.0", default-features = false, features = [
+rocksdb = { version = "0.24.0", default-features = false, features = [
     "lz4",
     "jemalloc",
 ] }
@@ -255,9 +255,9 @@ tempfile = "3.10.1"
 test-strategy = "0.4.3"
 textwrap = "0.16"
 thiserror = "2.0.16"
-tikv-jemalloc-ctl = "0.5.4"
-tikv-jemalloc-sys = "0.5.4"
-tikv-jemallocator = "0.5.4"
+tikv-jemalloc-ctl = "0.6"
+tikv-jemalloc-sys = "0.6"
+tikv-jemallocator = "0.6"
 time = "0.3"
 timekeeper = { version = "0.3.2", default-features = false }
 tokio = { version = "1.44", features = ["full"] }
