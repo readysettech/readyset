@@ -104,10 +104,10 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
     async fn apply_update(&self, catalog: SchemaCatalog) {
         trace!(
             generation = %catalog.generation,
-            base_tables = ?catalog.base_schemas.keys().collect::<Vec<_>>(),
+            base_tables = ?catalog.base_schemas.keys(),
             uncompiled_views = ?catalog.uncompiled_views,
-            custom_types = ?catalog.custom_types.keys().collect::<Vec<_>>(),
-            view_schemas = ?catalog.view_schemas.iter().collect::<Vec<_>>(),
+            custom_types = ?catalog.custom_types.keys(),
+            view_schemas = ?catalog.view_schemas.keys(),
             non_replicated_relations = ?catalog.non_replicated_relations,
             "Received schema catalog from server"
         );
