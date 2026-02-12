@@ -451,6 +451,7 @@ pub(super) fn post_lookup_aggregates(
                     op: function.try_into()?,
                 },
             },
+            raw_values: false,
         });
     }
 

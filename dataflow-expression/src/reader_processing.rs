@@ -1,5 +1,5 @@
 use std::cmp::{self, Ordering};
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Write};
 use std::sync::Arc;
 
 use partial_map::InsertionOrder;
@@ -117,6 +117,129 @@ impl PostLookupAggregateFunction {
             | PostLookupAggregateFunction::Sum => None,
         }
     }
+
+    /// Accumulate raw array values directly, bypassing split().
+    pub fn apply_raw_accumulated(
+        &self,
+        data: &mut AccumulatorData,
+        value: &DfValue,
+    ) -> ReadySetResult<()> {
+        match self {
+            PostLookupAggregateFunction::ArrayAgg { op }
+            | PostLookupAggregateFunction::GroupConcat { op }
+            | PostLookupAggregateFunction::StringAgg { op } => data.add_raw(op, value),
+            PostLookupAggregateFunction::JsonObjectAgg { .. } => {
+                unsupported!("JsonObjectAgg is not supported as a post-lookup aggregate")
+            }
+            PostLookupAggregateFunction::Max
+            | PostLookupAggregateFunction::Min
+            | PostLookupAggregateFunction::Sum => {
+                internal!("Calling raw accumulate on a non-accumulating function")
+            }
+        }
+    }
+
+    /// Finalize a single raw `DfValue::Array` into the output format.
+    ///
+    /// For simple (non-distinct, non-ordered) cases, this takes fast paths that avoid
+    /// intermediate `AccumulatorData` allocation and double iteration:
+    /// - `ArrayAgg`: the raw array IS the output, so just clone the value.
+    /// - `GroupConcat`/`StringAgg`: directly iterate the array and write to a `String`
+    ///   with the separator, skipping the intermediate `Vec<String>` + `join()`.
+    pub fn finalize_raw(&self, value: &DfValue) -> ReadySetResult<DfValue> {
+        match self {
+            PostLookupAggregateFunction::ArrayAgg { op } => {
+                // Fast path: non-distinct, non-ordered ArrayAgg — the raw array is the output.
+                if !op.is_distinct() && op.order_by().is_none() {
+                    return Ok(value.clone());
+                }
+                // Distinct/ordered: fall through to full accumulator path.
+                let mut acc_data: AccumulatorData = op.into();
+                acc_data.add_raw(op, value)?;
+                op.apply(&acc_data)
+            }
+            PostLookupAggregateFunction::GroupConcat { op }
+            | PostLookupAggregateFunction::StringAgg { op } => {
+                // Fast path: non-distinct, non-ordered string concat — single-pass direct join.
+                if !op.is_distinct() && op.order_by().is_none() {
+                    return Self::finalize_raw_string_direct(self, value);
+                }
+                // Distinct/ordered: fall through to full accumulator path.
+                let mut acc_data: AccumulatorData = op.into();
+                acc_data.add_raw(op, value)?;
+                op.apply(&acc_data)
+            }
+            PostLookupAggregateFunction::JsonObjectAgg { .. } => {
+                unsupported!("JsonObjectAgg is not supported as a post-lookup aggregate")
+            }
+            PostLookupAggregateFunction::Max
+            | PostLookupAggregateFunction::Min
+            | PostLookupAggregateFunction::Sum => {
+                internal!("finalize_raw called on non-accumulating function")
+            }
+        }
+    }
+
+    /// Direct single-pass string concatenation for non-distinct, non-ordered
+    /// `GroupConcat` / `StringAgg`.
+    ///
+    /// Appends each element directly into a pre-allocated `String`,
+    /// interleaving the separator. Uses `as_str()` for Text/TinyText values
+    /// to avoid `Display` formatting overhead on the hot path.
+    fn finalize_raw_string_direct(&self, value: &DfValue) -> ReadySetResult<DfValue> {
+        let arr = match value {
+            DfValue::Array(arr) => arr,
+            DfValue::None => return Ok(DfValue::None),
+            other => {
+                return Err(readyset_errors::internal_err!(
+                    "finalize_raw_string_direct: expected DfValue::Array, got {:?}",
+                    other
+                ));
+            }
+        };
+
+        let num_elements = arr.total_len();
+        if num_elements == 0 {
+            return Ok(DfValue::None);
+        }
+
+        let separator = match self {
+            PostLookupAggregateFunction::StringAgg {
+                op: AccumulationOp::StringAgg { separator, .. },
+            } => separator.as_deref().unwrap_or(""),
+            PostLookupAggregateFunction::GroupConcat {
+                op: AccumulationOp::GroupConcat { separator, .. },
+            } => separator.as_str(),
+            _ => {
+                return Err(readyset_errors::internal_err!(
+                    "finalize_raw_string_direct called on non-string-concat function"
+                ));
+            }
+        };
+
+        // Pre-allocate: estimate ~16 bytes per element + separators.
+        let estimated_cap = num_elements * 16 + (num_elements.saturating_sub(1)) * separator.len();
+        let mut result = String::with_capacity(estimated_cap);
+        let mut first = true;
+        for val in arr.values() {
+            if first {
+                first = false;
+            } else {
+                result.push_str(separator);
+            }
+            // Fast path: Text/TinyText values can be appended directly without
+            // going through Display formatting and try_from overhead.
+            if let Some(s) = val.as_str() {
+                result.push_str(s);
+            } else {
+                write!(&mut result, "{}", val).map_err(|e: fmt::Error| {
+                    readyset_errors::internal_err!("fmt::Write failed: {}", e)
+                })?;
+            }
+        }
+
+        Ok(DfValue::from(result))
+    }
 }
 
 /// Representation of a single aggregate function to be performed on a column post-lookup
@@ -126,6 +249,11 @@ pub struct PostLookupAggregate<Column = usize> {
     pub column: Column,
     /// The aggregate function to perform
     pub function: PostLookupAggregateFunction,
+    /// When true, the column contains raw `DfValue::Array` values from a dataflow
+    /// accumulator with `skip_finalization`, and should be consumed directly
+    /// instead of going through split().
+    #[serde(default)]
+    pub raw_values: bool,
 }
 
 impl<Column> PostLookupAggregate<Column> {
@@ -137,6 +265,7 @@ impl<Column> PostLookupAggregate<Column> {
         Ok(PostLookupAggregate {
             column: f(self.column)?,
             function: self.function,
+            raw_values: self.raw_values,
         })
     }
 

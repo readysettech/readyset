@@ -147,6 +147,8 @@ struct AggregateIterator {
     aggregate: PostLookupAggregates,
     out_row: Option<Vec<DfValue>>,
     filter: Option<Expr>,
+    /// Cached: true if any aggregate has `raw_values` set.
+    has_raw: bool,
 }
 
 impl ResultIterator {
@@ -198,10 +200,36 @@ impl ResultIterator {
             }
             // if there's an aggregation, but only one key in the result set, we can return a
             // simple iterator as results are already aggregated in the dataflow graph.
-            (None, Some(_)) if data.len() == 1 => {
-                ResultIteratorInner::MultiKey(MultiKeyIterator::new(data))
+            (None, Some(aggregates)) if data.len() == 1 => {
+                if aggregates.aggregates.iter().any(|a| a.raw_values) {
+                    // Raw values need finalization even for single-key lookups
+                    let rows: Vec<Vec<DfValue>> = data[0]
+                        .iter()
+                        .map(|row| {
+                            let mut row = row.to_vec();
+                            for agg in &aggregates.aggregates {
+                                if agg.raw_values {
+                                    row[agg.column] = agg
+                                        .function
+                                        .finalize_raw(&row[agg.column])
+                                        .expect("finalize_raw failed");
+                                }
+                            }
+                            row
+                        })
+                        .collect();
+                    ResultIteratorInner::OwnedResults(OwnedResultIterator {
+                        data: vec![Results::new(rows)],
+                        set: 0,
+                        row: None,
+                    })
+                } else {
+                    ResultIteratorInner::MultiKey(MultiKeyIterator::new(data))
+                }
             }
             (None, Some(aggregates)) => {
+                let has_raw = aggregates.aggregates.iter().any(|a| a.raw_values);
+
                 if aggregates.group_by.is_empty() {
                     // No group by means just iterate over the results and aggregate
                     ResultIteratorInner::MultiKeyAggregateMerge(AggregateIterator {
@@ -209,6 +237,7 @@ impl ResultIterator {
                         out_row: None,
                         aggregate: aggregates.clone(),
                         filter: filter.take(),
+                        has_raw,
                     })
                 } else {
                     // With group by, merge results using a k-way merge iterator on group-by
@@ -232,6 +261,7 @@ impl ResultIterator {
                         out_row: None,
                         aggregate: aggregates.clone(),
                         filter: filter.take(),
+                        has_raw,
                     })
                 }
             }
@@ -265,6 +295,7 @@ impl ResultIterator {
                         out_row: None,
                         aggregate: aggregates.clone(),
                         filter: filter.take(),
+                        has_raw: aggregates.aggregates.iter().any(|a| a.raw_values),
                     }),
                     limit: None,
                     offset: None,
@@ -544,12 +575,22 @@ impl StreamingIterator for AggregateIterator {
     fn advance(&mut self) {
         // First assign the next row if possible
         if self.out_row.is_none() {
-            // Probably first adavnce
+            // Probably first advance
             self.advance_filtered();
         }
 
+        // Reuse the previous out_row's Vec allocation when possible to avoid
+        // a fresh heap allocation on every advance() call.
         let mut aggregate_row = match self.inner.get() {
-            Some(row) => row.to_vec(),
+            Some(row) => {
+                if let Some(mut prev) = self.out_row.take() {
+                    prev.clear();
+                    prev.extend_from_slice(row);
+                    prev
+                } else {
+                    row.to_vec()
+                }
+            }
             None => {
                 self.out_row = None;
                 return;
@@ -557,6 +598,7 @@ impl StreamingIterator for AggregateIterator {
         };
 
         self.advance_filtered();
+        let has_raw = self.has_raw;
         let mut aggs: Option<Vec<AggregateHolder>> = None;
         while let Some(row) = self.inner.get() {
             if self
@@ -579,9 +621,15 @@ impl StreamingIterator for AggregateIterator {
                             .create_accumulator_data()
                             .expect("AccumulatorData");
 
-                        agg.function
-                            .apply_accumulated(&mut acc_data, &aggregate_row[col])
-                            .expect("Accumulate failed");
+                        if agg.raw_values {
+                            agg.function
+                                .apply_raw_accumulated(&mut acc_data, &aggregate_row[col])
+                                .expect("Raw accumulate failed");
+                        } else {
+                            agg.function
+                                .apply_accumulated(&mut acc_data, &aggregate_row[col])
+                                .expect("Accumulate failed");
+                        }
                         AggregateHolder::Accumulated(acc_data)
                     } else {
                         AggregateHolder::Simple(aggregate_row[col].clone())
@@ -603,9 +651,15 @@ impl StreamingIterator for AggregateIterator {
                                 .expect("Apply failed");
                         }
                         AggregateHolder::Accumulated(ref mut data) => {
-                            agg.function
-                                .apply_accumulated(data, &row[col])
-                                .expect("Accumulate failed");
+                            if agg.raw_values {
+                                agg.function
+                                    .apply_raw_accumulated(data, &row[col])
+                                    .expect("Raw accumulate failed");
+                            } else {
+                                agg.function
+                                    .apply_accumulated(data, &row[col])
+                                    .expect("Accumulate failed");
+                            }
                         }
                     }
                 }
@@ -619,6 +673,17 @@ impl StreamingIterator for AggregateIterator {
             for (holder, agg) in holders.into_iter().zip(&self.aggregate.aggregates) {
                 let col = agg.column;
                 aggregate_row[col] = holder.finish(&agg.function);
+            }
+        } else if has_raw {
+            // Single-row group with raw values: use fast finalize_raw path
+            // which avoids creating AccumulatorData entirely.
+            for agg in &self.aggregate.aggregates {
+                if agg.raw_values {
+                    aggregate_row[agg.column] = agg
+                        .function
+                        .finalize_raw(&aggregate_row[agg.column])
+                        .expect("finalize_raw failed");
+                }
             }
         }
 
@@ -804,6 +869,7 @@ mod tests {
             aggregates: vec![PostLookupAggregate {
                 column: 1,
                 function: make_string_agg_function(","),
+                raw_values: false,
             }],
         });
 
@@ -837,6 +903,7 @@ mod tests {
             aggregates: vec![PostLookupAggregate {
                 column: 1,
                 function: make_array_agg_function(),
+                raw_values: false,
             }],
         });
 
@@ -860,6 +927,7 @@ mod tests {
             aggregates: vec![PostLookupAggregate {
                 column: 1,
                 function: make_string_agg_function(","),
+                raw_values: false,
             }],
         });
 
@@ -882,6 +950,7 @@ mod tests {
             aggregates: vec![PostLookupAggregate {
                 column: 1,
                 function: make_string_agg_function(","),
+                raw_values: false,
             }],
         });
 
@@ -909,6 +978,7 @@ mod tests {
             aggregates: vec![PostLookupAggregate {
                 column: 1,
                 function: make_string_agg_function(","),
+                raw_values: false,
             }],
         });
 
@@ -933,6 +1003,7 @@ mod tests {
             aggregates: vec![PostLookupAggregate {
                 column: 1,
                 function: make_string_agg_function(","),
+                raw_values: false,
             }],
         });
 
@@ -962,6 +1033,7 @@ mod tests {
             aggregates: vec![PostLookupAggregate {
                 column: 1,
                 function: make_distinct_string_agg_function(","),
+                raw_values: false,
             }],
         });
 
@@ -990,6 +1062,7 @@ mod tests {
             aggregates: vec![PostLookupAggregate {
                 column: 1,
                 function: make_string_agg_function(","),
+                raw_values: false,
             }],
         });
 
@@ -997,5 +1070,128 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0][1], DfValue::from("only_one"));
         assert_eq!(results[1][1], DfValue::from("also_one"));
+    }
+
+    fn make_raw_string_agg_agg(separator: &str) -> PostLookupAggregate {
+        PostLookupAggregate {
+            column: 1,
+            function: make_string_agg_function(separator),
+            raw_values: true,
+        }
+    }
+
+    fn make_raw_array(values: Vec<&str>) -> DfValue {
+        DfValue::Array(std::sync::Arc::new(readyset_data::Array::from(
+            values.into_iter().map(DfValue::from).collect::<Vec<_>>(),
+        )))
+    }
+
+    #[test]
+    fn test_raw_multi_key_string_agg() {
+        let data = make_shared_results(vec![
+            vec![vec![1.into(), make_raw_array(vec!["a", "b"])]],
+            vec![vec![1.into(), make_raw_array(vec!["c", "d"])]],
+            vec![vec![1.into(), make_raw_array(vec!["e"])]],
+        ]);
+        let post_lookup = make_post_lookup(PostLookupAggregates {
+            group_by: vec![],
+            aggregates: vec![make_raw_string_agg_agg(",")],
+        });
+
+        let results = collect_results(data, &post_lookup);
+        assert_eq!(results.len(), 1);
+        let merged = results[0][1].to_string();
+        for val in &["a", "b", "c", "d", "e"] {
+            assert!(merged.contains(val), "missing '{}' in '{}'", val, merged);
+        }
+    }
+
+    #[test]
+    fn test_raw_single_key_finalization() {
+        // Single key with raw values should still finalize
+        let data = make_shared_results(vec![vec![vec![
+            1.into(),
+            make_raw_array(vec!["x", "y", "z"]),
+        ]]]);
+        let post_lookup = make_post_lookup(PostLookupAggregates {
+            group_by: vec![],
+            aggregates: vec![make_raw_string_agg_agg(",")],
+        });
+
+        let results = collect_results(data, &post_lookup);
+        assert_eq!(results.len(), 1);
+        let val = results[0][1].to_string();
+        assert!(val.contains("x") && val.contains("y") && val.contains("z"));
+        // Should be a string, not an array
+        assert!(!matches!(results[0][1], DfValue::Array(_)));
+    }
+
+    #[test]
+    fn test_raw_single_row_in_group() {
+        // With group_by, each group has one row with raw values -> eager init finalizes
+        let data = make_shared_results(vec![
+            vec![vec![1.into(), make_raw_array(vec!["a", "b"])]],
+            vec![vec![2.into(), make_raw_array(vec!["c"])]],
+        ]);
+        let post_lookup = make_post_lookup(PostLookupAggregates {
+            group_by: vec![0],
+            aggregates: vec![make_raw_string_agg_agg(",")],
+        });
+
+        let results = collect_results(data, &post_lookup);
+        assert_eq!(results.len(), 2);
+        let g1 = results[0][1].to_string();
+        let g2 = results[1][1].to_string();
+        assert!(g1.contains("a") && g1.contains("b"));
+        assert_eq!(g2, "c");
+    }
+
+    #[test]
+    fn test_raw_value_containing_separator() {
+        // This is the lossiness fix: raw values containing separator are handled correctly
+        let data = make_shared_results(vec![
+            // Key 1: raw array has "a,b" as a single value
+            vec![vec![1.into(), make_raw_array(vec!["a,b"])]],
+            // Key 2: raw array has "c"
+            vec![vec![1.into(), make_raw_array(vec!["c"])]],
+        ]);
+        let post_lookup = make_post_lookup(PostLookupAggregates {
+            group_by: vec![],
+            aggregates: vec![make_raw_string_agg_agg(",")],
+        });
+
+        let results = collect_results(data, &post_lookup);
+        assert_eq!(results.len(), 1);
+        let merged = results[0][1].to_string();
+        // With raw path, "a,b" stays as one value, so result is "a,b,c" (2 original values)
+        // NOT "a,b,c" from 3 values like the split() bug would produce
+        assert_eq!(merged, "a,b,c");
+    }
+
+    #[test]
+    fn test_raw_with_distinct() {
+        let data = make_shared_results(vec![
+            vec![vec![1.into(), make_raw_array(vec!["a", "b"])]],
+            vec![vec![1.into(), make_raw_array(vec!["a", "c"])]],
+        ]);
+        let post_lookup = make_post_lookup(PostLookupAggregates {
+            group_by: vec![],
+            aggregates: vec![PostLookupAggregate {
+                column: 1,
+                function: make_distinct_string_agg_function(","),
+                raw_values: true,
+            }],
+        });
+
+        let results = collect_results(data, &post_lookup);
+        assert_eq!(results.len(), 1);
+        let merged = results[0][1].to_string();
+        let parts: Vec<&str> = merged.split(',').collect();
+        assert_eq!(
+            parts.len(),
+            3,
+            "Expected 3 distinct values (a,b,c), got: {}",
+            merged
+        );
     }
 }
