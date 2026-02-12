@@ -54,11 +54,10 @@ impl FailpointClient {
     /// `"off"`, etc.
     pub async fn set(&self, name: &str, action: &str) -> Result<(), FailpointError> {
         // NOTE: Must use the same bincode version/config as readyset-server's /failpoint handler.
-        // The GET-with-body protocol is a legacy quirk; see TODO to migrate to POST.
         let data = bincode::serialize(&(name, action))?;
 
         let url = format!("{}/failpoint", self.base_url);
-        let req = hyper::Request::get(&url)
+        let req = hyper::Request::post(&url)
             .body(Body::from(data))
             .map_err(FailpointError::BuildRequest)?;
 

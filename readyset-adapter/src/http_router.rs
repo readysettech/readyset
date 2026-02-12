@@ -193,7 +193,7 @@ where
 
         match (req.method(), req.uri().path()) {
             #[cfg(feature = "failure_injection")]
-            (&Method::GET, "/failpoint") => {
+            (&Method::POST, "/failpoint") => {
                 let tx = self.failpoint_channel.clone();
                 Box::pin(async move {
                     let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
@@ -269,7 +269,7 @@ where
                 })
             }
             // Returns a summary of memory usage for the entire process and per-thread memory usage
-            (&Method::POST, "/memory_stats") => {
+            (&Method::GET, "/memory_stats") => {
                 let res = match print_memory_and_per_thread_stats() {
                     Ok(stats) => res
                         .status(StatusCode::OK)
@@ -287,7 +287,7 @@ where
             }
             // Returns a large dump of jemalloc debugging information along with per-thread
             // memory stats
-            (&Method::POST, "/memory_stats_verbose") => {
+            (&Method::GET, "/memory_stats_verbose") => {
                 let res = match dump_stats() {
                     Ok(stats) => res
                         .status(StatusCode::OK)
