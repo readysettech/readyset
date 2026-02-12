@@ -84,8 +84,10 @@ schema-catalog = { path = "../schema-catalog" }
 tournament-kway = { path = "../tournament-kway" }
 
 [dev-dependencies]
+hyper = { workspace = true, features = ["server"] }
 tempfile = { workspace = true }
 test-utils = { path = "../test-utils" }
+tokio = { workspace = true, features = ["test-util"] }
 
 [features]
 failure_injection = ["fail/failpoints", "readyset-util/failure_injection"]
