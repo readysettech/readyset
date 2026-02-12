@@ -1,0 +1,363 @@
+
+# Tests for VALUES clause in FROM position with JOINs
+# Standalone VALUES queries are NOT supported -- they must be used with JOINs
+#
+# This is the MySQL version of `./psql/values_clause.test`
+# MySQL mainly differs from psql in a few ways:
+# 1. requiring the keyword `ROW` before each row in VALUES
+# 2. how it generates the names of the columns if an alias is not specified
+#    psql (column1, column2, ...) vs MySQL (column_0, column_1, ...)
+# 3. MySQL requires the number of aliases to exactly match the number of cols
+
+statement ok
+CREATE TABLE categories (id INT PRIMARY KEY, name TEXT, active BOOLEAN);
+
+statement ok
+INSERT INTO categories (id, name, active) VALUES
+(1, 'Electronics', true),
+(2, 'Books', true),
+(3, 'Clothing', false);
+
+statement ok
+CREATE TABLE products (id INT, category TEXT, price INT);
+
+statement ok
+INSERT INTO products (id, category, price) VALUES
+(1, 'Electronics', 100),
+(2, 'Books', 20),
+(3, 'Electronics', 200);
+
+# LEFT JOIN: all VALUES rows, match with existing table rows
+query TT rowsort
+SELECT v.category, c.name
+FROM (VALUES ROW('Electronics'), ROW('Books'), ROW('Toys')) AS v(category)
+LEFT JOIN categories c ON v.category = c.name;
+----
+Books
+Books
+Electronics
+Electronics
+Toys
+NULL
+
+# INNER JOIN: only matching rows
+query TT rowsort
+SELECT v.category, c.name
+FROM (VALUES ROW('Electronics'), ROW('Books'), ROW('Toys')) AS v(category)
+INNER JOIN categories c ON v.category = c.name;
+----
+Books
+Books
+Electronics
+Electronics
+
+# VALUES with CASE expression
+query TI rowsort
+SELECT v.category, CASE WHEN c.name IS NULL THEN 0 ELSE 1 END AS exists_flag
+FROM (VALUES ROW('Electronics'), ROW('Books'), ROW('Toys'), ROW('Food')) AS v(category)
+LEFT JOIN categories c ON v.category = c.name;
+----
+Books
+1
+Electronics
+1
+Food
+0
+Toys
+0
+
+# VALUES with multiple columns in JOIN
+query ITI rowsort
+SELECT v.id, v.cat, p.price
+FROM (VALUES ROW(1, 'Electronics'), ROW(2, 'Books'), ROW(3, 'Electronics')) AS v(id, cat)
+JOIN products p ON v.id = p.id AND v.cat = p.category;
+----
+1
+Electronics
+100
+2
+Books
+20
+3
+Electronics
+200
+
+# VALUES with WHERE filter after JOIN
+query TT rowsort
+SELECT v.category, c.name
+FROM (VALUES ROW('Electronics'), ROW('Books'), ROW('Toys')) AS v(category)
+LEFT JOIN categories c ON v.category = c.name
+WHERE c.name IS NOT NULL;
+----
+Books
+Books
+Electronics
+Electronics
+
+# VALUES with aggregation after JOIN
+query I nosort
+SELECT COUNT(*)
+FROM (VALUES ROW('Electronics'), ROW('Books')) AS v(category)
+LEFT JOIN categories c ON v.category = c.name;
+----
+2
+
+query TI rowsort
+SELECT v.category, COUNT(c.id)
+FROM (VALUES ROW('Electronics'), ROW('Books'), ROW('Toys')) AS v(category)
+LEFT JOIN categories c ON v.category = c.name
+GROUP BY v.category;
+----
+Books
+1
+Electronics
+1
+Toys
+0
+
+# VALUES with NULL values in JOIN
+query IT rowsort
+SELECT v.num, c.name
+FROM (VALUES ROW(1), ROW(NULL), ROW(2)) AS v(num)
+LEFT JOIN categories c ON v.num = c.id;
+----
+1
+Electronics
+2
+Books
+NULL
+NULL
+
+# VALUES with auto-generated column names in JOIN
+query TT rowsort
+SELECT v.column_0, c.name
+FROM (VALUES ROW('Electronics'), ROW('Books')) AS v
+LEFT JOIN categories c ON v.column_0 = c.name;
+----
+Books
+Books
+Electronics
+Electronics
+
+# Multiple VALUES rows with JOIN
+query TI rowsort
+SELECT v.name, c.id
+FROM (VALUES ROW('Electronics'), ROW('Books'), ROW('Clothing'), ROW('Toys'), ROW('Food')) AS v(name)
+LEFT JOIN categories c ON v.name = c.name
+ORDER BY v.name;
+----
+Books
+2
+Clothing
+3
+Electronics
+1
+Food
+NULL
+Toys
+NULL
+
+# Test VALUES on the RIGHT side of JOIN (reverse order)
+
+# Base table LEFT JOIN VALUES
+query TT rowsort
+SELECT c.name, v.category
+FROM categories c
+LEFT JOIN (VALUES ROW('Electronics'), ROW('Books')) AS v(category) ON c.name = v.category;
+----
+Books
+Books
+Clothing
+NULL
+Electronics
+Electronics
+
+# Base table INNER JOIN VALUES (should only show matching rows)
+query TT rowsort
+SELECT c.name, v.category
+FROM categories c
+INNER JOIN (VALUES ROW('Electronics'), ROW('Books')) AS v(category) ON c.name = v.category;
+----
+Books
+Books
+Electronics
+Electronics
+
+# VALUES on right with multiple columns
+query ITT rowsort
+SELECT c.id, c.name, v.cat_name
+FROM categories c
+LEFT JOIN (VALUES ROW('Electronics'), ROW('Books'), ROW('Toys')) AS v(cat_name) ON c.name = v.cat_name;
+----
+1
+Electronics
+Electronics
+2
+Books
+Books
+3
+Clothing
+NULL
+
+# WHERE clause with VALUES on right side of LEFT JOIN
+query TT rowsort
+SELECT c.name, v.category
+FROM categories c
+LEFT JOIN (VALUES ROW('Electronics'), ROW('Books')) AS v(category) ON c.name = v.category
+WHERE c.active = true;
+----
+Books
+Books
+Electronics
+Electronics
+
+# All aliases explicitly named (MySQL requires exact alias count)
+query ITT rowsort
+SELECT v.id, v.name, v.bool
+FROM (VALUES ROW(1, 'Electronics', true), ROW(2, 'Books', false)) AS v(id, name, bool)
+JOIN categories c ON v.id = c.id;
+----
+1
+Electronics
+1
+2
+Books
+0
+
+# We require all VALUES clauses to have an alias, but seems
+# like later versions of PostgreSQL don't require an alias
+query ITT rowsort
+SELECT c.id, c.name, v.column_0
+FROM (VALUES ROW('x'), ROW('y')) AS v
+CROSS JOIN categories AS c;
+----
+1
+Electronics
+x
+1
+Electronics
+y
+2
+Books
+x
+2
+Books
+y
+3
+Clothing
+x
+3
+Clothing
+y
+
+# Comma-style cross join with VALUES (implicit cross join via FROM list)
+query ITT rowsort
+SELECT c.id, c.name, v.column_0
+FROM (VALUES ROW('x'), ROW('y')) AS v, categories AS c;
+----
+1
+Electronics
+x
+1
+Electronics
+y
+2
+Books
+x
+2
+Books
+y
+3
+Clothing
+x
+3
+Clothing
+y
+
+# TODO: FULL OUTER JOIN tests (VALUES on left)
+# Readyset doesn't support FULL OUTER JOIN yet - "Query failed to parse"
+# These tests pass in upstream PostgreSQL
+
+# negative tests
+
+# More aliases than columns
+statement error: VALUES clause has 2 columns but 3 aliases were specified
+SELECT v.a, v.b
+FROM (VALUES ROW(1, 'x'), ROW(2, 'y')) AS v(a, b, c)
+JOIN categories cat ON v.a = cat.id;
+
+# Fewer aliases than columns — MySQL requires exact match
+statement error
+SELECT v.id, v.name
+FROM (VALUES ROW(1, 'Electronics', true), ROW(2, 'Books', false)) AS v(id, name)
+JOIN categories c ON v.id = c.id;
+
+# Duplicate column aliases - PostgreSQL allows this but Readyset doesn't
+# (Readyset requires unique column names internally)
+onlyif readyset
+statement error
+SELECT * FROM (VALUES ROW(1, 2, 3), ROW(-1, -2, -3)) AS T1 (C1, C1, C1)
+CROSS JOIN categories;
+
+onlyif readyset
+statement error: VALUES clauses must be used in a JOIN
+SELECT * FROM (VALUES ROW(1), ROW(2), ROW(3)) AS v(num);
+
+onlyif readyset
+statement error: VALUES clauses must be used in a JOIN
+SELECT * FROM (VALUES ROW('a'), ROW('b')) AS v(col);
+
+onlyif readyset
+statement error: VALUES clauses must be used in a JOIN
+SELECT num * 2 FROM (VALUES ROW(1), ROW(2), ROW(3)) AS v(num);
+
+onlyif readyset
+statement error: VALUES clauses must be used in a JOIN
+SELECT * FROM (VALUES ROW(1), ROW(2), ROW(3)) AS v(num) WHERE num > 1;
+
+onlyif readyset
+statement error: VALUES clauses must be used in a JOIN
+SELECT COUNT(*) FROM (VALUES ROW(1), ROW(2), ROW(3)) AS v(num);
+
+onlyif readyset
+statement error: VALUES clauses must be used in a JOIN
+SELECT * FROM (VALUES ROW(1, 'a'), ROW(2, 'b')) AS v(id, name);
+
+onlyif readyset
+statement error: VALUES clauses must be used in a JOIN
+SELECT UPPER(col1) FROM (VALUES ROW('a'), ROW('b'), ROW('c')) AS v(col1);
+
+onlyif readyset
+statement error: VALUES clauses must be used in a JOIN
+SELECT * FROM (VALUES ROW(1), ROW(2), ROW(3)) AS v(num) ORDER BY num;
+
+onlyif readyset
+statement error: VALUES clauses must be used in a JOIN
+SELECT category, COUNT(*) FROM (VALUES ROW('A', 1), ROW('A', 2)) AS v(category, val) GROUP BY category;
+
+onlyif readyset
+statement error: at least one base table is required
+SELECT * FROM (VALUES ROW(1)) AS v1(a) JOIN (VALUES ROW(2)) AS v2(b) ON v1.a = v2.b;
+
+onlyif readyset
+statement error: All VALUES clauses must have an alias
+SELECT * FROM (VALUES ROW(1), ROW(2), ROW(3));
+
+# Double-paren VALUES: ((1,1), (1,2), ...) uses ROW constructors (composite types).
+# MySQL errors on this syntax. Readyset errors because ROW/tuple expressions
+# in VALUES are not supported.
+statement error
+SELECT * FROM (VALUES ROW((1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (1, 10))) AS Foo(C1, C2)
+JOIN categories ON Foo.C1 = categories.id;
+
+# Simple ROW constructor in VALUES — Readyset rejects ROW/tuple expressions
+onlyif readyset
+statement error: ROW/tuple expressions in VALUES clauses are not supported
+SELECT v.c1, c.name
+FROM (VALUES ROW((1, 'x')), ROW((2, 'y'))) AS v(c1)
+LEFT JOIN categories c ON v.c1 = c.id;
+
+# missing parens, parser error (different error message between psql and readyset)
+statement error
+SELECT * FROM VALUES ROW(1), ROW(2), ROW(3);
+

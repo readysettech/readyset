@@ -197,11 +197,17 @@ impl DialectDisplay for TableExprInner {
             ),
             TableExprInner::Values { rows } => {
                 write!(f, "(VALUES ")?;
+                let row_prefix = if dialect == Dialect::MySQL { "ROW" } else { "" };
                 for (i, row) in rows.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "({})", CommaSeparatedList::from(row).display(dialect))?;
+                    write!(
+                        f,
+                        "{}({})",
+                        row_prefix,
+                        CommaSeparatedList::from(row).display(dialect)
+                    )?;
                 }
                 write!(f, ")")
             }

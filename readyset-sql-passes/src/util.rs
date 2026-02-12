@@ -1,5 +1,5 @@
 use itertools::Either;
-use readyset_errors::{ReadySetResult, unsupported_err};
+use readyset_errors::{ReadySetResult, invalid_query, unsupported_err};
 use readyset_sql::DialectDisplay;
 use readyset_sql::analysis::is_aggregate;
 use readyset_sql::ast::{
@@ -93,14 +93,14 @@ pub(crate) fn subquery_schemas<'a>(
     // First pass: populate auto-generated column aliases for VALUES clauses that don't have
     // explicit column names (e.g., `(VALUES (1, 'a')) AS v` gets columns `column1`, `column2`).
     for table in tables.iter_mut() {
-        populate_values_column_aliases(table);
+        populate_values_column_aliases(table, dialect)?;
     }
     for jc in join.iter_mut() {
         match &mut jc.right {
-            JoinRightSide::Table(te) => populate_values_column_aliases(te),
+            JoinRightSide::Table(te) => populate_values_column_aliases(te, dialect)?,
             JoinRightSide::Tables(tes) => {
                 for te in tes {
-                    populate_values_column_aliases(te);
+                    populate_values_column_aliases(te, dialect)?;
                 }
             }
         }
@@ -150,19 +150,48 @@ pub(crate) fn subquery_schemas<'a>(
     Ok(schemas)
 }
 
-/// Populate auto-generated column aliases (`column1`, `column2`, etc.) for VALUES table
-/// expressions that don't have explicit column names, and auto-generate a table alias
-/// (`"*VALUES*"`) if none is provided (matching PostgreSQL's internal naming).
-fn populate_values_column_aliases(te: &mut TableExpr) {
-    if let TableExprInner::Values { rows } = &te.inner
-        && te.column_aliases.is_empty()
-    {
+/// Populate auto-generated column aliases for VALUES table expressions that don't have explicit
+/// column names. PostgreSQL uses 1-indexed names (column1, column2, ...) while MySQL uses
+/// 0-indexed names (column_0, column_1, ...).
+fn populate_values_column_aliases(
+    te: &mut TableExpr,
+    dialect: readyset_sql::Dialect,
+) -> ReadySetResult<()> {
+    if let TableExprInner::Values { rows } = &te.inner {
         let num_cols = rows.first().map(|r| r.len()).unwrap_or(0);
-        for i in 1..=num_cols {
-            te.column_aliases
-                .push(SqlIdentifier::from(format!("column{}", i)));
+        let num_aliases = te.column_aliases.len();
+
+        if num_aliases > num_cols {
+            invalid_query!(
+                "VALUES clause has {} columns but {} aliases were specified",
+                num_cols,
+                num_aliases
+            );
+        } else if num_aliases > 0 && num_aliases < num_cols {
+            if dialect == readyset_sql::Dialect::MySQL {
+                invalid_query!(
+                    "VALUES clause has {} columns but {} aliases were specified",
+                    num_cols,
+                    num_aliases
+                );
+            }
+            // PostgreSQL allows partial aliases; pad the rest with defaults.
+            for i in num_aliases..num_cols {
+                te.column_aliases
+                    .push(SqlIdentifier::from(format!("column{}", i + 1)));
+            }
+        } else if num_aliases == 0 {
+            // No aliases provided; generate all default names.
+            for i in 0..num_cols {
+                let name = match dialect {
+                    readyset_sql::Dialect::MySQL => format!("column_{}", i),
+                    readyset_sql::Dialect::PostgreSQL => format!("column{}", i + 1),
+                };
+                te.column_aliases.push(SqlIdentifier::from(name));
+            }
         }
     }
+    Ok(())
 }
 
 // Built-in function names that are allowed in expressions containing aggregates.

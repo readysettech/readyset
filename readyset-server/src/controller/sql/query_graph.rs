@@ -1053,17 +1053,8 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                     }
                 }
 
-                // Reject more aliases than columns (matches PostgreSQL behavior).
-                if table_expr.column_aliases.len() > expected_cols {
-                    return Err(invalid_query_err!(
-                        "VALUES clause has {} columns but {} aliases were specified",
-                        expected_cols,
-                        table_expr.column_aliases.len()
-                    ));
-                }
-
                 // Reject duplicate column aliases to avoid panics downstream.
-                // PostgreSQL allows this but ReadySet requires unique column names.
+                // PostgreSQL allows this but Readyset requires unique column names.
                 {
                     let mut seen = HashSet::new();
                     for alias in &table_expr.column_aliases {
@@ -1076,19 +1067,13 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                     }
                 }
 
-                // Get column names from column_aliases, or generate default names.
-                // If fewer aliases than columns are provided, pad with defaults.
-                // Uses "column1", "column2" etc. to match PostgreSQL's naming.
-                let mut column_names: Vec<SqlIdentifier> = if table_expr.column_aliases.is_empty() {
-                    (1..=expected_cols)
-                        .map(|i| format!("column{}", i).into())
-                        .collect()
-                } else {
-                    table_expr.column_aliases.clone()
-                };
-                for i in (column_names.len() + 1)..=expected_cols {
-                    column_names.push(format!("column{}", i).into());
-                }
+                // column_aliases must already be fully populated by
+                // populate_values_column_aliases in the SQL passes.
+                invariant_eq!(
+                    table_expr.column_aliases.len(),
+                    expected_cols,
+                    "VALUES column_aliases should have been populated by SQL passes"
+                );
 
                 // Convert expressions to literals
                 let literal_rows: Vec<Vec<Literal>> = rows
@@ -1109,7 +1094,8 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                     let node = QueryGraphNode {
                         relation: rel.clone(),
                         predicates: vec![],
-                        columns: column_names
+                        columns: table_expr
+                            .column_aliases
                             .iter()
                             .map(|name| Column {
                                 name: name.clone(),
@@ -1119,7 +1105,7 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                         parameters: Vec::new(),
                         source: RelationSource::Values(ValuesClause {
                             rows: literal_rows,
-                            column_names,
+                            column_names: table_expr.column_aliases.clone(),
                         }),
                     };
                     e.insert(node);

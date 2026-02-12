@@ -59,7 +59,10 @@ fn values_clause(
         let (i, rows) = separated_list1(
             ws_sep_comma,
             delimited(
-                terminated(tag("("), whitespace0),
+                terminated(
+                    preceded(opt(terminated(tag_no_case("row"), whitespace0)), tag("(")),
+                    whitespace0,
+                ),
                 separated_list1(ws_sep_comma, expression(dialect)),
                 preceded(whitespace0, tag(")")),
             ),

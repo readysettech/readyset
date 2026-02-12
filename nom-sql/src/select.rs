@@ -2225,5 +2225,35 @@ mod tests {
             assert_eq!(res.tables[0].alias, Some("v".into()));
             assert!(res.tables[0].column_aliases.is_empty());
         }
+
+        #[test]
+        fn values_clause_mysql_row_keyword() {
+            let qstr = "SELECT v.category, c.name \
+                         FROM (VALUES ROW('Electronics'), ROW('Books'), ROW('Toys')) AS v(category) \
+                         LEFT JOIN categories c ON v.category = c.name";
+            let res = test_parse!(selection(Dialect::MySQL), qstr.as_bytes());
+            assert_eq!(res.tables.len(), 1);
+            assert!(matches!(
+                &res.tables[0].inner,
+                TableExprInner::Values { rows } if rows.len() == 3
+            ));
+            assert_eq!(res.tables[0].alias, Some("v".into()));
+            assert_eq!(
+                res.tables[0].column_aliases,
+                vec![SqlIdentifier::from("category")]
+            );
+        }
+
+        #[test]
+        fn values_clause_mysql_row_multi_column() {
+            let qstr = "SELECT v.id, v.cat \
+                         FROM (VALUES ROW(1, 'Electronics'), ROW(2, 'Books')) AS v(id, cat) \
+                         JOIN products p ON v.id = p.id";
+            let res = test_parse!(selection(Dialect::MySQL), qstr.as_bytes());
+            assert!(matches!(
+                &res.tables[0].inner,
+                TableExprInner::Values { rows } if rows.len() == 2 && rows[0].len() == 2
+            ));
+        }
     }
 }

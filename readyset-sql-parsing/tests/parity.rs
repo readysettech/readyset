@@ -792,6 +792,46 @@ fn explain_materialization() {
 }
 
 #[test]
+fn explain_materialization_roundtrip() {
+    check_rt_both!("EXPLAIN MATERIALIZATIONS");
+    check_rt_both!("EXPLAIN MATERIALIZATIONS FOR CACHE my_cache");
+    check_rt_mysql!("EXPLAIN MATERIALIZATIONS FOR CACHE `my_cache`");
+    check_rt_postgres!("EXPLAIN MATERIALIZATIONS FOR CACHE \"my_cache\"");
+}
+
+#[test]
+fn values_clause_in_join() {
+    check_parse_postgres!(
+        "SELECT v.a FROM (VALUES (1), (2)) AS v(a) CROSS JOIN categories c"
+    );
+    check_parse_mysql!(
+        "SELECT v.a FROM (VALUES ROW(1), ROW(2)) AS v(a) CROSS JOIN categories c"
+    );
+    check_parse_postgres!(
+        "SELECT v.a, v.b FROM (VALUES (1, 'x'), (2, 'y')) AS v(a, b) CROSS JOIN categories c"
+    );
+    check_parse_mysql!(
+        "SELECT v.a, v.b FROM (VALUES ROW(1, 'x'), ROW(2, 'y')) AS v(a, b) CROSS JOIN categories c"
+    );
+}
+
+#[test]
+fn values_clause_roundtrip() {
+    check_rt_postgres!(
+        "SELECT v.a FROM (VALUES (1), (2)) AS v(a) CROSS JOIN categories c"
+    );
+    check_rt_mysql!(
+        "SELECT v.a FROM (VALUES ROW(1), ROW(2)) AS v(a) CROSS JOIN categories c"
+    );
+    check_rt_postgres!(
+        "SELECT v.a, v.b FROM (VALUES (1, 'x'), (2, 'y')) AS v(a, b) CROSS JOIN categories c"
+    );
+    check_rt_mysql!(
+        "SELECT v.a, v.b FROM (VALUES ROW(1, 'x'), ROW(2, 'y')) AS v(a, b) CROSS JOIN categories c"
+    );
+}
+
+#[test]
 fn point_types() {
     check_parse_mysql!("CREATE TABLE t (p POINT)");
     check_parse_postgres!("CREATE TABLE t (p GEOMETRY(POINT))");
