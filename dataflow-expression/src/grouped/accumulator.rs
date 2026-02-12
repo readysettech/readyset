@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter, Result};
 
 use crate::eval::json;
-use readyset_data::DfValue;
+use readyset_data::{Collation, DfValue};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::analysis::is_aggregate;
 use readyset_sql::analysis::visit::{self, Visitor};
@@ -60,7 +60,7 @@ impl AccumulationOp {
         }
     }
 
-    fn is_distinct(&self) -> bool {
+    pub fn is_distinct(&self) -> bool {
         match self {
             Self::ArrayAgg { distinct, .. }
             | Self::GroupConcat { distinct, .. }
@@ -70,7 +70,7 @@ impl AccumulationOp {
         }
     }
 
-    fn order_by(&self) -> Option<(OrderType, NullOrder)> {
+    pub fn order_by(&self) -> Option<(OrderType, NullOrder)> {
         match self {
             AccumulationOp::ArrayAgg { order_by, .. }
             | AccumulationOp::GroupConcat { order_by, .. }
@@ -171,6 +171,49 @@ impl AccumulationOp {
             &json_vals.into(),
             allow_duplicate_keys,
         )
+    }
+
+    /// Emit raw accumulated values as a `DfValue::Array` without finalization.
+    /// This is used when skip_finalization is set, so post-lookup can work
+    /// with the raw constituent values instead of the finalized string.
+    ///
+    /// Text values are normalized to `Collation::Utf8` so that post-lookup's
+    /// `DistinctOrdered` BTreeMap compares them case-sensitively, matching the
+    /// behavior of the old `split()` path (which created fresh `DfValue::from(&str)`
+    /// values with `Collation::Utf8`). Without this, MySQL's default `Utf8AiCi`
+    /// collation causes the BTreeMap to merge values that differ only in case
+    /// (e.g. `"aaa"` and `"AAA"`).
+    pub fn emit_raw(&self, data: &AccumulatorData) -> DfValue {
+        if data.is_empty() {
+            return DfValue::Array(std::sync::Arc::new(readyset_data::Array::from(vec![])));
+        }
+
+        let values: Vec<DfValue> = match data {
+            AccumulatorData::Simple(v) => v.iter().map(Self::normalize_collation).collect(),
+            AccumulatorData::DistinctOrdered(t) => t
+                .iter()
+                .flat_map(|(k, &count)| {
+                    let repeat_count = if self.is_distinct() { 1 } else { count };
+                    let normalized = Self::normalize_collation(&k.value);
+                    std::iter::repeat_n(normalized, repeat_count)
+                })
+                .collect(),
+        };
+
+        DfValue::Array(std::sync::Arc::new(readyset_data::Array::from(values)))
+    }
+
+    /// Normalize a DfValue's collation to `Utf8` (case-sensitive) for raw emission.
+    /// Non-text values are cloned as-is.
+    fn normalize_collation(v: &DfValue) -> DfValue {
+        match v.collation() {
+            Some(Collation::Utf8) | None => v.clone(),
+            Some(_) => {
+                // Re-create the text value with Utf8 collation
+                let s = <&str>::try_from(v).expect("text DfValue must convert to str");
+                DfValue::from_str_and_collation(s, Collation::Utf8)
+            }
+        }
     }
 
     pub fn apply(&self, data: &AccumulatorData) -> ReadySetResult<DfValue> {
@@ -292,6 +335,36 @@ impl AccumulatorData {
     pub fn add_accummulated(&mut self, op: &AccumulationOp, value: DfValue) -> ReadySetResult<()> {
         op.split(&value)?.into_iter().for_each(|v| self.add(op, v));
         Ok(())
+    }
+
+    /// Add raw values from a `DfValue::Array` directly, bypassing split().
+    /// Uses `Vec::extend` for the `Simple` variant for fewer capacity checks.
+    pub fn add_raw(&mut self, op: &AccumulationOp, value: &DfValue) -> ReadySetResult<()> {
+        match value {
+            DfValue::Array(arr) => {
+                match self {
+                    AccumulatorData::Simple(v) => {
+                        v.extend(arr.values().cloned());
+                    }
+                    AccumulatorData::DistinctOrdered(map) => {
+                        let order_by = op.order_by();
+                        for val in arr.values().cloned() {
+                            let key = OrderableDfValue {
+                                value: val,
+                                order_by,
+                            };
+                            map.entry(key).and_modify(|cnt| *cnt += 1).or_insert(1);
+                        }
+                    }
+                }
+                Ok(())
+            }
+            DfValue::None => Ok(()),
+            other => Err(internal_err!(
+                "add_raw: expected DfValue::Array, got {:?}",
+                other
+            )),
+        }
     }
 
     pub fn add(&mut self, op: &AccumulationOp, value: DfValue) {
@@ -712,6 +785,283 @@ mod tests {
 
             let result = validate_no_nested_aggregates(&expr);
             assert!(result.is_err());
+        }
+    }
+
+    mod emit_raw_tests {
+        use super::*;
+
+        fn make_simple_data(values: Vec<DfValue>) -> AccumulatorData {
+            AccumulatorData::Simple(values)
+        }
+
+        fn make_distinct_ordered_data(
+            values: Vec<(DfValue, usize)>,
+            order_by: Option<(OrderType, NullOrder)>,
+        ) -> AccumulatorData {
+            let mut map = std::collections::BTreeMap::new();
+            for (val, count) in values {
+                map.insert(
+                    OrderableDfValue {
+                        value: val,
+                        order_by,
+                    },
+                    count,
+                );
+            }
+            AccumulatorData::DistinctOrdered(map)
+        }
+
+        #[test]
+        fn test_emit_raw_simple() {
+            let op = AccumulationOp::StringAgg {
+                separator: Some(",".to_string()),
+                distinct: false.into(),
+                order_by: None,
+            };
+            let data = make_simple_data(vec![
+                DfValue::from("a"),
+                DfValue::from("b"),
+                DfValue::from("c"),
+            ]);
+
+            let result = op.emit_raw(&data);
+            match result {
+                DfValue::Array(arr) => {
+                    let vals: Vec<_> = arr.values().cloned().collect();
+                    assert_eq!(
+                        vals,
+                        vec![DfValue::from("a"), DfValue::from("b"), DfValue::from("c")]
+                    );
+                }
+                other => panic!("Expected Array, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn test_emit_raw_distinct_ordered() {
+            let op = AccumulationOp::StringAgg {
+                separator: Some(",".to_string()),
+                distinct: true.into(),
+                order_by: None,
+            };
+            let data = make_distinct_ordered_data(
+                vec![(DfValue::from("a"), 3), (DfValue::from("b"), 2)],
+                None,
+            );
+
+            let result = op.emit_raw(&data);
+            match result {
+                DfValue::Array(arr) => {
+                    let vals: Vec<_> = arr.values().cloned().collect();
+                    assert_eq!(vals, vec![DfValue::from("a"), DfValue::from("b")]);
+                }
+                other => panic!("Expected Array, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn test_emit_raw_non_distinct_ordered() {
+            let op = AccumulationOp::GroupConcat {
+                separator: ",".to_string(),
+                distinct: false.into(),
+                order_by: Some((OrderType::OrderAscending, NullOrder::NullsFirst)),
+            };
+            let data = make_distinct_ordered_data(
+                vec![(DfValue::from("a"), 2), (DfValue::from("b"), 1)],
+                Some((OrderType::OrderAscending, NullOrder::NullsFirst)),
+            );
+
+            let result = op.emit_raw(&data);
+            match result {
+                DfValue::Array(arr) => {
+                    let vals: Vec<_> = arr.values().cloned().collect();
+                    assert_eq!(
+                        vals,
+                        vec![DfValue::from("a"), DfValue::from("a"), DfValue::from("b")]
+                    );
+                }
+                other => panic!("Expected Array, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn test_emit_raw_empty() {
+            let op = AccumulationOp::StringAgg {
+                separator: Some(",".to_string()),
+                distinct: false.into(),
+                order_by: None,
+            };
+            let data = make_simple_data(vec![]);
+
+            let result = op.emit_raw(&data);
+            match result {
+                DfValue::Array(arr) => {
+                    assert_eq!(arr.values().count(), 0);
+                }
+                other => panic!("Expected empty Array, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn test_emit_raw_normalizes_collation_simple() {
+            let op = AccumulationOp::GroupConcat {
+                separator: ",".to_string(),
+                distinct: false.into(),
+                order_by: None,
+            };
+            // Simulate MySQL-origin values with Utf8AiCi collation
+            let data = make_simple_data(vec![
+                DfValue::from_str_and_collation("aaa", Collation::Utf8AiCi),
+                DfValue::from_str_and_collation("AAA", Collation::Utf8AiCi),
+            ]);
+
+            let result = op.emit_raw(&data);
+            let arr = match result {
+                DfValue::Array(arr) => arr,
+                other => panic!("Expected Array, got {:?}", other),
+            };
+            let vals: Vec<_> = arr.values().cloned().collect();
+            assert_eq!(vals.len(), 2);
+            // Both values should now have Utf8 collation
+            assert_eq!(vals[0].collation(), Some(Collation::Utf8));
+            assert_eq!(vals[1].collation(), Some(Collation::Utf8));
+            // And they should compare as NOT equal (case-sensitive)
+            assert_ne!(vals[0], vals[1]);
+        }
+
+        #[test]
+        fn test_emit_raw_normalizes_collation_distinct_ordered() {
+            let op = AccumulationOp::StringAgg {
+                separator: Some(",".to_string()),
+                distinct: true.into(),
+                order_by: None,
+            };
+            // Build a DistinctOrdered map with Utf8AiCi values.
+            // Note: with Utf8AiCi, "aaa" and "AAA" would be the same key in the
+            // BTreeMap, so we only insert one of them here. In practice, the
+            // dataflow accumulator already deduplicates per-key.
+            let data = make_distinct_ordered_data(
+                vec![
+                    (
+                        DfValue::from_str_and_collation("aaa", Collation::Utf8AiCi),
+                        2,
+                    ),
+                    (
+                        DfValue::from_str_and_collation("bbb", Collation::Utf8AiCi),
+                        1,
+                    ),
+                ],
+                None,
+            );
+
+            let result = op.emit_raw(&data);
+            let arr = match result {
+                DfValue::Array(arr) => arr,
+                other => panic!("Expected Array, got {:?}", other),
+            };
+            let vals: Vec<_> = arr.values().cloned().collect();
+            // Distinct: each emitted once regardless of count
+            assert_eq!(vals.len(), 2);
+            for v in &vals {
+                assert_eq!(v.collation(), Some(Collation::Utf8));
+            }
+        }
+
+        #[test]
+        fn test_emit_raw_preserves_non_text_values() {
+            let op = AccumulationOp::ArrayAgg {
+                distinct: false.into(),
+                order_by: None,
+            };
+            let data = make_simple_data(vec![DfValue::Int(1), DfValue::Int(2), DfValue::None]);
+
+            let result = op.emit_raw(&data);
+            let arr = match result {
+                DfValue::Array(arr) => arr,
+                other => panic!("Expected Array, got {:?}", other),
+            };
+            let vals: Vec<_> = arr.values().cloned().collect();
+            assert_eq!(vals, vec![DfValue::Int(1), DfValue::Int(2), DfValue::None]);
+        }
+
+        /// Simulates the cross-key post-lookup scenario that caused the original
+        /// collation bug: key 1 has "aaa" and key 2 has "AAA" (both Utf8AiCi).
+        /// After emit_raw normalizes to Utf8, add_raw into a DistinctOrdered map
+        /// should keep them as separate entries.
+        #[test]
+        fn test_add_raw_preserves_case_after_normalization() {
+            let op = AccumulationOp::GroupConcat {
+                separator: "::".to_string(),
+                distinct: true.into(),
+                order_by: None,
+            };
+
+            // Simulate key 1's raw array (already normalized by emit_raw)
+            let key1_values =
+                DfValue::Array(std::sync::Arc::new(readyset_data::Array::from(vec![
+                    DfValue::from("aaa"),
+                    DfValue::from("bbb"),
+                ])));
+            // Simulate key 2's raw array
+            let key2_values =
+                DfValue::Array(std::sync::Arc::new(readyset_data::Array::from(vec![
+                    DfValue::from("AAA"),
+                    DfValue::from("zzz"),
+                ])));
+
+            let mut acc_data: AccumulatorData = (&op).into();
+            acc_data.add_raw(&op, &key1_values).unwrap();
+            acc_data.add_raw(&op, &key2_values).unwrap();
+
+            // With Utf8 collation (post-normalization), "aaa" and "AAA" are distinct
+            let result = op.apply(&acc_data).unwrap();
+            let result_str = result.as_str().expect("should be text");
+            // Should contain all 4 values
+            let parts: Vec<&str> = result_str.split("::").collect();
+            assert_eq!(parts.len(), 4);
+            assert!(parts.contains(&"aaa"));
+            assert!(parts.contains(&"AAA"));
+            assert!(parts.contains(&"bbb"));
+            assert!(parts.contains(&"zzz"));
+        }
+
+        /// Without collation normalization, Utf8AiCi values would merge in the
+        /// BTreeMap. This test demonstrates that add_raw with original Utf8AiCi
+        /// values WOULD lose "AAA" (merged into "aaa"), confirming the bug exists
+        /// when normalization is skipped.
+        #[test]
+        fn test_add_raw_without_normalization_merges_case() {
+            let op = AccumulationOp::GroupConcat {
+                separator: "::".to_string(),
+                distinct: true.into(),
+                order_by: None,
+            };
+
+            // Use Utf8AiCi values directly (simulating what would happen without
+            // the normalization fix in emit_raw)
+            let key1_values =
+                DfValue::Array(std::sync::Arc::new(readyset_data::Array::from(vec![
+                    DfValue::from_str_and_collation("aaa", Collation::Utf8AiCi),
+                    DfValue::from_str_and_collation("bbb", Collation::Utf8AiCi),
+                ])));
+            let key2_values =
+                DfValue::Array(std::sync::Arc::new(readyset_data::Array::from(vec![
+                    DfValue::from_str_and_collation("AAA", Collation::Utf8AiCi),
+                    DfValue::from_str_and_collation("zzz", Collation::Utf8AiCi),
+                ])));
+
+            let mut acc_data: AccumulatorData = (&op).into();
+            acc_data.add_raw(&op, &key1_values).unwrap();
+            acc_data.add_raw(&op, &key2_values).unwrap();
+
+            // With Utf8AiCi, "aaa" and "AAA" are equal — BTreeMap merges them
+            let result = op.apply(&acc_data).unwrap();
+            let result_str = result.as_str().expect("should be text");
+            let parts: Vec<&str> = result_str.split("::").collect();
+            // Only 3 values: AAA was merged into aaa
+            assert_eq!(parts.len(), 3);
+            assert!(!parts.contains(&"AAA"), "AAA should be merged into aaa");
         }
     }
 }

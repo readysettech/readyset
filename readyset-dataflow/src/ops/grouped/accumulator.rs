@@ -30,6 +30,8 @@ pub struct Accumulator {
     over: usize,
     group: Vec<usize>,
     out_ty: DfType,
+    #[serde(default)]
+    skip_finalization: bool,
 }
 
 impl Accumulator {
@@ -41,6 +43,7 @@ impl Accumulator {
         group_by: &[usize],
         over_col_ty: &DfType,
         _dialect: &Dialect,
+        skip_finalization: bool,
     ) -> ReadySetResult<GroupedOperator<Accumulator>> {
         match &op {
             AccumulationOp::ArrayAgg { .. } => {
@@ -80,6 +83,7 @@ impl Accumulator {
                 over,
                 group: group_by.into(),
                 out_ty,
+                skip_finalization,
             },
         ))
     }
@@ -175,7 +179,11 @@ impl GroupedOperation for Accumulator {
                 prev_state.data.remove(&self.op, value)?;
             }
         }
-        let output_value = self.op.apply(&prev_state.data)?;
+        let output_value = if self.skip_finalization {
+            self.op.emit_raw(&prev_state.data)
+        } else {
+            self.op.apply(&prev_state.data)?
+        };
         prev_state.last_output = Some(output_value.clone());
         last_state.insert(group, prev_state);
         Ok(Some(output_value))
@@ -262,7 +270,13 @@ impl GroupedOperation for Accumulator {
     }
 
     fn empty_value(&self) -> Option<DfValue> {
-        Some("".into())
+        if self.skip_finalization {
+            Some(DfValue::Array(std::sync::Arc::new(
+                readyset_data::Array::from(vec![]),
+            )))
+        } else {
+            Some("".into())
+        }
     }
 
     fn can_lose_state(&self) -> bool {
@@ -302,6 +316,7 @@ mod tests {
             &[0],
             &DfType::Unknown,
             &Dialect::DEFAULT_MYSQL,
+            false,
         )
         .unwrap();
         g.set_op("concat", &["x", "ys"], c, mat);

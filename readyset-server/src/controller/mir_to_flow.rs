@@ -101,6 +101,7 @@ pub(super) fn mir_node_to_flow_parts(
                         on,
                         group_by,
                         GroupedNodeType::Accumulation(kind.clone()),
+                        false,
                         mig,
                     )?)
                 }
@@ -117,6 +118,7 @@ pub(super) fn mir_node_to_flow_parts(
                         on,
                         group_by,
                         GroupedNodeType::Aggregation(kind.clone()),
+                        false,
                         mig,
                     )?)
                 }
@@ -146,6 +148,7 @@ pub(super) fn mir_node_to_flow_parts(
                         on,
                         group_by,
                         GroupedNodeType::Extremum(kind.clone()),
+                        false,
                         mig,
                     )?)
                 }
@@ -831,6 +834,7 @@ fn make_grouped_node(
     on: &Column,
     group_by: &[Column],
     kind: GroupedNodeType,
+    skip_finalization: bool,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeIndex> {
     let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
@@ -879,6 +883,7 @@ fn make_grouped_node(
                 group_col_indx.as_slice(),
                 over_col_ty,
                 &mig.dialect,
+                skip_finalization,
             )?;
             let agg_col = make_agg_col(grouped.output_col_type().or_ref(over_col_ty).clone());
             cols.push(agg_col);
