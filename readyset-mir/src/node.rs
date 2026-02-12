@@ -224,6 +224,7 @@ mod tests {
                         distinct: false.into(),
                         order_by: None,
                     },
+                    skip_finalization: false,
                 },
                 vec![Column::new(Some("base"), "b"), Column::named("agg")],
             );

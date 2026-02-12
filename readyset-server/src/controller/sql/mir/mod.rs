@@ -993,6 +993,7 @@ impl SqlToMirConverter {
                         group_by,
                         output_column,
                         kind,
+                        skip_finalization: false,
                     },
                 ),
                 GroupedNodeType::Aggregation(kind) => MirNode::new(
@@ -2828,7 +2829,51 @@ impl SqlToMirConverter {
                     // Note: Post-lookup operations have performance overhead, so they're gated behind
                     // the allow_post_lookup config flag.
                     match post_lookup_aggregates(query_graph, query_name, self.dialect)? {
-                        Some(agg) if self.config.allow_post_lookup => Some(agg),
+                        Some(mut agg) if self.config.allow_post_lookup => {
+                            // For accumulation-type post-lookup aggregates, enable raw_values
+                            // and set skip_finalization on the corresponding upstream
+                            // Accumulator MIR nodes so that they emit raw arrays instead of
+                            // finalized strings. This avoids the lossy split() round-trip.
+                            for pla in &mut agg.aggregates {
+                                if pla.function.is_accumulation() {
+                                    // Walk ancestors of final_node to find the Accumulator
+                                    // whose output_column matches this post-lookup aggregate.
+                                    // Name-only comparison is sufficient because both sides
+                                    // derive from the same alias in query_graph.aggregates.
+                                    let mut stack = vec![final_node];
+                                    let mut visited = HashSet::new();
+                                    let mut found = false;
+                                    while let Some(n) = stack.pop() {
+                                        if !visited.insert(n) {
+                                            continue;
+                                        }
+                                        // Collect parents before mutably borrowing the node,
+                                        // since neighbors_directed borrows the graph immutably.
+                                        let parents: Vec<_> = self
+                                            .mir_graph
+                                            .neighbors_directed(n, Direction::Incoming)
+                                            .collect();
+                                        if let MirNodeInner::Accumulator {
+                                            output_column,
+                                            skip_finalization,
+                                            ..
+                                        } = &mut self.mir_graph[n].inner
+                                        {
+                                            if output_column.name == pla.column.name {
+                                                *skip_finalization = true;
+                                                found = true;
+                                                break;
+                                            }
+                                        }
+                                        stack.extend(parents);
+                                    }
+                                    if found {
+                                        pla.raw_values = true;
+                                    }
+                                }
+                            }
+                            Some(agg)
+                        }
                         Some(_) => {
                             unsupported!(
                                 "Queries which perform operations post-lookup are not supported"
@@ -3552,5 +3597,198 @@ mod tests {
             has_call,
             "Expected unqualified unknown function call to be parsed as FunctionExpr::Call"
         );
+    }
+
+    /// Helper: build a MIR query from SQL with collapsed_where_in + allow_post_lookup,
+    /// returning the converter and leaf node index.
+    fn mir_with_post_lookup(
+        dialect: readyset_sql::Dialect,
+        sql: &str,
+        table_name: &str,
+        columns: &[ColumnSpecification],
+    ) -> ReadySetResult<(SqlToMirConverter, NodeIndex)> {
+        let mut query = parse_select(dialect, sql).unwrap();
+        query.metadata.push(SelectMetadata::CollapsedWhereIn);
+
+        let qg = to_query_graph(query, Dialect::DEFAULT_MYSQL)?;
+
+        let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_MYSQL);
+        converter.set_config(Config {
+            allow_post_lookup: true,
+            ..Default::default()
+        });
+
+        let _ = converter.make_base_node(&table_name.into(), columns, None)?;
+        let node = converter.named_query_to_mir(
+            &"q_test".into(),
+            &qg,
+            &HashMap::new(),
+            LeafBehavior::Leaf,
+        )?;
+
+        Ok((converter, node))
+    }
+
+    fn test_table_columns() -> Vec<ColumnSpecification> {
+        vec![
+            ColumnSpecification {
+                column: Column::from("t.id"),
+                sql_type: SqlType::Int(None),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+            ColumnSpecification {
+                column: Column::from("t.grp"),
+                sql_type: SqlType::Int(None),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+            ColumnSpecification {
+                column: Column::from("t.val"),
+                sql_type: SqlType::VarChar(Some(255)),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+        ]
+    }
+
+    #[test]
+    fn skip_finalization_set_on_group_concat_with_where_in() {
+        let cols = test_table_columns();
+        let (mut converter, node) = mir_with_post_lookup(
+            readyset_sql::Dialect::MySQL,
+            "SELECT group_concat(t.val) FROM t WHERE t.id = 1 GROUP BY t.grp",
+            "t",
+            &cols,
+        )
+        .unwrap();
+
+        let query = converter.make_mir_query("q_test".into(), node);
+
+        // Find the Accumulator node and verify skip_finalization is set
+        let mut found_accumulator = false;
+        for n in query.topo_nodes() {
+            if let MirNodeInner::Accumulator {
+                skip_finalization, ..
+            } = &query.get_node(n).unwrap().inner
+            {
+                assert!(
+                    *skip_finalization,
+                    "Accumulator should have skip_finalization=true"
+                );
+                found_accumulator = true;
+            }
+        }
+        assert!(found_accumulator, "Expected to find an Accumulator node");
+
+        // Verify the leaf has raw_values set on the aggregate
+        if let MirNodeInner::Leaf { aggregates, .. } = &query.get_node(node).unwrap().inner {
+            let agg = aggregates
+                .as_ref()
+                .expect("should have post-lookup aggregates");
+            let accum_aggs: Vec<_> = agg
+                .aggregates
+                .iter()
+                .filter(|a| a.function.is_accumulation())
+                .collect();
+            assert!(
+                !accum_aggs.is_empty(),
+                "should have accumulation aggregates"
+            );
+            for a in accum_aggs {
+                assert!(
+                    a.raw_values,
+                    "accumulation aggregate should have raw_values=true"
+                );
+            }
+        } else {
+            panic!("Expected leaf node");
+        }
+    }
+
+    #[test]
+    fn skip_finalization_not_set_on_sum_with_where_in() {
+        let cols = test_table_columns();
+        let (mut converter, node) = mir_with_post_lookup(
+            readyset_sql::Dialect::MySQL,
+            "SELECT sum(t.grp) FROM t WHERE t.id = 1",
+            "t",
+            &cols,
+        )
+        .unwrap();
+
+        let query = converter.make_mir_query("q_test".into(), node);
+
+        // Sum uses Aggregation, not Accumulator, so no skip_finalization to check.
+        // Verify the leaf has aggregates but none have raw_values set.
+        if let MirNodeInner::Leaf { aggregates, .. } = &query.get_node(node).unwrap().inner {
+            let agg = aggregates
+                .as_ref()
+                .expect("should have post-lookup aggregates");
+            for a in &agg.aggregates {
+                assert!(
+                    !a.raw_values,
+                    "non-accumulation aggregate should not have raw_values"
+                );
+            }
+        } else {
+            panic!("Expected leaf node");
+        }
+    }
+
+    #[test]
+    fn skip_finalization_only_on_matching_accumulator() {
+        // Query with both an accumulation (group_concat) and a non-accumulation (sum)
+        let cols = test_table_columns();
+        let (mut converter, node) = mir_with_post_lookup(
+            readyset_sql::Dialect::MySQL,
+            "SELECT group_concat(t.val), sum(t.grp) FROM t WHERE t.id = 1 GROUP BY t.grp",
+            "t",
+            &cols,
+        )
+        .unwrap();
+
+        let query = converter.make_mir_query("q_test".into(), node);
+
+        // The Accumulator (group_concat) should have skip_finalization=true
+        let mut found_accumulator = false;
+        for n in query.topo_nodes() {
+            if let MirNodeInner::Accumulator {
+                skip_finalization, ..
+            } = &query.get_node(n).unwrap().inner
+            {
+                assert!(
+                    *skip_finalization,
+                    "Accumulator should have skip_finalization=true"
+                );
+                found_accumulator = true;
+            }
+        }
+        assert!(found_accumulator, "Expected to find an Accumulator node");
+
+        // Verify leaf: accumulation aggregate has raw_values, sum does not
+        if let MirNodeInner::Leaf { aggregates, .. } = &query.get_node(node).unwrap().inner {
+            let agg = aggregates
+                .as_ref()
+                .expect("should have post-lookup aggregates");
+            for a in &agg.aggregates {
+                if a.function.is_accumulation() {
+                    assert!(
+                        a.raw_values,
+                        "accumulation aggregate should have raw_values=true"
+                    );
+                } else {
+                    assert!(
+                        !a.raw_values,
+                        "non-accumulation aggregate should not have raw_values"
+                    );
+                }
+            }
+        } else {
+            panic!("Expected leaf node");
+        }
     }
 }

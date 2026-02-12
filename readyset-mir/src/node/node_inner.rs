@@ -89,6 +89,11 @@ pub enum MirNodeInner {
         output_column: Column,
         /// Which accumulation function we are computing
         kind: AccumulationOp,
+        /// When true, the accumulator emits raw arrays instead of finalized values,
+        /// deferring finalization to the post-lookup phase for lossless merging.
+        // serde(default): backward compat with serialized MIR graphs predating this field
+        #[serde(default)]
+        skip_finalization: bool,
     },
     /// Node that computes an aggregate function on a column grouped by another set of columns,
     /// outputting its result as an additional column.

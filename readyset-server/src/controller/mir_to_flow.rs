@@ -89,7 +89,11 @@ pub(super) fn mir_node_to_flow_parts(
             record_reachable(mir_node_inner);
             let flow_node = match mir_node_inner {
                 MirNodeInner::Accumulator {
-                    on, group_by, kind, ..
+                    on,
+                    group_by,
+                    kind,
+                    skip_finalization,
+                    ..
                 } => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];
@@ -101,7 +105,7 @@ pub(super) fn mir_node_to_flow_parts(
                         on,
                         group_by,
                         GroupedNodeType::Accumulation(kind.clone()),
-                        false,
+                        *skip_finalization,
                         mig,
                     )?)
                 }
