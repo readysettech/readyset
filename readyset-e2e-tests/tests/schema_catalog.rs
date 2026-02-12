@@ -18,6 +18,7 @@ const CATALOG_UPDATE_DELAY_MS: u64 = 15_000;
 const CATALOG_UPDATE_APPLY_WAIT: Duration = Duration::from_millis(CATALOG_UPDATE_DELAY_MS + 1_000);
 
 struct SchemaGenerationRace<'a> {
+    /// Kept alive for the duration of the test to prevent the Readyset server from shutting down.
     _handle: Handle,
     rs_conn: mysql_async::Conn,
     shutdown_tx: ShutdownSender,

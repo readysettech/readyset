@@ -191,25 +191,34 @@ impl SchemaCatalogHandle {
         }
     }
 
-    /// Get a copy of the current cached schema catalog, if available
+    /// Get a copy of the current cached schema catalog, if available.
+    ///
+    /// Returns an error if the catalog has not been populated yet (e.g., the SSE stream from the
+    /// server has not delivered the initial catalog update).
     pub async fn get_catalog(&self) -> ReadySetResult<Arc<SchemaCatalog>> {
-        self.inner
-            .read()
-            .await
-            .clone()
-            .ok_or_else(|| internal_err!("SchemaCatalog not initialized"))
+        self.inner.read().await.clone().ok_or_else(|| {
+            trace!("SchemaCatalog requested but not yet initialized; SSE stream may not have delivered the initial update");
+            internal_err!("SchemaCatalog not initialized")
+        })
     }
 
     /// A retrying wrapper around [`get_catalog`] for convenience. The catalog is populated by the
     /// SSE stream from the server; this retries in case the first stream event hasn't arrived yet
     /// (e.g., the server is still starting).
     pub async fn get_catalog_retrying(&self) -> ReadySetResult<Arc<SchemaCatalog>> {
-        retry_with_exponential_backoff!(
+        let result = retry_with_exponential_backoff!(
             { self.get_catalog().await },
             retries: 10,
             delay: 100,
             backoff: 1.2,
-        )
+        );
+        if let Err(ref e) = result {
+            warn!(
+                error = %e,
+                "SchemaCatalog not available after all retries; SSE stream may not have delivered the initial update"
+            );
+        }
+        result
     }
 
     /// Check if a schema catalog is currently cached

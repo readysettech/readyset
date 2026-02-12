@@ -1498,6 +1498,9 @@ impl SqlIncorporator {
 
         let uncompiled_views = self.uncompiled_views.keys().cloned().collect();
 
+        // Custom types without a schema are filtered out here because the SchemaCatalog indexes
+        // custom types by schema. Schema-less types shouldn't occur in practice (they always come
+        // from DDL which sets the schema), but we silently skip them rather than failing.
         let custom_types: HashMap<SqlIdentifier, HashSet<SqlIdentifier>> = self
             .custom_types
             .keys()
