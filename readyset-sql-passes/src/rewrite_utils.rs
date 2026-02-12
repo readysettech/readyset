@@ -1236,6 +1236,8 @@ fn calculate_aggregate_only_expression_for_empty_data_set(mut expr: Expr) -> Rea
 
     ForEachVisitor {}.visit_expr(&mut expr)?;
 
+    // Use the non-preserving variant intentionally -- this needs to fully reduce
+    // the expression to a literal for fallback value computation.
     constant_fold_expr(&mut expr, dialect::Dialect::DEFAULT_POSTGRESQL);
 
     Ok(expr)
@@ -1378,6 +1380,8 @@ pub(crate) fn extract_aggregate_fallback_for_expr(
     }
     .visit_expr(&mut expr)?;
 
+    // Use the non-preserving variant intentionally -- this needs to fully reduce
+    // the expression to a literal for fallback value computation.
     constant_fold_expr(&mut expr, dialect::Dialect::DEFAULT_POSTGRESQL);
 
     Ok(if matches!(expr, Expr::Literal(_)) {

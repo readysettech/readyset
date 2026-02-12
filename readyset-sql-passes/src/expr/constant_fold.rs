@@ -28,6 +28,7 @@ fn const_eval(expr: &Expr, dialect: Dialect) -> ReadySetResult<Literal> {
 
 struct ConstantFoldVisitor {
     dialect: Dialect,
+    preserve_casts: bool,
 }
 
 impl<'ast> VisitorMut<'ast> for ConstantFoldVisitor {
@@ -36,6 +37,16 @@ impl<'ast> VisitorMut<'ast> for ConstantFoldVisitor {
     fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
         if matches!(expr, Expr::Literal(_)) {
             return Ok(());
+        }
+
+        // When preserve_casts is enabled, don't fold away Cast expressions — they carry type
+        // information that is semantically important. For example, PostgreSQL uses casts for
+        // function overload resolution: `ARRAY_AGG('A'::CHAR)` is valid but `ARRAY_AGG('A')`
+        // fails because the literal 'A' has type `unknown` which is ambiguous. Instead, recurse
+        // into the inner expression so that sub-expressions still get folded (e.g.,
+        // `CAST(1 + 2 AS INT)` becomes `CAST(3 AS INT)`).
+        if self.preserve_casts && matches!(expr, Expr::Cast { .. }) {
+            return visit_mut::walk_expr(self, expr);
         }
 
         // Since we have to recursively traverse the expression's AST to convert it into a dataflow
@@ -68,8 +79,34 @@ impl<'ast> VisitorMut<'ast> for ConstantFoldVisitor {
 /// ```sql
 /// x = ifnull(y, 21)
 /// ```
+///
+/// Note: this will also fold away `CAST` expressions (e.g. `'A'::CHAR` becomes `'A'`). If you
+/// need to preserve `CAST` type annotations (e.g. for PostgreSQL function overload resolution),
+/// use [`constant_fold_expr_preserving_casts`] instead.
 pub fn constant_fold_expr(expr: &mut Expr, dialect: Dialect) {
-    let Ok(()) = ConstantFoldVisitor { dialect }.visit_expr(expr);
+    let Ok(()) = ConstantFoldVisitor {
+        dialect,
+        preserve_casts: false,
+    }
+    .visit_expr(expr);
+}
+
+/// Like [`constant_fold_expr`], but preserves `CAST`/`::` type annotations instead of folding
+/// them away.
+///
+/// This is important for PostgreSQL where casts carry semantic meaning for function overload
+/// resolution. For example, `ARRAY_AGG('A'::CHAR)` requires the `::CHAR` cast — without it,
+/// PostgreSQL cannot resolve the `array_agg(unknown)` overload.
+///
+/// Non-Cast inner sub-expressions of a Cast are still folded: `CAST(1 + 2 AS INT)` becomes
+/// `CAST(3 AS INT)`. Nested Casts are also preserved (e.g., `CAST(CAST(1+2 AS INT) AS TEXT)`
+/// becomes `CAST(CAST(3 AS INT) AS TEXT)`).
+pub fn constant_fold_expr_preserving_casts(expr: &mut Expr, dialect: Dialect) {
+    let Ok(()) = ConstantFoldVisitor {
+        dialect,
+        preserve_casts: true,
+    }
+    .visit_expr(expr);
 }
 
 #[cfg(test)]
@@ -109,5 +146,63 @@ mod tests {
         within_larger_expression_grouped("t.x + (4 + 5)", "t.x + 9");
         within_larger_expression_left_associative("4 + 5 + t.x", "9 + t.x");
         doc_example("x = ifnull(y, 1 + (4 * 5))", "x = ifnull(y, 21)");
+    }
+
+    /// Helper for PostgreSQL-dialect constant folding tests that preserve casts.
+    fn pg_preserving_casts_rewrites_to(input: &str, expected: &str) {
+        let mut expr = parse_expr(readyset_sql::Dialect::PostgreSQL, input).unwrap();
+        let expected = parse_expr(readyset_sql::Dialect::PostgreSQL, expected).unwrap();
+        constant_fold_expr_preserving_casts(&mut expr, Dialect::DEFAULT_POSTGRESQL);
+
+        let expr = expr.display(readyset_sql::Dialect::PostgreSQL).to_string();
+        let expected = expected
+            .display(readyset_sql::Dialect::PostgreSQL)
+            .to_string();
+        assert_eq!(expr, expected, "\nExpected: {expected}\n     Got: {expr}");
+    }
+
+    /// Cast of a literal must not be folded away — the type annotation carries semantic
+    /// meaning in PostgreSQL (REA-6285).
+    #[test]
+    fn cast_literal_preserved() {
+        pg_preserving_casts_rewrites_to("'A'::char", "'A'::char");
+    }
+
+    /// Cast with a foldable inner expression: the inner arithmetic should be folded
+    /// but the outer Cast must remain.
+    #[test]
+    fn cast_with_foldable_inner() {
+        pg_preserving_casts_rewrites_to("CAST(1 + 2 AS int)", "CAST(3 AS int)");
+    }
+
+    /// Cast must be preserved inside a non-constant expression so PostgreSQL can
+    /// resolve function overloads (e.g., ARRAY_AGG('A'::CHAR) — REA-6285).
+    /// Here we use a column reference to make the outer expression non-constant,
+    /// simulating the aggregate case.
+    #[test]
+    fn cast_preserved_in_non_constant_context() {
+        pg_preserving_casts_rewrites_to("t.x = 'A'::char", "t.x = 'A'::char");
+    }
+
+    /// Nested casts: both Cast wrappers are preserved, but non-Cast inner
+    /// sub-expressions (like arithmetic) are still folded.
+    #[test]
+    fn nested_casts_both_preserved() {
+        pg_preserving_casts_rewrites_to(
+            "CAST(CAST(1 + 2 AS int) AS text)",
+            "CAST(CAST(3 AS int) AS text)",
+        );
+    }
+
+    /// Verify that the non-preserving `constant_fold_expr` still folds casts to literals,
+    /// since `rewrite_utils.rs` callers depend on this for fallback value computation.
+    #[test]
+    fn non_preserving_folds_cast() {
+        let mut expr = parse_expr(readyset_sql::Dialect::PostgreSQL, "'A'::char").unwrap();
+        constant_fold_expr(&mut expr, Dialect::DEFAULT_POSTGRESQL);
+        assert!(
+            matches!(expr, Expr::Literal(_)),
+            "constant_fold_expr should fold 'A'::char to a literal, got: {expr:?}"
+        );
     }
 }

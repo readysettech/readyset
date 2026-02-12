@@ -4,14 +4,18 @@ use readyset_sql::ast::{Expr, SelectStatement};
 
 use crate::RewriteDialectContext;
 
-use self::constant_fold::constant_fold_expr;
+use self::constant_fold::constant_fold_expr_preserving_casts;
 use self::normalize_negation::normalize_negation;
 
 pub(crate) mod constant_fold;
 mod normalize_negation;
 
 pub fn scalar_optimize_expr(expr: &mut Expr, dialect: Dialect) {
-    constant_fold_expr(expr, dialect);
+    // Use the cast-preserving variant so that type annotations like `'A'::CHAR` are retained in
+    // stored query definitions. PostgreSQL needs these for function overload resolution (REA-6285).
+    // This also preserves MySQL casts, which is harmless -- preserving type info is strictly more
+    // conservative than folding it away.
+    constant_fold_expr_preserving_casts(expr, dialect);
     normalize_negation(expr);
 }
 

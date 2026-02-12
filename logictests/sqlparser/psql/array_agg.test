@@ -301,3 +301,35 @@ query T
 select array_agg(concat(t.tag, '-suffix')) from tags t where d_id in (1, 2);
 ----
 {bbb-suffix,aaa-suffix,ccc-suffix,bbb-suffix,NULL,aaa-suffix,NULL,yyy-suffix,zzz-suffix,AAA-suffix}
+
+
+#####
+# test with CAST in aggregate argument (REA-6285)
+# The cast must be preserved in the cache definition so that PostgreSQL
+# can resolve the function overload correctly.
+
+# column cast
+query T
+select array_agg(t.tag::text) from tags t where d_id = 2;
+----
+{yyy,zzz,AAA}
+
+# column cast - post-lookup aggregation
+query T
+select array_agg(t.tag::text) from tags t where d_id in (1, 2);
+----
+{bbb,aaa,ccc,bbb,NULL,aaa,NULL,yyy,zzz,AAA}
+
+# literal cast inside aggregate (the actual REA-6285 failure mode)
+# A literal like 'hello'::text would previously be constant-folded away,
+# stripping the cast and causing a cache-definition mismatch with PostgreSQL.
+query T
+select array_agg('hello'::text) from tags t where d_id = 2;
+----
+{hello,hello,hello}
+
+# literal cast inside aggregate - post-lookup aggregation
+query T
+select array_agg('hello'::text) from tags t where d_id in (1, 2);
+----
+{hello,hello,hello,hello,hello,hello,hello,hello,hello,hello}
