@@ -206,6 +206,7 @@ pub(crate) async fn write_query_results<S: AsyncRead + AsyncWrite + Unpin>(
 async fn write_meta_table<S: AsyncRead + AsyncWrite + Unpin>(
     vars: Vec<MetaVariable>,
     results: QueryResultWriter<'_, S>,
+    status_flags: StatusFlags,
 ) -> io::Result<()> {
     let cols = vars
         .iter()
@@ -226,7 +227,7 @@ async fn write_meta_table<S: AsyncRead + AsyncWrite + Unpin>(
         writer.write_col(var.value)?;
     }
     writer.end_row().await?;
-    writer.finish().await
+    writer.set_status_flags(status_flags).finish().await
 }
 
 /// Writes a Vec of [`MetaVariable`] as a table with two columns, where each row represents one
@@ -234,6 +235,7 @@ async fn write_meta_table<S: AsyncRead + AsyncWrite + Unpin>(
 async fn write_meta_variables<S: AsyncRead + AsyncWrite + Unpin>(
     vars: Vec<MetaVariable>,
     results: QueryResultWriter<'_, S>,
+    status_flags: StatusFlags,
 ) -> io::Result<()> {
     // Assign column schema to match MySQL
     // [`SHOW STATUS`](https://dev.mysql.com/doc/refman/8.0/en/show-status.html)
@@ -263,7 +265,7 @@ async fn write_meta_variables<S: AsyncRead + AsyncWrite + Unpin>(
         writer.write_col(v.value)?;
         writer.end_row().await?;
     }
-    writer.finish().await
+    writer.set_status_flags(status_flags).finish().await
 }
 
 /// Writes a Vec of [`MetaVariable`] as a table with a single row, where the column names correspond
@@ -272,6 +274,7 @@ async fn write_meta_variables<S: AsyncRead + AsyncWrite + Unpin>(
 async fn write_meta_with_header<S: AsyncRead + AsyncWrite + Unpin>(
     vars: Vec<MetaVariable>,
     results: QueryResultWriter<'_, S>,
+    status_flags: StatusFlags,
 ) -> io::Result<()> {
     let cols = vec![
         Column {
@@ -299,7 +302,7 @@ async fn write_meta_with_header<S: AsyncRead + AsyncWrite + Unpin>(
         writer.write_col(v.value)?;
         writer.end_row().await?;
     }
-    writer.finish().await
+    writer.set_status_flags(status_flags).finish().await
 }
 
 pub struct Backend {
@@ -321,6 +324,26 @@ impl Deref for Backend {
 impl DerefMut for Backend {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.noria
+    }
+}
+
+impl Backend {
+    /// Constructs the MySQL server status flags from a `ProxyState` snapshot.
+    fn flags_from_proxy_state(state: readyset_adapter::backend::ProxyState) -> StatusFlags {
+        let mut flags = StatusFlags::empty();
+        if state.is_autocommit() {
+            flags |= StatusFlags::SERVER_STATUS_AUTOCOMMIT;
+        }
+        if state.in_transaction_or_implicit() {
+            flags |= StatusFlags::SERVER_STATUS_IN_TRANS;
+        }
+        flags
+    }
+
+    /// Constructs the MySQL server status flags bitmask from the current
+    /// adapter state (autocommit and transaction tracking via `ProxyState`).
+    fn build_status_flags(&self) -> StatusFlags {
+        Self::flags_from_proxy_state(self.noria.proxy_state())
     }
 }
 
@@ -396,29 +419,33 @@ async fn handle_readyset_result<S>(
     result: noria_connector::QueryResult<'_>,
     writer: QueryResultWriter<'_, S>,
     results_encoding: Encoding,
+    status_flags: StatusFlags,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    let flags = Some(status_flags);
     match result {
-        noria_connector::QueryResult::Empty => writer.completed(0, 0, None).await,
+        noria_connector::QueryResult::Empty => writer.completed(0, 0, flags).await,
         noria_connector::QueryResult::Insert {
             num_rows_inserted,
             first_inserted_id,
-        } => write_query_results(Ok((num_rows_inserted, first_inserted_id)), writer, None).await,
+        } => write_query_results(Ok((num_rows_inserted, first_inserted_id)), writer, flags).await,
         noria_connector::QueryResult::Update {
             num_rows_updated,
             last_inserted_id,
-        } => write_query_results(Ok((num_rows_updated, last_inserted_id)), writer, None).await,
+        } => write_query_results(Ok((num_rows_updated, last_inserted_id)), writer, flags).await,
         noria_connector::QueryResult::Delete { num_rows_deleted } => {
-            writer.completed(num_rows_deleted, 0, None).await
+            writer.completed(num_rows_deleted, 0, flags).await
         }
-        noria_connector::QueryResult::Meta(vars) => write_meta_table(vars, writer).await,
+        noria_connector::QueryResult::Meta(vars) => {
+            write_meta_table(vars, writer, status_flags).await
+        }
         noria_connector::QueryResult::MetaVariables(vars) => {
-            write_meta_variables(vars, writer).await
+            write_meta_variables(vars, writer, status_flags).await
         }
         noria_connector::QueryResult::MetaWithHeader(vars) => {
-            write_meta_with_header(vars, writer).await
+            write_meta_with_header(vars, writer, status_flags).await
         }
         noria_connector::QueryResult::Select { mut rows, schema } => {
             let mysql_schema = convert_columns!(schema.schema, writer);
@@ -455,7 +482,7 @@ where
                 }
                 rw.end_row().await?;
             }
-            rw.finish().await
+            rw.set_status_flags(status_flags).finish().await
         }
     }
 }
@@ -463,6 +490,7 @@ where
 async fn handle_shallow_result<S>(
     result: readyset_shallow::QueryResult<CacheEntry>,
     writer: QueryResultWriter<'_, S>,
+    status_flags: StatusFlags,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -493,35 +521,41 @@ where
         }
         rw.end_row().await?;
     }
-    rw.finish().await
+    rw.set_status_flags(status_flags).finish().await
 }
 
 async fn handle_upstream_result<S>(
     result: upstream::QueryResult<'_>,
     writer: QueryResultWriter<'_, S>,
     cache: Option<CacheInsertGuard<Vec<DfValue>, CacheEntry>>,
+    status_flags_override: Option<StatusFlags>,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    result.process(Some(writer), cache).await
+    result
+        .process(Some(writer), cache, status_flags_override)
+        .await
 }
 
 async fn handle_execute_result<S>(
     result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
     writer: QueryResultWriter<'_, S>,
     results_encoding: Encoding,
+    status_flags: StatusFlags,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     match result {
         Ok(QueryResult::Noria(result)) => {
-            handle_readyset_result(result, writer, results_encoding).await
+            handle_readyset_result(result, writer, results_encoding, status_flags).await
         }
-        Ok(QueryResult::Shallow(result)) => handle_shallow_result(result, writer).await,
+        Ok(QueryResult::Shallow(result)) => {
+            handle_shallow_result(result, writer, status_flags).await
+        }
         Ok(QueryResult::Upstream(result, cache, _)) => {
-            handle_upstream_result(result, writer, cache).await
+            handle_upstream_result(result, writer, cache, Some(status_flags)).await
         }
         Ok(QueryResult::UpstreamBufferedInMemory(..)) => handle_error!(
             Error::ReadySet(readyset_errors::unsupported_err!(
@@ -543,6 +577,7 @@ async fn handle_query_result<S>(
     result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
     writer: QueryResultWriter<'_, S>,
     results_encoding: Encoding,
+    status_flags: StatusFlags,
 ) -> QueryResultsResponse
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -550,7 +585,7 @@ where
     match result {
         Ok(QueryResult::Parser(command)) => QueryResultsResponse::Command(command),
         res => QueryResultsResponse::IoResult(
-            handle_execute_result(res, writer, results_encoding).await,
+            handle_execute_result(res, writer, results_encoding, status_flags).await,
         ),
     }
 }
@@ -559,6 +594,10 @@ impl<S> MySqlShim<S> for Backend
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    fn server_status_flags(&self) -> StatusFlags {
+        self.build_status_flags()
+    }
+
     fn on_connect_attrs(&mut self, attrs: &HashMap<&str, &str>) {
         if attrs
             .get("_program_name")
@@ -711,8 +750,17 @@ where
         }
 
         let results_encoding = self.noria.noria.results_encoding();
+        let pre_flags = self.build_status_flags();
 
-        match self.execute(id, &value_params, &()).await {
+        let (execute_result, post_state) = match self.execute(id, &value_params, &()).await {
+            Ok((result, state)) => (Ok(result), Some(state)),
+            Err(e) => (Err(e), None),
+        };
+        let status_flags = post_state
+            .map(Self::flags_from_proxy_state)
+            .unwrap_or(pre_flags);
+
+        match execute_result {
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select { mut rows, schema })) => {
                 let CachedSchema {
                     mysql_schema,
@@ -752,10 +800,10 @@ where
                     }
                     rw.end_row().await?;
                 }
-                rw.finish().await
+                rw.set_status_flags(status_flags).finish().await
             }
             execute_result => {
-                handle_execute_result(execute_result, results, results_encoding).await
+                handle_execute_result(execute_result, results, results_encoding, status_flags).await
             }
         }
     }
@@ -849,8 +897,12 @@ where
         }
 
         let results_encoding = self.noria.noria.results_encoding();
-        let query_result = self.query(query).await;
-        handle_query_result(query_result, results, results_encoding).await
+        let pre_flags = self.build_status_flags();
+        let (query_result, status_flags) = match self.query(query).await {
+            Ok((result, state)) => (Ok(result), Self::flags_from_proxy_state(state)),
+            Err(e) => (Err(e), pre_flags),
+        };
+        handle_query_result(query_result, results, results_encoding, status_flags).await
     }
 
     fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {
@@ -894,5 +946,45 @@ async fn handle_column_write_err<S: AsyncRead + AsyncWrite + Unpin>(
             msg.clone(),
         )),
         _ => rw.error(e.error_kind(), e.to_string().as_bytes()).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mysql_async::consts::StatusFlags;
+    use readyset_adapter::backend::ProxyState;
+
+    use super::Backend;
+
+    /// Flag truth table matching the design doc (section 5):
+    ///
+    /// | ProxyState     | is_autocommit | in_tx_or_implicit | AUTOCOMMIT | IN_TRANS |
+    /// |----------------|---------------|-------------------|------------|----------|
+    /// | Never          | true          | false             | 1          | 0        |
+    /// | Fallback       | true          | false             | 1          | 0        |
+    /// | InTransaction  | true          | true              | 1          | 1        |
+    /// | AutocommitOff  | false         | true              | 0          | 1        |
+    /// | ProxyAlways    | true          | false             | 1          | 0        |
+    #[test]
+    fn status_flags_truth_table() {
+        let ac = StatusFlags::SERVER_STATUS_AUTOCOMMIT;
+        let tx = StatusFlags::SERVER_STATUS_IN_TRANS;
+
+        // Never / Fallback / ProxyAlways: autocommit on, not in transaction
+        assert_eq!(Backend::flags_from_proxy_state(ProxyState::Never), ac);
+        assert_eq!(Backend::flags_from_proxy_state(ProxyState::Fallback), ac);
+        assert_eq!(Backend::flags_from_proxy_state(ProxyState::ProxyAlways), ac);
+
+        // InTransaction: autocommit on, in explicit transaction
+        assert_eq!(
+            Backend::flags_from_proxy_state(ProxyState::InTransaction),
+            ac | tx
+        );
+
+        // AutocommitOff: autocommit off, in implicit transaction
+        assert_eq!(
+            Backend::flags_from_proxy_state(ProxyState::AutocommitOff),
+            tx
+        );
     }
 }

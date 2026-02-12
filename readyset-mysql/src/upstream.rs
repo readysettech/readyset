@@ -114,10 +114,24 @@ impl UpstreamDestination for QueryResult<'_> {
 }
 
 impl<'a> QueryResult<'a> {
+    /// Process the query result, writing it to the given writer and optionally
+    /// caching it.
+    ///
+    /// When `status_flags_override` is `Some(flags)`, those flags replace the
+    /// flags that mysql-async extracted from the upstream response packets.
+    /// This is the normal path for proxied results because mysql-async can
+    /// produce garbage flags (e.g. due to PREPARE_Response mis-parsing).
+    /// The override should be the "base" flags; mysql-srv will OR in
+    /// `SERVER_MORE_RESULTS_EXISTS` when appropriate.
+    ///
+    /// When `status_flags_override` is `None`, the flags from mysql-async are
+    /// forwarded verbatim (used only for cache-refresh paths that have no
+    /// client writer).
     pub async fn process<S>(
         self,
         writer: Option<QueryResultWriter<'_, S>>,
         mut cache: Option<CacheInsertGuard<Vec<DfValue>, CacheEntry>>,
+        status_flags_override: Option<StatusFlags>,
     ) -> io::Result<()>
     where
         S: AsyncRead + AsyncWrite + Unpin,
@@ -127,8 +141,9 @@ impl<'a> QueryResult<'a> {
                 let Some(writer) = writer else {
                     return Ok(());
                 };
+                let flags = status_flags_override.unwrap_or(status_flags);
                 let rw = writer.start(&[]).await?;
-                rw.set_status_flags(status_flags).finish().await
+                rw.set_status_flags(flags).finish().await
             }
             QueryResult::WriteResult {
                 num_rows_affected,
@@ -138,10 +153,11 @@ impl<'a> QueryResult<'a> {
                 let Some(writer) = writer else {
                     return Ok(());
                 };
+                let flags = status_flags_override.unwrap_or(status_flags);
                 write_query_results(
                     Ok((num_rows_affected, last_inserted_id)),
                     writer,
-                    Some(status_flags),
+                    Some(flags),
                 )
                 .await
             }
@@ -203,8 +219,9 @@ impl<'a> QueryResult<'a> {
                 }
 
                 if let Some(mut rw) = rw {
-                    if let Some(status_flags) = stream.status_flags() {
-                        rw = rw.set_status_flags(status_flags);
+                    let flags = status_flags_override.or_else(|| stream.status_flags());
+                    if let Some(flags) = flags {
+                        rw = rw.set_status_flags(flags);
                     }
                     rw.finish().await?;
                 }
@@ -230,6 +247,7 @@ impl Refresh for QueryResult<'_> {
         self.process(
             None::<QueryResultWriter<'_, tokio::net::TcpStream>>,
             Some(cache),
+            None, // No status flags override for cache refresh (no client writer)
         )
         .await
     }

@@ -232,7 +232,7 @@ pub enum UnsupportedSetMode {
 /// }
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProxyState {
+pub enum ProxyState {
     /// Never proxy statements upstream. This is the behavior used when no upstream database is
     /// configured for a backend
     Never,
@@ -290,6 +290,18 @@ impl ProxyState {
 
     fn in_transaction(&self) -> bool {
         *self == ProxyState::InTransaction
+    }
+
+    /// Returns true when autocommit is effectively on.
+    /// True for all states except `AutocommitOff`.
+    pub fn is_autocommit(&self) -> bool {
+        !matches!(self, ProxyState::AutocommitOff)
+    }
+
+    /// Returns true when inside any transaction -- explicit (`BEGIN`) or
+    /// implicit (`autocommit=0`).
+    pub fn in_transaction_or_implicit(&self) -> bool {
+        matches!(self, ProxyState::InTransaction | ProxyState::AutocommitOff)
     }
 
     /// Sets the autocommit state accordingly. If turning autocommit on, will set ProxyState to
@@ -2055,7 +2067,7 @@ where
         id: u32,
         params: &[DfValue],
         exec_meta: &'a DB::ExecMeta,
-    ) -> Result<QueryResult<'a, DB>, DB::Error> {
+    ) -> Result<(QueryResult<'a, DB>, ProxyState), DB::Error> {
         self.check_routing().await?;
         self.last_query = None;
         // The rewrite context isn't needed until we have looked up the statement and checked its
@@ -2281,7 +2293,8 @@ where
             self.settings.dialect,
         );
 
-        result
+        let proxy_state = self.state.proxy_state;
+        result.map(|r| (r, proxy_state))
     }
 
     pub async fn remove_statement(&mut self, deallocate_id: DeallocateId) -> Result<(), DB::Error> {
@@ -4547,7 +4560,10 @@ where
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
     #[inline]
-    pub async fn query<'a>(&'a mut self, query: &'a str) -> Result<QueryResult<'a, DB>, DB::Error> {
+    pub async fn query<'a>(
+        &'a mut self,
+        query: &'a str,
+    ) -> Result<(QueryResult<'a, DB>, ProxyState), DB::Error> {
         self.check_routing().await?;
         let mut event = QueryExecutionEvent::new(EventType::Query);
         let query_log_sender = self.query_log_sender.clone();
@@ -4595,7 +4611,8 @@ where
                 self.settings.dialect,
             );
 
-            return result;
+            let proxy_state = self.state.proxy_state;
+            return result.map(|r| (r, proxy_state));
         }
 
         let result = match parsed {
@@ -4718,7 +4735,8 @@ where
                                 .map(|e| e.to_string())
                                 .unwrap_or_default(),
                         });
-                        return result;
+                        let proxy_state = self.state.proxy_state;
+                        return result.map(|r| (r, proxy_state));
                     }
                     Err(e) => return Err(e.into()),
                 };
@@ -4800,7 +4818,8 @@ where
             self.settings.dialect,
         );
 
-        result
+        let proxy_state = self.state.proxy_state;
+        result.map(|r| (r, proxy_state))
     }
 
     /// Whether or not we have fallback enabled.
@@ -4905,8 +4924,27 @@ where
         ))
     }
 
+    /// Returns the current `ProxyState`, which protocol-specific backends
+    /// can use to derive connection status flags (e.g. MySQL status flags).
+    pub fn proxy_state(&self) -> ProxyState {
+        self.state.proxy_state
+    }
+
     pub fn in_transaction(&self) -> bool {
         self.state.proxy_state.in_transaction()
+    }
+
+    /// Returns true when autocommit is effectively on.
+    /// This is true for all states except `AutocommitOff`.
+    pub fn is_autocommit(&self) -> bool {
+        self.state.proxy_state.is_autocommit()
+    }
+
+    /// Returns true when inside any transaction -- explicit (`BEGIN`) or
+    /// implicit (`autocommit=0`). Distinct from [`in_transaction()`] which only
+    /// covers explicit transactions (used by the PostgreSQL path).
+    pub fn in_transaction_or_implicit(&self) -> bool {
+        self.state.proxy_state.in_transaction_or_implicit()
     }
 
     async fn rewrite_context(
@@ -5187,4 +5225,38 @@ where
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProxyState;
+
+    #[test]
+    fn is_autocommit_by_proxy_state() {
+        assert!(ProxyState::Never.is_autocommit());
+        assert!(ProxyState::Fallback.is_autocommit());
+        assert!(ProxyState::InTransaction.is_autocommit());
+        assert!(!ProxyState::AutocommitOff.is_autocommit());
+        assert!(ProxyState::ProxyAlways.is_autocommit());
+    }
+
+    #[test]
+    fn in_transaction_or_implicit_by_proxy_state() {
+        assert!(!ProxyState::Never.in_transaction_or_implicit());
+        assert!(!ProxyState::Fallback.in_transaction_or_implicit());
+        assert!(ProxyState::InTransaction.in_transaction_or_implicit());
+        assert!(ProxyState::AutocommitOff.in_transaction_or_implicit());
+        assert!(!ProxyState::ProxyAlways.in_transaction_or_implicit());
+    }
+
+    /// Verify that existing in_transaction() is NOT affected -- it only covers
+    /// explicit transactions, not AutocommitOff.
+    #[test]
+    fn in_transaction_only_covers_explicit() {
+        assert!(!ProxyState::Never.in_transaction());
+        assert!(!ProxyState::Fallback.in_transaction());
+        assert!(ProxyState::InTransaction.in_transaction());
+        assert!(!ProxyState::AutocommitOff.in_transaction());
+        assert!(!ProxyState::ProxyAlways.in_transaction());
+    }
 }

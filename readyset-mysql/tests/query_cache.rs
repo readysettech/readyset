@@ -1,12 +1,12 @@
 use assert_matches::assert_matches;
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Result, Row, Statement};
+use readyset_adapter::BackendBuilder;
 use readyset_adapter::backend::{MigrationMode, QueryInfo, UnsupportedSetMode};
 use readyset_adapter::query_status_cache::QueryStatusCache;
-use readyset_adapter::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
-use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
-use readyset_client_test_helpers::{sleep, wait_for_table_id_change_and_leader_ready, TestBuilder};
+use readyset_client_test_helpers::mysql_helpers::{MySQLAdapter, last_query_info};
+use readyset_client_test_helpers::{TestBuilder, sleep, wait_for_table_id_change_and_leader_ready};
 use readyset_server::Handle;
 use readyset_sql::ast::Relation;
 use readyset_util::shutdown::ShutdownSender;

@@ -378,6 +378,13 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
     fn require_authentication(&self) -> bool {
         true
     }
+
+    /// Returns the current server status flags to include in OK/EOF packets.
+    /// The default implementation returns `SERVER_STATUS_AUTOCOMMIT`, which is
+    /// correct for a fresh connection with no transaction tracking.
+    fn server_status_flags(&self) -> StatusFlags {
+        StatusFlags::SERVER_STATUS_AUTOCOMMIT
+    }
 }
 
 /// Stores a preencoded result schema for a prepared MySQL statement
@@ -526,7 +533,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         init_packet.extend_from_slice(&capabilities.to_le_bytes()[..2]);
 
         init_packet.extend_from_slice(&[0x21]); // UTF8_GENERAL_CI
-        init_packet.extend_from_slice(&[0x00, 0x00]); // status flags
+
+        // Status flags: fresh connections always have autocommit on, matching real MySQL behavior.
+        init_packet.extend_from_slice(&StatusFlags::SERVER_STATUS_AUTOCOMMIT.bits().to_le_bytes());
         init_packet.extend_from_slice(&CAPABILITIES.to_le_bytes()[2..]);
         // We will add a \0 byte below so we need to account for that when sending the length, since
         // rust strings don't add the null terminator
@@ -696,7 +705,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         };
         if auth_success {
             debug!(%username, "Successfully authenticated client");
-            writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
+            writers::write_ok_packet(&mut self.conn, 0, 0, self.shim.server_status_flags()).await?;
         } else {
             debug!(%username, ?client_auth_plugin, "Received incorrect password");
             writers::write_err(
@@ -798,7 +807,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                                     &mut self.conn,
                                     0,
                                     0,
-                                    StatusFlags::empty(),
+                                    self.shim.server_status_flags(),
                                 )
                                 .await?;
                             }
@@ -856,7 +865,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                                             &mut self.conn,
                                             0,
                                             0,
-                                            StatusFlags::empty(),
+                                            self.shim.server_status_flags(),
                                         )
                                         .await?;
                                     }
@@ -891,7 +900,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         })?
                         .long_data
                         .clear();
-                    writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
+                    writers::write_ok_packet(&mut self.conn, 0, 0, self.shim.server_status_flags())
+                        .await?;
                 }
                 Command::Execute { stmt, params } => {
                     let state = stmts.get_mut(&stmt).ok_or_else(|| {
@@ -955,7 +965,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 }
                 Command::Ping => {
                     self.shim.on_ping().await?;
-                    writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
+                    writers::write_ok_packet(&mut self.conn, 0, 0, self.shim.server_status_flags())
+                        .await?;
                     self.conn.flush().await?;
                 }
                 Command::ComSetOption(_) => {
@@ -964,12 +975,14 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     // statements, so failure with any one will be forwarded to the underlying
                     // database as a single statement, meaning that the underlying database does
                     // not need to have multi-statement support enabled for this connection.
-                    writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
+                    writers::write_ok_packet(&mut self.conn, 0, 0, self.shim.server_status_flags())
+                        .await?;
                     self.conn.flush().await?;
                 }
                 Command::Reset => {
                     self.shim.on_reset().await?;
-                    writers::write_ok_packet(&mut self.conn, 0, 0, StatusFlags::empty()).await?;
+                    writers::write_ok_packet(&mut self.conn, 0, 0, self.shim.server_status_flags())
+                        .await?;
                     self.conn.flush().await?;
                 }
                 Command::Quit => {

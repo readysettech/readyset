@@ -85,7 +85,7 @@ impl Deref for Backend {
 
 impl Backend {
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<QueryResponse<'a>, Error> {
-        let result = self.inner.query(query).await?;
+        let (result, _) = self.inner.query(query).await?;
         Ok(QueryResponse(result))
     }
 
@@ -117,11 +117,11 @@ impl Backend {
         params: &[DfValue],
         result_transfer_formats: &'a [TransferFormat],
     ) -> Result<QueryResponse<'a>, Error> {
-        Ok(QueryResponse(
-            self.inner
-                .execute(id, params, result_transfer_formats)
-                .await?,
-        ))
+        let (result, _) = self
+            .inner
+            .execute(id, params, result_transfer_formats)
+            .await?;
+        Ok(QueryResponse(result))
     }
 }
 
