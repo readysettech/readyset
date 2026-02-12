@@ -12,9 +12,6 @@ use readyset_util::failpoints;
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
-// readyset_alloc initializes the global allocator
-extern crate readyset_alloc;
-
 const TABLES: &[&str] = &["stress_a", "stress_b", "stress_c"];
 const MAX_RETRY_SECS: u64 = 10;
 const RETRY_SLEEP_MS: u64 = 50;
