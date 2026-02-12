@@ -16,6 +16,56 @@ const TABLES: &[&str] = &["stress_a", "stress_b", "stress_c"];
 const MAX_RETRY_SECS: u64 = 10;
 const RETRY_SLEEP_MS: u64 = 50;
 
+/// DDL operations with their relative weights for random selection.
+#[derive(Debug, Clone, Copy)]
+enum DdlOp {
+    CreateTable,
+    AlterAddColumn,
+    AlterDropColumn,
+    DropTable,
+    AlterAddUnsupportedColumn,
+    AlterDropUnsupportedColumn,
+}
+
+impl DdlOp {
+    const WEIGHTED: &[(u32, DdlOp)] = &[
+        (25, DdlOp::CreateTable),
+        (25, DdlOp::AlterAddColumn),
+        (25, DdlOp::AlterDropColumn),
+        (15, DdlOp::DropTable),
+        (5, DdlOp::AlterAddUnsupportedColumn),
+        (5, DdlOp::AlterDropUnsupportedColumn),
+    ];
+
+    fn random(rng: &mut impl rand::Rng) -> Self {
+        const TOTAL: u32 = 25 + 25 + 25 + 15 + 5 + 5;
+        let roll: u32 = rng.random_range(0..TOTAL);
+        let mut cumulative = 0;
+        for &(weight, op) in Self::WEIGHTED {
+            cumulative += weight;
+            if roll < cumulative {
+                return op;
+            }
+        }
+        // Fallback — mathematically unreachable when TOTAL matches WEIGHTED sum
+        *Self::WEIGHTED
+            .last()
+            .map(|(_, op)| op)
+            .expect("WEIGHTED must not be empty")
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            DdlOp::CreateTable => "CREATE TABLE",
+            DdlOp::AlterAddColumn => "ALTER TABLE ADD COLUMN",
+            DdlOp::AlterDropColumn => "ALTER TABLE DROP COLUMN",
+            DdlOp::DropTable => "DROP TABLE",
+            DdlOp::AlterAddUnsupportedColumn => "ALTER TABLE ADD UNSUPPORTED COLUMN",
+            DdlOp::AlterDropUnsupportedColumn => "ALTER TABLE DROP UNSUPPORTED COLUMN",
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "ddl-stress")]
 struct Opts {
@@ -171,19 +221,13 @@ async fn run_ddl(mysql: &MysqlOpts, duration_secs: u64) -> Result<()> {
         };
 
         let table = TABLES[rng.random_range(0..TABLES.len())];
-        let op: u32 = rng.random_range(0..4);
-        let op_name = match op {
-            0 => "CREATE TABLE",
-            1 => "ALTER TABLE ADD COLUMN",
-            2 => "ALTER TABLE DROP COLUMN",
-            3 => "DROP TABLE",
-            _ => unreachable!(),
-        };
+        let op = DdlOp::random(&mut rng);
+        let op_name = op.name();
 
         debug!(iteration, op_name, table, "Executing DDL");
 
         let result = match op {
-            0 => {
+            DdlOp::CreateTable => {
                 let sql = format!(
                     "CREATE TABLE IF NOT EXISTS `{table}` (id INT PRIMARY KEY, val TEXT, num INT)"
                 );
@@ -193,7 +237,7 @@ async fn run_ddl(mysql: &MysqlOpts, duration_secs: u64) -> Result<()> {
                 }
                 r
             }
-            1 => {
+            DdlOp::AlterAddColumn => {
                 let col_suffix: u32 = rng.random_range(0..20);
                 let sql = format!("ALTER TABLE `{table}` ADD COLUMN `extra_{col_suffix}` INT");
                 let r = conn.query_drop(&sql).await;
@@ -202,7 +246,7 @@ async fn run_ddl(mysql: &MysqlOpts, duration_secs: u64) -> Result<()> {
                 }
                 r
             }
-            2 => {
+            DdlOp::AlterDropColumn => {
                 let col = find_extra_column(&mut conn, &mysql.mysql_db, table).await;
                 if let Some(col_name) = col {
                     let sql = format!("ALTER TABLE `{table}` DROP COLUMN `{col_name}`");
@@ -216,7 +260,7 @@ async fn run_ddl(mysql: &MysqlOpts, duration_secs: u64) -> Result<()> {
                     Ok(())
                 }
             }
-            3 => {
+            DdlOp::DropTable => {
                 let sql = format!("DROP TABLE IF EXISTS `{table}`");
                 let r = conn.query_drop(&sql).await;
                 if r.is_ok() {
@@ -224,7 +268,37 @@ async fn run_ddl(mysql: &MysqlOpts, duration_secs: u64) -> Result<()> {
                 }
                 r
             }
-            _ => unreachable!(),
+            DdlOp::AlterAddUnsupportedColumn => {
+                let col_suffix: u32 = rng.random_range(0..5);
+                let sql = format!(
+                    "ALTER TABLE `{table}` ADD COLUMN `unsupported_{col_suffix}` LINESTRING"
+                );
+                let r = conn.query_drop(&sql).await;
+                if r.is_ok() {
+                    assert_reachable!(
+                        "Executed ALTER TABLE ADD unsupported type column",
+                        &json!({"table": table})
+                    );
+                }
+                r
+            }
+            DdlOp::AlterDropUnsupportedColumn => {
+                let col = find_unsupported_column(&mut conn, &mysql.mysql_db, table).await;
+                if let Some(col_name) = col {
+                    let sql = format!("ALTER TABLE `{table}` DROP COLUMN `{col_name}`");
+                    let r = conn.query_drop(&sql).await;
+                    if r.is_ok() {
+                        assert_reachable!(
+                            "Executed ALTER TABLE DROP unsupported type column",
+                            &json!({"table": table})
+                        );
+                    }
+                    r
+                } else {
+                    debug!(table, "No unsupported_ columns to drop");
+                    Ok(())
+                }
+            }
         };
 
         match result {
@@ -237,6 +311,12 @@ async fn run_ddl(mysql: &MysqlOpts, duration_secs: u64) -> Result<()> {
             }
         }
     }
+
+    assert_sometimes!(
+        iteration > 0,
+        "DDL driver completed at least one iteration",
+        &json!({"iterations": iteration})
+    );
 
     info!(
         iterations = iteration,
@@ -252,6 +332,21 @@ async fn find_extra_column(conn: &mut Conn, db: &str, table: &str) -> Option<Str
         "SELECT COLUMN_NAME FROM information_schema.COLUMNS \
          WHERE TABLE_SCHEMA = '{db}' AND TABLE_NAME = '{table}' \
          AND COLUMN_NAME LIKE 'extra_%' ORDER BY RAND() LIMIT 1"
+    );
+    match conn.query_first::<String, _>(&sql).await {
+        Ok(col) => col,
+        Err(e) => {
+            info!(%e, table, "Failed to query information_schema");
+            None
+        }
+    }
+}
+
+async fn find_unsupported_column(conn: &mut Conn, db: &str, table: &str) -> Option<String> {
+    let sql = format!(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS \
+         WHERE TABLE_SCHEMA = '{db}' AND TABLE_NAME = '{table}' \
+         AND COLUMN_NAME LIKE 'unsupported_%' ORDER BY RAND() LIMIT 1"
     );
     match conn.query_first::<String, _>(&sql).await {
         Ok(col) => col,
@@ -328,6 +423,126 @@ async fn run_query(mysql: &MysqlOpts, readyset: &ReadysetOpts, duration_secs: u6
             }
         }
 
+        // Phase 1b: EXPLAIN consistency check — verify that if EXPLAIN says a
+        // query is supported, CREATE CACHE actually succeeds. A stale EXPLAIN
+        // result (reporting "yes" when the table now has unsupported columns)
+        // is the exact bug REA-6108 fixes.
+        let mut explain_conn = match pool.get_conn().await {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(%e, "Failed to acquire Readyset connection for EXPLAIN check");
+                continue;
+            }
+        };
+        // Drop all caches first so EXPLAIN can return "yes" (supported but not
+        // yet cached) instead of "cached". Without this, Phase 1's cache
+        // creation makes every EXPLAIN return "cached", so the consistency
+        // check never actually tests anything.
+        let _ = explain_conn.query_drop("DROP ALL CACHES").await;
+
+        for &table in TABLES {
+            if duration_expired(duration_secs, start) {
+                break;
+            }
+
+            let explain_sql =
+                format!("EXPLAIN CREATE CACHE FROM SELECT * FROM {table} WHERE id = 1");
+            let explain_result: Result<Option<(String, String, String)>, _> =
+                explain_conn.query_first(&explain_sql).await;
+
+            match explain_result {
+                Ok(Some((_query_id, readyset_supported, _query_text))) => {
+                    let supported_lower = readyset_supported.to_lowercase();
+                    // Only follow up on "yes" — the status where staleness
+                    // actually matters. "cached" means a cache already exists
+                    // (CREATE CACHE would fail with "cache already exists",
+                    // not staleness). "pending" means the cache is in-flight
+                    // and could hit transient states unrelated to staleness.
+                    if supported_lower == "yes" {
+                        assert_reachable!(
+                            "EXPLAIN returned 'yes' during consistency check",
+                            &json!({"table": table, "status": readyset_supported})
+                        );
+
+                        // Follow up: if EXPLAIN says supported, CREATE CACHE
+                        // should not fail with "unsupported type".
+                        // Use explain_conn directly instead of retry_on_schema_mismatch,
+                        // because is_expected_error() treats "unsupported type" as
+                        // expected and returns Ok — which would mask the exact error
+                        // this consistency check is trying to detect.
+                        let create_sql =
+                            format!("CREATE CACHE FROM SELECT * FROM {table} WHERE id = 1");
+                        match explain_conn.query_drop(&create_sql).await {
+                            Ok(()) => {
+                                assert_reachable!(
+                                    "EXPLAIN 'yes' confirmed by successful CREATE CACHE",
+                                    &json!({"table": table, "status": readyset_supported})
+                                );
+                            }
+                            Err(create_err) => {
+                                let create_msg = create_err.to_string().to_lowercase();
+                                // Only flag unsupported-type errors as stale EXPLAIN.
+                                // Other failures (table dropped, etc.) are concurrent
+                                // DDL races, not catalog staleness.
+                                let is_stale = create_msg.contains("unsupported type");
+
+                                if is_stale {
+                                    // Re-run EXPLAIN to distinguish genuine staleness
+                                    // from a TOCTOU race with concurrent DDL. If the
+                                    // second EXPLAIN still says "yes", the catalog is
+                                    // genuinely stale. If it now says unsupported, the
+                                    // schema changed between our first EXPLAIN and the
+                                    // CREATE CACHE — a legitimate race, not a bug.
+                                    let recheck: Result<Option<(String, String, String)>, _> =
+                                        explain_conn.query_first(&explain_sql).await;
+                                    let still_stale = match recheck {
+                                        Ok(Some((_, status, _))) => {
+                                            let s = status.to_lowercase();
+                                            s == "yes"
+                                        }
+                                        // If the recheck fails or returns no rows,
+                                        // the table was likely dropped — not staleness.
+                                        _ => false,
+                                    };
+
+                                    if still_stale {
+                                        error!(
+                                            %create_err,
+                                            table,
+                                            explain_status = %readyset_supported,
+                                            "Stale EXPLAIN detected"
+                                        );
+                                        assert_unreachable!(
+                                            "EXPLAIN CREATE CACHE must not report stale 'yes'",
+                                            &json!({
+                                                "table": table,
+                                                "explain_status": readyset_supported,
+                                                "create_error": create_err.to_string()
+                                            })
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // EXPLAIN said unsupported, cached, pending, etc. —
+                        // confirms the DDL paths are observable.
+                        assert_reachable!(
+                            "EXPLAIN returned non-yes status after DDL",
+                            &json!({"table": table, "status": readyset_supported})
+                        );
+                    }
+                }
+                Ok(None) => {
+                    debug!(table, "EXPLAIN returned no rows (table may not exist)");
+                }
+                Err(e) => {
+                    // Table may have been dropped by DDL driver — expected.
+                    debug!(%e, table, "EXPLAIN query failed (expected during stress)");
+                }
+            }
+        }
+
         // Phase 2: Drop all caches
         info!(cycle, "Dropping caches");
         for &table in TABLES {
@@ -351,6 +566,12 @@ async fn run_query(mysql: &MysqlOpts, readyset: &ReadysetOpts, duration_secs: u6
 
         info!(cycle, "Cycle complete");
     }
+
+    assert_sometimes!(
+        cycle > 0,
+        "Query driver completed at least one cycle",
+        &json!({"cycles": cycle})
+    );
 
     info!(
         cycles = cycle,
@@ -498,4 +719,5 @@ fn is_expected_error(msg: &str) -> bool {
         || lower.contains("table already exists")
         || lower.contains("cache already exists")
         || lower.contains("could not find table")
+        || lower.contains("unsupported type")
 }

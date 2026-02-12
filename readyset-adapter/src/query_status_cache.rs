@@ -20,7 +20,9 @@ use readyset_client::metrics::recorded;
 use readyset_client::query::*;
 use readyset_client::{ShallowViewRequest, ViewCreateRequest};
 use readyset_data::DfValue;
-use readyset_sql::ast::{CacheType, Relation};
+use readyset_sql::ast::{CacheType, Relation, SqlIdentifier};
+
+use schema_catalog::SchemaChangeHandler;
 
 use crate::table_extraction_visitor::extract_referenced_tables;
 
@@ -827,42 +829,64 @@ impl QueryStatusCache {
         statuses.peek(&id).map(|(query, _status)| query.clone())
     }
 
-    /// Removes cache entries for queries that reference any of the specified tables
+    /// Removes cache entries for queries that reference any of the specified tables.
+    ///
+    /// Uses a two-phase approach: read lock to collect query IDs to remove, then write lock to
+    /// perform the removals. This minimizes write-lock hold time.
     pub fn invalidate_queries_referencing_tables(&self, dropped_tables: &[Relation]) {
         if dropped_tables.is_empty() {
             return;
         }
 
-        let mut statuses = self.persistent_handle.statuses.write();
-        let mut to_remove = Vec::new();
+        // Build a name-based HashSet for O(1) lookup on the common path.
+        let dropped_names: HashSet<&SqlIdentifier> =
+            dropped_tables.iter().map(|r| &r.name).collect();
 
-        for (query_id, (query, _status)) in statuses.iter() {
-            if let Some(referenced_tables) = extract_referenced_tables(query)
-                && referenced_tables.iter().any(|table| {
-                    dropped_tables.iter().any(|dropped| {
-                        match (&table.schema, &dropped.schema) {
-                            (Some(t_schema), Some(d_schema)) => {
-                                t_schema == d_schema && table.name == dropped.name
+        // Phase 1: Read lock — collect IDs to remove
+        let to_remove: Vec<QueryId> = {
+            let statuses = self.persistent_handle.statuses.read();
+            statuses
+                .iter()
+                .filter_map(|(query_id, (query, _status))| {
+                    if let Some(referenced_tables) = extract_referenced_tables(query)
+                        && referenced_tables.iter().any(|table| {
+                            if !dropped_names.contains(&table.name) {
+                                return false;
                             }
-                            (None, None) => table.name == dropped.name,
-                            // If one has schema and other doesn't, do nothing to avoid
-                            // deleting queries that we shouldn't
-                            //
-                            // TODO (REA-5970): ideally, the queries stored in the cache should have
-                            // the tables resolved. However, that is a bit difficult given
-                            // that the search path can be a list of schemas.
-                            _ => false,
-                        }
-                    })
+                            // Name matches; verify schema qualification if both present.
+                            dropped_tables.iter().any(|dropped| {
+                                match (&table.schema, &dropped.schema) {
+                                    (Some(t_schema), Some(d_schema)) => {
+                                        t_schema == d_schema && table.name == dropped.name
+                                    }
+                                    // When one side has schema and the other doesn't, fall back
+                                    // to name-only matching. Over-invalidation is acceptable;
+                                    // under-invalidation causes stale EXPLAIN results.
+                                    //
+                                    // TODO (REA-5970): ideally, the queries stored in the cache
+                                    // should have the tables resolved. However, that is a bit
+                                    // difficult given that the search path can be a list of
+                                    // schemas.
+                                    _ => table.name == dropped.name,
+                                }
+                            })
+                        })
+                    {
+                        Some(*query_id)
+                    } else {
+                        None
+                    }
                 })
-            {
-                to_remove.push(*query_id);
-            }
-        }
+                .collect()
+        };
 
-        for query_id in to_remove {
-            statuses.pop(&query_id);
-            self.id_to_status.remove(&query_id);
+        // Phase 2: Write lock — best-effort removal
+        if !to_remove.is_empty() {
+            let mut statuses = self.persistent_handle.statuses.write();
+            for query_id in to_remove {
+                statuses.pop(&query_id);
+                self.id_to_status.remove(&query_id);
+            }
         }
     }
 
@@ -873,6 +897,22 @@ impl QueryStatusCache {
             pending_inlined_migrations_size: self.persistent_handle.pending_inlined_migrations.len()
                 as u64,
         }
+    }
+}
+
+impl SchemaChangeHandler for QueryStatusCache {
+    fn invalidate_for_tables(&self, tables: &[Relation]) {
+        self.invalidate_queries_referencing_tables(tables);
+    }
+
+    fn invalidate_all(&self) {
+        // Acquire the statuses write lock before clearing to prevent a concurrent reader from
+        // re-inserting between clears. Clear pending_inlined_migrations inside the lock too,
+        // so a concurrent inlined_cache_miss can't re-populate it for a query we just removed.
+        let mut statuses = self.persistent_handle.statuses.write();
+        self.id_to_status.clear();
+        statuses.clear();
+        self.persistent_handle.pending_inlined_migrations.clear();
     }
 }
 
@@ -1507,5 +1547,101 @@ mod tests {
             .collect();
         assert!(final_table_names.contains(&"t2"));
         assert!(final_table_names.contains(&"t4"));
+    }
+
+    #[test]
+    fn invalidate_all_clears_both_caches() {
+        use schema_catalog::SchemaChangeHandler;
+
+        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
+
+        // Populate the cache with some queries
+        cache.update_query_migration_state(
+            &ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]),
+            MigrationState::Successful(CacheType::Deep),
+            None,
+        );
+        cache.update_query_migration_state(
+            &ViewCreateRequest::new(
+                select_statement("SELECT * FROM t1 WHERE id = ?").unwrap(),
+                vec![],
+            ),
+            MigrationState::Pending,
+            None,
+        );
+        cache.update_query_migration_state(
+            &ViewCreateRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]),
+            MigrationState::Unsupported("nope".into()),
+            None,
+        );
+
+        assert_eq!(cache.id_to_status.len(), 3);
+        assert_eq!(cache.persistent_handle.statuses.read().len(), 3);
+
+        // invalidate_all should clear everything
+        cache.invalidate_all();
+
+        assert_eq!(cache.id_to_status.len(), 0);
+        assert_eq!(cache.persistent_handle.statuses.read().len(), 0);
+        assert!(cache.cached_list().is_empty());
+        assert!(cache.proxied_list(CacheType::Deep).is_empty());
+    }
+
+    #[test]
+    fn invalidate_all_clears_pending_inlined_migrations() {
+        use schema_catalog::SchemaChangeHandler;
+
+        let cache = QueryStatusCache::new()
+            .style(MigrationStyle::Explicit)
+            .set_placeholder_inlining(true);
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let inlined_state = MigrationState::Inlined(InlinedState {
+            inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
+            epoch: 0,
+        });
+
+        cache.update_query_migration_state(&q, inlined_state, None);
+        cache.inlined_cache_miss(&q, vec![DfValue::None]);
+        cache.inlined_cache_miss(&q, vec![DfValue::Max]);
+
+        // Verify pending_inlined_migrations is populated
+        assert!(
+            !cache
+                .persistent_handle
+                .pending_inlined_migrations
+                .is_empty()
+        );
+
+        cache.invalidate_all();
+
+        // Everything should be cleared
+        assert_eq!(cache.id_to_status.len(), 0);
+        assert_eq!(cache.persistent_handle.statuses.read().len(), 0);
+        assert!(
+            cache
+                .persistent_handle
+                .pending_inlined_migrations
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn invalidate_all_then_queries_return_default() {
+        use schema_catalog::SchemaChangeHandler;
+
+        let cache = QueryStatusCache::new();
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+
+        cache.update_query_migration_state(&q, MigrationState::Successful(CacheType::Deep), None);
+        assert!(matches!(
+            cache.query_migration_state(&q).1,
+            MigrationState::Successful(_)
+        ));
+
+        cache.invalidate_all();
+
+        // After invalidation, the query is no longer in the cache; querying it re-inserts with
+        // default Pending state.
+        assert_eq!(cache.query_migration_state(&q).1, MigrationState::Pending);
     }
 }

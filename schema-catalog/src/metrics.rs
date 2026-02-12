@@ -18,3 +18,12 @@ pub const SCHEMA_CATALOG_DECODE_FAILED: &str = "readyset_schema_catalog_decode_f
 
 /// Counter: Incremented when the update stream ends and we re-subscribe.
 pub const SCHEMA_CATALOG_STREAM_RECONNECTED: &str = "readyset_schema_catalog_stream_reconnected";
+
+/// Counter: Incremented when a schema change triggers targeted invalidation of queries referencing
+/// specific changed tables.
+pub const SCHEMA_CATALOG_INVALIDATION_TARGETED: &str =
+    "readyset_schema_catalog_invalidation_targeted";
+
+/// Counter: Incremented when a schema change triggers full invalidation of all cached query state
+/// (e.g., custom type changes or first catalog update).
+pub const SCHEMA_CATALOG_INVALIDATION_FULL: &str = "readyset_schema_catalog_invalidation_full";
