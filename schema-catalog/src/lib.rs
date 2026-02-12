@@ -70,8 +70,9 @@ impl TryFrom<&SchemaCatalog> for SchemaCatalogUpdate {
     type Error = readyset_errors::ReadySetError;
 
     fn try_from(catalog: &SchemaCatalog) -> ReadySetResult<Self> {
-        let bytes = bincode::serialize(catalog)
-            .map_err(|e| internal_err!("Failed to serialize catalog: {e}"))?;
+        let bytes = bincode::serialize(catalog).map_err(|e| {
+            internal_err!("Failed to serialize SchemaCatalog for SchemaCatalogUpdate: {e}")
+        })?;
         Ok(Self {
             catalog_b64: B64.encode(bytes),
         })
@@ -82,10 +83,11 @@ impl TryFrom<SchemaCatalogUpdate> for SchemaCatalog {
     type Error = readyset_errors::ReadySetError;
 
     fn try_from(update: SchemaCatalogUpdate) -> ReadySetResult<Self> {
-        let bytes = B64
-            .decode(update.catalog_b64)
-            .map_err(|e| internal_err!("Failed to decode catalog: {e}"))?;
-        bincode::deserialize(&bytes)
-            .map_err(|e| internal_err!("Failed to deserialize catalog: {e}"))
+        let bytes = B64.decode(update.catalog_b64).map_err(|e| {
+            internal_err!("Failed to base64-decode SchemaCatalog from SchemaCatalogUpdate: {e}")
+        })?;
+        bincode::deserialize(&bytes).map_err(|e| {
+            internal_err!("Failed to deserialize SchemaCatalog from SchemaCatalogUpdate: {e}")
+        })
     }
 }
