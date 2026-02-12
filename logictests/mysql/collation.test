@@ -1,0 +1,28 @@
+# Test that MySQL string literal collation is hash-consistent with replicated data.
+#
+# When ReadySet autoparameterizes a query like `WHERE name = 'Electronics'`, the
+# literal is converted to a DfValue via TryFromDialect. Replicated data from
+# upstream MySQL arrives with Utf8AiCi collation. If TryFromDialect produces Utf8
+# instead, Collation::key() generates different sort keys for the two DfValues
+# — even for byte-identical strings — causing hash-based reader lookups to fail.
+
+statement ok
+CREATE TABLE collation_test (id INT PRIMARY KEY, name TEXT)
+
+statement ok
+INSERT INTO collation_test (id, name) VALUES (1, 'Electronics'), (2, 'Books')
+
+# Same-case match: the WHERE literal must hash-match the replicated row data.
+# Without the fix (CL #11808), the literal gets Utf8 collation while replicated data has
+# Utf8AiCi, producing different hashes and a silent lookup miss.
+query IT rowsort
+SELECT id, name FROM collation_test WHERE name = 'Electronics'
+----
+1
+Electronics
+
+query IT rowsort
+SELECT id, name FROM collation_test WHERE name = 'Books'
+----
+2
+Books

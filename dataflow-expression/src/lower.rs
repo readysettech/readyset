@@ -1922,6 +1922,14 @@ pub(crate) mod tests {
 
     use super::*;
 
+    /// MySQL default text type uses case-insensitive collation.
+    const MYSQL_TEXT: DfType = DfType::Text(Collation::Utf8AiCi);
+
+    /// Create a DfValue string with MySQL's default (case-insensitive) collation.
+    fn mysql_str(s: &str) -> DfValue {
+        DfValue::from_str_and_collation(s, Collation::Utf8AiCi)
+    }
+
     #[derive(Clone)]
     pub(crate) struct TestLowerContext<RC, RT> {
         resolve_column: RC,
@@ -2116,21 +2124,21 @@ pub(crate) mod tests {
             Expr::Call {
                 func: Box::new(BuiltinFunction::Concat(
                     Expr::Literal {
-                        val: "My".into(),
-                        ty: DfType::DEFAULT_TEXT,
+                        val: mysql_str("My"),
+                        ty: MYSQL_TEXT,
                     },
                     vec![
                         Expr::Literal {
-                            val: "SQ".into(),
-                            ty: DfType::DEFAULT_TEXT,
+                            val: mysql_str("SQ"),
+                            ty: MYSQL_TEXT,
                         },
                         Expr::Literal {
-                            val: "L".into(),
-                            ty: DfType::DEFAULT_TEXT,
+                            val: mysql_str("L"),
+                            ty: MYSQL_TEXT,
                         },
                     ],
                 )),
-                ty: DfType::DEFAULT_TEXT,
+                ty: MYSQL_TEXT,
             }
         );
     }
@@ -2181,8 +2189,8 @@ pub(crate) mod tests {
             Expr::Call {
                 func: Box::new(BuiltinFunction::Substring(
                     Expr::Literal {
-                        val: "abcdefghi".into(),
-                        ty: DfType::DEFAULT_TEXT
+                        val: mysql_str("abcdefghi"),
+                        ty: MYSQL_TEXT
                     },
                     Some(Expr::Literal {
                         val: 1.into(),
@@ -2193,7 +2201,7 @@ pub(crate) mod tests {
                         ty: DfType::BigInt
                     }),
                 )),
-                ty: DfType::DEFAULT_TEXT
+                ty: MYSQL_TEXT
             }
         )
     }
@@ -2207,8 +2215,8 @@ pub(crate) mod tests {
             Expr::Call {
                 func: Box::new(BuiltinFunction::Substring(
                     Expr::Literal {
-                        val: "abcdefghi".into(),
-                        ty: DfType::DEFAULT_TEXT
+                        val: mysql_str("abcdefghi"),
+                        ty: MYSQL_TEXT
                     },
                     Some(Expr::Literal {
                         val: 1.into(),
@@ -2219,7 +2227,7 @@ pub(crate) mod tests {
                         ty: DfType::BigInt
                     }),
                 )),
-                ty: DfType::DEFAULT_TEXT
+                ty: MYSQL_TEXT
             }
         )
     }
@@ -2248,14 +2256,14 @@ pub(crate) mod tests {
             get_case_result_type("case when 1=1 then NULL when 2=2 then 'BCD' end")
                 .unwrap()
                 .ty(),
-            &DfType::DEFAULT_TEXT
+            &MYSQL_TEXT
         );
         // 1st THEN is NULL and ELSE is NULL
         assert_eq!(
             get_case_result_type("case when 1=1 then NULL when 2=2 then 'BCD' else NULL end")
                 .unwrap()
                 .ty(),
-            &DfType::DEFAULT_TEXT
+            &MYSQL_TEXT
         );
         // The THEN(s) are not NULL and ELSE is missing
         assert_eq!(
@@ -2289,14 +2297,15 @@ pub(crate) mod tests {
                 .ty(),
             &DfType::Unknown
         );
-        // Incompatible THEN expressions
+        // Incompatible THEN expressions — falls back to DEFAULT_TEXT via
+        // infer_case_result_type (dialect-unaware fallback, not from the literal)
         assert_eq!(
             get_case_result_type("case when 1=1 then 2 when 2=2 then 'ABC' end")
                 .unwrap()
                 .ty(),
             &DfType::DEFAULT_TEXT
         );
-        // Incompatible THEN and ELSE expressions
+        // Incompatible THEN and ELSE expressions — same dialect-unaware fallback
         assert_eq!(
             get_case_result_type("case when 1=1 then 2 else 'ABC' end")
                 .unwrap()
@@ -2359,7 +2368,7 @@ pub(crate) mod tests {
         infers_type(
             vec!["123".into(), Literal::Number("1.23".into())],
             Dialect::DEFAULT_MYSQL,
-            DfType::DEFAULT_TEXT,
+            MYSQL_TEXT,
         );
 
         // TODO(ENG-1911)

@@ -1394,7 +1394,10 @@ impl TryFromDialect<&Literal> for DfValue {
             Literal::Boolean(b) => Ok(DfValue::from(*b)),
             Literal::Integer(i) => Ok((*i).into()),
             Literal::UnsignedInteger(i) => Ok((*i).into()),
-            Literal::String(s) => Ok(s.as_str().into()),
+            Literal::String(s) => Ok(DfValue::from_str_and_collation(
+                s,
+                Collation::default_for(dialect.into()),
+            )),
             Literal::Number(s) => match dialect {
                 readyset_sql::Dialect::PostgreSQL => Ok(DfValue::Numeric(Arc::new(
                     Decimal::from_str(s).map_err(|e| {
