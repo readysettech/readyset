@@ -1104,8 +1104,11 @@ where
     pub async fn reset(&mut self) -> Result<(), DB::Error> {
         self.check_routing().await?;
         if let Some(upstream) = &mut self.upstream {
-            upstream.reset().await
+            upstream.reset().await?;
+            self.state.proxy_state = ProxyState::Fallback;
+            Ok(())
         } else {
+            // proxy_state is already Never when no upstream exists
             Ok(())
         }
     }

@@ -477,3 +477,141 @@ async fn server_status_flags_reflect_transaction_state() {
 
     shutdown_tx.shutdown().await;
 }
+
+// Verify that COM_RESET_CONNECTION restores ProxyState to Fallback, so queries route back
+// to ReadySet after being in InTransaction or AutocommitOff states.
+// Regression test for the fix in commit a8fc1a346a (REA-6333).
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, mysql_upstream)]
+async fn reset_connection_restores_proxy_state() {
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
+    let (opts, _handle, shutdown_tx) = setup_with_cache(
+        query_status_cache,
+        true,
+        MigrationMode::OutOfBand,
+        UnsupportedSetMode::Error,
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE t_reset (x INT)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.query_drop("INSERT INTO t_reset (x) VALUES (1)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM t_reset")
+        .await
+        .unwrap();
+    sleep().await;
+
+    use mysql_async::consts::StatusFlags;
+
+    let ac = StatusFlags::SERVER_STATUS_AUTOCOMMIT;
+    let tx = StatusFlags::SERVER_STATUS_IN_TRANS;
+
+    // Verify initial query goes to ReadySet.
+    conn.query_drop("SELECT * FROM t_reset").await.unwrap();
+    sleep().await;
+
+    let destination: QueryInfo = conn
+        .query_first("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
+
+    // --- Test 1: Reset from InTransaction (BEGIN) ---
+
+    conn.query_drop("BEGIN").await.unwrap();
+
+    // Query should go upstream while in a transaction.
+    conn.query_drop("SELECT * FROM t_reset").await.unwrap();
+    sleep().await;
+
+    let destination: QueryInfo = conn
+        .query_first("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(destination.destination, QueryDestination::Upstream);
+
+    // COM_RESET_CONNECTION should restore ProxyState to Fallback.
+    let reset_supported = conn.reset().await.unwrap();
+    assert!(
+        reset_supported,
+        "COM_RESET_CONNECTION should be supported by the server"
+    );
+
+    // Status flags should reflect autocommit on, not in transaction.
+    let _: Vec<Row> = conn.query("SELECT * FROM t_reset").await.unwrap();
+    let flags = conn.status();
+    assert!(
+        flags.contains(ac),
+        "After reset from InTransaction: SERVER_STATUS_AUTOCOMMIT should be set, got {flags:?}"
+    );
+    assert!(
+        !flags.contains(tx),
+        "After reset from InTransaction: SERVER_STATUS_IN_TRANS should NOT be set, got {flags:?}"
+    );
+
+    // Query should route back to ReadySet.
+    sleep().await;
+
+    let destination: QueryInfo = conn
+        .query_first("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
+
+    // --- Test 2: Reset from AutocommitOff ---
+
+    conn.query_drop("SET autocommit=0").await.unwrap();
+
+    // Query should go upstream with autocommit off.
+    conn.query_drop("SELECT * FROM t_reset").await.unwrap();
+    sleep().await;
+
+    let destination: QueryInfo = conn
+        .query_first("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(destination.destination, QueryDestination::Upstream);
+
+    // COM_RESET_CONNECTION should restore ProxyState to Fallback.
+    let reset_supported = conn.reset().await.unwrap();
+    assert!(
+        reset_supported,
+        "COM_RESET_CONNECTION should be supported by the server"
+    );
+
+    // Status flags should reflect autocommit on, not in transaction.
+    let _: Vec<Row> = conn.query("SELECT * FROM t_reset").await.unwrap();
+    let flags = conn.status();
+    assert!(
+        flags.contains(ac),
+        "After reset from AutocommitOff: SERVER_STATUS_AUTOCOMMIT should be set, got {flags:?}"
+    );
+    assert!(
+        !flags.contains(tx),
+        "After reset from AutocommitOff: SERVER_STATUS_IN_TRANS should NOT be set, got {flags:?}"
+    );
+
+    // Query should route back to ReadySet.
+    sleep().await;
+
+    let destination: QueryInfo = conn
+        .query_first("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_matches!(destination.destination, QueryDestination::Readyset(_));
+
+    shutdown_tx.shutdown().await;
+}

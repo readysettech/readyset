@@ -880,11 +880,7 @@ where
     }
 
     async fn on_reset(&mut self) -> io::Result<()> {
-        let _ = match self.reset().await {
-            Ok(()) => Ok(()),
-            Err(e) => Err(io::Error::other(e.to_string())),
-        };
-        Ok(())
+        self.reset().await.map_err(io::Error::other)
     }
 
     async fn on_query(
