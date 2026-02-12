@@ -254,8 +254,6 @@ pub mod consensus;
 pub mod internal;
 pub mod replay_path;
 
-use std::convert::TryFrom;
-use std::default::Default;
 use std::fmt::Display;
 use std::future::Future;
 use std::hash::Hash;
@@ -270,9 +268,6 @@ use replication_offset::ReplicationOffset;
 use schema_catalog::{SchemaCatalogProvider, SchemaCatalogUpdate};
 use serde::{Deserialize, Serialize};
 use tokio::task_local;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
-use tokio_stream::wrappers::BroadcastStream;
-use tokio_stream::StreamExt;
 use tokio_tower::multiplex;
 
 pub use view::{
@@ -502,26 +497,160 @@ impl CacheMode {
     }
 }
 
+/// Build a schema-catalog update stream from a broadcast receiver.
+///
+/// Maps each [`ControllerEvent`] to an optional [`SchemaCatalogUpdate`], filters out
+/// non-catalog events, and **terminates** the stream when the broadcast receiver reports lag
+/// (i.e. the consumer fell behind the producer).
+///
+/// # Lag recovery invariant
+///
+/// Terminating on lag is safe because each new stream starts with a complete catalog snapshot
+/// (not a delta). The snapshot-first invariant is enforced by
+/// `EventsHandle::subscribe_with_snapshot` on the server side. If a delta-based update model
+/// is introduced, this recovery path must be revisited to ensure no schema state is silently
+/// lost.
+fn schema_catalog_stream_from_broadcast(
+    events_rx: tokio::sync::broadcast::Receiver<ControllerEvent>,
+) -> Pin<Box<dyn futures_util::Stream<Item = SchemaCatalogUpdate> + Send>> {
+    use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
+    use tokio_stream::wrappers::BroadcastStream;
+    use tokio_stream::StreamExt;
+
+    let stream = BroadcastStream::new(events_rx)
+        .map(|evt| match evt {
+            Ok(ControllerEvent::SchemaCatalogUpdate(update)) => Ok(Some(update)),
+            Ok(_) => Ok(None),
+            Err(BroadcastStreamRecvError::Lagged(skipped)) => {
+                tracing::warn!(
+                    skipped,
+                    "Schema catalog event receiver lagged behind; will reconnect"
+                );
+                ::metrics::counter!(crate::metrics::recorded::SCHEMA_CATALOG_BROADCAST_LAGGED)
+                    .increment(1);
+                ::metrics::counter!(crate::metrics::recorded::SCHEMA_CATALOG_BROADCAST_SKIPPED)
+                    .increment(skipped);
+                antithesis_sdk::assert_unreachable!(
+                    "Schema catalog broadcast receiver lagged",
+                    &serde_json::json!({"skipped": skipped})
+                );
+                Err(())
+            }
+        })
+        .take_while(|item| item.is_ok())
+        .filter_map(|item| item.ok().flatten());
+    Box::pin(stream)
+}
+
 #[async_trait]
 impl SchemaCatalogProvider for ReadySetHandle {
     fn schema_catalog_update_stream(
         &mut self,
     ) -> Pin<Box<dyn futures_util::Stream<Item = SchemaCatalogUpdate> + Send>> {
         let events_rx = self.subscribe_to_events();
-        let stream = BroadcastStream::new(events_rx).filter_map(|evt| match evt {
-            Ok(ControllerEvent::SchemaCatalogUpdate(update)) => Some(update),
-            Ok(_) => None,
-            Err(BroadcastStreamRecvError::Lagged(skipped)) => {
-                tracing::warn!(skipped, "Schema catalog event receiver lagged behind");
-                {
-                    antithesis_sdk::assert_unreachable!(
-                        "Schema catalog broadcast receiver lagged",
-                        &serde_json::json!({"skipped": skipped})
-                    );
-                }
-                None
-            }
-        });
-        Box::pin(stream)
+        schema_catalog_stream_from_broadcast(events_rx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use schema_catalog::{SchemaCatalog, SchemaCatalogUpdate};
+    use tokio::sync::broadcast;
+    use tokio_stream::StreamExt;
+
+    use super::schema_catalog_stream_from_broadcast;
+    use crate::events::ControllerEvent;
+
+    /// `stream.next()` with a timeout to catch regressions that would hang.
+    async fn try_next_with_timeout(
+        stream: &mut (impl futures_util::Stream<Item = SchemaCatalogUpdate> + Unpin),
+    ) -> Option<SchemaCatalogUpdate> {
+        tokio::time::timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("stream.next() timed out")
+    }
+
+    /// Verify that the stream terminates (yields `None`) when the broadcast receiver
+    /// lags, rather than silently skipping events.
+    #[tokio::test]
+    async fn lag_terminates_schema_catalog_update_stream() {
+        // Capacity 1: channel buffers only 1 unseen message per receiver.
+        let (tx, rx) = broadcast::channel::<ControllerEvent>(1);
+
+        let catalog = SchemaCatalog::new();
+        let update = SchemaCatalogUpdate::try_from(&catalog).expect("serialize");
+
+        // Send 2 events. The second overwrites the first, so `rx` will see Lagged.
+        tx.send(ControllerEvent::SchemaCatalogUpdate(update.clone()))
+            .expect("send first");
+        tx.send(ControllerEvent::SchemaCatalogUpdate(update))
+            .expect("send second");
+
+        let mut stream = schema_catalog_stream_from_broadcast(rx);
+
+        // Stream must terminate (yield None) due to lag — not silently skip.
+        assert!(
+            try_next_with_timeout(&mut stream).await.is_none(),
+            "expected stream to terminate on lag, but got an item"
+        );
+    }
+
+    /// Verify that a valid `SchemaCatalogUpdate` event is yielded through the stream
+    /// and that the stream terminates once the sender is dropped.
+    #[tokio::test]
+    async fn schema_catalog_stream_yields_valid_update() {
+        let (tx, rx) = broadcast::channel::<ControllerEvent>(16);
+
+        let catalog = SchemaCatalog::new();
+        let update = SchemaCatalogUpdate::try_from(&catalog).expect("serialize");
+
+        tx.send(ControllerEvent::SchemaCatalogUpdate(update.clone()))
+            .expect("send");
+        drop(tx);
+
+        let mut stream = schema_catalog_stream_from_broadcast(rx);
+
+        let item = try_next_with_timeout(&mut stream)
+            .await
+            .expect("expected one update");
+        assert_eq!(item, update);
+
+        // After the sender is dropped, the stream should terminate.
+        assert!(
+            try_next_with_timeout(&mut stream).await.is_none(),
+            "expected stream to end after sender dropped"
+        );
+    }
+
+    /// Verify that non-`SchemaCatalogUpdate` events (e.g. `Heartbeat`) are filtered out.
+    #[tokio::test]
+    async fn schema_catalog_stream_filters_non_catalog_events() {
+        let (tx, rx) = broadcast::channel::<ControllerEvent>(16);
+
+        let catalog = SchemaCatalog::new();
+        let update = SchemaCatalogUpdate::try_from(&catalog).expect("serialize");
+
+        tx.send(ControllerEvent::Heartbeat)
+            .expect("send heartbeat 1");
+        tx.send(ControllerEvent::SchemaCatalogUpdate(update.clone()))
+            .expect("send update");
+        tx.send(ControllerEvent::Heartbeat)
+            .expect("send heartbeat 2");
+        drop(tx);
+
+        let mut stream = schema_catalog_stream_from_broadcast(rx);
+
+        // Only the SchemaCatalogUpdate should come through.
+        let item = try_next_with_timeout(&mut stream)
+            .await
+            .expect("expected one update");
+        assert_eq!(item, update);
+
+        assert!(
+            try_next_with_timeout(&mut stream).await.is_none(),
+            "expected stream to end after sender dropped"
+        );
     }
 }

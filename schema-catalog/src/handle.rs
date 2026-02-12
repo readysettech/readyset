@@ -74,6 +74,17 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                             }
                         },
                         None => {
+                            // The update stream terminated. Possible causes:
+                            //   1. SSE connection closed (leader loss, network error)
+                            //   2. Broadcast receiver lagged (consumer too slow); the
+                            //      stream implementation terminates on lag so the
+                            //      synchronizer can reconnect with a fresh snapshot
+                            //
+                            // We apply exponential backoff in both cases. For lag specifically
+                            // this is deliberate: lag means the consumer is slower than the
+                            // producer, so immediate reconnection risks a lag-again loop.
+                            // Each reconnection fetches a fresh snapshot, so no schema
+                            // updates are permanently lost.
                             metrics::counter!(crate::metrics::SCHEMA_CATALOG_STREAM_RECONNECTED).increment(1);
                             warn!(
                                 delay_ms = reconnect_delay.as_millis() as u64,

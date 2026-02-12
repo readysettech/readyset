@@ -70,7 +70,8 @@ impl EventsHandle {
                 .expect("latest_catalog lock poisoned");
             *guard = Some(initial_catalog);
         }
-        let (events_tx, mut events_rx) = broadcast::channel(256);
+        let (events_tx, mut events_rx) =
+            broadcast::channel(readyset_client::events::BROADCAST_CHANNEL_CAPACITY);
         *self.events_tx.write().expect("events_tx lock poisoned") = Some(events_tx);
         // Spawn a heartbeat task to keep HTTP connections alive (arguably should live in the HTTP
         // server, not here, but I like that code not knowing anything about particular events)

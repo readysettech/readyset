@@ -465,4 +465,11 @@ pub mod recorded {
 
     /// Counter: Incremented each time the SSE stream closes or errors.
     pub const CONTROLLER_EVENTS_DISCONNECTED: &str = "readyset_controller_events_disconnected";
+
+    /// Counter: Incremented each time the schema catalog broadcast receiver detects lag,
+    /// causing the update stream to terminate and the synchronizer to reconnect.
+    pub const SCHEMA_CATALOG_BROADCAST_LAGGED: &str = "readyset_schema_catalog_broadcast_lagged";
+
+    /// Counter: Incremented by the number of events skipped when broadcast lag is detected.
+    pub const SCHEMA_CATALOG_BROADCAST_SKIPPED: &str = "readyset_schema_catalog_broadcast_skipped";
 }

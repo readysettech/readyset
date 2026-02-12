@@ -245,10 +245,17 @@ const DEFAULT_SSE_BUFFER_LIMIT: usize = 50 * 1024 * 1024;
 /// Environment variable to override the SSE buffer limit
 const SSE_BUFFER_LIMIT_ENV: &str = "READYSET_SSE_BUFFER_LIMIT";
 
+/// Capacity of the broadcast channel for controller events.
+///
+/// Used on both the client side ([`ControllerEventsClient`]) and the server side
+/// (`readyset_server::controller::events::EventsHandle`) to keep them in sync and
+/// minimize lag under DDL stress.
+pub const BROADCAST_CHANNEL_CAPACITY: usize = 256;
+
 impl ControllerEventsClient {
     /// Create a new `ControllerEventsClient`.
     fn new(leader_url: LeaderUrlSource) -> Self {
-        let (events_tx, _events_rx) = broadcast::channel(10);
+        let (events_tx, _events_rx) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
         let buffer_limit = std::env::var(SSE_BUFFER_LIMIT_ENV)
             .ok()
             .and_then(|v| v.parse().ok())
