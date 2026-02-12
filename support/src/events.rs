@@ -1,5 +1,6 @@
 use clap::Parser;
 use readyset_client::ReadySetHandle;
+use tokio::sync::broadcast::error::RecvError;
 use url::Url;
 
 /// Watch SSE events from Readyset server
@@ -23,8 +24,14 @@ impl Options {
         loop {
             match events_receiver.recv().await {
                 Ok(event) => tracing::info!(?event, "Event received"),
-                Err(error) => {
-                    tracing::warn!(%error, "Error receiving event");
+                Err(RecvError::Lagged(n)) => {
+                    tracing::warn!(
+                        skipped = n,
+                        "Receiver lagged behind, some events were dropped"
+                    );
+                }
+                Err(RecvError::Closed) => {
+                    tracing::info!("Event channel closed");
                     break;
                 }
             }
