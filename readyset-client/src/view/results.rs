@@ -726,3 +726,276 @@ impl From<ResultIterator> for Vec<Vec<DfValue>> {
         iter.into_vec()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dataflow_expression::grouped::accumulator::AccumulationOp;
+    use dataflow_expression::{
+        PostLookup, PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates,
+    };
+
+    /// Build SharedResults from a list of key result sets.
+    /// Each element of `keys_data` is the set of rows for one lookup key.
+    fn make_shared_results(keys_data: Vec<Vec<Vec<DfValue>>>) -> SharedResults {
+        keys_data
+            .into_iter()
+            .map(|rows| {
+                let boxed_rows: SmallVec<[Row; 1]> =
+                    rows.into_iter().map(|row| row.into_boxed_slice()).collect();
+                triomphe::Arc::new(boxed_rows)
+            })
+            .collect()
+    }
+
+    fn make_post_lookup(aggregates: PostLookupAggregates) -> PostLookup {
+        PostLookup {
+            order_by: None,
+            limit: None,
+            returned_cols: None,
+            default_row: None,
+            aggregates: Some(aggregates),
+        }
+    }
+
+    fn make_string_agg_function(separator: &str) -> PostLookupAggregateFunction {
+        PostLookupAggregateFunction::StringAgg {
+            op: AccumulationOp::StringAgg {
+                separator: Some(separator.to_string()),
+                distinct: false.into(),
+                order_by: None,
+            },
+        }
+    }
+
+    fn make_array_agg_function() -> PostLookupAggregateFunction {
+        PostLookupAggregateFunction::ArrayAgg {
+            op: AccumulationOp::ArrayAgg {
+                distinct: false.into(),
+                order_by: None,
+            },
+        }
+    }
+
+    fn make_distinct_string_agg_function(separator: &str) -> PostLookupAggregateFunction {
+        PostLookupAggregateFunction::StringAgg {
+            op: AccumulationOp::StringAgg {
+                separator: Some(separator.to_string()),
+                distinct: true.into(),
+                order_by: None,
+            },
+        }
+    }
+
+    fn collect_results(data: SharedResults, post_lookup: &PostLookup) -> Vec<Vec<DfValue>> {
+        ResultIterator::new(data, post_lookup, None, None, None).into_vec()
+    }
+
+    #[test]
+    fn test_multi_key_string_agg() {
+        // 3 keys, no group_by -> all should merge into one row
+        let data = make_shared_results(vec![
+            vec![vec![1.into(), "a,b".into()]],
+            vec![vec![1.into(), "c,d".into()]],
+            vec![vec![1.into(), "e".into()]],
+        ]);
+        let post_lookup = make_post_lookup(PostLookupAggregates {
+            group_by: vec![],
+            aggregates: vec![PostLookupAggregate {
+                column: 1,
+                function: make_string_agg_function(","),
+            }],
+        });
+
+        let results = collect_results(data, &post_lookup);
+        assert_eq!(results.len(), 1);
+        let merged = results[0][1].to_string();
+        for val in &["a", "b", "c", "d", "e"] {
+            assert!(merged.contains(val), "missing '{}' in '{}'", val, merged);
+        }
+    }
+
+    #[test]
+    fn test_multi_key_array_agg() {
+        let data = make_shared_results(vec![
+            vec![vec![
+                1.into(),
+                DfValue::Array(std::sync::Arc::new(readyset_data::Array::from(vec![
+                    DfValue::from("a"),
+                    DfValue::from("b"),
+                ]))),
+            ]],
+            vec![vec![
+                1.into(),
+                DfValue::Array(std::sync::Arc::new(readyset_data::Array::from(vec![
+                    DfValue::from("c"),
+                ]))),
+            ]],
+        ]);
+        let post_lookup = make_post_lookup(PostLookupAggregates {
+            group_by: vec![],
+            aggregates: vec![PostLookupAggregate {
+                column: 1,
+                function: make_array_agg_function(),
+            }],
+        });
+
+        let results = collect_results(data, &post_lookup);
+        assert_eq!(results.len(), 1);
+        match &results[0][1] {
+            DfValue::Array(arr) => {
+                let vals: Vec<_> = arr.values().collect();
+                assert_eq!(vals.len(), 3);
+            }
+            other => panic!("Expected Array, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_single_key_shortcircuit() {
+        // With only 1 key, AggregateIterator is NOT used (line 210 shortcircuit)
+        let data = make_shared_results(vec![vec![vec![1.into(), "a,b".into()]]]);
+        let post_lookup = make_post_lookup(PostLookupAggregates {
+            group_by: vec![],
+            aggregates: vec![PostLookupAggregate {
+                column: 1,
+                function: make_string_agg_function(","),
+            }],
+        });
+
+        let results = collect_results(data, &post_lookup);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0][1], DfValue::from("a,b"));
+    }
+
+    #[test]
+    fn test_multi_key_with_group_by() {
+        // 4 keys, 2 groups (group_by column 0)
+        let data = make_shared_results(vec![
+            vec![vec![1.into(), "a".into()]],
+            vec![vec![1.into(), "b".into()]],
+            vec![vec![2.into(), "c".into()]],
+            vec![vec![2.into(), "d".into()]],
+        ]);
+        let post_lookup = make_post_lookup(PostLookupAggregates {
+            group_by: vec![0],
+            aggregates: vec![PostLookupAggregate {
+                column: 1,
+                function: make_string_agg_function(","),
+            }],
+        });
+
+        let results = collect_results(data, &post_lookup);
+        assert_eq!(results.len(), 2);
+        let g1 = &results[0];
+        let g2 = &results[1];
+        assert_eq!(g1[0], DfValue::from(1));
+        assert_eq!(g2[0], DfValue::from(2));
+        let g1_str = g1[1].to_string();
+        assert!(g1_str.contains("a") && g1_str.contains("b"));
+        let g2_str = g2[1].to_string();
+        assert!(g2_str.contains("c") && g2_str.contains("d"));
+    }
+
+    #[test]
+    fn test_multi_key_no_group_by() {
+        let data = make_shared_results(vec![
+            vec![vec![1.into(), "x".into()]],
+            vec![vec![2.into(), "y".into()]],
+            vec![vec![3.into(), "z".into()]],
+        ]);
+        let post_lookup = make_post_lookup(PostLookupAggregates {
+            group_by: vec![],
+            aggregates: vec![PostLookupAggregate {
+                column: 1,
+                function: make_string_agg_function(","),
+            }],
+        });
+
+        let results = collect_results(data, &post_lookup);
+        assert_eq!(results.len(), 1);
+        let merged = results[0][1].to_string();
+        assert!(merged.contains("x") && merged.contains("y") && merged.contains("z"));
+    }
+
+    #[test]
+    fn test_split_lossiness_bug() {
+        // Documents a known bug: when a value contains the separator character,
+        // split() produces incorrect results.
+        let data = make_shared_results(vec![
+            // Key 1: value is "a,b" (single value that happens to contain separator)
+            vec![vec![1.into(), "a,b".into()]],
+            // Key 2: value is "c"
+            vec![vec![1.into(), "c".into()]],
+        ]);
+        let post_lookup = make_post_lookup(PostLookupAggregates {
+            group_by: vec![],
+            aggregates: vec![PostLookupAggregate {
+                column: 1,
+                function: make_string_agg_function(","),
+            }],
+        });
+
+        let results = collect_results(data, &post_lookup);
+        assert_eq!(results.len(), 1);
+        let merged = results[0][1].to_string();
+        // BUG: "a,b" was split into "a" and "b", so we get 3 parts instead of 2.
+        let parts: Vec<&str> = merged.split(',').collect();
+        assert_eq!(
+            parts.len(),
+            3,
+            "Lossiness bug: 'a,b' was split into parts. Got: {}",
+            merged
+        );
+    }
+
+    #[test]
+    fn test_multi_key_with_distinct() {
+        // Two keys with overlapping values; distinct should deduplicate
+        let data = make_shared_results(vec![
+            vec![vec![1.into(), "a".into()]],
+            vec![vec![1.into(), "a".into()]], // duplicate value
+            vec![vec![1.into(), "b".into()]],
+        ]);
+        let post_lookup = make_post_lookup(PostLookupAggregates {
+            group_by: vec![],
+            aggregates: vec![PostLookupAggregate {
+                column: 1,
+                function: make_distinct_string_agg_function(","),
+            }],
+        });
+
+        let results = collect_results(data, &post_lookup);
+        assert_eq!(results.len(), 1);
+        let merged = results[0][1].to_string();
+        let parts: Vec<&str> = merged.split(',').collect();
+        assert_eq!(
+            parts.len(),
+            2,
+            "Expected 2 distinct values, got: {}",
+            merged
+        );
+        assert!(merged.contains("a") && merged.contains("b"));
+    }
+
+    #[test]
+    fn test_single_row_per_group_passthrough() {
+        // With group_by, each group has only one key/row -> lazy init never triggers
+        let data = make_shared_results(vec![
+            vec![vec![1.into(), "only_one".into()]],
+            vec![vec![2.into(), "also_one".into()]],
+        ]);
+        let post_lookup = make_post_lookup(PostLookupAggregates {
+            group_by: vec![0],
+            aggregates: vec![PostLookupAggregate {
+                column: 1,
+                function: make_string_agg_function(","),
+            }],
+        });
+
+        let results = collect_results(data, &post_lookup);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0][1], DfValue::from("only_one"));
+        assert_eq!(results[1][1], DfValue::from("also_one"));
+    }
+}
