@@ -1531,6 +1531,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "failpoint-client"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "hyper 0.14.32",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "failpoint-macros"
 version = "0.1.0"
 dependencies = [
@@ -5495,9 +5504,8 @@ name = "readyset-tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bincode",
  "clap",
- "hyper 0.14.32",
+ "failpoint-client",
  "readyset-client",
  "readyset-server",
  "serde_json",

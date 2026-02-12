@@ -9,7 +9,6 @@ use std::hash::Hash;
 use std::mem::size_of_val;
 use std::sync::Arc;
 
-#[cfg(feature = "failure_injection")]
 pub mod failpoints;
 
 pub mod arbitrary;

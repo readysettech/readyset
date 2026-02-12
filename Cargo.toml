@@ -16,6 +16,7 @@ members = [
     "ddl-stress",
     "dataflow-expression",
     "dataflow-state",
+    "failpoint-client",
     "failpoint-macros",
     "failpoint-macros/proc-macros",
     "health-reporter",

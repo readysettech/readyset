@@ -1,0 +1,13 @@
+[package]
+name = "failpoint-client"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+hyper = { workspace = true, features = ["client", "http1", "tcp"] }
+bincode = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

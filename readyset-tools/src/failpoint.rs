@@ -15,7 +15,7 @@
 //! cargo run --bin failpoint -- --controller-address http://127.0.0.1:6033 critical-code-failure 50%panic
 //! ```
 use clap::Parser;
-use hyper::Client;
+use failpoint_client::FailpointClient;
 
 #[derive(Parser)]
 #[command(name = "failpoint")]
@@ -40,19 +40,8 @@ struct Failpoint {
 
 impl Failpoint {
     pub async fn run(self) -> anyhow::Result<()> {
-        let data = bincode::serialize(&(self.failpoint, self.action)).unwrap();
-        let string_url = self.controller_address + "/failpoint";
-        let r = hyper::Request::get(string_url)
-            .body(hyper::Body::from(data))
-            .unwrap();
-
-        let client = Client::new();
-        let res = client.request(r).await.unwrap();
-        let status = res.status();
-        assert!(
-            status == hyper::StatusCode::OK,
-            "status was: {status} (don't forget to compile Readyset with --features failure_injection)"
-        );
+        let client = FailpointClient::new(&self.controller_address);
+        client.set(&self.failpoint, &self.action).await?;
         Ok(())
     }
 }

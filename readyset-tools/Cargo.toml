@@ -8,12 +8,11 @@ edition = "2024"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
+failpoint-client = { path = "../failpoint-client" }
 serde_json = { workspace = true }
 readyset-client = { path = "../readyset-client" }
 tokio = { workspace = true, features = ["full"] }
 readyset-server = { path = "../readyset-server" }
-hyper = { workspace = true }
-bincode = { workspace = true }
 
 [[bin]]
 name = "view_checker"
