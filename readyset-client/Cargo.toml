@@ -85,6 +85,7 @@ tournament-kway = { path = "../tournament-kway" }
 
 [dev-dependencies]
 hyper = { workspace = true, features = ["server"] }
+criterion = { workspace = true }
 tempfile = { workspace = true }
 test-utils = { path = "../test-utils" }
 tokio = { workspace = true, features = ["test-util"] }
@@ -94,3 +95,7 @@ failure_injection = ["fail/failpoints", "readyset-util/failure_injection"]
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "post_lookup_aggregation"
+harness = false

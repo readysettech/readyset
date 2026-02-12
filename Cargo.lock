@@ -4757,6 +4757,7 @@ dependencies = [
  "async-trait",
  "bincode",
  "clap",
+ "criterion",
  "dataflow-expression",
  "deadpool",
  "derive_more",
