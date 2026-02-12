@@ -135,6 +135,11 @@ impl MigrationHandler {
         let inlined_queries = self.query_status_cache.pending_inlined_migration();
         for query in inlined_queries {
             let mut successful_migrations = vec![];
+            // Record when we first started processing this query's inlined migrations.
+            let start_time = *self
+                .start_time
+                .entry(query.query().clone())
+                .or_insert_with(Instant::now);
             for literals in query.literals() {
                 match self
                     .perform_inlined_migration(query.query(), query.placeholders(), literals)
@@ -142,8 +147,6 @@ impl MigrationHandler {
                 {
                     Ok(()) => {
                         successful_migrations.push(literals);
-                        // Remove the start time since we've successfully completed the migration.
-                        self.start_time.remove(query.query());
                     }
                     Err(e) if e.is_transient() => {
                         debug!(
@@ -151,9 +154,7 @@ impl MigrationHandler {
                             query = %Sensitive(&query.query().statement.display(self.dialect.into())),
                             "Transient failure during inline migration"
                         );
-                        if Instant::now() - *self.start_time.get(query.query()).unwrap()
-                            > self.max_retry
-                        {
+                        if Instant::now() - start_time > self.max_retry {
                             // Query failed for long enough, it is unsupported.
                             self.query_status_cache
                                 .unsupported_inlined_migration(query.query());
@@ -195,6 +196,7 @@ impl MigrationHandler {
                 // Inform the query status cache of completed migrations
                 self.query_status_cache
                     .created_inlined_query(query.query(), successful_migrations);
+                self.start_time.remove(query.query());
             }
         }
     }
@@ -227,11 +229,10 @@ impl MigrationHandler {
     }
 
     async fn perform_migration(&mut self, view_request: &ViewCreateRequest) {
-        // If this is the first migration we are performing, add the query to the
-        // start_time map.
-        if !self.start_time.contains_key(view_request) {
-            self.start_time.insert(view_request.clone(), Instant::now());
-        }
+        let start_time = *self
+            .start_time
+            .entry(view_request.clone())
+            .or_insert_with(Instant::now);
 
         let result = match self
             .rewrite_context(view_request.schema_search_path.clone())
@@ -262,8 +263,9 @@ impl MigrationHandler {
                     query = %Sensitive(&view_request.statement.display(self.dialect.into())),
                     "Transient failure during migration"
                 );
-                if Instant::now() - *self.start_time.get(view_request).unwrap() > self.max_retry {
+                if Instant::now() - start_time > self.max_retry {
                     // Query failed for long enough, it is unsupported.
+                    self.start_time.remove(view_request);
                     self.query_status_cache.update_query_migration_state(
                         view_request,
                         MigrationState::Unsupported("Migration timed out".to_string()),
@@ -297,12 +299,6 @@ impl MigrationHandler {
         placeholders: &[PlaceholderIdx],
         literals: &[DfValue],
     ) -> ReadySetResult<()> {
-        // We maintain one entry for all inlined migrations for the same query. It's unlikely that a
-        // query will be unsupported for only a subset of `DfValue` literals.
-        if !self.start_time.contains_key(view_request) {
-            self.start_time.insert(view_request.clone(), Instant::now());
-        }
-
         let mapping = placeholders
             .iter()
             .map(|p| {
