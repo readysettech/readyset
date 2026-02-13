@@ -1761,44 +1761,63 @@ impl DfState {
         true
     }
 
-    /// Remove any persistent state on disk (RocksDB databases) from the storage directory
+    /// Remove dataflow persistent state (`.db` RocksDB directories) from the storage directory
     /// and the working temp directory (if configured and different from storage_dir).
     ///
     /// This is called unconditionally when replication is disabled (shallow-only mode) because
     /// stale files may exist on disk even if the authority state has no tables (e.g. fresh
     /// authority or deserialization failure).
+    ///
+    /// Only `.db` entries are removed; the standalone authority's `.auth` database (which
+    /// stores shallow cache DDL requests) is preserved.
     pub(super) async fn remove_persistent_state(&self) {
         if self.persistence.mode != DurabilityMode::Permanent {
             return;
         }
 
         if let Some(ref storage_dir) = self.persistence.storage_dir {
-            Self::remove_dir(storage_dir).await;
+            Self::remove_db_entries(storage_dir).await;
         }
 
         if let Some(ref working_dir) = self.persistence.working_temp_dir {
             if self.persistence.storage_dir.as_ref() != Some(working_dir) {
-                Self::remove_dir(working_dir).await;
+                Self::remove_db_entries(working_dir).await;
             }
         }
     }
 
-    /// Remove a directory and all its contents, logging on success or failure.
-    async fn remove_dir(path: &Path) {
-        match fs::try_exists(path).await {
-            Ok(true) => {}
-            Ok(false) => return,
+    /// Remove only `.db` entries (dataflow RocksDB directories) from `dir`, preserving
+    /// everything else (in particular the standalone authority `.auth` database).
+    async fn remove_db_entries(dir: &Path) {
+        let mut entries = match fs::read_dir(dir).await {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
             Err(e) => {
-                error!(path = %path.display(), error = %e, "Failed to access directory");
+                error!(path = %dir.display(), error = %e, "Failed to read directory");
                 return;
             }
-        }
-        if let Err(e) = fs::remove_dir_all(path).await {
-            error!(
-                path = %path.display(),
-                error = %e,
-                "Failed to clean up directory"
-            );
+        };
+
+        loop {
+            let entry = match entries.next_entry().await {
+                Ok(Some(entry)) => entry,
+                Ok(None) => break,
+                Err(e) => {
+                    error!(path = %dir.display(), error = %e, "Failed to read directory entry");
+                    break;
+                }
+            };
+
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "db") {
+                if let Err(e) = fs::remove_dir_all(&path).await {
+                    error!(
+                        path = %path.display(),
+                        error = %e,
+                        "Failed to remove dataflow state directory"
+                    );
+                }
+            }
         }
     }
 
