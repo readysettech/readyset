@@ -8,6 +8,8 @@ use std::collections::{HashMap, HashSet};
 /// Describes what changed between two schema catalog versions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SchemaChanges {
+    /// No schema changes detected.
+    None,
     /// Specific relations changed; invalidate queries referencing these.
     Relations(Vec<Relation>),
     /// Non-relation-specific changes (e.g., custom types) or first catalog update; invalidate all
@@ -89,16 +91,35 @@ impl SchemaCatalog {
     /// queries). Returns [`SchemaChanges::Relations`] with the union of all changed relations from
     /// base_schemas, view_schemas, and non_replicated_relations.
     pub fn diff(&self, new: &SchemaCatalog) -> SchemaChanges {
+        // Destructure both catalogs so that adding a new field to SchemaCatalog causes a
+        // compile error here, forcing the developer to handle it in the diff.
+        let SchemaCatalog {
+            generation: _,
+            ref base_schemas,
+            ref uncompiled_views,
+            ref custom_types,
+            ref view_schemas,
+            ref non_replicated_relations,
+        } = *self;
+        let SchemaCatalog {
+            generation: _,
+            base_schemas: ref new_base_schemas,
+            uncompiled_views: ref new_uncompiled_views,
+            custom_types: ref new_custom_types,
+            view_schemas: ref new_view_schemas,
+            non_replicated_relations: ref new_non_replicated_relations,
+        } = *new;
+
         // Custom type changes can't be mapped to specific queries
-        if self.custom_types != new.custom_types {
+        if custom_types != new_custom_types {
             return SchemaChanges::All;
         }
 
         let mut changed = HashSet::new();
 
         // base_schemas: collect symmetric difference of keys + keys with different values
-        for (relation, body) in &self.base_schemas {
-            match new.base_schemas.get(relation) {
+        for (relation, body) in base_schemas {
+            match new_base_schemas.get(relation) {
                 Some(new_body) if new_body != body => {
                     changed.insert(relation.clone());
                 }
@@ -108,15 +129,15 @@ impl SchemaCatalog {
                 _ => {}
             }
         }
-        for relation in new.base_schemas.keys() {
-            if !self.base_schemas.contains_key(relation) {
+        for relation in new_base_schemas.keys() {
+            if !base_schemas.contains_key(relation) {
                 changed.insert(relation.clone());
             }
         }
 
         // view_schemas: same — symmetric diff + value diff
-        for (relation, columns) in &self.view_schemas {
-            match new.view_schemas.get(relation) {
+        for (relation, columns) in view_schemas {
+            match new_view_schemas.get(relation) {
                 Some(new_columns) if new_columns != columns => {
                     changed.insert(relation.clone());
                 }
@@ -126,32 +147,36 @@ impl SchemaCatalog {
                 _ => {}
             }
         }
-        for relation in new.view_schemas.keys() {
-            if !self.view_schemas.contains_key(relation) {
+        for relation in new_view_schemas.keys() {
+            if !view_schemas.contains_key(relation) {
                 changed.insert(relation.clone());
             }
         }
 
-        // uncompiled_views: symmetric diff
-        let old_uncompiled: HashSet<&Relation> = self.uncompiled_views.iter().collect();
-        let new_uncompiled: HashSet<&Relation> = new.uncompiled_views.iter().collect();
-        for view in old_uncompiled.symmetric_difference(&new_uncompiled) {
-            changed.insert((*view).clone());
+        // uncompiled_views: symmetric difference (these are just Relation values, no payloads)
+        let old_views: HashSet<&Relation> = uncompiled_views.iter().collect();
+        let new_views: HashSet<&Relation> = new_uncompiled_views.iter().collect();
+        for &relation in old_views.symmetric_difference(&new_views) {
+            changed.insert(relation.clone());
         }
 
         // non_replicated_relations: extract Relation from symmetric difference
-        for nrr in &self.non_replicated_relations {
-            if !new.non_replicated_relations.contains(nrr) {
+        for nrr in non_replicated_relations {
+            if !new_non_replicated_relations.contains(nrr) {
                 changed.insert(nrr.name.clone());
             }
         }
-        for nrr in &new.non_replicated_relations {
-            if !self.non_replicated_relations.contains(nrr) {
+        for nrr in new_non_replicated_relations {
+            if !non_replicated_relations.contains(nrr) {
                 changed.insert(nrr.name.clone());
             }
         }
 
-        SchemaChanges::Relations(changed.into_iter().collect())
+        if changed.is_empty() {
+            SchemaChanges::None
+        } else {
+            SchemaChanges::Relations(changed.into_iter().collect())
+        }
     }
 }
 
@@ -215,7 +240,7 @@ mod tests {
     fn diff_identical_catalogs() {
         let a = SchemaCatalog::new();
         let b = SchemaCatalog::new();
-        assert_eq!(a.diff(&b), SchemaChanges::Relations(vec![]));
+        assert_eq!(a.diff(&b), SchemaChanges::None);
     }
 
     #[test]
@@ -277,7 +302,7 @@ mod tests {
         new.base_schemas
             .insert(Relation::from("foo"), make_body("x"));
 
-        assert_eq!(old.diff(&new), SchemaChanges::Relations(vec![]));
+        assert_eq!(old.diff(&new), SchemaChanges::None);
     }
 
     #[test]
@@ -426,7 +451,8 @@ mod tests {
             .insert(Relation::from("t3"), make_body("z"));
 
         match old.diff(&new) {
-            SchemaChanges::Relations(mut tables) => {
+            SchemaChanges::Relations(tables) => {
+                let mut tables = tables;
                 tables.sort_by(|a, b| a.name.cmp(&b.name));
                 assert_eq!(tables.len(), 2);
                 assert_eq!(tables[0], Relation::from("t1"));
@@ -434,5 +460,15 @@ mod tests {
             }
             other => panic!("Expected Relations, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn diff_uncompiled_view_unchanged() {
+        let mut old = SchemaCatalog::new();
+        old.uncompiled_views.push(Relation::from("uv1"));
+        let mut new = SchemaCatalog::new();
+        new.uncompiled_views.push(Relation::from("uv1"));
+
+        assert_eq!(old.diff(&new), SchemaChanges::None);
     }
 }

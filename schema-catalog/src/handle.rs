@@ -13,9 +13,13 @@ use readyset_errors::{ReadySetResult, internal_err};
 use readyset_util::{retry_with_exponential_backoff, shutdown::ShutdownReceiver};
 use tokio::select;
 use tokio::sync::RwLock;
-use tracing::{debug, info, trace, warn};
+use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 
 use crate::{SchemaCatalog, SchemaCatalogUpdate, SchemaChangeHandler, SchemaChanges};
+
+/// Payload carried by the watch channel between the synchronizer and the invalidation sidecar:
+/// the latest [`SchemaCatalog`] together with the wall-clock time it was applied.
+type CatalogSnapshot = (Arc<SchemaCatalog>, std::time::Instant);
 
 /// A schema catalog provider that can be used to fetch the latest version of the schema catalog.
 #[async_trait]
@@ -36,6 +40,16 @@ pub struct SchemaCatalogSynchronizer<P: SchemaCatalogProvider> {
     handle: SchemaCatalogHandle,
     /// Optional handler that is notified of schema changes so it can invalidate cached query state.
     change_handler: Option<Arc<dyn SchemaChangeHandler>>,
+}
+
+impl<P: SchemaCatalogProvider + std::fmt::Debug> std::fmt::Debug for SchemaCatalogSynchronizer<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SchemaCatalogSynchronizer")
+            .field("controller", &self.controller)
+            .field("handle", &self.handle)
+            .field("has_change_handler", &self.change_handler.is_some())
+            .finish()
+    }
 }
 
 impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
@@ -60,6 +74,20 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
         const BASE_RECONNECT_DELAY: Duration = Duration::from_millis(500);
         const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 
+        // If a change handler is configured, spawn a sidecar task for async
+        // diffing/invalidation. The watch channel holds the latest catalog; intermediate
+        // versions are automatically discarded if the sidecar falls behind.
+        let (mut catalog_tx, mut sidecar_handle) = if let Some(ref handler) = self.change_handler {
+            let (tx, rx) = tokio::sync::watch::channel::<Option<CatalogSnapshot>>(None);
+            let handle = tokio::spawn(
+                run_invalidation_sidecar(rx, Arc::clone(handler))
+                    .instrument(info_span!("invalidation_sidecar")),
+            );
+            (Some(tx), Some(handle))
+        } else {
+            (None, None)
+        };
+
         let mut updates_stream = self.controller.schema_catalog_update_stream();
         let mut reconnect_delay = BASE_RECONNECT_DELAY;
 
@@ -68,14 +96,30 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                 biased;
                 _ = shutdown_recv.recv() => {
                     info!("Schema Catalog Synchronizer shutting down");
+                    // Returning drops `catalog_tx`, causing the sidecar's `changed()` to
+                    // return Err and exit cleanly.
                     return;
+                }
+                result = async { sidecar_handle.as_mut().expect("guarded by if").await }, if sidecar_handle.is_some() => {
+                    match result {
+                        Ok(()) => error!("Invalidation sidecar exited unexpectedly; restarting"),
+                        Err(e) => error!(%e, "Invalidation sidecar panicked; restarting"),
+                    }
+                    let handler = self.change_handler.as_ref()
+                        .expect("change_handler present when sidecar was spawned");
+                    let (tx, rx) = tokio::sync::watch::channel::<Option<CatalogSnapshot>>(None);
+                    sidecar_handle = Some(tokio::spawn(
+                        run_invalidation_sidecar(rx, Arc::clone(handler))
+                            .instrument(info_span!("invalidation_sidecar")),
+                    ));
+                    catalog_tx = Some(tx);
                 }
                 update = updates_stream.next() => {
                     match update {
                         Some(update) => match SchemaCatalog::try_from(update) {
                             Ok(catalog) => {
                                 reconnect_delay = BASE_RECONNECT_DELAY;
-                                self.apply_update(catalog).await;
+                                self.apply_update(catalog, catalog_tx.as_ref()).await;
                             }
                             Err(error) => {
                                 metrics::counter!(crate::metrics::SCHEMA_CATALOG_DECODE_FAILED).increment(1);
@@ -110,7 +154,11 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
         }
     }
 
-    async fn apply_update(&self, catalog: SchemaCatalog) {
+    async fn apply_update(
+        &self,
+        catalog: SchemaCatalog,
+        catalog_tx: Option<&tokio::sync::watch::Sender<Option<CatalogSnapshot>>>,
+    ) {
         trace!(
             generation = %catalog.generation,
             base_tables = ?catalog.base_schemas.keys(),
@@ -125,27 +173,30 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
         // separate read lock so it doesn't hold the write lock longer than necessary. If this
         // ever needs to take action based on the generation (e.g. reject out-of-order updates),
         // it should be moved inside the write lock below to avoid a TOCTOU race.
-        {
+        //
+        // Validate generation ordering against the current cached catalog.
+        let current_generation = {
             let cache = self.handle.inner.read().await;
-            if let Some(ref current) = *cache
-                && current.generation != catalog.generation
-                && !current.generation.precedes(catalog.generation)
-            {
-                metrics::counter!(crate::metrics::SCHEMA_CATALOG_UNEXPECTED_GENERATION)
-                    .increment(1);
-                warn!(
-                    new_generation = %catalog.generation,
-                    current_generation = %current.generation,
-                    "Schema update had unexpected generation"
-                );
-                antithesis_sdk::assert_unreachable!(
-                    "Schema catalog received unexpected generation",
-                    &serde_json::json!({
-                        "new_generation": catalog.generation.get(),
-                        "current_generation": current.generation.get(),
-                    })
-                );
-            }
+            cache.as_ref().map(|c| c.generation)
+        };
+
+        if let Some(current) = current_generation
+            && current != catalog.generation
+            && !current.precedes(catalog.generation)
+        {
+            metrics::counter!(crate::metrics::SCHEMA_CATALOG_UNEXPECTED_GENERATION).increment(1);
+            warn!(
+                new_generation = %catalog.generation,
+                current_generation = %current,
+                "Schema update had unexpected generation"
+            );
+            antithesis_sdk::assert_unreachable!(
+                "Schema catalog received unexpected generation",
+                &serde_json::json!({
+                    "new_generation": catalog.generation.get(),
+                    "current_generation": current.get(),
+                })
+            );
         }
 
         debug!(
@@ -176,48 +227,124 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                 );
             }
 
-            // Compute schema changes and notify the handler before updating the stored catalog.
-            // Diffing is done under the write lock to eliminate the TOCTOU gap between reading
-            // the old catalog and writing the new one.
-            if let Some(ref handler) = self.change_handler {
-                let changes = match cache.as_deref() {
-                    Some(old) => old.diff(&catalog),
-                    None => SchemaChanges::All, // First update
-                };
-                match &changes {
-                    SchemaChanges::Relations(tables) if !tables.is_empty() => {
-                        metrics::counter!(crate::metrics::SCHEMA_CATALOG_INVALIDATION_TARGETED)
-                            .increment(1);
-                        info!(
-                            count = tables.len(),
-                            ?tables,
-                            "Invalidating queries for changed tables"
-                        );
-                        handler.invalidate_for_tables(tables);
-                        antithesis_sdk::assert_reachable!(
-                            "Targeted QSC invalidation for changed tables",
-                            &serde_json::json!({"table_count": tables.len()})
-                        );
-                    }
-                    SchemaChanges::All => {
-                        metrics::counter!(crate::metrics::SCHEMA_CATALOG_INVALIDATION_FULL)
-                            .increment(1);
-                        info!("Invalidating all cached query state due to schema change");
-                        handler.invalidate_all();
-                        antithesis_sdk::assert_reachable!(
-                            "Full QSC invalidation due to schema change",
-                            &serde_json::json!({"generation": catalog.generation.get()})
-                        );
-                    }
-                    _ => {}
-                }
-            }
-
             metrics::counter!(crate::metrics::SCHEMA_CATALOG_UPDATE_APPLIED).increment(1);
             metrics::gauge!(crate::metrics::SCHEMA_CATALOG_CURRENT_GENERATION)
                 .set(catalog.generation.get() as f64);
-            *cache = Some(Arc::new(catalog));
+            let new_catalog = Arc::new(catalog);
+            *cache = Some(Arc::clone(&new_catalog));
+
+            // Send the new catalog to the sidecar for async diffing/invalidation.
+            // This is non-blocking; if the sidecar is behind, intermediate values are
+            // automatically coalesced by the watch channel.
+            //
+            // NOTE: The cache is updated above before the sidecar processes the
+            // invalidation, so there is a brief window where the QSC may contain
+            // stale entries that reference the old schema. This is acceptable because
+            // the sidecar will catch up and invalidate promptly, and the alternative
+            // (blocking on invalidation) would add latency to the synchronizer's hot
+            // path. The SCHEMA_CATALOG_INVALIDATION_STALENESS metric tracks this gap.
+            if let Some(tx) = catalog_tx
+                && tx
+                    .send(Some((new_catalog, std::time::Instant::now())))
+                    .is_err()
+            {
+                warn!("Invalidation sidecar is gone; schema change invalidation disabled");
+            }
         }
+    }
+}
+
+/// Sidecar task that performs schema diffing and invalidation asynchronously, decoupled from the
+/// synchronizer's hot path. Receives the latest catalog via a `watch` channel and diffs it against
+/// the previously processed version.
+///
+/// The sidecar exits when the watch sender is dropped (i.e., when the synchronizer shuts down).
+async fn run_invalidation_sidecar(
+    mut catalog_rx: tokio::sync::watch::Receiver<Option<CatalogSnapshot>>,
+    handler: Arc<dyn SchemaChangeHandler>,
+) {
+    let mut last_processed: Option<Arc<SchemaCatalog>> = None;
+
+    loop {
+        // Wait for a new catalog to arrive; returns Err when the sender is dropped.
+        if catalog_rx.changed().await.is_err() {
+            debug!("Invalidation sidecar shutting down (sender dropped)");
+            return;
+        }
+
+        let (catalog, send_time) = {
+            let borrowed = catalog_rx.borrow_and_update();
+            match borrowed.as_ref() {
+                Some((c, t)) => (Arc::clone(c), *t),
+                None => continue, // Initial None value, skip
+            }
+        };
+
+        let changes = {
+            let _span = info_span!("schema_catalog_diff").entered();
+            let start = std::time::Instant::now();
+            let changes = match last_processed {
+                Some(ref old) => old.diff(&catalog),
+                None => SchemaChanges::All, // First update
+            };
+            let elapsed = start.elapsed();
+            metrics::histogram!(crate::metrics::SCHEMA_CATALOG_DIFF_DURATION)
+                .record(elapsed.as_secs_f64());
+            debug!(
+                elapsed_us = elapsed.as_micros() as u64,
+                ?changes,
+                "Schema catalog diff completed"
+            );
+            changes
+        };
+
+        if !matches!(&changes, SchemaChanges::None) {
+            metrics::histogram!(crate::metrics::SCHEMA_CATALOG_INVALIDATION_STALENESS)
+                .record(send_time.elapsed().as_secs_f64());
+        }
+
+        {
+            let _span = info_span!("schema_catalog_invalidate").entered();
+            let invalidation_start = std::time::Instant::now();
+            match &changes {
+                SchemaChanges::Relations(tables) if !tables.is_empty() => {
+                    metrics::counter!(crate::metrics::SCHEMA_CATALOG_INVALIDATION_TARGETED)
+                        .increment(1);
+                    info!(
+                        count = tables.len(),
+                        ?tables,
+                        "Invalidating queries for changed tables"
+                    );
+                    // NOTE: targeted invalidation is best-effort; schema-qualification
+                    // mismatches may cause some stale entries to remain. See TODO REA-5970.
+                    handler.invalidate_for_tables(tables);
+                    antithesis_sdk::assert_reachable!(
+                        "Targeted QSC invalidation for changed tables",
+                        &serde_json::json!({"table_count": tables.len()})
+                    );
+                }
+                SchemaChanges::All => {
+                    metrics::counter!(crate::metrics::SCHEMA_CATALOG_INVALIDATION_FULL)
+                        .increment(1);
+                    info!("Invalidating all cached query state due to schema change");
+                    handler.invalidate_all();
+                    antithesis_sdk::assert_reachable!(
+                        "Full QSC invalidation due to schema change",
+                        &serde_json::json!({"generation": catalog.generation.get()})
+                    );
+                }
+                SchemaChanges::None | SchemaChanges::Relations(_) => {}
+            }
+            let invalidation_elapsed = invalidation_start.elapsed();
+            metrics::histogram!(crate::metrics::SCHEMA_CATALOG_INVALIDATION_DURATION)
+                .record(invalidation_elapsed.as_secs_f64());
+            debug!(
+                elapsed_us = invalidation_elapsed.as_micros() as u64,
+                "Schema catalog invalidation completed"
+            );
+        }
+
+        last_processed = Some(catalog);
     }
 }
 
@@ -371,6 +498,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_synchronizer_run_receives_stream_update() {
+        tokio::time::pause();
         let mock = MockProvider::new();
         let (synchronizer, handle) = SchemaCatalogSynchronizer::new(mock);
 
@@ -455,6 +583,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_first_catalog_triggers_invalidate_all() {
+        tokio::time::pause();
         let handler = Arc::new(MockChangeHandler::new());
 
         let mock = MockProvider::new();
@@ -464,7 +593,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = shutdown::channel();
         tokio::spawn(synchronizer.run(shutdown_rx));
 
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(handle.has_catalog().await);
         assert_eq!(
             handler
@@ -485,6 +614,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_changed_base_schema_triggers_targeted_invalidation() {
+        tokio::time::pause();
         let handler = Arc::new(MockChangeHandler::new());
 
         use readyset_sql::ast::*;
@@ -536,8 +666,10 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = shutdown::channel();
         tokio::spawn(synchronizer.run(shutdown_rx));
 
-        // Wait for both updates to be applied (stream reconnect delivers second)
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Wait for both updates to be applied. The reconnect backoff starts at 500ms,
+        // so we need to wait well beyond that for the second catalog to arrive and be
+        // processed by the sidecar.
+        tokio::time::sleep(Duration::from_millis(1500)).await;
 
         // First update triggers invalidate_all (no previous catalog)
         assert!(
@@ -550,9 +682,10 @@ mod tests {
         // Second update should trigger targeted invalidation for "foo"
         {
             let tables = handler.invalidated_tables.lock().expect("lock poisoned");
-            if !tables.is_empty() {
-                assert!(tables.iter().any(|t| t.contains(&Relation::from("foo"))));
-            }
+            assert!(
+                tables.iter().any(|t| t.contains(&Relation::from("foo"))),
+                "Expected targeted invalidation for 'foo' but got: {tables:?}"
+            );
         }
 
         shutdown_tx.shutdown().await;
@@ -560,6 +693,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_same_catalog_does_not_trigger_handler() {
+        tokio::time::pause();
         let handler = Arc::new(MockChangeHandler::new());
 
         let catalog = SchemaCatalog {
@@ -599,5 +733,26 @@ mod tests {
         );
 
         shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_sidecar_shuts_down_cleanly() {
+        tokio::time::pause();
+        let handler = Arc::new(MockChangeHandler::new());
+
+        let mock = MockProvider::new();
+        let (synchronizer, _handle) = SchemaCatalogSynchronizer::new(mock);
+        let synchronizer = synchronizer.with_change_handler(handler);
+
+        let (shutdown_tx, shutdown_rx) = shutdown::channel();
+        let join = tokio::spawn(synchronizer.run(shutdown_rx));
+
+        // Let the synchronizer process the first update
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Shut down — this drops the watch sender, which should cause the sidecar to exit
+        shutdown_tx.shutdown().await;
+        // The synchronizer task itself should complete without hanging
+        join.await.expect("synchronizer task should not panic");
     }
 }

@@ -27,3 +27,16 @@ pub const SCHEMA_CATALOG_INVALIDATION_TARGETED: &str =
 /// Counter: Incremented when a schema change triggers full invalidation of all cached query state
 /// (e.g., custom type changes or first catalog update).
 pub const SCHEMA_CATALOG_INVALIDATION_FULL: &str = "readyset_schema_catalog_invalidation_full";
+
+/// Histogram: Duration (in seconds) of the schema catalog diff operation.
+pub const SCHEMA_CATALOG_DIFF_DURATION: &str = "readyset_schema_catalog_diff_duration_seconds";
+
+/// Histogram: Duration (in seconds) of the schema change invalidation operation.
+pub const SCHEMA_CATALOG_INVALIDATION_DURATION: &str =
+    "readyset_schema_catalog_invalidation_duration_seconds";
+
+/// Histogram: Wall-clock time (in seconds) between when a new catalog is sent to the
+/// invalidation sidecar and when invalidation completes. Tracks how long the QSC may
+/// contain stale entries after a schema update is applied to the cache.
+pub const SCHEMA_CATALOG_INVALIDATION_STALENESS: &str =
+    "readyset_schema_catalog_invalidation_staleness_seconds";

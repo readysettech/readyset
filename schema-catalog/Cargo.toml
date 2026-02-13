@@ -24,6 +24,9 @@ base64 = { workspace = true }
 bincode = { workspace = true }
 fail = { workspace = true, optional = true }
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
 [features]
 failure_injection = ["readyset-util/failure_injection", "fail/failpoints", "fail"]
 
