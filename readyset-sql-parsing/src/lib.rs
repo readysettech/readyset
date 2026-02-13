@@ -14,6 +14,7 @@ use readyset_sql::ast::{
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
 use serde::{Deserialize, Serialize};
+use sqlparser::ast::SetExpr;
 use sqlparser::{
     keywords::Keyword,
     parser::Parser,
@@ -1018,10 +1019,22 @@ pub fn parse_shallow_query(
 ) -> Result<(ShallowCacheQuery, Option<ReadysetHintDirective>), ReadysetParsingError> {
     let mut query: ShallowCacheQuery =
         parse_sqlparser_inner(dialect, input, |parser, _dialect, _input| {
-            parser
-                .parse_query()
-                .map(|boxed| (*boxed).into())
-                .map_err(ReadysetParsingError::SqlparserError)
+            match parser.parse_query() {
+                Ok(query) => match *query.body {
+                    SetExpr::Select(..) | SetExpr::Query(..) | SetExpr::SetOperation { .. } => {
+                        Ok((*query).into())
+                    }
+                    SetExpr::Values(..)
+                    | SetExpr::Insert(..)
+                    | SetExpr::Update(..)
+                    | SetExpr::Delete(..)
+                    | SetExpr::Merge(..)
+                    | SetExpr::Table(..) => Err(ReadysetParsingError::ReadysetParsingError(
+                        format!("Expected SELECT, but got: {query}"),
+                    )),
+                },
+                Err(e) => Err(ReadysetParsingError::SqlparserError(e)),
+            }
         })?;
     let hint = query.take_hints();
     let directive = match hint {
