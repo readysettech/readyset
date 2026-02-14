@@ -70,6 +70,24 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncWrite for SwitchableStream<S> {
         }
     }
 
+    fn poll_write_vectored(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        match &mut self.0.as_mut().unwrap() {
+            Stream::Plain(stream) => std::pin::Pin::new(stream).poll_write_vectored(cx, bufs),
+            Stream::Tls(stream) => std::pin::Pin::new(stream).poll_write_vectored(cx, bufs),
+        }
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        match self.0.as_ref().unwrap() {
+            Stream::Plain(stream) => stream.is_write_vectored(),
+            Stream::Tls(stream) => stream.is_write_vectored(),
+        }
+    }
+
     fn poll_flush(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
