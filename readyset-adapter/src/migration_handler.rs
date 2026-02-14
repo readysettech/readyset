@@ -132,6 +132,14 @@ impl MigrationHandler {
     /// inlined migration is completed, we migrate the original query. This allows the server to
     /// associate the original query with the inlined migrations that we ran.
     async fn process_inlined_migrations(&mut self) {
+        let schema_generation = match self.schema_catalog_handle.get_catalog_retrying().await {
+            Ok(catalog) => catalog.generation,
+            Err(error) => {
+                warn!(%error, "Failed to fetch schema generation for inlined migrations");
+                return;
+            }
+        };
+
         let inlined_queries = self.query_status_cache.pending_inlined_migration();
         for query in inlined_queries {
             let mut successful_migrations = vec![];
@@ -142,7 +150,12 @@ impl MigrationHandler {
                 .or_insert_with(Instant::now);
             for literals in query.literals() {
                 match self
-                    .perform_inlined_migration(query.query(), query.placeholders(), literals)
+                    .perform_inlined_migration(
+                        query.query(),
+                        query.placeholders(),
+                        literals,
+                        schema_generation,
+                    )
                     .await
                 {
                     Ok(()) => {
@@ -190,7 +203,7 @@ impl MigrationHandler {
                         query.query().clone(),
                         /* always */ false,
                         /* concurrently */ false,
-                        SchemaGeneration::INITIAL, // TODO: pass actual schema generation
+                        schema_generation,
                     )
                     .await;
                 // Inform the query status cache of completed migrations
@@ -298,6 +311,7 @@ impl MigrationHandler {
         view_request: &ViewCreateRequest,
         placeholders: &[PlaceholderIdx],
         literals: &[DfValue],
+        schema_generation: SchemaGeneration,
     ) -> ReadySetResult<()> {
         let mapping = placeholders
             .iter()
@@ -315,9 +329,8 @@ impl MigrationHandler {
             view_request.schema_search_path.clone(),
         );
 
-        // TODO(mvzink): Pass actual schema generation
         self.noria
-            .handle_create_cached_query(None, req, false, false, SchemaGeneration::INITIAL)
+            .handle_create_cached_query(None, req, false, false, schema_generation)
             .await?;
         Ok(())
     }
