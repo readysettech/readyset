@@ -112,6 +112,7 @@ mod tests {
                 migration_state: MigrationState::Pending,
                 execution_info: None,
                 always: false,
+                schema_generation: None,
             },
         };
         proxied_queries_reporter.report_query(&mut init_q).await;
@@ -134,6 +135,7 @@ mod tests {
                 migration_state: MigrationState::Successful(CacheType::Deep),
                 execution_info: None,
                 always: false,
+                schema_generation: None,
             },
         };
         proxied_queries_reporter.report_query(&mut updated_q).await;

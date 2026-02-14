@@ -23,6 +23,8 @@ use serde::ser::{SerializeSeq, SerializeTuple};
 use serde::{Deserialize, Serialize, Serializer};
 use vec1::Vec1;
 
+use schema_catalog::SchemaGeneration;
+
 use crate::{PlaceholderIdx, ShallowViewRequest, ViewCreateRequest};
 
 /// Uniquely identifies a SELECT statement that is in a particular form. In other words,
@@ -247,6 +249,10 @@ pub struct QueryStatus {
     pub execution_info: Option<ExecutionInfo>,
     /// If we should always cache the query (never proxy to upstream)
     pub always: bool,
+    /// Schema generation active when this query was last rewritten by the adapter.
+    /// `None` for shallow queries (which are schema-insensitive) or queries that entered
+    /// the cache before this field was added.
+    pub schema_generation: Option<SchemaGeneration>,
 }
 
 impl QueryStatus {
@@ -257,6 +263,7 @@ impl QueryStatus {
             migration_state: MigrationState::default_for_query(query),
             execution_info: None,
             always: false,
+            schema_generation: None,
         }
     }
 
@@ -266,6 +273,7 @@ impl QueryStatus {
             migration_state,
             execution_info: None,
             always: false,
+            schema_generation: None,
         }
     }
 

@@ -22,7 +22,7 @@ use readyset_client::{ShallowViewRequest, ViewCreateRequest};
 use readyset_data::DfValue;
 use readyset_sql::ast::{CacheType, Relation, SqlIdentifier};
 
-use schema_catalog::SchemaChangeHandler;
+use schema_catalog::{SchemaChangeHandler, SchemaGeneration};
 
 use crate::table_extraction_visitor::extract_referenced_tables;
 
@@ -542,9 +542,22 @@ impl QueryStatusCache {
                     migration_state: MigrationState::Pending,
                     execution_info: None,
                     always: false,
+                    schema_generation: None,
                 },
             );
         }
+    }
+
+    /// Updates the stored schema generation for a query that already exists in the cache.
+    pub fn update_schema_generation<Q>(&self, q: &Q, schema_generation: SchemaGeneration)
+    where
+        Q: QueryStatusKey,
+    {
+        q.with_mut_status(self, |status| {
+            if let Some(status) = status {
+                status.schema_generation = Some(schema_generation);
+            }
+        });
     }
 
     /// Updates a query's migration state to `m` unless the query's migration state was
@@ -583,6 +596,7 @@ impl QueryStatusCache {
                     migration_state: m,
                     execution_info: None,
                     always: always.unwrap_or(false),
+                    schema_generation: None,
                 },
             );
         }
@@ -626,6 +640,7 @@ impl QueryStatusCache {
                     ),
                     execution_info: None,
                     always: false,
+                    schema_generation: None,
                 },
             );
         }
@@ -655,6 +670,7 @@ impl QueryStatusCache {
             Some(s) => {
                 s.migration_state.clone_from(&status.migration_state);
                 s.execution_info.clone_from(&status.execution_info);
+                s.schema_generation = status.schema_generation;
                 false
             }
             None => true,
@@ -827,6 +843,19 @@ impl QueryStatusCache {
         let id = id.parse::<QueryId>().ok()?;
         let statuses = self.persistent_handle.statuses.read();
         statuses.peek(&id).map(|(query, _status)| query.clone())
+    }
+
+    /// Returns a query and its stored schema generation given a query hash.
+    /// The schema generation reflects when the query was last rewritten by the adapter.
+    pub fn query_with_schema_generation(
+        &self,
+        id: &str,
+    ) -> Option<(Query, Option<SchemaGeneration>)> {
+        let id = id.parse::<QueryId>().ok()?;
+        let statuses = self.persistent_handle.statuses.read();
+        statuses
+            .peek(&id)
+            .map(|(query, status)| (query.clone(), status.schema_generation))
     }
 
     /// Removes cache entries for queries that reference any of the specified tables.
@@ -1643,5 +1672,58 @@ mod tests {
         // After invalidation, the query is no longer in the cache; querying it re-inserts with
         // default Pending state.
         assert_eq!(cache.query_migration_state(&q).1, MigrationState::Pending);
+    }
+
+    #[test]
+    fn schema_generation_stored_and_retrieved() {
+        let cache = QueryStatusCache::new();
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let generation = SchemaGeneration::INITIAL.next(); // generation 2
+
+        // Insert via query_migration_state, then update generation separately
+        cache.query_migration_state(&q);
+        cache.update_schema_generation(&q, generation);
+
+        // Retrieve via query_with_schema_generation
+        let id = QueryId::from(&q);
+        let result = cache.query_with_schema_generation(&id.to_string());
+        assert!(result.is_some());
+        let (_query, stored_gen) = result.unwrap();
+        assert_eq!(stored_gen, Some(generation));
+    }
+
+    #[test]
+    fn schema_generation_none_for_queries_without_generation() {
+        let cache = QueryStatusCache::new();
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+
+        // Insert via update_query_migration_state (does not set schema_generation)
+        cache.update_query_migration_state(&q, MigrationState::Pending, None);
+
+        let id = QueryId::from(&q);
+        let result = cache.query_with_schema_generation(&id.to_string());
+        assert!(result.is_some());
+        let (_query, stored_gen) = result.unwrap();
+        assert_eq!(stored_gen, None);
+    }
+
+    #[test]
+    fn try_query_migration_state_does_not_overwrite_generation() {
+        let cache = QueryStatusCache::new();
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let generation = SchemaGeneration::INITIAL.next(); // generation 2
+
+        // Store with generation 2
+        cache.query_migration_state(&q);
+        cache.update_schema_generation(&q, generation);
+
+        // Read with try_query_migration_state (should not mutate)
+        let (_, state) = cache.try_query_migration_state(&q);
+        assert_eq!(state, Some(MigrationState::Pending));
+
+        // Verify generation is still 2 (not overwritten)
+        let id = QueryId::from(&q);
+        let (_, stored_gen) = cache.query_with_schema_generation(&id.to_string()).unwrap();
+        assert_eq!(stored_gen, Some(generation));
     }
 }

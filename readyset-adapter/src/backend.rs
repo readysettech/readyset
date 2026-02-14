@@ -187,6 +187,7 @@ struct PrepareSelectMeta {
     must_migrate: bool,
     should_do_noria: bool,
     always: bool,
+    schema_generation: SchemaGeneration,
 }
 
 #[derive(Debug)]
@@ -1451,6 +1452,7 @@ where
                     || !self.has_fallback(),
                 should_do_noria: should_do_readyset,
                 always: status.always,
+                schema_generation: rewrite_context.schema_generation(),
             }))
         }
     }
@@ -1625,6 +1627,7 @@ where
                 stmt,
                 rewritten,
                 always,
+                schema_generation,
                 ..
             }) => {
                 let request =
@@ -1633,6 +1636,9 @@ where
                     .state
                     .query_status_cache
                     .query_migration_state(&request);
+                self.state
+                    .query_status_cache
+                    .update_schema_generation(&request, schema_generation);
                 PreparedStatement {
                     query_id: Some(migration_state.0),
                     prep: PrepareResult::new(statement_id, prep),
@@ -2084,10 +2090,13 @@ where
         {
             // We got a statement with a pending migration, we want to check if migration is
             // finished by now
+            // Use try_query_migration_state (read-only) rather than query_migration_state
+            // to avoid overwriting the stored schema generation. The generation was set
+            // at prepare time and must not be updated to the current generation here.
             let new_migration_state = self
                 .state
                 .query_status_cache
-                .query_migration_state(cached_statement.as_view_request()?)
+                .try_query_migration_state(cached_statement.as_view_request()?)
                 .1;
 
             let search_path = cached_statement
@@ -2102,10 +2111,10 @@ where
                 search_path,
             );
 
-            if matches!(new_migration_state, MigrationState::Successful(_)) {
+            if matches!(new_migration_state, Some(MigrationState::Successful(_))) {
                 // Attempt to prepare on ReadySet
                 let _ = Self::update_noria_prepare(noria, cached_statement, &rewrite_context).await;
-            } else if let MigrationState::Inlined(new_state) = new_migration_state
+            } else if let Some(MigrationState::Inlined(new_state)) = new_migration_state
                 && let MigrationState::Inlined(ref old_state) = cached_statement.migration_state
             {
                 // if the epoch has advanced, then we've made changes to the inlined caches so
@@ -2731,19 +2740,36 @@ where
 
                 Ok((deep, shallow, schema_generation))
             }
-            CacheInner::Id(id) => match self.state.query_status_cache.query(id.as_str()) {
-                Some(q) => match q {
-                    Query::Parsed(deep) => Ok((
-                        Ok((*deep).clone()),
-                        Err(ReadySetError::NoQueryForId { id: id.to_string() }),
-                        // TODO(mvzink): Possibly this needs to be moved into the `CreateViewRequest`
-                        SchemaGeneration::INITIAL,
-                    )),
-                    Query::ShallowParsed(shallow) => Ok((
-                        Err(ReadySetError::NoQueryForId { id: id.to_string() }),
-                        Ok((*shallow).clone()),
-                        SchemaGeneration::INITIAL,
-                    )),
+            CacheInner::Id(id) => match self
+                .state
+                .query_status_cache
+                .query_with_schema_generation(id.as_str())
+            {
+                Some((q, schema_gen)) => match q {
+                    Query::Parsed(deep) => {
+                        // Deep queries must have a stored generation from rewrite time;
+                        // missing generation here is a programming error since all deep
+                        // queries go through query_migration_state during prepare.
+                        let Some(generation) = schema_gen else {
+                            internal!("deep query {id} in QSC without schema_generation")
+                        };
+                        Ok((
+                            Ok((*deep).clone()),
+                            Err(ReadySetError::NoQueryForId { id: id.to_string() }),
+                            generation,
+                        ))
+                    }
+                    Query::ShallowParsed(shallow) => {
+                        // Shallow queries are schema-insensitive; generation is unused
+                        // by the shallow path but we need to return something. Use
+                        // INITIAL since the shallow create_cache path ignores it.
+                        let generation = schema_gen.unwrap_or(SchemaGeneration::INITIAL);
+                        Ok((
+                            Err(ReadySetError::NoQueryForId { id: id.to_string() }),
+                            Ok((*shallow).clone()),
+                            generation,
+                        ))
+                    }
                     Query::ParseFailed(_, e) => Err(ReadySetError::UnparseableQuery(e)),
                 },
                 None => Err(ReadySetError::NoQueryForId { id: id.to_string() }),
@@ -4021,6 +4047,11 @@ where
             &tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
         >,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        // Track the schema generation that was used to rewrite this query so that
+        // CREATE CACHE FROM <query_id> can retrieve it later. Without this, ad-hoc
+        // (text protocol) queries would never store their generation in the QSC.
+        status.schema_generation = Some(schema_generation);
+
         let original_status = status.clone();
         let did_work = if let Some(ref mut i) = status.execution_info {
             i.reset_if_exceeded_recovery(
