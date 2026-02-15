@@ -48,22 +48,31 @@ pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
 
         if let Ok(data) = res {
             let rows = Vec::<Vec<DfValue>>::try_from(data).unwrap();
-            let snapshot_status = rows.into_iter().find(|r| r[0] == "Status".into());
-            let snapshot_status: String = if let Some(s) = snapshot_status {
-                s[1].coerce_to(
-                    &readyset_data::DfType::Text(Collation::default_for(Dialect::DEFAULT_MYSQL)),
-                    &readyset_data::DfType::Unknown,
-                )
-                .unwrap()
-                .try_into()
-                .unwrap()
-            } else {
-                continue;
-            };
+            let snapshot_status = rows.into_iter().find(|r| match &r[0] {
+                DfValue::ByteArray(bytes) => std::str::from_utf8(bytes)
+                    .map(|s| s == "Status")
+                    .unwrap_or(false),
+                DfValue::Text(s) => s.as_str() == "Status",
+                DfValue::TinyText(s) => s.as_str() == "Status",
+                _ => false,
+            });
 
-            if snapshot_status == CurrentStatus::Online.to_string() {
-                info!("Database ready!");
-                return Ok(());
+            if let Some(s) = snapshot_status {
+                let status: String = s[1]
+                    .coerce_to(
+                        &readyset_data::DfType::Text(Collation::default_for(
+                            Dialect::DEFAULT_MYSQL,
+                        )),
+                        &readyset_data::DfType::Unknown,
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
+
+                if status == CurrentStatus::Online.to_string() {
+                    info!("Database ready!");
+                    return Ok(());
+                }
             }
         }
 
