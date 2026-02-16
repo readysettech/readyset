@@ -166,11 +166,23 @@ impl Array {
 
 impl Ord for Array {
     fn cmp(&self, other: &Self) -> Ordering {
+        // PostgreSQL array comparison semantics:
+        // 1. Compare elements in row-major order (element-by-element lexicographic).
+        //    Iterator::cmp handles the prefix case: shorter is less when one array
+        //    is a prefix of the other.
+        // 2. If contents are equal, compare number of dimensions as tiebreaker.
+        // 3. If ndim also equal, compare dimension sizes lexicographically.
+        // 4. Lower bounds as final tiebreaker for Ord/PartialEq consistency.
+        //
+        // From the PostgreSQL docs: "If the contents of two arrays are equal but
+        // the dimensionality is different, the first difference in the
+        // dimensionality information determines the sort order."
         self.contents
-            .shape()
-            .cmp(other.contents.shape())
+            .iter()
+            .cmp(other.contents.iter())
+            .then_with(|| self.contents.ndim().cmp(&other.contents.ndim()))
+            .then_with(|| self.contents.shape().cmp(other.contents.shape()))
             .then_with(|| self.lower_bounds.cmp(&other.lower_bounds))
-            .then_with(|| self.contents.iter().cmp(other.contents.iter()))
     }
 }
 
@@ -899,5 +911,297 @@ mod tests {
                 .unwrap()
             )
         );
+    }
+
+    // ---------------------------------------------------------------
+    // Ord comparison tests
+    // ---------------------------------------------------------------
+
+    // Proptest: Ord and PartialEq must agree
+    #[tags(no_retry)]
+    #[proptest]
+    fn eq_consistent_with_cmp(
+        #[strategy(non_numeric_array())] a: Array,
+        #[strategy(non_numeric_array())] b: Array,
+    ) {
+        assert_eq!(a == b, a.cmp(&b) == Ordering::Equal);
+    }
+
+    // --- 1-D comparison tests ---
+
+    #[test]
+    fn cmp_1d_element_by_element_larger_first_element_wins() {
+        // ARRAY[10] > ARRAY[1,2]: elements compared first, 10 > 1.
+        // Shape ([1] vs [2]) is only a tiebreaker when elements are equal.
+        let a = Array::from(vec![DfValue::from(10)]);
+        let b = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_1d_prefix_shorter_is_less() {
+        // ARRAY[1,2] < ARRAY[1,2,3]: prefix, so shorter is less
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        let b = Array::from(vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)]);
+        assert_eq!(a.cmp(&b), Ordering::Less);
+    }
+
+    #[test]
+    fn cmp_1d_equal_arrays() {
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        let b = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        assert_eq!(a.cmp(&b), Ordering::Equal);
+    }
+
+    #[test]
+    fn cmp_1d_empty_less_than_nonempty() {
+        let empty = Array::from(vec![]);
+        let nonempty = Array::from(vec![DfValue::from(1)]);
+        assert_eq!(empty.cmp(&nonempty), Ordering::Less);
+    }
+
+    #[test]
+    fn cmp_1d_single_element_less() {
+        let a = Array::from(vec![DfValue::from(1)]);
+        let b = Array::from(vec![DfValue::from(2)]);
+        assert_eq!(a.cmp(&b), Ordering::Less);
+    }
+
+    #[test]
+    fn cmp_1d_single_element_greater() {
+        let a = Array::from(vec![DfValue::from(5)]);
+        let b = Array::from(vec![DfValue::from(3)]);
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_1d_second_element_differs() {
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        let b = Array::from(vec![DfValue::from(1), DfValue::from(3)]);
+        assert_eq!(a.cmp(&b), Ordering::Less);
+    }
+
+    #[test]
+    fn cmp_1d_longer_prefix_is_greater() {
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)]);
+        let b = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_1d_both_empty() {
+        let a = Array::from(vec![]);
+        let b = Array::from(vec![]);
+        assert_eq!(a.cmp(&b), Ordering::Equal);
+    }
+
+    // --- Multi-dimensional comparison tests ---
+
+    #[test]
+    fn cmp_different_ndim_1d_less_than_2d() {
+        // Same flattened elements [1,2,3,4]; elements tie, then ndim tiebreaker:
+        // 1D (ndim=1) < 2D (ndim=2)
+        let a_1d = Array::from(vec![
+            DfValue::from(1),
+            DfValue::from(2),
+            DfValue::from(3),
+            DfValue::from(4),
+        ]);
+        let a_2d = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(1),
+                    DfValue::from(2),
+                    DfValue::from(3),
+                    DfValue::from(4),
+                ],
+            )
+            .unwrap(),
+        );
+        assert_eq!(a_1d.cmp(&a_2d), Ordering::Less);
+        assert_eq!(a_2d.cmp(&a_1d), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_same_ndim_different_shapes() {
+        // Both 2D, same flattened elements [1..=6]; elements tie, ndim ties,
+        // then shape tiebreaker: [2,3] < [3,2]
+        let a = Array::from(
+            ArrayD::from_shape_vec(IxDyn(&[2, 3]), (1..=6).map(DfValue::from).collect()).unwrap(),
+        );
+        let b = Array::from(
+            ArrayD::from_shape_vec(IxDyn(&[3, 2]), (1..=6).map(DfValue::from).collect()).unwrap(),
+        );
+        assert_eq!(a.cmp(&b), Ordering::Less);
+        assert_eq!(b.cmp(&a), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_2d_same_shape_different_elements() {
+        // {{1,2},{3,4}} < {{1,2},{3,5}}: last element differs
+        let a = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(1),
+                    DfValue::from(2),
+                    DfValue::from(3),
+                    DfValue::from(4),
+                ],
+            )
+            .unwrap(),
+        );
+        let b = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(1),
+                    DfValue::from(2),
+                    DfValue::from(3),
+                    DfValue::from(5),
+                ],
+            )
+            .unwrap(),
+        );
+        assert_eq!(a.cmp(&b), Ordering::Less);
+    }
+
+    #[test]
+    fn cmp_2d_equal() {
+        let a = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(1),
+                    DfValue::from(2),
+                    DfValue::from(3),
+                    DfValue::from(4),
+                ],
+            )
+            .unwrap(),
+        );
+        let b = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(1),
+                    DfValue::from(2),
+                    DfValue::from(3),
+                    DfValue::from(4),
+                ],
+            )
+            .unwrap(),
+        );
+        assert_eq!(a.cmp(&b), Ordering::Equal);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn cmp_2d_first_element_decides() {
+        // {{5,1},{1,1}} > {{1,9},{9,9}}: first element 5 > 1
+        let a = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(5),
+                    DfValue::from(1),
+                    DfValue::from(1),
+                    DfValue::from(1),
+                ],
+            )
+            .unwrap(),
+        );
+        let b = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(1),
+                    DfValue::from(9),
+                    DfValue::from(9),
+                    DfValue::from(9),
+                ],
+            )
+            .unwrap(),
+        );
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_elements_win_over_shape() {
+        // 2x2 with small elements vs 1x4 with large elements.
+        // Shape [2,2] > [1,4] but elements [1,1,1,1] < [9,9,9,9].
+        // Elements are compared first, so 2x2 < 1x4.
+        let a = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(1),
+                    DfValue::from(1),
+                    DfValue::from(1),
+                    DfValue::from(1),
+                ],
+            )
+            .unwrap(),
+        );
+        let b = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[1, 4]),
+                vec![
+                    DfValue::from(9),
+                    DfValue::from(9),
+                    DfValue::from(9),
+                    DfValue::from(9),
+                ],
+            )
+            .unwrap(),
+        );
+        assert_eq!(a.cmp(&b), Ordering::Less);
+    }
+
+    #[test]
+    fn cmp_3d_less_than_by_elements() {
+        let a = Array::from(
+            ArrayD::from_shape_vec(IxDyn(&[2, 1, 1]), vec![DfValue::from(1), DfValue::from(2)])
+                .unwrap(),
+        );
+        let b = Array::from(
+            ArrayD::from_shape_vec(IxDyn(&[2, 1, 1]), vec![DfValue::from(1), DfValue::from(3)])
+                .unwrap(),
+        );
+        assert_eq!(a.cmp(&b), Ordering::Less);
+    }
+
+    // --- NULL element tests ---
+    // NOTE: PostgreSQL treats NULL as greater than any non-NULL value in array
+    // element comparison. DfValue::Ord compares mismatched variants by
+    // discriminant order, where None (variant 0) < Int (variant 1). This means
+    // ReadySet's NULL ordering in arrays does NOT match PostgreSQL. Fixing this
+    // requires changes to DfValue::Ord, which is out of scope for this change.
+    // These tests document the current (incorrect) behavior.
+
+    #[test]
+    fn cmp_1d_null_element_ordering() {
+        // PostgreSQL: ARRAY[1, NULL] > ARRAY[1, 999] (NULL > non-NULL)
+        // ReadySet: DfValue::None < DfValue::Int, so this is reversed.
+        let a = Array::from(vec![DfValue::from(1), DfValue::None]);
+        let b = Array::from(vec![DfValue::from(1), DfValue::from(999)]);
+        // Document current behavior (opposite of PostgreSQL):
+        assert_eq!(a.cmp(&b), Ordering::Less);
+    }
+
+    #[test]
+    fn cmp_1d_null_vs_null() {
+        // Two NULL elements compare as equal (matches PostgreSQL)
+        let a = Array::from(vec![DfValue::None]);
+        let b = Array::from(vec![DfValue::None]);
+        assert_eq!(a.cmp(&b), Ordering::Equal);
+    }
+
+    #[test]
+    fn cmp_1d_all_nulls_different_lengths() {
+        let a = Array::from(vec![DfValue::None]);
+        let b = Array::from(vec![DfValue::None, DfValue::None]);
+        assert_eq!(a.cmp(&b), Ordering::Less);
     }
 }

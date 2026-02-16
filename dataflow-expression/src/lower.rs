@@ -1054,11 +1054,35 @@ impl BinaryOperator {
             }
         };
 
+        // For PostgreSQL, when one side of a comparison is an array and the other
+        // is not (e.g., a constant-folded text literal), coerce the non-array side
+        // to the array type.
+        let pg_array_coercion =
+            |left: &DfType, right: &DfType| -> (Option<DfType>, Option<DfType>) {
+                if left.is_array() && !right.is_array() {
+                    (None, Some(left.clone()))
+                } else if right.is_array() && !left.is_array() {
+                    (Some(right.clone()), None)
+                } else {
+                    (None, None)
+                }
+            };
+
         use BinaryOperator::*;
         match self {
-            Add | Subtract | Multiply | Divide | Modulo | And | Or | Greater | GreaterOrEqual
-            | Less | LessOrEqual | Is => match dialect.engine() {
+            Add | Subtract | Multiply | Divide | Modulo | And | Or | Is => match dialect.engine() {
                 SqlEngine::PostgreSQL => Ok((None, None)),
+                SqlEngine::MySQL => {
+                    let ty = mysql_type_conversion(left_type, right_type);
+                    Ok((Some(ty.clone()), Some(ty)))
+                }
+            },
+
+            Greater | GreaterOrEqual | Less | LessOrEqual => match dialect.engine() {
+                SqlEngine::PostgreSQL => {
+                    let (l, r) = pg_array_coercion(left_type, right_type);
+                    Ok((l, r))
+                }
                 SqlEngine::MySQL => {
                     let ty = mysql_type_conversion(left_type, right_type);
                     Ok((Some(ty.clone()), Some(ty)))
@@ -1086,7 +1110,17 @@ impl BinaryOperator {
             )),
 
             Equal => match dialect.engine() {
-                SqlEngine::PostgreSQL => Ok((None, Some(left_type.clone()))),
+                SqlEngine::PostgreSQL => {
+                    let (l, r) = pg_array_coercion(left_type, right_type);
+                    if l.is_some() || r.is_some() {
+                        Ok((l, r))
+                    } else {
+                        // Non-array Equal: coerce right to left's type to handle
+                        // cases like Unknown vs concrete type. Not needed for
+                        // ordering comparisons which return (None, None) here.
+                        Ok((None, Some(left_type.clone())))
+                    }
+                }
                 SqlEngine::MySQL => {
                     let ty = mysql_type_conversion(left_type, right_type);
                     Ok((Some(ty.clone()), Some(ty)))
@@ -2642,6 +2676,188 @@ pub(crate) mod tests {
                     DfType::DEFAULT_TEXT,
                 );
             }
+        }
+    }
+
+    mod array_comparison_coercions {
+        use pretty_assertions::assert_eq;
+
+        use super::*;
+
+        fn int_array_type() -> DfType {
+            DfType::Array(Box::new(DfType::Int))
+        }
+
+        #[test]
+        fn equal_coerces_right_text_to_array() {
+            let (left, right) = BinaryOperator::Equal
+                .argument_type_coercions(
+                    &int_array_type(),
+                    &DfType::DEFAULT_TEXT,
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, Some(int_array_type()));
+        }
+
+        #[test]
+        fn equal_coerces_left_text_to_array() {
+            let (left, right) = BinaryOperator::Equal
+                .argument_type_coercions(
+                    &DfType::DEFAULT_TEXT,
+                    &int_array_type(),
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, Some(int_array_type()));
+            assert_eq!(right, None);
+        }
+
+        #[test]
+        fn greater_coerces_right_text_to_array() {
+            let (left, right) = BinaryOperator::Greater
+                .argument_type_coercions(
+                    &int_array_type(),
+                    &DfType::DEFAULT_TEXT,
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, Some(int_array_type()));
+        }
+
+        #[test]
+        fn less_coerces_left_text_to_array() {
+            let (left, right) = BinaryOperator::Less
+                .argument_type_coercions(
+                    &DfType::DEFAULT_TEXT,
+                    &int_array_type(),
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, Some(int_array_type()));
+            assert_eq!(right, None);
+        }
+
+        #[test]
+        fn no_coercion_when_both_arrays() {
+            let (left, right) = BinaryOperator::Greater
+                .argument_type_coercions(
+                    &int_array_type(),
+                    &int_array_type(),
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, None);
+        }
+
+        #[test]
+        fn greater_coerces_right_unknown_to_array() {
+            let (left, right) = BinaryOperator::Greater
+                .argument_type_coercions(
+                    &int_array_type(),
+                    &DfType::Unknown,
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, Some(int_array_type()));
+        }
+
+        #[test]
+        fn equal_coerces_right_unknown_to_array() {
+            let (left, right) = BinaryOperator::Equal
+                .argument_type_coercions(
+                    &int_array_type(),
+                    &DfType::Unknown,
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, Some(int_array_type()));
+        }
+
+        #[test]
+        fn less_coerces_right_unknown_to_array() {
+            let (left, right) = BinaryOperator::Less
+                .argument_type_coercions(
+                    &int_array_type(),
+                    &DfType::Unknown,
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, Some(int_array_type()));
+        }
+
+        #[test]
+        fn greater_or_equal_coerces_left_text_to_array() {
+            let (left, right) = BinaryOperator::GreaterOrEqual
+                .argument_type_coercions(
+                    &DfType::DEFAULT_TEXT,
+                    &int_array_type(),
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, Some(int_array_type()));
+            assert_eq!(right, None);
+        }
+
+        #[test]
+        fn less_or_equal_coerces_right_text_to_array() {
+            let (left, right) = BinaryOperator::LessOrEqual
+                .argument_type_coercions(
+                    &int_array_type(),
+                    &DfType::DEFAULT_TEXT,
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, Some(int_array_type()));
+        }
+
+        #[test]
+        fn is_does_not_coerce_arrays() {
+            // Is (IS/IS NOT) should not trigger array coercion
+            let (left, right) = BinaryOperator::Is
+                .argument_type_coercions(
+                    &int_array_type(),
+                    &DfType::DEFAULT_TEXT,
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, None);
+        }
+
+        #[test]
+        fn equal_non_array_falls_through_to_coerce_right() {
+            // For non-array Equal on PostgreSQL, right is coerced to left's type
+            let (left, right) = BinaryOperator::Equal
+                .argument_type_coercions(
+                    &DfType::Int,
+                    &DfType::Unknown,
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, Some(DfType::Int));
+        }
+
+        #[test]
+        fn greater_non_array_returns_no_coercion() {
+            // For non-array Greater on PostgreSQL, no coercion
+            let (left, right) = BinaryOperator::Greater
+                .argument_type_coercions(
+                    &DfType::Int,
+                    &DfType::Unknown,
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, None);
         }
     }
 }
