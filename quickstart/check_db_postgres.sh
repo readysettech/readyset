@@ -261,7 +261,7 @@ check_postgres_compliance() {
             SELECT 1
             FROM pg_roles, pg_auth_members 
             WHERE pg_roles.oid = pg_auth_members.roleid 
-            AND pg_roles.rolname = 'rds_superuser' 
+            AND pg_roles.rolname IN ('rds_superuser', 'neon_superuser')
             AND pg_auth_members.member = (
                 SELECT oid 
                 FROM pg_roles 
