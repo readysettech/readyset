@@ -958,7 +958,7 @@ impl BinaryOperator {
         op: SqlBinaryOperator,
         dialect: Dialect,
         left_type: &DfType,
-        _right_type: &DfType,
+        right_type: &DfType,
     ) -> ReadySetResult<(Self, bool)> {
         use SqlBinaryOperator::*;
         match op {
@@ -992,11 +992,14 @@ impl BinaryOperator {
             QuestionMark => Ok((Self::JsonExists, false)),
             QuestionMarkPipe => Ok((Self::JsonAnyExists, false)),
             QuestionMarkAnd => Ok((Self::JsonAllExists, false)),
-            // TODO When we want to implement the double pipe string concat operator, we'll need to
-            // look at the types of the arguments to this operator to infer which `BinaryOperator`
-            // variant to return. For now we just support the JSON `||` concat though:
             DoublePipe => {
-                if dialect.double_pipe_is_concat() {
+                if dialect.engine() == SqlEngine::PostgreSQL
+                    && (left_type.is_array() || right_type.is_array())
+                    && !left_type.is_any_json()
+                    && !right_type.is_any_json()
+                {
+                    Ok((Self::ArrayConcat, false))
+                } else if dialect.double_pipe_is_concat() {
                     Ok((Self::JsonConcat, false))
                 } else {
                     Ok((Self::Or, false))
@@ -1015,8 +1018,26 @@ impl BinaryOperator {
             }
             HashArrow1 => Ok((Self::JsonKeyPathExtract, false)),
             HashArrow2 => Ok((Self::JsonKeyPathExtractText, false)),
-            AtArrowRight => Ok((Self::JsonContains, false)),
-            AtArrowLeft => Ok((Self::JsonContainedIn, false)),
+            AtArrowRight => {
+                if (left_type.is_array() || right_type.is_array())
+                    && !left_type.is_any_json()
+                    && !right_type.is_any_json()
+                {
+                    Ok((Self::ArrayContains, false))
+                } else {
+                    Ok((Self::JsonContains, false))
+                }
+            }
+            AtArrowLeft => {
+                if (left_type.is_array() || right_type.is_array())
+                    && !left_type.is_any_json()
+                    && !right_type.is_any_json()
+                {
+                    Ok((Self::ArrayContainedIn, false))
+                } else {
+                    Ok((Self::JsonContainedIn, false))
+                }
+            }
         }
     }
 
@@ -1152,6 +1173,10 @@ impl BinaryOperator {
                     Some(DfType::Array(Box::new(DfType::DEFAULT_TEXT))),
                 ))
             }
+            ArrayContains | ArrayContainedIn | ArrayConcat => {
+                let (l, r) = pg_array_coercion(left_type, right_type);
+                Ok((l, r))
+            }
             JsonConcat | JsonContains | JsonContainedIn => {
                 if left_type.is_known() && !left_type.is_jsonb() {
                     return error(Left, "JSONB");
@@ -1225,7 +1250,9 @@ impl BinaryOperator {
             | Self::JsonAnyExists
             | Self::JsonAllExists
             | Self::JsonContains
-            | Self::JsonContainedIn => Ok(DfType::Bool),
+            | Self::JsonContainedIn
+            | Self::ArrayContains
+            | Self::ArrayContainedIn => Ok(DfType::Bool),
 
             Self::AtTimeZone => {
                 if dialect.engine() == SqlEngine::PostgreSQL {
@@ -1259,6 +1286,8 @@ impl BinaryOperator {
             Self::JsonPathExtractUnquote
             | Self::JsonKeyExtractText
             | Self::JsonKeyPathExtractText => Ok(DfType::DEFAULT_TEXT),
+
+            Self::ArrayConcat => Ok(left_type.clone()),
 
             _ => Ok(left_type.clone()),
         }
@@ -2853,6 +2882,58 @@ pub(crate) mod tests {
                 .argument_type_coercions(
                     &DfType::Int,
                     &DfType::Unknown,
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, None);
+        }
+
+        #[test]
+        fn array_contains_coerces_right_text_to_array() {
+            let (left, right) = BinaryOperator::ArrayContains
+                .argument_type_coercions(
+                    &int_array_type(),
+                    &DfType::DEFAULT_TEXT,
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, Some(int_array_type()));
+        }
+
+        #[test]
+        fn array_contained_in_coerces_left_text_to_array() {
+            let (left, right) = BinaryOperator::ArrayContainedIn
+                .argument_type_coercions(
+                    &DfType::DEFAULT_TEXT,
+                    &int_array_type(),
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, Some(int_array_type()));
+            assert_eq!(right, None);
+        }
+
+        #[test]
+        fn array_concat_coerces_right_text_to_array() {
+            let (left, right) = BinaryOperator::ArrayConcat
+                .argument_type_coercions(
+                    &int_array_type(),
+                    &DfType::DEFAULT_TEXT,
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, Some(int_array_type()));
+        }
+
+        #[test]
+        fn array_contains_no_coercion_when_both_arrays() {
+            let (left, right) = BinaryOperator::ArrayContains
+                .argument_type_coercions(
+                    &int_array_type(),
+                    &int_array_type(),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();

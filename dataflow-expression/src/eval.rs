@@ -220,6 +220,21 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
             }
             Ok(json.into())
         }
+        ArrayContains => {
+            let left_arr = non_null!(left).as_array()?;
+            let right_arr = non_null!(right).as_array()?;
+            Ok(DfValue::from(left_arr.contains(right_arr)))
+        }
+        ArrayContainedIn => {
+            let left_arr = non_null!(left).as_array()?;
+            let right_arr = non_null!(right).as_array()?;
+            Ok(DfValue::from(right_arr.contains(left_arr)))
+        }
+        ArrayConcat => {
+            let left_arr = non_null!(left).as_array()?;
+            let right_arr = non_null!(right).as_array()?;
+            Ok(DfValue::from(left_arr.concat(right_arr)))
+        }
         JsonSubtractPath => {
             // Type errors are handled during expression lowering, unless the type is
             // unknown.
@@ -1529,6 +1544,111 @@ mod tests {
             // FIXME(ENG-2080): `serde_json::Number` does not compare exponents and decimals
             // correctly when `arbitrary_precision` is enabled.
             // test("0.1", "1.0e-1", true);
+        }
+    }
+
+    mod array_operators {
+        use pretty_assertions::assert_eq;
+        use readyset_data::Array;
+
+        use super::*;
+
+        #[test]
+        fn eval_array_contains() {
+            assert_eq!(
+                eval_expr(
+                    "ARRAY[0,10,20] @> ARRAY[10,20]",
+                    readyset_sql::Dialect::PostgreSQL
+                ),
+                true.into()
+            );
+            assert_eq!(
+                eval_expr("ARRAY[1,2] @> ARRAY[3]", readyset_sql::Dialect::PostgreSQL),
+                false.into()
+            );
+            // Empty array is contained by anything
+            assert_eq!(
+                eval_expr(
+                    "ARRAY[1,2,3] @> '{}'::int[]",
+                    readyset_sql::Dialect::PostgreSQL
+                ),
+                true.into()
+            );
+            // Order doesn't matter
+            assert_eq!(
+                eval_expr(
+                    "ARRAY[1,4,3] @> ARRAY[3,1]",
+                    readyset_sql::Dialect::PostgreSQL
+                ),
+                true.into()
+            );
+        }
+
+        #[test]
+        fn eval_array_contained_in() {
+            assert_eq!(
+                eval_expr(
+                    "ARRAY[10,20] <@ ARRAY[0,10,20]",
+                    readyset_sql::Dialect::PostgreSQL
+                ),
+                true.into()
+            );
+            assert_eq!(
+                eval_expr("ARRAY[3] <@ ARRAY[1,2]", readyset_sql::Dialect::PostgreSQL),
+                false.into()
+            );
+        }
+
+        #[test]
+        fn eval_array_concat() {
+            assert_eq!(
+                eval_expr(
+                    "ARRAY[1,2] || ARRAY[3,4]",
+                    readyset_sql::Dialect::PostgreSQL
+                ),
+                DfValue::from(Array::from(vec![
+                    DfValue::from(1),
+                    DfValue::from(2),
+                    DfValue::from(3),
+                    DfValue::from(4),
+                ]))
+            );
+        }
+
+        #[test]
+        fn eval_array_contains_null_propagation() {
+            assert_eq!(
+                eval_expr("null @> ARRAY[1]", readyset_sql::Dialect::PostgreSQL),
+                DfValue::None
+            );
+            assert_eq!(
+                eval_expr("ARRAY[1] @> null", readyset_sql::Dialect::PostgreSQL),
+                DfValue::None
+            );
+        }
+
+        #[test]
+        fn eval_array_contained_in_null_propagation() {
+            assert_eq!(
+                eval_expr("null <@ ARRAY[1]", readyset_sql::Dialect::PostgreSQL),
+                DfValue::None
+            );
+            assert_eq!(
+                eval_expr("ARRAY[1] <@ null", readyset_sql::Dialect::PostgreSQL),
+                DfValue::None
+            );
+        }
+
+        #[test]
+        fn eval_array_concat_null_propagation() {
+            assert_eq!(
+                eval_expr("null || ARRAY[1]", readyset_sql::Dialect::PostgreSQL),
+                DfValue::None
+            );
+            assert_eq!(
+                eval_expr("ARRAY[1] || null", readyset_sql::Dialect::PostgreSQL),
+                DfValue::None
+            );
         }
     }
 }

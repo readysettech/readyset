@@ -107,6 +107,15 @@ pub enum BinaryOperator {
     /// `<@`
     JsonContainedIn,
 
+    /// `@>` for PostgreSQL arrays (set-based containment)
+    ArrayContains,
+
+    /// `<@` for PostgreSQL arrays (set-based contained-in)
+    ArrayContainedIn,
+
+    /// `||` for PostgreSQL arrays (concatenation)
+    ArrayConcat,
+
     /// `-` applied to the PostreSQL JSONB type
     JsonSubtract,
 
@@ -137,13 +146,13 @@ impl fmt::Display for BinaryOperator {
             Self::JsonExists => "?",
             Self::JsonAnyExists => "?|",
             Self::JsonAllExists => "?&",
-            Self::JsonConcat => "||",
+            Self::JsonConcat | Self::ArrayConcat => "||",
             Self::JsonPathExtract | Self::JsonKeyExtract => "->",
             Self::JsonPathExtractUnquote | Self::JsonKeyExtractText => "->>",
             Self::JsonKeyPathExtract => "#>",
             Self::JsonKeyPathExtractText => "#>>",
-            Self::JsonContains => "@>",
-            Self::JsonContainedIn => "<@",
+            Self::JsonContains | Self::ArrayContains => "@>",
+            Self::JsonContainedIn | Self::ArrayContainedIn => "<@",
         };
         f.write_str(op)
     }

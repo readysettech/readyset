@@ -100,3 +100,66 @@ async fn array_comparison_postgres() {
 
     shutdown_tx.shutdown().await;
 }
+
+/// Tests array containment operators: @> and <@
+#[tokio::test]
+#[tags(serial, slow, postgres_upstream)]
+async fn array_containment_postgres() {
+    readyset_tracing::init_test_logging();
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
+        .parsing_preset(ParsingPreset::OnlySqlparser)
+        .build::<psql_helpers::PostgreSQLAdapter>()
+        .await;
+    let rs_conn = psql_helpers::connect(rs_opts).await;
+
+    let mut upstream_config = psql_helpers::upstream_config();
+    upstream_config.dbname("noria");
+    let upstream_conn = psql_helpers::connect(upstream_config).await;
+
+    setup_array_table(&upstream_conn).await;
+
+    let queries: Vec<(&str, &str)> = vec![
+        (
+            "SELECT id FROM t WHERE arr @> ARRAY[1, 2]",
+            "@> contains [1,2]",
+        ),
+        (
+            "SELECT id FROM t WHERE arr @> ARRAY[10, 20]",
+            "@> contains [10,20] (empty result)",
+        ),
+        (
+            "SELECT id FROM t WHERE arr @> '{}'::int[]",
+            "@> contains empty array (all rows)",
+        ),
+        (
+            "SELECT id FROM t WHERE arr @> ARRAY[3, 1]",
+            "@> set-based containment [3,1]",
+        ),
+        (
+            "SELECT id FROM t WHERE arr <@ ARRAY[1, 2, 3]",
+            "<@ contained by [1,2,3]",
+        ),
+        (
+            "SELECT id FROM t WHERE arr <@ ARRAY[10]",
+            "<@ contained by [10]",
+        ),
+    ];
+
+    for (query, description) in &queries {
+        let upstream_rows = upstream_conn.query(*query, &[]).await.unwrap();
+        let mut expected: Vec<i32> = upstream_rows.iter().map(|r| r.get(0)).collect();
+        expected.sort();
+
+        eventually!(run_test: {
+            let rs_rows = rs_conn.query(*query, &[]).await;
+            AssertUnwindSafe(|| { rs_rows })
+        }, then_assert: |result| {
+            let rs_rows = result().unwrap();
+            let mut actual: Vec<i32> = rs_rows.iter().map(|r| r.get(0)).collect();
+            actual.sort();
+            assert_eq!(actual, expected, "{description}");
+        });
+    }
+
+    shutdown_tx.shutdown().await;
+}

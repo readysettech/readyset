@@ -153,6 +153,38 @@ impl Array {
         Ok(arr)
     }
 
+    /// PostgreSQL array containment (`@>`): returns `true` if every element in `other` exists in
+    /// `self`.
+    ///
+    /// Semantics follow PostgreSQL:
+    /// - Set-based, not positional: `ARRAY[1,4,3] @> ARRAY[3,1]` is true
+    /// - Duplicates don't matter: `ARRAY[1,1] @> ARRAY[1]` is true
+    /// - Empty array is contained by everything
+    /// - Multi-dimensional arrays are flattened to element sets for comparison
+    /// - NULL contains NULL (element-level equality)
+    pub fn contains(&self, other: &Array) -> bool {
+        if other.is_empty() {
+            return true;
+        }
+        other
+            .contents
+            .iter()
+            .all(|needle| self.contents.iter().any(|e| e == needle))
+    }
+
+    /// PostgreSQL array concatenation (`||`): produces a new 1-D array by appending elements.
+    ///
+    /// For two 1-D arrays this is a simple append.
+    ///
+    /// **Limitation**: Multi-dimensional inputs are currently flattened to 1-D, which diverges
+    /// from PostgreSQL (which preserves dimensionality when both operands share the same ndim).
+    pub fn concat(&self, other: &Array) -> Array {
+        let mut vals = Vec::with_capacity(self.contents.len() + other.contents.len());
+        vals.extend(self.contents.iter().cloned());
+        vals.extend(other.contents.iter().cloned());
+        Array::from(vals)
+    }
+
     /// Create a [`Vec`] of [`str`] references, which are obtained by calling [`try_from`] on each
     /// of the [`DfValue`] elements contained in `self`.
     ///
@@ -1203,5 +1235,113 @@ mod tests {
         let a = Array::from(vec![DfValue::None]);
         let b = Array::from(vec![DfValue::None, DfValue::None]);
         assert_eq!(a.cmp(&b), Ordering::Less);
+    }
+
+    // ---------------------------------------------------------------
+    // Containment tests (@>)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn contains_basic() {
+        let a = Array::from(vec![DfValue::from(0), DfValue::from(10), DfValue::from(20)]);
+        let b = Array::from(vec![DfValue::from(10), DfValue::from(20)]);
+        assert!(a.contains(&b));
+    }
+
+    #[test]
+    fn contains_out_of_order() {
+        // Set-based: order doesn't matter
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(4), DfValue::from(3)]);
+        let b = Array::from(vec![DfValue::from(3), DfValue::from(1)]);
+        assert!(a.contains(&b));
+    }
+
+    #[test]
+    fn contains_duplicates() {
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(1)]);
+        let b = Array::from(vec![DfValue::from(1)]);
+        assert!(a.contains(&b));
+    }
+
+    #[test]
+    fn contains_empty_rhs() {
+        let a = Array::from(vec![DfValue::from(1)]);
+        let b = Array::from(vec![]);
+        assert!(a.contains(&b));
+    }
+
+    #[test]
+    fn contains_empty_both() {
+        let a = Array::from(vec![]);
+        let b = Array::from(vec![]);
+        assert!(a.contains(&b));
+    }
+
+    #[test]
+    fn contains_false_when_missing() {
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        let b = Array::from(vec![DfValue::from(3)]);
+        assert!(!a.contains(&b));
+    }
+
+    #[test]
+    fn contains_null_elements() {
+        let a = Array::from(vec![DfValue::None, DfValue::from(1)]);
+        let b = Array::from(vec![DfValue::None]);
+        assert!(a.contains(&b));
+    }
+
+    #[test]
+    fn contains_multidimensional_flattened() {
+        // Multi-dimensional arrays are flattened for containment
+        let a = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(1),
+                    DfValue::from(2),
+                    DfValue::from(3),
+                    DfValue::from(4),
+                ],
+            )
+            .unwrap(),
+        );
+        let b = Array::from(vec![DfValue::from(2), DfValue::from(4)]);
+        assert!(a.contains(&b));
+    }
+
+    // ---------------------------------------------------------------
+    // Concatenation tests (||)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn concat_1d_arrays() {
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        let b = Array::from(vec![DfValue::from(3), DfValue::from(4)]);
+        let result = a.concat(&b);
+        assert_eq!(
+            result,
+            Array::from(vec![
+                DfValue::from(1),
+                DfValue::from(2),
+                DfValue::from(3),
+                DfValue::from(4),
+            ])
+        );
+    }
+
+    #[test]
+    fn concat_with_empty() {
+        let a = Array::from(vec![DfValue::from(1)]);
+        let b = Array::from(vec![]);
+        assert_eq!(a.concat(&b), Array::from(vec![DfValue::from(1)]));
+        assert_eq!(b.concat(&a), Array::from(vec![DfValue::from(1)]));
+    }
+
+    #[test]
+    fn concat_both_empty() {
+        let a = Array::from(vec![]);
+        let b = Array::from(vec![]);
+        assert_eq!(a.concat(&b), Array::from(vec![]));
     }
 }
