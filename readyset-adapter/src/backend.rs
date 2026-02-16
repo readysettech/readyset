@@ -1138,6 +1138,9 @@ where
         if let Some(upstream) = &mut self.upstream {
             upstream.change_user(user, password, database).await?;
         }
+        if !database.is_empty() {
+            self.noria.set_schema_search_path(vec![database.into()]);
+        }
         Ok(())
     }
 

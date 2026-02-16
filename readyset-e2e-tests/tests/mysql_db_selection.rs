@@ -1,4 +1,6 @@
 use mysql_async::prelude::Queryable;
+use mysql_async::{ChangeUserOpts, Conn};
+use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_util::shutdown::ShutdownSender;
@@ -23,6 +25,52 @@ async fn non_default_db_in_connection_opts() {
         .await
         .unwrap();
     conn.query_drop(format!("SELECT a FROM {db_name}.db_sel_test"))
+        .await
+        .unwrap();
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Verify that COM_CHANGE_USER with a database parameter updates ReadySet's internal
+/// schema_search_path, so subsequent unqualified queries resolve against the new database.
+#[tokio::test]
+#[tags(serial, mysql_upstream)]
+async fn change_user_updates_schema_search_path() {
+    readyset_tracing::init_test_logging();
+
+    let mut users = std::collections::HashMap::new();
+    users.insert("root".to_string(), "noria".to_string());
+
+    let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) = TestBuilder::new(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .users(users),
+    )
+    .fallback(true)
+    .build::<MySQLAdapter>()
+    .await;
+
+    let db_name = rs_opts.db_name().unwrap().to_string();
+    let mut conn = Conn::new(rs_opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE change_user_test (a INT)")
+        .await
+        .unwrap();
+
+    // Issue COM_CHANGE_USER with the same database — this should update the
+    // schema_search_path inside ReadySet so unqualified queries still work.
+    conn.change_user(
+        ChangeUserOpts::default()
+            .with_user(Some("root".to_string()))
+            .with_pass(Some("noria".to_string()))
+            .with_db_name(Some(db_name.clone())),
+    )
+    .await
+    .unwrap();
+
+    // This unqualified query requires a correct schema_search_path.  Before the fix,
+    // it would fail because change_user() did not call set_schema_search_path().
+    conn.query_drop("SELECT a FROM change_user_test")
         .await
         .unwrap();
 
