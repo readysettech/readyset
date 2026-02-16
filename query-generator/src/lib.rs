@@ -2896,9 +2896,14 @@ fn prune_query_operations(ops: &mut Vec<QueryOperation>) {
     let mut range_parameter_found = false;
     let mut aggregate_found = false;
 
+    // Don't generate aggregates with TopK/Paginate, since TopK rewrites LIMIT/OFFSET into a
+    // ROW_NUMBER() window function, and mixing window functions with aggregates is not supported
+    // (REA-5805)
+    let mut topk_found = false;
+
     ops.retain(|op| match op {
         QueryOperation::ColumnAggregate(agg) if agg.is_distinct() => {
-            if in_parameter_found || window_function_found {
+            if in_parameter_found || window_function_found || topk_found {
                 false
             } else {
                 distinct_found = true;
@@ -2952,7 +2957,7 @@ fn prune_query_operations(ops: &mut Vec<QueryOperation>) {
             }
         }
         QueryOperation::ColumnAggregate(_) => {
-            if window_function_found {
+            if window_function_found || topk_found {
                 false
             } else {
                 aggregate_found = true;
@@ -2968,6 +2973,14 @@ fn prune_query_operations(ops: &mut Vec<QueryOperation>) {
                 false
             } else {
                 window_function_found = true;
+                true
+            }
+        }
+        QueryOperation::TopK { .. } | QueryOperation::Paginate { .. } => {
+            if aggregate_found {
+                false
+            } else {
+                topk_found = true;
                 true
             }
         }
