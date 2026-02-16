@@ -1680,7 +1680,7 @@ pub struct QueryOperationArgs {
 /// randomly via the proptest [`Arbitrary`] implementation. See [this design doc][0] for more
 /// information
 ///
-/// Note that not every operation that ReadySet supports is currently included in this enum -
+/// Note that not every operation that Readyset supports is currently included in this enum -
 /// planned for the future are:
 ///
 /// - arithmetic projections
@@ -3085,7 +3085,7 @@ impl Subquery {
                 let alias = state.fresh_alias();
                 let col = Column {
                     name: right_join_col.clone().into(),
-                    table: Some(right_table_name.into()),
+                    table: Some(right_table_name.clone().into()),
                 };
                 subquery.fields.push(FieldDefinitionExpr::Expr {
                     expr: Expr::Column(col.clone()),
@@ -3101,7 +3101,14 @@ impl Subquery {
 
         let left_table = state.some_table_in_query_mut(query);
         let left_table_name = left_table.name.clone();
-        let left_join_key = left_table.some_column_with_type(SqlType::Int(None));
+        // If the outer query's table is the same as the subquery's table, we must use a
+        // different column for the join key to avoid generating a self-join on the same column,
+        // which Readyset doesn't support (see detect_problematic_self_joins).
+        let left_join_key = if left_table_name == right_table_name {
+            left_table.some_column_with_type_different_than(SqlType::Int(None), &right_join_col)
+        } else {
+            left_table.some_column_with_type(SqlType::Int(None))
+        };
 
         let subquery_name = state.fresh_alias();
         let (join_rhs, operator) = match self.position {
@@ -3605,6 +3612,34 @@ mod tests {
             }
             constraint => unreachable!("Unexpected constraint: {:?}", constraint),
         }
+    }
+
+    /// Regression test: subquery joins must not produce queries that trigger the
+    /// "Self-joins using the same column are unsupported" error in Readyset.
+    /// See REA-6210.
+    #[test]
+    fn subquery_join_avoids_problematic_self_joins() {
+        use readyset_sql_passes::DetectProblematicSelfJoins;
+
+        let dialect = ParseDialect::MySQL;
+        let mut gen = GeneratorState::with_dialect(dialect);
+        let seed = QuerySeed {
+            operations: vec![],
+            subqueries: vec![Subquery {
+                position: SubqueryPosition::Join(JoinOperator::InnerJoin),
+                seed: QuerySeed {
+                    operations: vec![],
+                    subqueries: vec![],
+                },
+            }],
+        };
+        let mut query = gen.generate_query(seed).statement;
+        eprintln!("query: {}", query.display(dialect));
+
+        // The generated query must not be flagged as a problematic self-join
+        query
+            .detect_problematic_self_joins()
+            .expect("subquery join should not produce a problematic self-join");
     }
 
     #[test]
