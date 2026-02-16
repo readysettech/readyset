@@ -4680,6 +4680,7 @@ dependencies = [
  "database-utils",
  "dataflow-expression",
  "fail",
+ "failpoint-macros",
  "futures",
  "futures-util",
  "health-reporter",

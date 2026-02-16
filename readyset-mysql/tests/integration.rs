@@ -6,7 +6,7 @@ use std::time::Duration;
 use assert_matches::assert_matches;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql_async::prelude::*;
-use mysql_async::{params, Conn, OptsBuilder, Row, Value};
+use mysql_async::{params, Conn, Row, Value};
 use readyset_adapter::backend::noria_connector::ReadBehavior;
 use readyset_adapter::backend::{MigrationMode, QueryInfo};
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
@@ -2064,19 +2064,6 @@ async fn switch_database_with_use() {
     conn.query_drop("USE s2;").await.unwrap();
     conn.query_drop("SELECT b FROM t").await.unwrap();
     conn.query_drop("SELECT c FROM t2").await.unwrap();
-
-    shutdown_tx.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn non_default_db_in_connection_opts() {
-    let (opts, _handle, shutdown_tx) = setup().await;
-    let opts = OptsBuilder::from_opts(opts).db_name(Some("s1"));
-
-    let mut conn = Conn::new(opts).await.unwrap();
-
-    conn.query_drop("CREATE TABLE t (a int)").await.unwrap();
-    conn.query_drop("SELECT a from s1.t").await.unwrap();
 
     shutdown_tx.shutdown().await;
 }

@@ -803,7 +803,7 @@ where
                     )
                     .await
                 } else {
-                    Ok(())
+                    Err(io::Error::other(e.to_string()))
                 }
             }
         }

@@ -82,6 +82,7 @@ use anyhow::bail;
 use clap::ValueEnum;
 use crossbeam_skiplist::SkipSet;
 use database_utils::{DatabaseURL, UpstreamConfig};
+use failpoint_macros::set_failpoint;
 use futures::future::{self, OptionFuture};
 use lru::LruCache;
 use mysql_common::row::convert::{FromRow, FromRowError};
@@ -117,6 +118,8 @@ use readyset_sql_passes::adapter_rewrites::{
 use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::SizeOf;
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use readyset_util::redacted::{RedactedString, Sensitive};
 use readyset_util::retry_with_exponential_backoff;
 use readyset_version::READYSET_VERSION;
@@ -1091,6 +1094,10 @@ where
     /// Internally, this will set the schema search path to a single-element vector with the
     /// database, and send a `USE` command to the upstream, if any.
     pub async fn set_database(&mut self, db: &str) -> Result<(), DB::Error> {
+        set_failpoint!(failpoints::SET_DATABASE, |_| Err(ReadySetError::Internal(
+            "set-database failpoint injected".to_string()
+        )
+        .into()));
         self.check_routing().await?;
         if let Some(upstream) = &mut self.upstream {
             upstream

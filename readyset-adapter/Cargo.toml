@@ -12,6 +12,7 @@ ahash = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 fail = { workspace = true }
+failpoint-macros = { path = "../failpoint-macros" }
 futures-util = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
@@ -81,7 +82,7 @@ name = "hash"
 harness = false
 
 [features]
-failure_injection = ["fail/failpoints", "schema-catalog/failure_injection"]
+failure_injection = ["fail/failpoints", "readyset-util/failure_injection", "schema-catalog/failure_injection"]
 
 [lints]
 workspace = true
