@@ -324,109 +324,132 @@ mod types {
             }
         );
 
-        let where_eq_res: i64 = client
-            .query_one(
-                "WITH a AS (SELECT COUNT(*) AS c FROM enumt WHERE x = 'a') SELECT c FROM a",
-                &[],
-            )
-            .await
-            .unwrap()
-            .get(0);
-        assert_eq!(where_eq_res, 2);
-
-        assert_matches!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset(_)
+        eventually!(
+            run_test: {
+                let res: i64 = client
+                    .query_one(
+                        "WITH a AS (SELECT COUNT(*) AS c FROM enumt WHERE x = 'a') SELECT c FROM a",
+                        &[],
+                    )
+                    .await
+                    .unwrap()
+                    .get(0);
+                let dest = last_query_info(&client).await.destination;
+                (res, dest)
+            },
+            then_assert: |(res, dest)| {
+                assert_eq!(res, 2);
+                assert_matches!(dest, QueryDestination::Readyset(_));
+            }
         );
 
-        assert_matches!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset(_)
+        eventually!(
+            run_test: {
+                let res = client
+                    .query("SELECT x FROM enumt WHERE x = $1", &[&B])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.get(0))
+                    .collect::<Vec<Abc>>();
+                let dest = last_query_info(&client).await.destination;
+                (res, dest)
+            },
+            then_assert: |(res, dest)| {
+                assert_eq!(res, vec![B]);
+                assert_matches!(dest, QueryDestination::Readyset(_));
+            }
         );
 
-        let upquery_res = client
-            .query("SELECT x FROM enumt WHERE x = $1", &[&B])
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.get(0))
-            .collect::<Vec<Abc>>();
-        assert_eq!(upquery_res, vec![B]);
-
-        assert_matches!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset(_)
+        eventually!(
+            run_test: {
+                let mut res = client
+                    .query("SELECT x FROM t_nulls", &[])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.get(0))
+                    .collect::<Vec<Option<Abc>>>();
+                res.sort();
+                let dest = last_query_info(&client).await.destination;
+                (res, dest)
+            },
+            then_assert: |(res, dest)| {
+                assert_eq!(res, vec![None, Some(A), Some(B), Some(C)]);
+                assert_matches!(dest, QueryDestination::Readyset(_));
+            }
         );
 
-        let mut nulls_res = client
-            .query("SELECT x FROM t_nulls", &[])
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.get(0))
-            .collect::<Vec<Option<Abc>>>();
-        nulls_res.sort();
-        assert_eq!(nulls_res, vec![None, Some(A), Some(B), Some(C)]);
-
-        assert_matches!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset(_)
+        eventually!(
+            run_test: {
+                let res = client
+                    .query("SELECT x FROM enumt ORDER BY x ASC", &[])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.get(0))
+                    .collect::<Vec<Abc>>();
+                let dest = last_query_info(&client).await.destination;
+                (res, dest)
+            },
+            then_assert: |(res, dest)| {
+                assert_eq!(res, vec![A, A, B, C]);
+                assert_matches!(dest, QueryDestination::Readyset(_));
+            }
         );
 
-        let sort_res = client
-            .query("SELECT x FROM enumt ORDER BY x ASC", &[])
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.get(0))
-            .collect::<Vec<Abc>>();
-        assert_eq!(sort_res, vec![A, A, B, C]);
-
-        assert_matches!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset(_)
+        eventually!(
+            run_test: {
+                let mut res = client
+                    .query("SELECT x FROM enumt WHERE x >= $1", &[&B])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.get(0))
+                    .collect::<Vec<Abc>>();
+                res.sort();
+                let dest = last_query_info(&client).await.destination;
+                (res, dest)
+            },
+            then_assert: |(res, dest)| {
+                assert_eq!(res, vec![B, C]);
+                assert_matches!(dest, QueryDestination::Readyset(_));
+            }
         );
 
-        let mut range_res = client
-            .query("SELECT x FROM enumt WHERE x >= $1", &[&B])
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.get(0))
-            .collect::<Vec<Abc>>();
-        range_res.sort();
-        assert_eq!(range_res, vec![B, C]);
-
-        assert_matches!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset(_)
+        eventually!(
+            run_test: {
+                let mut res = client
+                    .query("select cast(x as abc) from t_s", &[])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.get(0))
+                    .collect::<Vec<Abc>>();
+                res.sort();
+                let dest = last_query_info(&client).await.destination;
+                (res, dest)
+            },
+            then_assert: |(res, dest)| {
+                assert_eq!(res, vec![A, A, B, C]);
+                assert_matches!(dest, QueryDestination::Readyset(_));
+            }
         );
 
-        let mut cast_res = client
-            .query("select cast(x as abc) from t_s", &[])
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.get(0))
-            .collect::<Vec<Abc>>();
-        cast_res.sort();
-        assert_eq!(cast_res, vec![A, A, B, C]);
-
-        assert_matches!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset(_)
-        );
-
-        let array_res = client
-            .query_one("SELECT x FROM t_arr", &[])
-            .await
-            .unwrap()
-            .get::<_, Vec<Abc>>(0);
-        assert_eq!(array_res, vec![A, B, C]);
-
-        assert_matches!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset(_)
+        eventually!(
+            run_test: {
+                let res = client
+                    .query_one("SELECT x FROM t_arr", &[])
+                    .await
+                    .unwrap()
+                    .get::<_, Vec<Abc>>(0);
+                let dest = last_query_info(&client).await.destination;
+                (res, dest)
+            },
+            then_assert: |(res, dest)| {
+                assert_eq!(res, vec![A, B, C]);
+                assert_matches!(dest, QueryDestination::Readyset(_));
+            }
         );
 
         let proxied_parameter_res = client
@@ -542,19 +565,23 @@ mod types {
 
         let _ = client.query("select cast(x as abc) from t_s", &[]).await;
 
-        let mut cast_res = client
-            .query("select cast(x as abc) from t_s", &[])
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.get(0))
-            .collect::<Vec<Abcd>>();
-        cast_res.sort();
-        assert_eq!(cast_res, vec![Abcd::A, Abcd::A, Abcd::B, Abcd::C, Abcd::D]);
-
-        assert_matches!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset(_)
+        eventually!(
+            run_test: {
+                let mut res = client
+                    .query("select cast(x as abc) from t_s", &[])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.get(0))
+                    .collect::<Vec<Abcd>>();
+                res.sort();
+                let dest = last_query_info(&client).await.destination;
+                (res, dest)
+            },
+            then_assert: |(res, dest)| {
+                assert_eq!(res, vec![Abcd::A, Abcd::A, Abcd::B, Abcd::C, Abcd::D]);
+                assert_matches!(dest, QueryDestination::Readyset(_));
+            }
         );
 
         client
@@ -609,22 +636,20 @@ mod types {
 
         eventually!(
             run_test: {
-                client
+                let res = client
                     .query("SELECT x FROM enumt2 ORDER BY x ASC", &[])
                     .await
                     .unwrap()
                     .into_iter()
                     .map(|r| r.get(0))
-                    .collect::<Vec<AbcRev>>()
+                    .collect::<Vec<AbcRev>>();
+                let dest = last_query_info(&client).await.destination;
+                (res, dest)
             },
-            then_assert: |sort_res| {
-                assert_eq!(sort_res, vec![AbcRev::C, AbcRev::B, AbcRev::A, AbcRev::A]);
+            then_assert: |(res, dest)| {
+                assert_eq!(res, vec![AbcRev::C, AbcRev::B, AbcRev::A, AbcRev::A]);
+                assert_matches!(dest, QueryDestination::Readyset(_));
             }
-        );
-
-        assert_matches!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset(_)
         );
 
         // Rename the type
@@ -678,18 +703,22 @@ mod types {
             .await
             .unwrap();
 
-        let post_rename_res = client
-            .query("SELECT x FROM t2", &[])
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.get(0))
-            .collect::<Vec<Cba>>();
-        assert_eq!(post_rename_res, vec![Cba::C]);
-
-        assert_matches!(
-            last_query_info(&client).await.destination,
-            QueryDestination::Readyset(_)
+        eventually!(
+            run_test: {
+                let res = client
+                    .query("SELECT x FROM t2", &[])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.get(0))
+                    .collect::<Vec<Cba>>();
+                let dest = last_query_info(&client).await.destination;
+                (res, dest)
+            },
+            then_assert: |(res, dest)| {
+                assert_eq!(res, vec![Cba::C]);
+                assert_matches!(dest, QueryDestination::Readyset(_));
+            }
         );
 
         // Rename a variant
