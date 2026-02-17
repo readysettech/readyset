@@ -82,7 +82,7 @@ where
     K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
     V: Send + Sync + SizeOf + 'static,
 {
-    let result = manager.get_or_start_insert(query_id, key).await;
+    let result = manager.get_or_start_insert(query_id, key, |_| true).await;
     assert_matches!(result, CacheResult::Miss(_));
 }
 
@@ -91,7 +91,7 @@ where
     K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
     V: Send + Sync + SizeOf + 'static,
 {
-    let result = manager.get_or_start_insert(query_id, key).await;
+    let result = manager.get_or_start_insert(query_id, key, |_| true).await;
     assert_matches!(
         result,
         CacheResult::Hit(..) | CacheResult::HitAndRefresh(..)
@@ -107,9 +107,9 @@ async fn check_hit_value<K, V>(
     K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
     V: Send + Sync + SizeOf + PartialEq + std::fmt::Debug + 'static,
 {
-    let result = manager.get_or_start_insert(query_id, key).await;
+    let result = manager.get_or_start_insert(query_id, key, |_| true).await;
     match result {
-        CacheResult::Hit(results, _) | CacheResult::HitAndRefresh(results, _) => {
+        CacheResult::Hit(results) | CacheResult::HitAndRefresh(results, _) => {
             assert_eq!(results.values, expected.into());
         }
         _ => panic!("expected Hit or HitAndRefresh"),
@@ -127,7 +127,7 @@ where
 {
     let mut hits = 0;
     for key in keys {
-        let result = manager.get_or_start_insert(query_id, key).await;
+        let result = manager.get_or_start_insert(query_id, key, |_| true).await;
         if result.is_hit() {
             hits += 1;
         }
@@ -286,7 +286,7 @@ async fn test_get_or_start_insert_not_cached() {
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     assert_matches!(result, CacheResult::NotCached);
 }
@@ -309,7 +309,7 @@ async fn test_get_or_start_insert_hit() {
     create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     insert_value(result, vec!["value1".to_string()]).await;
 
@@ -330,7 +330,7 @@ async fn test_cache_insert_guard_not_filled() {
     create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     let CacheResult::Miss(mut guard) = result else {
         panic!("Expected Miss");
@@ -351,7 +351,7 @@ async fn test_cache_insert_guard_filled_without_metadata() {
     create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     let CacheResult::Miss(mut guard) = result else {
         panic!("expected miss");
@@ -370,7 +370,7 @@ async fn test_cache_isolation() {
     create_test_cache(&manager, None, Some(query_id_2), test_policy()).unwrap();
 
     let result = manager
-        .get_or_start_insert(&query_id_1, "key1".to_string())
+        .get_or_start_insert(&query_id_1, "key1".to_string(), |_| true)
         .await;
     insert_value(result, vec!["value1".to_string()]).await;
 
@@ -454,7 +454,7 @@ async fn test_concurrent_inserts_different_keys() {
         let query_id_clone = query_id;
         let handle = tokio::spawn(async move {
             let result = manager_clone
-                .get_or_start_insert(&query_id_clone, key)
+                .get_or_start_insert(&query_id_clone, key, |_| true)
                 .await;
             insert_value(result, vec![format!("value_{}", i)]).await;
         });
@@ -479,7 +479,7 @@ async fn test_concurrent_reads_and_writes() {
     create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
 
     for (i, key) in keys_iter(PRE_POPULATE).enumerate() {
-        let result = manager.get_or_start_insert(&query_id, key).await;
+        let result = manager.get_or_start_insert(&query_id, key, |_| true).await;
         insert_value(result, vec![format!("value_{}", i)]).await;
     }
 
@@ -491,7 +491,7 @@ async fn test_concurrent_reads_and_writes() {
         let handle = tokio::spawn(async move {
             for key in keys_iter(PRE_POPULATE) {
                 let _result = manager_clone
-                    .get_or_start_insert(&query_id_clone, key)
+                    .get_or_start_insert(&query_id_clone, key, |_| true)
                     .await;
             }
         });
@@ -503,7 +503,7 @@ async fn test_concurrent_reads_and_writes() {
         let query_id_clone = query_id;
         let handle = tokio::spawn(async move {
             let result = manager_clone
-                .get_or_start_insert(&query_id_clone, key)
+                .get_or_start_insert(&query_id_clone, key, |_| true)
                 .await;
             insert_value(result, vec![format!("value_{}", i)]).await;
         });
@@ -560,19 +560,19 @@ async fn test_ttl_refresh_ahead() {
     .unwrap();
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     insert_value(result, vec!["value1".to_string()]).await;
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     assert_matches!(result, CacheResult::Hit(..));
 
     sleep(Duration::from_secs(3)).await;
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     assert_matches!(result, CacheResult::HitAndRefresh(..));
 }
@@ -593,7 +593,7 @@ async fn test_ttl_expiration() {
     .unwrap();
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     insert_value(result, vec!["value1".to_string()]).await;
 
@@ -615,7 +615,7 @@ async fn test_max_capacity_enforcement() {
 
     for key in keys_iter(COUNT) {
         let value = "x".repeat(100);
-        let result = manager.get_or_start_insert(&query_id, key).await;
+        let result = manager.get_or_start_insert(&query_id, key, |_| true).await;
         insert_value(result, vec![value]).await;
     }
 
@@ -640,10 +640,14 @@ async fn test_multi_cache_capacity_sharing() {
     for key in keys_iter(COUNT) {
         let large_value = "x".repeat(100);
 
-        let result = manager.get_or_start_insert(&query_id_1, key.clone()).await;
+        let result = manager
+            .get_or_start_insert(&query_id_1, key.clone(), |_| true)
+            .await;
         insert_value(result, vec![large_value.clone()]).await;
 
-        let result = manager.get_or_start_insert(&query_id_2, key).await;
+        let result = manager
+            .get_or_start_insert(&query_id_2, key, |_| true)
+            .await;
         insert_value(result, vec![large_value]).await;
     }
 
@@ -666,7 +670,7 @@ async fn test_cache_result_debug() {
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
     let not_cached = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     let debug_str = format!("{:?}", not_cached);
     assert!(debug_str.contains("NotCached"));
@@ -674,7 +678,7 @@ async fn test_cache_result_debug() {
     create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
 
     let miss = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     let debug_str = format!("{:?}", miss);
     assert!(debug_str.contains("Miss"));
@@ -682,7 +686,7 @@ async fn test_cache_result_debug() {
     insert_value(miss, vec!["value1".to_string()]).await;
 
     let hit = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     let debug_str = format!("{:?}", hit);
     assert!(debug_str.contains("Hit"));
@@ -696,7 +700,7 @@ async fn test_cache_insert_guard_debug() {
     create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
 
     let CacheResult::Miss(mut guard) = result else {
@@ -730,19 +734,19 @@ async fn test_ttl_and_period_refresh() {
     .unwrap();
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     insert_value(result, vec!["value1".to_string()]).await;
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     assert_matches!(result, CacheResult::Hit(..));
 
     sleep(Duration::from_millis(2100)).await;
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     assert_matches!(result, CacheResult::HitAndRefresh(..));
 }
@@ -773,7 +777,9 @@ async fn test_coalesce_concurrent_requests() {
     let handle_1 = tokio::spawn(async move {
         let start = Instant::now();
 
-        let result = m.get_or_start_insert(&query_id, "key1".to_string()).await;
+        let result = m
+            .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
+            .await;
         let CacheResult::Miss(mut guard) = result else {
             panic!("should miss");
         };
@@ -792,7 +798,9 @@ async fn test_coalesce_concurrent_requests() {
         let start = Instant::now();
 
         sleep(Duration::from_millis(1000)).await;
-        let result = m.get_or_start_insert(&query_id, "key1".to_string()).await;
+        let result = m
+            .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
+            .await;
 
         let CacheResult::Hit(..) = result else {
             panic!("should hit");
@@ -839,7 +847,7 @@ async fn test_periodic_refresh_callback() {
     let refresh_count = Arc::new(AtomicU32::new(0));
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     let CacheResult::Miss(mut guard) = result else {
         panic!("expected miss");
@@ -924,7 +932,7 @@ async fn test_slow_refresh_serves_stale_data() {
     };
 
     let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string())
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
         .await;
     let CacheResult::Miss(mut guard) = result else {
         panic!("expected miss");
@@ -959,9 +967,9 @@ async fn test_slow_refresh_serves_stale_data() {
         sleep(Duration::from_secs(1)).await;
 
         let result = manager
-            .get_or_start_insert(&query_id, "key1".to_string())
+            .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
             .await;
-        let CacheResult::Hit(result, _) = result else {
+        let CacheResult::Hit(result) = result else {
             panic!("expected hit");
         };
 

@@ -334,26 +334,34 @@ where
         }
     }
 
-    pub async fn get_or_start_insert(&self, query_id: &QueryId, key: K) -> CacheResult<K, V> {
+    pub async fn get_or_start_insert<F>(
+        &self,
+        query_id: &QueryId,
+        key: K,
+        is_compatible: F,
+    ) -> CacheResult<K, V>
+    where
+        F: Fn(&V) -> bool,
+    {
         let Some(cache) = self.get(None, Some(query_id)) else {
             return CacheResult::NotCached;
         };
         let res = cache.get(key.clone()).await;
-        let sched = cache.is_scheduled();
-        let guard = Self::make_guard(cache, key);
         let query_id = query_id.to_string();
 
-        match (res, sched) {
-            (Some((res, false)), _) | (Some((res, true)), true) => {
+        match res {
+            Some((res, needs_refresh)) if res.values.first().is_none_or(&is_compatible) => {
                 counter!(recorded::SHALLOW_HIT, "query_id" => query_id).increment(1);
-                CacheResult::Hit(res, guard)
+                if needs_refresh && !cache.is_scheduled() {
+                    let guard = Self::make_guard(cache, key);
+                    CacheResult::HitAndRefresh(res, guard)
+                } else {
+                    CacheResult::Hit(res)
+                }
             }
-            (Some((res, true)), _) => {
-                counter!(recorded::SHALLOW_HIT, "query_id" => query_id).increment(1);
-                CacheResult::HitAndRefresh(res, guard)
-            }
-            (None, _) => {
+            Some(_) | None => {
                 counter!(recorded::SHALLOW_MISS, "query_id" => query_id).increment(1);
+                let guard = Self::make_guard(cache, key);
                 CacheResult::Miss(guard)
             }
         }
@@ -376,7 +384,7 @@ where
 {
     NotCached,
     Miss(CacheInsertGuard<K, V>),
-    Hit(crate::QueryResult<V>, CacheInsertGuard<K, V>),
+    Hit(crate::QueryResult<V>),
     HitAndRefresh(crate::QueryResult<V>, CacheInsertGuard<K, V>),
 }
 
@@ -406,15 +414,15 @@ where
 
     pub fn result(&self) -> &crate::QueryResult<V> {
         match self {
-            Self::Hit(res, _) | Self::HitAndRefresh(res, _) => res,
+            Self::Hit(res) | Self::HitAndRefresh(res, _) => res,
             _ => panic!("no result in a non-hit"),
         }
     }
 
     pub fn guard(&mut self) -> &mut CacheInsertGuard<K, V> {
         match self {
-            Self::NotCached => panic!("NotCached has no guard"),
-            Self::Miss(guard) | Self::Hit(_, guard) | Self::HitAndRefresh(_, guard) => guard,
+            Self::NotCached | Self::Hit(_) => panic!("no guard"),
+            Self::Miss(guard) | Self::HitAndRefresh(_, guard) => guard,
         }
     }
 }

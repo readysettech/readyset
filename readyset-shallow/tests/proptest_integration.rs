@@ -16,12 +16,14 @@ fn test_metadata() -> QueryMetadata {
     })
 }
 
-async fn insert_value<K, V>(mut result: CacheResult<K, V>, values: Vec<V>, metadata: QueryMetadata)
+async fn insert_value<K, V>(result: CacheResult<K, V>, values: Vec<V>, metadata: QueryMetadata)
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
-    let guard = result.guard();
+    let CacheResult::Miss(mut guard) = result else {
+        return;
+    };
     values.into_iter().for_each(|v| guard.push(v));
     guard.set_metadata(metadata);
     guard.filled().await;
@@ -74,12 +76,16 @@ async fn run_insert_then_retrieve(keys: Vec<String>) -> Result<(), TestCaseError
     create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
 
     for key in &keys {
-        let result = manager.get_or_start_insert(&query_id, key.clone()).await;
+        let result = manager
+            .get_or_start_insert(&query_id, key.clone(), |_| true)
+            .await;
         insert_value(result, vec![format!("value_{key}")], test_metadata()).await;
     }
 
     for key in &keys {
-        let result = manager.get_or_start_insert(&query_id, key.clone()).await;
+        let result = manager
+            .get_or_start_insert(&query_id, key.clone(), |_| true)
+            .await;
         prop_assert!(result.is_hit());
         prop_assert_eq!(
             &result.result().values,
@@ -97,7 +103,9 @@ async fn insert_keys(
     value_prefix: &str,
 ) {
     for key in keys {
-        let result = manager.get_or_start_insert(query_id, key.clone()).await;
+        let result = manager
+            .get_or_start_insert(query_id, key.clone(), |_| true)
+            .await;
         insert_value(
             result,
             vec![format!("{value_prefix}_{key}")],
@@ -114,7 +122,9 @@ async fn verify_keys(
     value_prefix: &str,
 ) -> Result<(), TestCaseError> {
     for key in keys {
-        let result = manager.get_or_start_insert(query_id, key.clone()).await;
+        let result = manager
+            .get_or_start_insert(query_id, key.clone(), |_| true)
+            .await;
         prop_assert!(result.is_hit());
         prop_assert_eq!(
             &result.result().values,
@@ -148,13 +158,17 @@ async fn run_no_data_loss(keys: HashSet<String>) -> Result<(), TestCaseError> {
     create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
 
     for key in &keys {
-        let result = manager.get_or_start_insert(&query_id, key.clone()).await;
+        let result = manager
+            .get_or_start_insert(&query_id, key.clone(), |_| true)
+            .await;
         insert_value(result, vec![format!("value_{key}")], test_metadata()).await;
     }
 
     let mut found = HashSet::new();
     for key in &keys {
-        let result = manager.get_or_start_insert(&query_id, key.clone()).await;
+        let result = manager
+            .get_or_start_insert(&query_id, key.clone(), |_| true)
+            .await;
         prop_assert!(result.is_hit());
         prop_assert_eq!(
             &result.result().values,
@@ -173,12 +187,16 @@ async fn run_idempotent_reads(key: String, reads: usize) -> Result<(), TestCaseE
 
     create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
 
-    let result = manager.get_or_start_insert(&query_id, key.clone()).await;
+    let result = manager
+        .get_or_start_insert(&query_id, key.clone(), |_| true)
+        .await;
     insert_value(result, vec![format!("value_{key}")], test_metadata()).await;
 
     let expected_values = vec![format!("value_{key}")];
     for _ in 0..reads {
-        let result = manager.get_or_start_insert(&query_id, key.clone()).await;
+        let result = manager
+            .get_or_start_insert(&query_id, key.clone(), |_| true)
+            .await;
         prop_assert!(result.is_hit());
         prop_assert_eq!(&result.result().values, &expected_values.clone().into());
     }
@@ -195,7 +213,7 @@ async fn run_memory_accounting(value_sizes: Vec<usize>) -> Result<(), TestCaseEr
     for (i, size) in value_sizes.iter().enumerate() {
         let key = format!("key_{i}");
         let value = "x".repeat(*size);
-        let result = manager.get_or_start_insert(&query_id, key).await;
+        let result = manager.get_or_start_insert(&query_id, key, |_| true).await;
         insert_value(result, vec![value], test_metadata()).await;
     }
 
@@ -204,7 +222,7 @@ async fn run_memory_accounting(value_sizes: Vec<usize>) -> Result<(), TestCaseEr
     let mut found = 0;
     for i in 0..value_sizes.len() {
         let key = format!("key_{i}");
-        let result = manager.get_or_start_insert(&query_id, key).await;
+        let result = manager.get_or_start_insert(&query_id, key, |_| true).await;
         if result.is_hit() {
             found += 1;
         }

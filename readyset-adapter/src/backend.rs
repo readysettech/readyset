@@ -1810,16 +1810,6 @@ where
         Ok(QueryResult::Upstream(result, cache, client_exec_meta))
     }
 
-    async fn is_meta_compatible(
-        upstream: &mut DB,
-        values: &readyset_shallow::QueryResult<DB::CacheEntry>,
-    ) -> Result<bool, DB::Error> {
-        let Some(first) = values.values.first() else {
-            return Ok(true);
-        };
-        upstream.is_meta_compatible(first).await
-    }
-
     #[allow(clippy::too_many_arguments)]
     async fn execute_shallow<'a>(
         upstream: &'a mut DB,
@@ -1835,16 +1825,16 @@ where
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let merged = query_params.merge_params(params)?.unwrap_or_default();
         let key = query_params.make_keys_from_merged(&merged)?;
-        let res = shallow.get_or_start_insert(query_id, key).await;
+        let res = shallow
+            .get_or_start_insert(query_id, key, DB::is_meta_compatible)
+            .await;
 
         match res {
-            CacheResult::Hit(values, _) if Self::is_meta_compatible(upstream, &values).await? => {
+            CacheResult::Hit(values) => {
                 event.destination = Some(QueryDestination::ReadysetShallow);
                 Ok(QueryResult::Shallow(values))
             }
-            CacheResult::HitAndRefresh(values, cache)
-                if Self::is_meta_compatible(upstream, &values).await? =>
-            {
+            CacheResult::HitAndRefresh(values, cache) => {
                 if let Some(refresh) = refresh {
                     let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await.ok();
                     let query =
@@ -1863,9 +1853,7 @@ where
                 event.destination = Some(QueryDestination::ReadysetShallow);
                 Ok(QueryResult::Shallow(values))
             }
-            CacheResult::Miss(mut cache)
-            | CacheResult::Hit(_, mut cache)
-            | CacheResult::HitAndRefresh(_, mut cache) => {
+            CacheResult::Miss(mut cache) => {
                 let query = query_params.literalize_from_merged(&view_request.query, &merged)?;
                 let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await?;
 
@@ -3915,10 +3903,10 @@ where
         let query_id = QueryId::from(&req);
         event.query_id = Some(query_id).into();
         let key = params.make_keys(&[])?;
-        let res = shallow.get_or_start_insert(&query_id, key).await;
+        let res = shallow.get_or_start_insert(&query_id, key, |_| true).await;
 
         match res {
-            CacheResult::Hit(values, _) => {
+            CacheResult::Hit(values) => {
                 event.destination = Some(QueryDestination::ReadysetShallow);
                 Ok(QueryResult::Shallow(values))
             }

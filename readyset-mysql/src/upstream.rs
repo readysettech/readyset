@@ -654,11 +654,8 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(())
     }
 
-    async fn is_meta_compatible(&mut self, cache: &Self::CacheEntry) -> Result<bool, Self::Error> {
-        match cache {
-            CacheEntry::Text(_) => Ok(false),
-            CacheEntry::Binary(_) => Ok(true),
-        }
+    fn is_meta_compatible(cache: &Self::CacheEntry) -> bool {
+        matches!(cache, CacheEntry::Binary(_))
     }
 }
 

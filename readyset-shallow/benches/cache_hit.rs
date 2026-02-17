@@ -45,7 +45,7 @@ fn bench_cache_hit(c: &mut Criterion) {
     rt.block_on(async {
         for i in 0..NUM_ENTRIES {
             let key = vec![readyset_data::DfValue::Int(i as i64)];
-            let result = manager.get_or_start_insert(&query_id, key).await;
+            let result = manager.get_or_start_insert(&query_id, key, |_| true).await;
             let CacheResult::Miss(mut guard) = result else {
                 panic!("expected miss during setup");
             };
@@ -74,7 +74,7 @@ fn bench_cache_hit(c: &mut Criterion) {
             let keys = lookup_keys.clone();
             async move {
                 for key in keys {
-                    let result = manager.get_or_start_insert(&query_id, key).await;
+                    let result = manager.get_or_start_insert(&query_id, key, |_| true).await;
                     debug_assert!(result.is_hit());
                 }
             }
@@ -124,7 +124,7 @@ fn bench_cache_insert(c: &mut Criterion) {
             async move {
                 for i in base..base + NUM_INSERTS {
                     let key = vec![readyset_data::DfValue::Int(i as i64)];
-                    let result = manager.get_or_start_insert(&query_id, key).await;
+                    let result = manager.get_or_start_insert(&query_id, key, |_| true).await;
                     let CacheResult::Miss(mut guard) = result else {
                         panic!("expected miss during insertion benchmark");
                     };
