@@ -5377,6 +5377,7 @@ name = "readyset-shallow"
 version = "0.0.1"
 dependencies = [
  "assert_matches",
+ "criterion",
  "dashmap",
  "futures",
  "metrics",
@@ -5386,7 +5387,9 @@ dependencies = [
  "papaya",
  "proptest",
  "psql-srv",
+ "rand 0.9.2",
  "readyset-client",
+ "readyset-data",
  "readyset-errors",
  "readyset-sql",
  "readyset-util",

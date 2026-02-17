@@ -54,7 +54,7 @@ impl SizeOf for PostgreSqlMetadata {
 pub enum QueryMetadata {
     MySql(MySqlMetadata),
     PostgreSql(PostgreSqlMetadata),
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bench"))]
     Test,
 }
 
@@ -64,7 +64,7 @@ impl SizeOf for QueryMetadata {
             + match self {
                 QueryMetadata::MySql(meta) => meta.deep_size_of(),
                 QueryMetadata::PostgreSql(meta) => meta.deep_size_of(),
-                #[cfg(test)]
+                #[cfg(any(test, feature = "bench"))]
                 QueryMetadata::Test => 0,
             }
     }

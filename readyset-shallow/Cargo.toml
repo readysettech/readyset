@@ -23,7 +23,17 @@ readyset-errors = { path = "../readyset-errors" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 
+[features]
+bench = []
+
 [dev-dependencies]
 assert_matches = { workspace = true }
+criterion = { workspace = true, features = ["async_tokio"] }
 futures = { workspace = true }
 proptest = { workspace = true }
+rand = { workspace = true }
+readyset-data = { path = "../readyset-data" }
+
+[[bench]]
+name = "cache_hit"
+harness = false
