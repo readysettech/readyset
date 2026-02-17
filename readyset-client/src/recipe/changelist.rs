@@ -45,13 +45,12 @@ use readyset_sql::ast::{
     NonReplicatedRelation, Relation, RenameTableStatement, SelectStatement, SqlIdentifier,
     SqlQuery, TableKey,
 };
-use readyset_sql::DialectDisplay;
 use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteContext, AdapterRewriteParams};
 use schema_catalog::SchemaGeneration;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
-use tracing::{debug, error};
+use tracing::error;
 
 use crate::consensus::CacheDDLRequest;
 
@@ -307,35 +306,6 @@ impl ChangeList {
         this
     }
 
-    /// Returns true if any `CreateCache` in this changelist is missing a schema generation.
-    pub fn has_missing_schema_generation(&self) -> bool {
-        self.changes.iter().any(|change| match change {
-            Change::CreateCache(cache) => cache.schema_generation_used.is_none(),
-            _ => false,
-        })
-    }
-
-    /// Fill only missing schema generations for `CreateCache` changes.
-    ///
-    /// Returns true if any fields were filled.
-    pub fn fill_missing_schema_generation(&mut self, schema_generation: SchemaGeneration) -> bool {
-        let mut filled = false;
-        for change in &mut self.changes {
-            if let Change::CreateCache(cache) = change {
-                if cache.schema_generation_used.is_none() {
-                    debug!(
-                        generation = %schema_generation,
-                        query = %cache.statement.display(self.dialect.into()),
-                        "Filling missing schema generation for CreateCache"
-                    );
-                    cache.schema_generation_used = Some(schema_generation);
-                    filled = true;
-                }
-            }
-        }
-        filled
-    }
-
     /// Return a mutable reference to the changes in this `ChangeList`
     pub fn changes_mut(&mut self) -> &mut Vec<Change> {
         &mut self.changes
@@ -377,10 +347,7 @@ pub struct CreateCache {
     /// by the adapter. The controller validates this matches its current generation before
     /// performing the migration.
     ///
-    /// # Values
-    /// - `None` indicates the generation was not set (e.g., in tests or legacy paths)
-    /// - `has_missing_schema_generation()` treats `None` as "missing"
-    /// - `fill_missing_schema_generation()` will fill in `None` with the current generation
+    /// `None` indicates the generation was not set (e.g., in tests or legacy paths).
     pub schema_generation_used: Option<SchemaGeneration>,
 }
 

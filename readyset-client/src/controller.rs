@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, Mutex, RwLock};
 use tower::ServiceExt;
 use tower_service::Service;
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 use url::Url;
 
 use crate::consensus::{Authority, AuthorityControl};
@@ -812,30 +812,10 @@ impl ReadySetHandle {
         flush_partial()
     );
 
-    async fn fix_changelist_schema_generation(
-        &mut self,
-        changes: &mut ChangeList,
-    ) -> ReadySetResult<()> {
-        if changes.has_missing_schema_generation() {
-            let generation = self.schema_catalog().await?.generation;
-            if changes.fill_missing_schema_generation(generation) {
-                warn!(
-                    generation = %generation,
-                    "Filled missing schema generation for CreateCache in ChangeList (should only happen in tests)"
-                );
-            }
-        }
-
-        Ok(())
-    }
-
     /// Performs a dry-run migration with the given set of queries.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub async fn dry_run(&mut self, changes: ChangeList) -> ReadySetResult<ExtendRecipeResult> {
-        let mut changes = changes;
-        self.fix_changelist_schema_generation(&mut changes).await?;
-
         let request = ExtendRecipeSpec::from(changes);
 
         self.rpc("dry_run", request, self.migration_timeout).await
@@ -845,9 +825,6 @@ impl ReadySetHandle {
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub async fn extend_recipe(&mut self, changes: ChangeList) -> ReadySetResult<()> {
-        let mut changes = changes;
-        self.fix_changelist_schema_generation(&mut changes).await?;
-
         let request = ExtendRecipeSpec::from(changes);
 
         match self
@@ -875,9 +852,6 @@ impl ReadySetHandle {
     /// Asynchronous version of extend_recipe(). The Controller should immediately return an ID that
     /// can be used to query the migration status.
     pub async fn extend_recipe_async(&mut self, changes: ChangeList) -> ReadySetResult<u64> {
-        let mut changes = changes;
-        self.fix_changelist_schema_generation(&mut changes).await?;
-
         let request = ExtendRecipeSpec::from(changes).concurrently();
 
         match self
@@ -898,9 +872,6 @@ impl ReadySetHandle {
         &mut self,
         changes: ChangeList,
     ) -> ReadySetResult<()> {
-        let mut changes = changes;
-        self.fix_changelist_schema_generation(&mut changes).await?;
-
         let request = ExtendRecipeSpec {
             require_leader_ready: false,
             ..changes.into()
@@ -920,8 +891,6 @@ impl ReadySetHandle {
         require_leader_ready: bool,
     ) -> ReadySetResult<()> {
         let replication_offset = replication_offset.clone();
-        let mut changes = changes;
-        self.fix_changelist_schema_generation(&mut changes).await?;
 
         let request = ExtendRecipeSpec {
             changes,
