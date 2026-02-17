@@ -47,6 +47,10 @@ pub(crate) fn copy_simple_query_message(
 enum ResultsetInner {
     Empty,
     ReadySet(Box<<ResultIterator as IntoIterator>::IntoIter>),
+    ShallowDfValue {
+        values: Arc<Vec<CacheEntry>>,
+        row: usize,
+    },
     Stream {
         first_row: Option<tokio_postgres::Row>,
         stream: Pin<Box<ResultStream>>,
@@ -212,17 +216,41 @@ impl Resultset {
         }
     }
 
-    pub fn from_shallow(values: Arc<Vec<Vec<DfValue>>>, project_field_types: Vec<Type>) -> Self {
+    pub fn from_shallow_dfvalue(
+        values: Arc<Vec<CacheEntry>>,
+        project_field_types: Vec<Type>,
+    ) -> Self {
         Self {
-            results: ResultsetInner::ReadySet(Box::new(
-                ResultIterator::arc_owned(values).into_iter(),
-            )),
+            results: ResultsetInner::ShallowDfValue { values, row: 0 },
             project_field_types,
             project_field_names: Vec::new(),
             cache: None,
             client_formats: None,
         }
     }
+}
+
+/// Convert a row of `DfValue`s to a `PsqlSrvRow`, projecting to `len = types.len()` columns.
+/// Extra columns (bogokeys) are ignored. Returns an error if there are fewer values than types.
+fn convert_dfvalue_row(values: &[DfValue], types: &[Type]) -> Result<PsqlSrvRow, psql_srv::Error> {
+    let len = types.len();
+    if values.len() < len {
+        return Err(psql_srv::Error::IncorrectFormatCount(len));
+    }
+    let mut converted = Vec::with_capacity(len);
+    let spare = converted.spare_capacity_mut();
+    for i in 0..len {
+        spare[i].write(PsqlValue::try_from(TypedDfValue {
+            value: values[i].clone(),
+            col_type: &types[i],
+        })?);
+    }
+    // SAFETY: capacity is already set to `len`, and `old_len..new_len` was just initialized
+    // above via `spare`.
+    unsafe {
+        converted.set_len(len);
+    }
+    Ok(PsqlSrvRow::ValueVec(converted))
 }
 
 impl Stream for Resultset {
@@ -234,40 +262,23 @@ impl Stream for Resultset {
         let next = match &mut s.results {
             ResultsetInner::Empty => None,
             ResultsetInner::ReadySet(i) => {
-                let next_values = i.next();
-                if let Some(mut values) = next_values {
-                    // make sure we have at least as many values as types. if there are more
-                    // values than types, those are bogokeys, which we can ignore as we do not
-                    // send those back to callers.
-                    let len = project_field_types.len();
-                    if values.len() < len {
-                        return Poll::Ready(Some(Err(psql_srv::Error::IncorrectFormatCount(len))));
-                    }
-
-                    let mut converted_values = Vec::with_capacity(len);
-                    let spare = converted_values.spare_capacity_mut();
-
-                    for i in 0..len {
-                        let col_type = project_field_types.get(i).unwrap();
-                        let value = values.get_mut(i).unwrap();
-                        // as we are on the super hot path, we do an `unsafe` operation here:
-                        // it's more efficient to directly allocate into the converted_values
-                        // vector, rather than allocate locally and `push` into the vector.
-                        spare[i].write(PsqlValue::try_from(TypedDfValue {
-                            value: std::mem::take(value),
-                            col_type,
-                        })?);
-                    }
-                    // SAFETY: capacity is already set to `len`, and `old_len..new_len` was just
-                    // initialized above via `spare`.
-                    unsafe {
-                        converted_values.set_len(len);
-                    }
-
-                    Some(Ok(PsqlSrvRow::ValueVec(converted_values)))
-                } else {
-                    // at the end of all rows in the resultset ...
+                // make sure we have at least as many values as types. if there are more
+                // values than types, those are bogokeys, which we can ignore as we do not
+                // send those back to callers.
+                i.next()
+                    .map(|values| convert_dfvalue_row(&values, project_field_types))
+            }
+            ResultsetInner::ShallowDfValue { values, row } => {
+                if *row >= values.len() {
                     None
+                } else {
+                    let entry = &values[*row];
+                    *row += 1;
+                    let vals = match entry {
+                        CacheEntry::DfValue(vals) => vals,
+                        _ => unreachable!("mixed psql result format"),
+                    };
+                    Some(convert_dfvalue_row(vals, project_field_types))
                 }
             }
             ResultsetInner::RowStream { first_row, stream } => {

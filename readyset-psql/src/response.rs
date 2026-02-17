@@ -214,24 +214,13 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
 
                 if let Some(first) = result.values.first() {
                     match first {
-                        CacheEntry::DfValue(_) => {
-                            let rows = result
-                                .values
-                                .iter()
-                                .map(|entry| match entry {
-                                    CacheEntry::DfValue(vals) => vals.clone(),
-                                    _ => unreachable!("mixed psql result format"),
-                                })
-                                .collect();
-
-                            Ok(Select {
-                                schema: metadata.schema.clone(),
-                                resultset: Resultset::from_shallow(
-                                    Arc::new(rows),
-                                    metadata.types.clone(),
-                                ),
-                            })
-                        }
+                        CacheEntry::DfValue(_) => Ok(Select {
+                            schema: metadata.schema.clone(),
+                            resultset: Resultset::from_shallow_dfvalue(
+                                Arc::clone(&result.values),
+                                metadata.types.clone(),
+                            ),
+                        }),
                         CacheEntry::Simple(_) => {
                             let messages: Result<Vec<_>, _> = result
                                 .values
