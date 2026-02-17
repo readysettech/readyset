@@ -685,14 +685,6 @@ fn pgsql_url() -> String {
     )
 }
 
-fn pgsql13_url() -> String {
-    format!(
-        "postgresql://postgres:noria@{}:{}/noria",
-        env::var("PGHOST13").unwrap_or_else(|_| "127.0.0.1".into()),
-        env::var("PGPORT13").unwrap_or_else(|_| "5433".into()),
-    )
-}
-
 fn mysql_url() -> String {
     format!(
         "mysql://root:noria@{}:{}/public",
@@ -1332,57 +1324,29 @@ async fn mysql_replication_resnapshot() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(postgres13, postgres15)]
-async fn psql14_ddl_replicate_drop_table() {
+async fn psql_ddl_replicate_drop_table() {
     postgresql_ddl_replicate_drop_table_internal(&pgsql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(postgres13, postgres15)]
-async fn psql13_ddl_replicate_drop_table() {
-    postgresql_ddl_replicate_drop_table_internal(&pgsql13_url()).await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
-async fn psql14_ddl_replicate_create_table() {
+async fn psql_ddl_replicate_create_table() {
     postgresql_ddl_replicate_create_table_internal(&pgsql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(postgres13, postgres15)]
-async fn psql13_ddl_replicate_create_table() {
-    postgresql_ddl_replicate_create_table_internal(&pgsql13_url()).await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
-async fn psql14_ddl_replicate_drop_view() {
+async fn psql_ddl_replicate_drop_view() {
     postgresql_ddl_replicate_drop_view_internal(&pgsql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(postgres13, postgres15)]
-async fn psql13_ddl_replicate_drop_view() {
-    postgresql_ddl_replicate_drop_view_internal(&pgsql13_url()).await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
-async fn psql14_ddl_replicate_create_view() {
+async fn psql_ddl_replicate_create_view() {
     postgresql_ddl_replicate_create_view_internal(&pgsql_url()).await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
-async fn psql13_ddl_replicate_create_view() {
-    postgresql_ddl_replicate_create_view_internal(&pgsql13_url()).await
 }
 
 /// This test checks that when writes and replication happen in parallel

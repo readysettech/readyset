@@ -9,10 +9,6 @@ services:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/postgres:15
     expose:
       - "5432"
-  postgres13:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/postgres:13
-    expose:
-      - "5433"
   redis:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/redis:6.2
     expose:
@@ -36,13 +32,11 @@ services:
       - MYSQL_HOST=mysql
       - POSTGRESQL_HOST=postgres
       - PGHOST=postgres
-      - PGHOST13=postgres13
       - ALLOW_UNAUTHENTICATED_CONNECTIONS=true
     depends_on:
       - redis
       - mysql
       - postgres
-      - postgres13
 
 volumes:
   target:

@@ -16,7 +16,3 @@ services:
       - ALLOW_UNAUTHENTICATED_CONNECTIONS=true
       - POSTGRESQL_HOST=postgres
       - PGHOST=postgres
-      # Some tests are currently configured to connect to a separate postgres13 instance, but those
-      # tests should run against 15 as well.
-      - PGHOST13=postgres
-      - PGPORT13=5432
