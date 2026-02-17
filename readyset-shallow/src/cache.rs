@@ -5,7 +5,9 @@ use std::hash::Hash;
 use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
+#[cfg(not(target_os = "linux"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
@@ -26,10 +28,18 @@ pub(crate) type InnerCache<K, V> = Arc<MokaCache<(u64, K), Arc<CacheEntry<V>>>>;
 type ScheduledRefresh<K, V> = (K, RequestRefresh<K, V>);
 type Scheduler<K, V> = Arc<Mutex<BTreeMap<Instant, Vec<ScheduledRefresh<K, V>>>>>;
 
+#[cfg(target_os = "linux")]
+fn current_timestamp_ms() -> u64 {
+    use rustix::time::{ClockId, clock_gettime};
+    let ts = clock_gettime(ClockId::RealtimeCoarse);
+    (ts.tv_sec as u64) * 1000 + (ts.tv_nsec as u64) / 1_000_000
+}
+
+#[cfg(not(target_os = "linux"))]
 fn current_timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("system clock before UNIX epoch")
         .as_millis() as u64
 }
 
