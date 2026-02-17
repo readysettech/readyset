@@ -362,7 +362,7 @@ async fn run_query(mysql: &MysqlOpts, readyset: &ReadysetOpts, duration_secs: u6
 }
 
 async fn retry_on_schema_mismatch(pool: &Pool, sql: &str) -> Result<()> {
-    let start = Instant::now();
+    let mut mismatch_start: Option<Instant> = None;
     let mut saw_mismatch = false;
     loop {
         let mut conn = pool.get_conn().await?;
@@ -370,7 +370,7 @@ async fn retry_on_schema_mismatch(pool: &Pool, sql: &str) -> Result<()> {
         match conn.query_drop(sql).await {
             Ok(()) => {
                 if saw_mismatch {
-                    let elapsed_ms = start.elapsed().as_millis();
+                    let elapsed_ms = mismatch_start.unwrap().elapsed().as_millis();
                     info!(elapsed_ms, sql, "Schema mismatch resolved after retries");
                     assert_reachable!(
                         "Schema mismatch resolved within retry window",
@@ -385,26 +385,34 @@ async fn retry_on_schema_mismatch(pool: &Pool, sql: &str) -> Result<()> {
                 let is_leader_not_ready = msg.contains("The leader is not ready");
 
                 if is_schema_mismatch || is_leader_not_ready {
+                    if is_leader_not_ready {
+                        // Don't count time spent waiting for the leader toward
+                        // the schema mismatch retry window. Re-snapshots can
+                        // take arbitrarily long, and the first mismatch after
+                        // the leader comes back is expected (we sent a stale
+                        // generation before we could know about the DDL change
+                        // that triggered the re-snapshot).
+                        mismatch_start = None;
+                    }
                     if is_schema_mismatch {
                         saw_mismatch = true;
+                        mismatch_start.get_or_insert_with(Instant::now);
                         assert_reachable!("Encountered schema generation mismatch", &json!({}));
                     }
-                    if start.elapsed() >= Duration::from_secs(MAX_RETRY_SECS) {
-                        if is_schema_mismatch {
-                            let elapsed_ms = start.elapsed().as_millis();
-                            assert_unreachable!(
-                                "Schema mismatch retry timed out",
-                                &json!({"elapsed_ms": elapsed_ms, "sql": sql})
-                            );
-                            anyhow::bail!(
-                                "Schema generation mismatch not resolved within {MAX_RETRY_SECS}s for: {sql}"
-                            );
-                        } else {
-                            anyhow::bail!("Leader not ready after {MAX_RETRY_SECS}s for: {sql}");
-                        }
+                    if mismatch_start
+                        .is_some_and(|s| s.elapsed() >= Duration::from_secs(MAX_RETRY_SECS))
+                    {
+                        let elapsed_ms = mismatch_start.unwrap().elapsed().as_millis();
+                        assert_unreachable!(
+                            "Schema mismatch retry timed out",
+                            &json!({"elapsed_ms": elapsed_ms, "sql": sql})
+                        );
+                        anyhow::bail!(
+                            "Schema generation mismatch not resolved within {MAX_RETRY_SECS}s for: {sql}"
+                        );
                     }
                     debug!(
-                        elapsed_ms = start.elapsed().as_millis(),
+                        elapsed_ms = mismatch_start.map(|s| s.elapsed().as_millis()),
                         sql,
                         is_schema_mismatch,
                         is_leader_not_ready,
