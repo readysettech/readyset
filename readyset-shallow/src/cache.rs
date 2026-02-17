@@ -526,6 +526,13 @@ where
         const MAX_RETRIES: usize = 1;
 
         let k = (self.id, k);
+
+        if let Some(entry) = self.inner.get(&k).await
+            && let CacheEntry::Present(values) = &*entry
+        {
+            return self.get_hit(values);
+        }
+
         if let Some(coalesce_ms) = self.coalesce_ms {
             for i in 0..=MAX_RETRIES {
                 let e = self.inner.entry(k.clone()).or_default().await;
