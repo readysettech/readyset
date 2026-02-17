@@ -38,7 +38,8 @@ use readyset_adapter::query_status_cache::{
 use readyset_adapter::shallow_refresh_pool::ShallowRefreshPool;
 use readyset_adapter::views_synchronizer::ViewsSynchronizer;
 use readyset_adapter::{
-    Backend, BackendBuilder, DeploymentMode, QueryHandler, ReadySetStatusReporter, UpstreamDatabase,
+    Backend, BackendBuilder, ConnectionInfo, DeploymentMode, QueryHandler, ReadySetStatusReporter,
+    UpstreamDatabase,
 };
 use readyset_alloc::{StdThreadBuildWrapper, ThreadBuildWrapper};
 use readyset_alloc_metrics::report_allocator_metrics;
@@ -915,7 +916,7 @@ where
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let view_name_cache = SharedCache::new();
         let view_cache = SharedCache::new();
-        let connections: Arc<SkipSet<SocketAddr>> = Arc::default();
+        let connections: Arc<SkipSet<ConnectionInfo>> = Arc::default();
         let mut health_reporter = AdapterHealthReporter::new();
 
         let rs_connect = span!(Level::INFO, "Connecting to RS server");

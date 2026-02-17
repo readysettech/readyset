@@ -1,4 +1,3 @@
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use crossbeam_skiplist::SkipSet;
@@ -12,6 +11,7 @@ use tokio::sync::Mutex;
 use tracing::warn;
 
 use crate::UpstreamDatabase;
+use crate::backend::ConnectionInfo;
 use crate::backend::noria_connector::{MetaVariable, QueryResult};
 use crate::upstream_database::LazyUpstream;
 use crate::utils::time_or_null;
@@ -118,7 +118,7 @@ where
     pub fn new(
         upstream_config: UpstreamConfig,
         rs_handle: Option<ReadySetHandle>,
-        connections: Arc<SkipSet<SocketAddr>>,
+        connections: Arc<SkipSet<ConnectionInfo>>,
         authority: Arc<Authority>,
         enabled_features: Vec<String>,
     ) -> Self {
@@ -151,7 +151,7 @@ struct ReadySetStatusReporterInner<U> {
     /// a [`ReadySetControllerStatus`]
     pub(crate) rs_handle: Option<ReadySetHandle>,
     /// A set of current connections, shared with backends--used to report connection count
-    pub(crate) connections: Arc<SkipSet<SocketAddr>>,
+    pub(crate) connections: Arc<SkipSet<ConnectionInfo>>,
     /// A shared handle to the Authority, used for reading persistent_stats for /readyset_status
     pub(crate) authority: Arc<Authority>,
     /// Enabled features to display in status

@@ -149,12 +149,36 @@ pub const READYSET_QUERY_SAMPLER: &str = "READYSET_QUERY_SAMPLER";
 
 const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned through Readyset Cloud. Please use the Readyset Cloud UI to manage caches. You may continue to use the SQL interface to run other 'read' commands.";
 
+/// Placeholder username for connections that have not yet authenticated
+const UNAUTHENTICATED_USER: &str = "unauthenticated";
+
 /// Unique identifier for a prepared statement, local to a single [`Backend`].
 pub type StatementId = u32;
 
 use crate::ROUTING_CHECK_INTERVAL;
 use crate::shallow_refresh_pool::ShallowRefreshPool;
 pub use crate::shallow_refresh_pool::ShallowRefreshRequest;
+
+/// Information about an active connection
+#[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub struct ConnectionInfo {
+    /// The remote address of the connection
+    pub addr: SocketAddr,
+    /// The authenticated username for this connection
+    pub username: String,
+}
+
+impl ConnectionInfo {
+    pub fn new(addr: SocketAddr, username: String) -> Self {
+        Self { addr, username }
+    }
+}
+
+impl std::fmt::Display for ConnectionInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}@{}", self.username, self.addr)
+    }
+}
 
 /// Query metadata used to plan query prepare
 #[allow(clippy::large_enum_variant)]
@@ -349,7 +373,7 @@ pub struct BackendBuilder {
     telemetry_sender: Option<TelemetrySender>,
     placeholder_inlining: bool,
     metrics_handle: Option<MetricsHandle>,
-    connections: Option<Arc<SkipSet<SocketAddr>>>,
+    connections: Option<Arc<SkipSet<ConnectionInfo>>>,
     allow_cache_ddl: bool,
     sampler_tx:
         Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
@@ -420,7 +444,10 @@ impl BackendBuilder {
         };
 
         if let Some(connections) = &self.connections {
-            connections.insert(self.client_addr);
+            connections.insert(ConnectionInfo::new(
+                self.client_addr,
+                UNAUTHENTICATED_USER.to_string(),
+            ));
         }
 
         let last_upstream_url = match &self.upstream_config {
@@ -445,6 +472,7 @@ impl BackendBuilder {
                 telemetry_sender: self.telemetry_sender,
                 metrics_handle: self.metrics_handle,
                 connections: self.connections,
+                client_username: None,
                 status_reporter,
                 sampler_tx: self.sampler_tx,
                 is_internal_connection: false,
@@ -559,7 +587,7 @@ impl BackendBuilder {
         self
     }
 
-    pub fn connections(mut self, connections: Arc<SkipSet<SocketAddr>>) -> Self {
+    pub fn connections(mut self, connections: Arc<SkipSet<ConnectionInfo>>) -> Self {
         self.connections = Some(connections);
         self
     }
@@ -868,7 +896,9 @@ where
     /// Handle to the [`metrics_exporter_prometheus::PrometheusRecorder`] that runs in the adapter.
     metrics_handle: Option<MetricsHandle>,
     /// Set of active connections to this adapter
-    connections: Option<Arc<SkipSet<SocketAddr>>>,
+    connections: Option<Arc<SkipSet<ConnectionInfo>>>,
+    /// The authenticated username for this connection
+    client_username: Option<String>,
     status_reporter: ReadySetStatusReporter<DB>,
     /// Optional sender to enqueue original queries for background sampling/verification
     sampler_tx:
@@ -1045,22 +1075,32 @@ where
 
     fn show_connections(&self) -> Result<noria_connector::QueryResult<'static>, ReadySetError> {
         let schema = SelectSchema {
-            schema: Cow::Owned(vec![ColumnSchema {
-                column: ast::Column {
-                    name: "remote_addr".into(),
-                    table: None,
+            schema: Cow::Owned(vec![
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "client_addr".into(),
+                        table: None,
+                    },
+                    column_type: DfType::DEFAULT_TEXT,
+                    base: None,
                 },
-                column_type: DfType::DEFAULT_TEXT,
-                base: None,
-            }]),
-            columns: Cow::Owned(vec!["remote_addr".into()]),
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "username".into(),
+                        table: None,
+                    },
+                    column_type: DfType::DEFAULT_TEXT,
+                    base: None,
+                },
+            ]),
+            columns: Cow::Owned(vec!["client_addr".into(), "username".into()]),
         };
 
         let data = self
             .connections
             .iter()
             .flat_map(|c| c.iter())
-            .map(|conn| vec![conn.to_string().into()])
+            .map(|conn| vec![conn.addr.to_string().into(), conn.username.clone().into()])
             .collect::<Vec<_>>();
 
         Ok(noria_connector::QueryResult::from_owned(
@@ -1475,6 +1515,33 @@ where
         Ok(())
     }
 
+    /// Updates connection tracking when the authenticated user changes.
+    ///
+    /// This removes the old connection entry (if any) and inserts a new entry
+    /// with the updated username.
+    fn update_connection_username(&mut self, new_username: &str) {
+        if let Some(connections) = &self.state.connections {
+            // Remove old connection entry
+            let old_username = self
+                .state
+                .client_username
+                .as_deref()
+                .unwrap_or(UNAUTHENTICATED_USER);
+            connections.remove(&ConnectionInfo::new(
+                self.state.client_addr,
+                old_username.to_string(),
+            ));
+
+            // Insert new connection entry with updated username
+            connections.insert(ConnectionInfo::new(
+                self.state.client_addr,
+                new_username.to_string(),
+            ));
+        }
+
+        self.state.client_username = Some(new_username.to_string());
+    }
+
     /// Change the user for the upstream connection, if it exists
     ///
     /// This is called when the client authenticates to the server.
@@ -1487,6 +1554,10 @@ where
         if let Some(upstream) = &mut self.connectors.upstream {
             let _ = upstream.set_user(user, password).await;
         }
+
+        // Update connection tracking with authenticated username
+        self.update_connection_username(user);
+
         Ok(())
     }
 
@@ -1505,6 +1576,10 @@ where
                 .noria
                 .set_schema_search_path(vec![database.into()]);
         }
+
+        // Update connection tracking with new authenticated username
+        self.update_connection_username(user);
+
         Ok(())
     }
 
@@ -5120,7 +5195,15 @@ where
 {
     fn drop(&mut self) {
         if let Some(connections) = &self.state.connections {
-            connections.remove(&self.state.client_addr);
+            let username = self
+                .state
+                .client_username
+                .as_deref()
+                .unwrap_or(UNAUTHENTICATED_USER);
+            connections.remove(&ConnectionInfo::new(
+                self.state.client_addr,
+                username.to_string(),
+            ));
         }
         metrics::gauge!(recorded::CONNECTED_CLIENTS).decrement(1.0);
         metrics::counter!(recorded::CLIENT_CONNECTIONS_CLOSED).increment(1);
