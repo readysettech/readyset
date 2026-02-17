@@ -2073,11 +2073,7 @@ where
     ) -> Result<(QueryResult<'a, DB>, ProxyState), DB::Error> {
         self.check_routing().await?;
         self.last_query = None;
-        // The rewrite context isn't needed until we have looked up the statement and checked its
-        // migration status, but it requires an immutable borrow of the backend while looking up the
-        // statement requires a mutable borrow. To get around this, we just construct it
-        // possibly-prematurely.
-        let mut rewrite_context = self.rewrite_context(None).await?;
+        let schema_search_path = self.noria.schema_search_path().to_vec();
         let cached_statement = self
             .state
             .prepared_statements
@@ -2106,13 +2102,17 @@ where
                 .query_migration_state(cached_statement.as_view_request()?)
                 .1;
 
-            if let Some(search_path) = cached_statement
+            let search_path = cached_statement
                 .view_request
                 .as_ref()
                 .map(|pr| pr.schema_search_path.clone())
-            {
-                rewrite_context.set_search_path(search_path);
-            }
+                .unwrap_or(schema_search_path);
+
+            let rewrite_context = RewriteContext::new(
+                self.settings.dialect.into(),
+                self.state.schema_handle.get_catalog_retrying().await?,
+                search_path,
+            );
 
             if matches!(new_migration_state, MigrationState::Successful(_)) {
                 // Attempt to prepare on ReadySet
