@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, ValueHint};
@@ -73,9 +74,13 @@ impl DataGenerator {
         Ok(())
     }
 
-    pub async fn install(&self, conn_str: &str) -> anyhow::Result<()> {
+    pub async fn install(
+        &self,
+        conn_str: &str,
+        verification: &ServerCertVerification,
+    ) -> anyhow::Result<()> {
         let mut conn = DatabaseURL::from_str(conn_str)?
-            .connect(&ServerCertVerification::Default)
+            .connect(verification)
             .await?;
         let ddl = std::fs::read_to_string(benchmark_path(&self.schema)?)?;
 
@@ -89,11 +94,11 @@ impl DataGenerator {
         Ok(())
     }
 
-    async fn adjust_upstream_vars(db_url: &DatabaseURL) -> Option<usize> {
-        let mut conn = db_url
-            .connect(&ServerCertVerification::Default)
-            .await
-            .ok()?;
+    async fn adjust_upstream_vars(
+        db_url: &DatabaseURL,
+        verification: &ServerCertVerification,
+    ) -> Option<usize> {
+        let mut conn = db_url.connect(verification).await.ok()?;
 
         match conn {
             DatabaseConnection::MySQL(_) => {
@@ -133,8 +138,12 @@ impl DataGenerator {
         }
     }
 
-    async fn revert_upstream_vars(db_url: &DatabaseURL, old_size: Option<usize>) {
-        let conn = db_url.connect(&ServerCertVerification::Default).await;
+    async fn revert_upstream_vars(
+        db_url: &DatabaseURL,
+        old_size: Option<usize>,
+        verification: &ServerCertVerification,
+    ) {
+        let conn = db_url.connect(verification).await;
 
         match (conn, old_size) {
             (Ok(mut conn @ DatabaseConnection::MySQL(_)), Some(old_size)) => {
@@ -158,7 +167,11 @@ impl DataGenerator {
         }
     }
 
-    pub async fn generate(&self, conn_str: &str) -> anyhow::Result<DatabaseGenerationSpec> {
+    pub async fn generate(
+        &self,
+        conn_str: &str,
+        verification: ServerCertVerification,
+    ) -> anyhow::Result<DatabaseGenerationSpec> {
         let db_url = DatabaseURL::from_str(conn_str)?;
 
         let schema = match db_url.dialect() {
@@ -186,12 +199,18 @@ impl DataGenerator {
             }
         };
 
-        let old_size = Self::adjust_upstream_vars(&db_url).await;
+        let verification = Arc::new(verification);
+        let old_size = Self::adjust_upstream_vars(&db_url, &verification).await;
 
         let database_spec = DatabaseGenerationSpec::new(schema);
-        let status = parallel_load(db_url.clone(), database_spec.clone()).await;
+        let status = parallel_load(
+            db_url.clone(),
+            database_spec.clone(),
+            Arc::clone(&verification),
+        )
+        .await;
 
-        Self::revert_upstream_vars(&db_url, old_size).await;
+        Self::revert_upstream_vars(&db_url, old_size, &verification).await;
 
         status?;
 
@@ -262,8 +281,9 @@ pub async fn load_table_part(
     mut spec: TableSpec,
     partition: TablePartition,
     progress_bar: indicatif::ProgressBar,
+    verification: Arc<ServerCertVerification>,
 ) -> Result<()> {
-    let mut conn = db_url.connect(&ServerCertVerification::Default).await?;
+    let mut conn = db_url.connect(&verification).await?;
 
     let columns = spec.columns.keys().cloned().collect::<Vec<_>>();
     let insert_stmt =
@@ -320,6 +340,7 @@ async fn load_table(
     table_name: TableName,
     spec: TableGenerationSpec,
     progress_bar: indicatif::ProgressBar,
+    verification: Arc<ServerCertVerification>,
 ) -> Result<()> {
     let mut sub_tasks =
         futures::stream::iter((0..spec.num_rows).step_by(MAX_PARTITION_ROWS).map(|index| {
@@ -332,6 +353,7 @@ async fn load_table(
                     index,
                 },
                 progress_bar.clone(),
+                Arc::clone(&verification),
             )
         }))
         .buffer_unordered(8);
@@ -345,7 +367,11 @@ async fn load_table(
     Ok(())
 }
 
-pub async fn parallel_load(db: DatabaseURL, spec: DatabaseGenerationSpec) -> Result<()> {
+pub async fn parallel_load(
+    db: DatabaseURL,
+    spec: DatabaseGenerationSpec,
+    verification: Arc<ServerCertVerification>,
+) -> Result<()> {
     use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
     let multi_progress = MultiProgress::new();
@@ -373,6 +399,7 @@ pub async fn parallel_load(db: DatabaseURL, spec: DatabaseGenerationSpec) -> Res
                     .get(<TableName as Borrow<str>>::borrow(&table_name))
                     .unwrap()
                     .clone(),
+                Arc::clone(&verification),
             )
         }))
         .buffer_unordered(4);

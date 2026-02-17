@@ -24,19 +24,23 @@ pub fn seconds_as_str_to_duration(input: &str) -> std::result::Result<Duration, 
 }
 
 /// Wait for replication to finish by lazy looping over "SHOW READYSET STATUS"
-pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
-    info!("Waiting for the target database to be ready...");
+pub async fn readyset_ready(
+    target: &str,
+    verification: &ServerCertVerification,
+) -> anyhow::Result<()> {
+    println!("Waiting for Readyset to be ready...");
+
     // First attempt to connect to the readyset adapter at all
+    let db_url = DatabaseURL::from_str(target)?;
     let mut conn = loop {
-        match DatabaseURL::from_str(target)?
-            .connect(&ServerCertVerification::Default)
-            .await
-        {
+        match db_url.connect(verification).await {
             Ok(conn) => break conn,
-            _ => tokio::time::sleep(Duration::from_secs(1)).await,
+            Err(e) => {
+                println!("Error on connection to {:?}: {:?}", target, e);
+                tokio::time::sleep(Duration::from_secs(1)).await
+            }
         }
     };
-
     // Then query status until snapshot is completed
     let q = ShowStatement::ReadySetStatus;
     loop {

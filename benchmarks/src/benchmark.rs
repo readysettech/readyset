@@ -63,20 +63,37 @@ pub struct DeploymentParameters {
     #[arg(long)]
     pub database_type: DatabaseType,
 
-    #[arg(long, default_value = "test")]
-    pub database_name: String,
+    #[arg(long)]
+    pub database_name: Option<String>,
+
+    /// Require TLS for all connections to ReadySet and upstream databases.
+    /// When set, uses `ServerCertVerification::None` (accept any cert),
+    /// which establishes a TLS channel without validating the server
+    /// certificate.  This is sufficient for locally-trusted mkcert
+    /// certificates used in benchmarks.
+    #[arg(long, default_value_t = false)]
+    pub tls_required: bool,
 }
 
 impl DeploymentParameters {
+    /// Returns the TLS verification mode based on the `--tls-required` flag.
+    pub fn tls_verification(&self) -> ServerCertVerification {
+        if self.tls_required {
+            ServerCertVerification::None
+        } else {
+            ServerCertVerification::Default
+        }
+    }
+
     pub async fn connect_to_target(&self) -> Result<DatabaseConnection> {
         Ok(DatabaseURL::from_str(&self.target_conn_str)?
-            .connect(&ServerCertVerification::Default)
+            .connect(&self.tls_verification())
             .await?)
     }
 
     pub async fn connect_to_setup(&self) -> Result<DatabaseConnection> {
         Ok(DatabaseURL::from_str(&self.setup_conn_str)?
-            .connect(&ServerCertVerification::Default)
+            .connect(&self.tls_verification())
             .await?)
     }
 }

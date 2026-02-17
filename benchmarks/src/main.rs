@@ -185,11 +185,13 @@ impl BenchmarkRunner {
         }
 
         // Check that ReadySet has completed snapshotting via the readyset status.
-        let readyset_target = format!(
-            "{}/{}",
-            self.deployment_params.target_conn_str, self.deployment_params.database_name
-        );
-        readyset_ready(&readyset_target).await?;
+        let readyset_target = if let Some(ref db_name) = self.deployment_params.database_name {
+            format!("{}/{}", self.deployment_params.target_conn_str, db_name)
+        } else {
+            self.deployment_params.target_conn_str.clone()
+        };
+        let verification = self.deployment_params.tls_verification();
+        readyset_ready(&readyset_target, &verification).await?;
 
         let bench_start_time = std::time::SystemTime::now();
 
@@ -198,7 +200,7 @@ impl BenchmarkRunner {
             if self.iterations > 1 {
                 println!("Iteration: {i} ---------------------------");
                 benchmark_cmd.reset(&self.deployment_params).await?;
-                readyset_ready(&readyset_target).await?;
+                readyset_ready(&readyset_target, &verification).await?;
             }
             let start_time = Instant::now();
             let result = benchmark_cmd.benchmark(&self.deployment_params).await?;

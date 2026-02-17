@@ -150,9 +150,14 @@ impl BenchmarkControl for WorkloadEmulator {
         }
 
         if let Some(ref data_generator) = self.data_generator {
+            let verification = deployment.tls_verification();
             // assume the target database exists, so create schema and insert data
-            data_generator.install(&deployment.setup_conn_str).await?;
-            data_generator.generate(&deployment.setup_conn_str).await?;
+            data_generator
+                .install(&deployment.setup_conn_str, &verification)
+                .await?;
+            data_generator
+                .generate(&deployment.setup_conn_str, verification)
+                .await?;
         }
 
         Ok(())

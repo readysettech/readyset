@@ -588,10 +588,10 @@ impl AdapterHandle {
                 let database_type =
                     DatabaseURL::from_str(&args.upstream_url_with_db_name())?.database_type();
 
-                rt.block_on(benchmarks::utils::readyset_ready(&readyset_url(
-                    &args.database_name,
-                    database_type,
-                )))?;
+                rt.block_on(benchmarks::utils::readyset_ready(
+                    &readyset_url(&args.database_name, database_type),
+                    &database_utils::tls::ServerCertVerification::Default,
+                ))?;
                 Ok(AdapterHandle {
                     pid: child_pid,
                     write_hdl: sock2,
@@ -666,8 +666,9 @@ async fn prepare_db<P: Into<PathBuf>>(path: P, args: &SystemBenchArgs) -> anyhow
     drop(conn);
 
     let conn_str = args.upstream_url_with_db_name();
-    generator.install(&conn_str).await?;
-    generator.generate(&conn_str).await?;
+    let verification = database_utils::tls::ServerCertVerification::Default;
+    generator.install(&conn_str, &verification).await?;
+    generator.generate(&conn_str, verification).await?;
     Ok(())
 }
 
