@@ -347,11 +347,10 @@ where
             return CacheResult::NotCached;
         };
         let res = cache.get(key.clone()).await;
-        let query_id = query_id.to_string();
 
         match res {
             Some((res, needs_refresh)) if res.values.first().is_none_or(&is_compatible) => {
-                counter!(recorded::SHALLOW_HIT, "query_id" => query_id).increment(1);
+                cache.increment_hit();
                 if needs_refresh && !cache.is_scheduled() {
                     let guard = Self::make_guard(cache, key);
                     CacheResult::HitAndRefresh(res, guard)
@@ -360,7 +359,7 @@ where
                 }
             }
             Some(_) | None => {
-                counter!(recorded::SHALLOW_MISS, "query_id" => query_id).increment(1);
+                cache.increment_miss();
                 let guard = Self::make_guard(cache, key);
                 CacheResult::Miss(guard)
             }

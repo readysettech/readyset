@@ -15,7 +15,9 @@ use moka::policy::Expiry;
 use tokio::sync::{Mutex, oneshot};
 use tokio::time::{interval, timeout};
 
+use metrics::{Counter, counter};
 use readyset_client::consensus::CacheDDLRequest;
+use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_sql::ast::{
     CacheInner, CacheType, CreateCacheStatement, Relation, ShallowCacheQuery, SqlIdentifier,
@@ -245,6 +247,8 @@ where
     always: bool,
     scheduler: Option<Scheduler<K, V>>,
     shutdown_tx: std::sync::Mutex<Option<oneshot::Sender<()>>>,
+    hit_counter: Counter,
+    miss_counter: Counter,
 }
 
 impl<K, V> Debug for Cache<K, V>
@@ -303,6 +307,14 @@ where
             (None, None, None)
         };
 
+        let label = query_id
+            .as_ref()
+            .map(|q| q.to_string())
+            .or_else(|| name.as_ref().map(|n| n.name.to_string()))
+            .unwrap_or_default();
+        let hit_counter = counter!(recorded::SHALLOW_HIT, "query_id" => label.clone());
+        let miss_counter = counter!(recorded::SHALLOW_MISS, "query_id" => label);
+
         let cache = Arc::new(Self {
             id,
             inner,
@@ -318,6 +330,8 @@ where
             always,
             scheduler: scheduler.clone(),
             shutdown_tx: std::sync::Mutex::new(shutdown_tx),
+            hit_counter,
+            miss_counter,
         });
 
         if let Some(scheduler) = scheduler {
@@ -603,6 +617,14 @@ where
         if let Some(tx) = self.shutdown_tx.lock().unwrap().take() {
             let _ = tx.send(());
         }
+    }
+
+    pub(crate) fn increment_hit(&self) {
+        self.hit_counter.increment(1);
+    }
+
+    pub(crate) fn increment_miss(&self) {
+        self.miss_counter.increment(1);
     }
 }
 
