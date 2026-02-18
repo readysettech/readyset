@@ -57,8 +57,8 @@
 //!         Ok(())
 //!     }
 //!
-//!     async fn on_init(&mut self, _: &str, w: Option<InitWriter<'_, W>>) -> io::Result<()> {
-//!         w.unwrap().ok().await
+//!     async fn on_init(&mut self, _: &str) -> io::Result<()> {
+//!         Ok(())
 //!     }
 //!     async fn on_change_user(&mut self, _: &str, _: &str, _: &str) -> io::Result<()> {
 //!         Ok(())
@@ -266,7 +266,7 @@ impl From<&mysql_async::Column> for Column {
 pub use crate::error::MsqlSrvError;
 pub use crate::errorcodes::ErrorKind;
 pub use crate::params::{ParamParser, ParamValue, Params};
-pub use crate::resultset::{InitWriter, QueryResultWriter, RowWriter, StatementMetaWriter};
+pub use crate::resultset::{QueryResultWriter, RowWriter, StatementMetaWriter};
 pub use crate::value::{ToMySqlValue, Value, ValueInner};
 
 /// A wrapper to allow either an [`io::Result`] or a [`ParsedCommand`] to be returned
@@ -354,7 +354,7 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
     async fn on_reset(&mut self) -> io::Result<()>;
 
     /// Called when client switches database.
-    async fn on_init(&mut self, _: &str, _: Option<InitWriter<'_, S>>) -> io::Result<()>;
+    async fn on_init(&mut self, _: &str) -> io::Result<()>;
 
     /// Called when client switches user.
     async fn on_change_user(&mut self, _: &str, _: &str, _: &str) -> io::Result<()>;
@@ -493,7 +493,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             mi.shim.set_auth_info(&username, plain_password).await?;
             mi.shim.set_charset(charset).await?;
             if let Some(database) = database {
-                mi.shim.on_init(&database, None).await?;
+                mi.shim.on_init(&database).await?;
             }
             mi.run().await?;
         }
@@ -952,16 +952,27 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 }
                 Command::Init(schema) => {
                     debug!(schema = %String::from_utf8_lossy(schema), "Handling COM_INIT_DB");
-                    let w = InitWriter {
-                        conn: &mut self.conn,
-                    };
-                    self.shim
-                        .on_init(
-                            ::std::str::from_utf8(schema)
-                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                            Some(w),
-                        )
-                        .await?;
+                    let schema_str = ::std::str::from_utf8(schema)
+                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                    match self.shim.on_init(schema_str).await {
+                        Ok(()) => {
+                            writers::write_ok_packet(
+                                &mut self.conn,
+                                0,
+                                0,
+                                self.shim.server_status_flags(),
+                            )
+                            .await?;
+                        }
+                        Err(e) => {
+                            writers::write_err(
+                                ErrorKind::ER_BAD_DB_ERROR,
+                                e.to_string().as_bytes(),
+                                &mut self.conn,
+                            )
+                            .await?;
+                        }
+                    }
                 }
                 Command::Ping => {
                     self.shim.on_ping().await?;

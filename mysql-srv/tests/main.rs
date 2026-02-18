@@ -18,8 +18,8 @@ use mysql::consts::Command;
 use mysql::prelude::Queryable;
 use mysql::{Row, ServerError};
 use mysql_srv::{
-    CachedSchema, Column, ErrorKind, InitWriter, MySqlIntermediary, MySqlShim, ParamParser,
-    QueryResultWriter, QueryResultsResponse, StatementMetaWriter,
+    CachedSchema, Column, ErrorKind, MySqlIntermediary, MySqlShim, ParamParser, QueryResultWriter,
+    QueryResultsResponse, StatementMetaWriter,
 };
 use readyset_adapter_types::DeallocateId;
 use readyset_util::redacted::RedactedString;
@@ -53,11 +53,7 @@ where
             QueryResultWriter<'a, W>,
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send,
-    I: for<'a> FnMut(
-            &'a str,
-            InitWriter<'a, W>,
-        ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
-        + Send,
+    I: for<'a> FnMut(&'a str) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>> + Send,
     CU: for<'a> FnMut(
             &'a str,
             &'a str,
@@ -115,8 +111,8 @@ where
         Ok(())
     }
 
-    async fn on_init(&mut self, schema: &str, writer: Option<InitWriter<'_, W>>) -> io::Result<()> {
-        (self.on_i)(schema, writer.unwrap()).await
+    async fn on_init(&mut self, schema: &str) -> io::Result<()> {
+        (self.on_i)(schema).await
     }
 
     async fn on_change_user(
@@ -185,10 +181,7 @@ where
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send
         + 'static,
-    I: for<'a> FnMut(
-            &'a str,
-            InitWriter<'a, TcpStream>,
-        ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
+    I: for<'a> FnMut(&'a str) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send
         + 'static,
     CU: for<'a> FnMut(
@@ -265,7 +258,7 @@ async fn it_connects() {
         move |_, _| unreachable!(),
         move |_| unreachable!(),
         move |_, _, _| unreachable!(),
-        move |_, _| unreachable!(),
+        move |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .test(|_| Box::pin(async move {}))
@@ -279,7 +272,7 @@ fn failed_authentication() {
         |_, _| unreachable!(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        |_, _| unreachable!(),
+        |_| unreachable!(),
     );
     let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -307,9 +300,9 @@ async fn it_inits_ok() {
         |_, _| unreachable!(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        |schema, writer| {
+        |schema| {
             assert_eq!(schema, "test");
-            Box::pin(async move { writer.ok().await })
+            Box::pin(async move { Ok(()) })
         },
         |_, _, _| unreachable!(),
     )
@@ -318,8 +311,17 @@ async fn it_inits_ok() {
             db.write_command_data(Command::COM_INIT_DB, "test")
                 .await
                 .unwrap();
-            let res = db.read_packet().await;
-            assert!(res.is_ok());
+            let packet = db.read_packet().await.unwrap();
+            // OK packet: [0x00, affected_rows(0), last_insert_id(0), status_flags(2), warnings(2)]
+            assert_eq!(packet[0], 0x00, "expected OK packet");
+            let status_flags =
+                myc::constants::StatusFlags::from_bits_truncate(u16::from_le_bytes([
+                    packet[3], packet[4],
+                ]));
+            assert!(
+                status_flags.contains(myc::constants::StatusFlags::SERVER_STATUS_AUTOCOMMIT),
+                "COM_INIT_DB OK should include SERVER_STATUS_AUTOCOMMIT, got {status_flags:?}"
+            );
         })
     })
     .await;
@@ -331,16 +333,9 @@ async fn it_inits_error() {
         |_, _| unreachable!(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        |schema, writer| {
+        |schema| {
             assert_eq!(schema, "test");
-            Box::pin(async move {
-                writer
-                    .error(
-                        ErrorKind::ER_BAD_DB_ERROR,
-                        format!("Database {schema} not found").as_bytes(),
-                    )
-                    .await
-            })
+            Box::pin(async move { Err(io::Error::other(format!("Database {schema} not found"))) })
         },
         |_, _, _| unreachable!(),
     )
@@ -362,7 +357,7 @@ async fn it_pings() {
         |_, _| unreachable!(),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .test(|db| Box::pin(async move { assert!(db.ping().await.is_ok()) }))
@@ -375,7 +370,7 @@ async fn empty_response() {
         |_, w| Box::pin(async move { w.completed(0, 0, None).await }),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
@@ -398,7 +393,7 @@ async fn no_columns() {
         move |_, w| Box::pin(async move { w.start(&[]).await?.finish().await }),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
@@ -427,7 +422,7 @@ async fn no_columns_but_rows() {
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
@@ -451,7 +446,7 @@ async fn error_response() {
         move |_, w| Box::pin(async move { w.error(err.0, err.1.as_bytes()).await }),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
@@ -498,7 +493,7 @@ async fn it_queries_nulls() {
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
@@ -532,7 +527,7 @@ async fn it_queries() {
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
@@ -569,7 +564,7 @@ async fn multi_result() {
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
@@ -627,7 +622,7 @@ async fn it_queries_many_rows() {
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
@@ -694,7 +689,7 @@ async fn it_prepares() {
                 w.finish().await
             })
         },
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .with_params(params)
@@ -854,7 +849,7 @@ async fn insert_exec() {
 
             Box::pin(async move { w.completed(42, 1, None).await })
         },
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .with_params(params)
@@ -933,7 +928,7 @@ async fn send_long() {
                 w.finish().await
             })
         },
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .with_params(params)
@@ -995,7 +990,7 @@ async fn it_prepares_many() {
                 w.finish().await
             })
         },
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .with_params(Vec::new())
@@ -1047,7 +1042,7 @@ async fn prepared_empty() {
             assert!(!params.is_empty());
             Box::pin(async move { w.completed(0, 0, None).await })
         },
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .with_params(params)
@@ -1092,7 +1087,7 @@ async fn prepared_no_params() {
                 w.finish().await
             })
         },
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .with_params(params)
@@ -1180,7 +1175,7 @@ async fn prepared_nulls() {
                 w.finish().await
             })
         },
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .with_params(params)
@@ -1221,7 +1216,7 @@ async fn prepared_no_rows() {
             let cols = cols.clone();
             Box::pin(async move { w.start(&cols[..]).await?.finish().await })
         },
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .with_columns(cols2)
@@ -1251,7 +1246,7 @@ async fn prepared_no_cols_but_rows() {
                 w.finish().await
             })
         },
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
@@ -1274,7 +1269,7 @@ async fn prepared_no_cols() {
         |_, _| unreachable!(),
         |_| 0,
         move |_, _, w| Box::pin(async move { w.start(&[]).await?.finish().await }),
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .test(|db| {
@@ -1301,7 +1296,7 @@ async fn really_long_query() {
         },
         |_| 0,
         |_, _, _| unreachable!(),
-        |_, _| unreachable!(),
+        |_| unreachable!(),
         move |_, _, _| unreachable!(),
     )
     .test(move |db| {

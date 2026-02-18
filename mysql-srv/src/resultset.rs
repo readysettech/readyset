@@ -13,29 +13,6 @@ use crate::{writers, Column, ErrorKind, StatementData};
 pub(crate) const DEFAULT_ROW_CAPACITY: usize = 4096;
 pub(crate) const MAX_POOL_ROW_CAPACITY: usize = DEFAULT_ROW_CAPACITY * 4;
 
-/// Convenience type for responding to a client `USE <db>` command.
-pub struct InitWriter<'a, S: AsyncRead + AsyncWrite + Unpin> {
-    pub(crate) conn: &'a mut PacketConn<S>,
-}
-
-impl<'a, S: AsyncRead + AsyncWrite + Unpin + 'a> InitWriter<'a, S> {
-    /// Tell client that database context has been changed
-    pub async fn ok(self) -> io::Result<()> {
-        writers::write_ok_packet(self.conn, 0, 0, StatusFlags::empty()).await
-    }
-
-    /// Tell client that there was a problem changing the database context.
-    /// Although you can return any valid MySQL error code you probably want
-    /// to keep it similar to the MySQL server and issue either a
-    /// `ErrorKind::ER_BAD_DB_ERROR` or a `ErrorKind::ER_DBACCESS_DENIED_ERROR`.
-    pub async fn error<E>(self, kind: ErrorKind, msg: &E) -> io::Result<()>
-    where
-        E: Borrow<[u8]> + ?Sized,
-    {
-        writers::write_err(kind, msg.borrow(), self.conn).await
-    }
-}
-
 /// Convenience type for responding to a client `PREPARE` command.
 ///
 /// This type should not be dropped without calling

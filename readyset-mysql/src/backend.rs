@@ -8,8 +8,8 @@ use std::ops::{Deref, DerefMut};
 use itertools::{izip, Itertools};
 use mysql_async::consts::StatusFlags;
 use mysql_srv::{
-    CachedSchema, Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MySqlShim,
-    QueryResultWriter, QueryResultsResponse, RowWriter, StatementMetaWriter,
+    CachedSchema, Column, ColumnFlags, ColumnType, MsqlSrvError, MySqlShim, QueryResultWriter,
+    QueryResultsResponse, RowWriter, StatementMetaWriter,
 };
 use readyset_adapter::backend::noria_connector::{
     MetaVariable, PreparedSelectTypes, SelectPrepareResultInner,
@@ -831,30 +831,13 @@ where
         Ok(())
     }
 
-    async fn on_init(&mut self, database: &str, w: Option<InitWriter<'_, S>>) -> io::Result<()> {
+    async fn on_init(&mut self, database: &str) -> io::Result<()> {
         if self.enable_statement_logging {
             info!(target: "client_statement", "database: {database}");
         }
-        match self.set_database(database).await {
-            Ok(()) => {
-                if let Some(w) = w {
-                    w.ok().await
-                } else {
-                    Ok(())
-                }
-            }
-            Err(e) => {
-                if let Some(w) = w {
-                    w.error(
-                        mysql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                        e.to_string().as_bytes(),
-                    )
-                    .await
-                } else {
-                    Err(io::Error::other(e.to_string()))
-                }
-            }
-        }
+        self.set_database(database)
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     async fn on_change_user(
