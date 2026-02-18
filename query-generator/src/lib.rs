@@ -2385,10 +2385,7 @@ impl QueryOperation {
 
                         let mut arguments = Vec::new();
                         add_builtin!(@args_to_expr, table, arguments, $($arg)*);
-                        let expr = Expr::Call(FunctionExpr::Call {
-                            name: fn_name.into(),
-                            arguments: Some(arguments),
-                        });
+                        let expr = Expr::Call(FunctionExpr::from_name_and_args(fn_name, arguments));
                         let alias = state.fresh_alias();
                         query.fields.push(FieldDefinitionExpr::Expr {
                             alias: Some(alias.clone()),

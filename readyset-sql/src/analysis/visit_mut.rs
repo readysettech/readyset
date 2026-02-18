@@ -630,16 +630,104 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
         FunctionExpr::CountStar
         | FunctionExpr::RowNumber
         | FunctionExpr::Rank
-        | FunctionExpr::DenseRank => Ok(()),
-        FunctionExpr::Call {
-            arguments: None, ..
-        } => Ok(()),
-        FunctionExpr::Call {
-            arguments: Some(arguments),
-            ..
-        } => {
-            for arg in arguments {
-                visitor.visit_expr(arg)?;
+        | FunctionExpr::DenseRank
+        | FunctionExpr::CurrentDate
+        | FunctionExpr::CurrentTimestamp(_)
+        | FunctionExpr::CurrentTime
+        | FunctionExpr::LocalTimestamp
+        | FunctionExpr::LocalTime
+        | FunctionExpr::CurrentUser
+        | FunctionExpr::SessionUser
+        | FunctionExpr::CurrentCatalog
+        | FunctionExpr::SqlUser => Ok(()),
+        FunctionExpr::DayOfWeek(expr)
+        | FunctionExpr::Month(expr)
+        | FunctionExpr::Length(expr)
+        | FunctionExpr::OctetLength(expr)
+        | FunctionExpr::CharLength(expr)
+        | FunctionExpr::Ascii(expr)
+        | FunctionExpr::Hex(expr)
+        | FunctionExpr::JsonDepth(expr)
+        | FunctionExpr::JsonValid(expr)
+        | FunctionExpr::JsonQuote(expr)
+        | FunctionExpr::JsonTypeof(expr)
+        | FunctionExpr::JsonArrayLength(expr)
+        | FunctionExpr::JsonStripNulls(expr)
+        | FunctionExpr::JsonbStripNulls(expr)
+        | FunctionExpr::JsonbPretty(expr)
+        | FunctionExpr::StAsText(expr)
+        | FunctionExpr::StAsWkt(expr)
+        | FunctionExpr::StAsEwkt(expr) => visitor.visit_expr(expr.as_mut()),
+        FunctionExpr::Timediff(a, b)
+        | FunctionExpr::Addtime(a, b)
+        | FunctionExpr::DateFormat(a, b)
+        | FunctionExpr::DateTrunc(a, b)
+        | FunctionExpr::IfNull(a, b)
+        | FunctionExpr::JsonOverlaps(a, b) => {
+            visitor.visit_expr(a.as_mut())?;
+            visitor.visit_expr(b.as_mut())
+        }
+        FunctionExpr::ConvertTz(a, b, c) | FunctionExpr::SplitPart(a, b, c) => {
+            visitor.visit_expr(a.as_mut())?;
+            visitor.visit_expr(b.as_mut())?;
+            visitor.visit_expr(c.as_mut())
+        }
+        FunctionExpr::Round(expr, prec) => {
+            visitor.visit_expr(expr.as_mut())?;
+            if let Some(p) = prec {
+                visitor.visit_expr(p.as_mut())?;
+            }
+            Ok(())
+        }
+        FunctionExpr::ArrayToString(a, b, c) => {
+            visitor.visit_expr(a.as_mut())?;
+            visitor.visit_expr(b.as_mut())?;
+            if let Some(c) = c {
+                visitor.visit_expr(c.as_mut())?;
+            }
+            Ok(())
+        }
+        FunctionExpr::JsonbInsert(a, b, c, d) | FunctionExpr::JsonbSet(a, b, c, d) => {
+            visitor.visit_expr(a.as_mut())?;
+            visitor.visit_expr(b.as_mut())?;
+            visitor.visit_expr(c.as_mut())?;
+            if let Some(d) = d {
+                visitor.visit_expr(d.as_mut())?;
+            }
+            Ok(())
+        }
+        FunctionExpr::JsonbSetLax(a, b, c, d, e) => {
+            visitor.visit_expr(a.as_mut())?;
+            visitor.visit_expr(b.as_mut())?;
+            visitor.visit_expr(c.as_mut())?;
+            if let Some(d) = d {
+                visitor.visit_expr(d.as_mut())?;
+            }
+            if let Some(e) = e {
+                visitor.visit_expr(e.as_mut())?;
+            }
+            Ok(())
+        }
+        FunctionExpr::JsonExtractPathText(json, keys)
+        | FunctionExpr::JsonExtractPath(json, keys)
+        | FunctionExpr::JsonbExtractPath(json, keys) => {
+            visitor.visit_expr(json.as_mut())?;
+            for k in keys {
+                visitor.visit_expr(k)?;
+            }
+            Ok(())
+        }
+        FunctionExpr::Coalesce(exprs)
+        | FunctionExpr::Greatest(exprs)
+        | FunctionExpr::Least(exprs)
+        | FunctionExpr::Concat(exprs)
+        | FunctionExpr::ConcatWs(exprs)
+        | FunctionExpr::JsonObject(exprs)
+        | FunctionExpr::JsonbObject(exprs)
+        | FunctionExpr::JsonBuildObject(exprs)
+        | FunctionExpr::JsonbBuildObject(exprs) => {
+            for e in exprs {
+                visitor.visit_expr(e)?;
             }
             Ok(())
         }

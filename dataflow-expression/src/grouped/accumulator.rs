@@ -721,10 +721,7 @@ mod tests {
         #[test]
         fn test_window_function_rejected() {
             let expr = Expr::WindowFunction {
-                function: FunctionExpr::Call {
-                    name: SqlIdentifier::from("row_number"),
-                    arguments: Some(vec![]),
-                },
+                function: FunctionExpr::RowNumber,
                 partition_by: vec![],
                 order_by: vec![],
             };

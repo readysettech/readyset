@@ -9,7 +9,6 @@ use readyset_sql::ast::{
 };
 use std::collections::{HashMap, HashSet};
 use std::iter;
-use std::sync::OnceLock;
 
 pub(crate) fn join_clause_tables(join: &JoinClause) -> impl Iterator<Item = &TableExpr> {
     match &join.right {
@@ -194,83 +193,6 @@ fn populate_values_column_aliases(
     Ok(())
 }
 
-// Built-in function names that are allowed in expressions containing aggregates.
-// All allowed functions must be deterministic, formatting-only, and must not affect result cardinality.
-static BUILTIN_FUNCTIONS_ALLOWED_IN_AGG_CONTEXT: OnceLock<HashSet<&'static str>> = OnceLock::new();
-
-fn is_builtin_allowed_in_aggregate_context(name: &str) -> bool {
-    BUILTIN_FUNCTIONS_ALLOWED_IN_AGG_CONTEXT
-        .get_or_init(builtin_functions_allowed_in_agg_context)
-        .contains(name.to_ascii_lowercase().as_str())
-}
-
-fn builtin_functions_allowed_in_agg_context() -> HashSet<&'static str> {
-    use dataflow_expression::BuiltinFunctionDiscriminants;
-    use strum::IntoEnumIterator;
-    // Always add explicit arms to this match, do not use default arm here `_ =>`.
-    // We have to make sure, any newly added built-ins will be explicitly added here.
-    // To exclude a function from the list, the corresponding arm should return empty `!vec[]`.
-    BuiltinFunctionDiscriminants::iter()
-        .flat_map(|bf| match bf {
-            BuiltinFunctionDiscriminants::ConvertTZ => vec!["convert_tz"],
-            BuiltinFunctionDiscriminants::DayOfWeek => vec!["dayofweek"],
-            BuiltinFunctionDiscriminants::IfNull => vec!["ifnull"],
-            BuiltinFunctionDiscriminants::Month => vec!["month"],
-            BuiltinFunctionDiscriminants::Timediff => vec!["timediff"],
-            BuiltinFunctionDiscriminants::Addtime => vec!["addtime"],
-            BuiltinFunctionDiscriminants::DateFormat => vec!["date_format"],
-            BuiltinFunctionDiscriminants::Round => vec!["round"],
-            BuiltinFunctionDiscriminants::JsonDepth => vec!["json_depth"],
-            BuiltinFunctionDiscriminants::JsonValid => vec!["json_valid"],
-            BuiltinFunctionDiscriminants::JsonQuote => vec!["json_quote"],
-            BuiltinFunctionDiscriminants::JsonOverlaps => vec!["json_overlaps"],
-            BuiltinFunctionDiscriminants::JsonTypeof => vec!["json_typeof", "jsonb_typeof"],
-            BuiltinFunctionDiscriminants::JsonObject => vec!["json_object"],
-            BuiltinFunctionDiscriminants::JsonBuildObject => {
-                vec!["json_build_object", "jsonb_build_object"]
-            }
-            BuiltinFunctionDiscriminants::JsonArrayLength => {
-                vec!["json_array_length", "jsonb_array_length"]
-            }
-            BuiltinFunctionDiscriminants::JsonStripNulls => {
-                vec!["json_strip_nulls", "jsonb_strip_nulls"]
-            }
-            BuiltinFunctionDiscriminants::JsonExtractPath => vec![
-                "json_extract_path",
-                "jsonb_extract_path",
-                "json_extract_path_text",
-                "jsonb_extract_path_text",
-            ],
-            BuiltinFunctionDiscriminants::JsonbInsert => vec![],
-            BuiltinFunctionDiscriminants::JsonbSet => vec![],
-            BuiltinFunctionDiscriminants::JsonbPretty => vec!["jsonb_pretty"],
-            BuiltinFunctionDiscriminants::Coalesce => vec!["coalesce"],
-            BuiltinFunctionDiscriminants::Concat => vec!["concat"],
-            BuiltinFunctionDiscriminants::ConcatWs => vec!["concat_ws"],
-            BuiltinFunctionDiscriminants::Substring => vec!["substring", "substr"],
-            BuiltinFunctionDiscriminants::SplitPart => vec!["split_part"],
-            BuiltinFunctionDiscriminants::Greatest => vec!["greatest"],
-            BuiltinFunctionDiscriminants::Least => vec!["least"],
-            BuiltinFunctionDiscriminants::ArrayToString => vec!["array_to_string"],
-            BuiltinFunctionDiscriminants::DateTrunc => vec!["date_trunc"],
-            BuiltinFunctionDiscriminants::Extract => vec!["extract"],
-            BuiltinFunctionDiscriminants::Length => {
-                vec!["length", "octet_length", "char_length", "character_length"]
-            }
-            BuiltinFunctionDiscriminants::Ascii => vec!["ascii"],
-            BuiltinFunctionDiscriminants::Lower => vec!["lower"],
-            BuiltinFunctionDiscriminants::Upper => vec!["upper"],
-            BuiltinFunctionDiscriminants::Hex => vec!["hex"],
-            BuiltinFunctionDiscriminants::SpatialAsText => {
-                vec!["st_astext", "st_aswkt"]
-            }
-            BuiltinFunctionDiscriminants::SpatialAsEWKT => vec!["st_asewkt"],
-            BuiltinFunctionDiscriminants::Bucket => vec!["bucket"],
-        })
-        .filter(|t| !t.is_empty())
-        .collect::<HashSet<_>>()
-}
-
 #[must_use]
 pub fn map_aggregates(
     expr: &mut Expr,
@@ -307,11 +229,105 @@ pub fn map_aggregates(
         ) => {
             ret.append(&mut map_aggregates(expr, dialect));
         }
-        Expr::Call(FunctionExpr::Call {
-            name,
-            arguments: Some(exprs),
-        }) if is_builtin_allowed_in_aggregate_context(name.as_str()) => {
+        Expr::Call(FunctionExpr::Coalesce(exprs)) => {
             ret.extend(exprs.iter_mut().flat_map(|e| map_aggregates(e, dialect)));
+        }
+        Expr::Call(FunctionExpr::IfNull(a, b)) => {
+            ret.append(&mut map_aggregates(a, dialect));
+            ret.append(&mut map_aggregates(b, dialect));
+        }
+        // Typed variants that are allowed in aggregate context: recurse into arguments
+        Expr::Call(FunctionExpr::ConvertTz(a, b, c) | FunctionExpr::SplitPart(a, b, c)) => {
+            ret.append(&mut map_aggregates(a, dialect));
+            ret.append(&mut map_aggregates(b, dialect));
+            ret.append(&mut map_aggregates(c, dialect));
+        }
+        Expr::Call(
+            FunctionExpr::DayOfWeek(expr)
+            | FunctionExpr::Month(expr)
+            | FunctionExpr::Length(expr)
+            | FunctionExpr::OctetLength(expr)
+            | FunctionExpr::CharLength(expr)
+            | FunctionExpr::Ascii(expr)
+            | FunctionExpr::Hex(expr)
+            | FunctionExpr::JsonDepth(expr)
+            | FunctionExpr::JsonValid(expr)
+            | FunctionExpr::JsonQuote(expr)
+            | FunctionExpr::JsonTypeof(expr)
+            | FunctionExpr::JsonArrayLength(expr)
+            | FunctionExpr::JsonStripNulls(expr)
+            | FunctionExpr::JsonbStripNulls(expr)
+            | FunctionExpr::JsonbPretty(expr)
+            | FunctionExpr::StAsText(expr)
+            | FunctionExpr::StAsWkt(expr)
+            | FunctionExpr::StAsEwkt(expr),
+        ) => {
+            ret.append(&mut map_aggregates(expr, dialect));
+        }
+        Expr::Call(
+            FunctionExpr::Timediff(a, b)
+            | FunctionExpr::Addtime(a, b)
+            | FunctionExpr::DateFormat(a, b)
+            | FunctionExpr::DateTrunc(a, b)
+            | FunctionExpr::JsonOverlaps(a, b),
+        ) => {
+            ret.append(&mut map_aggregates(a, dialect));
+            ret.append(&mut map_aggregates(b, dialect));
+        }
+        Expr::Call(FunctionExpr::Round(expr, prec)) => {
+            ret.append(&mut map_aggregates(expr, dialect));
+            if let Some(p) = prec {
+                ret.append(&mut map_aggregates(p, dialect));
+            }
+        }
+        Expr::Call(
+            FunctionExpr::Greatest(exprs)
+            | FunctionExpr::Least(exprs)
+            | FunctionExpr::Concat(exprs)
+            | FunctionExpr::ConcatWs(exprs)
+            | FunctionExpr::JsonObject(exprs)
+            | FunctionExpr::JsonbObject(exprs)
+            | FunctionExpr::JsonBuildObject(exprs)
+            | FunctionExpr::JsonbBuildObject(exprs),
+        ) => {
+            ret.extend(exprs.iter_mut().flat_map(|e| map_aggregates(e, dialect)));
+        }
+        Expr::Call(
+            FunctionExpr::JsonExtractPathText(json, keys)
+            | FunctionExpr::JsonExtractPath(json, keys)
+            | FunctionExpr::JsonbExtractPath(json, keys),
+        ) => {
+            ret.append(&mut map_aggregates(json, dialect));
+            ret.extend(keys.iter_mut().flat_map(|e| map_aggregates(e, dialect)));
+        }
+        Expr::Call(FunctionExpr::ArrayToString(a, b, c)) => {
+            ret.append(&mut map_aggregates(a, dialect));
+            ret.append(&mut map_aggregates(b, dialect));
+            if let Some(c) = c {
+                ret.append(&mut map_aggregates(c, dialect));
+            }
+        }
+        // Previously these functions were excluded from aggregate context; they now
+        // recurse like all other strict multi-arg functions, allowing patterns such as
+        // `SELECT jsonb_insert(col, '{k}', count(*)::text) FROM t`.
+        Expr::Call(FunctionExpr::JsonbInsert(a, b, c, d) | FunctionExpr::JsonbSet(a, b, c, d)) => {
+            ret.append(&mut map_aggregates(a, dialect));
+            ret.append(&mut map_aggregates(b, dialect));
+            ret.append(&mut map_aggregates(c, dialect));
+            if let Some(d) = d {
+                ret.append(&mut map_aggregates(d, dialect));
+            }
+        }
+        Expr::Call(FunctionExpr::JsonbSetLax(a, b, c, d, e)) => {
+            ret.append(&mut map_aggregates(a, dialect));
+            ret.append(&mut map_aggregates(b, dialect));
+            ret.append(&mut map_aggregates(c, dialect));
+            if let Some(d) = d {
+                ret.append(&mut map_aggregates(d, dialect));
+            }
+            if let Some(e) = e {
+                ret.append(&mut map_aggregates(e, dialect));
+            }
         }
         Expr::Call(_) | Expr::Literal(_) | Expr::Column(_) | Expr::Variable(_) => {}
         Expr::BinaryOp { lhs, rhs, .. }

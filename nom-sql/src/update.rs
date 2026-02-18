@@ -184,13 +184,14 @@ mod tests {
                     table: Relation::from("group_permission"),
                     fields: vec![(
                         Column::from("permission"),
-                        Expr::Call(FunctionExpr::Call {
+                        Expr::Call(FunctionExpr::Udf {
+                            schema: None,
                             name: "replace".into(),
-                            arguments: Some(vec![
+                            arguments: vec![
                                 Expr::Column(Column::from("permission")),
                                 Expr::Literal(Literal::String("viewDiscussions".into())),
                                 Expr::Literal(Literal::String("viewForum".into())),
-                            ])
+                            ]
                         })
                     )],
                     where_clause: Some(Expr::BinaryOp {

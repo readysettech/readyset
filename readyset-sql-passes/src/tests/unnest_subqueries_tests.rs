@@ -1964,8 +1964,10 @@ fn test65() {
 // WHERE NOT IN: LHS null-free -> skip EP, keep NP (since RHS may contain NULLs)
 #[test]
 fn test66() {
-    // Mark LHS column t.rs_string as NOT NULL in the schema
+    // Mark LHS column t.rs_string as NOT NULL in the schema.
+    // Also ensure s.sn is nullable (test64 may have marked it non-null, polluting global state).
     let mut schema_guard = get_schema_guard();
+    make_col_nullable("s", "sn", &mut schema_guard);
     make_col_null_free("rsdatatypesnull", "rs_string", &mut schema_guard);
 
     let q = r#"

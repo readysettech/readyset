@@ -1379,23 +1379,79 @@ impl Expr {
         C: LowerContext,
     {
         match expr {
-            AstExpr::Call(FunctionExpr::Call {
-                name: fname,
-                arguments,
-            }) => {
-                let args = if let Some(arguments) = arguments {
-                    arguments
-                        .into_iter()
-                        .map(|arg| Self::lower(arg, dialect, context))
-                        .collect::<Result<Vec<_>, _>>()?
-                } else {
-                    vec![]
-                };
-                let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args, dialect)?;
+            // Typed built-in variants: lower arguments then delegate to BuiltinFunction::from_name_and_args
+            AstExpr::Call(
+                func_expr @ (FunctionExpr::ConvertTz(..)
+                | FunctionExpr::DayOfWeek(..)
+                | FunctionExpr::Month(..)
+                | FunctionExpr::Timediff(..)
+                | FunctionExpr::Addtime(..)
+                | FunctionExpr::DateFormat(..)
+                | FunctionExpr::DateTrunc(..)
+                | FunctionExpr::IfNull(..)
+                | FunctionExpr::Coalesce(..)
+                | FunctionExpr::Round(..)
+                | FunctionExpr::Greatest(..)
+                | FunctionExpr::Least(..)
+                | FunctionExpr::Concat(..)
+                | FunctionExpr::ConcatWs(..)
+                | FunctionExpr::SplitPart(..)
+                | FunctionExpr::Length(..)
+                | FunctionExpr::OctetLength(..)
+                | FunctionExpr::CharLength(..)
+                | FunctionExpr::Ascii(..)
+                | FunctionExpr::Hex(..)
+                | FunctionExpr::JsonDepth(..)
+                | FunctionExpr::JsonValid(..)
+                | FunctionExpr::JsonOverlaps(..)
+                | FunctionExpr::JsonQuote(..)
+                | FunctionExpr::JsonTypeof(..)
+                | FunctionExpr::JsonArrayLength(..)
+                | FunctionExpr::JsonExtractPathText(..)
+                | FunctionExpr::JsonObject(..)
+                | FunctionExpr::JsonbObject(..)
+                | FunctionExpr::JsonBuildObject(..)
+                | FunctionExpr::JsonbBuildObject(..)
+                | FunctionExpr::JsonStripNulls(..)
+                | FunctionExpr::JsonbStripNulls(..)
+                | FunctionExpr::JsonExtractPath(..)
+                | FunctionExpr::JsonbExtractPath(..)
+                | FunctionExpr::JsonbInsert(..)
+                | FunctionExpr::JsonbSet(..)
+                | FunctionExpr::JsonbSetLax(..)
+                | FunctionExpr::JsonbPretty(..)
+                | FunctionExpr::ArrayToString(..)
+                | FunctionExpr::StAsText(..)
+                | FunctionExpr::StAsWkt(..)
+                | FunctionExpr::StAsEwkt(..)),
+            ) => {
+                let fname = func_expr.builtin_name().ok_or_else(|| {
+                    internal_err!("FunctionExpr variant in builtin arm has no builtin_name")
+                })?;
+                let args: Vec<Expr> = func_expr
+                    .into_arguments()
+                    .into_iter()
+                    .map(|arg| Self::lower(arg, dialect, context))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let (func, ty) = BuiltinFunction::from_name_and_args(fname, args, dialect)?;
                 Ok(Self::Call {
                     func: Box::new(func),
                     ty,
                 })
+            }
+            // No-paren functions are not lowerable (they're kept for AST completeness)
+            AstExpr::Call(
+                FunctionExpr::CurrentDate
+                | FunctionExpr::CurrentTimestamp(_)
+                | FunctionExpr::CurrentTime
+                | FunctionExpr::LocalTimestamp
+                | FunctionExpr::LocalTime
+                | FunctionExpr::CurrentUser
+                | FunctionExpr::SessionUser
+                | FunctionExpr::CurrentCatalog
+                | FunctionExpr::SqlUser,
+            ) => {
+                unsupported!("No-parentheses functions are not supported in dataflow expressions")
             }
             AstExpr::Call(FunctionExpr::Udf { schema, name, .. }) => {
                 if let Some(schema) = schema {
@@ -1411,11 +1467,22 @@ impl Expr {
                 } else {
                     DfType::DEFAULT_TEXT
                 };
+                let cast_to_bigint = |expr: Expr| {
+                    if *expr.ty() == DfType::BigInt {
+                        expr
+                    } else {
+                        Expr::Cast {
+                            expr: Box::new(expr),
+                            ty: DfType::BigInt,
+                            null_on_failure: false,
+                        }
+                    }
+                };
                 let func = Box::new(BuiltinFunction::Substring(
                     string,
-                    pos.map(|expr| Self::lower(*expr, dialect, context))
+                    pos.map(|expr| Self::lower(*expr, dialect, context).map(cast_to_bigint))
                         .transpose()?,
-                    len.map(|expr| Self::lower(*expr, dialect, context))
+                    len.map(|expr| Self::lower(*expr, dialect, context).map(cast_to_bigint))
                         .transpose()?,
                 ));
 
@@ -2081,13 +2148,10 @@ pub(crate) mod tests {
 
     #[test]
     fn call_coalesce() {
-        let input = AstExpr::Call(FunctionExpr::Call {
-            name: "coalesce".into(),
-            arguments: Some(vec![
-                AstExpr::Column("t.x".into()),
-                AstExpr::Literal(2.into()),
-            ]),
-        });
+        let input = AstExpr::Call(FunctionExpr::Coalesce(vec![
+            AstExpr::Column("t.x".into()),
+            AstExpr::Literal(2.into()),
+        ]));
 
         let result = Expr::lower(
             input,
@@ -2325,10 +2389,9 @@ pub(crate) mod tests {
 
         #[track_caller]
         fn infers_type(args: Vec<Literal>, dialect: Dialect, expected_ty: DfType) {
-            let input = AstExpr::Call(FunctionExpr::Call {
-                name: "greatest".into(),
-                arguments: Some(args.into_iter().map(AstExpr::Literal).collect()),
-            });
+            let input = AstExpr::Call(FunctionExpr::Greatest(
+                args.into_iter().map(AstExpr::Literal).collect(),
+            ));
             let result = Expr::lower(input, dialect, &no_op_lower_context()).unwrap();
             assert_eq!(result.ty(), &expected_ty);
         }
@@ -2396,10 +2459,9 @@ pub(crate) mod tests {
 
         #[track_caller]
         fn compares_as(args: Vec<Literal>, dialect: Dialect, expected_ty: DfType) {
-            let input = AstExpr::Call(FunctionExpr::Call {
-                name: "greatest".into(),
-                arguments: Some(args.into_iter().map(AstExpr::Literal).collect()),
-            });
+            let input = AstExpr::Call(FunctionExpr::Greatest(
+                args.into_iter().map(AstExpr::Literal).collect(),
+            ));
             let result = Expr::lower(input, dialect, &no_op_lower_context()).unwrap();
             let compare_as = match result {
                 Expr::Call { func, .. } => match *func {

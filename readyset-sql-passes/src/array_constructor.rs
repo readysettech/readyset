@@ -385,13 +385,10 @@ fn rewrite_single_array_constructor(
         table: Some(lateral_alias.clone().into()),
     });
 
-    let coalesced_expr = Expr::Call(FunctionExpr::Call {
-        name: "coalesce".into(),
-        arguments: Some(vec![
-            lateral_result_ref,
-            Expr::Array(ArrayArguments::List(vec![])),
-        ]),
-    });
+    let coalesced_expr = Expr::Call(FunctionExpr::Coalesce(vec![
+        lateral_result_ref,
+        Expr::Array(ArrayArguments::List(vec![])),
+    ]));
 
     let new_field = FieldDefinitionExpr::Expr {
         expr: coalesced_expr,

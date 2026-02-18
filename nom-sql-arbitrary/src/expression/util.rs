@@ -81,12 +81,8 @@ where
     S: Strategy<Value = Expr> + Clone,
 {
     let expr_or_null = prop_oneof![Just(Expr::Literal(Literal::Null)), expr.clone()];
-    (expr_or_null, expr).prop_map(|(e1, e2)| {
-        Expr::Call(FunctionExpr::Call {
-            name: "ifnull".into(),
-            arguments: Some(vec![e1, e2]),
-        })
-    })
+    (expr_or_null, expr)
+        .prop_map(|(e1, e2)| Expr::Call(FunctionExpr::IfNull(Box::new(e1), Box::new(e2))))
 }
 
 /// Generates an [`Expr::Call`] with [`FunctionExpr::Call`], in the form of:
@@ -109,9 +105,6 @@ where
     (arguments, expr).prop_map(|(mut arguments, expr)| {
         // This guarantees that the final element is not null
         arguments.push(expr);
-        Expr::Call(FunctionExpr::Call {
-            name: "coalesce".into(),
-            arguments: Some(arguments),
-        })
+        Expr::Call(FunctionExpr::Coalesce(arguments))
     })
 }

@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn non_negatable_rhs() {
-        let mut expr = parse_expr(Dialect::MySQL, "NOT (x = 1 OR some_function(z))").unwrap();
+        let mut expr = parse_expr(Dialect::MySQL, "NOT (x = 1 OR length(z))").unwrap();
         let expected = expr.clone();
         normalize_negation(&mut expr);
         assert_eq!(expr, expected);

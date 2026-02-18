@@ -318,10 +318,10 @@ fn build_select_count_zero_mappings_recursive(
                 name: eff_name,
             };
             // COALESCE(out_col, zero_expr)
-            let mapped = Expr::Call(FunctionExpr::Call {
-                name: "coalesce".into(),
-                arguments: Some(vec![Expr::Column(out_col.clone()), zero_expr]),
-            });
+            let mapped = Expr::Call(FunctionExpr::Coalesce(vec![
+                Expr::Column(out_col.clone()),
+                zero_expr,
+            ]));
             out_map.entry(out_col).or_insert(Ok(mapped));
         }
     }

@@ -848,16 +848,13 @@ impl SqlToMirConverter {
                 format!("{}_coalesce_over_col", name.display_unquoted()).into(),
                 parent,
                 vec![ProjectExpr::Expr {
-                    expr: Expr::Call(Call {
-                        name: "coalesce".into(),
-                        arguments: Some(vec![
-                            Expr::Column(ast::Column {
-                                table: over_col.table.clone(),
-                                name: over_col.name.clone(),
-                            }),
-                            Expr::Literal(0.into()),
-                        ]),
-                    }),
+                    expr: Expr::Call(FunctionExpr::Coalesce(vec![
+                        Expr::Column(ast::Column {
+                            table: over_col.table.clone(),
+                            name: over_col.name.clone(),
+                        }),
+                        Expr::Literal(0.into()),
+                    ])),
                     alias: coalesce_alias.clone(),
                 }],
             );
@@ -3616,33 +3613,27 @@ mod tests {
     }
 
     #[test]
-    fn udf_unqualified_parses_as_call() {
-        use readyset_sql::ast::FunctionExpr;
+    fn unknown_unqualified_function_parses_as_udf() {
+        use readyset_sql::ast::{Expr, FieldDefinitionExpr, FunctionExpr};
         use readyset_sql_parsing::{parse_select_with_config, ParsingPreset};
 
-        // Unqualified function calls that aren't recognized built-ins are parsed as
-        // FunctionExpr::Call (not Udf). The Udf variant is specifically for schema-qualified
-        // function calls. Unknown unqualified functions will be rejected during expression
-        // lowering with "Function X does not exist".
-        let query = parse_select_with_config(
+        // Unknown unqualified function calls are treated as user-defined functions (Udf).
+        // They succeed at parse time and fail later (at MIR lowering / query creation).
+        let result = parse_select_with_config(
             ParsingPreset::OnlySqlparser,
             readyset_sql::Dialect::PostgreSQL,
             "SELECT totally_unknown_function_xyz(1) FROM test_table",
-        )
-        .unwrap();
-
-        let has_call = query.fields.iter().any(|field| {
-            matches!(
-                field,
-                readyset_sql::ast::FieldDefinitionExpr::Expr {
-                    expr: readyset_sql::ast::Expr::Call(FunctionExpr::Call { name, .. }),
-                    ..
-                } if name.as_str() == "totally_unknown_function_xyz"
-            )
-        });
+        );
+        let stmt = result.expect("Expected unknown function to parse as Udf");
         assert!(
-            has_call,
-            "Expected unqualified unknown function call to be parsed as FunctionExpr::Call"
+            matches!(
+                stmt.fields.first(),
+                Some(FieldDefinitionExpr::Expr {
+                    expr: Expr::Call(FunctionExpr::Udf { name, .. }),
+                    ..
+                }) if name.as_str() == "totally_unknown_function_xyz"
+            ),
+            "Expected unknown function to produce a Udf variant with the correct name"
         );
     }
 

@@ -1275,10 +1275,10 @@ pub(crate) fn analyse_lone_aggregates_subquery_fields(
             };
             fields_map.insert(
                 f_col.clone(),
-                Ok(Expr::Call(FunctionExpr::Call {
-                    name: "coalesce".into(),
-                    arguments: Some(vec![Expr::Column(f_col), fallback]),
-                })),
+                Ok(Expr::Call(FunctionExpr::Coalesce(vec![
+                    Expr::Column(f_col),
+                    fallback,
+                ]))),
             );
         }
     }
@@ -1341,19 +1341,15 @@ fn is_constant_non_null(expr: &Expr) -> bool {
 fn simplify_constant_coalesce(expr: &mut Expr) {
     let dominated_by_constants = matches!(
         expr,
-        Expr::Call(FunctionExpr::Call { name, arguments: Some(args) })
-            if name.as_str().eq_ignore_ascii_case("coalesce")
-            && args.iter().all(|a| matches!(a, Expr::Literal(_) | Expr::Array(_)))
+        Expr::Call(FunctionExpr::Coalesce(args))
+            if args.iter().all(|a| matches!(a, Expr::Literal(_) | Expr::Array(_)))
     );
     if !dominated_by_constants {
         return;
     }
 
     // Extract the first non-NULL constant argument.
-    if let Expr::Call(FunctionExpr::Call {
-        arguments: Some(args),
-        ..
-    }) = expr
+    if let Expr::Call(FunctionExpr::Coalesce(args)) = expr
         && let Some(pos) = args.iter().position(is_constant_non_null)
     {
         let replacement = args.swap_remove(pos);
@@ -1405,11 +1401,7 @@ pub(crate) fn extract_aggregate_fallback_for_expr(
         let inner_rel_for_extract: Relation = inner_alias.clone().into();
         map.into_iter().filter_map(|(k, v)| match v {
             Ok(mapped_expr) => {
-                if let Expr::Call(FunctionExpr::Call {
-                                      name,
-                                      arguments: Some(args),
-                                  }) = mapped_expr
-                    && name.as_str().eq_ignore_ascii_case("coalesce")
+                if let Expr::Call(FunctionExpr::Coalesce(args)) = mapped_expr
                     && args.len() == 2
                     && matches!(&args[0], Expr::Column(c0) if c0.name == k.name && is_column_of!(c0, inner_rel_for_extract))
                 {

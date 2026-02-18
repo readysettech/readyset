@@ -10,7 +10,7 @@ use tracing::error;
 
 use database_utils::tls::ServerCertVerification;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
-use readyset_sql::ast::{Expr, FieldDefinitionExpr, FunctionExpr, SqlQuery};
+use readyset_sql::ast::{Expr, FieldDefinitionExpr, SqlQuery};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::parse_query;
 
@@ -54,18 +54,24 @@ pub struct FromQueryLog {
 }
 
 fn should_validate_results(query: &str, parsed_query: &Option<SqlQuery>) -> bool {
+    use readyset_sql::ast::FunctionExpr;
     if let Some(parsed_query) = parsed_query {
         if let SqlQuery::Select(ref select) = parsed_query {
             if select.tables.is_empty() {
                 for field in &select.fields {
                     if let FieldDefinitionExpr::Expr { expr, .. } = field {
                         match expr {
-                            Expr::Call(FunctionExpr::Call { name, .. }) => match name.as_str() {
-                                "VERSION" => return false,
-                                "DATABASE" => return false,
-                                _ => (),
-                            },
                             Expr::Column(column) if column.name.starts_with("@@") => return false,
+                            Expr::Variable(_) => return false,
+                            // VERSION() and DATABASE() are informational functions not supported
+                            // by ReadySet. The parser maps unrecognized function names to Udf,
+                            // so we match case-insensitively on the lowercased name.
+                            Expr::Call(FunctionExpr::Udf { name, .. })
+                                if name.as_str().eq_ignore_ascii_case("version")
+                                    || name.as_str().eq_ignore_ascii_case("database") =>
+                            {
+                                return false
+                            }
                             _ => (),
                         };
                     }
@@ -85,7 +91,9 @@ fn should_validate_results(query: &str, parsed_query: &Option<SqlQuery>) -> bool
             if query != "SHOW TABLES" {
                 return false;
             }
-        } else if query.split(' ').contains(&"DATABASE()") {
+        } else if query.split(' ').contains(&"DATABASE()")
+            || query.split(' ').contains(&"VERSION()")
+        {
             return false;
         }
     }
@@ -310,5 +318,80 @@ impl FromQueryLog {
             output.flush().await.unwrap();
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_validate_results;
+    use readyset_sql::Dialect;
+    use readyset_sql_parsing::parse_query;
+
+    fn parsed(sql: &str) -> Option<readyset_sql::ast::SqlQuery> {
+        parse_query(Dialect::MySQL, sql).ok()
+    }
+
+    #[test]
+    fn version_function_returns_false() {
+        // Parsed path: VERSION() is an unrecognized name → Udf { name: "version" }
+        assert!(!should_validate_results(
+            "SELECT VERSION()",
+            &parsed("SELECT VERSION()")
+        ));
+        // Case-insensitive: lowercase form
+        assert!(!should_validate_results(
+            "SELECT version()",
+            &parsed("SELECT version()")
+        ));
+    }
+
+    #[test]
+    fn database_function_returns_false() {
+        assert!(!should_validate_results(
+            "SELECT DATABASE()",
+            &parsed("SELECT DATABASE()")
+        ));
+        assert!(!should_validate_results(
+            "SELECT database()",
+            &parsed("SELECT database()")
+        ));
+    }
+
+    #[test]
+    fn at_at_variable_returns_false() {
+        assert!(!should_validate_results(
+            "SELECT @@session.tx_isolation",
+            &parsed("SELECT @@session.tx_isolation")
+        ));
+    }
+
+    #[test]
+    fn regular_select_returns_true() {
+        assert!(should_validate_results("SELECT 1", &parsed("SELECT 1")));
+        assert!(should_validate_results(
+            "SELECT count(*) FROM t",
+            &parsed("SELECT count(*) FROM t")
+        ));
+    }
+
+    #[test]
+    fn non_select_returns_false() {
+        // INSERT is not a SELECT → should return false
+        assert!(!should_validate_results(
+            "INSERT INTO t VALUES (1)",
+            &parsed("INSERT INTO t VALUES (1)")
+        ));
+    }
+
+    #[test]
+    fn unparseable_non_select_returns_false() {
+        // Unparseable non-SELECT (no SqlQuery): the string fallback checks for "SELECT"
+        assert!(!should_validate_results("SHOW STATUS", &None));
+    }
+
+    #[test]
+    fn unparseable_select_database_returns_false() {
+        // Unparseable SELECT DATABASE() falls back to string-based detection
+        assert!(!should_validate_results("SELECT DATABASE()", &None));
     }
 }

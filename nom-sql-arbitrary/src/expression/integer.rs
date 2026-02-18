@@ -85,23 +85,15 @@ mod call {
     /// Produces a [`Strategy`] that generates an integer [`Expr::Call`] with
     /// [`BuiltinFunction::DayOfWeek`].
     fn day_of_week(es: ExprStrategy) -> impl Strategy<Value = Expr> {
-        es.timestamp.prop_map(|dt| {
-            Expr::Call(FunctionExpr::Call {
-                name: "dayofweek".into(),
-                arguments: Some(vec![dt]),
-            })
-        })
+        es.timestamp
+            .prop_map(|dt| Expr::Call(FunctionExpr::DayOfWeek(Box::new(dt))))
     }
 
     /// Produces a [`Strategy`] that generates an integer [`Expr::Call`] with
     /// [`BuiltinFunction::Month`].
     fn month(es: ExprStrategy) -> impl Strategy<Value = Expr> {
-        es.timestamp.prop_map(|dt| {
-            Expr::Call(FunctionExpr::Call {
-                name: "month".into(),
-                arguments: Some(vec![dt]),
-            })
-        })
+        es.timestamp
+            .prop_map(|dt| Expr::Call(FunctionExpr::Month(Box::new(dt))))
     }
 
     /// Produces a [`Strategy`] that generates an integer [`Expr::Call`] with
@@ -111,17 +103,11 @@ mod call {
         //  one. This is tricky as negative integers might become positive through + operator.
         (es.float, i64::MIN..=0).prop_flat_map(|(n1, neg_or_zero)| {
             prop_oneof![
-                Just(Expr::Call(FunctionExpr::Call {
-                    name: "round".into(),
-                    arguments: Some(vec![
-                        n1.clone(),
-                        Expr::Literal(Literal::Integer(neg_or_zero))
-                    ]),
-                })),
-                Just(Expr::Call(FunctionExpr::Call {
-                    name: "round".into(),
-                    arguments: Some(vec![n1])
-                }))
+                Just(Expr::Call(FunctionExpr::Round(
+                    Box::new(n1.clone()),
+                    Some(Box::new(Expr::Literal(Literal::Integer(neg_or_zero)))),
+                ))),
+                Just(Expr::Call(FunctionExpr::Round(Box::new(n1), None,)))
             ]
         })
     }

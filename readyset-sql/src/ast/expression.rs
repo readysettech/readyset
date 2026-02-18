@@ -151,14 +151,124 @@ pub enum FunctionExpr {
         allow_duplicate_keys: bool,
     },
 
-    /// Generic function call expression for built-in functions
-    Call {
-        /// Name of the function, always lowercased even if we don't recognize it.
-        name: SqlIdentifier,
-        /// Arguments to the function, or `None` if called without parentheses. With parens but no
-        /// arguments is `Some(vec![])`.
-        arguments: Option<Vec<Expr>>,
-    },
+    /// `convert_tz(expr, from_tz, to_tz)`
+    ConvertTz(Box<Expr>, Box<Expr>, Box<Expr>),
+    /// `dayofweek(expr)`
+    DayOfWeek(Box<Expr>),
+    /// `month(expr)`
+    Month(Box<Expr>),
+    /// `timediff(left, right)`
+    Timediff(Box<Expr>, Box<Expr>),
+    /// `addtime(base, delta)`
+    Addtime(Box<Expr>, Box<Expr>),
+    /// `date_format(date, format)`
+    DateFormat(Box<Expr>, Box<Expr>),
+    /// `date_trunc(field, source)`
+    DateTrunc(Box<Expr>, Box<Expr>),
+
+    /// `ifnull(expr, val)`
+    IfNull(Box<Expr>, Box<Expr>),
+    /// `coalesce(expr, ...)`
+    Coalesce(Vec<Expr>),
+
+    /// `round(expr [, prec])`
+    Round(Box<Expr>, Option<Box<Expr>>),
+    /// `greatest(expr, ...)`
+    Greatest(Vec<Expr>),
+    /// `least(expr, ...)`
+    Least(Vec<Expr>),
+
+    /// `concat(...)`, variadic
+    Concat(Vec<Expr>),
+    /// `concat_ws(separator, ...)`, first arg is separator
+    ConcatWs(Vec<Expr>),
+    /// `split_part(string, delim, field)`
+    SplitPart(Box<Expr>, Box<Expr>, Box<Expr>),
+    /// `length(expr)`
+    Length(Box<Expr>),
+    /// `octet_length(expr)`
+    OctetLength(Box<Expr>),
+    /// `char_length(expr)` / `character_length(expr)`
+    CharLength(Box<Expr>),
+    /// `ascii(expr)`
+    Ascii(Box<Expr>),
+    /// `hex(expr)`
+    Hex(Box<Expr>),
+
+    /// `json_depth(expr)`
+    JsonDepth(Box<Expr>),
+    /// `json_valid(expr)`
+    JsonValid(Box<Expr>),
+    /// `json_overlaps(a, b)`
+    JsonOverlaps(Box<Expr>, Box<Expr>),
+    /// `json_quote(expr)`
+    JsonQuote(Box<Expr>),
+    /// `json_typeof(expr)` / `jsonb_typeof(expr)` (consolidated)
+    JsonTypeof(Box<Expr>),
+    /// `json_array_length(expr)` / `jsonb_array_length(expr)` (consolidated)
+    JsonArrayLength(Box<Expr>),
+    /// `json_extract_path_text(json, keys...)` / `jsonb_extract_path_text(json, keys...)` (consolidated)
+    JsonExtractPathText(Box<Expr>, Vec<Expr>),
+
+    /// `json_object(...)` (PG behavior)
+    JsonObject(Vec<Expr>),
+    /// `jsonb_object(...)` (returns Jsonb)
+    JsonbObject(Vec<Expr>),
+    /// `json_build_object(...)` (allow_duplicate_keys=true)
+    JsonBuildObject(Vec<Expr>),
+    /// `jsonb_build_object(...)` (allow_duplicate_keys=false)
+    JsonbBuildObject(Vec<Expr>),
+    /// `json_strip_nulls(expr)` (returns Json)
+    JsonStripNulls(Box<Expr>),
+    /// `jsonb_strip_nulls(expr)` (returns Jsonb)
+    JsonbStripNulls(Box<Expr>),
+    /// `json_extract_path(json, keys...)` (returns Json)
+    JsonExtractPath(Box<Expr>, Vec<Expr>),
+    /// `jsonb_extract_path(json, keys...)` (returns Jsonb)
+    JsonbExtractPath(Box<Expr>, Vec<Expr>),
+    /// `jsonb_insert(target, path, new_value [, insert_after])`
+    JsonbInsert(Box<Expr>, Box<Expr>, Box<Expr>, Option<Box<Expr>>),
+    /// `jsonb_set(target, path, new_value [, create_if_missing])`
+    JsonbSet(Box<Expr>, Box<Expr>, Box<Expr>, Option<Box<Expr>>),
+    /// `jsonb_set_lax(target, path, new_value [, create_if_missing [, null_value_treatment]])`
+    JsonbSetLax(
+        Box<Expr>,
+        Box<Expr>,
+        Box<Expr>,
+        Option<Box<Expr>>,
+        Option<Box<Expr>>,
+    ),
+    /// `jsonb_pretty(expr)`
+    JsonbPretty(Box<Expr>),
+
+    /// `array_to_string(array, delim [, null_string])`
+    ArrayToString(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
+
+    /// `st_astext(expr)`
+    StAsText(Box<Expr>),
+    /// `st_aswkt(expr)`
+    StAsWkt(Box<Expr>),
+    /// `st_asewkt(expr)`
+    StAsEwkt(Box<Expr>),
+
+    /// `current_date`
+    CurrentDate,
+    /// `current_timestamp[(precision)]`
+    CurrentTimestamp(Option<Box<Expr>>),
+    /// `current_time`
+    CurrentTime,
+    /// `localtimestamp`
+    LocalTimestamp,
+    /// `localtime`
+    LocalTime,
+    /// `current_user`
+    CurrentUser,
+    /// `session_user`
+    SessionUser,
+    /// `current_catalog`
+    CurrentCatalog,
+    /// SQL `USER` (name avoids Rust keyword conflicts)
+    SqlUser,
 
     /// User-defined function call, optionally schema-qualified
     ///
@@ -299,24 +409,222 @@ impl FunctionExpr {
                 )
             }
             FunctionExpr::CountStar => "count(*)".to_string(),
-            FunctionExpr::Call {
-                name,
-                arguments: None,
-            } => name.to_string(),
-            FunctionExpr::Call {
-                name,
-                arguments: Some(arguments),
-            } => {
+            // No-paren functions
+            FunctionExpr::CurrentDate => "current_date".to_string(),
+            FunctionExpr::CurrentTimestamp(_) => "current_timestamp".to_string(),
+            FunctionExpr::CurrentTime => "current_time".to_string(),
+            FunctionExpr::LocalTimestamp => "localtimestamp".to_string(),
+            FunctionExpr::LocalTime => "localtime".to_string(),
+            FunctionExpr::CurrentUser => "current_user".to_string(),
+            FunctionExpr::SessionUser => "session_user".to_string(),
+            FunctionExpr::CurrentCatalog => "current_catalog".to_string(),
+            FunctionExpr::SqlUser => "user".to_string(),
+            // Typed built-in function variants: each produces its own format string.
+            FunctionExpr::ConvertTz(a, b, c) => format!(
+                "convert_tz({}, {}, {})",
+                a.alias(dialect)?,
+                b.alias(dialect)?,
+                c.alias(dialect)?
+            ),
+            FunctionExpr::DayOfWeek(e) => format!("dayofweek({})", e.alias(dialect)?),
+            FunctionExpr::Month(e) => format!("month({})", e.alias(dialect)?),
+            FunctionExpr::Timediff(a, b) => {
+                format!("timediff({}, {})", a.alias(dialect)?, b.alias(dialect)?)
+            }
+            FunctionExpr::Addtime(a, b) => {
+                format!("addtime({}, {})", a.alias(dialect)?, b.alias(dialect)?)
+            }
+            FunctionExpr::DateFormat(a, b) => {
+                format!("date_format({}, {})", a.alias(dialect)?, b.alias(dialect)?)
+            }
+            FunctionExpr::DateTrunc(a, b) => {
+                format!("date_trunc({}, {})", a.alias(dialect)?, b.alias(dialect)?)
+            }
+            FunctionExpr::IfNull(a, b) => {
+                format!("ifnull({}, {})", a.alias(dialect)?, b.alias(dialect)?)
+            }
+            FunctionExpr::Coalesce(args) => format!(
+                "coalesce({})",
+                args.iter()
+                    .map(|a| a.alias(dialect))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ")
+            ),
+            FunctionExpr::Round(e, prec) => {
+                if let Some(p) = prec {
+                    format!("round({}, {})", e.alias(dialect)?, p.alias(dialect)?)
+                } else {
+                    format!("round({})", e.alias(dialect)?)
+                }
+            }
+            FunctionExpr::Greatest(args) => format!(
+                "greatest({})",
+                args.iter()
+                    .map(|a| a.alias(dialect))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ")
+            ),
+            FunctionExpr::Least(args) => format!(
+                "least({})",
+                args.iter()
+                    .map(|a| a.alias(dialect))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ")
+            ),
+            FunctionExpr::Concat(args) => format!(
+                "concat({})",
+                args.iter()
+                    .map(|a| a.alias(dialect))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ")
+            ),
+            FunctionExpr::ConcatWs(args) => format!(
+                "concat_ws({})",
+                args.iter()
+                    .map(|a| a.alias(dialect))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ")
+            ),
+            FunctionExpr::SplitPart(a, b, c) => format!(
+                "split_part({}, {}, {})",
+                a.alias(dialect)?,
+                b.alias(dialect)?,
+                c.alias(dialect)?
+            ),
+            FunctionExpr::Length(e) => format!("length({})", e.alias(dialect)?),
+            FunctionExpr::OctetLength(e) => format!("octet_length({})", e.alias(dialect)?),
+            FunctionExpr::CharLength(e) => format!("char_length({})", e.alias(dialect)?),
+            FunctionExpr::Ascii(e) => format!("ascii({})", e.alias(dialect)?),
+            FunctionExpr::Hex(e) => format!("hex({})", e.alias(dialect)?),
+            FunctionExpr::JsonDepth(e) => format!("json_depth({})", e.alias(dialect)?),
+            FunctionExpr::JsonValid(e) => format!("json_valid({})", e.alias(dialect)?),
+            FunctionExpr::JsonOverlaps(a, b) => {
+                format!(
+                    "json_overlaps({}, {})",
+                    a.alias(dialect)?,
+                    b.alias(dialect)?
+                )
+            }
+            FunctionExpr::JsonQuote(e) => format!("json_quote({})", e.alias(dialect)?),
+            FunctionExpr::JsonTypeof(e) => format!("json_typeof({})", e.alias(dialect)?),
+            FunctionExpr::JsonArrayLength(e) => {
+                format!("json_array_length({})", e.alias(dialect)?)
+            }
+            FunctionExpr::JsonExtractPathText(json, keys) => format!(
+                "json_extract_path_text({}, {})",
+                json.alias(dialect)?,
+                keys.iter()
+                    .map(|a| a.alias(dialect))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ")
+            ),
+            FunctionExpr::JsonObject(args) | FunctionExpr::JsonbObject(args) => {
+                let name = if matches!(self, FunctionExpr::JsonObject(_)) {
+                    "json_object"
+                } else {
+                    "jsonb_object"
+                };
                 format!(
                     "{}({})",
                     name,
-                    arguments
-                        .iter()
-                        .map(|arg| arg.alias(dialect))
+                    args.iter()
+                        .map(|a| a.alias(dialect))
                         .collect::<Option<Vec<_>>>()?
                         .join(", ")
                 )
             }
+            FunctionExpr::JsonBuildObject(args) => format!(
+                "json_build_object({})",
+                args.iter()
+                    .map(|a| a.alias(dialect))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ")
+            ),
+            FunctionExpr::JsonbBuildObject(args) => format!(
+                "jsonb_build_object({})",
+                args.iter()
+                    .map(|a| a.alias(dialect))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ")
+            ),
+            FunctionExpr::JsonStripNulls(e) => format!("json_strip_nulls({})", e.alias(dialect)?),
+            FunctionExpr::JsonbStripNulls(e) => {
+                format!("jsonb_strip_nulls({})", e.alias(dialect)?)
+            }
+            FunctionExpr::JsonExtractPath(json, keys) => format!(
+                "json_extract_path({}, {})",
+                json.alias(dialect)?,
+                keys.iter()
+                    .map(|a| a.alias(dialect))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ")
+            ),
+            FunctionExpr::JsonbExtractPath(json, keys) => format!(
+                "jsonb_extract_path({}, {})",
+                json.alias(dialect)?,
+                keys.iter()
+                    .map(|a| a.alias(dialect))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ")
+            ),
+            FunctionExpr::JsonbInsert(a, b, c, d) => {
+                let mut s = format!(
+                    "jsonb_insert({}, {}, {}",
+                    a.alias(dialect)?,
+                    b.alias(dialect)?,
+                    c.alias(dialect)?
+                );
+                if let Some(d) = d {
+                    s.push_str(&format!(", {}", d.alias(dialect)?));
+                }
+                s.push(')');
+                s
+            }
+            FunctionExpr::JsonbSet(a, b, c, d) => {
+                let mut s = format!(
+                    "jsonb_set({}, {}, {}",
+                    a.alias(dialect)?,
+                    b.alias(dialect)?,
+                    c.alias(dialect)?
+                );
+                if let Some(d) = d {
+                    s.push_str(&format!(", {}", d.alias(dialect)?));
+                }
+                s.push(')');
+                s
+            }
+            FunctionExpr::JsonbSetLax(a, b, c, d, e) => {
+                let mut s = format!(
+                    "jsonb_set_lax({}, {}, {}",
+                    a.alias(dialect)?,
+                    b.alias(dialect)?,
+                    c.alias(dialect)?
+                );
+                if let Some(d) = d {
+                    s.push_str(&format!(", {}", d.alias(dialect)?));
+                }
+                if let Some(e) = e {
+                    s.push_str(&format!(", {}", e.alias(dialect)?));
+                }
+                s.push(')');
+                s
+            }
+            FunctionExpr::JsonbPretty(e) => format!("jsonb_pretty({})", e.alias(dialect)?),
+            FunctionExpr::ArrayToString(a, b, c) => {
+                let mut s = format!(
+                    "array_to_string({}, {}",
+                    a.alias(dialect)?,
+                    b.alias(dialect)?
+                );
+                if let Some(c) = c {
+                    s.push_str(&format!(", {}", c.alias(dialect)?));
+                }
+                s.push(')');
+                s
+            }
+            FunctionExpr::StAsText(e) => format!("st_astext({})", e.alias(dialect)?),
+            FunctionExpr::StAsWkt(e) => format!("st_aswkt({})", e.alias(dialect)?),
+            FunctionExpr::StAsEwkt(e) => format!("st_asewkt({})", e.alias(dialect)?),
             FunctionExpr::Udf {
                 schema,
                 name,
@@ -370,23 +678,101 @@ impl FunctionExpr {
             | FunctionExpr::Extract { expr: arg, .. }
             | FunctionExpr::Bucket { expr: arg, .. }
             | FunctionExpr::Lower { expr: arg, .. }
-            | FunctionExpr::Upper { expr: arg, .. } => {
+            | FunctionExpr::Upper { expr: arg, .. }
+            | FunctionExpr::DayOfWeek(arg)
+            | FunctionExpr::Month(arg)
+            | FunctionExpr::Length(arg)
+            | FunctionExpr::OctetLength(arg)
+            | FunctionExpr::CharLength(arg)
+            | FunctionExpr::Ascii(arg)
+            | FunctionExpr::Hex(arg)
+            | FunctionExpr::JsonDepth(arg)
+            | FunctionExpr::JsonValid(arg)
+            | FunctionExpr::JsonQuote(arg)
+            | FunctionExpr::JsonTypeof(arg)
+            | FunctionExpr::JsonArrayLength(arg)
+            | FunctionExpr::JsonStripNulls(arg)
+            | FunctionExpr::JsonbStripNulls(arg)
+            | FunctionExpr::JsonbPretty(arg)
+            | FunctionExpr::StAsText(arg)
+            | FunctionExpr::StAsWkt(arg)
+            | FunctionExpr::StAsEwkt(arg) => {
                 concrete_iter!(iter::once(arg.as_ref()))
             }
             FunctionExpr::JsonObjectAgg { key, value, .. } => {
                 concrete_iter!(iter::once(key.as_ref()).chain(iter::once(value.as_ref())))
             }
+            FunctionExpr::Timediff(a, b)
+            | FunctionExpr::Addtime(a, b)
+            | FunctionExpr::DateFormat(a, b)
+            | FunctionExpr::DateTrunc(a, b)
+            | FunctionExpr::IfNull(a, b)
+            | FunctionExpr::JsonOverlaps(a, b) => {
+                concrete_iter!(iter::once(a.as_ref()).chain(iter::once(b.as_ref())))
+            }
+            FunctionExpr::ConvertTz(a, b, c) | FunctionExpr::SplitPart(a, b, c) => {
+                concrete_iter!(
+                    iter::once(a.as_ref())
+                        .chain(iter::once(b.as_ref()))
+                        .chain(iter::once(c.as_ref()))
+                )
+            }
+            FunctionExpr::Round(e, prec) => {
+                concrete_iter!(iter::once(e.as_ref()).chain(prec.iter().map(|p| p.as_ref())))
+            }
+            FunctionExpr::ArrayToString(a, b, c) => {
+                concrete_iter!(
+                    iter::once(a.as_ref())
+                        .chain(iter::once(b.as_ref()))
+                        .chain(c.iter().map(|p| p.as_ref()))
+                )
+            }
+            FunctionExpr::JsonbInsert(a, b, c, d) | FunctionExpr::JsonbSet(a, b, c, d) => {
+                concrete_iter!(
+                    iter::once(a.as_ref())
+                        .chain(iter::once(b.as_ref()))
+                        .chain(iter::once(c.as_ref()))
+                        .chain(d.iter().map(|p| p.as_ref()))
+                )
+            }
+            FunctionExpr::JsonbSetLax(a, b, c, d, e) => {
+                concrete_iter!(
+                    iter::once(a.as_ref())
+                        .chain(iter::once(b.as_ref()))
+                        .chain(iter::once(c.as_ref()))
+                        .chain(d.iter().map(|p| p.as_ref()))
+                        .chain(e.iter().map(|p| p.as_ref()))
+                )
+            }
+            FunctionExpr::JsonExtractPathText(json, keys)
+            | FunctionExpr::JsonExtractPath(json, keys)
+            | FunctionExpr::JsonbExtractPath(json, keys) => {
+                concrete_iter!(iter::once(json.as_ref()).chain(keys.iter()))
+            }
+            FunctionExpr::Coalesce(args)
+            | FunctionExpr::Greatest(args)
+            | FunctionExpr::Least(args)
+            | FunctionExpr::Concat(args)
+            | FunctionExpr::ConcatWs(args)
+            | FunctionExpr::JsonObject(args)
+            | FunctionExpr::JsonbObject(args)
+            | FunctionExpr::JsonBuildObject(args)
+            | FunctionExpr::JsonbBuildObject(args) => {
+                concrete_iter!(args.iter())
+            }
             FunctionExpr::CountStar
             | FunctionExpr::RowNumber
             | FunctionExpr::Rank
-            | FunctionExpr::DenseRank => concrete_iter!(iter::empty()),
-            FunctionExpr::Call {
-                arguments: None, ..
-            } => concrete_iter!(iter::empty()),
-            FunctionExpr::Call {
-                arguments: Some(arguments),
-                ..
-            } => concrete_iter!(arguments),
+            | FunctionExpr::DenseRank
+            | FunctionExpr::CurrentDate
+            | FunctionExpr::CurrentTimestamp(_)
+            | FunctionExpr::CurrentTime
+            | FunctionExpr::LocalTimestamp
+            | FunctionExpr::LocalTime
+            | FunctionExpr::CurrentUser
+            | FunctionExpr::SessionUser
+            | FunctionExpr::CurrentCatalog
+            | FunctionExpr::SqlUser => concrete_iter!(iter::empty()),
             FunctionExpr::Udf { arguments, .. } => concrete_iter!(arguments),
             FunctionExpr::Substring { string, pos, len } => {
                 concrete_iter!(
@@ -395,6 +781,342 @@ impl FunctionExpr {
                         .chain(len.iter().map(|p| p.as_ref()))
                 )
             }
+        }
+    }
+
+    /// Consumes self and returns all direct arguments as owned `Expr` values
+    pub fn into_arguments(self) -> Vec<Expr> {
+        match self {
+            FunctionExpr::ArrayAgg { expr, .. }
+            | FunctionExpr::Avg { expr, .. }
+            | FunctionExpr::Count { expr, .. }
+            | FunctionExpr::Sum { expr, .. }
+            | FunctionExpr::Max(expr)
+            | FunctionExpr::Min(expr)
+            | FunctionExpr::GroupConcat { expr, .. }
+            | FunctionExpr::StringAgg { expr, .. }
+            | FunctionExpr::Extract { expr, .. }
+            | FunctionExpr::Bucket { expr, .. }
+            | FunctionExpr::Lower { expr, .. }
+            | FunctionExpr::Upper { expr, .. }
+            | FunctionExpr::DayOfWeek(expr)
+            | FunctionExpr::Month(expr)
+            | FunctionExpr::Length(expr)
+            | FunctionExpr::OctetLength(expr)
+            | FunctionExpr::CharLength(expr)
+            | FunctionExpr::Ascii(expr)
+            | FunctionExpr::Hex(expr)
+            | FunctionExpr::JsonDepth(expr)
+            | FunctionExpr::JsonValid(expr)
+            | FunctionExpr::JsonQuote(expr)
+            | FunctionExpr::JsonTypeof(expr)
+            | FunctionExpr::JsonArrayLength(expr)
+            | FunctionExpr::JsonStripNulls(expr)
+            | FunctionExpr::JsonbStripNulls(expr)
+            | FunctionExpr::JsonbPretty(expr)
+            | FunctionExpr::StAsText(expr)
+            | FunctionExpr::StAsWkt(expr)
+            | FunctionExpr::StAsEwkt(expr) => vec![*expr],
+            FunctionExpr::JsonObjectAgg { key, value, .. } => vec![*key, *value],
+            FunctionExpr::Timediff(a, b)
+            | FunctionExpr::Addtime(a, b)
+            | FunctionExpr::DateFormat(a, b)
+            | FunctionExpr::DateTrunc(a, b)
+            | FunctionExpr::IfNull(a, b)
+            | FunctionExpr::JsonOverlaps(a, b) => vec![*a, *b],
+            FunctionExpr::ConvertTz(a, b, c) | FunctionExpr::SplitPart(a, b, c) => vec![*a, *b, *c],
+            FunctionExpr::Round(e, prec) => {
+                let mut v = vec![*e];
+                if let Some(p) = prec {
+                    v.push(*p);
+                }
+                v
+            }
+            FunctionExpr::ArrayToString(a, b, c) => {
+                let mut v = vec![*a, *b];
+                if let Some(c) = c {
+                    v.push(*c);
+                }
+                v
+            }
+            FunctionExpr::JsonbInsert(a, b, c, d) | FunctionExpr::JsonbSet(a, b, c, d) => {
+                let mut v = vec![*a, *b, *c];
+                if let Some(d) = d {
+                    v.push(*d);
+                }
+                v
+            }
+            FunctionExpr::JsonbSetLax(a, b, c, d, e) => {
+                let mut v = vec![*a, *b, *c];
+                if let Some(d) = d {
+                    v.push(*d);
+                }
+                if let Some(e) = e {
+                    v.push(*e);
+                }
+                v
+            }
+            FunctionExpr::JsonExtractPathText(json, mut keys)
+            | FunctionExpr::JsonExtractPath(json, mut keys)
+            | FunctionExpr::JsonbExtractPath(json, mut keys) => {
+                let mut v = vec![*json];
+                v.append(&mut keys);
+                v
+            }
+            FunctionExpr::Coalesce(args)
+            | FunctionExpr::Greatest(args)
+            | FunctionExpr::Least(args)
+            | FunctionExpr::Concat(args)
+            | FunctionExpr::ConcatWs(args)
+            | FunctionExpr::JsonObject(args)
+            | FunctionExpr::JsonbObject(args)
+            | FunctionExpr::JsonBuildObject(args)
+            | FunctionExpr::JsonbBuildObject(args) => args,
+            FunctionExpr::Substring { string, pos, len } => {
+                let mut v = vec![*string];
+                if let Some(p) = pos {
+                    v.push(*p);
+                }
+                if let Some(l) = len {
+                    v.push(*l);
+                }
+                v
+            }
+            FunctionExpr::CountStar
+            | FunctionExpr::RowNumber
+            | FunctionExpr::Rank
+            | FunctionExpr::DenseRank
+            | FunctionExpr::CurrentDate
+            | FunctionExpr::CurrentTimestamp(_)
+            | FunctionExpr::CurrentTime
+            | FunctionExpr::LocalTimestamp
+            | FunctionExpr::LocalTime
+            | FunctionExpr::CurrentUser
+            | FunctionExpr::SessionUser
+            | FunctionExpr::CurrentCatalog
+            | FunctionExpr::SqlUser => vec![],
+            FunctionExpr::Udf { arguments, .. } => arguments,
+        }
+    }
+
+    /// Maps a function name and argument list to the corresponding typed `FunctionExpr` variant.
+    ///
+    /// Recognized built-in names are mapped to their specific variants. Unrecognized names,
+    /// or calls with fewer arguments than the minimum required for a variant, produce
+    /// `FunctionExpr::Udf` rather than panicking.
+    ///
+    /// This is the canonical source of the name→variant mapping used by both the SQL parser
+    /// (`nom-sql`) and the query generator.
+    pub fn from_name_and_args(name: &str, args: Vec<Expr>) -> Self {
+        let n = args.len();
+        let mut it = args.into_iter();
+        // All `next_box!()` calls below are guarded by `if n >= K` match guards, so
+        // `it.next()` is guaranteed to return `Some`.
+        macro_rules! next_box {
+            () => {
+                Box::new(it.next().expect("arity guard ensures arg is available"))
+            };
+        }
+        // Capture the result first; the debug_assert below checks that fixed-arity
+        // functions do not silently drop excess arguments.
+        let result = match name {
+            // Date/Time
+            "convert_tz" if n >= 3 => Self::ConvertTz(next_box!(), next_box!(), next_box!()),
+            "dayofweek" if n >= 1 => Self::DayOfWeek(next_box!()),
+            "month" if n >= 1 => Self::Month(next_box!()),
+            "timediff" if n >= 2 => Self::Timediff(next_box!(), next_box!()),
+            "addtime" if n >= 2 => Self::Addtime(next_box!(), next_box!()),
+            "date_format" if n >= 2 => Self::DateFormat(next_box!(), next_box!()),
+            "date_trunc" if n >= 2 => Self::DateTrunc(next_box!(), next_box!()),
+            // Both `now()` and `current_timestamp()` map to `CurrentTimestamp`, preserving the
+            // optional precision argument for DDL round-trip display (Readyset doesn't use it).
+            "now" | "current_timestamp" => Self::CurrentTimestamp(it.next().map(Box::new)),
+            // Null handling
+            "ifnull" if n >= 2 => Self::IfNull(next_box!(), next_box!()),
+            "coalesce" => Self::Coalesce(it.by_ref().collect()),
+            // Math
+            "round" if n >= 1 => {
+                let expr = next_box!();
+                let prec = it.next().map(Box::new);
+                Self::Round(expr, prec)
+            }
+            "greatest" => Self::Greatest(it.by_ref().collect()),
+            "least" => Self::Least(it.by_ref().collect()),
+            // String
+            "concat" => Self::Concat(it.by_ref().collect()),
+            "concat_ws" => Self::ConcatWs(it.by_ref().collect()),
+            "split_part" if n >= 3 => Self::SplitPart(next_box!(), next_box!(), next_box!()),
+            "length" if n >= 1 => Self::Length(next_box!()),
+            "octet_length" if n >= 1 => Self::OctetLength(next_box!()),
+            "char_length" | "character_length" if n >= 1 => Self::CharLength(next_box!()),
+            "ascii" if n >= 1 => Self::Ascii(next_box!()),
+            "hex" if n >= 1 => Self::Hex(next_box!()),
+            "lower" if n >= 1 => Self::Lower {
+                expr: next_box!(),
+                collation: None,
+            },
+            "upper" if n >= 1 => Self::Upper {
+                expr: next_box!(),
+                collation: None,
+            },
+            "substring" | "substr" if n >= 1 => {
+                let string = next_box!();
+                let pos = it.next().map(Box::new);
+                let len = it.next().map(Box::new);
+                Self::Substring { string, pos, len }
+            }
+            // JSON (consolidated)
+            "json_depth" if n >= 1 => Self::JsonDepth(next_box!()),
+            "json_valid" if n >= 1 => Self::JsonValid(next_box!()),
+            "json_overlaps" if n >= 2 => Self::JsonOverlaps(next_box!(), next_box!()),
+            "json_quote" if n >= 1 => Self::JsonQuote(next_box!()),
+            "json_typeof" | "jsonb_typeof" if n >= 1 => Self::JsonTypeof(next_box!()),
+            "json_array_length" | "jsonb_array_length" if n >= 1 => {
+                Self::JsonArrayLength(next_box!())
+            }
+            "json_extract_path_text" | "jsonb_extract_path_text" if n >= 1 => {
+                let json = next_box!();
+                Self::JsonExtractPathText(json, it.by_ref().collect())
+            }
+            // JSON (separate)
+            "json_object" => Self::JsonObject(it.by_ref().collect()),
+            "jsonb_object" => Self::JsonbObject(it.by_ref().collect()),
+            "json_build_object" => Self::JsonBuildObject(it.by_ref().collect()),
+            "jsonb_build_object" => Self::JsonbBuildObject(it.by_ref().collect()),
+            "json_strip_nulls" if n >= 1 => Self::JsonStripNulls(next_box!()),
+            "jsonb_strip_nulls" if n >= 1 => Self::JsonbStripNulls(next_box!()),
+            "json_extract_path" if n >= 1 => {
+                let json = next_box!();
+                Self::JsonExtractPath(json, it.by_ref().collect())
+            }
+            "jsonb_extract_path" if n >= 1 => {
+                let json = next_box!();
+                Self::JsonbExtractPath(json, it.by_ref().collect())
+            }
+            "jsonb_insert" if n >= 3 => {
+                let (a, b, c) = (next_box!(), next_box!(), next_box!());
+                Self::JsonbInsert(a, b, c, it.next().map(Box::new))
+            }
+            "jsonb_set" if n >= 3 => {
+                let (a, b, c) = (next_box!(), next_box!(), next_box!());
+                Self::JsonbSet(a, b, c, it.next().map(Box::new))
+            }
+            "jsonb_set_lax" if n >= 3 => {
+                let (a, b, c) = (next_box!(), next_box!(), next_box!());
+                let d = it.next().map(Box::new);
+                let e = it.next().map(Box::new);
+                Self::JsonbSetLax(a, b, c, d, e)
+            }
+            "jsonb_pretty" if n >= 1 => Self::JsonbPretty(next_box!()),
+            // Array
+            "array_to_string" if n >= 2 => {
+                let (a, b) = (next_box!(), next_box!());
+                Self::ArrayToString(a, b, it.next().map(Box::new))
+            }
+            // Spatial
+            "st_astext" if n >= 1 => Self::StAsText(next_box!()),
+            "st_aswkt" if n >= 1 => Self::StAsWkt(next_box!()),
+            "st_asewkt" if n >= 1 => Self::StAsEwkt(next_box!()),
+            // Unrecognized name, or a known name called with fewer arguments than required
+            // (arity guards above did not match). Both cases fall back to Udf so that the
+            // call site can produce a "user-defined function not supported" error downstream
+            // rather than failing silently at parse time.
+            _ => Self::Udf {
+                schema: None,
+                name: name.into(),
+                arguments: it.by_ref().collect(),
+            },
+        };
+        debug_assert!(
+            it.next().is_none(),
+            "from_name_and_args: extra arguments silently dropped for {name:?}"
+        );
+        result
+    }
+
+    /// Returns the canonical lowercase SQL function name used by `BuiltinFunction::from_name_and_args`.
+    ///
+    /// This covers only the typed built-in variants that are lowered via `from_name_and_args`.
+    /// Returns `None` for aggregate, window, and UDF variants that are not lowered that way.
+    pub fn builtin_name(&self) -> Option<&'static str> {
+        match self {
+            FunctionExpr::ConvertTz(..) => Some("convert_tz"),
+            FunctionExpr::DayOfWeek(..) => Some("dayofweek"),
+            FunctionExpr::Month(..) => Some("month"),
+            FunctionExpr::Timediff(..) => Some("timediff"),
+            FunctionExpr::Addtime(..) => Some("addtime"),
+            FunctionExpr::DateFormat(..) => Some("date_format"),
+            FunctionExpr::DateTrunc(..) => Some("date_trunc"),
+            FunctionExpr::IfNull(..) => Some("ifnull"),
+            FunctionExpr::Coalesce(..) => Some("coalesce"),
+            FunctionExpr::Round(..) => Some("round"),
+            FunctionExpr::Greatest(..) => Some("greatest"),
+            FunctionExpr::Least(..) => Some("least"),
+            FunctionExpr::Concat(..) => Some("concat"),
+            FunctionExpr::ConcatWs(..) => Some("concat_ws"),
+            FunctionExpr::SplitPart(..) => Some("split_part"),
+            FunctionExpr::Length(..) => Some("length"),
+            FunctionExpr::OctetLength(..) => Some("octet_length"),
+            FunctionExpr::CharLength(..) => Some("char_length"),
+            FunctionExpr::Ascii(..) => Some("ascii"),
+            FunctionExpr::Hex(..) => Some("hex"),
+            FunctionExpr::JsonDepth(..) => Some("json_depth"),
+            FunctionExpr::JsonValid(..) => Some("json_valid"),
+            FunctionExpr::JsonOverlaps(..) => Some("json_overlaps"),
+            FunctionExpr::JsonQuote(..) => Some("json_quote"),
+            FunctionExpr::JsonTypeof(..) => Some("json_typeof"),
+            FunctionExpr::JsonArrayLength(..) => Some("json_array_length"),
+            FunctionExpr::JsonExtractPathText(..) => Some("json_extract_path_text"),
+            FunctionExpr::JsonObject(..) => Some("json_object"),
+            FunctionExpr::JsonbObject(..) => Some("jsonb_object"),
+            FunctionExpr::JsonBuildObject(..) => Some("json_build_object"),
+            FunctionExpr::JsonbBuildObject(..) => Some("jsonb_build_object"),
+            FunctionExpr::JsonStripNulls(..) => Some("json_strip_nulls"),
+            FunctionExpr::JsonbStripNulls(..) => Some("jsonb_strip_nulls"),
+            FunctionExpr::JsonExtractPath(..) => Some("json_extract_path"),
+            FunctionExpr::JsonbExtractPath(..) => Some("jsonb_extract_path"),
+            FunctionExpr::JsonbInsert(..) => Some("jsonb_insert"),
+            FunctionExpr::JsonbSet(..) => Some("jsonb_set"),
+            FunctionExpr::JsonbSetLax(..) => Some("jsonb_set_lax"),
+            FunctionExpr::JsonbPretty(..) => Some("jsonb_pretty"),
+            FunctionExpr::ArrayToString(..) => Some("array_to_string"),
+            FunctionExpr::StAsText(..) => Some("st_astext"),
+            FunctionExpr::StAsWkt(..) => Some("st_aswkt"),
+            FunctionExpr::StAsEwkt(..) => Some("st_asewkt"),
+            // Aggregates — not lowered via from_name_and_args
+            FunctionExpr::ArrayAgg { .. }
+            | FunctionExpr::Avg { .. }
+            | FunctionExpr::Count { .. }
+            | FunctionExpr::CountStar
+            | FunctionExpr::GroupConcat { .. }
+            | FunctionExpr::StringAgg { .. }
+            | FunctionExpr::Sum { .. }
+            | FunctionExpr::Max(_)
+            | FunctionExpr::Min(_)
+            | FunctionExpr::JsonObjectAgg { .. }
+            // Window functions — not lowered via from_name_and_args
+            | FunctionExpr::RowNumber
+            | FunctionExpr::Rank
+            | FunctionExpr::DenseRank
+            // These built-ins have dedicated lowering arms that do not go through
+            // the builtin_name() / into_arguments() round-trip
+            | FunctionExpr::Bucket { .. }
+            | FunctionExpr::Substring { .. }
+            | FunctionExpr::Extract { .. }
+            | FunctionExpr::Lower { .. }
+            | FunctionExpr::Upper { .. }
+            // No-paren functions — lowered directly, not via from_name_and_args
+            | FunctionExpr::CurrentDate
+            | FunctionExpr::CurrentTimestamp(_)
+            | FunctionExpr::CurrentTime
+            | FunctionExpr::LocalTimestamp
+            | FunctionExpr::LocalTime
+            | FunctionExpr::CurrentUser
+            | FunctionExpr::SessionUser
+            | FunctionExpr::CurrentCatalog
+            | FunctionExpr::SqlUser
+            // UDF — dynamic name, never a static builtin_name
+            | FunctionExpr::Udf { .. } => None,
         }
     }
 }
@@ -485,36 +1207,6 @@ impl DialectDisplay for FunctionExpr {
                 }
                 write!(f, ")")
             }
-            FunctionExpr::Call {
-                name,
-                arguments: None,
-            } => write!(f, "{}", name),
-            FunctionExpr::Call {
-                name,
-                arguments: Some(arguments),
-            } => {
-                write!(
-                    f,
-                    "{}({})",
-                    name,
-                    arguments.iter().map(|arg| arg.display(dialect)).join(", ")
-                )
-            }
-            FunctionExpr::Udf {
-                schema,
-                name,
-                arguments,
-            } => {
-                if let Some(s) = schema {
-                    write!(f, "{}.", dialect.quote_identifier(s))?;
-                }
-                write!(
-                    f,
-                    "{}({})",
-                    dialect.quote_identifier(name),
-                    arguments.iter().map(|arg| arg.display(dialect)).join(", ")
-                )
-            }
             FunctionExpr::Substring { string, pos, len } => {
                 write!(f, "substring({}", string.display(dialect))?;
 
@@ -572,6 +1264,227 @@ impl DialectDisplay for FunctionExpr {
             FunctionExpr::RowNumber => write!(f, "ROW_NUMBER()"),
             FunctionExpr::Rank => write!(f, "RANK()"),
             FunctionExpr::DenseRank => write!(f, "DENSE_RANK()"),
+            // No-paren functions
+            FunctionExpr::CurrentDate => write!(f, "current_date"),
+            FunctionExpr::CurrentTimestamp(prec) => match prec {
+                Some(p) => write!(f, "current_timestamp({})", p.display(dialect)),
+                None => write!(f, "current_timestamp"),
+            },
+            FunctionExpr::CurrentTime => write!(f, "current_time"),
+            FunctionExpr::LocalTimestamp => write!(f, "localtimestamp"),
+            FunctionExpr::LocalTime => write!(f, "localtime"),
+            FunctionExpr::CurrentUser => write!(f, "current_user"),
+            FunctionExpr::SessionUser => write!(f, "session_user"),
+            FunctionExpr::CurrentCatalog => write!(f, "current_catalog"),
+            FunctionExpr::SqlUser => write!(f, "user"),
+            // New function variants - helper macro for simple display
+            FunctionExpr::ConvertTz(a, b, c) => write!(
+                f,
+                "convert_tz({}, {}, {})",
+                a.display(dialect),
+                b.display(dialect),
+                c.display(dialect)
+            ),
+            FunctionExpr::DayOfWeek(e) => write!(f, "dayofweek({})", e.display(dialect)),
+            FunctionExpr::Month(e) => write!(f, "month({})", e.display(dialect)),
+            FunctionExpr::Timediff(a, b) => write!(
+                f,
+                "timediff({}, {})",
+                a.display(dialect),
+                b.display(dialect)
+            ),
+            FunctionExpr::Addtime(a, b) => {
+                write!(f, "addtime({}, {})", a.display(dialect), b.display(dialect))
+            }
+            FunctionExpr::DateFormat(a, b) => write!(
+                f,
+                "date_format({}, {})",
+                a.display(dialect),
+                b.display(dialect)
+            ),
+            FunctionExpr::DateTrunc(a, b) => write!(
+                f,
+                "date_trunc({}, {})",
+                a.display(dialect),
+                b.display(dialect)
+            ),
+            FunctionExpr::IfNull(a, b) => {
+                write!(f, "ifnull({}, {})", a.display(dialect), b.display(dialect))
+            }
+            FunctionExpr::Coalesce(args) => write!(
+                f,
+                "coalesce({})",
+                args.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::Round(e, prec) => {
+                write!(f, "round({}", e.display(dialect))?;
+                if let Some(p) = prec {
+                    write!(f, ", {}", p.display(dialect))?;
+                }
+                write!(f, ")")
+            }
+            FunctionExpr::Greatest(args) => write!(
+                f,
+                "greatest({})",
+                args.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::Least(args) => write!(
+                f,
+                "least({})",
+                args.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::Concat(args) => write!(
+                f,
+                "concat({})",
+                args.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::ConcatWs(args) => write!(
+                f,
+                "concat_ws({})",
+                args.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::SplitPart(a, b, c) => write!(
+                f,
+                "split_part({}, {}, {})",
+                a.display(dialect),
+                b.display(dialect),
+                c.display(dialect)
+            ),
+            FunctionExpr::Length(e) => write!(f, "length({})", e.display(dialect)),
+            FunctionExpr::OctetLength(e) => write!(f, "octet_length({})", e.display(dialect)),
+            FunctionExpr::CharLength(e) => write!(f, "char_length({})", e.display(dialect)),
+            FunctionExpr::Ascii(e) => write!(f, "ascii({})", e.display(dialect)),
+            FunctionExpr::Hex(e) => write!(f, "hex({})", e.display(dialect)),
+            FunctionExpr::JsonDepth(e) => write!(f, "json_depth({})", e.display(dialect)),
+            FunctionExpr::JsonValid(e) => write!(f, "json_valid({})", e.display(dialect)),
+            FunctionExpr::JsonOverlaps(a, b) => write!(
+                f,
+                "json_overlaps({}, {})",
+                a.display(dialect),
+                b.display(dialect)
+            ),
+            FunctionExpr::JsonQuote(e) => write!(f, "json_quote({})", e.display(dialect)),
+            FunctionExpr::JsonTypeof(e) => write!(f, "json_typeof({})", e.display(dialect)),
+            FunctionExpr::JsonArrayLength(e) => {
+                write!(f, "json_array_length({})", e.display(dialect))
+            }
+            FunctionExpr::JsonExtractPathText(json, keys) => write!(
+                f,
+                "json_extract_path_text({}, {})",
+                json.display(dialect),
+                keys.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::JsonObject(args) => write!(
+                f,
+                "json_object({})",
+                args.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::JsonbObject(args) => write!(
+                f,
+                "jsonb_object({})",
+                args.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::JsonBuildObject(args) => write!(
+                f,
+                "json_build_object({})",
+                args.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::JsonbBuildObject(args) => write!(
+                f,
+                "jsonb_build_object({})",
+                args.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::JsonStripNulls(e) => {
+                write!(f, "json_strip_nulls({})", e.display(dialect))
+            }
+            FunctionExpr::JsonbStripNulls(e) => {
+                write!(f, "jsonb_strip_nulls({})", e.display(dialect))
+            }
+            FunctionExpr::JsonExtractPath(json, keys) => write!(
+                f,
+                "json_extract_path({}, {})",
+                json.display(dialect),
+                keys.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::JsonbExtractPath(json, keys) => write!(
+                f,
+                "jsonb_extract_path({}, {})",
+                json.display(dialect),
+                keys.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::JsonbInsert(a, b, c, d) => {
+                write!(
+                    f,
+                    "jsonb_insert({}, {}, {}",
+                    a.display(dialect),
+                    b.display(dialect),
+                    c.display(dialect)
+                )?;
+                if let Some(d) = d {
+                    write!(f, ", {}", d.display(dialect))?;
+                }
+                write!(f, ")")
+            }
+            FunctionExpr::JsonbSet(a, b, c, d) => {
+                write!(
+                    f,
+                    "jsonb_set({}, {}, {}",
+                    a.display(dialect),
+                    b.display(dialect),
+                    c.display(dialect)
+                )?;
+                if let Some(d) = d {
+                    write!(f, ", {}", d.display(dialect))?;
+                }
+                write!(f, ")")
+            }
+            FunctionExpr::JsonbSetLax(a, b, c, d, e) => {
+                write!(
+                    f,
+                    "jsonb_set_lax({}, {}, {}",
+                    a.display(dialect),
+                    b.display(dialect),
+                    c.display(dialect)
+                )?;
+                if let Some(d) = d {
+                    write!(f, ", {}", d.display(dialect))?;
+                }
+                if let Some(e) = e {
+                    write!(f, ", {}", e.display(dialect))?;
+                }
+                write!(f, ")")
+            }
+            FunctionExpr::JsonbPretty(e) => write!(f, "jsonb_pretty({})", e.display(dialect)),
+            FunctionExpr::ArrayToString(a, b, c) => {
+                write!(
+                    f,
+                    "array_to_string({}, {}",
+                    a.display(dialect),
+                    b.display(dialect)
+                )?;
+                if let Some(c) = c {
+                    write!(f, ", {}", c.display(dialect))?;
+                }
+                write!(f, ")")
+            }
+            FunctionExpr::StAsText(e) => write!(f, "st_astext({})", e.display(dialect)),
+            FunctionExpr::StAsWkt(e) => write!(f, "st_aswkt({})", e.display(dialect)),
+            FunctionExpr::StAsEwkt(e) => write!(f, "st_asewkt({})", e.display(dialect)),
+            FunctionExpr::Udf {
+                schema,
+                name,
+                arguments,
+            } => {
+                if let Some(s) = schema {
+                    write!(f, "{}.", dialect.quote_identifier(s))?;
+                }
+                write!(
+                    f,
+                    "{}({})",
+                    dialect.maybe_quote_identifier(name),
+                    arguments.iter().map(|arg| arg.display(dialect)).join(", ")
+                )
+            }
         })
     }
 }
@@ -1211,10 +2124,10 @@ impl Expr {
     fn extract_all_any_op(self) -> Result<Self, AstConversionError> {
         if let Expr::BinaryOp { lhs, op, rhs } = self {
             match *rhs {
-                Expr::Call(FunctionExpr::Call {
+                Expr::Call(FunctionExpr::Udf {
+                    schema: None,
                     name,
-                    arguments: Some(arguments),
-                    ..
+                    arguments,
                 }) if name.eq_ignore_ascii_case("ALL") => {
                     Ok(Self::OpAll {
                         lhs,
@@ -1224,10 +2137,10 @@ impl Expr {
                         })?),
                     })
                 }
-                Expr::Call(FunctionExpr::Call {
+                Expr::Call(FunctionExpr::Udf {
+                    schema: None,
                     name,
-                    arguments: Some(arguments),
-                    ..
+                    arguments,
                 }) if name.eq_ignore_ascii_case("ANY") => {
                     Ok(Self::OpAny {
                         lhs,
@@ -1633,24 +2546,16 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 substring_from,
                 substring_for,
                 special: true,
-                shorthand,
+                shorthand: _,
             } => {
-                let mut arguments = vec![expr.try_into_dialect(dialect)?];
-                if let Some(pos) = substring_from.try_into_dialect(dialect)? {
-                    arguments.push(pos);
-                }
-                if let Some(len) = substring_for.try_into_dialect(dialect)? {
-                    arguments.push(len);
-                }
-                let name = if shorthand {
-                    "substr".into_dialect(dialect)
-                } else {
-                    "substring".into_dialect(dialect)
-                };
-                Ok(Self::Call(FunctionExpr::Call {
-                    name,
-                    arguments: Some(arguments),
-                }))
+                let string: Box<Expr> = expr.try_into_dialect(dialect)?;
+                let pos: Option<Box<Expr>> = substring_from
+                    .map(|e| e.try_into_dialect(dialect))
+                    .transpose()?;
+                let len: Option<Box<Expr>> = substring_for
+                    .map(|e| e.try_into_dialect(dialect))
+                    .transpose()?;
+                Ok(Self::Call(FunctionExpr::Substring { string, pos, len }))
             }
             Trim {
                 expr: _,
@@ -1920,10 +2825,24 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                     failed!("Schema-qualified function calls require parentheses")?;
                 }
                 ident.value.make_ascii_lowercase();
-                return Ok(Self::Call(FunctionExpr::Call {
-                    name: ident.into_dialect(dialect),
-                    arguments: None,
-                }));
+                let func = match ident.value.as_str() {
+                    "current_date" => FunctionExpr::CurrentDate,
+                    "current_timestamp" => FunctionExpr::CurrentTimestamp(None),
+                    "current_time" => FunctionExpr::CurrentTime,
+                    "localtimestamp" => FunctionExpr::LocalTimestamp,
+                    "localtime" => FunctionExpr::LocalTime,
+                    "current_user" => FunctionExpr::CurrentUser,
+                    "session_user" => FunctionExpr::SessionUser,
+                    "current_catalog" => FunctionExpr::CurrentCatalog,
+                    "user" => FunctionExpr::SqlUser,
+                    _ => {
+                        return unsupported!(
+                            "No-parentheses function '{}' is not supported",
+                            ident.value
+                        );
+                    }
+                };
+                return Ok(Self::Call(func));
             }
             sqlparser::ast::FunctionArguments::Subquery(query) => {
                 if ident.value.eq_ignore_ascii_case("ARRAY") {
@@ -2098,12 +3017,10 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
                 }),
             }
         } else if is_builtin {
-            // Built-in function that we don't have a specific variant for
+            // Built-in function — map to specific variants where possible
             ident.value.make_ascii_lowercase();
-            Self::Call(FunctionExpr::Call {
-                name: ident.clone().into_dialect(dialect),
-                arguments: Some(exprs.by_ref().collect::<Result<_, _>>()?),
-            })
+            let all_args: Vec<Expr> = exprs.by_ref().collect::<Result<_, _>>()?;
+            map_builtin_to_function_expr(&ident.value, all_args)
         } else {
             Self::Call(FunctionExpr::Udf {
                 schema,
@@ -2122,6 +3039,12 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
             Ok(expr)
         }
     }
+}
+
+/// Maps a built-in function name and arguments to a specific `FunctionExpr` variant.
+/// Returns an error for unrecognized function names.
+fn map_builtin_to_function_expr(name: &str, args: Vec<Expr>) -> Expr {
+    Expr::Call(FunctionExpr::from_name_and_args(name, args))
 }
 
 fn sqlparser_window_to_window_function(
@@ -2543,11 +3466,8 @@ impl Arbitrary for Expr {
                     .prop_map(|(string, pos, len)| {
                         FunctionExpr::Substring { string, pos, len }
                     }),
-                (
-                    any::<SqlIdentifier>(),
-                    proptest::option::of(proptest::collection::vec(element.clone(), 0..24))
-                )
-                    .prop_map(|(name, arguments)| FunctionExpr::Call { name, arguments }),
+                proptest::collection::vec(element.clone(), 1..6).prop_map(FunctionExpr::Coalesce),
+                box_expr.clone().prop_map(FunctionExpr::Length),
                 (
                     proptest::option::of(any::<SqlIdentifier>()),
                     any::<SqlIdentifier>(),
@@ -2807,5 +3727,21 @@ mod tests {
             }
             other => panic!("expected outer Expr::BinaryOp with Add, got {:?}", other),
         }
+    }
+
+    /// Guard against `FunctionExpr` enum size regressions.
+    ///
+    /// The `Udf` variant dominates enum size due to its three heap-allocated fields
+    /// (`Option<SqlIdentifier>`, `SqlIdentifier`, `Vec<Expr>`). The ideal target is ≤ 48 bytes,
+    /// achievable by boxing `Udf` into `Udf(Box<UdfCall>)`. This test uses a conservative
+    /// bound to catch further regressions while the boxing refactor is pending.
+    #[test]
+    fn function_expr_size() {
+        use std::mem::size_of;
+        assert!(
+            size_of::<FunctionExpr>() <= 72,
+            "FunctionExpr grew to {} bytes — consider boxing the Udf variant to reduce size",
+            size_of::<FunctionExpr>()
+        );
     }
 }

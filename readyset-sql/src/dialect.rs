@@ -69,4 +69,37 @@ impl Dialect {
             ident.to_string().replace(quote, &format!("{quote}{quote}"))
         )
     }
+
+    /// Returns true if the identifier string requires quoting to be used as an SQL identifier.
+    ///
+    /// An identifier needs quoting if it contains characters outside `[A-Za-z0-9_]` or starts
+    /// with a digit.
+    pub fn identifier_needs_quoting(ident: &str) -> bool {
+        let mut chars = ident.chars();
+        match chars.next() {
+            None => true, // empty string always needs quoting
+            Some(first) => {
+                if !first.is_ascii_alphabetic() && first != '_' {
+                    return true;
+                }
+                chars.any(|c| !c.is_ascii_alphanumeric() && c != '_')
+            }
+        }
+    }
+
+    /// Quotes the identifier only if it contains characters that require quoting; otherwise
+    /// returns it as-is. Use this for function names in display output where unconditional quoting
+    /// would change the SQL semantics.
+    pub fn maybe_quote_identifier(self, ident: impl fmt::Display) -> String {
+        let s = ident.to_string();
+        if Self::identifier_needs_quoting(&s) {
+            let quote = self.quote_identifier_char();
+            format!(
+                "{quote}{}{quote}",
+                s.replace(quote, &format!("{quote}{quote}"))
+            )
+        } else {
+            s
+        }
+    }
 }

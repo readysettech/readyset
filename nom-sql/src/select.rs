@@ -1086,23 +1086,20 @@ mod tests {
         let qstring = "SELECT coalesce(a, b,c) as x,d FROM sometable;";
 
         let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        let agg_expr = FunctionExpr::Call {
-            name: "coalesce".into(),
-            arguments: Some(vec![
-                Expr::Column(Column {
-                    name: "a".into(),
-                    table: None,
-                }),
-                Expr::Column(Column {
-                    name: "b".into(),
-                    table: None,
-                }),
-                Expr::Column(Column {
-                    name: "c".into(),
-                    table: None,
-                }),
-            ]),
-        };
+        let agg_expr = FunctionExpr::Coalesce(vec![
+            Expr::Column(Column {
+                name: "a".into(),
+                table: None,
+            }),
+            Expr::Column(Column {
+                name: "b".into(),
+                table: None,
+            }),
+            Expr::Column(Column {
+                name: "c".into(),
+                table: None,
+            }),
+        ]);
         let expected_stmt = SelectStatement {
             tables: vec![TableExpr::from(Relation::from("sometable"))],
             fields: vec![
@@ -1594,14 +1591,11 @@ mod tests {
                         FieldDefinitionExpr::from(Column::from("id")),
                         FieldDefinitionExpr::Expr {
                             alias: Some("created_day".into()),
-                            expr: Expr::Call(FunctionExpr::Call {
-                                name: "coalesce".into(),
-                                arguments: Some(vec![
-                                    Expr::Column(Column::from("a")),
-                                    Expr::Literal(Literal::String("b".to_owned())),
-                                    Expr::Column(Column::from("c"))
-                                ])
-                            }),
+                            expr: Expr::Call(FunctionExpr::Coalesce(vec![
+                                Expr::Column(Column::from("a")),
+                                Expr::Literal(Literal::String("b".to_owned())),
+                                Expr::Column(Column::from("c"))
+                            ])),
                         },
                     ],
                     where_clause: None,
@@ -1627,10 +1621,7 @@ mod tests {
                         FieldDefinitionExpr::from(
                             Expr::Literal(Literal::String("foo".to_owned()),)
                         ),
-                        FieldDefinitionExpr::from(Expr::Call(FunctionExpr::Call {
-                            name: "current_time".into(),
-                            arguments: None,
-                        })),
+                        FieldDefinitionExpr::from(Expr::Call(FunctionExpr::CurrentTime)),
                     ],
                     ..Default::default()
                 }
@@ -1829,14 +1820,11 @@ mod tests {
                         FieldDefinitionExpr::from(Column::from("id")),
                         FieldDefinitionExpr::Expr {
                             alias: Some("created_day".into()),
-                            expr: Expr::Call(FunctionExpr::Call {
-                                name: "coalesce".into(),
-                                arguments: Some(vec![
-                                    Expr::Column(Column::from("a")),
-                                    Expr::Literal(Literal::String("b".to_owned())),
-                                    Expr::Column(Column::from("c"))
-                                ])
-                            }),
+                            expr: Expr::Call(FunctionExpr::Coalesce(vec![
+                                Expr::Column(Column::from("a")),
+                                Expr::Literal(Literal::String("b".to_owned())),
+                                Expr::Column(Column::from("c"))
+                            ])),
                         },
                     ],
                     where_clause: None,
@@ -1862,10 +1850,7 @@ mod tests {
                         FieldDefinitionExpr::from(
                             Expr::Literal(Literal::String("foo".to_owned()),)
                         ),
-                        FieldDefinitionExpr::from(Expr::Call(FunctionExpr::Call {
-                            name: "current_time".into(),
-                            arguments: None,
-                        })),
+                        FieldDefinitionExpr::from(Expr::Call(FunctionExpr::CurrentTime)),
                     ],
                     ..Default::default()
                 }

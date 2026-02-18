@@ -131,7 +131,9 @@ impl<'a> ReferredColumnsIter<'a> {
                 self.exprs_to_visit.push(key);
                 self.visit_expr(value)
             }
-            CountStar | RowNumber | DenseRank | Rank => None,
+            CountStar | RowNumber | DenseRank | Rank | CurrentDate | CurrentTimestamp(_)
+            | CurrentTime | LocalTimestamp | LocalTime | CurrentUser | SessionUser
+            | CurrentCatalog | SqlUser => None,
             Bucket { expr, .. }
             | ArrayAgg { expr, .. }
             | Avg { expr, .. }
@@ -143,16 +145,78 @@ impl<'a> ReferredColumnsIter<'a> {
             | Max(expr)
             | Min(expr)
             | StringAgg { expr, .. }
-            | GroupConcat { expr, .. } => self.visit_expr(expr),
-            Call {
-                arguments: None, ..
-            } => None,
-            Call {
-                arguments: Some(arguments),
-                ..
-            } => arguments.first().and_then(|first_arg| {
-                if arguments.len() >= 2 {
-                    self.exprs_to_visit.extend(arguments.iter().skip(1));
+            | GroupConcat { expr, .. }
+            | DayOfWeek(expr)
+            | Month(expr)
+            | Length(expr)
+            | OctetLength(expr)
+            | CharLength(expr)
+            | Ascii(expr)
+            | Hex(expr)
+            | JsonDepth(expr)
+            | JsonValid(expr)
+            | JsonQuote(expr)
+            | JsonTypeof(expr)
+            | JsonArrayLength(expr)
+            | JsonStripNulls(expr)
+            | JsonbStripNulls(expr)
+            | JsonbPretty(expr)
+            | StAsText(expr)
+            | StAsWkt(expr)
+            | StAsEwkt(expr) => self.visit_expr(expr),
+            Timediff(a, b)
+            | Addtime(a, b)
+            | DateFormat(a, b)
+            | DateTrunc(a, b)
+            | IfNull(a, b)
+            | JsonOverlaps(a, b) => {
+                self.exprs_to_visit.push(b);
+                self.visit_expr(a)
+            }
+            ConvertTz(a, b, c) | SplitPart(a, b, c) => {
+                self.exprs_to_visit.push(b);
+                self.exprs_to_visit.push(c);
+                self.visit_expr(a)
+            }
+            Round(expr, prec) => {
+                self.exprs_to_visit.extend(prec.iter().map(|e| e.as_ref()));
+                self.visit_expr(expr)
+            }
+            ArrayToString(a, b, c) => {
+                self.exprs_to_visit.push(b);
+                self.exprs_to_visit.extend(c.iter().map(|e| e.as_ref()));
+                self.visit_expr(a)
+            }
+            JsonbInsert(a, b, c, d) | JsonbSet(a, b, c, d) => {
+                self.exprs_to_visit.push(b);
+                self.exprs_to_visit.push(c);
+                self.exprs_to_visit.extend(d.iter().map(|e| e.as_ref()));
+                self.visit_expr(a)
+            }
+            JsonbSetLax(a, b, c, d, e) => {
+                self.exprs_to_visit.push(b);
+                self.exprs_to_visit.push(c);
+                self.exprs_to_visit.extend(d.iter().map(|e| e.as_ref()));
+                self.exprs_to_visit.extend(e.iter().map(|e| e.as_ref()));
+                self.visit_expr(a)
+            }
+            JsonExtractPathText(json, keys)
+            | JsonExtractPath(json, keys)
+            | JsonbExtractPath(json, keys) => {
+                self.exprs_to_visit.extend(keys.iter());
+                self.visit_expr(json)
+            }
+            Coalesce(exprs)
+            | Greatest(exprs)
+            | Least(exprs)
+            | Concat(exprs)
+            | ConcatWs(exprs)
+            | JsonObject(exprs)
+            | JsonbObject(exprs)
+            | JsonBuildObject(exprs)
+            | JsonbBuildObject(exprs) => exprs.first().and_then(|first_arg| {
+                if exprs.len() >= 2 {
+                    self.exprs_to_visit.extend(exprs.iter().skip(1));
                 }
                 self.visit_expr(first_arg)
             }),
@@ -279,7 +343,9 @@ impl<'a> ReferredColumnsMut<'a> {
         use FunctionExpr::*;
 
         match fexpr {
-            CountStar | RowNumber | Rank | DenseRank => None,
+            CountStar | RowNumber | Rank | DenseRank | CurrentDate | CurrentTimestamp(_)
+            | CurrentTime | LocalTimestamp | LocalTime | CurrentUser | SessionUser
+            | CurrentCatalog | SqlUser => None,
             Bucket { expr, .. }
             | Avg { expr, .. }
             | ArrayAgg { expr, .. }
@@ -291,14 +357,77 @@ impl<'a> ReferredColumnsMut<'a> {
             | Max(expr)
             | Min(expr)
             | StringAgg { expr, .. }
-            | GroupConcat { expr, .. } => self.visit_expr(expr),
-            Call {
-                arguments: None, ..
-            } => None,
-            Call {
-                arguments: Some(arguments),
-                ..
-            } => arguments.split_first_mut().and_then(|(first_arg, args)| {
+            | GroupConcat { expr, .. }
+            | DayOfWeek(expr)
+            | Month(expr)
+            | Length(expr)
+            | OctetLength(expr)
+            | CharLength(expr)
+            | Ascii(expr)
+            | Hex(expr)
+            | JsonDepth(expr)
+            | JsonValid(expr)
+            | JsonQuote(expr)
+            | JsonTypeof(expr)
+            | JsonArrayLength(expr)
+            | JsonStripNulls(expr)
+            | JsonbStripNulls(expr)
+            | JsonbPretty(expr)
+            | StAsText(expr)
+            | StAsWkt(expr)
+            | StAsEwkt(expr) => self.visit_expr(expr),
+            Timediff(a, b)
+            | Addtime(a, b)
+            | DateFormat(a, b)
+            | DateTrunc(a, b)
+            | IfNull(a, b)
+            | JsonOverlaps(a, b) => {
+                self.exprs_to_visit.push(b);
+                self.visit_expr(a)
+            }
+            ConvertTz(a, b, c) | SplitPart(a, b, c) => {
+                self.exprs_to_visit.push(b);
+                self.exprs_to_visit.push(c);
+                self.visit_expr(a)
+            }
+            Round(expr, prec) => {
+                self.exprs_to_visit
+                    .extend(prec.iter_mut().map(|e| e.as_mut()));
+                self.visit_expr(expr)
+            }
+            ArrayToString(a, b, c) => {
+                self.exprs_to_visit.push(b);
+                self.exprs_to_visit.extend(c.iter_mut().map(|e| e.as_mut()));
+                self.visit_expr(a)
+            }
+            JsonbInsert(a, b, c, d) | JsonbSet(a, b, c, d) => {
+                self.exprs_to_visit.push(b);
+                self.exprs_to_visit.push(c);
+                self.exprs_to_visit.extend(d.iter_mut().map(|e| e.as_mut()));
+                self.visit_expr(a)
+            }
+            JsonbSetLax(a, b, c, d, e) => {
+                self.exprs_to_visit.push(b);
+                self.exprs_to_visit.push(c);
+                self.exprs_to_visit.extend(d.iter_mut().map(|e| e.as_mut()));
+                self.exprs_to_visit.extend(e.iter_mut().map(|e| e.as_mut()));
+                self.visit_expr(a)
+            }
+            JsonExtractPathText(json, keys)
+            | JsonExtractPath(json, keys)
+            | JsonbExtractPath(json, keys) => {
+                self.exprs_to_visit.extend(keys.iter_mut());
+                self.visit_expr(json)
+            }
+            Coalesce(exprs)
+            | Greatest(exprs)
+            | Least(exprs)
+            | Concat(exprs)
+            | ConcatWs(exprs)
+            | JsonObject(exprs)
+            | JsonbObject(exprs)
+            | JsonBuildObject(exprs)
+            | JsonbBuildObject(exprs) => exprs.split_first_mut().and_then(|(first_arg, args)| {
                 self.exprs_to_visit.extend(args);
                 self.visit_expr(first_arg)
             }),
@@ -457,8 +586,59 @@ pub fn is_aggregate(function: &FunctionExpr) -> bool {
         // For now, assume all "generic" function calls are not aggregates.
         // NOTE: UDFs might be aggregates in the upstream database, but we have no way
         // to know this at parse time. Queries using aggregate UDFs are unsupported.
-        | FunctionExpr::Call { .. }
-        | FunctionExpr::Udf { .. } => false,
+        | FunctionExpr::Udf { .. }
+        | FunctionExpr::ConvertTz(..)
+        | FunctionExpr::DayOfWeek(..)
+        | FunctionExpr::Month(..)
+        | FunctionExpr::Timediff(..)
+        | FunctionExpr::Addtime(..)
+        | FunctionExpr::DateFormat(..)
+        | FunctionExpr::DateTrunc(..)
+        | FunctionExpr::IfNull(..)
+        | FunctionExpr::Coalesce(..)
+        | FunctionExpr::Round(..)
+        | FunctionExpr::Greatest(..)
+        | FunctionExpr::Least(..)
+        | FunctionExpr::Concat(..)
+        | FunctionExpr::ConcatWs(..)
+        | FunctionExpr::SplitPart(..)
+        | FunctionExpr::Length(..)
+        | FunctionExpr::OctetLength(..)
+        | FunctionExpr::CharLength(..)
+        | FunctionExpr::Ascii(..)
+        | FunctionExpr::Hex(..)
+        | FunctionExpr::JsonDepth(..)
+        | FunctionExpr::JsonValid(..)
+        | FunctionExpr::JsonOverlaps(..)
+        | FunctionExpr::JsonQuote(..)
+        | FunctionExpr::JsonTypeof(..)
+        | FunctionExpr::JsonArrayLength(..)
+        | FunctionExpr::JsonExtractPathText(..)
+        | FunctionExpr::JsonObject(..)
+        | FunctionExpr::JsonbObject(..)
+        | FunctionExpr::JsonBuildObject(..)
+        | FunctionExpr::JsonbBuildObject(..)
+        | FunctionExpr::JsonStripNulls(..)
+        | FunctionExpr::JsonbStripNulls(..)
+        | FunctionExpr::JsonExtractPath(..)
+        | FunctionExpr::JsonbExtractPath(..)
+        | FunctionExpr::JsonbInsert(..)
+        | FunctionExpr::JsonbSet(..)
+        | FunctionExpr::JsonbSetLax(..)
+        | FunctionExpr::JsonbPretty(..)
+        | FunctionExpr::ArrayToString(..)
+        | FunctionExpr::StAsText(..)
+        | FunctionExpr::StAsWkt(..)
+        | FunctionExpr::StAsEwkt(..)
+        | FunctionExpr::CurrentDate
+        | FunctionExpr::CurrentTimestamp(_)
+        | FunctionExpr::CurrentTime
+        | FunctionExpr::LocalTimestamp
+        | FunctionExpr::LocalTime
+        | FunctionExpr::CurrentUser
+        | FunctionExpr::SessionUser
+        | FunctionExpr::CurrentCatalog
+        | FunctionExpr::SqlUser => false,
     }
 }
 
@@ -666,13 +846,10 @@ mod tests {
         #[test]
         fn generic_with_multiple_columns() {
             assert_eq!(
-                Call(FunctionExpr::Call {
-                    name: "ifnull".into(),
-                    arguments: Some(vec![
-                        Expr::Column(Column::from("col1")),
-                        Expr::Column(Column::from("col2")),
-                    ])
-                })
+                Call(FunctionExpr::IfNull(
+                    Box::new(Expr::Column(Column::from("col1"))),
+                    Box::new(Expr::Column(Column::from("col2"))),
+                ))
                 .referred_columns()
                 .collect::<Vec<_>>(),
                 vec![&Column::from("col1"), &Column::from("col2")]
@@ -683,13 +860,10 @@ mod tests {
         fn nested_function_call() {
             assert_eq!(
                 Call(FunctionExpr::Count {
-                    expr: Box::new(Expr::Call(FunctionExpr::Call {
-                        name: "ifnull".into(),
-                        arguments: Some(vec![
-                            Expr::Column(Column::from("col1")),
-                            Expr::Column(Column::from("col2")),
-                        ])
-                    })),
+                    expr: Box::new(Expr::Call(FunctionExpr::IfNull(
+                        Box::new(Expr::Column(Column::from("col1"))),
+                        Box::new(Expr::Column(Column::from("col2"))),
+                    ))),
                     distinct: false,
                 })
                 .referred_columns()

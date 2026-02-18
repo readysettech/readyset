@@ -1332,10 +1332,10 @@ fn build_rhs_expr_for_aggregate_only_derived_table(
     // Try to compute a zero-argument substitute for the first-field expression
     // by peeling allowed wrappers and/or descending through single-child wrappers.
     if let Some(f_zero) = extract_aggregate_fallback_for_expr(ff_expr, derived_table_stmt)? {
-        return Ok(Some(Expr::Call(FunctionExpr::Call {
-            name: "coalesce".into(),
-            arguments: Some(vec![first_field_ref.clone(), f_zero]),
-        })));
+        return Ok(Some(Expr::Call(FunctionExpr::Coalesce(vec![
+            first_field_ref.clone(),
+            f_zero,
+        ]))));
     }
 
     Ok(None)

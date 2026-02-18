@@ -55,35 +55,15 @@ impl FunctionProcessor<'_> {
             | FunctionExpr::Upper { expr, .. }
             | FunctionExpr::Extract { expr, .. }
             | FunctionExpr::Substring { string: expr, .. } => expr,
-            FunctionExpr::Call {
-                name,
-                arguments: Some(arguments),
-            } if matches!(
-                name.as_str(),
-                // TODO: Support more ?
-                "ascii"
-                    | "substring"
-                    | "substr"
-                    | "lower"
-                    | "upper"
-                    | "length"
-                    | "octet_length"
-                    | "char_length"
-                    | "character_length"
-                    | "hex"
-            ) =>
-            {
-                arguments.first().ok_or_else(|| {
-                    internal_err!(
-                        "Call to {} must have at least one argument",
-                        f.alias(self.dialect).unwrap_or_default()
-                    )
-                })?
-            }
+            FunctionExpr::Ascii(expr)
+            | FunctionExpr::Length(expr)
+            | FunctionExpr::OctetLength(expr)
+            | FunctionExpr::CharLength(expr)
+            | FunctionExpr::Hex(expr) => expr,
             _ => return Ok(None),
         };
 
-        Ok(match expr {
+        Ok(match expr.as_ref() {
             Expr::Column(c) => Some(Column::from(c)),
             Expr::Call(func) => self.find_column(func)?,
             _ => None,

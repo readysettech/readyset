@@ -1599,15 +1599,12 @@ mod tests {
 
         #[test]
         fn between_function_call() {
-            let qs = b"f(foo, bar) between 1 and 2";
+            let qs = b"coalesce(foo, bar) between 1 and 2";
             let expected = Expr::Between {
-                operand: Box::new(Expr::Call(FunctionExpr::Call {
-                    name: "f".into(),
-                    arguments: Some(vec![
-                        Expr::Column(Column::from("foo")),
-                        Expr::Column(Column::from("bar")),
-                    ]),
-                })),
+                operand: Box::new(Expr::Call(FunctionExpr::Coalesce(vec![
+                    Expr::Column(Column::from("foo")),
+                    Expr::Column(Column::from("bar")),
+                ]))),
                 min: Box::new(Expr::Literal(1.into())),
                 max: Box::new(Expr::Literal(2.into())),
                 negated: false,

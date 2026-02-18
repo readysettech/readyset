@@ -67,10 +67,7 @@ mod call {
         let concats = proptest::collection::vec(random_expr, 0..3);
         (es.string, concats).prop_map(|(s, mut exprs): (_, Vec<Expr>)| {
             exprs.insert(0, s);
-            Expr::Call(FunctionExpr::Call {
-                name: "concat".into(),
-                arguments: Some(exprs),
-            })
+            Expr::Call(FunctionExpr::Concat(exprs))
         })
     }
 
@@ -86,10 +83,7 @@ mod call {
         let concat_wss = proptest::collection::vec(random_expr, 0..3);
         (es.string, concat_wss).prop_map(|(s, mut exprs): (_, Vec<Expr>)| {
             exprs.insert(0, s);
-            Expr::Call(FunctionExpr::Call {
-                name: "concat_ws".into(),
-                arguments: Some(exprs),
-            })
+            Expr::Call(FunctionExpr::ConcatWs(exprs))
         })
     }
 
@@ -97,10 +91,11 @@ mod call {
     /// [`BuiltinFunction::SplitPart`].
     fn split_part(es: ExprStrategy) -> impl Strategy<Value = Expr> {
         (es.string.clone(), es.string.clone(), es.integer).prop_map(|(s1, s2, int)| {
-            Expr::Call(FunctionExpr::Call {
-                name: "split_part".into(),
-                arguments: Some(vec![s1, s2, int]),
-            })
+            Expr::Call(FunctionExpr::SplitPart(
+                Box::new(s1),
+                Box::new(s2),
+                Box::new(int),
+            ))
         })
     }
 
@@ -117,9 +112,10 @@ mod call {
             if let Some(int2) = int2 {
                 args.push(int2);
             }
-            Expr::Call(FunctionExpr::Call {
-                name: "substring".into(),
-                arguments: Some(args),
+            Expr::Call(FunctionExpr::Substring {
+                string: Box::new(args.remove(0)),
+                pos: args.first().cloned().map(Box::new),
+                len: args.get(1).cloned().map(Box::new),
             })
         })
     }

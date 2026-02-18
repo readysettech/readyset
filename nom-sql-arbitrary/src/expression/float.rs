@@ -82,11 +82,7 @@ mod call {
     /// Produces a [`Strategy`] that generates a float [`Expr::Call`] with
     /// [`BuiltinFunction::Round`].
     fn round(es: ExprStrategy) -> impl Strategy<Value = Expr> {
-        (es.float, es.integer).prop_map(|(f, n)| {
-            Expr::Call(FunctionExpr::Call {
-                name: "round".into(),
-                arguments: Some(vec![f, n]),
-            })
-        })
+        (es.float, es.integer)
+            .prop_map(|(f, n)| Expr::Call(FunctionExpr::Round(Box::new(f), Some(Box::new(n)))))
     }
 }

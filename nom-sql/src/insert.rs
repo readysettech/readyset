@@ -148,10 +148,7 @@ mod tests {
                         Expr::Literal(42.into()),
                         Expr::Literal("test".into()),
                         Expr::Literal("test".into()),
-                        Expr::Call(FunctionExpr::Call {
-                            name: "current_timestamp".into(),
-                            arguments: None,
-                        }),
+                        Expr::Call(FunctionExpr::CurrentTimestamp(None)),
                     ],],
                     on_duplicate: None,
                     ignore: false
@@ -323,10 +320,7 @@ mod tests {
                         Expr::Literal(42.into()),
                         Expr::Literal("test".into()),
                         Expr::Literal("test".into()),
-                        Expr::Call(FunctionExpr::Call {
-                            name: "current_timestamp".into(),
-                            arguments: None,
-                        }),
+                        Expr::Call(FunctionExpr::CurrentTimestamp(None)),
                     ],],
                     on_duplicate: None,
                     ignore: false,

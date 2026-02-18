@@ -2981,10 +2981,11 @@ PRIMARY KEY (`id`));";
                         SqlType::DateTime(Some(6)),
                         vec![
                             ColumnConstraint::NotNull,
-                            ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
-                                name: "current_timestamp".into(),
-                                arguments: Some(vec![Expr::Literal(Literal::Integer(6,),),]),
-                            },),),
+                            ColumnConstraint::DefaultValue(Expr::Call(
+                                FunctionExpr::CurrentTimestamp(Some(Box::new(Expr::Literal(
+                                    Literal::Integer(6)
+                                ))),)
+                            )),
                             ColumnConstraint::OnUpdateCurrentTimestamp(Some(Literal::Integer(6)),),
                         ],
                     ),],

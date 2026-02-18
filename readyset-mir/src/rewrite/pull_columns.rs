@@ -151,13 +151,10 @@ mod tests {
                     ProjectExpr::Column("agg".into()),
                     ProjectExpr::Expr {
                         alias: "c0".into(),
-                        expr: Expr::Call(FunctionExpr::Call {
-                            name: "ifnull".into(),
-                            arguments: Some(vec![
-                                Expr::Column("c".into()),
-                                Expr::Literal(0.into()),
-                            ]),
-                        }),
+                        expr: Expr::Call(FunctionExpr::IfNull(
+                            Box::new(Expr::Column("c".into())),
+                            Box::new(Expr::Literal(0.into())),
+                        )),
                     },
                 ],
             },

@@ -136,11 +136,15 @@ fn function_call_without_parens(
     move |i| {
         let common_funcs = move |i| {
             alt((
-                tag_no_case("current_date"),
-                tag_no_case("current_timestamp"),
-                tag_no_case("current_time"),
-                tag_no_case("localtimestamp"),
-                tag_no_case("localtime"),
+                map(tag_no_case("current_date"), |_| FunctionExpr::CurrentDate),
+                map(tag_no_case("current_timestamp"), |_| {
+                    FunctionExpr::CurrentTimestamp(None)
+                }),
+                map(tag_no_case("current_time"), |_| FunctionExpr::CurrentTime),
+                map(tag_no_case("localtimestamp"), |_| {
+                    FunctionExpr::LocalTimestamp
+                }),
+                map(tag_no_case("localtime"), |_| FunctionExpr::LocalTime),
             ))(i)
         };
         let funcs = move |i| {
@@ -150,40 +154,28 @@ fn function_call_without_parens(
                     // XXX: This list is not complete because it is, frankly, only here to match the
                     // list that sqlparser-rs recognizes. Other stuff will get turned into a column
                     // reference, and that's okay.
-                    tag_no_case("user"),
-                    tag_no_case("current_user"),
-                    tag_no_case("session_user"),
-                    tag_no_case("current_catalog"),
+                    map(tag_no_case("user"), |_| FunctionExpr::SqlUser),
+                    map(tag_no_case("current_user"), |_| FunctionExpr::CurrentUser),
+                    map(tag_no_case("session_user"), |_| FunctionExpr::SessionUser),
+                    map(tag_no_case("current_catalog"), |_| {
+                        FunctionExpr::CurrentCatalog
+                    }),
                 ))(i)
             } else {
                 common_funcs(i)
             }
         };
         // Some functions can be called without parentheses, in both mysql and postgres
-        let (i, name) = map(
-            terminated(
-                funcs,
-                // Without this, a column named `username` would parse as `user` and then error.
-                // Since we don't have a lexer/tokenizer, we can't check for a word boundary or make
-                // this list into keywords; so just check for things that can't be parts of
-                // identifiers.
-                not(peek(take_while1(is_sql_identifier))),
-            ),
-            |n: LocatedSpan<&[u8]>| {
-                String::from_utf8(n.to_vec())
-                    .expect("Only constant string literals")
-                    .to_lowercase()
-                    .into()
-            },
+        let (i, func) = terminated(
+            funcs,
+            // Without this, a column named `username` would parse as `user` and then error.
+            // Since we don't have a lexer/tokenizer, we can't check for a word boundary or make
+            // this list into keywords; so just check for things that can't be parts of
+            // identifiers.
+            not(peek(take_while1(is_sql_identifier))),
         )(i)?;
 
-        Ok((
-            i,
-            FunctionExpr::Call {
-                name,
-                arguments: None,
-            },
-        ))
+        Ok((i, func))
     }
 }
 
@@ -364,13 +356,9 @@ fn function_call(
         let (i, name) = dialect.function_identifier()(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, arguments) = delim_fx_args(dialect)(i)?;
-        Ok((
-            i,
-            FunctionExpr::Call {
-                name: name.to_lowercase().into(),
-                arguments: Some(arguments),
-            },
-        ))
+        let lc_name = name.to_lowercase();
+        let func = FunctionExpr::from_name_and_args(&lc_name, arguments);
+        Ok((i, func))
     }
 }
 
@@ -849,14 +837,11 @@ mod tests {
         ];
         for q in qlist.iter() {
             let res = to_nom_result(function_expr(Dialect::MySQL)(LocatedSpan::new(q)));
-            let expected = FunctionExpr::Call {
-                name: "coalesce".into(),
-                arguments: Some(vec![
-                    Expr::Column(Column::from("a")),
-                    Expr::Column(Column::from("b")),
-                    Expr::Column(Column::from("c")),
-                ]),
-            };
+            let expected = FunctionExpr::Coalesce(vec![
+                Expr::Column(Column::from("a")),
+                Expr::Column(Column::from("b")),
+                Expr::Column(Column::from("c")),
+            ]);
             assert_eq!(res, Ok((&b""[..], expected)));
         }
     }
@@ -891,13 +876,10 @@ mod tests {
         let (_, res) = function_expr(Dialect::MySQL)(LocatedSpan::new(b"ifnull(x, 0)")).unwrap();
         assert_eq!(
             res,
-            FunctionExpr::Call {
-                name: "ifnull".into(),
-                arguments: Some(vec![
-                    Expr::Column(Column::from("x")),
-                    Expr::Literal(Literal::Integer(0))
-                ])
-            }
+            FunctionExpr::IfNull(
+                Box::new(Expr::Column(Column::from("x"))),
+                Box::new(Expr::Literal(Literal::Integer(0)))
+            )
         );
     }
 
@@ -979,13 +961,10 @@ mod tests {
         let res = test_parse!(function_expr(Dialect::MySQL), b"substring(a,1,7)");
         assert_eq!(
             res,
-            FunctionExpr::Call {
-                name: "substring".into(),
-                arguments: Some(vec![
-                    Expr::Column("a".into()),
-                    Expr::Literal(1.into()),
-                    Expr::Literal(7.into()),
-                ])
+            FunctionExpr::Substring {
+                string: Box::new(Expr::Column("a".into())),
+                pos: Some(Box::new(Expr::Literal(1.into()))),
+                len: Some(Box::new(Expr::Literal(7.into()))),
             }
         );
     }
@@ -1070,14 +1049,11 @@ mod tests {
             ];
             for q in qlist.iter() {
                 let res = to_nom_result(function_expr(Dialect::MySQL)(LocatedSpan::new(q)));
-                let expected = FunctionExpr::Call {
-                    name: "coalesce".into(),
-                    arguments: Some(vec![
-                        Expr::Literal(Literal::String("a".to_owned())),
-                        Expr::Column(Column::from("b")),
-                        Expr::Column(Column::from("c")),
-                    ]),
-                };
+                let expected = FunctionExpr::Coalesce(vec![
+                    Expr::Literal(Literal::String("a".to_owned())),
+                    Expr::Column(Column::from("b")),
+                    Expr::Column(Column::from("c")),
+                ]);
                 assert_eq!(res, Ok((&b""[..], expected)));
             }
         }
@@ -1159,14 +1135,11 @@ mod tests {
             ];
             for q in qlist.iter() {
                 let res = to_nom_result(function_expr(Dialect::PostgreSQL)(LocatedSpan::new(q)));
-                let expected = FunctionExpr::Call {
-                    name: "coalesce".into(),
-                    arguments: Some(vec![
-                        Expr::Literal(Literal::String("a".to_owned())),
-                        Expr::Column(Column::from("b")),
-                        Expr::Column(Column::from("c")),
-                    ]),
-                };
+                let expected = FunctionExpr::Coalesce(vec![
+                    Expr::Literal(Literal::String("a".to_owned())),
+                    Expr::Column(Column::from("b")),
+                    Expr::Column(Column::from("c")),
+                ]);
                 assert_eq!(res, Ok((&b""[..], expected)));
             }
         }

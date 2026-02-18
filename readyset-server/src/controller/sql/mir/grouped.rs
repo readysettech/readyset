@@ -109,26 +109,26 @@ pub(super) fn make_expressions_above_grouped(
                 )),
             }
         }))
-        .chain(qg.aggregates.keys().filter_map(|f| {
-            match f {
-                FunctionExpr::JsonObjectAgg {
-                    key,
-                    value,
-                    allow_duplicate_keys,
-                } => Some((
-                    SqlIdentifier::from("__json_objects__".to_string()),
-                    Expr::Call(FunctionExpr::Call {
-                        name: if *allow_duplicate_keys {
-                            "json_build_object"
-                        } else {
-                            "jsonb_build_object"
-                        }
-                        .into(),
-                        arguments: Some(vec![*key.clone(), *value.clone()]),
-                    }),
-                )),
-                _ => None,
-            }
+        .chain(qg.aggregates.keys().filter_map(|f| match f {
+            FunctionExpr::JsonObjectAgg {
+                key,
+                value,
+                allow_duplicate_keys,
+            } => Some((
+                SqlIdentifier::from("__json_objects__".to_string()),
+                if *allow_duplicate_keys {
+                    Expr::Call(FunctionExpr::JsonBuildObject(vec![
+                        *key.clone(),
+                        *value.clone(),
+                    ]))
+                } else {
+                    Expr::Call(FunctionExpr::JsonbBuildObject(vec![
+                        *key.clone(),
+                        *value.clone(),
+                    ]))
+                },
+            )),
+            _ => None,
         }))
         .collect();
 
@@ -356,11 +356,11 @@ fn record_reachable(function: &FunctionExpr) {
         JsonObjectAgg { .. } => record_reachable!(
             r#"{"id":"Post-lookup aggregate","sub":"JsonObjectAgg","tags":["exclude-nightly"]}"#
         ),
-        Call { .. } => record_reachable!(
-            r#"{"id":"Post-lookup aggregate","sub":"Call","tags":["exclude-nightly"]}"#
-        ),
         Udf { .. } => record_reachable!(
             r#"{"id":"Post-lookup aggregate","sub":"Udf","tags":["exclude-nightly"]}"#
+        ),
+        _ => record_reachable!(
+            r#"{"id":"Post-lookup aggregate","sub":"Other","tags":["exclude-nightly"]}"#
         ),
     }
 }
@@ -438,7 +438,6 @@ pub(super) fn post_lookup_aggregates(
                     op: function.try_into()?,
                 },
                 Extract { .. }
-                | Call { .. }
                 | Udf { .. }
                 | Substring { .. }
                 | Lower { .. }
@@ -450,6 +449,7 @@ pub(super) fn post_lookup_aggregates(
                 StringAgg { .. } => PostLookupAggregateFunction::StringAgg {
                     op: function.try_into()?,
                 },
+                _ => continue,
             },
             raw_values: false,
         });
