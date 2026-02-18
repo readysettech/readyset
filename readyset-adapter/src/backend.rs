@@ -2667,20 +2667,6 @@ where
         res
     }
 
-    /// Build a synthetic `CREATE SHALLOW CACHE ...` DDL string for hint-based creation.
-    fn build_hint_ddl_string(&self, opts: &CreateCacheOptions, query_text: &str) -> String {
-        use std::fmt::Write;
-        let mut ddl = String::from("CREATE SHALLOW CACHE ");
-        if let Some(policy) = &opts.policy {
-            let _ = write!(ddl, "{} ", policy.display(DB::SQL_DIALECT));
-        }
-        if opts.always {
-            ddl.push_str("ALWAYS ");
-        }
-        let _ = write!(ddl, "FROM {query_text}");
-        ddl
-    }
-
     /// Determines via running PREPARE if the upstream can support this query.
     async fn upstream_supports(&mut self, req: &ShallowViewRequest) -> anyhow::Result<()> {
         let Some(upstream) = self.upstream.as_mut() else {
@@ -3882,7 +3868,7 @@ where
         }
 
         let query_text = shallow.query.display(DB::SQL_DIALECT).to_string();
-        let ddl_stmt = self.build_hint_ddl_string(&opts, &query_text);
+        let ddl_stmt = build_hint_ddl_string(DB::SQL_DIALECT, &opts, &query_text);
         let ddl_req = CacheDDLRequest {
             unparsed_stmt: ddl_stmt,
             schema_search_path: self.noria.schema_search_path().to_owned(),
@@ -5049,6 +5035,23 @@ fn resolve_eviction_policy(
     }
 }
 
+/// Build a synthetic `CREATE SHALLOW CACHE ...` DDL string for hint-based creation.
+fn build_hint_ddl_string(dialect: Dialect, opts: &CreateCacheOptions, query_text: &str) -> String {
+    use std::fmt::Write;
+    let mut ddl = String::from("CREATE SHALLOW CACHE ");
+    if let Some(policy) = &opts.policy {
+        let _ = write!(ddl, "{} ", policy.display(dialect));
+    }
+    if let Some(coalesce) = &opts.coalesce_ms {
+        let _ = write!(ddl, "COALESCE {} SECONDS ", coalesce.as_secs());
+    }
+    if opts.always {
+        ddl.push_str("ALWAYS ");
+    }
+    let _ = write!(ddl, "FROM {query_text}");
+    ddl
+}
+
 fn resolve_coalesce(coalesce: Option<Duration>, default_coalesce_ms: u64) -> Option<Duration> {
     coalesce.or_else(|| match default_coalesce_ms {
         0 => None,
@@ -5232,7 +5235,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::ProxyState;
+    use std::time::Duration;
+
+    use readyset_sql::Dialect;
+    use readyset_sql::ast::{CreateCacheOptions, EvictionPolicy};
+    use readyset_sql_parsing::parse_query;
+
+    use super::*;
 
     #[test]
     fn is_autocommit_by_proxy_state() {
@@ -5261,5 +5270,61 @@ mod tests {
         assert!(ProxyState::InTransaction.in_transaction());
         assert!(!ProxyState::AutocommitOff.in_transaction());
         assert!(!ProxyState::ProxyAlways.in_transaction());
+    }
+
+    #[test]
+    fn hint_ddl_string_includes_coalesce() {
+        let opts = CreateCacheOptions {
+            coalesce_ms: Some(Duration::from_secs(17)),
+            ..Default::default()
+        };
+        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT RAND()");
+        assert_eq!(
+            ddl,
+            "CREATE SHALLOW CACHE COALESCE 17 SECONDS FROM SELECT RAND()"
+        );
+    }
+
+    #[test]
+    fn hint_ddl_string_includes_policy_and_coalesce() {
+        let opts = CreateCacheOptions {
+            policy: Some(EvictionPolicy::Ttl {
+                ttl: Duration::from_secs(271),
+            }),
+            coalesce_ms: Some(Duration::from_secs(17)),
+            ..Default::default()
+        };
+        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT RAND()");
+        assert!(
+            ddl.contains("COALESCE 17 SECONDS"),
+            "DDL missing COALESCE: {ddl}"
+        );
+        assert!(
+            ddl.contains("POLICY TTL 271 SECONDS"),
+            "DDL missing POLICY: {ddl}"
+        );
+    }
+
+    #[test]
+    fn hint_ddl_coalesce_roundtrip() {
+        let opts = CreateCacheOptions {
+            policy: Some(EvictionPolicy::Ttl {
+                ttl: Duration::from_secs(271),
+            }),
+            coalesce_ms: Some(Duration::from_secs(17)),
+            ..Default::default()
+        };
+        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT RAND()");
+
+        // Re-parse the generated DDL — this is the path taken on restart.
+        let parsed = parse_query(Dialect::MySQL, &ddl).expect("DDL should parse");
+        let SqlQuery::CreateCache(stmt) = parsed else {
+            panic!("Expected CreateCache, got: {parsed:?}");
+        };
+        assert_eq!(
+            stmt.coalesce_ms,
+            Some(Duration::from_secs(17)),
+            "Coalesce must survive DDL round-trip"
+        );
     }
 }
