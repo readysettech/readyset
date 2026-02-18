@@ -1115,8 +1115,8 @@ impl Ord for DfValue {
             (&DfValue::Float(fa), &DfValue::Float(fb)) => fa.total_cmp(&fb),
             (&DfValue::Double(fa), &DfValue::Double(fb)) => fa.total_cmp(&fb),
             (DfValue::Numeric(da), DfValue::Numeric(db)) => da.cmp(db),
-            (&DfValue::Float(fa), &DfValue::Double(fb)) => fa.total_cmp(&(fb as f32)),
-            (&DfValue::Double(fa), &DfValue::Float(fb)) => fb.total_cmp(&(fa as f32)).reverse(),
+            (&DfValue::Float(fa), &DfValue::Double(fb)) => (fa as f64).total_cmp(&fb),
+            (&DfValue::Double(fa), &DfValue::Float(fb)) => fa.total_cmp(&(fb as f64)),
             (&DfValue::Float(fa), DfValue::Numeric(d)) => f32::try_from(d.as_ref())
                 .as_ref()
                 .map(|fb| fa.total_cmp(fb))
@@ -2382,6 +2382,113 @@ mod tests {
         #[strategy(non_numeric())]
         DfValue
     );
+
+    // ---------------------------------------------------------------
+    // REA-6355: Float-vs-Double eq/cmp consistency
+    // ---------------------------------------------------------------
+
+    /// Proptest specifically targeting mixed Float/Double pairs, which are the
+    /// combination that triggered the original inconsistency between PartialEq
+    /// (widening f32→f64) and Ord (formerly narrowing f64→f32).
+    #[tags(no_retry)]
+    #[proptest]
+    fn float_double_eq_consistent_with_cmp(a: f32, b: f64) {
+        let va = DfValue::Float(a);
+        let vb = DfValue::Double(b);
+        assert_eq!(
+            va == vb,
+            va.cmp(&vb) == std::cmp::Ordering::Equal,
+            "eq/cmp inconsistency: Float({a:?}) vs Double({b:?})"
+        );
+    }
+
+    /// The reverse direction: Double first, Float second.
+    #[tags(no_retry)]
+    #[proptest]
+    fn double_float_eq_consistent_with_cmp(a: f64, b: f32) {
+        let va = DfValue::Double(a);
+        let vb = DfValue::Float(b);
+        assert_eq!(
+            va == vb,
+            va.cmp(&vb) == std::cmp::Ordering::Equal,
+            "eq/cmp inconsistency: Double({a:?}) vs Float({b:?})"
+        );
+    }
+
+    /// Targeted unit tests for Float/Double edge cases that are easy to get
+    /// wrong with lossy conversions.
+    #[test]
+    fn float_double_cmp_eq_edge_cases() {
+        use std::cmp::Ordering;
+
+        // --- Values outside f32 range collapse under narrowing ---
+        // A tiny f64 that underflows to f32 -0.0; must NOT equal Float(-0.0).
+        let tiny = DfValue::Double(-4.0642577861281973e-234);
+        let neg_zero_f = DfValue::Float(-0.0);
+        assert_ne!(tiny, neg_zero_f);
+        assert_ne!(tiny.cmp(&neg_zero_f), Ordering::Equal);
+
+        // Large f64 beyond f32 MAX; must NOT equal Float(f32::INFINITY).
+        let big = DfValue::Double(1.0e300);
+        let inf_f = DfValue::Float(f32::INFINITY);
+        assert_ne!(big, inf_f);
+        assert_ne!(big.cmp(&inf_f), Ordering::Equal);
+
+        // --- Positive vs negative zero ---
+        // f64(+0.0) and f32(-0.0): bit patterns differ, so not equal.
+        let pos_zero_d = DfValue::Double(0.0);
+        let neg_zero_f2 = DfValue::Float(-0.0_f32);
+        assert_ne!(pos_zero_d, neg_zero_f2);
+        assert_ne!(pos_zero_d.cmp(&neg_zero_f2), Ordering::Equal);
+
+        // Same sign zeros: should be equal.
+        let pos_zero_f = DfValue::Float(0.0);
+        assert_eq!(pos_zero_d, DfValue::Double(0.0));
+        assert_eq!(pos_zero_f, DfValue::Float(0.0));
+        assert_eq!(
+            DfValue::Float(0.0).cmp(&DfValue::Double(0.0)),
+            Ordering::Equal
+        );
+
+        // --- NaN handling ---
+        let nan_f = DfValue::Float(f32::NAN);
+        let nan_d = DfValue::Double(f64::NAN);
+        // NaN bit patterns should be consistent between eq and cmp.
+        assert_eq!(nan_f == nan_d, nan_f.cmp(&nan_d) == Ordering::Equal);
+
+        // --- Exact round-trip values ---
+        // 1.0 has the same representation in f32 and f64.
+        assert_eq!(DfValue::Float(1.0), DfValue::Double(1.0));
+        assert_eq!(
+            DfValue::Float(1.0).cmp(&DfValue::Double(1.0)),
+            Ordering::Equal
+        );
+
+        // --- f64 value close to but not exactly representable as the f32 ---
+        // 1.0000001 as f64 is NOT the same as 1.0000001_f32 widened to f64.
+        let close_d = DfValue::Double(1.0000001_f64);
+        let close_f = DfValue::Float(1.0000001_f32);
+        // They should agree on whether they're equal.
+        assert_eq!(close_d == close_f, close_d.cmp(&close_f) == Ordering::Equal,);
+
+        // --- Subnormals ---
+        // f64 subnormals that are zero in f32.
+        let subnormal_d = DfValue::Double(f64::MIN_POSITIVE / 2.0);
+        let zero_f = DfValue::Float(0.0);
+        assert_ne!(subnormal_d, zero_f);
+        assert_ne!(subnormal_d.cmp(&zero_f), Ordering::Equal);
+
+        // --- Infinities ---
+        let inf_d = DfValue::Double(f64::INFINITY);
+        let inf_f2 = DfValue::Float(f32::INFINITY);
+        assert_eq!(inf_d, inf_f2);
+        assert_eq!(inf_d.cmp(&inf_f2), Ordering::Equal);
+
+        let neg_inf_d = DfValue::Double(f64::NEG_INFINITY);
+        let neg_inf_f = DfValue::Float(f32::NEG_INFINITY);
+        assert_eq!(neg_inf_d, neg_inf_f);
+        assert_eq!(neg_inf_d.cmp(&neg_inf_f), Ordering::Equal);
+    }
 
     #[derive(Debug, derive_more::From, derive_more::Into)]
     struct MySqlValue(mysql_common::value::Value);
