@@ -218,6 +218,103 @@ fn mixed_rs_and_non_rs_hints_all_stripped() {
     );
 }
 
+// --- UNION / SetOperation hint tests ---
+
+#[test]
+fn union_query_hint_extracted_and_stripped() {
+    let (with_hint, directive) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT /*rs+ CREATE SHALLOW CACHE */ RAND() UNION SELECT RAND()",
+    )
+    .expect("should parse hinted UNION query");
+    assert!(
+        matches!(directive, Some(ReadysetHintDirective::CreateCache(_))),
+        "Hint directive should be extracted from UNION query"
+    );
+
+    let (without_hint, _) =
+        parse_shallow_query(Dialect::MySQL, "SELECT RAND() UNION SELECT RAND()")
+            .expect("should parse plain UNION query");
+    assert_eq!(
+        with_hint, without_hint,
+        "Hinted UNION query should equal the plain UNION query after stripping"
+    );
+    assert_eq!(
+        format!("{with_hint}"),
+        format!("{without_hint}"),
+        "Display output should be identical with and without hint on UNION"
+    );
+}
+
+#[test]
+fn nested_union_hint_stripped() {
+    let (with_hint, directive) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT /*rs+ CREATE SHALLOW CACHE */ 1 UNION SELECT 2 UNION SELECT 3",
+    )
+    .expect("should parse nested UNION with hint");
+    assert!(
+        matches!(directive, Some(ReadysetHintDirective::CreateCache(_))),
+        "Hint directive should be extracted from nested UNION"
+    );
+
+    let (without_hint, _) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT 1 UNION SELECT 2 UNION SELECT 3",
+    )
+    .expect("should parse plain nested UNION");
+    assert_eq!(
+        with_hint, without_hint,
+        "Nested UNION with hint should equal the plain version"
+    );
+}
+
+#[test]
+fn non_rs_hint_on_union_stripped() {
+    let (query, directive) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT /*mysql+ SET_VAR(sort_buffer_size=16M) */ 1 UNION SELECT 2",
+    )
+    .expect("should parse UNION with non-rs hint");
+    assert!(
+        directive.is_none(),
+        "Non-rs hint on UNION should not produce a directive"
+    );
+
+    let (plain, _) = parse_shallow_query(Dialect::MySQL, "SELECT 1 UNION SELECT 2")
+        .expect("should parse plain UNION");
+    assert_eq!(
+        query, plain,
+        "Non-rs hint on UNION should be stripped, matching the plain query"
+    );
+    assert_eq!(
+        format!("{query}"),
+        format!("{plain}"),
+        "Display output should not contain the non-rs hint on UNION"
+    );
+}
+
+#[test]
+fn hint_on_right_side_of_union_stripped() {
+    // Hint on the right branch of a UNION should still be drained.
+    let (query, directive) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT 1 UNION SELECT /*rs+ CREATE SHALLOW CACHE */ 2",
+    )
+    .expect("should parse UNION with hint on right");
+    assert!(
+        matches!(directive, Some(ReadysetHintDirective::CreateCache(_))),
+        "Hint on right side of UNION should be extracted"
+    );
+
+    let (plain, _) = parse_shallow_query(Dialect::MySQL, "SELECT 1 UNION SELECT 2")
+        .expect("should parse plain UNION");
+    assert_eq!(
+        query, plain,
+        "Hint on right side of UNION should be stripped"
+    );
+}
+
 // --- parse_hint_directive unit tests ---
 
 #[test]

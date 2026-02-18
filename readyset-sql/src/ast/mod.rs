@@ -188,18 +188,33 @@ impl ShallowCacheQuery {
     /// This must be called before hashing or comparing `ShallowCacheQuery` values,
     /// because `Select::Display` includes hints in its output. Without stripping,
     /// a hinted query would get a different `QueryId` than the same query without a hint.
+    /// Walk the entire [`SetExpr`] tree and drain optimizer hints from every
+    /// `Select` node.  Returns the first `rs`-prefixed hint encountered
+    /// (left-to-right) so the caller can interpret it as a directive.
     pub fn take_hints(&mut self) -> Option<sqlparser::ast::OptimizerHint> {
-        if let sqlparser::ast::SetExpr::Select(ref mut select) = *self.0.body {
-            let mut first_rs = None;
-            for h in select.optimizer_hints.drain(..) {
-                if first_rs.is_none() && h.prefix.eq_ignore_ascii_case("rs") {
-                    first_rs = Some(h);
+        let mut first_rs = None;
+        let mut stack: Vec<&mut sqlparser::ast::SetExpr> = vec![&mut self.0.body];
+        while let Some(current) = stack.pop() {
+            match current {
+                sqlparser::ast::SetExpr::Select(select) => {
+                    for h in select.optimizer_hints.drain(..) {
+                        if first_rs.is_none() && h.prefix.eq_ignore_ascii_case("rs") {
+                            first_rs = Some(h);
+                        }
+                    }
                 }
+                sqlparser::ast::SetExpr::SetOperation { left, right, .. } => {
+                    // Push right first so left is processed first (LIFO).
+                    stack.push(right);
+                    stack.push(left);
+                }
+                sqlparser::ast::SetExpr::Query(inner) => {
+                    stack.push(&mut inner.body);
+                }
+                _ => {}
             }
-            first_rs
-        } else {
-            None
         }
+        first_rs
     }
 }
 
