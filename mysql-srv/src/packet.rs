@@ -224,9 +224,27 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
 
     /// Send all the currently queued packets. Does not flush the writer.
     pub async fn write_queued_packets(&mut self) -> Result<(), tokio::io::Error> {
-        let mut slices = queued_packet_slices(&self.queue);
+        let slices = queued_packet_slices(&self.queue);
         if !slices.is_empty() {
-            write_all_vectored(&mut self.stream, &mut slices).await?;
+            if self.stream.is_write_vectored() {
+                // Plain TCP: use writev for zero-copy scatter/gather IO.
+                let mut slices = slices;
+                write_all_vectored(&mut self.stream, &mut slices).await?;
+            } else {
+                // TLS path: tokio-native-tls does not implement poll_write_vectored,
+                // so the default AsyncWrite fallback sends each IoSlice as a separate
+                // poll_write call. Each call produces an independent TLS record with
+                // its own 5-byte header, MAC, and padding. For a typical prepared
+                // statement response (~4 buffers, ~130 bytes), that means 4 TLS
+                // records instead of 1. Coalescing into a single buffer avoids this
+                // per-buffer TLS record overhead at the cost of one memcpy.
+                let total: usize = slices.iter().map(|s| s.len()).sum();
+                let mut buf = Vec::with_capacity(total);
+                for slice in &slices {
+                    buf.extend_from_slice(slice);
+                }
+                self.stream.write_all(&buf).await?;
+            }
             self.return_queued_to_pool();
         }
 
