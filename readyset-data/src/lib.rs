@@ -1211,7 +1211,10 @@ impl Hash for DfValue {
             DfValue::TimestampTz(ts) => ts.hash(state),
             DfValue::Time(ref t) => t.hash(state),
             DfValue::ByteArray(ref array) => array.hash(state),
-            DfValue::Numeric(ref d) => d.hash(state),
+            DfValue::Numeric(ref d) => f64::try_from(d.as_ref())
+                .unwrap_or(f64::NAN)
+                .to_bits()
+                .hash(state),
             DfValue::BitVector(ref bits) => bits.hash(state),
             DfValue::Array(ref vs) => vs.hash(state),
             DfValue::PassThrough(ref p) => p.hash(state),
