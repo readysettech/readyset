@@ -235,6 +235,11 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
             let right_arr = non_null!(right).as_array()?;
             Ok(DfValue::from(left_arr.concat(right_arr)))
         }
+        StringConcat => {
+            let left_str = <&str>::try_from(non_null!(left))?;
+            let right_str = <&str>::try_from(non_null!(right))?;
+            Ok(DfValue::from(format!("{left_str}{right_str}")))
+        }
         JsonSubtractPath => {
             // Type errors are handled during expression lowering, unless the type is
             // unknown.
@@ -1647,6 +1652,26 @@ mod tests {
             );
             assert_eq!(
                 eval_expr("ARRAY[1] || null", readyset_sql::Dialect::PostgreSQL),
+                DfValue::None
+            );
+        }
+
+        #[test]
+        fn eval_string_concat() {
+            assert_eq!(
+                eval_expr("'hello' || ' world'", readyset_sql::Dialect::PostgreSQL),
+                DfValue::from("hello world")
+            );
+        }
+
+        #[test]
+        fn eval_string_concat_null_propagation() {
+            assert_eq!(
+                eval_expr("null || 'world'", readyset_sql::Dialect::PostgreSQL),
+                DfValue::None
+            );
+            assert_eq!(
+                eval_expr("'hello' || null", readyset_sql::Dialect::PostgreSQL),
                 DfValue::None
             );
         }

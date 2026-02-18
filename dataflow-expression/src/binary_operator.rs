@@ -116,6 +116,9 @@ pub enum BinaryOperator {
     /// `||` for PostgreSQL arrays (concatenation)
     ArrayConcat,
 
+    /// `||` for PostgreSQL string concatenation
+    StringConcat,
+
     /// `-` applied to the PostreSQL JSONB type
     JsonSubtract,
 
@@ -146,7 +149,7 @@ impl fmt::Display for BinaryOperator {
             Self::JsonExists => "?",
             Self::JsonAnyExists => "?|",
             Self::JsonAllExists => "?&",
-            Self::JsonConcat | Self::ArrayConcat => "||",
+            Self::JsonConcat | Self::ArrayConcat | Self::StringConcat => "||",
             Self::JsonPathExtract | Self::JsonKeyExtract => "->",
             Self::JsonPathExtractUnquote | Self::JsonKeyExtractText => "->>",
             Self::JsonKeyPathExtract => "#>",

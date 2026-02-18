@@ -1000,7 +1000,11 @@ impl BinaryOperator {
                 {
                     Ok((Self::ArrayConcat, false))
                 } else if dialect.double_pipe_is_concat() {
-                    Ok((Self::JsonConcat, false))
+                    if left_type.is_any_json() || right_type.is_any_json() {
+                        Ok((Self::JsonConcat, false))
+                    } else {
+                        Ok((Self::StringConcat, false))
+                    }
                 } else {
                     Ok((Self::Or, false))
                 }
@@ -1177,6 +1181,7 @@ impl BinaryOperator {
                 let (l, r) = pg_array_coercion(left_type, right_type);
                 Ok((l, r))
             }
+            StringConcat => Ok((Some(DfType::DEFAULT_TEXT), Some(DfType::DEFAULT_TEXT))),
             JsonConcat | JsonContains | JsonContainedIn => {
                 if left_type.is_known() && !left_type.is_jsonb() {
                     return error(Left, "JSONB");
@@ -1288,6 +1293,8 @@ impl BinaryOperator {
             | Self::JsonKeyPathExtractText => Ok(DfType::DEFAULT_TEXT),
 
             Self::ArrayConcat => Ok(left_type.clone()),
+
+            Self::StringConcat => Ok(DfType::DEFAULT_TEXT),
 
             _ => Ok(left_type.clone()),
         }

@@ -163,3 +163,74 @@ async fn array_containment_postgres() {
 
     shutdown_tx.shutdown().await;
 }
+
+/// Tests string concatenation with the `||` operator
+#[tokio::test]
+#[tags(serial, slow, postgres_upstream)]
+async fn string_concat_postgres() {
+    readyset_tracing::init_test_logging();
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
+        .parsing_preset(ParsingPreset::OnlySqlparser)
+        .build::<psql_helpers::PostgreSQLAdapter>()
+        .await;
+    let rs_conn = psql_helpers::connect(rs_opts).await;
+
+    let mut upstream_config = psql_helpers::upstream_config();
+    upstream_config.dbname("noria");
+    let upstream_conn = psql_helpers::connect(upstream_config).await;
+
+    upstream_conn
+        .execute(
+            "CREATE TABLE str_t (id int, col1 text, col2 varchar(50))",
+            &[],
+        )
+        .await
+        .unwrap();
+
+    upstream_conn
+        .execute(
+            "INSERT INTO str_t VALUES
+                (1, 'hello', ' world'),
+                (2, 'foo', 'bar'),
+                (3, '', 'empty')",
+            &[],
+        )
+        .await
+        .unwrap();
+
+    // Test projection: SELECT col1 || col2 FROM str_t
+    {
+        let query = "SELECT col1 || col2 FROM str_t ORDER BY id";
+        let upstream_rows = upstream_conn.query(query, &[]).await.unwrap();
+        let expected: Vec<String> = upstream_rows.iter().map(|r| r.get(0)).collect();
+
+        eventually!(run_test: {
+            let rs_rows = rs_conn.query(query, &[]).await;
+            AssertUnwindSafe(|| { rs_rows })
+        }, then_assert: |result| {
+            let rs_rows = result().unwrap();
+            let actual: Vec<String> = rs_rows.iter().map(|r| r.get(0)).collect();
+            assert_eq!(actual, expected, "string concat in projection");
+        });
+    }
+
+    // Test WHERE clause: SELECT id FROM str_t WHERE col1 || col2 = 'hello world'
+    {
+        let query = "SELECT id FROM str_t WHERE col1 || col2 = 'hello world'";
+        let upstream_rows = upstream_conn.query(query, &[]).await.unwrap();
+        let mut expected: Vec<i32> = upstream_rows.iter().map(|r| r.get(0)).collect();
+        expected.sort();
+
+        eventually!(run_test: {
+            let rs_rows = rs_conn.query(query, &[]).await;
+            AssertUnwindSafe(|| { rs_rows })
+        }, then_assert: |result| {
+            let rs_rows = result().unwrap();
+            let mut actual: Vec<i32> = rs_rows.iter().map(|r| r.get(0)).collect();
+            actual.sort();
+            assert_eq!(actual, expected, "string concat in WHERE clause");
+        });
+    }
+
+    shutdown_tx.shutdown().await;
+}
