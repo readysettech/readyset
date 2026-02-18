@@ -109,6 +109,115 @@ fn malformed_hint_still_returns_valid_shallow_query() {
     );
 }
 
+#[test]
+fn multiple_hints_all_stripped() {
+    // A query with two /*rs+ ... */ hints: one valid, one invalid.
+    let (with_hints, directive) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT /*rs+ CREATE SHALLOW CACHE */ /*rs+ INVALID */ RAND()",
+    )
+    .expect("should parse query with multiple hints");
+
+    // The first (valid) hint should be returned as the directive.
+    assert!(
+        matches!(directive, Some(ReadysetHintDirective::CreateCache(_))),
+        "First valid hint should produce CreateCache directive"
+    );
+
+    // The plain query (no hints) should be identical after stripping.
+    let (plain, _) =
+        parse_shallow_query(Dialect::MySQL, "SELECT RAND()").expect("should parse plain query");
+    assert_eq!(
+        with_hints, plain,
+        "Query with multiple hints should equal the plain query after stripping"
+    );
+    assert_eq!(
+        format!("{with_hints}"),
+        format!("{plain}"),
+        "Display output should match the plain query (no leftover hints)"
+    );
+}
+
+#[test]
+fn uppercase_hint_prefix_recognized() {
+    let (with_hint, directive) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT /*RS+ CREATE SHALLOW CACHE */ id FROM users WHERE id = 1",
+    )
+    .expect("should parse uppercase hint");
+    assert!(
+        matches!(directive, Some(ReadysetHintDirective::CreateCache(_))),
+        "Uppercase RS prefix should be recognized"
+    );
+
+    let (plain, _) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT id FROM users WHERE id = 1",
+    )
+    .expect("should parse plain query");
+    assert_eq!(
+        with_hint, plain,
+        "Uppercase-hinted query should equal the plain query"
+    );
+}
+
+#[test]
+fn non_rs_hint_also_stripped() {
+    // A non-rs hint (e.g. /*mysql+ ... */) should be stripped from the query
+    // so it doesn't affect the hash, but no directive is returned.
+    let (query, directive) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT /*mysql+ SET_VAR(sort_buffer_size=16M) */ id FROM users WHERE id = 1",
+    )
+    .expect("should parse query with non-rs hint");
+    assert!(
+        directive.is_none(),
+        "Non-rs hint should not produce a directive"
+    );
+
+    let (plain, _) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT id FROM users WHERE id = 1",
+    )
+    .expect("should parse plain query");
+    assert_eq!(
+        query, plain,
+        "Non-rs hint should be stripped, matching the plain query"
+    );
+    assert_eq!(
+        format!("{query}"),
+        format!("{plain}"),
+        "Display output should not contain the non-rs hint"
+    );
+}
+
+#[test]
+fn mixed_rs_and_non_rs_hints_all_stripped() {
+    // A query with both an rs hint and a non-rs hint — both should be stripped,
+    // and only the rs hint is returned as the directive.
+    let (query, directive) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT /*mysql+ NO_INDEX_MERGE() */ /*rs+ CREATE SHALLOW CACHE */ RAND()",
+    )
+    .expect("should parse query with mixed hints");
+    assert!(
+        matches!(directive, Some(ReadysetHintDirective::CreateCache(_))),
+        "rs hint should produce CreateCache directive"
+    );
+
+    let (plain, _) =
+        parse_shallow_query(Dialect::MySQL, "SELECT RAND()").expect("should parse plain query");
+    assert_eq!(
+        query, plain,
+        "Both rs and non-rs hints should be stripped"
+    );
+    assert_eq!(
+        format!("{query}"),
+        format!("{plain}"),
+        "Display output should contain no hints at all"
+    );
+}
+
 // --- parse_hint_directive unit tests ---
 
 #[test]

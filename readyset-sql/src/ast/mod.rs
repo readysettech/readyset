@@ -178,18 +178,25 @@ impl DialectDisplay for ShallowCacheQuery {
 }
 
 impl ShallowCacheQuery {
-    /// Extracts and removes the `readyset_hint` from the inner `Select` AST node.
+    /// Removes **all** optimizer hints from the inner `Select` AST node, regardless
+    /// of prefix, and returns the first `/*rs+ … */` hint (case-insensitive prefix
+    /// match) if one was present.
+    ///
+    /// Non-`rs` hints (e.g. `/*mysql+ … */`) are also stripped so they do not
+    /// affect the query hash or `Display` output, but they are not returned.
     ///
     /// This must be called before hashing or comparing `ShallowCacheQuery` values,
-    /// because `Select::Display` includes the hint in its output. Without stripping,
+    /// because `Select::Display` includes hints in its output. Without stripping,
     /// a hinted query would get a different `QueryId` than the same query without a hint.
-    pub fn take_readyset_hint(&mut self) -> Option<sqlparser::ast::OptimizerHint> {
+    pub fn take_hints(&mut self) -> Option<sqlparser::ast::OptimizerHint> {
         if let sqlparser::ast::SetExpr::Select(ref mut select) = *self.0.body {
-            let pos = select
-                .optimizer_hints
-                .iter()
-                .position(|h| h.prefix == "rs")?;
-            Some(select.optimizer_hints.remove(pos))
+            let mut first_rs = None;
+            for h in select.optimizer_hints.drain(..) {
+                if first_rs.is_none() && h.prefix.eq_ignore_ascii_case("rs") {
+                    first_rs = Some(h);
+                }
+            }
+            first_rs
         } else {
             None
         }

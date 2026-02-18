@@ -1023,7 +1023,7 @@ pub fn parse_shallow_query(
                 .map(|boxed| (*boxed).into())
                 .map_err(ReadysetParsingError::SqlparserError)
         })?;
-    let hint = query.take_readyset_hint();
+    let hint = query.take_hints();
     let directive = match hint {
         Some(h) => match parse_hint_directive(dialect, &h.text) {
             Ok(d) => d,

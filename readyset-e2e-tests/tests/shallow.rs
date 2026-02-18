@@ -1070,6 +1070,79 @@ async fn malformed_hint_falls_through() {
     shutdown_tx.shutdown().await;
 }
 
+/// Verify that queries with different extra `/*rs+` hints all hit the same shallow cache,
+/// rather than creating duplicate cache entries.
+#[test]
+#[tags(serial, slow, mysql_upstream)]
+async fn multiple_hints_produce_same_cache() {
+    init_test_logging();
+
+    let test_name = derive_test_name!();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+
+    upstream
+        .query_drop("CREATE TABLE t_multi (id INT, val INT)")
+        .await
+        .unwrap();
+    upstream
+        .query_drop("INSERT INTO t_multi VALUES (1, 42)")
+        .await
+        .unwrap();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    // First query with a single valid hint — creates the cache.
+    readyset
+        .query_drop(
+            "SELECT /*rs+ CREATE SHALLOW CACHE */ id, val FROM t_multi WHERE id = 1",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::Upstream,
+        "First hinted query should be a cache miss"
+    );
+
+    // Same query with TWO hints — should hit the existing cache, not create a new one.
+    readyset
+        .query_drop(
+            "SELECT /*rs+ CREATE SHALLOW CACHE */ /*rs+ INVALID */ id, val FROM t_multi WHERE id = 1",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow,
+        "Query with two hints should hit the same shallow cache"
+    );
+
+    // Same query with no hints — should also hit the existing cache.
+    readyset
+        .query_drop("SELECT id, val FROM t_multi WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow,
+        "Query with no hints should hit the same shallow cache"
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
 /// Verify that a malformed hint does not bypass an existing shallow cache.
 ///
 /// When a shallow cache already exists for a query, sending that query with a
