@@ -1682,8 +1682,23 @@ impl Expr {
                         match args {
                             ArrayArguments::List(elems) => {
                                 out.push(elems.len());
-                                if let Some(elem) = elems.first() {
-                                    find_shape(elem, out)?
+                                let mut expected_sub: Option<Vec<usize>> = None;
+                                for elem in elems {
+                                    let mut sub = vec![];
+                                    find_shape(elem, &mut sub)?;
+                                    match &expected_sub {
+                                        None => expected_sub = Some(sub),
+                                        Some(exp) if *exp != sub => {
+                                            return Err(invalid_query_err!(
+                                                "Multidimensional arrays must have sub-arrays \
+                                                 with matching dimensions"
+                                            ));
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                if let Some(sub) = expected_sub {
+                                    out.extend(sub);
                                 }
                             }
                             ArrayArguments::Subquery(..) => {
@@ -2940,5 +2955,49 @@ pub(crate) mod tests {
             assert_eq!(left, None);
             assert_eq!(right, None);
         }
+    }
+
+    #[test]
+    fn array_mismatched_dimensions_rejected() {
+        let expr = parse_expr(ParserDialect::PostgreSQL, "ARRAY[[1, 2, 3], [4, 5, 6, 7]]").unwrap();
+        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Multidimensional arrays must have sub-arrays with matching dimensions"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn array_consistent_dimensions_accepted() {
+        let expr = parse_expr(ParserDialect::PostgreSQL, "ARRAY[[1, 2], [3, 4]]").unwrap();
+        let result =
+            Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context()).unwrap();
+        assert_eq!(
+            result,
+            Expr::Array {
+                elements: vec![
+                    Expr::Literal {
+                        val: 1u32.into(),
+                        ty: DfType::BigInt,
+                    },
+                    Expr::Literal {
+                        val: 2u32.into(),
+                        ty: DfType::BigInt,
+                    },
+                    Expr::Literal {
+                        val: 3u32.into(),
+                        ty: DfType::BigInt,
+                    },
+                    Expr::Literal {
+                        val: 4u32.into(),
+                        ty: DfType::BigInt,
+                    },
+                ],
+                shape: vec![2, 2],
+                ty: DfType::Array(Box::new(DfType::Array(Box::new(DfType::BigInt)))),
+            }
+        );
     }
 }

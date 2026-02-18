@@ -405,7 +405,8 @@ mod tests {
     use crate::lower::tests::{no_op_lower_context, resolve_columns};
     use crate::utils::{column_with_type, make_column, make_literal, normalize_json};
 
-    /// Returns the value from evaluating an expression, or `ReadySetError` if evaluation fails.
+    /// Returns the value from evaluating an expression, or `ReadySetError` if lowering or
+    /// evaluation fails.
     ///
     /// Note that parsing is expected to succeed, since this is strictly meant to test evaluation.
     #[track_caller]
@@ -420,8 +421,7 @@ mod tests {
             MySQL => crate::Dialect::DEFAULT_MYSQL,
         };
 
-        expr_unwrap(Expr::lower(ast, expr_dialect, &no_op_lower_context()), expr)
-            .eval::<DfValue>(&[])
+        Expr::lower(ast, expr_dialect, &no_op_lower_context())?.eval::<DfValue>(&[])
     }
 
     /// Returns the value from evaluating an expression, panicking if parsing or evaluation fails.
