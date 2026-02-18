@@ -861,6 +861,9 @@ impl Value {
                 }
             }
             (Self::Json(json), Type::Text) => Ok(Cow::Owned(Self::Text(json.to_string()))),
+            (Self::TimestampTz(ts), Type::Text) => {
+                Ok(Cow::Owned(Self::Text(ts.naive_local().to_string())))
+            }
             (v, t) => {
                 bail!("Conversion from {v:?} to {t:?} is not supported")
             }

@@ -21,9 +21,6 @@ pub const ISO_TIMESTAMP_PARSE_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.f";
 /// The format for timestamps when presented as text
 pub const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
-/// The format for timestamps with time zone when presented as text
-pub const TIMESTAMP_TZ_FORMAT: &str = "%Y-%m-%d %H:%M:%S%:z";
-
 /// The format for dates when parsed as text
 pub const DATE_FORMAT: &str = "%Y-%m-%d";
 
@@ -236,15 +233,14 @@ impl fmt::Display for TimestampTz {
             }
         }
 
-        if self.has_timezone() {
-            assert!(!self.is_zero(), "Zero date should not have timezone");
-            write!(f, "{}", ts.format(TIMESTAMP_TZ_FORMAT))?;
-        } else if self.is_zero() {
+        // Write date+time without timezone first
+        if self.is_zero() {
             write!(f, "0000-00-00 00:00:00")?;
         } else {
             write!(f, "{}", ts.format(TIMESTAMP_FORMAT))?;
         }
 
+        // Subsecond digits after time, before timezone
         if self.subsecond_digits() > 0 {
             let micros = if self.is_zero() {
                 0
@@ -257,6 +253,17 @@ impl fmt::Display for TimestampTz {
                 micros as f64 * 0.000001
             );
             write!(f, "{}", &micros_str[1..])?;
+        }
+
+        // Timezone offset last
+        if self.has_timezone() {
+            assert!(!self.is_zero(), "Zero date should not have timezone");
+            let offset = ts.offset().local_minus_utc();
+            let sign = if offset >= 0 { '+' } else { '-' };
+            let abs = offset.unsigned_abs();
+            let hours = abs / 3600;
+            let minutes = (abs % 3600) / 60;
+            write!(f, "{sign}{hours:02}:{minutes:02}")?;
         }
 
         Ok(())
@@ -387,46 +394,53 @@ impl TimestampTz {
     }
 
     fn from_str_impl(ts: &str) -> anyhow::Result<TimestampTz> {
-        // If there is a dot, there is a microseconds field attached
-        Ok(
-            if let Ok((naive_date_time, offset_tag)) =
-                NaiveDateTime::parse_and_remainder(ts, TIMESTAMP_PARSE_FORMAT)
-                    .or_else(|_| NaiveDateTime::parse_and_remainder(ts, ISO_TIMESTAMP_PARSE_FORMAT))
-            {
-                if let Some(offset) = parse_timestamp_tag(offset_tag) {
-                    offset?
-                        .from_local_datetime(&naive_date_time)
-                        .single()
-                        .ok_or(internal_err!("Invalid date format"))?
-                        .into()
-                } else {
-                    naive_date_time.into()
-                }
-            } else if let Ok(dt) = NaiveDate::parse_from_str(ts, DATE_FORMAT) {
-                // Make TimestampTz object with time portion 00:00:00
-                dt.and_hms_opt(0, 0, 0)
+        let result: TimestampTz = if let Ok((naive_date_time, offset_tag)) =
+            NaiveDateTime::parse_and_remainder(ts, TIMESTAMP_PARSE_FORMAT)
+                .or_else(|_| NaiveDateTime::parse_and_remainder(ts, ISO_TIMESTAMP_PARSE_FORMAT))
+        {
+            let mut ts_result: TimestampTz = if let Some(offset) = parse_timestamp_tag(offset_tag) {
+                offset?
+                    .from_local_datetime(&naive_date_time)
+                    .single()
                     .ok_or(internal_err!("Invalid date format"))?
                     .into()
-            } else if ts.starts_with("+0000-00-00") {
-                const ZERO_TIME: NaiveTime = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
-                match ts.split_once(' ') {
-                    None | Some((_, "")) => Self::zero(),
-                    Some((_, time)) => {
-                        if let Ok(time) = NaiveTime::parse_from_str(time, TIME_PARSE_FORMAT) {
-                            if time == ZERO_TIME {
-                                Self::zero()
-                            } else {
-                                internal!("Invalid date format")
-                            }
+            } else {
+                naive_date_time.into()
+            };
+            // Count fractional-second digits from the source string so Display
+            // preserves the original precision (e.g. ".123456" → 6 digits).
+            // `offset_tag` is the unconsumed suffix of `ts`, so the consumed
+            // portion is ts[..ts.len() - offset_tag.len()].
+            let consumed = &ts[..ts.len() - offset_tag.len()];
+            if let Some(dot_pos) = consumed.rfind('.') {
+                ts_result.set_subsecond_digits((consumed.len() - dot_pos - 1) as u8);
+            }
+            ts_result
+        } else if let Ok(dt) = NaiveDate::parse_from_str(ts, DATE_FORMAT) {
+            // Make TimestampTz object with time portion 00:00:00
+            dt.and_hms_opt(0, 0, 0)
+                .ok_or(internal_err!("Invalid date format"))?
+                .into()
+        } else if ts.starts_with("+0000-00-00") {
+            const ZERO_TIME: NaiveTime = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+            match ts.split_once(' ') {
+                None | Some((_, "")) => Self::zero(),
+                Some((_, time)) => {
+                    if let Ok(time) = NaiveTime::parse_from_str(time, TIME_PARSE_FORMAT) {
+                        if time == ZERO_TIME {
+                            Self::zero()
                         } else {
                             internal!("Invalid date format")
                         }
+                    } else {
+                        internal!("Invalid date format")
                     }
                 }
-            } else {
-                internal!("Invalid date format")
-            },
-        )
+            }
+        } else {
+            internal!("Invalid date format")
+        };
+        Ok(result)
     }
 
     fn from_str_no_bc(ts: &str) -> anyhow::Result<TimestampTz> {
@@ -936,5 +950,57 @@ mod tests {
                 .single()
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn timestamp_from_str_subsecond_digits_preserved() {
+        let ts = TimestampTz::from_str("2023-01-15 10:30:45").unwrap();
+        assert_eq!(ts.subsecond_digits(), 0);
+        assert_eq!(ts.to_string(), "2023-01-15 10:30:45");
+
+        let ts = TimestampTz::from_str("2023-01-15 10:30:45.123456").unwrap();
+        assert_eq!(ts.subsecond_digits(), 6);
+        assert_eq!(ts.to_string(), "2023-01-15 10:30:45.123456");
+
+        let ts = TimestampTz::from_str("2023-01-15 10:30:45.123").unwrap();
+        assert_eq!(ts.subsecond_digits(), 3);
+        assert_eq!(ts.to_string(), "2023-01-15 10:30:45.123");
+
+        let ts = TimestampTz::from_str("2023-01-15 10:30:45.1").unwrap();
+        assert_eq!(ts.subsecond_digits(), 1);
+        assert_eq!(ts.to_string(), "2023-01-15 10:30:45.1");
+    }
+
+    #[test]
+    fn timestamp_from_str_subsecond_digits_with_timezone() {
+        // No fractional seconds, with timezone
+        let ts = TimestampTz::from_str("2004-10-19 10:23:54+02").unwrap();
+        assert_eq!(ts.subsecond_digits(), 0);
+        assert!(ts.has_timezone());
+        assert_eq!(ts.to_string(), "2004-10-19 10:23:54+02:00");
+
+        // 4-digit fractional seconds, with timezone offset
+        let ts = TimestampTz::from_str("2004-10-19 10:23:54.1234+02").unwrap();
+        assert_eq!(ts.subsecond_digits(), 4);
+        assert!(ts.has_timezone());
+        assert_eq!(ts.to_string(), "2004-10-19 10:23:54.1234+02:00");
+
+        // 6-digit fractional seconds, with timezone offset
+        let ts = TimestampTz::from_str("2004-10-19 10:23:54.123456+02").unwrap();
+        assert_eq!(ts.subsecond_digits(), 6);
+        assert!(ts.has_timezone());
+        assert_eq!(ts.to_string(), "2004-10-19 10:23:54.123456+02:00");
+
+        // 6-digit fractional seconds, with negative timezone offset
+        let ts = TimestampTz::from_str("2004-10-19 10:23:54.123456-05").unwrap();
+        assert_eq!(ts.subsecond_digits(), 6);
+        assert!(ts.has_timezone());
+        assert_eq!(ts.to_string(), "2004-10-19 10:23:54.123456-05:00");
+
+        // 2-digit fractional seconds, with timezone offset including minutes
+        let ts = TimestampTz::from_str("2004-10-19 10:23:54.12+05:30").unwrap();
+        assert_eq!(ts.subsecond_digits(), 2);
+        assert!(ts.has_timezone());
+        assert_eq!(ts.to_string(), "2004-10-19 10:23:54.12+05:30");
     }
 }

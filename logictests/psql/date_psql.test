@@ -21,3 +21,15 @@ query D nosort
 SELECT date(DATE_TRUNC('year', tm)) from date_test where id = 1
 ----
 2024-01-01
+
+# ::TIMESTAMP cast on a string literal should preserve microsecond precision
+query T nosort
+SELECT '2023-01-15 10:30:45.123456'::TIMESTAMP FROM date_test WHERE id = 1
+----
+2023-01-15 10:30:45.123456
+
+# No fractional part: no trailing zeros should appear
+query T nosort
+SELECT '2023-01-15 10:30:45'::TIMESTAMP FROM date_test WHERE id = 1
+----
+2023-01-15 10:30:45
