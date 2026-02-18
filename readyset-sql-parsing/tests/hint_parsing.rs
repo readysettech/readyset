@@ -86,6 +86,29 @@ fn parse_hint_postgresql_dialect() {
     assert_eq!(with_hint, without_hint);
 }
 
+#[test]
+fn malformed_hint_still_returns_valid_shallow_query() {
+    // "POLICY TT" is invalid (should be "POLICY TTL"), but the SQL query itself is valid.
+    // parse_shallow_query should succeed with directive = None, not propagate the hint error.
+    let (query, directive) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT /*rs+ CREATE SHALLOW CACHE POLICY TT 300 SECONDS */ RAND()",
+    )
+    .expect("should parse despite malformed hint");
+    assert!(
+        directive.is_none(),
+        "Malformed hint should produce None directive"
+    );
+
+    // The returned query should match the hint-stripped version.
+    let (plain_query, _) = parse_shallow_query(Dialect::MySQL, "SELECT RAND()")
+        .expect("should parse plain query");
+    assert_eq!(
+        query, plain_query,
+        "Hint-stripped query should equal the plain query"
+    );
+}
+
 // --- parse_hint_directive unit tests ---
 
 #[test]

@@ -1025,7 +1025,13 @@ pub fn parse_shallow_query(
         })?;
     let hint = query.take_readyset_hint();
     let directive = match hint {
-        Some(h) => parse_hint_directive(dialect, &h.text)?,
+        Some(h) => match parse_hint_directive(dialect, &h.text) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(error = %e, "Malformed readyset hint directive, ignoring");
+                None
+            }
+        },
         None => None,
     };
     Ok((query, directive))

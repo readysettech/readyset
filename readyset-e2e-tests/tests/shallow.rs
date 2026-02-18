@@ -1069,3 +1069,90 @@ async fn malformed_hint_falls_through() {
 
     shutdown_tx.shutdown().await;
 }
+
+/// Verify that a malformed hint does not bypass an existing shallow cache.
+///
+/// When a shallow cache already exists for a query, sending that query with a
+/// malformed `/*rs+` hint (e.g., `POLICY TT` instead of `POLICY TTL`) must
+/// still match the existing cache. Before the fix, `parse_shallow_query` would
+/// discard the successfully-parsed inner query on hint-parse failure, causing
+/// the cache lookup to be skipped entirely.
+#[test]
+#[tags(serial, slow, mysql_upstream)]
+async fn malformed_hint_does_not_bypass_existing_cache() {
+    init_test_logging();
+
+    let test_name = derive_test_name!();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+
+    upstream
+        .query_drop("CREATE TABLE t8 (id INT, val INT)")
+        .await
+        .unwrap();
+    upstream
+        .query_drop("INSERT INTO t8 VALUES (1, 77)")
+        .await
+        .unwrap();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    // Create a shallow cache via explicit DDL.
+    readyset
+        .query_drop(
+            "CREATE SHALLOW CACHE POLICY TTL 60 SECONDS FROM SELECT id, val FROM t8 WHERE id = ?",
+        )
+        .await
+        .expect("create shallow cache");
+
+    // First query (no hint): goes upstream, populates the cache.
+    let rows: Vec<(i32, i32)> = readyset
+        .query("SELECT id, val FROM t8 WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![(1, 77)]);
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::Upstream,
+    );
+
+    // Second query (no hint): should hit the shallow cache.
+    let rows: Vec<(i32, i32)> = readyset
+        .query("SELECT id, val FROM t8 WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![(1, 77)]);
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow,
+    );
+
+    // Same query with a malformed hint — the hint text is invalid (`POLICY TT`
+    // instead of `POLICY TTL`), but the inner SELECT is identical to the cached
+    // query. This must still hit the shallow cache, not fall through to upstream.
+    let rows: Vec<(i32, i32)> = readyset
+        .query(
+            "SELECT /*rs+ CREATE SHALLOW CACHE POLICY TT 300 SECONDS */ id, val FROM t8 WHERE id = 1",
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![(1, 77)]);
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow,
+        "Malformed hint must not bypass an existing shallow cache"
+    );
+
+    shutdown_tx.shutdown().await;
+}
