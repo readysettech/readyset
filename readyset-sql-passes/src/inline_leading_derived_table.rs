@@ -96,8 +96,9 @@ use crate::rewrite_utils::{
     expect_only_subquery_from_with_alias, expect_sub_query_with_alias_mut,
     for_each_window_function, get_from_item_reference_name, get_select_item_alias,
     get_unique_alias, hoist_parametrizable_join_filters_to_where, is_aggregated_expr,
-    is_aggregated_select, is_simple_parametrizable_filter, outermost_expression,
-    split_correlated_constraint, split_correlated_expression, split_expr, split_expr_mut,
+    is_aggregated_select, is_simple_parametrizable_filter, normalize_comma_separated_lhs,
+    outermost_expression, split_correlated_constraint, split_correlated_expression, split_expr,
+    split_expr_mut,
 };
 use crate::unnest_subqueries::{
     AggNoGbyCardinality, agg_only_no_gby_cardinality, has_limit_one_deep,
@@ -111,10 +112,9 @@ use readyset_errors::{
 };
 use readyset_sql::analysis::visit::{Visitor, walk_select_statement};
 use readyset_sql::ast::{
-    Column, Expr, FieldDefinitionExpr, FieldReference, GroupByClause, InValue, JoinClause,
-    JoinConstraint, JoinOperator, JoinRightSide, LimitClause, LimitValue, Literal, OrderBy,
-    OrderClause, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
-    UnaryOperator,
+    Column, Expr, FieldDefinitionExpr, FieldReference, GroupByClause, InValue, JoinConstraint,
+    JoinOperator, JoinRightSide, LimitClause, LimitValue, Literal, OrderBy, OrderClause, Relation,
+    SelectStatement, SqlIdentifier, TableExpr, TableExprInner, UnaryOperator,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use std::collections::{HashMap, HashSet};
@@ -966,22 +966,6 @@ fn orders_equivalent_under_projection(
             .iter()
             .take(norm_outer_order.len())
             .eq(norm_outer_order.iter()))
-}
-
-fn normalize_comma_separated_lhs(stmt: &mut SelectStatement) -> ReadySetResult<bool> {
-    Ok(if stmt.tables.len() > 1 {
-        stmt.join.splice(
-            0..0,
-            stmt.tables.drain(1..).map(|dt| JoinClause {
-                operator: JoinOperator::CrossJoin,
-                right: JoinRightSide::Table(dt),
-                constraint: JoinConstraint::Empty,
-            }),
-        );
-        true
-    } else {
-        false
-    })
 }
 
 fn is_agg_derived_outputs(

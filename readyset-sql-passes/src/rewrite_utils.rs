@@ -10,8 +10,9 @@ use readyset_sql::analysis::visit_mut::{VisitorMut, walk_expr};
 use readyset_sql::analysis::{ReferredColumns, is_aggregate, visit, visit_mut};
 use readyset_sql::ast::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
-    InValue, JoinConstraint, JoinRightSide, LimitClause, Literal, OrderBy, OrderClause, OrderType,
-    Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+    InValue, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal,
+    OrderBy, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier, TableExpr,
+    TableExprInner,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use std::collections::{HashMap, HashSet};
@@ -2434,4 +2435,23 @@ pub(crate) fn deep_columns_visitor(
         depth: 0,
     }
     .visit_select_statement(stmt)
+}
+
+/// Normalize comma-separated tables in `FROM` to explicit `CROSS JOIN`
+/// clauses. Converts `FROM a, b, c` to `FROM a CROSS JOIN b CROSS JOIN c`.
+/// Idempotent — no-op if `stmt.tables` has 0 or 1 entries.
+pub(crate) fn normalize_comma_separated_lhs(stmt: &mut SelectStatement) -> ReadySetResult<bool> {
+    Ok(if stmt.tables.len() > 1 {
+        stmt.join.splice(
+            0..0,
+            stmt.tables.drain(1..).map(|dt| JoinClause {
+                operator: JoinOperator::CrossJoin,
+                right: JoinRightSide::Table(dt),
+                constraint: JoinConstraint::Empty,
+            }),
+        );
+        true
+    } else {
+        false
+    })
 }

@@ -371,3 +371,15 @@ select array(select upper(tag) from tags where d_id = d.id) from dogs d where d.
 ----
 {BBB,AAA,CCC,BBB,NULL,AAA,NULL}
 
+
+#####
+# REA-6348: comma-separated joins with ARRAY() subquery constructor
+# Uses existing dogs/tags tables to avoid schema generation mismatch.
+####
+
+# correlated array ctor with comma join (REA-6348)
+query T
+select array(select tag from tags where d_id = d.id order by tag) from dogs d, tags t where d.id = t.d_id and d.id = 2 and t.tag = 'yyy';
+----
+{AAA,yyy,zzz}
+

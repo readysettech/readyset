@@ -104,6 +104,7 @@ use crate::get_local_from_items_iter_mut;
 use crate::rewrite_utils::{
     as_sub_query_with_alias_mut, collect_local_from_items,
     default_alias_for_select_item_expression, get_from_item_reference_name, get_unique_alias,
+    normalize_comma_separated_lhs,
 };
 use std::iter;
 use std::mem;
@@ -448,6 +449,13 @@ fn rewrite_array_constructors_in_select(
     }
 
     stmt.fields = new_fields;
+
+    // Normalize comma-separated tables to explicit CROSS JOINs before
+    // adding lateral joins, so downstream passes see a consistent
+    // join structure. Only needed when we have lateral tables to add.
+    if !lateral_tables.is_empty() {
+        normalize_comma_separated_lhs(stmt)?;
+    }
 
     // Add lateral tables to the query
     // If there are no existing tables, add the first lateral to FROM, rest become joins
@@ -1074,5 +1082,32 @@ mod tests {
             }
             other => panic!("Expected expression field, got: {other:?}"),
         }
+    }
+
+    /// Regression test for REA-6348: ARRAY() subquery constructor with
+    /// comma-separated joins must normalize to CROSS JOIN before adding
+    /// lateral joins.
+    #[test]
+    fn test_rewrite_with_comma_join() {
+        let sql = r#"
+            SELECT ARRAY(SELECT sname FROM s) FROM s, spj WHERE s.sn = spj.sn
+        "#;
+        let stmt = test_rewrite(sql);
+        // Comma join normalized: stmt.tables should have 1 entry
+        assert_eq!(stmt.tables.len(), 1);
+        // CROSS JOIN + LEFT OUTER JOIN for the lateral subquery
+        assert!(stmt.join.len() >= 2);
+    }
+
+    #[test]
+    fn test_rewrite_with_left_join_and_comma_join() {
+        let sql = r#"
+            SELECT ARRAY(SELECT MIN(status) FROM s)
+            FROM s LEFT OUTER JOIN spj ON s.sn != spj.sn
+            WHERE spj.pn = 'P22222'
+        "#;
+        let stmt = test_rewrite(sql);
+        // LEFT OUTER JOIN (original) + LEFT OUTER JOIN (lateral)
+        assert!(stmt.join.len() >= 2);
     }
 }
