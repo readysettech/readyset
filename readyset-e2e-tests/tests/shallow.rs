@@ -599,7 +599,7 @@ async fn hint_creates_shallow_cache_union() {
 
 /// Verify that a `/*rs+ CREATE SHALLOW CACHE */` hint works with a CTE.
 #[test]
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 async fn hint_creates_shallow_cache_cte() {
     init_test_logging();
 
@@ -656,7 +656,7 @@ async fn hint_creates_shallow_cache_cte() {
 
 /// Verify that a `/*rs+ CREATE SHALLOW CACHE */` hint works with a window function.
 #[test]
-#[tags(serial, mysql_upstream)]
+#[tags(serial, mysql8_upstream)]
 async fn hint_creates_shallow_cache_window_function() {
     init_test_logging();
 
