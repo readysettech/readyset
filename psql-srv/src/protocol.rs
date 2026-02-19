@@ -632,9 +632,9 @@ impl Protocol {
         let response = backend.on_query(query).await?;
         if let Select { schema, resultset } = response {
             let mut field_descriptions = Vec::with_capacity(schema.len());
-            for i in schema {
+            for i in &*schema {
                 field_descriptions.push(
-                    make_field_description(&i, Text, backend, &mut self.extended_types).await?,
+                    make_field_description(i, Text, backend, &mut self.extended_types).await?,
                 );
             }
 
@@ -1311,7 +1311,7 @@ mod tests {
                 Err(Error::InternalError("error requested".to_string()))
             } else if self.is_query_read {
                 Ok(QueryResponse::Select {
-                    schema: vec![
+                    schema: Arc::new(vec![
                         Column::Column {
                             name: "col1".into(),
                             table_oid: None,
@@ -1324,7 +1324,7 @@ mod tests {
                             attnum: None,
                             col_type: Type::FLOAT8,
                         },
-                    ],
+                    ]),
                     resultset: stream::iter(vec![
                         Ok(vec![PsqlValue::Int(88), PsqlValue::Double(0.123)].into()),
                         Ok(vec![PsqlValue::Int(22), PsqlValue::Double(0.456)].into()),
@@ -1379,7 +1379,7 @@ mod tests {
                 Err(Error::InternalError("error requested".to_string()))
             } else if self.is_query_read {
                 Ok(QueryResponse::Select {
-                    schema: vec![
+                    schema: Arc::new(vec![
                         Column::Column {
                             name: "col1".into(),
                             table_oid: None,
@@ -1392,7 +1392,7 @@ mod tests {
                             attnum: None,
                             col_type: Type::FLOAT8,
                         },
-                    ],
+                    ]),
                     resultset: stream::iter(vec![
                         Ok(vec![PsqlValue::Int(88), PsqlValue::Double(0.123)].into()),
                         Ok(vec![PsqlValue::Int(22), PsqlValue::Double(0.456)].into()),

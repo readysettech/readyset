@@ -182,7 +182,7 @@ pub enum QueryResponse<R> {
     /// The response to a select statement.
     Select {
         /// The schema of the resultset produced by the select statement.
-        schema: Vec<Column>,
+        schema: Arc<Vec<Column>>,
         /// The actual resultset produced by the select statement.
         resultset: R,
     },

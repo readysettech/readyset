@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::vec;
 
 use database_utils::TlsMode;
@@ -45,7 +46,7 @@ impl PsqlBackend for ErrorBackend {
             Err(Error::InternalError("help I'm".to_owned()))
         } else {
             Ok(QueryResponse::Select {
-                schema: vec![],
+                schema: Default::default(),
                 resultset: stream::iter(vec![]),
             })
         }
@@ -82,16 +83,16 @@ impl PsqlBackend for ErrorBackend {
         match self.0 {
             ErrorPosition::Execute => Err(Error::InternalError("a database".to_owned())),
             ErrorPosition::Serialize => Ok(QueryResponse::Select {
-                schema: vec![Column::Column {
+                schema: Arc::new(vec![Column::Column {
                     name: "x".into(),
                     table_oid: None,
                     attnum: None,
                     col_type: Type::BOOL,
-                }],
+                }]),
                 resultset: stream::iter(vec![Err(Error::InternalError("factory".to_owned()))]),
             }),
             _ => Ok(QueryResponse::Select {
-                schema: vec![],
+                schema: Default::default(),
                 resultset: stream::iter(vec![]),
             }),
         }

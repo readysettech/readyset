@@ -73,7 +73,7 @@ pub struct Resultset {
     results: ResultsetInner,
 
     /// The data types of the projected fields for each row.
-    project_field_types: Vec<Type>,
+    project_field_types: Arc<Vec<Type>>,
 
     /// The names of the projected fields for each row (for shallow cache metadata).
     project_field_names: Vec<String>,
@@ -88,22 +88,23 @@ pub struct Resultset {
 impl Resultset {
     fn finalize_cache(&mut self) {
         if let Some(cache) = &mut self.cache {
-            let schema = self
-                .project_field_names
-                .iter()
-                .zip(&self.project_field_types)
-                .enumerate()
-                .map(|(i, (name, col_type))| ps::Column::Column {
-                    name: name.clone().into(),
-                    col_type: col_type.clone(),
-                    table_oid: Some(0),
-                    attnum: Some(i as i16),
-                })
-                .collect();
+            let schema = Arc::new(
+                self.project_field_names
+                    .iter()
+                    .zip(self.project_field_types.iter())
+                    .enumerate()
+                    .map(|(i, (name, col_type))| ps::Column::Column {
+                        name: name.clone().into(),
+                        col_type: col_type.clone(),
+                        table_oid: Some(0),
+                        attnum: Some(i as i16),
+                    })
+                    .collect(),
+            );
 
             cache.set_metadata(QueryMetadata::PostgreSql(PostgreSqlMetadata {
                 schema,
-                types: self.project_field_types.clone(),
+                types: Arc::clone(&self.project_field_types),
             }));
             drop(cache.filled());
         }
@@ -125,7 +126,7 @@ impl Resultset {
     pub fn empty() -> Self {
         Self {
             results: ResultsetInner::Empty,
-            project_field_types: Vec::new(),
+            project_field_types: Default::default(),
             project_field_names: Vec::new(),
             cache: None,
             client_formats: None,
@@ -137,12 +138,14 @@ impl Resultset {
         schema: &SelectSchema,
     ) -> Result<Self, ps::Error> {
         // Extract the appropriate `tokio_postgres` `Type` for each column in the schema.
-        let project_field_types = schema
-            .0
-            .schema
-            .iter()
-            .map(|c| type_to_pgsql(&c.column_type))
-            .collect::<Result<Vec<_>, _>>()?;
+        let project_field_types = Arc::new(
+            schema
+                .0
+                .schema
+                .iter()
+                .map(|c| type_to_pgsql(&c.column_type))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
         Ok(Resultset {
             results: ResultsetInner::ReadySet(Box::new(results.into_iter())),
             project_field_types,
@@ -168,7 +171,7 @@ impl Resultset {
                 first_row: Some(first_row),
                 stream,
             },
-            project_field_types: schema,
+            project_field_types: Arc::new(schema),
             project_field_names: names,
             cache,
             client_formats: None,
@@ -192,7 +195,7 @@ impl Resultset {
                 first_row: Some(first_row),
                 stream,
             },
-            project_field_types: schema,
+            project_field_types: Arc::new(schema),
             project_field_names: names,
             cache,
             client_formats,
@@ -209,7 +212,7 @@ impl Resultset {
                 first_message: Some(first_msg),
                 stream,
             },
-            project_field_types: Vec::new(),
+            project_field_types: Default::default(),
             project_field_names: Vec::new(),
             cache,
             client_formats: None,
@@ -218,7 +221,7 @@ impl Resultset {
 
     pub fn from_shallow_dfvalue(
         values: Arc<Vec<CacheEntry>>,
-        project_field_types: Vec<Type>,
+        project_field_types: Arc<Vec<Type>>,
     ) -> Self {
         Self {
             results: ResultsetInner::ShallowDfValue { values, row: 0 },
@@ -258,7 +261,7 @@ impl Stream for Resultset {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let s = self.get_mut();
-        let project_field_types = &s.project_field_types;
+        let project_field_types = s.project_field_types.as_slice();
         let next = match &mut s.results {
             ResultsetInner::Empty => None,
             ResultsetInner::ReadySet(i) => {
@@ -305,7 +308,7 @@ impl Stream for Resultset {
                             let df_values = row_to_df_values(&row)?;
                             let psql_values: Result<_, _> = df_values
                                 .into_iter()
-                                .zip(&s.project_field_types)
+                                .zip(s.project_field_types.iter())
                                 .map(|(val, typ)| {
                                     TypedDfValue {
                                         value: val,
@@ -415,7 +418,7 @@ mod tests {
             columns: Cow::Owned(vec!["col1".into()]),
         });
         let resultset = Resultset::from_readyset(ResultIterator::owned(results), &schema).unwrap();
-        assert_eq!(resultset.project_field_types, vec![Type::INT8]);
+        assert_eq!(*resultset.project_field_types, vec![Type::INT8]);
         assert_eq!(
             collect_resultset_values(resultset).await,
             Vec::<Vec<PsqlValue>>::new()

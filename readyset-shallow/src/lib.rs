@@ -36,8 +36,8 @@ impl SizeOf for MySqlMetadata {
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct PostgreSqlMetadata {
-    pub schema: Vec<psql_srv::Column>,
-    pub types: Vec<tokio_postgres::types::Type>,
+    pub schema: Arc<Vec<psql_srv::Column>>,
+    pub types: Arc<Vec<tokio_postgres::types::Type>>,
 }
 
 impl SizeOf for PostgreSqlMetadata {

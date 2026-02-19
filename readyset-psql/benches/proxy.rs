@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::{io, vec};
 
@@ -160,15 +161,17 @@ impl PsqlBackend for Backend {
             schema: res
                 .first()
                 .map(|row| {
-                    row.columns()
-                        .iter()
-                        .map(|col| psql_srv::Column::Column {
-                            name: col.name().into(),
-                            col_type: col.type_().clone(),
-                            table_oid: None,
-                            attnum: None,
-                        })
-                        .collect()
+                    Arc::new(
+                        row.columns()
+                            .iter()
+                            .map(|col| psql_srv::Column::Column {
+                                name: col.name().into(),
+                                col_type: col.type_().clone(),
+                                table_oid: None,
+                                attnum: None,
+                            })
+                            .collect(),
+                    )
                 })
                 .unwrap_or_default(),
             resultset: ResultStream::Owned(res.into_iter()),
@@ -240,15 +243,17 @@ impl PsqlBackend for Backend {
                 _ => None,
             })
             .map(|row| {
-                row.columns()
-                    .iter()
-                    .map(|col| psql_srv::Column::Column {
-                        name: col.name().into(),
-                        col_type: col.type_().clone(),
-                        table_oid: None,
-                        attnum: None,
-                    })
-                    .collect()
+                Arc::new(
+                    row.columns()
+                        .iter()
+                        .map(|col| psql_srv::Column::Column {
+                            name: col.name().into(),
+                            col_type: col.type_().clone(),
+                            table_oid: None,
+                            attnum: None,
+                        })
+                        .collect(),
+                )
             })
             .unwrap_or_default();
 
