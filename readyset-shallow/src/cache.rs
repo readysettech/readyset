@@ -546,16 +546,22 @@ where
         ))
     }
 
-    pub(crate) async fn get(&self, k: K) -> Option<(QueryResult<V>, bool)> {
+    pub(crate) async fn get(&self, k: K) -> (Option<(QueryResult<V>, bool)>, K) {
+        let k = (self.id, k);
+        let result = if let Some(entry) = self.inner.get(&k).await
+            && let CacheEntry::Present(values) = &*entry
+        {
+            self.get_hit(values)
+        } else {
+            None
+        };
+        (result, k.1)
+    }
+
+    pub(crate) async fn get_on_miss(&self, k: K) -> Option<(QueryResult<V>, bool)> {
         const MAX_RETRIES: usize = 1;
 
         let k = (self.id, k);
-
-        if let Some(entry) = self.inner.get(&k).await
-            && let CacheEntry::Present(values) = &*entry
-        {
-            return self.get_hit(values);
-        }
 
         if let Some(coalesce_ms) = self.coalesce_ms {
             for i in 0..=MAX_RETRIES {
@@ -672,7 +678,7 @@ mod tests {
         key: &[&'static str],
     ) {
         // Insert a guard entry to allow a subsequent insert.
-        assert!(cache.get(key.to_owned()).await.is_none());
+        assert!(cache.get_on_miss(key.to_owned()).await.is_none());
     }
 
     #[tokio::test]
@@ -692,11 +698,11 @@ mod tests {
         cache
             .insert(key.clone(), values.clone(), metadata, ZERO_DURATION)
             .await;
-        let result = cache.get(key.clone()).await.unwrap();
+        let result = cache.get(key.clone()).await.0.unwrap();
         assert_eq!(result.0.values.as_ref(), &values);
 
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert!(cache.get(key).await.is_none());
+        assert!(cache.get(key).await.0.is_none());
     }
 
     #[tokio::test]
@@ -719,12 +725,12 @@ mod tests {
             cache
                 .insert(key.clone(), values.clone(), metadata.clone(), exec)
                 .await;
-            let result = cache.get(key.clone()).await.unwrap();
+            let result = cache.get(key.clone()).await.0.unwrap();
             assert_eq!(result.0.values.as_ref(), &values);
         }
 
         tokio::time::sleep(Duration::from_secs(1)).await;
-        assert!(cache.get(key).await.is_none());
+        assert!(cache.get(key).await.0.is_none());
     }
 
     #[tokio::test]
@@ -784,10 +790,10 @@ mod tests {
             )
             .await;
 
-        let result_0 = cache_0.get(key.clone()).await.unwrap();
+        let result_0 = cache_0.get(key.clone()).await.0.unwrap();
         assert_eq!(result_0.0.values.as_ref(), &values_0);
 
-        let result_1 = cache_1.get(key.clone()).await.unwrap();
+        let result_1 = cache_1.get(key.clone()).await.0.unwrap();
         assert_eq!(result_1.0.values.as_ref(), &values_1);
     }
 

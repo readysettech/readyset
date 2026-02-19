@@ -346,23 +346,26 @@ where
         let Some(cache) = self.get(None, Some(query_id)) else {
             return CacheResult::NotCached;
         };
-        let res = cache.get(key.clone()).await;
-
-        match res {
+        let (res, key) = cache.get(key).await;
+        let (res, needs_refresh, key) = match res {
             Some((res, needs_refresh)) if res.values.first().is_none_or(&is_compatible) => {
-                cache.increment_hit();
-                if needs_refresh && !cache.is_scheduled() {
-                    let guard = Self::make_guard(cache, key);
-                    CacheResult::HitAndRefresh(res, guard)
-                } else {
-                    CacheResult::Hit(res)
+                (res, needs_refresh, key)
+            }
+            Some(_) | None => match cache.get_on_miss(key.clone()).await {
+                Some((res, needs_refresh)) if res.values.first().is_none_or(&is_compatible) => {
+                    (res, needs_refresh, key)
                 }
-            }
-            Some(_) | None => {
-                cache.increment_miss();
-                let guard = Self::make_guard(cache, key);
-                CacheResult::Miss(guard)
-            }
+                _ => {
+                    cache.increment_miss();
+                    return CacheResult::Miss(Self::make_guard(cache, key));
+                }
+            },
+        };
+        cache.increment_hit();
+        if needs_refresh && !cache.is_scheduled() {
+            CacheResult::HitAndRefresh(res, Self::make_guard(cache, key))
+        } else {
+            CacheResult::Hit(res)
         }
     }
 
@@ -591,7 +594,7 @@ mod tests {
         let cache_2 = manager.get(None, Some(&query_id_2)).unwrap();
 
         // Mark intent and insert for cache 1
-        let _ = cache_1.get(vec!["key1"]).await;
+        let _ = cache_1.get_on_miss(vec!["key1"]).await;
         cache_1
             .insert(
                 vec!["key1"],
@@ -602,7 +605,7 @@ mod tests {
             .await;
 
         // Mark intent and insert for cache 2
-        let _ = cache_2.get(vec!["key2"]).await;
+        let _ = cache_2.get_on_miss(vec!["key2"]).await;
         cache_2
             .insert(
                 vec!["key2"],
@@ -660,7 +663,7 @@ mod tests {
         let cache_1 = manager.get(None, Some(&query_id_1)).unwrap();
         let cache_2 = manager.get(None, Some(&query_id_2)).unwrap();
 
-        let _ = cache_1.get(vec!["key1"]).await;
+        let _ = cache_1.get_on_miss(vec!["key1"]).await;
         cache_1
             .insert(
                 vec!["key1"],
@@ -670,7 +673,7 @@ mod tests {
             )
             .await;
 
-        let _ = cache_2.get(vec!["key2"]).await;
+        let _ = cache_2.get_on_miss(vec!["key2"]).await;
         cache_2
             .insert(
                 vec!["key2"],
@@ -713,7 +716,7 @@ mod tests {
             .unwrap();
 
         let cache = manager.get(None, Some(&query_id_1)).unwrap();
-        let _ = cache.get(vec!["key"]).await;
+        let _ = cache.get_on_miss(vec!["key"]).await;
         cache
             .insert(
                 vec!["key"],
@@ -752,7 +755,7 @@ mod tests {
         // Insert multiple entries with different keys
         for i in 0..5 {
             let key = format!("key{}", i);
-            let _ = cache.get(key.clone()).await;
+            let _ = cache.get_on_miss(key.clone()).await;
             cache
                 .insert(
                     key,
@@ -801,15 +804,15 @@ mod tests {
 
         let cache = manager.get(None, Some(&query_id)).unwrap();
 
-        // Create a Loading entry by calling get without inserting
-        let _ = cache.get(vec!["loading_key"]).await;
+        // Create a Loading entry by calling get_on_miss without inserting
+        let _ = cache.get_on_miss(vec!["loading_key"]).await;
 
         // The Loading entry should not appear in list_entries
         let entries = manager.list_entries(None, None);
         assert!(entries.is_empty());
 
         // Now insert a real entry
-        let _ = cache.get(vec!["real_key"]).await;
+        let _ = cache.get_on_miss(vec!["real_key"]).await;
         cache
             .insert(
                 vec!["real_key"],
