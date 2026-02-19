@@ -1,14 +1,30 @@
 use dataflow_expression::Dialect;
 use readyset_sql::analysis::visit_mut::VisitorMut;
-use readyset_sql::ast::{Expr, SelectStatement};
+use readyset_sql::ast::{Expr, Literal, SelectStatement};
 
 use crate::RewriteDialectContext;
 
-use self::constant_fold::constant_fold_expr_preserving_casts;
+use self::constant_fold::{constant_fold_expr, constant_fold_expr_preserving_casts};
 use self::normalize_negation::normalize_negation;
 
 pub(crate) mod constant_fold;
 mod normalize_negation;
+
+/// Attempt to evaluate `expr` as a constant (no column references) and return the
+/// resulting [`Literal`].
+///
+/// Returns `None` if the expression is not constant-foldable (e.g. it contains a
+/// column reference or is otherwise non-constant).
+///
+/// This is used by the VALUES clause handler to evaluate typed expressions like
+/// `'2023-01-15 10:30:45.123456'::TIMESTAMP` into a plain literal value.
+pub fn eval_constant_expr(mut expr: Expr, dialect: Dialect) -> Option<Literal> {
+    constant_fold_expr(&mut expr, dialect);
+    match expr {
+        Expr::Literal(lit) => Some(lit),
+        _ => None,
+    }
+}
 
 pub fn scalar_optimize_expr(expr: &mut Expr, dialect: Dialect) {
     // Use the cast-preserving variant so that type annotations like `'A'::CHAR` are retained in

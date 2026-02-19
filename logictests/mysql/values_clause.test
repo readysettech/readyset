@@ -361,3 +361,36 @@ LEFT JOIN categories c ON v.c1 = c.id;
 statement error
 SELECT * FROM VALUES ROW(1), ROW(2), ROW(3);
 
+# TODO: Move constant expression folding tests into their own test file.
+
+# Constant expression folding in VALUES: arithmetic
+query II rowsort
+SELECT v.a, v.b
+FROM (VALUES ROW(1 + 2, 10 * 3), ROW(4 - 1, 100 / 5)) AS v(a, b)
+CROSS JOIN categories c
+WHERE c.id = 1;
+----
+3
+20
+3
+30
+
+# Constant expression folding in VALUES: string concatenation
+query T nosort
+SELECT v.val
+FROM (VALUES ROW(CONCAT('hello', ' ', 'world'))) AS v(val)
+CROSS JOIN categories c
+WHERE c.id = 1;
+----
+hello world
+
+# Timestamp precision: VALUES with a DATETIME string containing microseconds should
+# preserve sub-second precision through the Constant node to the result.
+query T nosort
+SELECT v.ts
+FROM (VALUES ROW('2023-01-15 10:30:45.123456')) AS v(ts)
+CROSS JOIN categories c
+WHERE c.id = 1;
+----
+2023-01-15 10:30:45.123456
+

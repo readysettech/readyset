@@ -22,7 +22,9 @@ use readyset_sql::ast::{
     TableExprInner,
 };
 use readyset_sql::DialectDisplay;
-use readyset_sql_passes::{is_correlated, is_predicate, map_aggregates, LogicalOp};
+use readyset_sql_passes::{
+    eval_constant_expr, is_correlated, is_predicate, map_aggregates, LogicalOp,
+};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -1075,16 +1077,21 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                     "VALUES column_aliases should have been populated by SQL passes"
                 );
 
-                // Convert expressions to literals
+                // Convert expressions to literals, evaluating constant expressions
+                // (e.g. typed casts like '2023-01-15 10:30:45.123456'::TIMESTAMP).
                 let literal_rows: Vec<Vec<Literal>> = rows
                     .iter()
                     .map(|row| {
                         row.iter()
                             .map(|expr| match expr {
                                 Expr::Literal(lit) => Ok(lit.clone()),
-                                _ => unsupported!(
-                                    "Only literal values are supported in VALUES clause"
-                                ),
+                                other => {
+                                    eval_constant_expr(other.clone(), dialect).ok_or_else(|| {
+                                        unsupported_err!(
+                                            "Only constant expressions are supported in VALUES clause"
+                                        )
+                                    })
+                                }
                             })
                             .collect::<ReadySetResult<Vec<_>>>()
                     })
