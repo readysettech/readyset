@@ -115,6 +115,18 @@ pub fn upstream(args: TokenStream, item: TokenStream) -> TokenStream {
 
     let fn_name = &item.sig.ident;
     let attrs = &item.attrs;
+
+    // If #[tags(...)] is still present in attrs, it means `upstream` was applied *before* `tags`,
+    // which is the wrong order. `tags` must be outermost so it runs first.
+    if let Some(tags_attr) = attrs.iter().find(|attr| attr.path().is_ident("tags")) {
+        return Error::new_spanned(
+            tags_attr,
+            "#[tags(...)] must be placed before (above) #[upstream(...)], not after it",
+        )
+        .to_compile_error()
+        .into();
+    }
+
     let asyncness = &item.sig.asyncness;
     let ret_type = &item.sig.output;
     let inputs = &item.sig.inputs;

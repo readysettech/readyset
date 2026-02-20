@@ -1,0 +1,5 @@
+error: #[tags(...)] must be placed before (above) #[upstream(...)], not after it
+ --> tests/compile-fail/tags_after_upstream.rs:7:1
+  |
+7 | #[tags(serial)]
+  | ^^^^^^^^^^^^^^^

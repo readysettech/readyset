@@ -1,6 +1,12 @@
 use test_strategy::proptest;
 use test_utils::{tags, upstream};
 
+#[test]
+fn tags_after_upstream_fails_to_compile() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile-fail/tags_after_upstream.rs");
+}
+
 // Parameterless + upstream only
 #[upstream(mysql80, mysql84)]
 #[test]
