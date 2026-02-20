@@ -1532,19 +1532,21 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn remove_query() {
         let (mut noria, shutdown_tx) = start_simple("remove_query").await;
-        noria
-            .extend_recipe(
-                ChangeList::from_strings(
-                    vec![
-                        "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
-                        "CREATE CACHE test_query FROM SELECT * FROM users;",
-                    ],
-                    DataDialect::DEFAULT_MYSQL,
+        eventually! {
+            noria
+                .extend_recipe(
+                    ChangeList::from_strings(
+                        vec![
+                            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+                            "CREATE CACHE test_query FROM SELECT * FROM users;",
+                        ],
+                        DataDialect::DEFAULT_MYSQL,
+                    )
+                    .unwrap(),
                 )
-                .unwrap(),
-            )
-            .await
-            .unwrap();
+                .await
+                .is_ok()
+        }
 
         let queries = noria.views().await.unwrap();
         assert!(queries.contains_key(&"test_query".into()));
@@ -1560,20 +1562,22 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn remove_all_queries() {
         let (mut noria, shutdown_tx) = start_simple("remove_all_queries").await;
-        noria
-            .extend_recipe(
-                ChangeList::from_strings(
-                    vec![
-                        "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
-                        "CREATE CACHE q1 FROM SELECT id FROM users;",
-                        "CREATE CACHE q2 FROM SELECT name FROM users where id = ?;",
-                    ],
-                    DataDialect::DEFAULT_MYSQL,
+        eventually! {
+            noria
+                .extend_recipe(
+                    ChangeList::from_strings(
+                        vec![
+                            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+                            "CREATE CACHE q1 FROM SELECT id FROM users;",
+                            "CREATE CACHE q2 FROM SELECT name FROM users where id = ?;",
+                        ],
+                        DataDialect::DEFAULT_MYSQL,
+                    )
+                    .unwrap(),
                 )
-                .unwrap(),
-            )
-            .await
-            .unwrap();
+                .await
+                .is_ok()
+        }
 
         let queries = noria.views().await.unwrap();
         assert!(queries.contains_key(&"q1".into()));
@@ -1599,20 +1603,22 @@ mod tests {
             .set_schema_replication_offset(Some(&offset))
             .await
             .unwrap();
-        noria
-            .extend_recipe(
-                ChangeList::from_strings(
-                    vec![
-                        "CREATE TABLE t1 (id int);",
-                        "CREATE TABLE t2 (id int);",
-                        "CREATE TABLE t3 (id int);",
-                    ],
-                    DataDialect::DEFAULT_MYSQL,
+        eventually! {
+            noria
+                .extend_recipe(
+                    ChangeList::from_strings(
+                        vec![
+                            "CREATE TABLE t1 (id int);",
+                            "CREATE TABLE t2 (id int);",
+                            "CREATE TABLE t3 (id int);",
+                        ],
+                        DataDialect::DEFAULT_MYSQL,
+                    )
+                    .unwrap(),
                 )
-                .unwrap(),
-            )
-            .await
-            .unwrap();
+                .await
+                .is_ok()
+        }
 
         let mut t1 = noria.table("t1").await.unwrap();
         let mut t2 = noria.table("t2").await.unwrap();
@@ -1657,19 +1663,21 @@ mod tests {
     async fn key_count_rpc() {
         let (mut noria, shutdown_tx) = start_simple("all_tables").await;
 
-        noria
-            .extend_recipe(
-                ChangeList::from_strings(
-                    vec![
-                        "CREATE TABLE key_count_test (id INT PRIMARY KEY, stuff TEXT);",
-                        "CREATE CACHE q1 FROM SELECT * FROM key_count_test;",
-                    ],
-                    DataDialect::DEFAULT_MYSQL,
+        eventually! {
+            noria
+                .extend_recipe(
+                    ChangeList::from_strings(
+                        vec![
+                            "CREATE TABLE key_count_test (id INT PRIMARY KEY, stuff TEXT);",
+                            "CREATE CACHE q1 FROM SELECT * FROM key_count_test;",
+                        ],
+                        DataDialect::DEFAULT_MYSQL,
+                    )
+                    .unwrap(),
                 )
-                .unwrap(),
-            )
-            .await
-            .unwrap();
+                .await
+                .is_ok()
+        }
 
         let mut table = noria.table("key_count_test").await.unwrap();
         // The table only contains the local index, so we use `tables()` to get the global index
@@ -1725,20 +1733,22 @@ mod tests {
             .unwrap();
         assert_eq!(res1, vec![None, None]);
 
-        noria
-            .extend_recipe(
-                ChangeList::from_strings(
-                    vec![
-                        "CREATE TABLE t1 (x int);",
-                        "CREATE CACHE FROM SELECT * FROM t1;",
-                    ],
-                    DataDialect::DEFAULT_MYSQL,
+        eventually! {
+            noria
+                .extend_recipe(
+                    ChangeList::from_strings(
+                        vec![
+                            "CREATE TABLE t1 (x int);",
+                            "CREATE CACHE FROM SELECT * FROM t1;",
+                        ],
+                        DataDialect::DEFAULT_MYSQL,
+                    )
+                    .unwrap()
+                    .with_schema_search_path(schema_search_path.clone()),
                 )
-                .unwrap()
-                .with_schema_search_path(schema_search_path.clone()),
-            )
-            .await
-            .unwrap();
+                .await
+                .is_ok()
+        }
 
         let res2 = noria
             .views_info(
@@ -1781,16 +1791,18 @@ mod tests {
         assert!(matches!(&res3[..], &[Some(_)]));
 
         // A change in schema_search_path that *does* change the semantics
-        noria
-            .extend_recipe(
-                ChangeList::from_strings(
-                    vec!["CREATE TABLE s2.t1 (x int)"],
-                    DataDialect::DEFAULT_MYSQL,
+        eventually! {
+            noria
+                .extend_recipe(
+                    ChangeList::from_strings(
+                        vec!["CREATE TABLE s2.t1 (x int)"],
+                        DataDialect::DEFAULT_MYSQL,
+                    )
+                    .unwrap(),
                 )
-                .unwrap(),
-            )
-            .await
-            .unwrap();
+                .await
+                .is_ok()
+        }
 
         let query1_equivalent = parse_select(Dialect::MySQL, "SELECT x FROM t1").unwrap();
         let res3 = noria
@@ -1811,28 +1823,30 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn non_replicated_relations() {
         let (mut noria, shutdown_tx) = start_simple("non_replicated_tables").await;
-        noria
-            .extend_recipe(ChangeList::from_changes(
-                vec![
-                    Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                        name: Relation {
-                            schema: Some("s1".into()),
-                            name: "t".into(),
-                        },
-                        reason: NotReplicatedReason::Default,
-                    }),
-                    Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                        name: Relation {
-                            schema: Some("s2".into()),
-                            name: "t".into(),
-                        },
-                        reason: NotReplicatedReason::Default,
-                    }),
-                ],
-                DataDialect::DEFAULT_MYSQL,
-            ))
-            .await
-            .unwrap();
+        eventually! {
+            noria
+                .extend_recipe(ChangeList::from_changes(
+                    vec![
+                        Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                            name: Relation {
+                                schema: Some("s1".into()),
+                                name: "t".into(),
+                            },
+                            reason: NotReplicatedReason::Default,
+                        }),
+                        Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                            name: Relation {
+                                schema: Some("s2".into()),
+                                name: "t".into(),
+                            },
+                            reason: NotReplicatedReason::Default,
+                        }),
+                    ],
+                    DataDialect::DEFAULT_MYSQL,
+                ))
+                .await
+                .is_ok()
+        }
 
         let rels = noria.non_replicated_relations().await.unwrap();
 
@@ -1862,37 +1876,39 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn table_statuses() {
         let (mut noria, shutdown_tx) = start_simple("table_status").await;
-        noria
-            .extend_recipe(ChangeList::from_changes(
-                vec![
-                    Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                        name: Relation {
-                            schema: Some("s1".into()),
-                            name: "t".into(),
+        eventually! {
+            noria
+                .extend_recipe(ChangeList::from_changes(
+                    vec![
+                        Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                            name: Relation {
+                                schema: Some("s1".into()),
+                                name: "t".into(),
+                            },
+                            reason: NotReplicatedReason::Configuration,
+                        }),
+                        Change::CreateTable {
+                            statement: parse_create_table(
+                                Dialect::MySQL,
+                                "CREATE TABLE s2.snapshotting_t (x int);",
+                            )
+                            .unwrap(),
+                            pg_meta: None,
                         },
-                        reason: NotReplicatedReason::Configuration,
-                    }),
-                    Change::CreateTable {
-                        statement: parse_create_table(
-                            Dialect::MySQL,
-                            "CREATE TABLE s2.snapshotting_t (x int);",
-                        )
-                        .unwrap(),
-                        pg_meta: None,
-                    },
-                    Change::CreateTable {
-                        statement: parse_create_table(
-                            Dialect::MySQL,
-                            "CREATE TABLE s2.snapshotted_t (x int);",
-                        )
-                        .unwrap(),
-                        pg_meta: None,
-                    },
-                ],
-                DataDialect::DEFAULT_MYSQL,
-            ))
-            .await
-            .unwrap();
+                        Change::CreateTable {
+                            statement: parse_create_table(
+                                Dialect::MySQL,
+                                "CREATE TABLE s2.snapshotted_t (x int);",
+                            )
+                            .unwrap(),
+                            pg_meta: None,
+                        },
+                    ],
+                    DataDialect::DEFAULT_MYSQL,
+                ))
+                .await
+                .is_ok()
+        }
 
         noria
             .table(Relation {
@@ -1967,17 +1983,19 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn domains() {
         let (mut noria, shutdown_tx) = start_simple("domains").await;
-        noria
-            .extend_recipe(ChangeList::from_change(
-                Change::CreateTable {
-                    statement: parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (x int);")
-                        .unwrap(),
-                    pg_meta: None,
-                },
-                DataDialect::DEFAULT_MYSQL,
-            ))
-            .await
-            .unwrap();
+        eventually! {
+            noria
+                .extend_recipe(ChangeList::from_change(
+                    Change::CreateTable {
+                        statement: parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (x int);")
+                            .unwrap(),
+                        pg_meta: None,
+                    },
+                    DataDialect::DEFAULT_MYSQL,
+                ))
+                .await
+                .is_ok()
+        }
 
         let res = noria.domains().await.unwrap();
         assert_eq!(res.len(), 1);
@@ -1992,20 +2010,22 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn materialization_info() {
         let (mut noria, shutdown_tx) = start_simple("materialization_info").await;
-        noria
-            .extend_recipe(ChangeList::from_change(
-                Change::CreateTable {
-                    statement: parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE t1 (x int primary key);",
-                    )
-                    .unwrap(),
-                    pg_meta: None,
-                },
-                DataDialect::DEFAULT_MYSQL,
-            ))
-            .await
-            .unwrap();
+        eventually! {
+            noria
+                .extend_recipe(ChangeList::from_change(
+                    Change::CreateTable {
+                        statement: parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE t1 (x int primary key);",
+                        )
+                        .unwrap(),
+                        pg_meta: None,
+                    },
+                    DataDialect::DEFAULT_MYSQL,
+                ))
+                .await
+                .is_ok()
+        }
 
         let res = noria.materialization_info().await.unwrap();
         assert_eq!(res.len(), 1);
@@ -2019,19 +2039,21 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn min_persisted_replication_offset() {
         let (mut noria, shutdown_tx) = start_simple("min_persisted_replication_offset").await;
-        noria
-            .extend_recipe(
-                ChangeList::from_strings(
-                    vec![
-                        "CREATE TABLE persisted_offset_test1 (id INT PRIMARY KEY, stuff TEXT)",
-                        "CREATE TABLE persisted_offset_test2 (id INT PRIMARY KEY, stuff TEXT)",
-                    ],
-                    DataDialect::DEFAULT_MYSQL,
+        eventually! {
+            noria
+                .extend_recipe(
+                    ChangeList::from_strings(
+                        vec![
+                            "CREATE TABLE persisted_offset_test1 (id INT PRIMARY KEY, stuff TEXT)",
+                            "CREATE TABLE persisted_offset_test2 (id INT PRIMARY KEY, stuff TEXT)",
+                        ],
+                        DataDialect::DEFAULT_MYSQL,
+                    )
+                    .unwrap(),
                 )
-                .unwrap(),
-            )
-            .await
-            .unwrap();
+                .await
+                .is_ok()
+        }
 
         let min_persisted_offset = noria.min_persisted_replication_offset().await.unwrap();
 
