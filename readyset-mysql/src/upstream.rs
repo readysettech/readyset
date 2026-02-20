@@ -186,7 +186,9 @@ impl<'a> QueryResult<'a> {
                         }
                     };
 
-                    let mut copy = cache.as_ref().map(|_| Vec::new());
+                    let mut copy = cache
+                        .as_ref()
+                        .map(|_| Vec::with_capacity(row.columns_ref().len()));
                     for i in 0..row.columns_ref().len() {
                         let col = row.as_ref(i).expect("Must match column number");
 
