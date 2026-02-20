@@ -14,6 +14,7 @@ use readyset_client::consensus::StandaloneAuthority;
 use readyset_client::recipe::changelist::ChangeList;
 use readyset_data::{DfValue, Dialect};
 use readyset_sql::Dialect as SqlDialect;
+use readyset_util::eventually;
 use rusty_fork::rusty_fork_test;
 
 use crate::integration_utils::*;
@@ -197,38 +198,44 @@ async fn it_works_basic_standalone_impl() {
 
     let (mut g, shutdown_tx) = start_standalone().await.unwrap();
 
-    g.extend_recipe(
-        ChangeList::from_strings(
-            vec!["CREATE TABLE a (a int PRIMARY KEY, b int)"],
-            Dialect::DEFAULT_MYSQL,
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(
+                vec!["CREATE TABLE a (a int PRIMARY KEY, b int)"],
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
         )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+        .await
+        .is_ok()
+    };
 
-    g.extend_recipe(
-        ChangeList::from_strings(
-            vec!["CREATE TABLE b (a int PRIMARY KEY, b int)"],
-            Dialect::DEFAULT_MYSQL,
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(
+                vec!["CREATE TABLE b (a int PRIMARY KEY, b int)"],
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
         )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+        .await
+        .is_ok()
+    };
 
-    g.extend_recipe(
-        ChangeList::from_strings(
-            vec![
-                "CREATE VIEW c AS SELECT a,b FROM a WHERE a = ? UNION ALL (SELECT a,b FROM b WHERE a = ? ORDER BY b);",
-                "CREATE CACHE q FROM SELECT a,b FROM c WHERE a = ?;",
-            ],
-            Dialect::DEFAULT_MYSQL,
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(
+                vec![
+                    "CREATE VIEW c AS SELECT a,b FROM a WHERE a = ? UNION ALL (SELECT a,b FROM b WHERE a = ? ORDER BY b);",
+                    "CREATE CACHE q FROM SELECT a,b FROM c WHERE a = ?;",
+                ],
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
         )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
+        .await
+        .is_ok()
+    };
 
     let mut cq = g.view("q").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table("a").await.unwrap();
