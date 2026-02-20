@@ -41,8 +41,6 @@ use tokio_postgres::error::SqlState;
 use tracing::info;
 use tracing::{debug, error, trace};
 
-const MAX_ATTEMPTS: usize = 40;
-
 // Postgres does not accept MySQL escapes, so rename the table before the query
 const PGSQL_RENAME: (&str, &str) = ("`groups`", "groups");
 
@@ -495,26 +493,18 @@ impl TestHandle {
         view_name: &str,
         expected_results: &[&[DfValue]],
     ) -> ReadySetResult<Vec<Vec<DfValue>>> {
-        let mut attempt: usize = 0;
-        let result = loop {
-            match self.get_results_inner(view_name).await {
-                Err(_) if attempt < MAX_ATTEMPTS => {
-                    // Sometimes things are slow in CI, so we retry a few times before giving up
-                    attempt += 1;
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                }
-                Ok(res) if res != expected_results && attempt < MAX_ATTEMPTS => {
-                    // Sometimes things are slow in CI, so we retry a few times before giving up
-                    attempt += 1;
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                }
-                Ok(res) => {
-                    break res;
-                }
-                Err(err) => return Err(err),
+        eventually! {
+            attempts: 40,
+            sleep: Duration::from_millis(500),
+            run_test: {
+                self.get_results_inner(view_name).await
+            },
+            then_assert: |res| {
+                let res = res.unwrap();
+                assert_eq!(res, expected_results);
+                Ok(res)
             }
-        };
-        Ok(result)
+        }
     }
 
     async fn get_results_inner(&mut self, view_name: &str) -> ReadySetResult<Vec<Vec<DfValue>>> {
@@ -1750,16 +1740,18 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
         non_replicated_rels.contains(&NonReplicatedRelation::new( relation))
     }
 
-    ctx.noria
-        .extend_recipe(
-            ChangeList::from_strings(
-                vec!["CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;"],
-                Dialect::DEFAULT_MYSQL,
+    eventually! {
+        ctx.noria
+            .extend_recipe(
+                ChangeList::from_strings(
+                    vec!["CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;"],
+                    Dialect::DEFAULT_MYSQL,
+                )
+                .unwrap(),
             )
-            .unwrap(),
-        )
-        .await
-        .unwrap();
+            .await
+            .is_ok()
+    };
 
     for view in ["t1_view", "t3_view", "t4_view"] {
         check_results!(
@@ -1841,16 +1833,18 @@ async fn replication_all_schemas_inner(url: &str) -> ReadySetResult<()> {
         )
         .await?;
 
-    ctx.noria
-        .extend_recipe(
-            ChangeList::from_strings(
-                vec!["CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;"],
-                Dialect::DEFAULT_MYSQL,
+    eventually! {
+        ctx.noria
+            .extend_recipe(
+                ChangeList::from_strings(
+                    vec!["CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;"],
+                    Dialect::DEFAULT_MYSQL,
+                )
+                .unwrap(),
             )
-            .unwrap(),
-        )
-        .await
-        .unwrap();
+            .await
+            .is_ok()
+    };
 
     check_results!(
         ctx,
@@ -2288,13 +2282,15 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
         always: false,
         schema_generation_used: None,
     });
-    ctx.noria
-        .extend_recipe(ChangeList::from_change(
-            create_cache_change.clone(),
-            Dialect::DEFAULT_POSTGRESQL,
-        ))
-        .await
-        .unwrap();
+    eventually! {
+        ctx.noria
+            .extend_recipe(ChangeList::from_change(
+                create_cache_change.clone(),
+                Dialect::DEFAULT_POSTGRESQL,
+            ))
+            .await
+            .is_ok()
+    };
 
     trace!("Dropping view");
     client.query("DROP VIEW t2_view;").await.unwrap();
