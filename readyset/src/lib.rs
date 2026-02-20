@@ -1424,6 +1424,7 @@ where
                 adapter_rewrite_params,
                 options.default_ttl_ms,
                 options.default_coalesce_ms,
+                options.cache_mode,
             )) {
                 error!("Failed to recreate shallow caches: {}", e);
             }

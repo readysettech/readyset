@@ -5101,6 +5101,7 @@ async fn remove_ddl_on_error<T, F, Fut>(
 }
 
 /// Recreate shallow caches from stored DDL requests on adapter startup.
+#[allow(clippy::too_many_arguments)]
 pub async fn recreate_shallow_caches<V>(
     shallow: Arc<CacheManager<Vec<DfValue>, V>>,
     query_status_cache: &'static QueryStatusCache,
@@ -5109,6 +5110,7 @@ pub async fn recreate_shallow_caches<V>(
     rewrite_params: AdapterRewriteParams,
     default_ttl_ms: u64,
     default_coalesce_ms: u64,
+    cache_mode: CacheMode,
 ) -> ReadySetResult<()>
 where
     V: Debug + Send + Sync + SizeOf + 'static,
@@ -5122,6 +5124,7 @@ where
             rewrite_params,
             default_ttl_ms,
             default_coalesce_ms,
+            cache_mode,
         )
         .await
         {
@@ -5131,6 +5134,7 @@ where
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_shallow_cache_statement<V>(
     shallow: &CacheManager<Vec<DfValue>, V>,
     query_status_cache: &'static QueryStatusCache,
@@ -5139,6 +5143,7 @@ async fn handle_shallow_cache_statement<V>(
     rewrite_params: AdapterRewriteParams,
     default_ttl_ms: u64,
     default_coalesce_ms: u64,
+    cache_mode: CacheMode,
 ) -> ReadySetResult<()>
 where
     V: Debug + Send + Sync + SizeOf + 'static,
@@ -5160,6 +5165,7 @@ where
                 req,
                 default_ttl_ms,
                 default_coalesce_ms,
+                cache_mode,
             )
             .await
         }
@@ -5177,11 +5183,14 @@ async fn recover_shallow_cache_create<V>(
     ddl_req: CacheDDLRequest,
     default_ttl_ms: u64,
     default_coalesce_ms: u64,
+    cache_mode: CacheMode,
 ) -> ReadySetResult<()>
 where
     V: Debug + Send + Sync + SizeOf + 'static,
 {
-    if !matches!(stmt.cache_type, Some(CacheType::Shallow)) {
+    if !(matches!(stmt.cache_type, Some(CacheType::Shallow))
+        || stmt.cache_type.is_none() && cache_mode.is_shallow())
+    {
         internal!("Not a shallow cache");
     }
 
