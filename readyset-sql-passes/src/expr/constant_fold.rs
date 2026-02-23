@@ -194,6 +194,37 @@ mod tests {
         );
     }
 
+    /// PostgreSQL helper for non-preserving constant folding tests.
+    fn pg_rewrites_to(input: &str, expected: &str) {
+        let mut expr = parse_expr(readyset_sql::Dialect::PostgreSQL, input).unwrap();
+        let expected = parse_expr(readyset_sql::Dialect::PostgreSQL, expected).unwrap();
+        constant_fold_expr(&mut expr, Dialect::DEFAULT_POSTGRESQL);
+
+        let expr = expr.display(readyset_sql::Dialect::PostgreSQL).to_string();
+        let expected = expected
+            .display(readyset_sql::Dialect::PostgreSQL)
+            .to_string();
+        assert_eq!(expr, expected, "\nExpected: {expected}\n     Got: {expr}");
+    }
+
+    /// Array constructors with all-literal elements must NOT be folded into a string literal.
+    /// Folding `ARRAY[0, 10, 20]` to `'{0,10,20}'` breaks `IN` comparisons because the
+    /// subsequent equality check compares an array against a string (REA-6335).
+    #[test]
+    fn array_literal_not_folded_to_string() {
+        pg_rewrites_to("ARRAY[0, 10, 20]", "ARRAY[0, 10, 20]");
+    }
+
+    /// When an array constructor appears in an `IN` expression, constant folding must leave the
+    /// RHS array constructors intact so the `IN` desugars to element-wise array equality.
+    #[test]
+    fn array_in_list_not_folded() {
+        pg_rewrites_to(
+            "t.x IN (ARRAY[0, 10, 20], ARRAY[1, 2, 3])",
+            "t.x IN (ARRAY[0, 10, 20], ARRAY[1, 2, 3])",
+        );
+    }
+
     /// Verify that the non-preserving `constant_fold_expr` still folds casts to literals,
     /// since `rewrite_utils.rs` callers depend on this for fallback value computation.
     #[test]

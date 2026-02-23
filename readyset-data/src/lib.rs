@@ -1436,9 +1436,7 @@ impl TryFrom<DfValue> for Literal {
             )?)),
             DfValue::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
             DfValue::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().clone())),
-            DfValue::Array(_) => Ok(Literal::String(String::try_from(
-                value.coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)?,
-            )?)),
+            DfValue::Array(_) => internal!("Array has no representation as a literal"),
             DfValue::PassThrough(_) => internal!("PassThrough has no representation as a literal"),
             DfValue::Default => internal!("Default has no representation as a literal"),
             DfValue::Max => internal!("MAX has no representation as a literal"),

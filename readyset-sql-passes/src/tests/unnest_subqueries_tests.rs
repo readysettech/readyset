@@ -6521,7 +6521,7 @@ FROM
 ORDER BY
     "tags" NULLS LAST;
 "#;
-    let expected_text = r#"SELECT "inner"."sn", "inner"."pn", "inner"."jn", coalesce("tags"."tags", '{}') AS "tags"
+    let expected_text = r#"SELECT "inner"."sn", "inner"."pn", "inner"."jn", coalesce("tags"."tags", ARRAY[]) AS "tags"
     FROM (SELECT DISTINCT "s"."sn", "s"."pn", "s"."jn" FROM "qa"."s" AS "s") AS "inner" LEFT OUTER JOIN
     (SELECT coalesce("array_subq"."agg_result", ARRAY[]) AS "tags", "array_subq"."jn" AS "jn" FROM
     (SELECT "array_subq"."agg_result", "array_subq"."jn" AS "jn" FROM (SELECT array_agg("inner_subq"."pn"

@@ -9,10 +9,10 @@ use readyset_sql::analysis::visit::{Visitor, walk_function_expr, walk_select_sta
 use readyset_sql::analysis::visit_mut::{VisitorMut, walk_expr};
 use readyset_sql::analysis::{ReferredColumns, is_aggregate, visit, visit_mut};
 use readyset_sql::ast::{
-    BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
-    InValue, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal,
-    OrderBy, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier, TableExpr,
-    TableExprInner,
+    ArrayArguments, BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference,
+    FunctionExpr, GroupByClause, InValue, JoinClause, JoinConstraint, JoinOperator, JoinRightSide,
+    LimitClause, Literal, OrderBy, OrderClause, OrderType, Relation, SelectStatement,
+    SqlIdentifier, TableExpr, TableExprInner,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use std::collections::{HashMap, HashSet};
@@ -1262,21 +1262,19 @@ pub(crate) fn analyse_lone_aggregates_subquery_fields(
     for fe in &stmt.fields {
         let (f_expr, f_alias) = expect_field_as_expr(fe);
         let f_alias = alias_for_expr(f_expr, f_alias);
-        match calculate_aggregate_only_expression_for_empty_data_set(f_expr.clone())? {
-            Expr::Literal(lit) if !matches!(lit, Literal::Null) => {
-                let f_col = Column {
-                    name: f_alias.clone(),
-                    table: Some(stmt_alias.clone().into()),
-                };
-                fields_map.insert(
-                    f_col.clone(),
-                    Ok(Expr::Call(FunctionExpr::Call {
-                        name: "coalesce".into(),
-                        arguments: Some(vec![Expr::Column(f_col), Expr::Literal(lit)]),
-                    })),
-                );
-            }
-            _ => {}
+        let fallback = calculate_aggregate_only_expression_for_empty_data_set(f_expr.clone())?;
+        if is_constant_non_null(&fallback) {
+            let f_col = Column {
+                name: f_alias.clone(),
+                table: Some(stmt_alias.clone().into()),
+            };
+            fields_map.insert(
+                f_col.clone(),
+                Ok(Expr::Call(FunctionExpr::Call {
+                    name: "coalesce".into(),
+                    arguments: Some(vec![Expr::Column(f_col), fallback]),
+                })),
+            );
         }
     }
     Ok(())
@@ -1306,10 +1304,55 @@ fn make_aggregate_fallback_for_expr(mut fallback_expr: Expr) -> Option<Expr> {
     // the expression to a literal for fallback value computation.
     constant_fold_expr(&mut fallback_expr, dialect::Dialect::DEFAULT_POSTGRESQL);
 
-    if matches!(fallback_expr, Expr::Literal(ref literal) if !matches!(literal, Literal::Null)) {
+    // After REA-6335, `ARRAY[]` can no longer be folded into a string literal, so
+    // `coalesce(NULL, ARRAY[])` stays unreduced by the constant folder.  Simplify it here by
+    // picking the first non-NULL constant argument, mirroring PostgreSQL's COALESCE semantics.
+    simplify_constant_coalesce(&mut fallback_expr);
+
+    if is_constant_non_null(&fallback_expr) {
         Some(fallback_expr)
     } else {
         None
+    }
+}
+
+/// Returns `true` if the expression is a constant, non-NULL value suitable for use as an
+/// aggregate fallback.  This includes non-NULL literals **and** array constructors whose
+/// elements are all constant (e.g. `ARRAY[]` or `ARRAY[1, 2]`).  Array constructors cannot
+/// be represented as a single [`Literal`] after REA-6335 prevented array-to-string coercion
+/// in constant folding, so we must accept them explicitly here.
+fn is_constant_non_null(expr: &Expr) -> bool {
+    match expr {
+        Expr::Literal(lit) => !matches!(lit, Literal::Null),
+        Expr::Array(ArrayArguments::List(elems)) => elems.iter().all(is_constant_non_null),
+        _ => false,
+    }
+}
+
+/// Simplify a `coalesce(args…)` call whose arguments are all constants by replacing
+/// it with the first non-NULL constant argument.  This handles the case where the constant
+/// folder was unable to reduce the call because the result type (e.g. `DfValue::Array`) has no
+/// `Literal` representation.
+fn simplify_constant_coalesce(expr: &mut Expr) {
+    let dominated_by_constants = matches!(
+        expr,
+        Expr::Call(FunctionExpr::Call { name, arguments: Some(args) })
+            if name.as_str().eq_ignore_ascii_case("coalesce")
+            && args.iter().all(|a| matches!(a, Expr::Literal(_) | Expr::Array(_)))
+    );
+    if !dominated_by_constants {
+        return;
+    }
+
+    // Extract the first non-NULL constant argument.
+    if let Expr::Call(FunctionExpr::Call {
+        arguments: Some(args),
+        ..
+    }) = expr
+        && let Some(pos) = args.iter().position(is_constant_non_null)
+    {
+        let replacement = args.swap_remove(pos);
+        *expr = replacement;
     }
 }
 

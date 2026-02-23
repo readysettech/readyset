@@ -1675,5 +1675,25 @@ mod tests {
                 DfValue::None
             );
         }
+
+        /// `ARRAY[1,2,3] IN (ARRAY[1,2,3], ARRAY[4,5,6])` should evaluate to true via
+        /// element-wise equality, not string comparison (REA-6335).
+        #[test]
+        fn eval_array_in_list() {
+            assert_eq!(
+                eval_expr(
+                    "ARRAY[1,2,3] IN (ARRAY[1,2,3], ARRAY[4,5,6])",
+                    readyset_sql::Dialect::PostgreSQL
+                ),
+                true.into()
+            );
+            assert_eq!(
+                eval_expr(
+                    "ARRAY[1,2,3] IN (ARRAY[4,5,6], ARRAY[7,8,9])",
+                    readyset_sql::Dialect::PostgreSQL
+                ),
+                false.into()
+            );
+        }
     }
 }
