@@ -1,5 +1,5 @@
 use readyset_errors::{ReadySetError, ReadySetResult, unsupported};
-use readyset_sql::analysis::visit_mut::VisitorMut;
+use readyset_sql::analysis::visit_mut::{VisitorMut, walk_select_statement};
 use readyset_sql::ast::{Expr, FieldDefinitionExpr, SelectStatement, SqlQuery};
 
 /// Visitor that traverses a `SelectStatement` and errors if `ROW` is found in the projection.
@@ -21,7 +21,8 @@ impl<'ast> VisitorMut<'ast> for DisallowRowVisitor {
                 unsupported!("ROW constructor not allowed in select");
             }
         }
-        Ok(())
+        // Recurse into subqueries
+        walk_select_statement(self, stmt)
     }
 }
 
@@ -65,7 +66,7 @@ impl DisallowRow for SqlQuery {
 mod tests {
     use super::*;
     use readyset_sql::Dialect;
-    use readyset_sql_parsing::parse_query;
+    use readyset_sql_parsing::{ParsingPreset, parse_query, parse_query_with_config};
 
     #[test]
     fn test_disallow_row_in_projection() {
@@ -89,5 +90,51 @@ mod tests {
         )
         .unwrap();
         assert!(query.disallow_row().is_ok());
+    }
+
+    // ARRAY(SELECT ...) is only supported by the sqlparser backend, so these tests
+    // use OnlySqlparser.
+
+    #[test]
+    fn test_disallow_row_in_array_subquery() {
+        let mut query = parse_query_with_config(
+            ParsingPreset::OnlySqlparser,
+            Dialect::PostgreSQL,
+            "SELECT ARRAY(SELECT ROW(1, 2) FROM t) FROM s;",
+        )
+        .unwrap();
+        assert!(query.disallow_row().is_err());
+    }
+
+    #[test]
+    fn test_disallow_implicit_row_in_array_subquery() {
+        let mut query = parse_query_with_config(
+            ParsingPreset::OnlySqlparser,
+            Dialect::PostgreSQL,
+            "SELECT ARRAY(SELECT (a, b) FROM t) FROM s;",
+        )
+        .unwrap();
+        assert!(query.disallow_row().is_err());
+    }
+
+    #[test]
+    fn test_allow_scalar_array_subquery() {
+        let mut query = parse_query_with_config(
+            ParsingPreset::OnlySqlparser,
+            Dialect::PostgreSQL,
+            "SELECT ARRAY(SELECT col FROM t) FROM s;",
+        )
+        .unwrap();
+        assert!(query.disallow_row().is_ok());
+    }
+
+    #[test]
+    fn test_disallow_row_in_from_subquery() {
+        let mut query = parse_query(
+            Dialect::PostgreSQL,
+            "SELECT * FROM (SELECT ROW(1, 2) FROM t) sub;",
+        )
+        .unwrap();
+        assert!(query.disallow_row().is_err());
     }
 }
