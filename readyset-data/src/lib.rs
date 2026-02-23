@@ -2368,7 +2368,11 @@ mod tests {
     }
 
     fn non_numeric() -> impl Strategy<Value = DfValue> {
-        any::<DfValue>().prop_filter("Numeric DfValue", |dt| !matches!(dt, DfValue::Numeric(_)))
+        any::<DfValue>().prop_filter("Numeric DfValue", |dt| match dt {
+            DfValue::Numeric(_) => false,
+            DfValue::Array(arr) => !arr.values().any(|v| matches!(v, DfValue::Numeric(_))),
+            _ => true,
+        })
     }
 
     eq_laws!(DfValue);
