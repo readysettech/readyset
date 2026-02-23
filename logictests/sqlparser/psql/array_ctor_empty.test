@@ -163,7 +163,6 @@ select id, ARRAY(select count(*) from inner_t where link_id = -999) from outer_t
 2
 {0}
 
-
 # ---- NULL projection with an explicit cast (REA-6187 repro) ----
 # `ARRAY(SELECT NULL::int ...)` is the ticket's reported failure.  The cast
 # gives array_agg a concrete element type and types the COALESCE fallback
@@ -201,7 +200,22 @@ select id, ARRAY(select sum(link_id) from inner_t where link_id = outer_t.id) fr
 {2}
 
 
-# Bare-fallback failure-path coverage (derivation returns None -> rewrite
-# emits bare ARRAY[] -> REA-6186 reject) lives on the REA-6186 commit
-# above this one in the stack, since the reject does not exist at this
-# commit on its own.
+# ---- Bare-fallback safety net ----
+# Unrecognized projection shapes fall through derive_sql_type_of_expr's
+# `_ => None` arm; the rewrite emits bare ARRAY[] and REA-6186's lowering
+# reject surfaces a clear error rather than the rewrite inventing a type.
+# A future refactor that softens the None arm into a default type would
+# silently break the reject -- this query would then succeed and the
+# regression would be caught here.
+statement error: cannot determine type of empty array
+select id, ARRAY(select link_id + 1 from inner_t where link_id = -999) from outer_t;
+
+
+# ---- Bare NULL projection, no cast (REA-6187 repro) ----
+# `ARRAY(SELECT NULL ...)` with no cast: the element type cannot be derived,
+# so the rewrite emits bare ARRAY[] and REA-6186 rejects the query.  ReadySet
+# proxies it to the upstream rather than caching a rewrite whose array_agg is
+# itself untyped -- which is what produced the ticket's "expected array type,
+# but got text" error.
+statement error: cannot determine type of empty array
+select id, ARRAY(select NULL from inner_t where link_id = outer_t.id) from outer_t;

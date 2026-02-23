@@ -58,17 +58,38 @@ pub fn normalize_json(json: &str) -> String {
     json.parse::<serde_json::Value>().unwrap().to_string()
 }
 
-/// Creates an empty array expression with the given number of dimensions.
+// NOTE: there is no bare-empty-array helper here.  Bare `array[]` is
+// rejected at lowering (PG: "cannot determine type of empty array"), so
+// any test fixture that needs an empty array must specify the element
+// type via [`empty_array_expr_with_cast`].
+
+/// Creates an empty array expression with an explicit element-type cast.
+///
+/// `dimensions` must be at least 1: zero-bracket targets like `array[]::text`
+/// are rejected at lowering (the cast does not rescue the bare empty array).
+/// `(1, "text")` returns `array[]::text[]`, `(2, "text")` returns
+/// `array[]::text[][]`, etc.
 ///
 /// Not intended for use outside of tests.
 #[cfg(test)]
-pub fn empty_array_expr(dimensions: usize) -> String {
-    std::iter::repeat_n("array[", dimensions)
-        .chain(std::iter::repeat_n("]", dimensions))
-        .collect()
+pub fn empty_array_expr_with_cast(dimensions: usize, element_type: &str) -> String {
+    assert!(
+        dimensions >= 1,
+        "empty_array_expr_with_cast: dimensions must be >= 1; \
+         a zero-dimension cast like `array[]::{element_type}` is rejected at lowering"
+    );
+    let mut expr = format!("array[]::{element_type}");
+    for _ in 0..dimensions {
+        expr.push_str("[]");
+    }
+    expr
 }
 
 /// Converts a sequence of values to array expression syntax.
+///
+/// Panics on empty input: bare `array[]` is rejected at lowering (PG: "cannot
+/// determine type of empty array"), so the caller must route empty cases
+/// through [`empty_array_expr_with_cast`] which carries the element type.
 ///
 /// Not intended for use outside of tests.
 #[cfg(test)]
@@ -79,10 +100,20 @@ where
 {
     use itertools::Itertools;
 
-    format!("array[{}]", iter.into_iter().join(", "))
+    let mut peekable = iter.into_iter().peekable();
+    assert!(
+        peekable.peek().is_some(),
+        "iter_to_array_expr: empty input would produce bare array[] which is rejected; \
+         use empty_array_expr_with_cast instead",
+    );
+    format!("array[{}]", peekable.join(", "))
 }
 
-/// Converts a sequence of strings to array expression syntax.
+/// Converts a sequence of strings to a 1-D text array expression.
+///
+/// Empty input produces `array[]::text[]` because this helper always emits a
+/// text array (every element is quoted with `'…'`), and bare `ARRAY[]` is
+/// rejected at lowering.
 ///
 /// Not intended for use outside of tests.
 #[cfg(test)]
@@ -91,7 +122,11 @@ where
     S: IntoIterator,
     S::Item: std::fmt::Display,
 {
-    iter_to_array_expr(strings.into_iter().map(|s| format!("'{s}'")))
+    let mut iter = strings.into_iter().peekable();
+    if iter.peek().is_none() {
+        return empty_array_expr_with_cast(1, "text");
+    }
+    iter_to_array_expr(iter.map(|s| format!("'{s}'")))
 }
 
 /// Converts `index` to be a reverse index of `slice` if negative.
@@ -180,6 +215,29 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+
+    mod array_helpers {
+        use super::*;
+
+        #[test]
+        #[should_panic(expected = "empty input would produce bare array[]")]
+        fn iter_to_array_expr_panics_on_empty() {
+            // Pin the panic so a future weakening of the precondition (e.g.
+            // dropping the `peekable` check) cannot silently re-emit `array[]`,
+            // which would then be rejected at lowering with a confusing
+            // error far from the call site.
+            let _ = iter_to_array_expr(std::iter::empty::<&str>());
+        }
+
+        #[test]
+        #[should_panic(expected = "dimensions must be >= 1")]
+        fn empty_array_expr_with_cast_zero_dim_panics() {
+            // Pin the precondition: a zero-dimension cast like `array[]::text`
+            // would compile but reject at lowering, exactly the failure mode
+            // this helper exists to prevent.
+            let _ = empty_array_expr_with_cast(0, "text");
+        }
+    }
 
     mod index_bidirectional {
         use pretty_assertions::assert_eq;

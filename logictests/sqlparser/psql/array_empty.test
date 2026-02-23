@@ -1,0 +1,107 @@
+# Tests for empty ARRAY[] constructor handling (REA-6186).
+#
+# PostgreSQL rejects bare `ARRAY[]` because the element type cannot be
+# inferred ("cannot determine type of empty array"). With an explicit cast
+# to an array type, the constructor is accepted and produces an empty array
+# of the cast's target type.
+
+statement ok
+create table t (id int, arr int[]);
+
+statement ok
+insert into t values (1, '{1,2,3}'), (2, '{}');
+
+
+# Bare ARRAY[] is rejected: the element type is unknowable.
+statement error: cannot determine type of empty array
+select id, ARRAY[] from t;
+
+
+# Cast to an array type provides the missing element type.
+query IT rowsort
+select id, ARRAY[]::int[] from t;
+----
+1
+{}
+2
+{}
+
+
+# Same shape with a different cast target type, to confirm the element
+# type is taken from the cast itself rather than any in-band default.
+query IT rowsort
+select id, ARRAY[]::text[] from t;
+----
+1
+{}
+2
+{}
+
+
+# Multi-dimensional cast collapses to a dimensionless empty array, matching
+# PG: pg_typeof(ARRAY[]::int[][]) is `integer[]` and array_ndims returns
+# NULL. The displayed value is `{}` regardless of cast bracket count.
+query IT rowsort
+select id, ARRAY[]::int[][] from t;
+----
+1
+{}
+2
+{}
+
+
+# Chained cast: inner empty-array intercept fires (INT[]); outer cast
+# wraps the result in a TEXT[] cast.  Round-trips through eval as `{}`.
+query IT rowsort
+select id, (ARRAY[]::int[])::text[] from t;
+----
+1
+{}
+2
+{}
+
+
+# Casting bare ARRAY[] to a non-array type is rejected.  PG itself emits
+# the same "cannot determine type of empty array" message regardless of
+# whether the cast target is scalar or absent altogether -- the scalar
+# cast does not rescue the inner empty-array typing.
+statement error: cannot determine type of empty array
+select id, ARRAY[]::text from t;
+
+
+# Adjacent edge case: a non-empty all-NULL array is NOT rejected -- only
+# empty arrays trigger the "cannot determine type" rule.  PG accepts this
+# and types it via the cast.
+query IT rowsort
+select id, ARRAY[NULL]::int[] from t;
+----
+1
+{NULL}
+2
+{NULL}
+
+
+# Equality against a stored empty array -- proves the lowered empty array
+# round-trips through eval and matches PG's `'{}'` literal form.
+query I rowsort
+select id from t where arr = ARRAY[]::int[];
+----
+2
+
+
+# Containment against an empty cast array (everything contains {}).
+query I rowsort
+select id from t where arr @> ARRAY[]::int[];
+----
+1
+2
+
+
+# Derived-table projection: empty array survives a subquery boundary.
+query IT rowsort
+select sub.id, sub.empty_arr from (select id, ARRAY[]::int[] as empty_arr from t) sub;
+----
+1
+{}
+2
+{}

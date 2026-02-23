@@ -2928,7 +2928,7 @@ mod tests {
 
         mod json_object {
             use super::*;
-            use crate::utils::{empty_array_expr, iter_to_array_expr};
+            use crate::utils::{empty_array_expr_with_cast, iter_to_array_expr};
             use pretty_assertions::assert_eq;
 
             #[track_caller]
@@ -2979,8 +2979,8 @@ mod tests {
             #[test]
             fn null_propagation() {
                 test_nullable("null", None, None);
-                test_nullable("null", Some("array[]"), None);
-                test_nullable("array[]", Some("null"), None);
+                test_nullable("null", Some("array[]::text[]"), None);
+                test_nullable("array[]::text[]", Some("null"), None);
             }
 
             #[test]
@@ -3018,7 +3018,16 @@ mod tests {
             fn pairs_2d() {
                 #[track_caller]
                 fn test(pairs: &[[&str; 2]], expected_json: &str) {
-                    let pairs = iter_to_array_expr(pairs.iter().map(strings_to_array_expr));
+                    // Empty arrays collapse to 1-D under PG's dimensionless
+                    // empty-array semantics, so the cast's bracket count is
+                    // immaterial for the empty branch -- a 2-D cast is used
+                    // here only for syntactic parity with the non-empty
+                    // branch.  The non-empty branch is the actual 2-D test.
+                    let pairs = if pairs.is_empty() {
+                        empty_array_expr_with_cast(2, "text")
+                    } else {
+                        iter_to_array_expr(pairs.iter().map(strings_to_array_expr))
+                    };
                     test_non_null(&pairs, None, expected_json);
                 }
 
@@ -3089,13 +3098,22 @@ mod tests {
 
             #[test]
             fn empty() {
-                // PostgreSQL allows empty arrays of any number of dimensions.
-                for arg1_dimensions in 1..=5 {
-                    let arg1 = empty_array_expr(arg1_dimensions);
+                // All empty arrays collapse to 1-D regardless of cast bracket
+                // count (PG's dimensionless-empty semantics, mirrored at
+                // lowering), so each arg's eval result is the same 1-D empty
+                // array.  The dimension loop here exercises *cast bracket
+                // parsing* and *cast intercept handling* across 1-D / 2-D /
+                // 3-D targets, plus the single-arg vs two-arg dispatch
+                // through json_object -- not multi-D array values, since
+                // those aren't reachable from empty inputs.  1..=3 is enough;
+                // higher counts would only re-exercise the same cast-parse
+                // path with no new behavior.
+                for arg1_dimensions in 1..=3 {
+                    let arg1 = empty_array_expr_with_cast(arg1_dimensions, "text");
                     test_non_null(&arg1, None, "{}");
 
-                    for arg2_dimensions in 1..=5 {
-                        let arg2 = empty_array_expr(arg2_dimensions);
+                    for arg2_dimensions in 1..=3 {
+                        let arg2 = empty_array_expr_with_cast(arg2_dimensions, "text");
                         test_non_null(&arg1, Some(&arg2), "{}");
                     }
                 }
@@ -3170,10 +3188,10 @@ mod tests {
 
             #[test]
             fn null_propagation() {
-                test_nullable("null", "array[]", "'42'", Some(false), None);
+                test_nullable("null", "array[]::text[]", "'42'", Some(false), None);
                 test_nullable("'{}'", "null", "'42'", Some(false), None);
-                test_nullable("'{}'", "array[]", "null", Some(false), None);
-                test_nullable("'{}'", "array[]", "'42'", None, None);
+                test_nullable("'{}'", "array[]::text[]", "null", Some(false), None);
+                test_nullable("'{}'", "array[]::text[]", "'42'", None, None);
             }
 
             #[test]
@@ -3300,10 +3318,10 @@ mod tests {
 
             #[test]
             fn null_propagation() {
-                test_nullable("null", "array[]", "'42'", Some(false), None);
+                test_nullable("null", "array[]::text[]", "'42'", Some(false), None);
                 test_nullable("'{}'", "null", "'42'", Some(false), None);
-                test_nullable("'{}'", "array[]", "null", Some(false), None);
-                test_nullable("'{}'", "array[]", "'42'", None, None);
+                test_nullable("'{}'", "array[]::text[]", "null", Some(false), None);
+                test_nullable("'{}'", "array[]::text[]", "'42'", None, None);
             }
 
             #[test]
@@ -3526,7 +3544,7 @@ mod tests {
                     let null_value_treatment = null_value_treatment.to_string();
                     test_nullable(
                         "null",
-                        "array[]",
+                        "array[]::text[]",
                         "'42'",
                         Some(false),
                         Some(&null_value_treatment),
@@ -3542,7 +3560,7 @@ mod tests {
                     );
                     test_nullable(
                         "'{}'",
-                        "array[]",
+                        "array[]::text[]",
                         "'42'",
                         None,
                         Some(&null_value_treatment),

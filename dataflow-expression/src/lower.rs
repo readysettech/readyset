@@ -3,7 +3,7 @@ use std::{cmp, iter};
 use chrono_tz::Tz;
 use readyset_data::dialect::SqlEngine;
 use readyset_data::upstream_system_props::get_system_timezone;
-use readyset_data::{CharsetFamily, Collation, DfType, DfValue};
+use readyset_data::{Array, ArrayD, CharsetFamily, Collation, DfType, DfValue, IxDyn};
 use readyset_errors::{
     internal, internal_err, invalid_query, invalid_query_err, unsupported, unsupported_err,
     ReadySetError, ReadySetResult,
@@ -118,6 +118,13 @@ fn apply_collation_coercion(
 ///
 /// [pg-docs]: https://www.postgresql.org/docs/current/typeconv-union-case.html
 fn unify_postgres_types(types: Vec<&DfType>) -> ReadySetResult<DfType> {
+    // The empty-input branch follows PG's rule #3 (all-unknown -> text)
+    // vacuously: with no types to inspect, "all" inputs are unknown.  This is
+    // the correct contract for type unification.  PG's *array constructor*
+    // rule is different ("cannot determine type of empty array") and the bare
+    // `ARRAY[]` lowering rejects in the caller before it reaches this helper.
+    // Do not move the empty-array reject in here -- it would corrupt CASE /
+    // COALESCE / UNION callers that legitimately rely on the text fallback.
     let Some(first_ty) = types.first() else {
         return Ok(DfType::DEFAULT_TEXT);
     };
@@ -1455,6 +1462,41 @@ impl Expr {
         result_type
     }
 
+    /// If `expr` is a bare `ARRAY[]` and `ty` is an array type, build the empty
+    /// array directly using the cast's element type as a constant `Expr::Literal`.
+    /// Returns `None` for non-array `ty` or non-empty inner; the caller handles
+    /// the rejection so the error message can name the cast target.
+    ///
+    /// PG treats all empty arrays as the same dimensionless `<elem>[]` value
+    /// regardless of how many bracket pairs the cast carries —
+    /// `pg_typeof(ARRAY[]::int[][])` is `integer[]` and `array_ndims` is NULL.
+    /// Match that: collapse to a single-layer `DfType::Array(elem)` and
+    /// `shape: [0]` no matter how deep `ty` nests.  Folding to `Literal` at
+    /// lower time also avoids per-row `ArrayD::from_shape_vec` reconstruction
+    /// on the eval hot path.
+    fn try_lower_empty_array_cast(expr: &AstExpr, ty: &DfType) -> Option<Self> {
+        let AstExpr::Array(ArrayArguments::List(exprs)) = expr else {
+            return None;
+        };
+        if !exprs.is_empty() {
+            return None;
+        }
+        let DfType::Array(_) = ty else {
+            return None;
+        };
+        let mut elem = ty;
+        while let DfType::Array(next) = elem {
+            elem = next;
+        }
+        let collapsed_ty = DfType::Array(Box::new(elem.clone()));
+        let empty =
+            ArrayD::<DfValue>::from_shape_vec(IxDyn(&[0]), vec![]).expect("0-shape always valid");
+        Some(Self::Literal {
+            val: DfValue::from(Array::from(empty)),
+            ty: collapsed_ty,
+        })
+    }
+
     /// Lower the given [`nom_sql`] AST expression to a dataflow expression
     ///
     /// Currently, this involves:
@@ -1765,6 +1807,13 @@ impl Expr {
             } => {
                 let ty =
                     DfType::from_sql_type(&to_type, dialect, |t| context.resolve_type(t), None)?;
+                if let Some(arr) = Self::try_lower_empty_array_cast(&expr, &ty) {
+                    return Ok(arr);
+                }
+                // A bare `ARRAY[]` with a non-array cast target falls through:
+                // the inner `Array([])` lowering will reject it with the same
+                // "cannot determine type of empty array" message PG emits,
+                // since PG does not differentiate the scalar-cast case.
                 Ok(Self::Cast {
                     expr: Box::new(Self::lower(*expr, dialect, context)?),
                     ty,
@@ -1952,6 +2001,10 @@ impl Expr {
                 let mut elements = vec![];
                 find_shape(&expr, &mut shape)?;
                 flatten(expr, &mut elements, dialect, context)?;
+
+                if elements.is_empty() {
+                    return Err(invalid_query_err!("cannot determine type of empty array"));
+                }
 
                 let mut ty =
                     // Array exprs are only supported for postgresql
@@ -3532,6 +3585,108 @@ pub(crate) mod tests {
         let expr = parse_expr(ParserDialect::PostgreSQL, "ARRAY[1, 1.5]").unwrap();
         let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context());
         assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+    }
+
+    #[test]
+    fn empty_array_no_cast_rejected() {
+        let expr = parse_expr(ParserDialect::PostgreSQL, "ARRAY[]").unwrap();
+        let err = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("cannot determine type of empty array"),
+            "expected 'cannot determine type of empty array', got: {err}"
+        );
+    }
+
+    /// Lowers `expr_str` and asserts it produces a constant empty array literal
+    /// of `DfType::Array(<elem>)` with `num_dimensions() == 1`, regardless of
+    /// how many bracket pairs the cast target carries.  This mirrors PG's
+    /// behavior: empty arrays are dimensionless (`array_ndims = NULL`) and
+    /// `pg_typeof(ARRAY[]::int[][])` returns `integer[]`.
+    #[track_caller]
+    fn assert_lowered_to_empty_array(expr_str: &str, expected_elem_ty: DfType) {
+        let expr = parse_expr(ParserDialect::PostgreSQL, expr_str).unwrap();
+        let lowered = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context())
+            .unwrap_or_else(|e| panic!("{expr_str} should be accepted, got: {e}"));
+        assert_eq!(
+            lowered.ty(),
+            &DfType::Array(Box::new(expected_elem_ty)),
+            "{expr_str}: expected collapsed 1-D array type"
+        );
+        // Eval round-trip: the lowered Literal carries a pre-built ArrayD.
+        // Confirm it surfaces as an empty 1-D `DfValue::Array` regardless of
+        // cast nesting.
+        let value = lowered
+            .eval::<DfValue>(&[])
+            .unwrap_or_else(|e| panic!("eval of {expr_str} failed: {e}"));
+        let array = match value {
+            DfValue::Array(a) => a,
+            other => panic!("expected DfValue::Array, got {other:?}"),
+        };
+        assert!(array.is_empty(), "{expr_str}: expected empty, got {array}");
+        assert_eq!(
+            array.num_dimensions(),
+            1,
+            "{expr_str}: empty arrays should always be 1-D to match PG's dimensionless empty"
+        );
+    }
+
+    #[test]
+    fn empty_array_with_1d_array_cast_accepted() {
+        assert_lowered_to_empty_array("ARRAY[]::TEXT[]", DfType::DEFAULT_TEXT);
+    }
+
+    #[test]
+    fn empty_array_with_multidim_array_cast_accepted() {
+        // PG: pg_typeof(ARRAY[]::TEXT[][]) is `text[]` (single layer); the
+        // value collapses to a dimensionless empty array.  Match that — the
+        // lowered type is 1-D, not 2-D.
+        assert_lowered_to_empty_array("ARRAY[]::TEXT[][]", DfType::DEFAULT_TEXT);
+    }
+
+    #[test]
+    fn empty_array_with_cast_as_array_form_accepted() {
+        // The intercept must be cast-style-agnostic: `CAST(x AS T[])` has the
+        // same semantics as `x::T[]` and must hit the same empty-array path.
+        assert_lowered_to_empty_array("CAST(ARRAY[] AS INT[])", DfType::Int);
+    }
+
+    #[test]
+    fn empty_array_with_nested_cast_accepted() {
+        // `(ARRAY[]::INT[])::TEXT[]` -- inner intercept fires (INT[]); outer
+        // wraps the resulting Literal in a Cast(TEXT[]).  The outer Cast does
+        // not short-circuit because its inner expression is no longer a bare
+        // Array AST node.  Parens are required: PG's parser does not accept
+        // chained `::` casts without grouping.
+        let expr = parse_expr(ParserDialect::PostgreSQL, "(ARRAY[]::INT[])::TEXT[]").unwrap();
+        let lowered = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context())
+            .unwrap_or_else(|e| panic!("nested cast should be accepted, got: {e}"));
+        // Outer Cast: TEXT[] target; inner Literal: INT[].
+        match &lowered {
+            Expr::Cast { ty, expr, .. } => {
+                assert_eq!(ty, &DfType::Array(Box::new(DfType::DEFAULT_TEXT)));
+                assert!(matches!(expr.as_ref(), Expr::Literal { .. }));
+            }
+            other => panic!("expected Expr::Cast wrapping a Literal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn empty_array_with_scalar_cast_rejected() {
+        // ARRAY[]::TEXT (scalar target) falls through to the regular cast
+        // path; the inner empty Array lowers and rejects with PG's standard
+        // empty-array message.  PG itself does not differentiate the
+        // scalar-cast case -- it emits the same error -- so matching that
+        // message keeps wire-protocol fallback behavior consistent.
+        let expr = parse_expr(ParserDialect::PostgreSQL, "ARRAY[]::TEXT").unwrap();
+        let err = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("cannot determine type of empty array"),
+            "expected empty-array rejection, got: {err}"
+        );
     }
 
     /// REA-6500: CONCAT(int_col, utf8mb4_literal, latin1_col) should resolve to the latin1
