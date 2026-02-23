@@ -63,13 +63,13 @@ fn unify_postgres_types(types: Vec<&DfType>) -> ReadySetResult<DfType> {
         .filter(|t| t.is_known())
         .any(|t| t.pg_category() != first_known_type.pg_category())
     {
-        invalid_query_err!(
+        return Err(invalid_query_err!(
             "Cannot coerce type {} to type {}",
             first_ty,
             types
                 .get(1)
                 .expect("can't get here unless we have at least 2 types")
-        );
+        ));
     }
 
     // > 5. Select the first non-unknown input type as the candidate type, then consider each other
@@ -3006,5 +3006,51 @@ pub(crate) mod tests {
                 ty: DfType::Array(Box::new(DfType::Array(Box::new(DfType::BigInt)))),
             }
         );
+    }
+
+    #[test]
+    fn array_incompatible_element_types_rejected() {
+        // Integer and date are in different type categories and cannot be coerced
+        let expr = parse_expr(ParserDialect::PostgreSQL, "ARRAY[1, DATE('1999-12-31')]").unwrap();
+        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Cannot coerce type"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn nested_array_incompatible_element_types_rejected() {
+        // The exact case from the ticket: nested arrays with mixed integer and date
+        let expr = parse_expr(
+            ParserDialect::PostgreSQL,
+            "ARRAY[[1, 2, 3, 4], [1, 2, 3, DATE('1999-12-31')]]",
+        )
+        .unwrap();
+        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Cannot coerce type"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn array_same_type_accepted() {
+        // Sanity check: all same type should work fine
+        let expr = parse_expr(ParserDialect::PostgreSQL, "ARRAY[1, 2, 3]").unwrap();
+        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context());
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+    }
+
+    #[test]
+    fn array_compatible_numeric_types_accepted() {
+        // Integer and float are both in the Numeric category and should coerce
+        let expr = parse_expr(ParserDialect::PostgreSQL, "ARRAY[1, 1.5]").unwrap();
+        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context());
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
     }
 }
