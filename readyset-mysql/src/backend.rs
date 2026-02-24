@@ -749,7 +749,7 @@ where
             info!(target: "client_statement", "Execute: {{id: {id}, params: {:?}}}", value_params)
         }
 
-        let results_encoding = self.noria.noria.results_encoding();
+        let results_encoding = self.noria.connectors.noria.results_encoding();
         let pre_flags = self.build_status_flags();
 
         let (execute_result, post_state) = match self.execute(id, &value_params, &()).await {
@@ -827,7 +827,7 @@ where
         )
         .increment(1);
         let encoding = readyset_data::encoding::Encoding::from_mysql_collation_id(charset);
-        self.noria.noria.set_results_encoding(encoding);
+        self.noria.connectors.noria.set_results_encoding(encoding);
         Ok(())
     }
 
@@ -875,7 +875,7 @@ where
             info!(target: "client_statement", "Query: {query}");
         }
 
-        let results_encoding = self.noria.noria.results_encoding();
+        let results_encoding = self.noria.connectors.noria.results_encoding();
         let pre_flags = self.build_status_flags();
         let (query_result, status_flags) = match self.query(query).await {
             Ok((result, state)) => (Ok(result), Self::flags_from_proxy_state(state)),
@@ -885,7 +885,7 @@ where
     }
 
     fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {
-        self.users.get(username).cloned().map(String::into_bytes)
+        self.users().get(username).cloned().map(String::into_bytes)
     }
 
     fn require_authentication(&self) -> bool {

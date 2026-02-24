@@ -133,7 +133,7 @@ impl ps::PsqlBackend for Backend {
     }
 
     fn credentials_for_user(&self, user: &str) -> Option<ps::Credentials<'_>> {
-        self.users
+        self.users()
             .get(user)
             .map(|pw| ps::Credentials::CleartextPassword(pw))
     }
