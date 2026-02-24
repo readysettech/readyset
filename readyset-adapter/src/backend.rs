@@ -1401,8 +1401,7 @@ where
         // the SET anyway, so propagating the error is expected.
         // Then we need to determine if we're actually going to proxy to the upstream.
         Self::handle_set(
-            &mut self.connectors.noria,
-            self.connectors.upstream.is_some(),
+            &mut self.connectors,
             &self.settings,
             &mut self.state,
             query,
@@ -3956,21 +3955,21 @@ where
             .1
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn query_shallow<'a>(
-        noria: &'a mut NoriaConnector,
-        upstream: Option<&'a mut DB>,
-        shallow: &Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
+        connectors: &'a mut BackendConnectors<DB>,
+        state: &BackendState<DB>,
         req: ShallowViewRequest,
         query: &'a str,
         event: &mut QueryExecutionEvent,
         params: ShallowQueryParameters,
-        refresh: Option<&Arc<ShallowRefreshPool<DB>>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let query_id = QueryId::from(&req);
         event.query_id = Some(query_id).into();
         let key = params.make_keys(&[])?;
-        let res = shallow.get_or_start_insert(&query_id, key, |_| true).await;
+        let res = state
+            .shallow
+            .get_or_start_insert(&query_id, key, |_| true)
+            .await;
 
         match res {
             CacheResult::Hit(values) => {
@@ -3978,10 +3977,10 @@ where
                 Ok(QueryResult::Shallow(values))
             }
             CacheResult::HitAndRefresh(values, cache) => {
-                if let Some(refresh) = refresh {
+                if let Some(refresh) = state.shallow_refresh_pool.as_ref() {
                     let request = ShallowRefreshRequest {
                         query_id,
-                        path: noria.schema_search_path().to_vec(),
+                        path: connectors.noria.schema_search_path().to_vec(),
                         query: query.to_string(),
                         cache,
                         shallow_exec_meta: None,
@@ -3993,11 +3992,11 @@ where
                 Ok(QueryResult::Shallow(values))
             }
             CacheResult::Miss(mut cache) => {
-                if let Some(refresh) = refresh
+                if let Some(refresh) = state.shallow_refresh_pool.as_ref()
                     && cache.is_scheduled()
                 {
                     let refresh = refresh.clone();
-                    let path = noria.schema_search_path().to_vec();
+                    let path = connectors.noria.schema_search_path().to_vec();
                     let q = query.to_string();
                     let callback = Arc::new(move |cache| {
                         let req = ShallowRefreshRequest::<DB::CacheEntry, DB::ShallowExecMeta> {
@@ -4011,7 +4010,7 @@ where
                     });
                     cache.schedule_refresh(callback).await;
                 };
-                Self::query_fallback(upstream, query, event, Some(cache)).await
+                Self::query_fallback(connectors.upstream.as_mut(), query, event, Some(cache)).await
             }
             CacheResult::NotCached => Err(ReadySetError::NoCacheForQuery.into()),
         }
@@ -4019,8 +4018,7 @@ where
 
     #[allow(clippy::too_many_arguments)]
     async fn try_noria_adhoc_select<'a>(
-        noria: &'a mut NoriaConnector,
-        upstream: Option<&'a mut DB>,
+        connectors: &'a mut BackendConnectors<DB>,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         query: &'a str,
@@ -4030,7 +4028,7 @@ where
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         match Self::noria_should_try_select(
-            noria,
+            &connectors.noria,
             settings,
             state,
             &mut view_request,
@@ -4043,8 +4041,7 @@ where
                 schema_generation,
             } => {
                 Self::noria_adhoc_select(
-                    noria,
-                    upstream,
+                    connectors,
                     settings,
                     state,
                     query,
@@ -4057,12 +4054,12 @@ where
                 .await
             }
             ShouldTrySelect::No { error } => {
-                if upstream.is_none() {
+                if connectors.upstream.is_none() {
                     Err(error
                         .unwrap_or(ReadySetError::InvalidUpstreamDatabase)
                         .into())
                 } else {
-                    Self::query_fallback(upstream, query, event, None).await
+                    Self::query_fallback(connectors.upstream.as_mut(), query, event, None).await
                 }
             }
         }
@@ -4070,8 +4067,7 @@ where
 
     #[allow(clippy::too_many_arguments)]
     async fn noria_adhoc_select<'a>(
-        noria: &'a mut NoriaConnector,
-        upstream: Option<&'a mut DB>,
+        connectors: &'a mut BackendConnectors<DB>,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         original_query: &'a str,
@@ -4097,7 +4093,7 @@ where
         };
 
         // Test several conditions to see if we should proxy
-        let upstream_exists = upstream.is_some();
+        let upstream_exists = connectors.upstream.is_some();
         let proxy_out_of_band = settings.migration_mode != MigrationMode::InRequestPath
             && !matches!(status.migration_state, MigrationState::Successful(_));
         let unsupported = matches!(&status.migration_state, MigrationState::Unsupported(_));
@@ -4116,7 +4112,8 @@ where
                     &status.execution_info.unwrap().last_transition_time,
                 );
             }
-            return Self::query_fallback(upstream, original_query, event, None).await;
+            return Self::query_fallback(connectors.upstream.as_mut(), original_query, event, None)
+                .await;
         }
 
         event.destination = Some(QueryDestination::Readyset(None));
@@ -4128,7 +4125,7 @@ where
             processed_query_params: params,
             schema_generation,
         };
-        let res = noria.execute_select(ctx, event).await;
+        let res = connectors.noria.execute_select(ctx, event).await;
         if status.execution_info.is_none() {
             status.execution_info = Some(ExecutionInfo {
                 state: ExecutionState::Failed,
@@ -4190,7 +4187,7 @@ where
 
                 // Try to execute on fallback if present, as long as query is not an `always`
                 // query.
-                match (always, upstream) {
+                match (always, connectors.upstream.as_mut()) {
                     (true, _) | (_, None) => {
                         // Enqueue the original query for background sampling if enabled.
                         if !state.is_internal_connection
@@ -4391,8 +4388,7 @@ where
     /// - If no upstream is present, statements are typically ignored.
     /// - Disallowed set statements always produce an error.
     fn handle_set(
-        noria: &mut NoriaConnector,
-        has_upstream: bool,
+        connectors: &mut BackendConnectors<DB>,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         query: &str,
@@ -4417,7 +4413,7 @@ where
                     let e = ReadySetError::SetDisallowed {
                         statement: query.to_string(),
                     };
-                    if has_upstream {
+                    if connectors.upstream.is_some() {
                         event.set_noria_error(&e);
                     }
                     error!(
@@ -4457,45 +4453,36 @@ where
         }
         if let Some(search_path) = set_search_path {
             trace!(?search_path, "Setting search_path");
-            noria.set_schema_search_path(search_path);
+            connectors.noria.set_schema_search_path(search_path);
         }
         if let Some(encoding) = set_results_encoding {
             trace!(?encoding, "Setting results_encoding");
-            noria.set_results_encoding(encoding);
+            connectors.noria.set_results_encoding(encoding);
         }
 
         Ok(())
     }
 
     async fn query_adhoc_non_select<'a>(
-        noria: &'a mut NoriaConnector,
-        upstream: Option<&'a mut DB>,
+        connectors: &'a mut BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
         raw_query: &'a str,
         event: &mut QueryExecutionEvent,
         query: SqlQuery,
-        settings: &BackendSettings,
-        state: &mut BackendState<DB>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         match &query {
-            SqlQuery::Set(s) => Self::handle_set(
-                noria,
-                upstream.is_some(),
-                settings,
-                state,
-                raw_query,
-                s,
-                event,
-            )?,
-            SqlQuery::Use(UseStatement { database }) => {
-                noria.set_schema_search_path(vec![database.clone()])
-            }
+            SqlQuery::Set(s) => Self::handle_set(connectors, settings, state, raw_query, s, event)?,
+            SqlQuery::Use(UseStatement { database }) => connectors
+                .noria
+                .set_schema_search_path(vec![database.clone()]),
             _ => (),
         }
 
         {
             // Upstream reads are tried when noria reads produce an error. Upstream writes are done
             // by default when the upstream connector is present.
-            if let Some(upstream) = upstream {
+            if let Some(upstream) = connectors.upstream.as_mut() {
                 match query {
                     SqlQuery::Select(_) => unreachable!("read path returns prior"),
                     SqlQuery::Insert(_) | SqlQuery::Update(_) | SqlQuery::Delete(_) => {
@@ -4563,15 +4550,23 @@ where
                 let res = match &query {
                     SqlQuery::Select(_) => unreachable!("read path returns prior"),
                     // CREATE VIEW will still trigger migrations with explicit-migrations enabled
-                    SqlQuery::CreateView(q) => noria.handle_create_view(q).await,
-                    SqlQuery::CreateTable(q) => noria.handle_table_operation(q.clone()).await,
-                    SqlQuery::AlterTable(q) => noria.handle_table_operation(q.clone()).await,
-                    SqlQuery::DropTable(q) => noria.handle_table_operation(q.clone()).await,
-                    SqlQuery::DropView(q) => noria.handle_table_operation(q.clone()).await,
-                    SqlQuery::Insert(q) => noria.handle_insert(q).await,
-                    SqlQuery::Update(q) => noria.handle_update(q).await,
-                    SqlQuery::Delete(q) => noria.handle_delete(q).await,
-                    SqlQuery::Truncate(q) => noria.handle_truncate(q).await,
+                    SqlQuery::CreateView(q) => connectors.noria.handle_create_view(q).await,
+                    SqlQuery::CreateTable(q) => {
+                        connectors.noria.handle_table_operation(q.clone()).await
+                    }
+                    SqlQuery::AlterTable(q) => {
+                        connectors.noria.handle_table_operation(q.clone()).await
+                    }
+                    SqlQuery::DropTable(q) => {
+                        connectors.noria.handle_table_operation(q.clone()).await
+                    }
+                    SqlQuery::DropView(q) => {
+                        connectors.noria.handle_table_operation(q.clone()).await
+                    }
+                    SqlQuery::Insert(q) => connectors.noria.handle_insert(q).await,
+                    SqlQuery::Update(q) => connectors.noria.handle_update(q).await,
+                    SqlQuery::Delete(q) => connectors.noria.handle_delete(q).await,
+                    SqlQuery::Truncate(q) => connectors.noria.handle_truncate(q).await,
                     SqlQuery::Deallocate(_) => unreachable!("deallocate path returns prior"),
 
                     // Return an empty result as we are allowing unsupported set statements. Commit
@@ -4625,14 +4620,12 @@ where
             && let Some((query_id, _)) = self.should_query_shallow(&shallow, hint_directive).await
         {
             let result = Self::query_shallow(
-                &mut self.connectors.noria,
-                self.connectors.upstream.as_mut(),
-                &self.state.shallow,
+                &mut self.connectors,
+                &self.state,
                 shallow,
                 query,
                 &mut event,
                 params,
-                self.state.shallow_refresh_pool.as_ref(),
             )
             .await;
 
@@ -4714,13 +4707,12 @@ where
             // know when a COMMIT or ROLLBACK happens so we can leave `ProxyState::InTransaction`
             Ok(parsed_query @ (SqlQuery::Commit(_) | SqlQuery::Rollback(_))) => {
                 Self::query_adhoc_non_select(
-                    &mut self.connectors.noria,
-                    self.connectors.upstream.as_mut(),
+                    &mut self.connectors,
+                    &self.settings,
+                    &mut self.state,
                     query,
                     &mut event,
                     parsed_query,
-                    &self.settings,
-                    &mut self.state,
                 )
                 .await
             }
@@ -4735,13 +4727,12 @@ where
                 if Handler::handle_set_statement(&s).set_autocommit == Some(true) =>
             {
                 Self::query_adhoc_non_select(
-                    &mut self.connectors.noria,
-                    self.connectors.upstream.as_mut(),
+                    &mut self.connectors,
+                    &self.settings,
+                    &mut self.state,
                     query,
                     &mut event,
                     SqlQuery::Set(s),
-                    &self.settings,
-                    &mut self.state,
                 )
                 .await
             }
@@ -4814,8 +4805,7 @@ where
                     QueryIdWrapper::Uncalculated(self.connectors.noria.schema_search_path().into());
 
                 Self::try_noria_adhoc_select(
-                    &mut self.connectors.noria,
-                    self.connectors.upstream.as_mut(),
+                    &mut self.connectors,
                     &self.settings,
                     &mut self.state,
                     query,
@@ -4833,13 +4823,12 @@ where
             }
             Ok(parsed_query) => {
                 let result = Self::query_adhoc_non_select(
-                    &mut self.connectors.noria,
-                    self.connectors.upstream.as_mut(),
+                    &mut self.connectors,
+                    &self.settings,
+                    &mut self.state,
                     query,
                     &mut event,
                     parsed_query.clone(),
-                    &self.settings,
-                    &mut self.state,
                 )
                 .await;
 
