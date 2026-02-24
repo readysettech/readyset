@@ -1,3 +1,7 @@
+# tcv pinned version should match public/build/docker-compose.ci-tcv.yml
+ARG TCV_IMAGE_TAG=87c75e439d6169669fd06f036c328e8df873cbee
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/test-container-vendor:${TCV_IMAGE_TAG} AS tcv
+
 FROM public.ecr.aws/docker/library/rust:1.93.0
 
 ARG TARGETARCH
@@ -51,8 +55,7 @@ RUN cargo binstall -y --locked \
       sccache@0.13.0
 ENV RUSTC_WRAPPER=sccache
 
-# tcv pinned version should match public/build/docker-compose.ci-tcv.yml
-COPY --from=305232526136.dkr.ecr.us-east-2.amazonaws.com/test-container-vendor:87c75e439d6169669fd06f036c328e8df873cbee /usr/local/bin/tcv /usr/local/bin/tcv
+COPY --from=tcv /usr/local/bin/tcv /usr/local/bin/tcv
 
 # Set some rustflags.  For info on the graviton flag, see:
 #   https://github.com/aws/aws-graviton-getting-started/blob/main/rust.md

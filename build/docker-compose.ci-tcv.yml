@@ -4,7 +4,7 @@
 services:
   tcv:
     # tcv pinned version should match public/build/Dockerfile
-    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/test-container-vendor:87c75e439d6169669fd06f036c328e8df873cbee"
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/test-container-vendor:${TCV_IMAGE_TAG:-87c75e439d6169669fd06f036c328e8df873cbee}"
     stop_grace_period: 60s
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"

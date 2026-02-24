@@ -99,6 +99,10 @@ if [[ -n "${SCCACHE_BUCKET-}" ]] && [[ -n "${SCCACHE_REGION-}" ]]; then
     )
 fi
 
+if [[ -n "${TCV_IMAGE_TAG-}" ]]; then
+    build_cmd_prefix+=("--build-arg" "TCV_IMAGE_TAG")
+fi
+
 build_cmd_suffix=(
     "$@"
     "$context"
