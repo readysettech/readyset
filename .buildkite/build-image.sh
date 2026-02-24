@@ -92,6 +92,13 @@ build_cmd_prefix=(
     "--build-arg" "BUILDKITE_COMMIT=$BUILDKITE_COMMIT"
 )
 
+# Add a label with the week number so that we don't run out of ECR image tags. We are limited to
+# 1000 tags per image. An "image" here means an image digest. Adding a label to an image changes the
+# metadata portion of the image, which changes the digest without changing or adding any layers. We
+# may have to make this more frequent if we ever hit the 1000 tag limit within a week, but that
+# seems like it would be a pathological situation.
+build_cmd_prefix+=("--label" "build.week=$(date +%Y%W)")
+
 if [[ -n "${SCCACHE_BUCKET-}" ]] && [[ -n "${SCCACHE_REGION-}" ]]; then
     build_cmd_prefix+=(
         "--build-arg" "SCCACHE_BUCKET"
@@ -102,6 +109,7 @@ fi
 if [[ -n "${TCV_IMAGE_TAG-}" ]]; then
     build_cmd_prefix+=("--build-arg" "TCV_IMAGE_TAG")
 fi
+
 
 build_cmd_suffix=(
     "$@"
