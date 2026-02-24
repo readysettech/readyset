@@ -443,9 +443,9 @@ dependencies = [
 
 [[package]]
 name = "btoi"
-version = "0.4.3"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9dd6407f73a9b8b6162d8a2ef999fe6afd7cc15902ebf42c5cd296addf17e0ad"
+checksum = "3b5ab9db53bcda568284df0fd39f6eac24ad6f7ba7ff1168b9e76eba6576b976"
 dependencies = [
  "num-traits",
 ]
@@ -3201,8 +3201,7 @@ dependencies = [
 [[package]]
 name = "mysql-common-derive"
 version = "0.32.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66f62cad7623a9cb6f8f64037f0c4f69c8db8e82914334a83c9788201c2c1bfa"
+source = "git+https://github.com/readysettech/rust_mysql_common#1d884b47573a802464a758ea9b328f042360e680"
 dependencies = [
  "darling 0.20.11",
  "heck",
@@ -3260,7 +3259,7 @@ dependencies = [
 [[package]]
 name = "mysql_async"
 version = "0.36.1"
-source = "git+https://github.com/readysettech/mysql_async#ccd4fbd7ff2dd009d86b428faf03214efe550cdd"
+source = "git+https://github.com/readysettech/mysql_async?branch=gtid_tags#5eba329af2ea18e51aa2e1f4ba4945778fe99759"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -3288,9 +3287,8 @@ dependencies = [
 
 [[package]]
 name = "mysql_common"
-version = "0.35.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbb9f371618ce723f095c61fbcdc36e8936956d2b62832f9c7648689b338e052"
+version = "0.36.2"
+source = "git+https://github.com/readysettech/rust_mysql_common#1d884b47573a802464a758ea9b328f042360e680"
 dependencies = [
  "base64 0.22.1",
  "bigdecimal",
