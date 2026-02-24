@@ -1645,10 +1645,34 @@ impl Expr {
 
                     let lhs = Self::lower(*lhs, dialect, context)?;
                     let make_comparison = |rhs| -> ReadySetResult<_> {
+                        let mut left = Box::new(lhs.clone());
+                        let mut right = Box::new(Self::lower(rhs, dialect, context)?);
+
+                        // Apply the same type coercions that BinaryOp uses for
+                        // Equal, so that e.g. Int vs Numeric gets a Cast node
+                        // inserted rather than comparing mismatched types at
+                        // eval time.
+                        let (left_coerce, right_coerce) = BinaryOperator::Equal
+                            .argument_type_coercions(left.ty(), right.ty(), dialect)?;
+                        if let Some(ty) = left_coerce {
+                            left = Box::new(Self::Cast {
+                                expr: left,
+                                ty,
+                                null_on_failure: false,
+                            });
+                        }
+                        if let Some(ty) = right_coerce {
+                            right = Box::new(Self::Cast {
+                                expr: right,
+                                ty,
+                                null_on_failure: false,
+                            });
+                        }
+
                         let equal = Self::Op {
-                            left: Box::new(lhs.clone()),
+                            left,
                             op: BinaryOperator::Equal,
-                            right: Box::new(Self::lower(rhs, dialect, context)?),
+                            right,
                             ty: DfType::Bool, // type of = is always bool
                         };
                         if negated {
@@ -3035,6 +3059,144 @@ pub(crate) mod tests {
         assert!(
             err.contains("Cannot coerce type"),
             "unexpected error message: {err}"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // REA-5955: IN expression lowering must apply type coercions
+    // ---------------------------------------------------------------
+
+    /// When an Int column is compared via IN against a Numeric column, the
+    /// lowered expression should contain Cast nodes to coerce types, just
+    /// like a plain `=` comparison would.
+    #[test]
+    fn in_list_applies_type_coercions_pg() {
+        // `col_int IN (col_num)` where col_int is Int and col_num is Numeric
+        let input = parse_expr(ParserDialect::PostgreSQL, "col_int IN (col_num)").unwrap();
+        let ctx = resolve_columns(|c| match c.name.as_str() {
+            "col_int" => Ok((0, DfType::Int)),
+            "col_num" => Ok((
+                1,
+                DfType::Numeric {
+                    prec: 65,
+                    scale: 30,
+                },
+            )),
+            _ => internal!("unexpected column"),
+        });
+        let lowered = Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, &ctx).unwrap();
+
+        // The lowered tree should be an Equal with a Cast on the right-hand
+        // side (coercing Numeric to Int, since Equal coerces right to left's
+        // type in PG).
+        let repr = format!("{lowered:?}");
+        assert!(
+            repr.contains("Cast"),
+            "Expected a Cast node in the lowered IN expression, got: {lowered}"
+        );
+    }
+
+    /// End-to-end eval: `col_int IN (col_num)` where both hold value 1
+    /// but with different types (Int vs Numeric). Should return true.
+    #[test]
+    fn in_list_int_vs_numeric_eval_pg() {
+        use readyset_decimal::Decimal;
+
+        let input = parse_expr(ParserDialect::PostgreSQL, "col_int IN (col_num)").unwrap();
+        let ctx = resolve_columns(|c| match c.name.as_str() {
+            "col_int" => Ok((0, DfType::Int)),
+            "col_num" => Ok((
+                1,
+                DfType::Numeric {
+                    prec: 65,
+                    scale: 30,
+                },
+            )),
+            _ => internal!("unexpected column"),
+        });
+        let expr = Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, &ctx).unwrap();
+
+        let row: Vec<DfValue> = vec![DfValue::Int(1), DfValue::from(Decimal::from(1))];
+        let result = expr.eval::<DfValue>(&row).unwrap();
+        assert_eq!(result, DfValue::from(true), "1 IN (1.0) should be true");
+    }
+
+    /// NOT IN variant: `col_int NOT IN (col_num)` where both hold value 1
+    /// should return false.
+    #[test]
+    fn not_in_list_int_vs_numeric_eval_pg() {
+        use readyset_decimal::Decimal;
+
+        let input = parse_expr(ParserDialect::PostgreSQL, "col_int NOT IN (col_num)").unwrap();
+        let ctx = resolve_columns(|c| match c.name.as_str() {
+            "col_int" => Ok((0, DfType::Int)),
+            "col_num" => Ok((
+                1,
+                DfType::Numeric {
+                    prec: 65,
+                    scale: 30,
+                },
+            )),
+            _ => internal!("unexpected column"),
+        });
+        let expr = Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, &ctx).unwrap();
+
+        let row: Vec<DfValue> = vec![DfValue::Int(1), DfValue::from(Decimal::from(1))];
+        let result = expr.eval::<DfValue>(&row).unwrap();
+        assert_eq!(
+            result,
+            DfValue::from(false),
+            "1 NOT IN (1.0) should be false"
+        );
+    }
+
+    /// Multi-element IN list with mixed types.
+    #[test]
+    fn in_list_multi_element_mixed_types_pg() {
+        use readyset_decimal::Decimal;
+
+        let input =
+            parse_expr(ParserDialect::PostgreSQL, "col_int IN (col_num, col_num2)").unwrap();
+        let ctx = resolve_columns(|c| match c.name.as_str() {
+            "col_int" => Ok((0, DfType::Int)),
+            "col_num" => Ok((
+                1,
+                DfType::Numeric {
+                    prec: 65,
+                    scale: 30,
+                },
+            )),
+            "col_num2" => Ok((
+                2,
+                DfType::Numeric {
+                    prec: 65,
+                    scale: 30,
+                },
+            )),
+            _ => internal!("unexpected column"),
+        });
+        let expr = Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, &ctx).unwrap();
+
+        // Match on second element: col_int=5, col_num=99, col_num2=5
+        let row: Vec<DfValue> = vec![
+            DfValue::Int(5),
+            DfValue::from(Decimal::from(99)),
+            DfValue::from(Decimal::from(5)),
+        ];
+        let result = expr.eval::<DfValue>(&row).unwrap();
+        assert_eq!(result, DfValue::from(true), "5 IN (99, 5) should be true");
+
+        // No match
+        let row2: Vec<DfValue> = vec![
+            DfValue::Int(5),
+            DfValue::from(Decimal::from(99)),
+            DfValue::from(Decimal::from(100)),
+        ];
+        let result2 = expr.eval::<DfValue>(&row2).unwrap();
+        assert_eq!(
+            result2,
+            DfValue::from(false),
+            "5 IN (99, 100) should be false"
         );
     }
 

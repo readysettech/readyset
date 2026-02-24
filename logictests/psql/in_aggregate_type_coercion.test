@@ -1,0 +1,43 @@
+# REA-5955: IN expression with mixed integer/numeric aggregate types
+#
+# AVG() returns numeric in PostgreSQL, while MAX() preserves the input
+# integer type. When comparing these via IN, the type coercion must be
+# applied so that the equality check works correctly.
+
+statement ok
+CREATE TABLE agg_types (row_num int);
+
+statement ok
+INSERT INTO agg_types VALUES (1);
+
+# Baseline: = comparison works (returns true because both are 1)
+query I nosort
+SELECT MAX(row_num) = AVG(row_num) FROM agg_types WHERE row_num = 1;
+----
+1
+
+# The bug: IN comparison must also return true
+query I nosort
+SELECT MAX(row_num) IN (AVG(row_num)) FROM agg_types WHERE row_num = 1;
+----
+1
+
+# NOT IN should return false (same values)
+query I nosort
+SELECT MAX(row_num) NOT IN (AVG(row_num)) FROM agg_types WHERE row_num = 1;
+----
+0
+
+# Multi-row case: MAX=3, AVG=2 (not equal)
+statement ok
+INSERT INTO agg_types VALUES (2), (3);
+
+query I nosort
+SELECT MAX(row_num) IN (AVG(row_num)) FROM agg_types;
+----
+0
+
+query I nosort
+SELECT MAX(row_num) NOT IN (AVG(row_num)) FROM agg_types;
+----
+1
