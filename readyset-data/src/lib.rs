@@ -1007,6 +1007,15 @@ impl PartialEq for DfValue {
                 let b: i128 = <i128>::try_from(other).unwrap();
                 a == b
             }
+            (&DfValue::Int(..), DfValue::Numeric(ref b))
+            | (&DfValue::UnsignedInt(..), DfValue::Numeric(ref b)) => {
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on
+                // Int and UnsignedInt
+                #[allow(clippy::unwrap_used)]
+                let a: i128 = <i128>::try_from(self).unwrap();
+                Decimal::from(a) == **b
+            }
+            (DfValue::Numeric(_), &DfValue::Int(..) | &DfValue::UnsignedInt(..)) => other == self,
             (&DfValue::Float(fa), &DfValue::Float(fb)) => {
                 // We need to compare the *bit patterns* of the floats so that our Hash matches our
                 // Eq
@@ -2493,6 +2502,115 @@ mod tests {
         let neg_inf_f = DfValue::Float(f32::NEG_INFINITY);
         assert_eq!(neg_inf_d, neg_inf_f);
         assert_eq!(neg_inf_d.cmp(&neg_inf_f), Ordering::Equal);
+    }
+
+    // ---------------------------------------------------------------
+    // REA-6365: Int/UnsignedInt vs Numeric eq/cmp consistency
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn int_numeric_eq_consistent_with_cmp() {
+        use std::cmp::Ordering;
+
+        // --- Int vs Numeric: equal values ---
+        let int_1 = DfValue::Int(1);
+        let num_1 = DfValue::from(Decimal::from(1));
+        assert_eq!(int_1, num_1, "Int(1) should equal Numeric(1)");
+        assert_eq!(int_1.cmp(&num_1), Ordering::Equal);
+
+        // --- Symmetry: Numeric vs Int ---
+        assert_eq!(num_1, int_1, "Numeric(1) should equal Int(1)");
+        assert_eq!(num_1.cmp(&int_1), Ordering::Equal);
+
+        // --- Zero ---
+        let int_0 = DfValue::Int(0);
+        let num_0 = DfValue::from(Decimal::from(0));
+        assert_eq!(int_0, num_0);
+        assert_eq!(num_0, int_0);
+
+        // --- Negative ---
+        let int_neg = DfValue::Int(-42);
+        let num_neg = DfValue::from(Decimal::from(-42));
+        assert_eq!(int_neg, num_neg);
+        assert_eq!(num_neg, int_neg);
+
+        // --- Not equal ---
+        let int_2 = DfValue::Int(2);
+        assert_ne!(int_1, DfValue::from(Decimal::from(2)));
+        assert_ne!(int_2, num_1);
+
+        // --- Fractional Numeric should NOT equal Int ---
+        let num_1_5 = DfValue::from(Decimal::new(15, 1)); // 1.5
+        assert_ne!(int_1, num_1_5);
+        assert_ne!(int_2, num_1_5);
+
+        // --- UnsignedInt vs Numeric ---
+        let uint_1 = DfValue::UnsignedInt(1);
+        assert_eq!(uint_1, num_1, "UnsignedInt(1) should equal Numeric(1)");
+        assert_eq!(num_1, uint_1, "Numeric(1) should equal UnsignedInt(1)");
+        assert_eq!(uint_1.cmp(&num_1), Ordering::Equal);
+        assert_eq!(num_1.cmp(&uint_1), Ordering::Equal);
+
+        // --- Large UnsignedInt ---
+        let big_val = u64::MAX;
+        let uint_big = DfValue::UnsignedInt(big_val);
+        let num_big = DfValue::from(Decimal::from(big_val));
+        assert_eq!(uint_big, num_big);
+        assert_eq!(num_big, uint_big);
+        assert_eq!(uint_big.cmp(&num_big), Ordering::Equal);
+
+        // --- Ordering (not just equality) ---
+        let int_5 = DfValue::Int(5);
+        let num_10 = DfValue::from(Decimal::from(10));
+        assert_ne!(int_5, num_10);
+        assert_eq!(int_5.cmp(&num_10), Ordering::Less);
+        assert_eq!(num_10.cmp(&int_5), Ordering::Greater);
+    }
+
+    /// Proptest for Int vs Numeric eq/cmp consistency.
+    #[tags(no_retry)]
+    #[proptest]
+    fn int_numeric_eq_consistent_with_cmp_proptest(a: i64) {
+        let int_val = DfValue::Int(a);
+        let num_val = DfValue::from(Decimal::from(a));
+        prop_assert_eq!(
+            int_val == num_val,
+            int_val.cmp(&num_val) == std::cmp::Ordering::Equal,
+            "eq/cmp inconsistency: Int({}) vs Numeric({})",
+            a,
+            a
+        );
+        // Symmetry
+        prop_assert_eq!(
+            num_val == int_val,
+            num_val.cmp(&int_val) == std::cmp::Ordering::Equal,
+            "eq/cmp inconsistency (reversed): Numeric({}) vs Int({})",
+            a,
+            a
+        );
+    }
+
+    /// Proptest for UnsignedInt vs Numeric eq/cmp consistency.
+    #[tags(no_retry)]
+    #[proptest]
+    fn unsigned_int_numeric_eq_consistent_with_cmp_proptest(a: u64) {
+        let uint_val = DfValue::UnsignedInt(a);
+        let num_val = DfValue::from(Decimal::from(a));
+        prop_assert_eq!(
+            uint_val == num_val,
+            uint_val.cmp(&num_val) == std::cmp::Ordering::Equal,
+            "eq/cmp inconsistency: UnsignedInt({}) vs Numeric({})",
+            a,
+            a
+        );
+        // Symmetry
+        prop_assert_eq!(
+            num_val == uint_val,
+            num_val.cmp(&uint_val) == std::cmp::Ordering::Equal,
+            "eq/cmp inconsistency (reversed): Numeric({}) vs UnsignedInt({})",
+            a,
+            a
+        );
     }
 
     #[derive(Debug, derive_more::From, derive_more::Into)]
