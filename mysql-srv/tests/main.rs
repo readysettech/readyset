@@ -2,7 +2,6 @@ extern crate chrono;
 extern crate mysql_async as mysql;
 extern crate mysql_common as myc;
 extern crate mysql_srv;
-extern crate nom;
 extern crate tokio;
 
 use core::iter;

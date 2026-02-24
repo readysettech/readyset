@@ -557,7 +557,6 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
 
         if commands::is_ssl_request(&packet.data)
             .map_err(|_| io::Error::other("invalid client capabilities flags in the handshake"))?
-            .1
         {
             // switch to ssl
             self.tls_acceptor.as_ref().ok_or_else(|| {
@@ -594,28 +593,12 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             }
         }
 
-        let handshake = commands::client_handshake(&packet.data)
-            .map_err(|e| match e {
-                nom::Err::Incomplete(_) => io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "client sent incomplete handshake",
-                ),
-                nom::Err::Failure(nom::error::Error { input, code })
-                | nom::Err::Error(nom::error::Error { input, code }) => {
-                    if let nom::error::ErrorKind::Eof = code {
-                        io::Error::new(
-                            io::ErrorKind::UnexpectedEof,
-                            format!("client did not complete handshake; got {input:?}"),
-                        )
-                    } else {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("bad client handshake; got {input:?} ({code:?})"),
-                        )
-                    }
-                }
-            })?
-            .1;
+        let handshake = commands::client_handshake(&packet.data).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("bad client handshake: {e}"),
+            )
+        })?;
 
         // Pass MySQL connect attributes to backend shim, if any
         if !handshake.connect_attrs.is_empty() {
@@ -731,13 +714,11 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         let mut stmts: HashMap<u32, _> = HashMap::new();
         while let Some(packet) = self.conn.next().await? {
             self.conn.set_seq(packet.seq + 1);
-            let cmd = commands::parse(&packet)
-                .map_err(|e| {
-                    other_error(OtherErrorKind::GenericErr {
-                        error: format!("{e:?}"),
-                    })
-                })?
-                .1;
+            let cmd = commands::parse(&packet).map_err(|e| {
+                other_error(OtherErrorKind::GenericErr {
+                    error: format!("{e:?}"),
+                })
+            })?;
             // These other variants are logged by the readyset-mysql `Backend`.
             if self.enable_statement_logging
                 && !matches!(
@@ -752,13 +733,11 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             }
             match cmd {
                 Command::ChangeUser(q) => {
-                    let change_user = change_user(q, self.client_capabilities)
-                        .map_err(|e| {
-                            other_error(OtherErrorKind::GenericErr {
-                                error: format!("{e:?}"),
-                            })
-                        })?
-                        .1;
+                    let change_user = change_user(q, self.client_capabilities).map_err(|e| {
+                        other_error(OtherErrorKind::GenericErr {
+                            error: format!("{e:?}"),
+                        })
+                    })?;
                     let username = change_user.username.to_owned();
                     let authpassword = change_user.password.to_vec();
 

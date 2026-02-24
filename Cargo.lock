@@ -3249,7 +3249,6 @@ dependencies = [
  "mysql-time",
  "mysql_async",
  "mysql_common",
- "nom",
  "readyset-adapter-types",
  "readyset-data",
  "readyset-util",

@@ -1,14 +1,6 @@
 use std::collections::HashMap;
-
-use nom::branch::alt;
-use nom::bytes::complete::{tag, take, take_until};
-use nom::combinator::{map, map_res, opt, rest};
-use nom::error::FromExternalError;
-use nom::multi::fold_many0;
-use nom::number::complete::{le_i16, le_i24, le_i64, le_u16, le_u32, le_u8};
-use nom::sequence::preceded;
-use nom::sequence::tuple;
-use nom::IResult;
+use std::io;
+use std::str;
 
 use crate::myc::constants::{CapabilityFlags, Command as CommandByte, UTF8MB4_GENERAL_CI};
 
@@ -37,46 +29,133 @@ pub struct ClientChangeUser<'a> {
     pub auth_plugin_name: &'a str,
 }
 
-/// Parse a "length-encoded integer" as specified by the [mysql binary protocol documentation][docs]
-///
-/// [docs]: https://dev.mysql.com/doc/internals/en/integer.html#length-encoded-integer
-fn lenenc_int(i: &[u8]) -> IResult<&[u8], i64> {
-    let (i, first_byte) = le_u8(i)?;
-    match first_byte {
-        b @ 0x00..=0xfb => Ok((i, b.into())),
-        0xfc => le_i16(i).map(|(i, n)| (i, n.into())),
-        0xfd => le_i24(i).map(|(i, n)| (i, n.into())),
-        0xfe => le_i64(i),
-        0xff => Err(nom::Err::Error(nom::error::Error::new(
-            i,
-            nom::error::ErrorKind::Tag,
-        ))),
+struct PacketParser<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> PacketParser<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        PacketParser { data, pos: 0 }
     }
-}
 
-/// Parse a length-encoded string as specified by the [mysql binary protocol documentation][docs]
-///
-/// [docs]: https://dev.mysql.com/doc/internals/en/string.html#length-encoded-string
-fn lenenc_string(i: &[u8]) -> IResult<&[u8], &str> {
-    let (i, length) = lenenc_int(i)?;
-    let (i, string) = take(length as usize)(i)?;
-    Ok((i, parse_bytes_to_string(string)?))
-}
+    fn remaining(&self) -> &'a [u8] {
+        &self.data[self.pos..]
+    }
 
-fn parse_bytes_to_string(i: &[u8]) -> Result<&str, nom::Err<nom::error::Error<&[u8]>>> {
-    std::str::from_utf8(i).map_err(|e| {
-        nom::Err::Error(nom::error::Error::from_external_error(
-            i,
-            nom::error::ErrorKind::Verify,
-            e,
-        ))
-    })
-}
+    fn is_empty(&self) -> bool {
+        self.pos >= self.data.len()
+    }
 
-fn null_terminated_string(i: &[u8]) -> IResult<&[u8], &str> {
-    let (i, res) = map_res(take_until(&b"\0"[..]), parse_bytes_to_string)(i)?;
-    let (i, _) = take(1u8)(i)?;
-    Ok((i, res))
+    fn read_u8(&mut self) -> io::Result<u8> {
+        if self.pos >= self.data.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unexpected end of packet",
+            ));
+        }
+        let b = self.data[self.pos];
+        self.pos += 1;
+        Ok(b)
+    }
+
+    fn read_u16_le(&mut self) -> io::Result<u16> {
+        let bytes = self.read_bytes(2)?;
+        Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
+    }
+
+    fn read_u32_le(&mut self) -> io::Result<u32> {
+        let bytes = self.read_bytes(4)?;
+        Ok(u32::from_le_bytes(bytes.try_into().unwrap()))
+    }
+
+    fn read_i16_le(&mut self) -> io::Result<i16> {
+        let bytes = self.read_bytes(2)?;
+        Ok(i16::from_le_bytes(bytes.try_into().unwrap()))
+    }
+
+    fn read_i24_le(&mut self) -> io::Result<i32> {
+        let bytes = self.read_bytes(3)?;
+        let n = (bytes[0] as u32) | ((bytes[1] as u32) << 8) | ((bytes[2] as u32) << 16);
+        // Sign-extend from 24 bits to 32 bits
+        Ok(if n & 0x80_0000 != 0 {
+            (n | 0xFF00_0000) as i32
+        } else {
+            n as i32
+        })
+    }
+
+    fn read_i64_le(&mut self) -> io::Result<i64> {
+        let bytes = self.read_bytes(8)?;
+        Ok(i64::from_le_bytes(bytes.try_into().unwrap()))
+    }
+
+    fn read_bytes(&mut self, n: usize) -> io::Result<&'a [u8]> {
+        if self.pos + n > self.data.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unexpected end of packet",
+            ));
+        }
+        let bytes = &self.data[self.pos..self.pos + n];
+        self.pos += n;
+        Ok(bytes)
+    }
+
+    fn skip(&mut self, n: usize) -> io::Result<()> {
+        if self.pos + n > self.data.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unexpected end of packet",
+            ));
+        }
+        self.pos += n;
+        Ok(())
+    }
+
+    /// Parse a "length-encoded integer" as specified by the
+    /// [mysql binary protocol documentation][docs]
+    ///
+    /// [docs]: https://dev.mysql.com/doc/internals/en/integer.html#length-encoded-integer
+    fn read_lenenc_int(&mut self) -> io::Result<i64> {
+        let first = self.read_u8()?;
+        match first {
+            b @ 0x00..=0xfb => Ok(b.into()),
+            0xfc => self.read_i16_le().map(Into::into),
+            0xfd => self.read_i24_le().map(Into::into),
+            0xfe => self.read_i64_le(),
+            0xff => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid length-encoded integer prefix 0xff",
+            )),
+        }
+    }
+
+    /// Parse a length-encoded string as specified by the
+    /// [mysql binary protocol documentation][docs]
+    ///
+    /// [docs]: https://dev.mysql.com/doc/internals/en/string.html#length-encoded-string
+    fn read_lenenc_str(&mut self) -> io::Result<&'a str> {
+        let length = self.read_lenenc_int()? as usize;
+        let bytes = self.read_bytes(length)?;
+        str::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+
+    fn read_null_str(&mut self) -> io::Result<&'a str> {
+        let start = self.pos;
+        while self.pos < self.data.len() && self.data[self.pos] != 0 {
+            self.pos += 1;
+        }
+        if self.pos >= self.data.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "missing null terminator",
+            ));
+        }
+        let bytes = &self.data[start..self.pos];
+        self.pos += 1; // skip the null byte
+        str::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
 }
 
 /// Parse a COM_CHANGE_USER packet as specified by the [mysql binary protocol documentation][docs]
@@ -84,117 +163,121 @@ fn null_terminated_string(i: &[u8]) -> IResult<&[u8], &str> {
 pub fn change_user(
     i: &[u8],
     client_capability_flags: CapabilityFlags,
-) -> IResult<&[u8], ClientChangeUser<'_>> {
-    let (i, username) = null_terminated_string(i)?;
-    let (i, password) =
-        if client_capability_flags.contains(CapabilityFlags::CLIENT_SECURE_CONNECTION) {
-            let (q, auth_token_length) = le_u8(i)?;
-            take(auth_token_length)(q)?
-        } else {
-            map(null_terminated_string, |s| s.as_bytes())(i)?
-        };
-    let (i, database) = map(null_terminated_string, Some)(i)?;
-    let (i, charset, auth_plugin_name) = if !i.is_empty() {
-        let (i, charset) = if client_capability_flags.contains(CapabilityFlags::CLIENT_PROTOCOL_41)
-        {
-            let (i, bytes) = take(2usize)(i)?;
-            let charset = u16::from_le_bytes(bytes.try_into().unwrap());
-            (i, charset)
-        } else {
-            (i, UTF8MB4_GENERAL_CI)
-        };
-        let (i, auth_plugin_name) =
-            if client_capability_flags.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH) {
-                null_terminated_string(i)?
-            } else {
-                (i, "")
-            };
-        (i, charset, auth_plugin_name)
+) -> io::Result<ClientChangeUser<'_>> {
+    let mut p = PacketParser::new(i);
+
+    let username = p.read_null_str()?;
+    let password = if client_capability_flags.contains(CapabilityFlags::CLIENT_SECURE_CONNECTION) {
+        let auth_token_length = p.read_u8()?;
+        p.read_bytes(auth_token_length as usize)?
     } else {
-        (i, UTF8MB4_GENERAL_CI, "")
+        p.read_null_str()?.as_bytes()
+    };
+    let database = Some(p.read_null_str()?);
+    let (charset, auth_plugin_name) = if !p.is_empty() {
+        let charset = if client_capability_flags.contains(CapabilityFlags::CLIENT_PROTOCOL_41) {
+            p.read_u16_le()?
+        } else {
+            UTF8MB4_GENERAL_CI
+        };
+        let auth_plugin_name =
+            if client_capability_flags.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH) {
+                p.read_null_str()?
+            } else {
+                ""
+            };
+        (charset, auth_plugin_name)
+    } else {
+        (UTF8MB4_GENERAL_CI, "")
     };
 
-    Ok((
-        i,
-        ClientChangeUser {
-            username,
-            password,
-            database,
-            charset,
-            auth_plugin_name,
-        },
-    ))
+    Ok(ClientChangeUser {
+        username,
+        password,
+        database,
+        charset,
+        auth_plugin_name,
+    })
 }
 
-pub fn is_ssl_request(i: &[u8]) -> IResult<&[u8], bool> {
-    let (i, capabilities) = map(le_u32, CapabilityFlags::from_bits_truncate)(i)?;
-    Ok((i, capabilities.contains(CapabilityFlags::CLIENT_SSL)))
+pub fn is_ssl_request(i: &[u8]) -> io::Result<bool> {
+    let mut p = PacketParser::new(i);
+    let capabilities = CapabilityFlags::from_bits_truncate(p.read_u32_le()?);
+    Ok(capabilities.contains(CapabilityFlags::CLIENT_SSL))
 }
 
 /// <https://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Protocol::HandshakeResponse41>
-pub fn client_handshake(i: &[u8]) -> IResult<&[u8], ClientHandshake<'_>> {
-    let (i, capabilities) = map(le_u32, CapabilityFlags::from_bits_truncate)(i)?;
-    let (i, maxps) = le_u32(i)?;
-    let (i, charset) = le_u8(i)?;
-    let (i, _) = take(23u8)(i)?;
-    let (i, username) = null_terminated_string(i)?;
-    let (i, password) =
-        if capabilities.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA) {
-            let (i, auth_token_length) = lenenc_int(i)?;
-            take(auth_token_length as usize)(i)?
-        } else if capabilities.contains(CapabilityFlags::CLIENT_SECURE_CONNECTION) {
-            let (i, auth_token_length) = le_u8(i)?;
-            take(auth_token_length)(i)?
-        } else {
-            map(null_terminated_string, |s| s.as_bytes())(i)?
-        };
+pub fn client_handshake(i: &[u8]) -> io::Result<ClientHandshake<'_>> {
+    let mut p = PacketParser::new(i);
 
-    let (i, database) = if capabilities.contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB) {
-        map(null_terminated_string, Some)(i)?
+    let capabilities = CapabilityFlags::from_bits_truncate(p.read_u32_le()?);
+    let maxps = p.read_u32_le()?;
+    let charset = p.read_u8()? as u16;
+    p.skip(23)?;
+    let username = p.read_null_str()?;
+    let password = if capabilities.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA)
+    {
+        let auth_token_length = p.read_lenenc_int()? as usize;
+        p.read_bytes(auth_token_length)?
+    } else if capabilities.contains(CapabilityFlags::CLIENT_SECURE_CONNECTION) {
+        let auth_token_length = p.read_u8()?;
+        p.read_bytes(auth_token_length as usize)?
     } else {
-        (i, None)
+        p.read_null_str()?.as_bytes()
     };
 
-    let (i, auth_plugin_name) = if capabilities.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH) {
-        opt(null_terminated_string)(i)?
+    let database = if capabilities.contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB) {
+        Some(p.read_null_str()?)
     } else {
-        (i, None)
+        None
     };
 
-    let (i, connect_attrs) = if capabilities.contains(CapabilityFlags::CLIENT_CONNECT_ATTRS) {
+    let auth_plugin_name = if capabilities.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH) {
+        // A client may omit the auth plugin name even with CLIENT_PLUGIN_AUTH set
+        // (no null terminator present), so attempt to read and restore position on failure.
+        let saved_pos = p.pos;
+        match p.read_null_str() {
+            Ok(s) => Some(s),
+            Err(_) => {
+                p.pos = saved_pos;
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let connect_attrs = if capabilities.contains(CapabilityFlags::CLIENT_CONNECT_ATTRS) {
         // If the flag is set, we should receive a length-encoded integer followed by a block of
         // key-value pairs. Adding a fallback for safety.
-        let (i, length) = lenenc_int(i).unwrap_or((i, 0));
-        let (i, attrs_block) = take(length as usize)(i)?;
-
-        // Parse and accumulate directly into a HashMap without separate iteration
-        let (remaining, connect_attrs) = fold_many0(
-            map(tuple((lenenc_string, lenenc_string)), |(k, v)| (k, v)),
-            HashMap::new,
-            |mut acc: HashMap<&str, &str>, (k, v)| {
-                acc.insert(k, v);
-                acc
-            },
-        )(attrs_block)?;
-        debug_assert!(remaining.is_empty());
-        (i, connect_attrs)
+        let saved_pos = p.pos;
+        let length = p.read_lenenc_int().unwrap_or_else(|_| {
+            p.pos = saved_pos;
+            0
+        }) as usize;
+        let attrs_data = p.read_bytes(length)?;
+        let mut attrs_parser = PacketParser::new(attrs_data);
+        let mut connect_attrs = HashMap::new();
+        while !attrs_parser.is_empty() {
+            let k = attrs_parser.read_lenenc_str()?;
+            let v = attrs_parser.read_lenenc_str()?;
+            connect_attrs.insert(k, v);
+        }
+        connect_attrs
     } else {
-        (i, HashMap::new())
+        HashMap::new()
     };
 
-    Ok((
-        i,
-        ClientHandshake {
-            capabilities,
-            maxps,
-            charset: charset.into(),
-            username,
-            password,
-            database,
-            auth_plugin_name,
-            connect_attrs,
-        },
-    ))
+    Ok(ClientHandshake {
+        capabilities,
+        maxps,
+        charset,
+        username,
+        password,
+        database,
+        auth_plugin_name,
+        connect_attrs,
+    })
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -221,71 +304,48 @@ pub enum Command<'a> {
     ChangeUser(&'a [u8]),
 }
 
-pub fn execute(i: &[u8]) -> IResult<&[u8], Command<'_>> {
-    let (i, stmt) = le_u32(i)?;
-    let (i, _flags) = take(1u8)(i)?;
-    let (i, _iterations) = le_u32(i)?;
-    Ok((&[], Command::Execute { stmt, params: i }))
+fn parse_execute<'a>(p: &mut PacketParser<'a>) -> io::Result<Command<'a>> {
+    let stmt = p.read_u32_le()?;
+    p.skip(1)?; // flags
+    p.skip(4)?; // iteration-count
+    Ok(Command::Execute {
+        stmt,
+        params: p.remaining(),
+    })
 }
 
-pub fn send_long_data(i: &[u8]) -> IResult<&[u8], Command<'_>> {
-    let (i, stmt) = le_u32(i)?;
-    let (i, param) = le_u16(i)?;
-    Ok((
-        &[],
-        Command::SendLongData {
-            stmt,
-            param,
-            data: i,
-        },
-    ))
+fn parse_send_long_data<'a>(p: &mut PacketParser<'a>) -> io::Result<Command<'a>> {
+    let stmt = p.read_u32_le()?;
+    let param = p.read_u16_le()?;
+    Ok(Command::SendLongData {
+        stmt,
+        param,
+        data: p.remaining(),
+    })
 }
 
-pub fn parse(i: &[u8]) -> IResult<&[u8], Command<'_>> {
-    alt((
-        map(
-            preceded(tag(&[CommandByte::COM_QUERY as u8]), rest),
-            Command::Query,
-        ),
-        map(
-            preceded(tag(&[CommandByte::COM_FIELD_LIST as u8]), rest),
-            Command::ListFields,
-        ),
-        map(
-            preceded(tag(&[CommandByte::COM_INIT_DB as u8]), rest),
-            Command::Init,
-        ),
-        map(
-            preceded(tag(&[CommandByte::COM_SET_OPTION as u8]), rest),
-            Command::ComSetOption,
-        ),
-        map(
-            preceded(tag(&[CommandByte::COM_STMT_PREPARE as u8]), rest),
-            Command::Prepare,
-        ),
-        map(
-            preceded(tag(&[CommandByte::COM_STMT_RESET as u8]), le_u32),
-            Command::ResetStmtData,
-        ),
-        preceded(tag(&[CommandByte::COM_STMT_EXECUTE as u8]), execute),
-        preceded(
-            tag(&[CommandByte::COM_STMT_SEND_LONG_DATA as u8]),
-            send_long_data,
-        ),
-        map(
-            preceded(tag(&[CommandByte::COM_STMT_CLOSE as u8]), le_u32),
-            Command::Close,
-        ),
-        map(tag(&[CommandByte::COM_RESET_CONNECTION as u8]), |_| {
-            Command::Reset
-        }),
-        map(tag(&[CommandByte::COM_QUIT as u8]), |_| Command::Quit),
-        map(tag(&[CommandByte::COM_PING as u8]), |_| Command::Ping),
-        map(
-            preceded(tag(&[CommandByte::COM_CHANGE_USER as u8]), rest),
-            Command::ChangeUser,
-        ),
-    ))(i)
+pub fn parse(i: &[u8]) -> io::Result<Command<'_>> {
+    let mut p = PacketParser::new(i);
+    let cmd_byte = p.read_u8()?;
+    match cmd_byte {
+        b if b == CommandByte::COM_QUERY as u8 => Ok(Command::Query(p.remaining())),
+        b if b == CommandByte::COM_FIELD_LIST as u8 => Ok(Command::ListFields(p.remaining())),
+        b if b == CommandByte::COM_INIT_DB as u8 => Ok(Command::Init(p.remaining())),
+        b if b == CommandByte::COM_SET_OPTION as u8 => Ok(Command::ComSetOption(p.remaining())),
+        b if b == CommandByte::COM_STMT_PREPARE as u8 => Ok(Command::Prepare(p.remaining())),
+        b if b == CommandByte::COM_STMT_RESET as u8 => Ok(Command::ResetStmtData(p.read_u32_le()?)),
+        b if b == CommandByte::COM_STMT_EXECUTE as u8 => parse_execute(&mut p),
+        b if b == CommandByte::COM_STMT_SEND_LONG_DATA as u8 => parse_send_long_data(&mut p),
+        b if b == CommandByte::COM_STMT_CLOSE as u8 => Ok(Command::Close(p.read_u32_le()?)),
+        b if b == CommandByte::COM_RESET_CONNECTION as u8 => Ok(Command::Reset),
+        b if b == CommandByte::COM_QUIT as u8 => Ok(Command::Quit),
+        b if b == CommandByte::COM_PING as u8 => Ok(Command::Ping),
+        b if b == CommandByte::COM_CHANGE_USER as u8 => Ok(Command::ChangeUser(p.remaining())),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported MySQL command byte: 0x{cmd_byte:02x}"),
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -306,7 +366,7 @@ mod tests {
         let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
         let mut pr = PacketConn::new(r);
         let packet = pr.next().await.unwrap().unwrap();
-        assert!(is_ssl_request(&packet.data).unwrap().1);
+        assert!(is_ssl_request(&packet.data).unwrap());
     }
 
     #[tokio::test]
@@ -326,7 +386,7 @@ mod tests {
         let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
         let mut pr = PacketConn::new(r);
         let packet = pr.next().await.unwrap().unwrap();
-        let (_, handshake) = client_handshake(&packet.data).unwrap();
+        let handshake = client_handshake(&packet.data).unwrap();
         assert!(handshake
             .capabilities
             .contains(CapabilityFlags::CLIENT_LONG_PASSWORD));
@@ -358,7 +418,7 @@ mod tests {
         let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
         let mut pr = PacketConn::new(r);
         let packet = pr.next().await.unwrap().unwrap();
-        let (_, cmd) = parse(&packet.data).unwrap();
+        let cmd = parse(&packet.data).unwrap();
         assert_eq!(
             cmd,
             Command::Query(&b"select @@version_comment limit 1"[..])
@@ -378,7 +438,7 @@ mod tests {
         let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
         let mut pr = PacketConn::new(r);
         let packet = pr.next().await.unwrap().unwrap();
-        let (_, cmd) = parse(&packet.data).unwrap();
+        let cmd = parse(&packet.data).unwrap();
         assert_eq!(
             cmd,
             Command::ListFields(&b"select @@version_comment limit 1"[..])
@@ -398,7 +458,7 @@ mod tests {
         let capability_flags = CapabilityFlags::CLIENT_PROTOCOL_41
             | CapabilityFlags::CLIENT_SECURE_CONNECTION
             | CapabilityFlags::CLIENT_PLUGIN_AUTH;
-        let (_, changeuser) = change_user(&packet.data, capability_flags).unwrap();
+        let changeuser = change_user(&packet.data, capability_flags).unwrap();
         assert_eq!(changeuser.username, "root");
         assert_eq!(changeuser.password, b"");
         assert_eq!(changeuser.database, Some("test"));
@@ -415,7 +475,7 @@ mod tests {
         let r: Cursor<&mut [u8]> = Cursor::new(&mut data[..]);
         let mut pr = PacketConn::new(r);
         let packet = pr.next().await.unwrap().unwrap();
-        let (_, changeuser) = change_user(&packet.data, capability_flags).unwrap();
+        let changeuser = change_user(&packet.data, capability_flags).unwrap();
         assert_eq!(changeuser.username, "root");
         assert_eq!(
             changeuser.password,
