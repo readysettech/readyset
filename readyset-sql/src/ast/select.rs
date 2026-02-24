@@ -8,6 +8,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
+use crate::analysis::contains_aggregate;
 use crate::dialect_display::CommaSeparatedList;
 use crate::{
     AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, TryIntoDialect,
@@ -483,32 +484,7 @@ pub struct SelectStatement {
 impl SelectStatement {
     pub fn contains_aggregate_select(&self) -> bool {
         self.fields.iter().any(|e| match e {
-            FieldDefinitionExpr::Expr { expr, .. } => match expr {
-                Expr::Call(func) => match func {
-                    FunctionExpr::ArrayAgg { .. }
-                    | FunctionExpr::Avg { .. }
-                    | FunctionExpr::Count { .. }
-                    | FunctionExpr::CountStar
-                    | FunctionExpr::Sum { .. }
-                    | FunctionExpr::Max(_)
-                    | FunctionExpr::Min(_)
-                    | FunctionExpr::GroupConcat { .. }
-                    | FunctionExpr::JsonObjectAgg { .. }
-                    | FunctionExpr::StringAgg { .. } => true,
-                    FunctionExpr::Call { .. }
-                    | FunctionExpr::Udf { .. }
-                    | FunctionExpr::Extract { .. }
-                    | FunctionExpr::Lower { .. }
-                    | FunctionExpr::DenseRank
-                    | FunctionExpr::Rank
-                    | FunctionExpr::Bucket { .. }
-                    | FunctionExpr::RowNumber
-                    | FunctionExpr::Substring { .. }
-                    | FunctionExpr::Upper { .. } => false,
-                },
-                Expr::NestedSelect(select) => select.contains_aggregate_select(),
-                _ => false,
-            },
+            FieldDefinitionExpr::Expr { expr, .. } => contains_aggregate(expr),
             _ => false,
         })
     }

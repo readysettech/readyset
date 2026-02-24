@@ -1,0 +1,25 @@
+# Test that aggregates nested inside scalar functions produce a default row
+# on empty tables. Covers the fix for contains_aggregate_select() not
+# detecting aggregates wrapped in scalar calls like ROUND(MAX(col)).
+
+statement ok
+CREATE TABLE t_empty (a int, b int);
+
+# Scalar wrapping aggregate on empty table should return 1 row with NULL
+query I nosort
+SELECT ROUND(MAX(a)) FROM t_empty;
+----
+NULL
+
+# Multiple scalar-wrapped aggregates on empty table
+query II nosort
+SELECT ROUND(MAX(a)), ROUND(AVG(b)) FROM t_empty;
+----
+NULL
+NULL
+
+# Direct aggregate on empty table (regression check)
+query I nosort
+SELECT MAX(a) FROM t_empty;
+----
+NULL
