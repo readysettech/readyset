@@ -3720,18 +3720,22 @@ async fn mysql_handle_dml_in_statement_events() {
         .query("SET binlog_format=STATEMENT; INSERT INTO stmt_table (x) VALUES (2);")
         .await
         .unwrap();
-    sleep(Duration::from_millis(50)).await;
 
-    // Ensure that:
-    // 1. The base table has been dropped
-    // 2. The table is not replicated
-    // 3. The cache has been dropped
-    let tables = ctx.noria.tables().await.unwrap();
-    let non_replicated_tables = ctx.noria.non_replicated_relations().await.unwrap();
-    let caches = ctx.noria.views().await.unwrap();
-    assert!(tables.is_empty());
-    assert!(non_replicated_tables.contains(&NonReplicatedRelation::new(relation)));
-    assert_eq!(caches.len(), 0);
+    // Wait for the replicator to process the STATEMENT binlog event, which should
+    // cause it to drop the base table and mark it as non-replicated.
+    eventually! {
+        run_test: {
+            let tables = ctx.noria.tables().await.unwrap();
+            let non_replicated_tables = ctx.noria.non_replicated_relations().await.unwrap();
+            let caches = ctx.noria.views().await.unwrap();
+            (tables, non_replicated_tables, caches)
+        },
+        then_assert: |(tables, non_replicated_tables, caches)| {
+            assert!(tables.is_empty());
+            assert!(non_replicated_tables.contains(&NonReplicatedRelation::new(relation.clone())));
+            assert_eq!(caches.len(), 0);
+        }
+    }
     shutdown_tx.shutdown().await;
 }
 
