@@ -277,41 +277,40 @@ impl QueryStatus {
         }
     }
 
-    /// Returns true if this query status represents a [pending][] query
-    ///
-    /// [pending]: MigrationState::Pending
+    /// Returns true if the query is inlined.
+    #[must_use]
+    pub fn is_inlined(&self) -> bool {
+        self.migration_state.is_inlined()
+    }
+
+    /// Returns true if we don't yet know if this query is supported.
     #[must_use]
     pub fn is_pending(&self) -> bool {
-        self.migration_state == MigrationState::Pending
+        self.migration_state.is_pending()
     }
 
-    /// Returns true if this query status represents a [successfully migrated][] query
-    ///
-    /// [successfully migrated]: MigrationState::Successful
-    #[must_use]
-    pub fn is_successful(&self, cache_type: Option<CacheType>) -> bool {
-        matches!(self.migration_state,
-            MigrationState::Successful(t) if cache_type == Some(t) || cache_type.is_none())
-    }
-
-    /// Returns true if this query status represents an [unsupported][] query
-    ///
-    /// [unsupported]: MigrationState::Unsupported
-    #[must_use]
-    pub fn is_unsupported(&self) -> bool {
-        matches!(self.migration_state, MigrationState::Unsupported(_))
-    }
-
-    /// Returns true if this query status is supported
+    /// Returns true if the query is supported.
     #[must_use]
     pub fn is_supported(&self) -> bool {
-        self.migration_state == MigrationState::Supported
+        self.migration_state.is_supported()
     }
 
-    /// Returns true if the query should be proxied.
+    /// Returns true if this query is unsupported.
+    #[must_use]
+    pub fn is_unsupported(&self) -> bool {
+        self.migration_state.is_unsupported()
+    }
+
+    /// Returns true if this query is proxied.
     #[must_use]
     pub fn is_proxied(&self) -> bool {
-        self.is_unsupported() || self.is_pending() || self.is_supported()
+        self.migration_state.is_proxied()
+    }
+
+    /// Returns true if this query is cached.
+    #[must_use]
+    pub fn is_cached(&self, cache_type: Option<CacheType>) -> bool {
+        self.migration_state.is_cached(cache_type)
     }
 }
 
@@ -412,22 +411,41 @@ impl MigrationState {
         }
     }
 
-    /// Returns true if the query is inlined
+    /// Returns true if this query is inlined.
+    #[must_use]
     pub fn is_inlined(&self) -> bool {
-        matches!(self, MigrationState::Inlined(_))
+        matches!(self, MigrationState::Inlined(..))
     }
 
-    /// Returns true if the migration state of the query indicates that we are still processing it
+    /// Returns true if we don't yet know if this query is supported.
+    #[must_use]
     pub fn is_pending(&self) -> bool {
         matches!(self, MigrationState::Pending)
     }
 
-    /// Returns true if the query should be considered "supported"
+    /// Returns true if the query is supported.
+    #[must_use]
     pub fn is_supported(&self) -> bool {
-        matches!(
-            self,
-            MigrationState::Supported | MigrationState::Successful(_)
-        )
+        matches!(self, MigrationState::Supported)
+    }
+
+    /// Returns true if this query is unsupported.
+    #[must_use]
+    pub fn is_unsupported(&self) -> bool {
+        matches!(self, MigrationState::Unsupported(..))
+    }
+
+    /// Returns true if this query is proxied.
+    #[must_use]
+    pub fn is_proxied(&self) -> bool {
+        self.is_pending() || self.is_supported() || self.is_unsupported()
+    }
+
+    /// Returns true if this query is cached.
+    #[must_use]
+    pub fn is_cached(&self, cache_type: Option<CacheType>) -> bool {
+        matches!(self,
+            MigrationState::Successful(t) if cache_type == Some(*t) || cache_type.is_none())
     }
 }
 

@@ -117,7 +117,7 @@ impl PersistentStatusCacheHandle {
             .iter()
             .filter_map(|(query_id, (query, status))| match query {
                 Query::Parsed(view) => {
-                    if status.is_successful(None) {
+                    if status.is_cached(None) {
                         Some((*query_id, view.clone(), status.clone()))
                     } else {
                         None
@@ -684,7 +684,7 @@ impl QueryStatusCache {
     pub fn clear(&self, cache_type: Option<CacheType>) {
         self.id_to_status
             .iter_mut()
-            .filter(|v| v.is_successful(cache_type))
+            .filter(|v| v.is_cached(cache_type))
             .for_each(|mut v| {
                 v.migration_state = MigrationState::Pending;
                 v.always = false;
@@ -692,7 +692,7 @@ impl QueryStatusCache {
         let mut statuses = self.persistent_handle.statuses.write();
         statuses
             .iter_mut()
-            .filter(|(_query_id, (_query, status))| status.is_successful(cache_type))
+            .filter(|(_query_id, (_query, status))| status.is_cached(cache_type))
             .for_each(|(_query_id, (_query, status))| {
                 status.migration_state = MigrationState::Pending;
                 status.always = false;
@@ -702,12 +702,12 @@ impl QueryStatusCache {
     /// Clear all queries not marked as successful from the cache.
     pub fn clear_proxied_queries(&self) {
         self.id_to_status
-            .retain(|_query_id, status| status.is_successful(None));
+            .retain(|_query_id, status| status.is_cached(None));
 
         let mut statuses = self.persistent_handle.statuses.write();
         let keys_to_remove: Vec<QueryId> = statuses
             .iter()
-            .filter(|(_, (_, status))| !status.is_successful(None))
+            .filter(|(_, (_, status))| !status.is_cached(None))
             .map(|(query_id, _)| *query_id)
             .collect();
 
