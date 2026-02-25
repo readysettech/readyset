@@ -57,7 +57,7 @@ impl Options {
                 .unwrap();
 
                 if let Some(cf_handle) = db.cf_handle(&column_family) {
-                    let iter = db.iterator_cf(cf_handle, rocksdb::IteratorMode::Start);
+                    let iter = db.iterator_cf(&cf_handle, rocksdb::IteratorMode::Start);
                     let mut rows = 0;
                     for item in iter {
                         rows += 1;

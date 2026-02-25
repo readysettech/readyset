@@ -220,6 +220,7 @@ rmp-serde = "1.2.0"
 rocksdb = { version = "0.24.0", default-features = false, features = [
     "lz4",
     "jemalloc",
+    "multi-threaded-cf",
 ] }
 rusty-fork = "0.3.0"
 rustix = { version = "1", features = ["time"] }
