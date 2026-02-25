@@ -687,6 +687,30 @@ where
     }
 }
 
+fn parse_query(settings: &BackendSettings, query: &str) -> ReadySetResult<SqlQuery> {
+    trace!(%query, "Parsing query");
+    readyset_sql_parsing::parse_query_with_config(
+        settings.parsing_preset.into_config().log_only_selects(true),
+        settings.dialect,
+        query,
+    )
+    .map_err(Into::into)
+}
+
+fn parse_shallow_query(
+    settings: &BackendSettings,
+    query: &str,
+) -> (
+    ReadySetResult<ShallowCacheQuery>,
+    Option<ReadysetHintDirective>,
+) {
+    trace!(%query, "Parsing shallow query");
+    match readyset_sql_parsing::parse_shallow_query(settings.dialect, query) {
+        Ok((q, directive)) => (Ok(q), directive),
+        Err(e) => (Err(e.into()), None),
+    }
+}
+
 pub struct Backend<DB, Handler>
 where
     DB: UpstreamDatabase,
@@ -1056,7 +1080,10 @@ where
     /// When a routing change is detected, this returns an error to force the client to
     /// disconnect and reconnect, picking up the new upstream on the fresh connection.
     /// Rate-limited to at most once per second for the initial detection.
-    async fn check_routing(&mut self) -> Result<(), DB::Error> {
+    async fn check_routing(
+        connectors: &BackendConnectors<DB>,
+        state: &mut BackendState<DB>,
+    ) -> Result<(), DB::Error> {
         let err = || -> DB::Error {
             ReadySetError::ConnectionClosed(
                 "upstream routing changed; reconnect to reach the new upstream".into(),
@@ -1064,35 +1091,34 @@ where
             .into()
         };
 
-        if self.state.routing_changed {
+        if state.routing_changed {
             return Err(err());
         }
 
-        if self.state.upstream_config.is_none()
-            || self.connectors.upstream.is_none()
-            || self.state.last_routing_check.elapsed() < ROUTING_CHECK_INTERVAL
+        if state.upstream_config.is_none()
+            || connectors.upstream.is_none()
+            || state.last_routing_check.elapsed() < ROUTING_CHECK_INTERVAL
         {
             return Ok(());
         }
-        self.state.last_routing_check = Instant::now();
+        state.last_routing_check = Instant::now();
 
-        let shared = self
-            .state
+        let shared = state
             .upstream_config
             .as_ref()
             .ok_or_else(|| internal_err!("upstream config is not configured"))?;
         let current_config = shared.read().await;
-        if current_config.upstream_db_url == self.state.last_upstream_url {
+        if current_config.upstream_db_url == state.last_upstream_url {
             return Ok(());
         }
 
-        self.state.routing_changed = true;
+        state.routing_changed = true;
         Err(err())
     }
 
     /// Send ping on the upstream connection, if it exists
     pub async fn ping(&mut self) -> Result<(), DB::Error> {
-        self.check_routing().await?;
+        Self::check_routing(&self.connectors, &mut self.state).await?;
         if let Some(upstream) = &mut self.connectors.upstream {
             upstream.ping().await
         } else {
@@ -1101,7 +1127,7 @@ where
     }
     /// Reset the current upstream connection
     pub async fn reset(&mut self) -> Result<(), DB::Error> {
-        self.check_routing().await?;
+        Self::check_routing(&self.connectors, &mut self.state).await?;
         if let Some(upstream) = &mut self.connectors.upstream {
             upstream.reset().await?;
             self.state.proxy_state = ProxyState::Fallback;
@@ -1121,7 +1147,7 @@ where
             "set-database failpoint injected".to_string()
         )
         .into()));
-        self.check_routing().await?;
+        Self::check_routing(&self.connectors, &mut self.state).await?;
         if let Some(upstream) = &mut self.connectors.upstream {
             upstream
                 .query(
@@ -1146,7 +1172,7 @@ where
         user: &str,
         password: RedactedString,
     ) -> Result<(), DB::Error> {
-        self.check_routing().await?;
+        Self::check_routing(&self.connectors, &mut self.state).await?;
         if let Some(upstream) = &mut self.connectors.upstream {
             let _ = upstream.set_user(user, password).await;
         }
@@ -1159,7 +1185,7 @@ where
         password: &str,
         database: &str,
     ) -> Result<(), DB::Error> {
-        self.check_routing().await?;
+        Self::check_routing(&self.connectors, &mut self.state).await?;
         if let Some(upstream) = &mut self.connectors.upstream {
             upstream.change_user(user, password, database).await?;
         }
@@ -1199,7 +1225,7 @@ where
         &'a mut self,
         query: &'a str,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        self.check_routing().await?;
+        Self::check_routing(&self.connectors, &mut self.state).await?;
         let upstream = self.connectors.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("Simple query requires an upstream".to_string())
         })?;
@@ -1215,7 +1241,7 @@ where
         data: DB::PrepareData<'_>,
         statement_type: PreparedStatementType,
     ) -> Result<UpstreamPrepare<DB>, DB::Error> {
-        self.check_routing().await?;
+        Self::check_routing(&self.connectors, &mut self.state).await?;
         let upstream = self.connectors.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("Prepare fallback requires an upstream".to_string())
         })?;
@@ -1235,8 +1261,9 @@ where
         statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
-        self.check_routing().await?;
-        let rewrite_context = self.rewrite_context(None).await?;
+        Self::check_routing(&self.connectors, &mut self.state).await?;
+        let rewrite_context =
+            Self::rewrite_context(&self.connectors, &self.settings, &self.state, None).await?;
         let up_prep: OptionFuture<_> = self
             .connectors
             .upstream
@@ -1345,7 +1372,7 @@ where
         statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
-        self.check_routing().await?;
+        Self::check_routing(&self.connectors, &mut self.state).await?;
         event.sql_type = SqlQueryType::Write;
         if let Some(ref mut upstream) = self.connectors.upstream {
             let _t = event.start_upstream_timer();
@@ -1395,7 +1422,7 @@ where
         statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
-        self.check_routing().await?;
+        Self::check_routing(&self.connectors, &mut self.state).await?;
 
         // if `handle_set()` returns an error, we aren't supposed to process
         // the SET anyway, so propagating the error is expected.
@@ -1425,7 +1452,8 @@ where
 
     /// Provides metadata required to prepare a select query
     async fn plan_prepare_select(&mut self, stmt: SelectStatement) -> ReadySetResult<PrepareMeta> {
-        let rewrite_context = self.rewrite_context(None).await?;
+        let rewrite_context =
+            Self::rewrite_context(&self.connectors, &self.settings, &self.state, None).await?;
         let mut rewritten = stmt.clone();
         if let Err(e) = adapter_rewrites::rewrite_query(
             &mut rewritten,
@@ -1457,7 +1485,7 @@ where
                 // For select statements only InRequestPath should trigger migrations
                 // synchronously, or if no upstream is present.
                 must_migrate: self.settings.migration_mode == MigrationMode::InRequestPath
-                    || !self.has_fallback(),
+                    || !Self::has_fallback(&self.connectors),
                 should_do_noria: should_do_readyset,
                 always: status.always,
                 schema_generation: rewrite_context.schema_generation(),
@@ -1471,29 +1499,38 @@ where
         query: &str,
         event: &mut QueryExecutionEvent,
     ) -> ReadySetResult<PrepareMeta> {
-        let (parsed, (shallow_parsed, hint_directive)) =
-            match self.state.parsed_query_cache.get(query) {
-                Some(cached_query) => {
+        let (parsed, (shallow_parsed, hint)) = match self.state.parsed_query_cache.get(query) {
+            Some(cached_query) => {
+                let _t = event.start_parse_timer();
+                let (shallow_parsed, hint) = parse_shallow_query(&self.settings, query);
+                (Ok(cached_query.clone()), (shallow_parsed, hint))
+            }
+            None => {
+                let (parsed, (shallow_parsed, hint)) = {
                     let _t = event.start_parse_timer();
-                    (Ok(cached_query.clone()), self.parse_shallow_query(query))
+                    let parsed = parse_query(&self.settings, query);
+                    let (shallow_parsed, hint) = parse_shallow_query(&self.settings, query);
+                    (parsed, (shallow_parsed, hint))
+                };
+                if let Ok(parsed) = &parsed {
+                    self.state
+                        .parsed_query_cache
+                        .put(query.to_string(), parsed.clone());
                 }
-                None => {
-                    let (parsed, shallow_parsed) = {
-                        let _t = event.start_parse_timer();
-                        (self.parse_query(query), self.parse_shallow_query(query))
-                    };
-                    if let Ok(parsed) = &parsed {
-                        self.state
-                            .parsed_query_cache
-                            .put(query.to_string(), parsed.clone());
-                    }
-                    (parsed, shallow_parsed)
-                }
-            };
+                (parsed, (shallow_parsed, hint))
+            }
+        };
 
-        if let Some((shallow, params)) = self.prepare_shallow_query(shallow_parsed)
-            && let Some((query_id, always)) =
-                self.should_query_shallow(&shallow, hint_directive).await
+        if let Some((shallow, params)) =
+            Self::prepare_shallow_query(&self.connectors, shallow_parsed)
+            && let Some((query_id, always)) = Self::should_query_shallow(
+                &mut self.connectors,
+                &self.settings,
+                &self.state,
+                &shallow,
+                hint,
+            )
+            .await
         {
             return Ok(PrepareMeta::ShallowSelect(PrepareShallowSelectMeta {
                 query_id,
@@ -1703,7 +1740,7 @@ where
         data: DB::PrepareData<'_>,
         statement_type: PreparedStatementType,
     ) -> Result<&PrepareResult<DB>, DB::Error> {
-        self.check_routing().await?;
+        Self::check_routing(&self.connectors, &mut self.state).await?;
         // early return if we're preparing an unnamed statement that we already have the metadata for.
         // Also, don't bother to record an event for this query as it's not really useful data.
         if matches!(statement_type, PreparedStatementType::Unnamed)
@@ -2030,9 +2067,12 @@ where
 
     /// Iterate over the cache of the prepared statements, and invalidate those that are
     /// equal to the one provided
-    fn invalidate_prepared_statements_cache(&mut self, stmt: &ViewCreateRequest) {
+    fn invalidate_prepared_statements_cache(
+        state: &mut BackendState<DB>,
+        stmt: &ViewCreateRequest,
+    ) {
         // Linear scan, but we shouldn't be doing it often, right?
-        self.state
+        state
             .prepared_statements
             .iter_mut()
             .filter_map(
@@ -2075,7 +2115,7 @@ where
         params: &[DfValue],
         exec_meta: &'a DB::ExecMeta,
     ) -> Result<(QueryResult<'a, DB>, ProxyState), DB::Error> {
-        self.check_routing().await?;
+        Self::check_routing(&self.connectors, &mut self.state).await?;
         self.state.last_query = None;
         let schema_search_path = self.connectors.noria.schema_search_path().to_vec();
         let cached_statement = self
@@ -2410,9 +2450,10 @@ where
     }
 
     /// Generates response to the `EXPLAIN LAST STATEMENT` query
-    fn explain_last_statement(&self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let (destination, error) = self
-            .state
+    fn explain_last_statement(
+        state: &BackendState<DB>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let (destination, error) = state
             .last_query
             .as_ref()
             .map(|info| {
@@ -2432,11 +2473,10 @@ where
         ]))
     }
 
-    fn make_name_and_id<'a>(
-        &self,
-        name: &'a mut Option<Relation>,
+    fn make_name_and_id(
+        name: &mut Option<Relation>,
         query_id: QueryId,
-    ) -> (QueryId, &'a Relation, Option<Relation>) {
+    ) -> (QueryId, &Relation, Option<Relation>) {
         let requested_name = name.clone();
         let name = match name {
             Some(name) => &*name,
@@ -2449,8 +2489,11 @@ where
     }
 
     /// Forwards a `CREATE CACHE` request to ReadySet
+    #[allow(clippy::too_many_arguments)]
     async fn create_cached_query(
-        &mut self,
+        connectors: &mut BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
         name: &mut Option<Relation>,
         deep: ReadySetResult<ViewCreateRequest>,
         shallow: ReadySetResult<ShallowViewRequest>,
@@ -2459,19 +2502,30 @@ where
         schema_generation: SchemaGeneration,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let deep = deep?;
-        let (query_id, name, requested_name) = self.make_name_and_id(name, QueryId::from(&deep));
+        let (query_id, name, requested_name) = Self::make_name_and_id(name, QueryId::from(&deep));
 
         // If we have existing caches with the same query_id or name, drop them first.
-        self.drop_caches_on_collision(Some(query_id), requested_name.as_ref())
-            .await?;
+        Self::drop_caches_on_collision(
+            connectors,
+            settings,
+            state,
+            Some(query_id),
+            requested_name.as_ref(),
+        )
+        .await?;
         if let Ok(shallow) = shallow {
-            self.drop_caches_on_collision(Some(QueryId::from(&shallow)), None)
-                .await?;
+            Self::drop_caches_on_collision(
+                connectors,
+                settings,
+                state,
+                Some(QueryId::from(&shallow)),
+                None,
+            )
+            .await?;
         }
 
         // Now migrate the new query
-        let migration_state = match self
-            .connectors
+        let migration_state = match connectors
             .noria
             .handle_create_cached_query(
                 Some(name),
@@ -2499,7 +2553,7 @@ where
                             .collect::<Vec<_>>(),
                     )
                     .unwrap();
-                    if self.settings.placeholder_inlining {
+                    if settings.placeholder_inlining {
                         MigrationState::Inlined(InlinedState::from_placeholders(placeholders))
                     } else {
                         return Err(e);
@@ -2509,10 +2563,10 @@ where
                 }
             }
         };
-        self.state
+        state
             .query_status_cache
             .update_query_migration_state(&deep, migration_state, None);
-        self.state
+        state
             .query_status_cache
             .always_attempt_readyset(&deep, always);
         Ok(noria_connector::QueryResult::Empty)
@@ -2520,7 +2574,9 @@ where
 
     #[allow(clippy::too_many_arguments)]
     async fn create_deep_cache(
-        &mut self,
+        connectors: &mut BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
         mut name: Option<Relation>,
         deep: ReadySetResult<ViewCreateRequest>,
         shallow: ReadySetResult<ShallowViewRequest>,
@@ -2531,26 +2587,28 @@ where
         quiet: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         if let Some(ref ddl_req) = ddl_req {
-            self.state
+            state
                 .authority
                 .add_cache_ddl_request(ddl_req.clone())
                 .await?;
         }
 
-        let res = self
-            .create_cached_query(
-                &mut name,
-                deep,
-                shallow,
-                always,
-                concurrently,
-                schema_generation,
-            )
-            .await;
+        let res = Self::create_cached_query(
+            connectors,
+            settings,
+            state,
+            &mut name,
+            deep,
+            shallow,
+            always,
+            concurrently,
+            schema_generation,
+        )
+        .await;
 
         remove_ddl_on_error(
             &res,
-            &self.state.authority,
+            &state.authority,
             ddl_req,
             name,
             "deep",
@@ -2564,7 +2622,9 @@ where
 
     #[allow(clippy::too_many_arguments)]
     async fn create_shallow_cache(
-        &mut self,
+        connectors: &mut BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
         mut name: Option<Relation>,
         deep: ReadySetResult<ViewCreateRequest>,
         shallow: ReadySetResult<ShallowViewRequest>,
@@ -2577,35 +2637,48 @@ where
             ddl_req.ok_or_else(|| internal_err!("No statement supplied to shallow cache"))?;
 
         let shallow = shallow?;
-        if let Err(e) = self.upstream_supports(&shallow).await {
+        if let Err(e) = Self::upstream_supports(connectors, &shallow).await {
             return Err(ReadySetError::CreateCacheError(e.to_string()));
         }
 
         // DDL-specific: drop collisions before creating.
         let (query_id, _, requested_name) =
-            self.make_name_and_id(&mut name, QueryId::from(&shallow));
-        self.drop_caches_on_collision(Some(query_id), requested_name.as_ref())
-            .await?;
+            Self::make_name_and_id(&mut name, QueryId::from(&shallow));
+        Self::drop_caches_on_collision(
+            connectors,
+            settings,
+            state,
+            Some(query_id),
+            requested_name.as_ref(),
+        )
+        .await?;
         if let Ok(deep) = deep {
-            self.drop_caches_on_collision(Some(QueryId::from(&deep)), None)
-                .await?;
+            Self::drop_caches_on_collision(
+                connectors,
+                settings,
+                state,
+                Some(QueryId::from(&deep)),
+                None,
+            )
+            .await?;
         }
 
         // Propagate upstream-validation and DDL-persistence errors to the
         // caller. ViewAlreadyExists from a concurrent race is not a real
         // failure — treat it the same as success.
-        match self
-            .create_shallow_cache_core(
-                name,
-                &shallow,
-                policy,
-                always,
-                coalesce_ms,
-                ddl_req,
-                requested_name,
-                false,
-            )
-            .await
+        match Self::create_shallow_cache_core(
+            settings,
+            state,
+            name,
+            &shallow,
+            policy,
+            always,
+            coalesce_ms,
+            ddl_req,
+            requested_name,
+            false,
+        )
+        .await
         {
             Ok(()) | Err(ReadySetError::ViewAlreadyExists(_)) => {
                 Ok(noria_connector::QueryResult::Empty)
@@ -2618,7 +2691,8 @@ where
     /// `shallow.create_cache()`, status updates, and error cleanup.
     #[allow(clippy::too_many_arguments)]
     async fn create_shallow_cache_core(
-        &mut self,
+        settings: &BackendSettings,
+        state: &BackendState<DB>,
         mut name: Option<Relation>,
         shallow: &ShallowViewRequest,
         policy: Option<ast::EvictionPolicy>,
@@ -2628,23 +2702,23 @@ where
         requested_name: Option<Relation>,
         quiet: bool,
     ) -> ReadySetResult<()> {
-        self.state
+        state
             .authority
             .add_shallow_cache_ddl_request(ddl_req.clone())
             .await?;
 
-        let (query_id, cache_name, _) = self.make_name_and_id(&mut name, QueryId::from(shallow));
+        let (query_id, cache_name, _) = Self::make_name_and_id(&mut name, QueryId::from(shallow));
         let cache_name = cache_name.clone();
 
-        let res = self.state.shallow.create_cache(
+        let res = state.shallow.create_cache(
             Some(cache_name),
             Some(query_id),
             shallow.query.clone(),
             shallow.schema_search_path.clone(),
-            resolve_eviction_policy(policy, self.settings.default_ttl_ms),
+            resolve_eviction_policy(policy, settings.default_ttl_ms),
             ddl_req.clone(),
             always,
-            resolve_coalesce(coalesce_ms, self.settings.default_coalesce_ms),
+            resolve_coalesce(coalesce_ms, settings.default_coalesce_ms),
         );
 
         match &res {
@@ -2652,19 +2726,19 @@ where
                 // Success or concurrent creation race — update status cache
                 // either way. ViewAlreadyExists is not a real failure: the
                 // cache exists, so we must NOT remove the DDL.
-                self.state.query_status_cache.update_query_migration_state(
+                state.query_status_cache.update_query_migration_state(
                     shallow,
                     MigrationState::Successful(CacheType::Shallow),
                     None,
                 );
-                self.state
+                state
                     .query_status_cache
                     .always_attempt_readyset(shallow, always);
             }
             Err(_) => {
                 remove_ddl_on_error(
                     &res,
-                    &self.state.authority,
+                    &state.authority,
                     Some(ddl_req),
                     requested_name,
                     "shallow",
@@ -2679,8 +2753,11 @@ where
     }
 
     /// Determines via running PREPARE if the upstream can support this query.
-    async fn upstream_supports(&mut self, req: &ShallowViewRequest) -> anyhow::Result<()> {
-        let Some(upstream) = self.connectors.upstream.as_mut() else {
+    async fn upstream_supports(
+        connectors: &mut BackendConnectors<DB>,
+        req: &ShallowViewRequest,
+    ) -> anyhow::Result<()> {
+        let Some(upstream) = connectors.upstream.as_mut() else {
             bail!("No upstream database found");
         };
 
@@ -2705,7 +2782,9 @@ where
 
     /// Extract the deep and shallow representations of the query.
     async fn query_from_cache_inner(
-        &self,
+        connectors: &BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &BackendState<DB>,
         inner: &CacheInner,
     ) -> ReadySetResult<(
         ReadySetResult<ViewCreateRequest>,
@@ -2718,13 +2797,14 @@ where
                 let shallow = shallow.clone();
 
                 // Rewrite for deep.
-                let rewrite_context = self.rewrite_context(None).await?;
+                let rewrite_context =
+                    Self::rewrite_context(connectors, settings, state, None).await?;
                 let schema_generation = rewrite_context.schema_generation();
                 let deep = match deep {
                     Ok(mut deep) => {
                         match adapter_rewrites::rewrite_query(
                             &mut deep,
-                            self.connectors.noria.rewrite_params(),
+                            connectors.noria.rewrite_params(),
                             &rewrite_context,
                         ) {
                             Ok(_params) => Ok(ViewCreateRequest::new(
@@ -2742,11 +2822,11 @@ where
                     Ok(mut shallow) => {
                         adapter_rewrites::rewrite_shallow(
                             &mut shallow,
-                            self.connectors.noria.rewrite_params(),
+                            connectors.noria.rewrite_params(),
                         )?;
                         Ok(ShallowViewRequest::new(
                             *shallow,
-                            self.connectors.noria.schema_search_path().to_owned(),
+                            connectors.noria.schema_search_path().to_owned(),
                         ))
                     }
                     Err(e) => Err(ReadySetError::UnparseableQuery(e)),
@@ -2754,8 +2834,7 @@ where
 
                 Ok((deep, shallow, schema_generation))
             }
-            CacheInner::Id(id) => match self
-                .state
+            CacheInner::Id(id) => match state
                 .query_status_cache
                 .query_with_schema_generation(id.as_str())
             {
@@ -2793,7 +2872,9 @@ where
 
     /// Extract the deep and shallow representations of the query from the EXPLAIN.
     async fn query_from_explain(
-        &self,
+        connectors: &BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &BackendState<DB>,
         explain: &ExplainStatement,
     ) -> ReadySetResult<(
         ReadySetResult<ViewCreateRequest>,
@@ -2804,12 +2885,13 @@ where
             internal!("Unexpected EXPLAIN: {explain:?}");
         };
 
-        self.query_from_cache_inner(inner).await
+        Self::query_from_cache_inner(connectors, settings, state, inner).await
     }
 
     // Determine the migration state of the deep representation, performing a dry run if necessary.
     async fn explain_migration_state(
-        &mut self,
+        connectors: &mut BackendConnectors<DB>,
+        state: &BackendState<DB>,
         deep: &ReadySetResult<ViewCreateRequest>,
         cache_mode: CacheMode,
         cache_type: Option<CacheType>,
@@ -2823,17 +2905,13 @@ where
         };
 
         // Check if we already know the migration state for this query.
-        let (id, migration_state) = self
-            .state
-            .query_status_cache
-            .try_query_migration_state(deep);
+        let (id, migration_state) = state.query_status_cache.try_query_migration_state(deep);
 
         // Alternatively ask the controller if it knows about this query.
         let migration_state = match migration_state {
             Some(migration_state) => migration_state,
             None => {
-                if self
-                    .connectors
+                if connectors
                     .noria
                     .get_view_name(deep.clone())
                     .await
@@ -2862,8 +2940,7 @@ where
         }
 
         // We don't yet know the migration state and are considering a deep cache.
-        match self
-            .connectors
+        match connectors
             .noria
             .handle_dry_run(id, deep, schema_generation)
             .await
@@ -2877,7 +2954,6 @@ where
     }
 
     fn output_explain_create_cache(
-        &self,
         query_id: QueryId,
         query: String,
         supported: &str,
@@ -2904,31 +2980,38 @@ where
     /// the migration handler to advance the query's processing in the background.  A result of
     /// pending indicates that the caller should try again later.
     async fn explain_create_cache(
-        &mut self,
+        connectors: &mut BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &BackendState<DB>,
         explain: &ExplainStatement,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let cache_mode = self.settings.cache_mode;
+        let cache_mode = settings.cache_mode;
         let cache_type = Self::requested_cache_type(explain)?;
 
         // Get the deep and shallow representations of the query.
-        let (deep, shallow, schema_generation) = self.query_from_explain(explain).await?;
+        let (deep, shallow, schema_generation) =
+            Self::query_from_explain(connectors, settings, state, explain).await?;
 
         // The only time we care about the migration state of a shallow representation is if we've
         // marked one as cached in the query status cache.
         if let Ok(shallow) = &shallow
-            && let (query_id, Some(MigrationState::Successful(CacheType::Shallow))) = self
-                .state
-                .query_status_cache
-                .try_query_migration_state(shallow)
+            && let (query_id, Some(MigrationState::Successful(CacheType::Shallow))) =
+                state.query_status_cache.try_query_migration_state(shallow)
         {
-            let query = shallow.query.display(self.settings.dialect).to_string();
-            return self.output_explain_create_cache(query_id, query, "cached");
+            let query = shallow.query.display(settings.dialect).to_string();
+            return Self::output_explain_create_cache(query_id, query, "cached");
         }
 
         // Determine support.
-        let migration_state = self
-            .explain_migration_state(&deep, cache_mode, cache_type, schema_generation)
-            .await;
+        let migration_state = Self::explain_migration_state(
+            connectors,
+            state,
+            &deep,
+            cache_mode,
+            cache_type,
+            schema_generation,
+        )
+        .await;
         match cache_type {
             Some(CacheType::Deep) => {
                 let deep = deep?;
@@ -2939,19 +3022,20 @@ where
                     MigrationState::Inlined(..) | MigrationState::Pending => "pending",
                 };
 
-                let query = deep.statement.display(self.settings.dialect).to_string();
-                self.output_explain_create_cache(QueryId::from(&deep), query, supported)
+                let query = deep.statement.display(settings.dialect).to_string();
+                Self::output_explain_create_cache(QueryId::from(&deep), query, supported)
             }
             Some(CacheType::Shallow) => {
                 let shallow = shallow?;
-                let supported = if let Err(e) = self.upstream_supports(&shallow).await {
+                let supported = if let Err(e) = Self::upstream_supports(connectors, &shallow).await
+                {
                     &format!("no: {e}")
                 } else {
                     "yes"
                 };
 
-                let query = shallow.query.display(self.settings.dialect).to_string();
-                self.output_explain_create_cache(QueryId::from(&shallow), query, supported)
+                let query = shallow.query.display(settings.dialect).to_string();
+                Self::output_explain_create_cache(QueryId::from(&shallow), query, supported)
             }
             None => {
                 let defaults_deep = cache_mode.defaults_deep();
@@ -2969,7 +3053,7 @@ where
                     | MigrationState::Supported
                     | MigrationState::Unsupported(..) => {
                         let shallow = shallow?;
-                        if let Err(e) = self.upstream_supports(&shallow).await {
+                        if let Err(e) = Self::upstream_supports(connectors, &shallow).await {
                             (None, Some(shallow), &format!("no: {e}"))
                         } else {
                             (None, Some(shallow), "yes")
@@ -2980,56 +3064,53 @@ where
                 let (query_id, query) = match (deep, shallow) {
                     (Some(deep), None) => (
                         QueryId::from(&deep),
-                        deep.statement.display(self.settings.dialect).to_string(),
+                        deep.statement.display(settings.dialect).to_string(),
                     ),
                     (None, Some(shallow)) => (
                         QueryId::from(&shallow),
-                        shallow.query.display(self.settings.dialect).to_string(),
+                        shallow.query.display(settings.dialect).to_string(),
                     ),
                     _ => internal!("Expected either deep or shallow AST"),
                 };
 
-                self.output_explain_create_cache(query_id, query, supported)
+                Self::output_explain_create_cache(query_id, query, supported)
             }
         }
     }
 
-    fn drop_view_request(&mut self, view_request: &ViewCreateRequest) {
-        self.state.query_status_cache.update_query_migration_state(
+    fn drop_view_request(state: &mut BackendState<DB>, view_request: &ViewCreateRequest) {
+        state.query_status_cache.update_query_migration_state(
             view_request,
             MigrationState::Pending,
             None,
         );
-        self.state
+        state
             .query_status_cache
             .always_attempt_readyset(view_request, false);
-        self.invalidate_prepared_statements_cache(view_request);
+        Self::invalidate_prepared_statements_cache(state, view_request);
     }
 
-    fn drop_shallow_view_request(&mut self, shallow: &ShallowViewRequest) {
-        self.state.query_status_cache.update_query_migration_state(
+    fn drop_shallow_view_request(state: &BackendState<DB>, shallow: &ShallowViewRequest) {
+        state.query_status_cache.update_query_migration_state(
             shallow,
             MigrationState::Pending,
             None,
         );
-        self.state
+        state
             .query_status_cache
             .always_attempt_readyset(shallow, false);
     }
 
     /// Forwards a `DROP CACHE` request to noria
     async fn drop_cached_query(
-        &mut self,
+        connectors: &mut BackendConnectors<DB>,
+        state: &mut BackendState<DB>,
         name: &Relation,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let maybe_view_request = self
-            .connectors
-            .noria
-            .view_create_request_from_name(name)
-            .await;
-        let result = self.connectors.noria.drop_view(name).await?;
+        let maybe_view_request = connectors.noria.view_create_request_from_name(name).await;
+        let result = connectors.noria.drop_view(name).await?;
         if let Some(view_request) = maybe_view_request {
-            self.drop_view_request(&view_request);
+            Self::drop_view_request(state, &view_request);
         }
         Ok(noria_connector::QueryResult::Delete {
             num_rows_deleted: result,
@@ -3037,18 +3118,17 @@ where
     }
 
     async fn drop_shallow_cached_query(
-        &mut self,
+        state: &BackendState<DB>,
         name: Option<&Relation>,
         query_id: Option<QueryId>,
         ddl_req: CacheDDLRequest,
     ) -> ReadySetResult<()> {
-        let info = self
-            .state
+        let info = state
             .shallow
             .get(name, query_id.as_ref())
             .map(|cache| cache.get_info());
 
-        self.state.shallow.drop_cache(name, query_id.as_ref())?;
+        state.shallow.drop_cache(name, query_id.as_ref())?;
 
         if let Some(CacheInfo {
             query,
@@ -3057,12 +3137,12 @@ where
         }) = info
         {
             let view_request = ShallowViewRequest::new(query, schema_search_path);
-            self.drop_shallow_view_request(&view_request);
+            Self::drop_shallow_view_request(state, &view_request);
         };
 
         if let Err(e) = retry_with_exponential_backoff!(
             || async {
-                self.state
+                state
                     .authority
                     .remove_shallow_cache_ddl_request(ddl_req.clone())
                     .await
@@ -3082,22 +3162,23 @@ where
 
     /// Forwards a `DROP ALL CACHES` request to noria
     async fn drop_all_caches(
-        &mut self,
+        connectors: &mut BackendConnectors<DB>,
+        state: &mut BackendState<DB>,
         cache_type: Option<CacheType>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         if matches!(cache_type, Some(CacheType::Deep) | None) {
-            self.state.authority.remove_all_cache_ddl_requests().await?;
-            self.connectors.noria.drop_all_caches().await?;
+            state.authority.remove_all_cache_ddl_requests().await?;
+            connectors.noria.drop_all_caches().await?;
         }
         if matches!(cache_type, Some(CacheType::Shallow) | None) {
-            self.state
+            state
                 .authority
                 .remove_all_shallow_cache_ddl_requests()
                 .await?;
-            self.state.shallow.drop_all_caches();
+            state.shallow.drop_all_caches();
         }
-        self.state.query_status_cache.clear(cache_type);
-        self.state.prepared_statements.iter_mut().for_each(
+        state.query_status_cache.clear(cache_type);
+        state.prepared_statements.iter_mut().for_each(
             |(
                 _,
                 PreparedStatement {
@@ -3119,7 +3200,9 @@ where
 
     /// Drop caches with matching query_id or name.
     async fn drop_caches_on_collision(
-        &mut self,
+        connectors: &mut BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
         query_id: Option<QueryId>,
         name: Option<&Relation>,
     ) -> ReadySetResult<()> {
@@ -3132,15 +3215,15 @@ where
             statement,
             query_id,
             ..
-        } in self.connectors.noria.verbose_views(query_id, name).await?
+        } in connectors.noria.verbose_views(query_id, name).await?
         {
             warn!(
                 %query_id,
                 name = %name.display(DB::SQL_DIALECT),
-                statement = %Sensitive(&statement.display(self.settings.dialect)),
+                statement = %Sensitive(&statement.display(settings.dialect)),
                 "Dropping previously cached query",
             );
-            self.drop_cached_query(&name).await?;
+            Self::drop_cached_query(connectors, state, &name).await?;
         }
         for CacheInfo {
             name,
@@ -3148,7 +3231,7 @@ where
             query,
             ddl_req,
             ..
-        } in self.state.shallow.list_caches(query_id, name)
+        } in state.shallow.list_caches(query_id, name)
         {
             let none = || "None".to_string();
             warn!(
@@ -3156,33 +3239,31 @@ where
                 name = %name
                     .as_ref()
                     .map_or_else(none, |name| name.display(DB::SQL_DIALECT).to_string()),
-                statement = %Sensitive(&query.display(self.settings.dialect)),
+                statement = %Sensitive(&query.display(settings.dialect)),
                 "Dropping previously shallow-cached query",
             );
-            self.drop_shallow_cached_query(name.as_ref(), query_id, ddl_req)
-                .await?;
+            Self::drop_shallow_cached_query(state, name.as_ref(), query_id, ddl_req).await?;
         }
         Ok(())
     }
 
     /// Handles a `DROP ALL PROXIED QUERIES` request
     async fn drop_all_proxied_queries(
-        &mut self,
+        state: &BackendState<DB>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        self.state.query_status_cache.clear_proxied_queries();
+        state.query_status_cache.clear_proxied_queries();
         Ok(noria_connector::QueryResult::Empty)
     }
 
     /// Responds to a `SHOW PROXIED QUERIES` query
     async fn show_proxied_queries(
-        &mut self,
+        state: &mut BackendState<DB>,
         query_id: &Option<String>,
         only_supported: bool,
         limit: Option<u64>,
         cache_type: Option<CacheType>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let mut queries = self
-            .state
+        let mut queries = state
             .query_status_cache
             .proxied_list(cache_type.unwrap_or(CacheType::Deep));
         if let Some(q_id) = query_id {
@@ -3193,7 +3274,7 @@ where
             queries.retain(|q| q.status.migration_state.is_supported());
         }
 
-        let select_schema = if let Some(handle) = self.state.metrics_handle.as_mut() {
+        let select_schema = if let Some(handle) = state.metrics_handle.as_mut() {
             // Must snapshot to get the latest metrics
             handle.snapshot_counters(readyset_client_metrics::DatabaseType::Upstream);
 
@@ -3238,7 +3319,7 @@ where
                 ];
 
                 // Append metrics if we have them
-                if let Some(handle) = self.state.metrics_handle.as_ref() {
+                if let Some(handle) = state.metrics_handle.as_ref() {
                     let MetricsSummary { sample_count } =
                         handle.metrics_summary(id.to_string()).unwrap_or_default();
                     row.push(DfValue::UnsignedInt(sample_count));
@@ -3292,7 +3373,8 @@ where
 
     /// Responds to a `SHOW CACHES` query
     async fn show_caches(
-        &mut self,
+        connectors: &mut BackendConnectors<DB>,
+        state: &mut BackendState<DB>,
         cache_type: Option<CacheType>,
         query_id: Option<&str>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
@@ -3302,7 +3384,7 @@ where
             None => None,
         };
 
-        let select_schema = if let Some(handle) = self.state.metrics_handle.as_mut() {
+        let select_schema = if let Some(handle) = state.metrics_handle.as_mut() {
             // Must snapshot histograms to get the latest metrics
             handle.snapshot_counters(readyset_client_metrics::DatabaseType::ReadySet);
             create_dummy_schema!(
@@ -3327,7 +3409,7 @@ where
         };
 
         if matches!(cache_type, Some(CacheType::Deep) | None) {
-            for view in self.connectors.noria.verbose_views(query_id, None).await? {
+            for view in connectors.noria.verbose_views(query_id, None).await? {
                 let query_id = view.query_id.to_string().into();
                 let name = view.name.display_unquoted().to_string().into();
                 let query =
@@ -3338,7 +3420,7 @@ where
                     properties.set_always(view.always);
                     properties.to_string().into()
                 };
-                let count = self.state.metrics_handle.as_ref().map(|h| {
+                let count = state.metrics_handle.as_ref().map(|h| {
                     h.metrics_summary(view.query_id.to_string())
                         .unwrap_or_default()
                         .sample_count
@@ -3360,7 +3442,7 @@ where
                 always,
                 schedule,
                 ..
-            } in self.state.shallow.list_caches(query_id, None)
+            } in state.shallow.list_caches(query_id, None)
             {
                 let query_id = query_id
                     .map(|id| id.to_string().into())
@@ -3384,11 +3466,7 @@ where
                     properties.set_schedule(schedule);
                     properties.to_string().into()
                 };
-                let count = self
-                    .state
-                    .metrics_handle
-                    .as_ref()
-                    .map(|_| 0.to_string().into());
+                let count = state.metrics_handle.as_ref().map(|_| 0.to_string().into());
 
                 push_row(query_id, name, query, properties, count);
             }
@@ -3402,13 +3480,13 @@ where
 
     /// Responds to a `SHOW SHALLOW CACHE ENTRIES` query
     async fn show_shallow_entries(
-        &self,
+        state: &BackendState<DB>,
         query_id: Option<&str>,
         limit: Option<u64>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let query_id = query_id.map(|q| q.parse()).transpose()?;
         let limit = limit.map(|l| l as usize);
-        let shallow = Arc::clone(&self.state.shallow);
+        let shallow = Arc::clone(&state.shallow);
 
         let rows: Vec<Vec<DfValue>> = tokio::task::spawn_blocking(move || {
             let entries = shallow.list_entries(query_id, limit);
@@ -3445,13 +3523,14 @@ where
         ))
     }
 
-    fn readyset_adapter_status(&self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let mut statuses = match self.state.metrics_handle.as_ref() {
+    fn readyset_adapter_status(
+        state: &BackendState<DB>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let mut statuses = match state.metrics_handle.as_ref() {
             Some(handle) => handle.readyset_status(),
             None => vec![],
         };
-        let time_ms = self
-            .state
+        let time_ms = state
             .adapter_start_time
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -3468,9 +3547,11 @@ where
 
     /// Responds to a `SHOW REPLAY PATHS` query
     /// Returns replay paths data as a result set with columns and rows
-    async fn show_replay_paths(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+    async fn show_replay_paths(
+        connectors: &mut BackendConnectors<DB>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         // Get replay paths from the controller (already flattened and sorted)
-        let replay_paths = self.connectors.noria.replay_paths().await?;
+        let replay_paths = connectors.noria.replay_paths().await?;
 
         // Create schema with all columns
         let schema = create_dummy_schema!(
@@ -3513,7 +3594,9 @@ where
     }
 
     async fn query_readyset_extensions<'a>(
-        &'a mut self,
+        connectors: &'a mut BackendConnectors<DB>,
+        settings: &'a BackendSettings,
+        state: &'a mut BackendState<DB>,
         query: &'a SqlQuery,
         event: &mut QueryExecutionEvent,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
@@ -3523,23 +3606,27 @@ where
         let start = Instant::now();
 
         let res = match query {
-            SqlQuery::Explain(ExplainStatement::LastStatement) => self.explain_last_statement(),
+            SqlQuery::Explain(ExplainStatement::LastStatement) => {
+                Self::explain_last_statement(state)
+            }
             SqlQuery::Explain(ExplainStatement::Graphviz {
                 simplified: _,
                 for_cache,
-            }) => self.connectors.noria.graphviz(for_cache.clone()).await,
+            }) => connectors.noria.graphviz(for_cache.clone()).await,
             SqlQuery::Explain(ExplainStatement::Domains) => {
-                self.connectors.noria.explain_domains().await
+                connectors.noria.explain_domains().await
             }
-            SqlQuery::Explain(ExplainStatement::Caches) => self.explain_caches().await,
+            SqlQuery::Explain(ExplainStatement::Caches) => {
+                Self::explain_caches(connectors, state).await
+            }
             SqlQuery::Explain(ExplainStatement::Materializations) => {
-                self.connectors.noria.explain_materializations().await
+                connectors.noria.explain_materializations().await
             }
             SqlQuery::Explain(explain @ ExplainStatement::CreateCache { .. }) => {
-                self.explain_create_cache(explain).await
+                Self::explain_create_cache(connectors, settings, state, explain).await
             }
             SqlQuery::CreateCache(create_cache_stmt) => {
-                if !self.settings.allow_cache_ddl {
+                if !settings.allow_cache_ddl {
                     unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
                 }
 
@@ -3555,10 +3642,11 @@ where
                     concurrently,
                     unparsed_create_cache_statement,
                 } = create_cache_stmt;
-                let (deep, shallow, schema_generation) = self.query_from_cache_inner(inner).await?;
+                let (deep, shallow, schema_generation) =
+                    Self::query_from_cache_inner(connectors, settings, state, inner).await?;
 
                 // Log a telemetry event
-                if let Some(ref telemetry_sender) = self.state.telemetry_sender {
+                if let Some(ref telemetry_sender) = state.telemetry_sender {
                     if let Err(e) = telemetry_sender.send_event(TelemetryEvent::CreateCache) {
                         warn!(error = %e, "Failed to send CREATE CACHE metric");
                     }
@@ -3571,20 +3659,23 @@ where
                 {
                     let ddl_req = CacheDDLRequest {
                         unparsed_stmt: unparsed_create_cache_statement.clone(),
-                        schema_search_path: self.connectors.noria.schema_search_path().to_owned(),
-                        dialect: self.settings.dialect.into(),
+                        schema_search_path: connectors.noria.schema_search_path().to_owned(),
+                        dialect: settings.dialect.into(),
                     };
                     Some(ddl_req)
                 } else {
                     None
                 };
 
-                let cache_mode = self.settings.cache_mode;
+                let cache_mode = settings.cache_mode;
                 let deep_requested = *cache_type == Some(CacheType::Deep);
                 let shallow_requested = *cache_type == Some(CacheType::Shallow);
 
                 if deep_requested || (cache_mode.is_deep() && !shallow_requested) {
-                    self.create_deep_cache(
+                    Self::create_deep_cache(
+                        connectors,
+                        settings,
+                        state,
                         name.clone(),
                         deep,
                         shallow,
@@ -3596,7 +3687,10 @@ where
                     )
                     .await
                 } else if shallow_requested || (cache_mode.is_shallow() && !deep_requested) {
-                    self.create_shallow_cache(
+                    Self::create_shallow_cache(
+                        connectors,
+                        settings,
+                        state,
                         name.clone(),
                         deep,
                         shallow,
@@ -3607,18 +3701,20 @@ where
                     )
                     .await
                 } else {
-                    let res = self
-                        .create_deep_cache(
-                            name.clone(),
-                            deep.clone(),
-                            shallow.clone(),
-                            *always,
-                            *concurrently,
-                            schema_generation,
-                            ddl_req.clone(),
-                            true,
-                        )
-                        .await;
+                    let res = Self::create_deep_cache(
+                        connectors,
+                        settings,
+                        state,
+                        name.clone(),
+                        deep.clone(),
+                        shallow.clone(),
+                        *always,
+                        *concurrently,
+                        schema_generation,
+                        ddl_req.clone(),
+                        true,
+                    )
+                    .await;
                     match res {
                         Ok(res) => Ok(res),
                         Err(error) if error.is_transient() => {
@@ -3632,7 +3728,10 @@ where
                                 %error,
                                 "Deep cache creation failed; falling back to shallow cache"
                             );
-                            self.create_shallow_cache(
+                            Self::create_shallow_cache(
+                                connectors,
+                                settings,
+                                state,
                                 name.clone(),
                                 deep,
                                 shallow,
@@ -3647,7 +3746,7 @@ where
                 }
             }
             SqlQuery::DropCache(drop_cache) => {
-                if !self.settings.allow_cache_ddl {
+                if !settings.allow_cache_ddl {
                     unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG)
                 }
                 let ddl_req = CacheDDLRequest {
@@ -3655,16 +3754,15 @@ where
                     // drop cache statements explicitly don't use a search path, as the only schema
                     // we need to resolve is the cache name.
                     schema_search_path: vec![],
-                    dialect: self.settings.dialect.into(),
+                    dialect: settings.dialect.into(),
                 };
-                self.state
+                state
                     .authority
                     .add_cache_ddl_request(ddl_req.clone())
                     .await?;
                 let DropCacheStatement { name } = drop_cache;
 
-                if self
-                    .drop_shallow_cached_query(Some(name), None, ddl_req.clone())
+                if Self::drop_shallow_cached_query(state, Some(name), None, ddl_req.clone())
                     .await
                     .is_ok()
                 {
@@ -3672,7 +3770,7 @@ where
                         num_rows_deleted: 1,
                     })
                 } else {
-                    let res = self.drop_cached_query(name).await;
+                    let res = Self::drop_cached_query(connectors, state, name).await;
                     // `drop_cached_query` may return an Err, but if the cache fails to be
                     // dropped for certain reasons, we can also see an Ok(Delete) here with
                     // num_rows_deleted set to 0.
@@ -3685,7 +3783,7 @@ where
                         let remove_res = retry_with_exponential_backoff!(
                             || async {
                                 let ddl_req = ddl_req.clone();
-                                self.state.authority.remove_cache_ddl_request(ddl_req).await
+                                state.authority.remove_cache_ddl_request(ddl_req).await
                             },
                             retries: 5,
                             delay: 1,
@@ -3701,20 +3799,20 @@ where
                 }
             }
             SqlQuery::DropAllCaches(DropAllCachesStatement { cache_type }) => {
-                if !self.settings.allow_cache_ddl {
+                if !settings.allow_cache_ddl {
                     unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
                 }
-                self.drop_all_caches(*cache_type).await
+                Self::drop_all_caches(connectors, state, *cache_type).await
             }
             SqlQuery::DropAllProxiedQueries(_) => {
-                if !self.settings.allow_cache_ddl {
+                if !settings.allow_cache_ddl {
                     unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
                 }
-                self.drop_all_proxied_queries().await
+                Self::drop_all_proxied_queries(state).await
             }
             SqlQuery::Show(ShowStatement::CachedQueries(cache_type, query_id)) => {
                 // Log a telemetry event
-                if let Some(ref telemetry_sender) = self.state.telemetry_sender {
+                if let Some(ref telemetry_sender) = state.telemetry_sender {
                     if let Err(e) = telemetry_sender.send_event(TelemetryEvent::ShowCaches) {
                         warn!(error = %e, "Failed to send SHOW CACHES metric");
                     }
@@ -3722,26 +3820,27 @@ where
                     trace!("No telemetry sender. not sending metric for SHOW CACHES");
                 }
 
-                self.show_caches(*cache_type, query_id.as_deref()).await
+                Self::show_caches(connectors, state, *cache_type, query_id.as_deref()).await
             }
             SqlQuery::Show(ShowStatement::ShallowCacheEntries { query_id, limit }) => {
-                self.show_shallow_entries(query_id.as_deref(), *limit).await
+                Self::show_shallow_entries(state, query_id.as_deref(), *limit).await
             }
-            SqlQuery::Show(ShowStatement::ReadySetStatus) => Ok(self
-                .state
+            SqlQuery::Show(ShowStatement::ReadySetStatus) => Ok(state
                 .status_reporter
                 .report_status()
                 .await
                 .into_query_result()),
-            SqlQuery::Show(ShowStatement::ReadySetStatusAdapter) => self.readyset_adapter_status(),
+            SqlQuery::Show(ShowStatement::ReadySetStatusAdapter) => {
+                Self::readyset_adapter_status(state)
+            }
             SqlQuery::Show(ShowStatement::ReadySetMigrationStatus(id)) => {
-                self.connectors.noria.migration_status(*id).await
+                connectors.noria.migration_status(*id).await
             }
             SqlQuery::Show(ShowStatement::ReadySetVersion) => readyset_version(),
             SqlQuery::Show(ShowStatement::ReadySetTables(options)) => {
-                self.connectors.noria.table_statuses(options.all).await
+                connectors.noria.table_statuses(options.all).await
             }
-            SqlQuery::Show(ShowStatement::Connections) => self.show_connections(),
+            SqlQuery::Show(ShowStatement::Connections) => Self::show_connections(state),
             SqlQuery::Show(ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
                 query_id,
                 only_supported,
@@ -3749,7 +3848,7 @@ where
                 cache_type,
             })) => {
                 // Log a telemetry event
-                if let Some(ref telemetry_sender) = self.state.telemetry_sender {
+                if let Some(ref telemetry_sender) = state.telemetry_sender {
                     if let Err(e) = telemetry_sender.send_event(TelemetryEvent::ShowProxiedQueries)
                     {
                         warn!(error = %e, "Failed to send SHOW PROXIED QUERIES metric");
@@ -3758,26 +3857,26 @@ where
                     trace!("No telemetry sender. not sending metric for SHOW PROXIED QUERIES");
                 }
 
-                self.show_proxied_queries(query_id, *only_supported, *limit, *cache_type)
+                Self::show_proxied_queries(state, query_id, *only_supported, *limit, *cache_type)
                     .await
             }
-            SqlQuery::Show(ShowStatement::ReplayPaths) => self.show_replay_paths().await,
+            SqlQuery::Show(ShowStatement::ReplayPaths) => Self::show_replay_paths(connectors).await,
             SqlQuery::Show(ShowStatement::Rls(_maybe_table)) => {
                 unsupported!("SHOW RLS statement is not yet supported")
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::ResnapshotTable(stmt)) => {
                 let mut table = stmt.table.clone();
-                self.connectors.noria.resnapshot_table(&mut table).await
+                connectors.noria.resnapshot_table(&mut table).await
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::AddTables(stmt)) => {
                 let mut tables = stmt.tables.clone();
-                self.connectors.noria.add_filter_tables(&mut tables).await
+                connectors.noria.add_filter_tables(&mut tables).await
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::EnterMaintenanceMode) => {
-                self.connectors.noria.enter_maintenance_mode().await
+                connectors.noria.enter_maintenance_mode().await
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::ExitMaintenanceMode) => {
-                self.connectors.noria.exit_maintenance_mode().await
+                connectors.noria.exit_maintenance_mode().await
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::SetLogLevel(directives)) => {
                 match readyset_tracing::set_log_level(directives) {
@@ -3797,25 +3896,24 @@ where
                     "Setting eviction configuration"
                 );
 
-                self.connectors.noria.set_eviction(period, limit).await?;
+                connectors.noria.set_eviction(period, limit).await?;
                 Ok(noria_connector::QueryResult::Empty)
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::ChangeUpstream(
                 ChangeUpstreamStatement { url },
             )) => {
-                if self.settings.replication_enabled {
+                if settings.replication_enabled {
                     unsupported!("CHANGE UPSTREAM is only allowed when replication is disabled");
                 }
                 let parsed: DatabaseURL = url
                     .parse()
                     .map_err(|e| internal_err!("invalid upstream URL: {e}"))?;
-                if parsed.dialect() != self.settings.dialect {
+                if parsed.dialect() != settings.dialect {
                     internal!("wrong database type for upstream");
                 }
                 let url = url.clone();
                 let redacted = RedactedString::from(url.clone());
-                let config = self
-                    .state
+                let config = state
                     .upstream_config
                     .as_ref()
                     .ok_or_else(|| internal_err!("upstream config is not configured"))?;
@@ -3843,21 +3941,19 @@ where
 
     /// Rewrite and wrap a shallow query into a [`ShallowViewRequest`].
     fn prepare_shallow_query(
-        &self,
+        connectors: &BackendConnectors<DB>,
         shallow: Result<ShallowCacheQuery, ReadySetError>,
     ) -> Option<(ShallowViewRequest, ShallowQueryParameters)> {
         let Ok(mut shallow) = shallow else {
             return None;
         };
         let Ok(params) =
-            adapter_rewrites::rewrite_shallow(&mut shallow, self.connectors.noria.rewrite_params())
+            adapter_rewrites::rewrite_shallow(&mut shallow, connectors.noria.rewrite_params())
         else {
             return None;
         };
-        let shallow = ShallowViewRequest::new(
-            shallow,
-            self.connectors.noria.schema_search_path().to_owned(),
-        );
+        let shallow =
+            ShallowViewRequest::new(shallow, connectors.noria.schema_search_path().to_owned());
         Some((shallow, params))
     }
 
@@ -3868,26 +3964,32 @@ where
     ///
     /// If we haven't seen this query before, add it as pending to the query status cache.
     async fn should_query_shallow(
-        &mut self,
+        connectors: &mut BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &BackendState<DB>,
         shallow: &ShallowViewRequest,
         hint_directive: Option<ReadysetHintDirective>,
     ) -> Option<(QueryId, bool)> {
-        let (query_id, migration) = self.state.query_status_cache.query_migration_state(shallow);
+        let (query_id, migration) = state.query_status_cache.query_migration_state(shallow);
         if migration != MigrationState::Successful(CacheType::Shallow) {
             // No cache yet — try hint-based creation and use the resulting state.
-            let migration = self
-                .create_shallow_cache_from_hint(shallow, hint_directive)
-                .await;
+            let migration = Self::create_shallow_cache_from_hint(
+                connectors,
+                settings,
+                state,
+                shallow,
+                hint_directive,
+            )
+            .await;
             if migration != Some(MigrationState::Successful(CacheType::Shallow)) {
                 return None;
             }
         }
-        let always = self
-            .state
+        let always = state
             .query_status_cache
             .try_query_status(shallow)
             .is_some_and(|status| status.always);
-        if self.state.proxy_state.should_proxy() && !always {
+        if state.proxy_state.should_proxy() && !always {
             return None;
         }
         Some((query_id, always))
@@ -3897,27 +3999,29 @@ where
     /// shallow cache via [`create_shallow_cache_core`] and return the
     /// resulting migration state.
     async fn create_shallow_cache_from_hint(
-        &mut self,
+        connectors: &mut BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &BackendState<DB>,
         shallow: &ShallowViewRequest,
         hint_directive: Option<ReadysetHintDirective>,
     ) -> Option<MigrationState> {
         let Some(ReadysetHintDirective::CreateCache(opts)) = hint_directive else {
             return None;
         };
-        if !self.settings.allow_cache_ddl {
+        if !settings.allow_cache_ddl {
             warn!("Hint-based cache creation skipped: cache DDL is disabled");
             return None;
         }
         let wants_shallow = match opts.cache_type {
             Some(CacheType::Shallow) => true,
             Some(CacheType::Deep) => false,
-            None => self.settings.cache_mode.is_shallow(),
+            None => settings.cache_mode.is_shallow(),
         };
         if !wants_shallow {
             return None;
         }
 
-        if let Err(e) = self.upstream_supports(shallow).await {
+        if let Err(e) = Self::upstream_supports(connectors, shallow).await {
             warn!(error = %e, "Hint-based shallow cache creation failed: upstream unsupported");
             return None;
         }
@@ -3926,22 +4030,23 @@ where
         let ddl_stmt = build_hint_ddl_string(DB::SQL_DIALECT, &opts, &query_text);
         let ddl_req = CacheDDLRequest {
             unparsed_stmt: ddl_stmt,
-            schema_search_path: self.connectors.noria.schema_search_path().to_owned(),
-            dialect: self.settings.dialect.into(),
+            schema_search_path: connectors.noria.schema_search_path().to_owned(),
+            dialect: settings.dialect.into(),
         };
 
-        match self
-            .create_shallow_cache_core(
-                None,
-                shallow,
-                opts.policy,
-                opts.always,
-                opts.coalesce_ms,
-                ddl_req,
-                None,
-                true,
-            )
-            .await
+        match Self::create_shallow_cache_core(
+            settings,
+            state,
+            None,
+            shallow,
+            opts.policy,
+            opts.always,
+            opts.coalesce_ms,
+            ddl_req,
+            None,
+            true,
+        )
+        .await
         {
             Ok(()) | Err(ReadySetError::ViewAlreadyExists(_)) => {}
             Err(e) => {
@@ -3949,7 +4054,7 @@ where
             }
         }
 
-        self.state
+        state
             .query_status_cache
             .try_query_migration_state(shallow)
             .1
@@ -4606,18 +4711,28 @@ where
         &'a mut self,
         query: &'a str,
     ) -> Result<(QueryResult<'a, DB>, ProxyState), DB::Error> {
-        self.check_routing().await?;
+        Self::check_routing(&self.connectors, &mut self.state).await?;
         let mut event = QueryExecutionEvent::new(EventType::Query);
         let query_log_sender = self.state.query_log_sender.clone();
         let slowlog = self.settings.slowlog;
 
-        let (parsed, (shallow_parsed, hint_directive)) = {
+        let (parsed, (shallow_parsed, hint)) = {
             let _t = event.start_parse_timer();
-            (self.parse_query(query), self.parse_shallow_query(query))
+            let parsed = parse_query(&self.settings, query);
+            let (shallow_parsed, hint) = parse_shallow_query(&self.settings, query);
+            (parsed, (shallow_parsed, hint))
         };
 
-        if let Some((shallow, params)) = self.prepare_shallow_query(shallow_parsed)
-            && let Some((query_id, _)) = self.should_query_shallow(&shallow, hint_directive).await
+        if let Some((shallow, params)) =
+            Self::prepare_shallow_query(&self.connectors, shallow_parsed)
+            && let Some((query_id, _)) = Self::should_query_shallow(
+                &mut self.connectors,
+                &self.settings,
+                &self.state,
+                &shallow,
+                hint,
+            )
+            .await
         {
             let result = Self::query_shallow(
                 &mut self.connectors,
@@ -4657,7 +4772,7 @@ where
 
         let result = match parsed {
             // Parse error, but no fallback exists
-            Err(e) if !self.has_fallback() => {
+            Err(e) if !Self::has_fallback(&self.connectors) => {
                 error!("{}", e);
                 event.set_noria_error(&e);
                 Err(e.into())
@@ -4716,11 +4831,18 @@ where
                 )
                 .await
             }
-            Ok(ref parsed_query) if parsed_query.is_readyset_extension() => self
-                .query_readyset_extensions(parsed_query, &mut event)
+            Ok(ref parsed_query) if parsed_query.is_readyset_extension() => {
+                Self::query_readyset_extensions(
+                    &mut self.connectors,
+                    &self.settings,
+                    &mut self.state,
+                    parsed_query,
+                    &mut event,
+                )
                 .await
                 .map(Into::into)
-                .map_err(Into::into),
+                .map_err(Into::into)
+            }
             // SET autocommit=1 needs to be handled explicitly or it will end up getting proxied in
             // most cases.
             Ok(SqlQuery::Set(s))
@@ -4737,7 +4859,9 @@ where
                 .await
             }
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
-                if !Handler::return_default_response(parsed_query) && self.has_fallback() {
+                if !Handler::return_default_response(parsed_query)
+                    && Self::has_fallback(&self.connectors)
+                {
                     if let SqlQuery::Select(stmt) = parsed_query {
                         event.sql_type = SqlQueryType::Read;
                         event.query = Some(Arc::new(parsed_query.clone()));
@@ -4759,14 +4883,16 @@ where
                 }
             }
             Ok(SqlQuery::Select(mut stmt)) => {
-                let rewrite_context = self.rewrite_context(None).await?;
+                let rewrite_context =
+                    Self::rewrite_context(&self.connectors, &self.settings, &self.state, None)
+                        .await?;
                 let params = match adapter_rewrites::rewrite_equivalent_deep(
                     &mut stmt,
                     self.connectors.noria.rewrite_params(),
                     &rewrite_context,
                 ) {
                     Ok(params) => params,
-                    Err(_) if self.has_fallback() => {
+                    Err(_) if Self::has_fallback(&self.connectors) => {
                         let result = Self::query_fallback(
                             self.connectors.upstream.as_mut(),
                             query,
@@ -4865,40 +4991,13 @@ where
     }
 
     /// Whether or not we have fallback enabled.
-    pub fn has_fallback(&self) -> bool {
-        self.connectors.upstream.is_some()
+    pub fn has_fallback(connectors: &BackendConnectors<DB>) -> bool {
+        connectors.upstream.is_some()
     }
 
     /// Mark or unmark this backend connection as an internal ReadySet connection
     pub fn set_internal_connection(&mut self, is_internal: bool) {
         self.state.is_internal_connection = is_internal;
-    }
-
-    fn parse_query(&self, query: &str) -> ReadySetResult<SqlQuery> {
-        trace!(%query, "Parsing query");
-        readyset_sql_parsing::parse_query_with_config(
-            self.settings
-                .parsing_preset
-                .into_config()
-                .log_only_selects(true),
-            self.settings.dialect,
-            query,
-        )
-        .map_err(Into::into)
-    }
-
-    fn parse_shallow_query(
-        &self,
-        query: &str,
-    ) -> (
-        ReadySetResult<ShallowCacheQuery>,
-        Option<ReadysetHintDirective>,
-    ) {
-        trace!(%query, "Parsing shallow query");
-        match readyset_sql_parsing::parse_shallow_query(self.settings.dialect, query) {
-            Ok((q, directive)) => (Ok(q), directive),
-            Err(e) => (Err(e.into()), None),
-        }
     }
 
     pub fn does_require_authentication(&self) -> bool {
@@ -4911,9 +5010,11 @@ where
     }
 
     /// Gets a list of all `CREATE CACHE ...` statements
-    async fn explain_caches(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let mut results: Vec<Vec<DfValue>> = self
-            .connectors
+    async fn explain_caches(
+        connectors: &mut BackendConnectors<DB>,
+        state: &BackendState<DB>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let mut results: Vec<Vec<DfValue>> = connectors
             .noria
             .list_create_cache_stmts()
             .await?
@@ -4921,7 +5022,7 @@ where
             .map(|s| vec![DfValue::from(s)])
             .collect();
         results.extend(
-            self.state
+            state
                 .shallow
                 .list_caches(None, None)
                 .into_iter()
@@ -4947,7 +5048,9 @@ where
         }
     }
 
-    fn show_connections(&self) -> Result<noria_connector::QueryResult<'static>, ReadySetError> {
+    fn show_connections(
+        state: &BackendState<DB>,
+    ) -> Result<noria_connector::QueryResult<'static>, ReadySetError> {
         let schema = SelectSchema {
             schema: Cow::Owned(vec![ColumnSchema {
                 column: ast::Column {
@@ -4960,8 +5063,7 @@ where
             columns: Cow::Owned(vec!["remote_addr".into()]),
         };
 
-        let data = self
-            .state
+        let data = state
             .connections
             .iter()
             .flat_map(|c| c.iter())
@@ -4998,13 +5100,15 @@ where
     }
 
     async fn rewrite_context(
-        &self,
+        connectors: &BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &BackendState<DB>,
         search_path: Option<Vec<SqlIdentifier>>,
     ) -> ReadySetResult<RewriteContext> {
         Ok(RewriteContext::new(
-            self.settings.dialect.into(),
-            self.state.schema_handle.get_catalog_retrying().await?,
-            search_path.unwrap_or_else(|| self.connectors.noria.schema_search_path().to_vec()),
+            settings.dialect.into(),
+            state.schema_handle.get_catalog_retrying().await?,
+            search_path.unwrap_or_else(|| connectors.noria.schema_search_path().to_vec()),
         ))
     }
 }
