@@ -4729,73 +4729,38 @@ where
         QueryResult::Parser(ParsedCommand::Deallocate(dealloc_id))
     }
 
-    /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
-    #[inline]
-    pub async fn query<'a>(
-        &'a mut self,
+    async fn query_inner<'a>(
+        connectors: &'a mut BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
         query: &'a str,
-    ) -> Result<(QueryResult<'a, DB>, ProxyState), DB::Error> {
-        Self::check_routing(&self.connectors, &mut self.state).await?;
-        let mut event = QueryExecutionEvent::new(EventType::Query);
-        let query_log_sender = self.state.query_log_sender.clone();
-        let slowlog = self.settings.slowlog;
-
+        event: &mut QueryExecutionEvent,
+    ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let (parsed, (shallow_parsed, hint)) = {
             let _t = event.start_parse_timer();
-            let parsed = parse_query(&self.settings, query);
-            let (shallow_parsed, hint) = parse_shallow_query(&self.settings, query);
+            let parsed = parse_query(settings, query);
+            let (shallow_parsed, hint) = parse_shallow_query(settings, query);
             (parsed, (shallow_parsed, hint))
         };
 
-        if let Some((shallow, params)) = self.connectors.prepare_shallow_query(shallow_parsed)
-            && let Some((query_id, _)) = Self::should_query_shallow(
-                &mut self.connectors,
-                &self.settings,
-                &self.state,
-                &shallow,
-                hint,
-            )
-            .await
+        if let Some((shallow, params)) = connectors.prepare_shallow_query(shallow_parsed)
+            && let Some((query_id, _)) =
+                Self::should_query_shallow(connectors, settings, state, &shallow, hint).await
         {
-            let result = Self::query_shallow(
-                &mut self.connectors,
-                &self.state,
-                shallow,
-                query,
-                &mut event,
-                params,
-            )
-            .await;
+            let result =
+                Self::query_shallow(connectors, state, shallow, query, event, params).await;
 
             event.sql_type = SqlQueryType::Read;
             event.query_id = QueryIdWrapper::Calculated(query_id);
             if let Err(e) = &result {
                 event.set_noria_error(&internal_err!("{e}"));
             }
-
-            self.state.last_query = event.destination.as_ref().map(|d| QueryInfo {
-                destination: d.clone(),
-                noria_error: event
-                    .noria_error
-                    .as_ref()
-                    .map(|e| e.to_string())
-                    .unwrap_or_default(),
-            });
-
-            log_query(
-                query_log_sender.as_ref(),
-                event,
-                slowlog,
-                self.settings.dialect,
-            );
-
-            let proxy_state = self.state.proxy_state;
-            return result.map(|r| (r, proxy_state));
+            return result;
         }
 
-        let result = match parsed {
+        match parsed {
             // Parse error, but no fallback exists
-            Err(e) if !self.connectors.has_fallback() => {
+            Err(e) if !connectors.has_fallback() => {
                 error!("{}", e);
                 event.set_noria_error(&e);
                 Err(e.into())
@@ -4811,19 +4776,13 @@ where
                     warn!(error = %e, "Error received from noria, sending query to fallback");
                     event.set_noria_error(&e);
                 }
-                let fallback_res = Self::query_fallback(
-                    self.connectors.upstream.as_mut(),
-                    query,
-                    &mut event,
-                    None,
-                )
-                .await;
+                let fallback_res =
+                    Self::query_fallback(connectors.upstream.as_mut(), query, event, None).await;
                 if fallback_res.is_ok() {
-                    let (id, _) = self
-                        .state
+                    let (id, _) = state
                         .query_status_cache
                         .insert(Query::ParseFailed(query.to_string().into(), e.to_string()));
-                    if let Some(ref telemetry_sender) = self.state.telemetry_sender {
+                    if let Some(ref telemetry_sender) = state.telemetry_sender {
                         if let Err(e) = telemetry_sender.send_event_with_payload(
                             TelemetryEvent::QueryParseFailed,
                             TelemetryBuilder::new()
@@ -4845,26 +4804,20 @@ where
             // know when a COMMIT or ROLLBACK happens so we can leave `ProxyState::InTransaction`
             Ok(parsed_query @ (SqlQuery::Commit(_) | SqlQuery::Rollback(_))) => {
                 Self::query_adhoc_non_select(
-                    &mut self.connectors,
-                    &self.settings,
-                    &mut self.state,
+                    connectors,
+                    settings,
+                    state,
                     query,
-                    &mut event,
+                    event,
                     parsed_query,
                 )
                 .await
             }
             Ok(ref parsed_query) if parsed_query.is_readyset_extension() => {
-                Self::query_readyset_extensions(
-                    &mut self.connectors,
-                    &self.settings,
-                    &mut self.state,
-                    parsed_query,
-                    &mut event,
-                )
-                .await
-                .map(Into::into)
-                .map_err(Into::into)
+                Self::query_readyset_extensions(connectors, settings, state, parsed_query, event)
+                    .await
+                    .map(Into::into)
+                    .map_err(Into::into)
             }
             // SET autocommit=1 needs to be handled explicitly or it will end up getting proxied in
             // most cases.
@@ -4872,30 +4825,28 @@ where
                 if Handler::handle_set_statement(&s).set_autocommit == Some(true) =>
             {
                 Self::query_adhoc_non_select(
-                    &mut self.connectors,
-                    &self.settings,
-                    &mut self.state,
+                    connectors,
+                    settings,
+                    state,
                     query,
-                    &mut event,
+                    event,
                     SqlQuery::Set(s),
                 )
                 .await
             }
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
-                if !Handler::return_default_response(parsed_query) && self.connectors.has_fallback()
-                {
+                if !Handler::return_default_response(parsed_query) && connectors.has_fallback() {
                     if let SqlQuery::Select(stmt) = parsed_query {
                         event.sql_type = SqlQueryType::Read;
                         event.query = Some(Arc::new(parsed_query.clone()));
                         event.query_id = QueryIdWrapper::Calculated(QueryId::from_select(
                             stmt,
-                            self.connectors.noria.schema_search_path(),
+                            connectors.noria.schema_search_path(),
                         ));
                     }
 
                     // Query requires a fallback and we can send it to fallback
-                    Self::query_fallback(self.connectors.upstream.as_mut(), query, &mut event, None)
-                        .await
+                    Self::query_fallback(connectors.upstream.as_mut(), query, event, None).await
                 } else {
                     // Query should return a default response or requires a fallback, but none is
                     // available
@@ -4906,76 +4857,58 @@ where
             }
             Ok(SqlQuery::Select(mut stmt)) => {
                 let rewrite_context =
-                    Self::rewrite_context(&self.connectors, &self.settings, &self.state, None)
-                        .await?;
+                    Self::rewrite_context(connectors, settings, state, None).await?;
                 let params = match adapter_rewrites::rewrite_equivalent_deep(
                     &mut stmt,
-                    self.connectors.noria.rewrite_params(),
+                    connectors.noria.rewrite_params(),
                     &rewrite_context,
                 ) {
                     Ok(params) => params,
-                    Err(_) if self.connectors.has_fallback() => {
-                        let result = Self::query_fallback(
-                            self.connectors.upstream.as_mut(),
-                            query,
-                            &mut event,
-                            None,
-                        )
-                        .await;
-                        // Update last_query before early return so EXPLAIN LAST STATEMENT works
-                        self.state.last_query = event.destination.as_ref().map(|d| QueryInfo {
-                            destination: d.clone(),
-                            noria_error: event
-                                .noria_error
-                                .as_ref()
-                                .map(|e| e.to_string())
-                                .unwrap_or_default(),
-                        });
-                        let proxy_state = self.state.proxy_state;
-                        return result.map(|r| (r, proxy_state));
+                    Err(_) if connectors.has_fallback() => {
+                        let result =
+                            Self::query_fallback(connectors.upstream.as_mut(), query, event, None)
+                                .await;
+                        return result;
                     }
                     Err(e) => return Err(e.into()),
                 };
 
-                let view_request = ViewCreateRequest::new(
-                    stmt,
-                    self.connectors.noria.schema_search_path().to_owned(),
-                );
+                let view_request =
+                    ViewCreateRequest::new(stmt, connectors.noria.schema_search_path().to_owned());
 
                 event.sql_type = SqlQueryType::Read;
-                if let Some(QueryLogMode::Verbose) = self.state.query_log_mode {
+                if let Some(QueryLogMode::Verbose) = state.query_log_mode {
                     event.query = Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
                 }
 
                 // force the QueryLogger to recalculate the query_id, instead of doing it here
                 // on the hot path as it will execute a rewrite pass over the query.
                 event.query_id =
-                    QueryIdWrapper::Uncalculated(self.connectors.noria.schema_search_path().into());
+                    QueryIdWrapper::Uncalculated(connectors.noria.schema_search_path().into());
 
                 Self::try_noria_adhoc_select(
-                    &mut self.connectors,
-                    &self.settings,
-                    &mut self.state,
+                    connectors,
+                    settings,
+                    state,
                     query,
                     view_request,
                     params,
                     rewrite_context.schema_generation(),
-                    &mut event,
+                    event,
                 )
                 .await
             }
             Ok(SqlQuery::Deallocate(stmt)) => Ok(Self::handle_deallocate_statement(stmt)),
-            Ok(_) if self.state.proxy_state.should_proxy() => {
-                Self::query_fallback(self.connectors.upstream.as_mut(), query, &mut event, None)
-                    .await
+            Ok(_) if state.proxy_state.should_proxy() => {
+                Self::query_fallback(connectors.upstream.as_mut(), query, event, None).await
             }
             Ok(parsed_query) => {
                 let result = Self::query_adhoc_non_select(
-                    &mut self.connectors,
-                    &self.settings,
-                    &mut self.state,
+                    connectors,
+                    settings,
+                    state,
                     query,
-                    &mut event,
+                    event,
                     parsed_query.clone(),
                 )
                 .await;
@@ -4983,14 +4916,31 @@ where
                 if let SqlQuery::DropTable(drop_stmt) = &parsed_query
                     && result.is_ok()
                 {
-                    self.state
+                    state
                         .query_status_cache
                         .invalidate_queries_referencing_tables(&drop_stmt.tables);
                 }
-
                 result
             }
-        };
+        }
+    }
+
+    /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
+    pub async fn query<'a>(
+        &'a mut self,
+        query: &'a str,
+    ) -> Result<(QueryResult<'a, DB>, ProxyState), DB::Error> {
+        Self::check_routing(&self.connectors, &mut self.state).await?;
+
+        let mut event = QueryExecutionEvent::new(EventType::Query);
+        let result = Self::query_inner(
+            &mut self.connectors,
+            &self.settings,
+            &mut self.state,
+            query,
+            &mut event,
+        )
+        .await;
 
         self.state.last_query = event.destination.as_ref().map(|d| QueryInfo {
             destination: d.clone(),
@@ -5002,14 +4952,13 @@ where
         });
 
         log_query(
-            query_log_sender.as_ref(),
+            self.state.query_log_sender.as_ref(),
             event,
-            slowlog,
+            self.settings.slowlog,
             self.settings.dialect,
         );
 
-        let proxy_state = self.state.proxy_state;
-        result.map(|r| (r, proxy_state))
+        result.map(|r| (r, self.state.proxy_state))
     }
 
     /// Mark or unmark this backend connection as an internal ReadySet connection
