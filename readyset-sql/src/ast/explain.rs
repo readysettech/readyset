@@ -25,8 +25,12 @@ pub enum ExplainStatement {
     /// List all CREATE CACHE statements that have been executed, for the
     /// purpose of exporting them
     Caches,
-    /// List and give information about all materializations in the graph
-    Materializations,
+    /// List and give information about all materializations in the graph.
+    /// If `for_cache` is specified, only include nodes that are part of that cache's subgraph.
+    Materializations {
+        /// Limit the results to only a single cache's subgraph
+        for_cache: Option<Relation>,
+    },
     /// For the given query, report whether it is supported by ReadySet, its rewritten form, and
     /// its ID
     CreateCache {
@@ -62,7 +66,13 @@ impl DialectDisplay for ExplainStatement {
                 ExplainStatement::LastStatement => write!(f, "LAST STATEMENT;"),
                 ExplainStatement::Domains => write!(f, "DOMAINS;"),
                 ExplainStatement::Caches => write!(f, "CACHES;"),
-                ExplainStatement::Materializations => write!(f, "MATERIALIZATIONS;"),
+                ExplainStatement::Materializations { for_cache } => {
+                    write!(f, "MATERIALIZATIONS")?;
+                    if let Some(cache) = for_cache {
+                        write!(f, " FOR CACHE {}", cache.display(dialect))?;
+                    }
+                    write!(f, ";")
+                }
                 ExplainStatement::CreateCache {
                     inner, cache_type, ..
                 } => {

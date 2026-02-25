@@ -36,6 +36,24 @@ fn explain_graphviz(
     }
 }
 
+fn explain_materializations(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ExplainStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("materializations")(i)?;
+        let (i, for_cache) = opt(move |i| {
+            let (i, _) = whitespace1(i)?;
+            let (i, _) = tag_no_case("for")(i)?;
+            let (i, _) = whitespace1(i)?;
+            let (i, _) = tag_no_case("cache")(i)?;
+            let (i, _) = whitespace1(i)?;
+            relation(dialect)(i)
+        })(i)?;
+
+        Ok((i, ExplainStatement::Materializations { for_cache }))
+    }
+}
+
 fn explain_create_cache(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ExplainStatement> {
@@ -65,10 +83,7 @@ pub(crate) fn explain_statement(
             ),
             value(ExplainStatement::Domains, tag_no_case("domains")),
             value(ExplainStatement::Caches, tag_no_case("caches")),
-            value(
-                ExplainStatement::Materializations,
-                tag_no_case("materializations"),
-            ),
+            explain_materializations(dialect),
             explain_create_cache(dialect),
         ))(i)?;
         let (i, _) = statement_terminator(i)?;
@@ -143,7 +158,23 @@ mod tests {
                 explain_statement(Dialect::MySQL),
                 b"explain   mAtERIaLIZAtIOns"
             ),
-            ExplainStatement::Materializations
+            ExplainStatement::Materializations { for_cache: None }
+        );
+    }
+
+    #[test]
+    fn explain_materializations_for_cache() {
+        assert_eq!(
+            test_parse!(
+                explain_statement(Dialect::MySQL),
+                b"explain materializations for cache my_cache"
+            ),
+            ExplainStatement::Materializations {
+                for_cache: Some(Relation {
+                    schema: None,
+                    name: "my_cache".into()
+                })
+            }
         );
     }
 

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::{self, Display};
 
 use dataflow::prelude::{Graph, NodeIndex};
@@ -43,19 +43,7 @@ impl Display for Graphviz<'_> {
         out!(f, 1, "node [shape=none, fontsize=10]");
 
         let nodes = if let Some((ni, dir)) = self.reachable_from {
-            let mut nodes = HashSet::new();
-            let mut stack = vec![ni];
-            while let Some(node) = stack.pop() {
-                if nodes.insert(node) {
-                    for next in self.graph.neighbors_directed(node, dir) {
-                        if !nodes.contains(&next) {
-                            stack.push(next);
-                        }
-                    }
-                }
-            }
-
-            nodes
+            super::reachable_from(self.graph, ni, dir)
         } else {
             self.graph.node_indices().collect()
         };

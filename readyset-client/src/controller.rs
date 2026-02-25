@@ -1002,6 +1002,11 @@ impl ReadySetHandle {
     );
 
     simple_request!(
+        /// Get information about materializations for nodes in a specific cache's subgraph
+        materialization_info_for_cache(cache: Relation) -> Vec<MaterializationInfo>
+    );
+
+    simple_request!(
         /// Get the url of the current noria controller.
         ///
         /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.

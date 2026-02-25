@@ -394,6 +394,11 @@ impl Leader {
                 let ds = self.dataflow_state_handle.read().await;
                 return_serialized!(ds.materialization_info().await?);
             }
+            (&Method::POST, "/materialization_info_for_cache") => {
+                let cache: Relation = bincode::deserialize(&body)?;
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(ds.materialization_info_for_cache(&cache).await?);
+            }
             (&Method::GET, "/allocated_bytes") => {
                 let alloc_bytes = tikv_jemalloc_ctl::epoch::mib()
                     .and_then(|m| m.advance())

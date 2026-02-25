@@ -92,6 +92,22 @@ pub(in crate::controller) use self::graphviz::Graphviz;
 /// for replication offsets)
 const CONCURRENT_REQUESTS: usize = 16;
 
+/// Collect all nodes reachable from `start` by traversing edges in the given `direction`.
+fn reachable_from(graph: &Graph, start: NodeIndex, direction: Direction) -> HashSet<NodeIndex> {
+    let mut reachable = HashSet::new();
+    let mut stack = vec![start];
+    while let Some(node) = stack.pop() {
+        if reachable.insert(node) {
+            for next in graph.neighbors_directed(node, direction) {
+                if !reachable.contains(&next) {
+                    stack.push(next);
+                }
+            }
+        }
+    }
+    reachable
+}
+
 /// This structure holds all the dataflow state.
 /// It's meant to be handled exclusively by the [`DfStateHandle`], which is the structure
 /// that guarantees thread-safe access to it.
@@ -201,6 +217,17 @@ impl DfState {
 
     pub(super) fn schema_replication_offset(&self) -> &Option<ReplicationOffset> {
         &self.schema_replication_offset
+    }
+
+    fn reader_node_index(&self, query: &Relation) -> ReadySetResult<NodeIndex> {
+        self.recipe
+            .node_addr_for(query)
+            .ok()
+            .or_else(|| self.views().get(query).copied())
+            .and_then(|leaf| self.find_reader_for(leaf, query, &Default::default()))
+            .ok_or_else(|| ReadySetError::QueryNotFound {
+                name: query.display_unquoted().to_string(),
+            })
     }
 
     /// Retrieve the current schema generation number, incremented when DDL or other changes are
@@ -762,15 +789,7 @@ impl DfState {
         query: &Relation,
         node_sizes: Option<HashMap<NodeIndex, NodeSize>>,
     ) -> ReadySetResult<String> {
-        let ni = self
-            .recipe
-            .node_addr_for(query)
-            .ok()
-            .or_else(|| self.views().get(query).copied())
-            .and_then(|leaf| self.find_reader_for(leaf, query, &Default::default()))
-            .ok_or_else(|| ReadySetError::QueryNotFound {
-                name: query.display_unquoted().to_string(),
-            })?;
+        let ni = self.reader_node_index(query)?;
 
         Ok(Graphviz {
             graph: &self.ingredients,
@@ -813,10 +832,45 @@ impl DfState {
     /// Return a list of information about materializations in the graph
     pub(super) async fn materialization_info(&self) -> ReadySetResult<Vec<MaterializationInfo>> {
         let sizes = self.node_sizes().await?;
+        Ok(self.collect_materialization_info(&sizes, None))
+    }
 
-        Ok(self
-            .materializations
+    /// Return materialization info filtered to only nodes in the subgraph for the given cache.
+    ///
+    /// Traverses the dataflow graph upstream from the cache's reader node (via incoming edges)
+    /// to collect all ancestor nodes, then queries only the domains containing those nodes for
+    /// size information.
+    pub(super) async fn materialization_info_for_cache(
+        &self,
+        cache: &Relation,
+    ) -> ReadySetResult<Vec<MaterializationInfo>> {
+        let reader_ni = self.reader_node_index(cache)?;
+        let reachable = reachable_from(&self.ingredients, reader_ni, Direction::Incoming);
+
+        // Perf: only RPC domains that contain reachable nodes
+        let sizes = self
+            .node_sizes_for(
+                self.domain_node_index_pairs
+                    .iter()
+                    .filter(|(_, nodes)| nodes.keys().any(|ni| reachable.contains(ni)))
+                    .map(|(di, _)| *di),
+            )
+            .await?;
+
+        Ok(self.collect_materialization_info(&sizes, Some(&reachable)))
+    }
+
+    /// Build [`MaterializationInfo`] for materialized nodes, optionally restricted to `filter`.
+    fn collect_materialization_info(
+        &self,
+        sizes: &HashMap<NodeIndex, NodeSize>,
+        filter: Option<&HashSet<NodeIndex>>,
+    ) -> Vec<MaterializationInfo> {
+        let dominated = |ni: &NodeIndex| filter.is_none_or(|f| f.contains(ni));
+
+        self.materializations
             .materialized_non_reader_nodes()
+            .filter(dominated)
             .map(|ni| {
                 (
                     ni,
@@ -828,16 +882,21 @@ impl DfState {
                         .clone(),
                 )
             })
-            .chain(self.ingredients.node_references().filter_map(|(ni, n)| {
-                n.as_reader().and_then(|r| r.index()).map(|idx| {
-                    (
-                        ni,
-                        n.name().clone(),
-                        n.description(),
-                        HashSet::from([idx.clone()]),
-                    )
-                })
-            }))
+            .chain(
+                self.ingredients
+                    .node_references()
+                    .filter(move |(ni, _)| dominated(ni))
+                    .filter_map(|(ni, n)| {
+                        n.as_reader().and_then(|r| r.index()).map(|idx| {
+                            (
+                                ni,
+                                n.name().clone(),
+                                n.description(),
+                                HashSet::from([idx.clone()]),
+                            )
+                        })
+                    }),
+            )
             .map(
                 |(node_index, node_name, node_description, indexes)| MaterializationInfo {
                     // TODO(marce): This index might be out of sync if we run readyset distributed
@@ -860,7 +919,7 @@ impl DfState {
                     indexes,
                 },
             )
-            .collect())
+            .collect()
     }
 
     /// Issue all of `requests` to their corresponding domains asynchronously, and return a stream
@@ -1121,21 +1180,36 @@ impl DfState {
 
     /// Return a map of node indices to key counts.
     pub(super) async fn node_sizes(&self) -> ReadySetResult<HashMap<NodeIndex, NodeSize>> {
+        self.node_sizes_for(self.domains.keys().copied()).await
+    }
+
+    /// Like [`Self::node_sizes`], but only queries the given domains.
+    async fn node_sizes_for(
+        &self,
+        domains: impl Iterator<Item = DomainIndex>,
+    ) -> ReadySetResult<HashMap<NodeIndex, NodeSize>> {
         // Copying the keys into a vec here is a workaround for a higher order
         // lifetime compile error in `external_request` that occurs if we simply
         // use keys().map() to pass into query_domains directly.
         let counts_per_domain: Vec<(DomainIndex, Array2<Option<Vec<(NodeIndex, NodeSize)>>>)> = {
-            let requests = self
-                .domains
-                .keys()
-                .map(|di| (*di, DomainRequest::RequestNodeSizes))
+            let requests = domains
+                .map(|di| (di, DomainRequest::RequestNodeSizes))
                 .collect::<Vec<_>>();
 
             stream::iter(requests)
                 .map(move |(domain, request)| {
-                    self.domains[&domain]
-                        .send_to_healthy::<Vec<(NodeIndex, NodeSize)>>(request, &self.workers)
-                        .map(move |r| -> ReadySetResult<_> { Ok((domain, r?)) })
+                    let handle = self.domains.get(&domain).ok_or_else(|| {
+                        internal_err!(
+                            "Domain {domain:?} is not yet available \
+                                 — the server may still be recovering"
+                        )
+                    });
+                    async move {
+                        let r = handle?
+                            .send_to_healthy::<Vec<(NodeIndex, NodeSize)>>(request, &self.workers)
+                            .await?;
+                        Ok::<_, ReadySetError>((domain, r))
+                    }
                 })
                 .buffer_unordered(CONCURRENT_REQUESTS)
         }

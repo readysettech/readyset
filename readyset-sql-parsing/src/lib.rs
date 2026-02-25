@@ -765,8 +765,13 @@ fn parse_explain(
         ));
     }
     if parse_readyset_keyword(parser, ReadysetKeyword::MATERIALIZATIONS) {
+        let for_cache = if parser.parse_keywords(&[Keyword::FOR, Keyword::CACHE]) {
+            Some(parser.parse_object_name(false)?.try_into_dialect(dialect)?)
+        } else {
+            None
+        };
         return Ok(SqlQuery::Explain(
-            readyset_sql::ast::ExplainStatement::Materializations,
+            readyset_sql::ast::ExplainStatement::Materializations { for_cache },
         ));
     }
     let simplified = parse_readyset_keyword(parser, ReadysetKeyword::SIMPLIFIED);

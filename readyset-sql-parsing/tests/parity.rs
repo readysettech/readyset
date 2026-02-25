@@ -786,6 +786,9 @@ fn row() {
 #[test]
 fn explain_materialization() {
     check_parse_both!("EXPLAIN MATERIALIZATIONS");
+    check_parse_both!("EXPLAIN MATERIALIZATIONS FOR CACHE my_cache");
+    check_parse_mysql!("EXPLAIN MATERIALIZATIONS FOR CACHE `my_cache`");
+    check_parse_postgres!("EXPLAIN MATERIALIZATIONS FOR CACHE \"my_cache\"");
 }
 
 #[test]

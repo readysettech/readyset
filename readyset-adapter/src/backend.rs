@@ -3676,8 +3676,11 @@ where
             SqlQuery::Explain(ExplainStatement::Caches) => {
                 Self::explain_caches(connectors, state).await
             }
-            SqlQuery::Explain(ExplainStatement::Materializations) => {
-                connectors.noria.explain_materializations().await
+            SqlQuery::Explain(ExplainStatement::Materializations { for_cache }) => {
+                connectors
+                    .noria
+                    .explain_materializations(for_cache.clone())
+                    .await
             }
             SqlQuery::Explain(explain @ ExplainStatement::CreateCache { .. }) => {
                 Self::explain_create_cache(connectors, settings, state, explain).await

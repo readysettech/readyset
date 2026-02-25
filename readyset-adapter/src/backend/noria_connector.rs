@@ -477,8 +477,16 @@ impl NoriaConnector {
 
     pub(crate) async fn explain_materializations(
         &mut self,
+        for_cache: Option<Relation>,
     ) -> ReadySetResult<QueryResult<'static>> {
-        let mut materializations = self.inner.noria.materialization_info().await?;
+        let mut materializations = if let Some(cache) = for_cache {
+            self.inner
+                .noria
+                .materialization_info_for_cache(cache)
+                .await?
+        } else {
+            self.inner.noria.materialization_info().await?
+        };
         materializations.sort_unstable_by_key(|mi| Reverse(mi.size.bytes));
         let cols = [
             ("domain_index", DfType::DEFAULT_TEXT),

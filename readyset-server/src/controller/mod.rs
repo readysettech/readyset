@@ -2037,6 +2037,66 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn materialization_info_for_cache_filters_to_cache_subgraph() {
+        let (mut noria, shutdown_tx) =
+            start_simple("materialization_info_for_cache_filters_to_cache_subgraph").await;
+
+        // Two caches on the same table — the filtered call should return only the
+        // nodes that belong to the requested cache, not those of the other cache.
+        noria
+            .extend_recipe(
+                ChangeList::from_strings(
+                    vec![
+                        "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+                        "CREATE CACHE cache_a FROM SELECT id FROM users WHERE id = ?;",
+                        "CREATE CACHE cache_b FROM SELECT name FROM users WHERE name = ?;",
+                    ],
+                    DataDialect::DEFAULT_MYSQL,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let all = noria.materialization_info().await.unwrap();
+        let for_a = noria
+            .materialization_info_for_cache("cache_a".into())
+            .await
+            .unwrap();
+        let for_b = noria
+            .materialization_info_for_cache("cache_b".into())
+            .await
+            .unwrap();
+
+        // Each per-cache result must be a strict subset of all materializations.
+        assert!(!for_a.is_empty());
+        assert!(!for_b.is_empty());
+        assert!(for_a.len() <= all.len());
+        assert!(for_b.len() <= all.len());
+
+        let all_indices: std::collections::HashSet<_> =
+            all.iter().map(|mi| mi.node_index).collect();
+        let a_indices: std::collections::HashSet<_> =
+            for_a.iter().map(|mi| mi.node_index).collect();
+        let b_indices: std::collections::HashSet<_> =
+            for_b.iter().map(|mi| mi.node_index).collect();
+
+        // All nodes in the per-cache results must appear in the global list.
+        assert!(a_indices.is_subset(&all_indices));
+        assert!(b_indices.is_subset(&all_indices));
+
+        // The reader nodes for each cache must appear in their respective results.
+        assert!(for_a.iter().any(|mi| mi.node_name == "cache_a".into()));
+        assert!(for_b.iter().any(|mi| mi.node_name == "cache_b".into()));
+
+        // Each cache's reader must not appear in the other cache's result.
+        assert!(!for_a.iter().any(|mi| mi.node_name == "cache_b".into()));
+        assert!(!for_b.iter().any(|mi| mi.node_name == "cache_a".into()));
+
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn min_persisted_replication_offset() {
         let (mut noria, shutdown_tx) = start_simple("min_persisted_replication_offset").await;
         eventually! {
