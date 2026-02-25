@@ -6,7 +6,6 @@ authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2024"
 
 [dependencies]
-nom = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 readyset-util = { path = "../readyset-util" }
 proptest = { workspace = true }

@@ -175,9 +175,8 @@ impl MySqlTime {
     /// assert!(MySqlTime::from_bytes("60".as_bytes()).is_err());
     /// ```
     pub fn from_bytes(bytes: &[u8]) -> Result<MySqlTime, ConvertError> {
-        let (positive, hour, minutes, seconds, microseconds) = parse::h_m_s_us(bytes)
-            .map(|res| res.1)
-            .map_err(|_| ConvertError::ParseError)?;
+        let (positive, hour, minutes, seconds, microseconds) =
+            parse::h_m_s_us(bytes).map_err(|_| ConvertError::ParseError)?;
         if minutes > 59 {
             return Err(ConvertError::OutOfBounds(
                 "Minutes can't be greater than 59".to_owned(),
@@ -370,124 +369,114 @@ impl From<MySqlTime> for Duration {
 }
 
 mod parse {
-    use nom::IResult;
-    use nom::branch::alt;
-    use nom::bytes::complete::take_while_m_n;
-    use nom::character::complete::{char, digit1};
-    use nom::character::{self, is_digit};
-    use nom::combinator::{complete, eof, map, map_parser, opt};
-    use nom::multi::{fold_many0, many0};
-    use nom::sequence::{preceded, terminated, tuple};
+    use std::str::{self, FromStr};
 
-    use super::*;
-
-    fn microseconds_padding(i: &[u8]) -> IResult<&[u8], u32> {
-        let num_digits = i.len();
-        map(character::complete::u32, move |number| {
-            number * (10u32.pow(6 - num_digits as u32))
-        })(i)
+    fn parse_ascii<T>(s: &[u8]) -> Result<T, ()>
+    where
+        T: FromStr,
+    {
+        str::from_utf8(s).map_err(|_| ())?.parse().map_err(|_| ())
     }
 
-    fn microseconds(i: &[u8]) -> IResult<&[u8], u32> {
-        preceded(
-            complete(char('.')),
-            map_parser(take_while_m_n(1, 6, is_digit), microseconds_padding),
-        )(i)
-    }
-
-    fn seconds(i: &[u8]) -> IResult<&[u8], u8> {
-        preceded(
-            complete(char(':')),
-            map_parser(take_while_m_n(1, 2, is_digit), character::complete::u8),
-        )(i)
-    }
-
-    /// Creates a number from an array of digits.
-    /// Each position of the array must be a number from 0-9.
-    fn to_number(digits: &[u8]) -> u64 {
-        // These u8 are actual numbers, NOT a byte representing a char. Thus, it is
-        // safe to perform arithmetic operations on them to yield a number.
-        let mut res = 0u64;
-        for &n in digits {
-            res = res * 10 + n as u64;
+    fn parse_microseconds(s: &[u8]) -> Result<u32, ()> {
+        if s.is_empty() || s.len() > 6 || !s.iter().all(|b| b.is_ascii_digit()) {
+            return Err(());
         }
-        res
+        let n = parse_ascii::<u32>(s)?;
+        Ok(n * 10u32.pow(6 - s.len() as u32))
     }
 
-    fn one_digit(i: &[u8]) -> IResult<&[u8], u8> {
-        map_parser(take_while_m_n(1, 1, is_digit), character::complete::u8)(i)
+    fn parse_u8_2digits(s: &[u8]) -> Result<u8, ()> {
+        if s.is_empty() || s.len() > 2 || !s.iter().all(|b| b.is_ascii_digit()) {
+            return Err(());
+        }
+        parse_ascii(s)
     }
 
-    fn h_m_s_us_no_colons(i: &[u8]) -> IResult<&[u8], (bool, u16, u8, u8, u32)> {
-        map(
-            terminated(
-                tuple((
-                    opt(char('-')),
-                    fold_many0(one_digit, Vec::new, |mut acc: Vec<u8>, num: u8| {
-                        acc.push(num);
-                        acc
-                    }),
-                    opt(microseconds),
-                )),
-                eof,
-            ),
-            |(sign, numbers, microseconds)| {
-                let digits = numbers.len();
-                let (hour, minutes, seconds) = if digits > 4 {
-                    (
-                        to_number(&numbers[0..digits - 4]),
-                        to_number(&numbers[digits - 4..digits - 2]),
-                        to_number(&numbers[digits - 2..digits]),
-                    )
-                } else if digits > 2 {
-                    (
-                        0,
-                        to_number(&numbers[0..digits - 2]),
-                        to_number(&numbers[digits - 2..digits]),
-                    )
-                } else {
-                    (0, 0, to_number(&numbers[0..digits]))
+    fn split_dot(s: &[u8]) -> (&[u8], Option<&[u8]>) {
+        let mut it = s.splitn(2, |&b| b == b'.');
+        let before = it.next().unwrap();
+        (before, it.next())
+    }
+
+    fn parse_colon(positive: bool, input: &[u8]) -> Result<(bool, u16, u8, u8, u32), ()> {
+        // H...H:MM[:SS[.us]]
+        let c1 = input.iter().position(|&b| b == b':').ok_or(())?;
+        let hour_bytes = &input[..c1];
+        if hour_bytes.is_empty() || !hour_bytes.iter().all(|b| b.is_ascii_digit()) {
+            return Err(());
+        }
+        let hour = parse_ascii(hour_bytes).unwrap_or(u16::MAX);
+        let rest = &input[c1 + 1..];
+
+        match rest.iter().position(|&b| b == b':') {
+            Some(c2) => {
+                // rest = MM:SS[.us]
+                let minutes = parse_u8_2digits(&rest[..c2])?;
+                let (ss_bytes, us_bytes) = split_dot(&rest[c2 + 1..]);
+                let seconds = parse_u8_2digits(ss_bytes)?;
+                let microseconds = match us_bytes {
+                    Some(u) => parse_microseconds(u)?,
+                    None => 0,
                 };
-                (
-                    sign.is_none(),
-                    hour.try_into().unwrap_or(u16::MAX),
-                    minutes.try_into().unwrap_or(u8::MAX),
-                    seconds.try_into().unwrap_or(u8::MAX),
-                    microseconds.unwrap_or(0),
-                )
-            },
-        )(i)
+                Ok((positive, hour, minutes, seconds, microseconds))
+            }
+            None => {
+                // rest = MM[.us], no seconds component
+                let (mm_bytes, us_bytes) = split_dot(rest);
+                let minutes = parse_u8_2digits(mm_bytes)?;
+                let microseconds = match us_bytes {
+                    Some(u) => parse_microseconds(u)?,
+                    None => 0,
+                };
+                Ok((positive, hour, minutes, 0, microseconds))
+            }
+        }
     }
 
-    fn h_m_s_us_colons(i: &[u8]) -> IResult<&[u8], (bool, u16, u8, u8, u32)> {
-        map(
-            terminated(
-                tuple((
-                    opt(char('-')),
-                    terminated(map_parser(digit1, character::complete::u32), char(':')),
-                    map_parser(take_while_m_n(1, 2, is_digit), character::complete::u8),
-                    opt(seconds),
-                    opt(microseconds),
-                )),
-                eof,
-            ),
-            |(sign, hour, minutes, seconds, microseconds)| {
-                (
-                    sign.is_none(),
-                    hour.try_into().unwrap_or(u16::MAX),
-                    minutes,
-                    seconds.unwrap_or(0),
-                    microseconds.unwrap_or(0),
-                )
-            },
-        )(i)
+    fn parse_no_colon(positive: bool, input: &[u8]) -> Result<(bool, u16, u8, u8, u32), ()> {
+        let (digit_part, us_bytes) = split_dot(input);
+        if digit_part.is_empty() || !digit_part.iter().all(|b| b.is_ascii_digit()) {
+            return Err(());
+        }
+        let parse = |s| parse_ascii(s).unwrap_or(u64::MAX);
+        let n = digit_part.len();
+        let (hour, minutes, seconds) = if n > 4 {
+            (
+                parse(&digit_part[..n - 4]),
+                parse(&digit_part[n - 4..n - 2]),
+                parse(&digit_part[n - 2..]),
+            )
+        } else if n > 2 {
+            (0, parse(&digit_part[..n - 2]), parse(&digit_part[n - 2..]))
+        } else {
+            (0, 0, parse(digit_part))
+        };
+        let microseconds = match us_bytes {
+            Some(u) => parse_microseconds(u)?,
+            None => 0,
+        };
+        Ok((
+            positive,
+            hour.try_into().unwrap_or(u16::MAX),
+            minutes.try_into().unwrap_or(u8::MAX),
+            seconds.try_into().unwrap_or(u8::MAX),
+            microseconds,
+        ))
     }
 
-    pub fn h_m_s_us(i: &[u8]) -> IResult<&[u8], (bool, u16, u8, u8, u32)> {
-        preceded(
-            many0(char(' ')),
-            alt((complete(h_m_s_us_colons), complete(h_m_s_us_no_colons))),
-        )(i)
+    pub fn h_m_s_us(input: &[u8]) -> Result<(bool, u16, u8, u8, u32), ()> {
+        let input = input.trim_ascii_start();
+        let (positive, rest) = if input.first() == Some(&b'-') {
+            (false, &input[1..])
+        } else {
+            (true, input)
+        };
+        if rest.contains(&b':') {
+            parse_colon(positive, rest)
+        } else {
+            parse_no_colon(positive, rest)
+        }
     }
 }
 
@@ -1164,6 +1153,34 @@ mod tests {
         fn from_str_non_timestamp() {
             let result = MySqlTime::from_str("banana");
             assert_eq!(result, Err(ConvertError::ParseError));
+        }
+
+        #[test]
+        fn from_str_colon_errors() {
+            // minutes out of range
+            MySqlTime::from_str("1:60").unwrap_err();
+            MySqlTime::from_str("1:60:00").unwrap_err();
+            // seconds out of range
+            MySqlTime::from_str("1:00:60").unwrap_err();
+            // too many colons
+            MySqlTime::from_str("1:2:3:4").unwrap_err();
+            // empty components
+            MySqlTime::from_str(":1:2").unwrap_err();
+            MySqlTime::from_str("1::2").unwrap_err();
+        }
+
+        #[test]
+        fn from_str_leading_spaces() {
+            let mysql_time = MySqlTime::from_str("  123:45:59").unwrap();
+            assert_time!(mysql_time, true, 123, 45, 59, 0);
+            let mysql_time = MySqlTime::from_str("  1234559").unwrap();
+            assert_time!(mysql_time, true, 123, 45, 59, 0);
+        }
+
+        #[test]
+        fn from_str_too_many_fractional_digits() {
+            MySqlTime::from_str("1:2:3.1234567").unwrap_err();
+            MySqlTime::from_str("1234559.1234567").unwrap_err();
         }
     }
 
