@@ -42,22 +42,36 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
         --workspace --features failure_injection
     )
 
+    # Skip mysql57 on ARM — no native ARM64 image, QEMU emulation is unreliable.
+    # Must be combined into a single --filterset with & (intersection), because
+    # multiple --filterset args are unioned and the exclusion would be ineffective.
+    FILTERSET=""
+    if [[ "$(uname -m)" == "aarch64" ]]; then
+        echo "--- Excluding mysql57 tests (no native ARM64 image)"
+        FILTERSET='not test(/:mysql57:/)'
+    fi
+
     if [[ "${MYSQL_MRBR:-off}" == "on" ]]; then
         echo "+++ :rust: Run tests (MySQL MRBR on)"
-        NEXTEST_ARGS+=(--filterset 'test(/:mysql\d+:/)')
+        if [[ -n "$FILTERSET" ]]; then
+            FILTERSET="test(/:mysql\d+:/) & $FILTERSET"
+        else
+            FILTERSET='test(/:mysql\d+:/)'
+        fi
     elif [[ -n "${NEXTEST_FILTERSET:-}" ]]; then
         echo "+++ :rust: Run tests (nextest, filterset: $NEXTEST_FILTERSET)"
-        NEXTEST_ARGS+=(--filterset "$NEXTEST_FILTERSET")
+        if [[ -n "$FILTERSET" ]]; then
+            FILTERSET="$NEXTEST_FILTERSET & $FILTERSET"
+        else
+            FILTERSET="$NEXTEST_FILTERSET"
+        fi
     else
         echo "+++ :rust: Run tests (nextest)"
     fi
 
-    # Skip mysql57 on ARM — no native ARM64 image, QEMU emulation is unreliable
-    if [[ "$(uname -m)" == "aarch64" ]]; then
-        echo "--- Excluding mysql57 tests (no native ARM64 image)"
-        NEXTEST_ARGS+=(--filterset 'not test(/:mysql57:/)')
+    if [[ -n "$FILTERSET" ]]; then
+        NEXTEST_ARGS+=(--filterset "$FILTERSET")
     fi
-
     set -x
     cargo --locked nextest run "${NEXTEST_ARGS[@]}" || upload_artifacts
     set +x
