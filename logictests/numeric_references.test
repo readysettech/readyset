@@ -52,3 +52,4 @@ select max(id), val from t group by 2 order by 2 desc
 2
 2
 1
+
