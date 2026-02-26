@@ -856,7 +856,7 @@ where
     /// "reusing" that prepared statement, so we only have the query string to identify
     /// any metadata we've previously prepared and cached. Thus this map is a link from the query
     /// to the index of the prepared statement in `prepared_statements`.
-    unnamed_prepared_statements: HashMap<String, usize>,
+    unnamed_prepared_statements: HashMap<String, StatementId>,
     /// Handle to access the cached schema catalog
     schema_handle: SchemaCatalogHandle,
     /// Map from username to password for all users allowed to connect to the db
@@ -2039,6 +2039,44 @@ where
         }
     }
 
+    pub async fn prepare_inner(
+        &mut self,
+        query: &str,
+        data: DB::PrepareData<'_>,
+        statement_type: PreparedStatementType,
+        event: &mut QueryExecutionEvent,
+    ) -> Result<StatementId, DB::Error> {
+        if matches!(statement_type, PreparedStatementType::Unnamed)
+            && self.state.unnamed_prepared_statements.contains_key(query)
+        {
+            return Ok(self.state.unnamed_prepared_statements[query]);
+        }
+
+        let meta = self.plan_prepare(query, event).await?;
+        let prep = self
+            .do_prepare(&meta, query, data, statement_type, event)
+            .await?;
+
+        let next_id = self
+            .state
+            .prepared_statements
+            .vacant_key()
+            .try_into()
+            .expect("Cannot prepare more than u32::MAX statements with a single connection");
+        let prepared_statement = self.create_prepared_statement(meta, prep, next_id);
+        let statement_id = self.state.prepared_statements.insert(prepared_statement) as StatementId;
+        assert_eq!(next_id, statement_id);
+
+        if matches!(statement_type, PreparedStatementType::Unnamed) {
+            // For unnamed prepared statements, store the query string mapping
+            self.state
+                .unnamed_prepared_statements
+                .insert(query.to_string(), statement_id);
+        }
+
+        Ok(statement_id)
+    }
+
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
@@ -2049,56 +2087,27 @@ where
         statement_type: PreparedStatementType,
     ) -> Result<&PrepareResult<DB>, DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
-        // early return if we're preparing an unnamed statement that we already have the metadata for.
-        // Also, don't bother to record an event for this query as it's not really useful data.
-        if matches!(statement_type, PreparedStatementType::Unnamed)
-            && self.state.unnamed_prepared_statements.contains_key(query)
-        {
-            let id = self.state.unnamed_prepared_statements[query];
-            return Ok(&self.state.prepared_statements[id].prep);
-        }
 
-        let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
-        let meta = self.plan_prepare(query, &mut query_event).await?;
-        let prep = self
-            .do_prepare(&meta, query, data, statement_type, &mut query_event)
-            .await?;
+        let mut event = QueryExecutionEvent::new(EventType::Prepare);
+        let result = self
+            .prepare_inner(query, data, statement_type, &mut event)
+            .await;
 
-        let next_id = self
-            .state
-            .prepared_statements
-            .vacant_key()
-            .try_into()
-            .expect("Cannot prepare more than u32::MAX statements with a single connection");
-        let prepared_statement = self.create_prepared_statement(meta, prep, next_id);
-        let statement_id = self.state.prepared_statements.insert(prepared_statement);
-        assert_eq!(next_id, statement_id as u32);
-
-        if matches!(statement_type, PreparedStatementType::Unnamed) {
-            // For unnamed prepared statements, store the query string mapping
-            self.state
-                .unnamed_prepared_statements
-                .insert(query.to_string(), statement_id);
-        }
-
-        // we've already put the prepared statement in the cache, but dig it a reference
-        // for both query logging and returning to the caller.
-        let prepared_statement = &self.state.prepared_statements[statement_id];
+        let statement_id = result?;
+        let prepared_statement = &self.state.prepared_statements[statement_id as usize];
 
         if let Some(QueryLogMode::Verbose) = self.state.query_log_mode {
             // We only use the full query in verbose mode, so avoid cloning if we don't need to
             if let Some(parsed) = &prepared_statement.parsed_query {
-                query_event.query = Some(parsed.clone());
+                event.query = Some(parsed.clone());
             }
         }
 
-        query_event.query_id = prepared_statement.query_id.into();
-        let query_log_sender = self.state.query_log_sender.clone();
-        let slowlog = self.settings.slowlog;
+        event.query_id = prepared_statement.query_id.into();
         log_query(
-            query_log_sender.as_ref(),
-            query_event,
-            slowlog,
+            self.state.query_log_sender.as_ref(),
+            event,
+            self.settings.slowlog,
             self.settings.dialect,
         );
 
