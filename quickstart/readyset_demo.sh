@@ -197,13 +197,6 @@ import_data() {
   fi
 }
 
-display_arm_warning() {
-  if [[ $(uname -m) == "arm64" ]]; then
-    echo -e "${YELLOW}${WARNING}You are running on an ARM-based Machine, but Readyset is currently built for x86_64."
-    echo -e "   Query performance will be slower due to virtualization overhead.${NOCOLOR}"
-  fi
-}
-
 explore_data() {
   if [[ $tables_exist == "t" ]] || [[ $import_choice == "y" ]]; then
     read -rp "Explore sample data in psql? (y/n, default: y): " explore_choice
@@ -621,7 +614,6 @@ check_localhost_alternatives() {
 
 
 run_after_connection() {
-  display_arm_warning
   wait_for_snapshot "$1"
   explore_connection
   free_form_connect "$1"
@@ -663,7 +655,6 @@ run_demo() {
   check_sample_data
   prompt_for_import
   import_data
-  display_arm_warning
   explore_data
   free_form_connect "psql"
   print_exit_message "psql"
