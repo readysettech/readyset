@@ -197,9 +197,21 @@ impl FunctionExpr {
                     order_by_clause_str!(order_by, dialect),
                 )
             }
-            FunctionExpr::Avg { expr, .. } => format!("avg({})", expr.alias(dialect)?),
-            FunctionExpr::Count { expr, .. } => format!("count({})", expr.alias(dialect)?),
-            FunctionExpr::Sum { expr, .. } => format!("sum({})", expr.alias(dialect)?),
+            FunctionExpr::Avg { expr, distinct } => format!(
+                "avg({}{})",
+                if *distinct { "DISTINCT " } else { "" },
+                expr.alias(dialect)?
+            ),
+            FunctionExpr::Count { expr, distinct } => format!(
+                "count({}{})",
+                if *distinct { "DISTINCT " } else { "" },
+                expr.alias(dialect)?
+            ),
+            FunctionExpr::Sum { expr, distinct } => format!(
+                "sum({}{})",
+                if *distinct { "DISTINCT " } else { "" },
+                expr.alias(dialect)?
+            ),
             FunctionExpr::Max(col) => format!("max({})", col.alias(dialect)?),
             FunctionExpr::Min(col) => format!("min({})", col.alias(dialect)?),
             FunctionExpr::Extract { field, expr } => {

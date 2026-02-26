@@ -53,3 +53,19 @@ select max(id), val from t group by 2 order by 2 desc
 2
 1
 
+query II rowsort
+select * from (select max(id), val from t group by 2) as sub order by 1
+----
+2
+1
+4
+2
+
+query II nosort
+select * from (select val, count(*) as cnt from t group by 1) as sub order by 1
+----
+1
+2
+2
+2
+

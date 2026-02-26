@@ -766,7 +766,9 @@ fn extract_having_aggregates(
 
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
             if matches!(expr, Expr::Call(fun) if is_aggregate(fun)) {
-                let name: SqlIdentifier = expr.display(self.dialect.into()).to_string().into();
+                let name: SqlIdentifier = expr
+                    .alias(self.dialect.into())
+                    .unwrap_or_else(|| expr.display(self.dialect.into()).to_string().into());
                 let col_expr = Expr::Column(ast::Column {
                     name: name.clone(),
                     table: None,
@@ -1251,9 +1253,14 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                 internal!("Stars should have been expanded by now!")
             }
             FieldDefinitionExpr::Expr { expr, alias } => {
-                let name: SqlIdentifier = alias
-                    .clone()
-                    .unwrap_or_else(|| expr.display(dialect.into()).to_string().into());
+                let name: SqlIdentifier = alias.clone().unwrap_or_else(|| {
+                    if matches!(expr, Expr::Call(f) if is_aggregate(f)) {
+                        expr.alias(dialect.into())
+                            .unwrap_or_else(|| expr.display(dialect.into()).to_string().into())
+                    } else {
+                        expr.display(dialect.into()).to_string().into()
+                    }
+                });
                 match expr {
                     Expr::Literal(l) => columns.push(OutputColumn::Literal(LiteralColumn {
                         name,
@@ -1371,14 +1378,18 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                     // we don't necessarily need it projected in the result set of the query, and
                     // the pull_columns pass will make sure the topk/paginate node gets the
                     // aggregate result column
-                    aggregates
-                        .entry(func.clone())
-                        .or_insert_with(|| func.display(dialect.into()).to_string().into());
+                    aggregates.entry(func.clone()).or_insert_with(|| {
+                        Expr::Call(func.clone())
+                            .alias(dialect.into())
+                            .unwrap_or_else(|| func.display(dialect.into()).to_string().into())
+                    });
                 }
                 FieldReference::Expr(expr) => {
                     // This is an expression that we need to add to the list of projected columns
                     columns.push(OutputColumn::Expr(ExprColumn {
-                        name: expr.display(dialect.into()).to_string().into(),
+                        name: expr
+                            .alias(dialect.into())
+                            .unwrap_or_else(|| expr.display(dialect.into()).to_string().into()),
                         table: None,
                         expression: expr.clone(),
                     }));
@@ -1408,7 +1419,9 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                             match field {
                                 FieldReference::Expr(Expr::Column(col)) => col,
                                 FieldReference::Expr(expr) => Column {
-                                    name: expr.display(dialect.into()).to_string().into(),
+                                    name: expr.alias(dialect.into()).unwrap_or_else(|| {
+                                        expr.display(dialect.into()).to_string().into()
+                                    }),
                                     table: None,
                                 },
                                 FieldReference::Numeric(_) => {
@@ -1541,7 +1554,7 @@ mod tests {
             qg.aggregates,
             HashMap::from([(
                 FunctionExpr::Max(Box::new(Expr::Column("t1.x".into()))),
-                "max(`t1`.`x`)".into()
+                "max(x)".into()
             )])
         );
     }
@@ -1613,7 +1626,7 @@ mod tests {
         let mut b = vec![
             Expr::BinaryOp {
                 lhs: Box::new(Expr::Column(Column {
-                    name: "min(`t`.`y`)".into(),
+                    name: "min(y)".into(),
                     table: None,
                 })),
                 op: BinaryOperator::Greater,
@@ -1621,7 +1634,7 @@ mod tests {
             },
             Expr::BinaryOp {
                 lhs: Box::new(Expr::Column(Column {
-                    name: "sum(`t`.`y`)".into(),
+                    name: "sum(y)".into(),
                     table: None,
                 })),
                 op: BinaryOperator::Greater,
@@ -1637,7 +1650,7 @@ mod tests {
                     name: "y".into(),
                     table: Some("t".into()),
                 }))),
-                "min(`t`.`y`)".into(),
+                "min(y)".into(),
             ),
             (
                 FunctionExpr::Sum {
@@ -1647,7 +1660,7 @@ mod tests {
                     })),
                     distinct: false,
                 },
-                "sum(`t`.`y`)".into(),
+                "sum(y)".into(),
             ),
         ];
         assert_eq!(qg.aggregates, HashMap::from(expected_aggs));
@@ -1696,9 +1709,9 @@ mod tests {
                     column: Column::from("t.b")
                 },
                 OutputColumn::Data {
-                    alias: "sum(`t`.`c`)".into(),
+                    alias: "sum(c)".into(),
                     column: Column {
-                        name: "sum(`t`.`c`)".into(),
+                        name: "sum(c)".into(),
                         table: None
                     }
                 }
@@ -1712,7 +1725,7 @@ mod tests {
                     expr: Box::new(Expr::Column("t.c".into())),
                     distinct: false,
                 },
-                "sum(`t`.`c`)".into()
+                "sum(c)".into()
             )])
         );
     }

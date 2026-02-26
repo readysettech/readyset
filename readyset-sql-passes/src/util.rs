@@ -203,7 +203,9 @@ pub fn map_aggregates(
     let mut ret = Vec::new();
     match expr {
         Expr::Call(f) if is_aggregate(f) => {
-            let name: SqlIdentifier = f.display(dialect).to_string().into();
+            let name: SqlIdentifier = Expr::Call(f.clone())
+                .alias(dialect)
+                .unwrap_or_else(|| f.display(dialect).to_string().into());
             ret.push((f.clone(), name.clone()));
             *expr = Expr::Column(Column { name, table: None });
         }

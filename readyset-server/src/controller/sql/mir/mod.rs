@@ -2749,6 +2749,16 @@ impl SqlToMirConverter {
                                 expr: Expr::Column(c),
                                 ..
                             } => Ok(Column::from(c)),
+                            FieldDefinitionExpr::Expr {
+                                expr: Expr::Call(f),
+                                ..
+                            } if is_aggregate(f) => Ok(Column::named(
+                                Expr::Call(f.clone())
+                                    .alias(self.dialect.into())
+                                    .unwrap_or_else(|| {
+                                        f.display(self.dialect.into()).to_string().into()
+                                    }),
+                            )),
                             FieldDefinitionExpr::Expr { expr, .. } => {
                                 Ok(Column::named(expr.display(self.dialect.into()).to_string()))
                             }
