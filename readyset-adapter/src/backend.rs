@@ -1806,6 +1806,7 @@ where
     async fn plan_prepare(
         &mut self,
         query: &str,
+        query_shallow: &mut Option<ShallowViewRequest>,
         event: &mut QueryExecutionEvent,
     ) -> ReadySetResult<PrepareMeta> {
         let (parsed, (shallow_parsed, hint)) = match self.state.parsed_query_cache.get(query) {
@@ -1830,8 +1831,9 @@ where
             }
         };
 
-        if let Some((shallow, params)) = self.connectors.prepare_shallow_query(shallow_parsed)
-            && let Some((query_id, always)) = Self::should_query_shallow(
+        if let Some((shallow, params)) = self.connectors.prepare_shallow_query(shallow_parsed) {
+            *query_shallow = Some(shallow.clone());
+            if let Some((query_id, always)) = Self::should_query_shallow(
                 &mut self.connectors,
                 &self.settings,
                 &self.state,
@@ -1839,13 +1841,14 @@ where
                 hint,
             )
             .await
-        {
-            return Ok(PrepareMeta::ShallowSelect(PrepareShallowSelectMeta {
-                query_id,
-                stmt: shallow,
-                params,
-                always,
-            }));
+            {
+                return Ok(PrepareMeta::ShallowSelect(PrepareShallowSelectMeta {
+                    query_id,
+                    stmt: shallow,
+                    params,
+                    always,
+                }));
+            }
         }
 
         match parsed {
@@ -2042,6 +2045,7 @@ where
     pub async fn prepare_inner(
         &mut self,
         query: &str,
+        query_shallow: &mut Option<ShallowViewRequest>,
         data: DB::PrepareData<'_>,
         statement_type: PreparedStatementType,
         event: &mut QueryExecutionEvent,
@@ -2052,7 +2056,7 @@ where
             return Ok(self.state.unnamed_prepared_statements[query]);
         }
 
-        let meta = self.plan_prepare(query, event).await?;
+        let meta = self.plan_prepare(query, query_shallow, event).await?;
         let prep = self
             .do_prepare(&meta, query, data, statement_type, event)
             .await?;
@@ -2088,10 +2092,13 @@ where
     ) -> Result<&PrepareResult<DB>, DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
 
+        let mut query_shallow = None;
         let mut event = QueryExecutionEvent::new(EventType::Prepare);
         let result = self
-            .prepare_inner(query, data, statement_type, &mut event)
+            .prepare_inner(query, &mut query_shallow, data, statement_type, &mut event)
             .await;
+
+        Self::update_shallow_support(&self.state, &query_shallow, result.as_ref().err());
 
         let statement_id = result?;
         let prepared_statement = &self.state.prepared_statements[statement_id as usize];
@@ -4941,16 +4948,16 @@ where
     fn update_shallow_support(
         state: &BackendState<DB>,
         shallow: &Option<ShallowViewRequest>,
-        result: &Result<QueryResult<DB>, DB::Error>,
+        error: Option<&DB::Error>,
     ) {
         if let Some(shallow) = shallow {
             state
                 .query_status_cache
                 .with_mut_migration_state(shallow, |state| {
                     if state.is_proxied() {
-                        *state = match result {
-                            Ok(..) => MigrationState::Supported,
-                            Err(e) => MigrationState::Unsupported(e.to_string()),
+                        *state = match error {
+                            None => MigrationState::Supported,
+                            Some(e) => MigrationState::Unsupported(e.to_string()),
                         }
                     }
                 });
@@ -4976,7 +4983,7 @@ where
         )
         .await;
 
-        Self::update_shallow_support(&self.state, &query_shallow, &result);
+        Self::update_shallow_support(&self.state, &query_shallow, result.as_ref().err());
 
         self.state.last_query = event.destination.as_ref().map(|d| QueryInfo {
             destination: d.clone(),
