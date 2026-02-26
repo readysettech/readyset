@@ -4087,12 +4087,12 @@ where
     async fn query_shallow<'a>(
         connectors: &'a mut BackendConnectors<DB>,
         state: &BackendState<DB>,
-        req: ShallowViewRequest,
+        req: &ShallowViewRequest,
         query: &'a str,
         event: &mut QueryExecutionEvent,
         params: ShallowQueryParameters,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let query_id = QueryId::from(&req);
+        let query_id = QueryId::from(req);
         event.query_id = Some(query_id).into();
         let key = params.make_keys(&[])?;
         let res = state
@@ -4734,6 +4734,7 @@ where
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         query: &'a str,
+        query_shallow: &mut Option<ShallowViewRequest>,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let (parsed, (shallow_parsed, hint)) = {
@@ -4743,19 +4744,22 @@ where
             (parsed, (shallow_parsed, hint))
         };
 
-        if let Some((shallow, params)) = connectors.prepare_shallow_query(shallow_parsed)
-            && let Some((query_id, _)) =
+        if let Some((shallow, params)) = connectors.prepare_shallow_query(shallow_parsed) {
+            if let Some((query_id, _)) =
                 Self::should_query_shallow(connectors, settings, state, &shallow, hint).await
-        {
-            let result =
-                Self::query_shallow(connectors, state, shallow, query, event, params).await;
+            {
+                let result =
+                    Self::query_shallow(connectors, state, &shallow, query, event, params).await;
 
-            event.sql_type = SqlQueryType::Read;
-            event.query_id = QueryIdWrapper::Calculated(query_id);
-            if let Err(e) = &result {
-                event.set_noria_error(&internal_err!("{e}"));
+                event.sql_type = SqlQueryType::Read;
+                event.query_id = QueryIdWrapper::Calculated(query_id);
+                if let Err(e) = &result {
+                    event.set_noria_error(&internal_err!("{e}"));
+                }
+                *query_shallow = Some(shallow);
+                return result;
             }
-            return result;
+            *query_shallow = Some(shallow);
         }
 
         match parsed {
@@ -4925,6 +4929,25 @@ where
         }
     }
 
+    fn update_shallow_support(
+        state: &BackendState<DB>,
+        shallow: &Option<ShallowViewRequest>,
+        result: &Result<QueryResult<DB>, DB::Error>,
+    ) {
+        if let Some(shallow) = shallow {
+            state
+                .query_status_cache
+                .with_mut_migration_state(shallow, |state| {
+                    if state.is_proxied() {
+                        *state = match result {
+                            Ok(..) => MigrationState::Supported,
+                            Err(e) => MigrationState::Unsupported(e.to_string()),
+                        }
+                    }
+                });
+        }
+    }
+
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
     pub async fn query<'a>(
         &'a mut self,
@@ -4932,15 +4955,19 @@ where
     ) -> Result<(QueryResult<'a, DB>, ProxyState), DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
 
+        let mut query_shallow = None;
         let mut event = QueryExecutionEvent::new(EventType::Query);
         let result = Self::query_inner(
             &mut self.connectors,
             &self.settings,
             &mut self.state,
             query,
+            &mut query_shallow,
             &mut event,
         )
         .await;
+
+        Self::update_shallow_support(&self.state, &query_shallow, &result);
 
         self.state.last_query = event.destination.as_ref().map(|d| QueryInfo {
             destination: d.clone(),

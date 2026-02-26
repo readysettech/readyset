@@ -394,7 +394,7 @@ pub enum MigrationState {
     Unsupported(String),
     /// For deep caches, indicates that a dry run of the query has succeeded.  It's very likely but
     /// not guaranteed that migration of the query will succeed if it's attempted.  For shallow
-    /// caches, indicates that we successfully prepared this query on the upstream.
+    /// caches, indicates that we successfully ran/prepared this query on the upstream.
     Supported,
 }
 
