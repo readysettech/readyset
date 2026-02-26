@@ -40,3 +40,4 @@ readyset-data = { path = "../readyset-data" }
 [[bench]]
 name = "cache_hit"
 harness = false
+required-features = ["bench"]
