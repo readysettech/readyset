@@ -728,7 +728,9 @@ fn parse_query_for_create_cache(
     // Try to parse as statement first
     if let Ok(statement) = parser.try_parse(|p| p.parse_statement()) {
         let shallow = if let sqlparser::ast::Statement::Query(ref query) = statement {
-            Ok((*query.clone()).into())
+            let mut sq: ShallowCacheQuery = (*query.clone()).into();
+            sq.take_hints();
+            Ok(Box::new(sq))
         } else {
             Err(remaining_query.clone())
         };

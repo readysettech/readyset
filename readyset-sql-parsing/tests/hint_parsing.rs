@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use readyset_sql::ast::{CacheType, EvictionPolicy, ReadysetHintDirective};
+use readyset_sql::ast::{CacheInner, CacheType, EvictionPolicy, ReadysetHintDirective, SqlQuery};
 use readyset_sql::Dialect;
-use readyset_sql_parsing::{parse_hint_directive, parse_shallow_query};
+use readyset_sql_parsing::{parse_hint_directive, parse_query, parse_shallow_query};
 
 #[test]
 fn parse_hint_extracts_create_cache_directive() {
@@ -312,6 +312,34 @@ fn hint_on_right_side_of_union_stripped() {
     assert_eq!(
         query, plain,
         "Hint on right side of UNION should be stripped"
+    );
+}
+
+#[test]
+fn create_cache_select_hints_stripped() {
+    let create_sql =
+        "CREATE SHALLOW CACHE FROM SELECT /*rs+ CREATE SHALLOW CACHE */ id FROM t WHERE id = ?";
+    let query = parse_query(Dialect::MySQL, create_sql).expect("parse create cache");
+    let SqlQuery::CreateCache(stmt) = query else {
+        panic!("expected CreateCache")
+    };
+    let CacheInner::Statement {
+        shallow: Ok(shallow),
+        ..
+    } = stmt.inner
+    else {
+        panic!("expected shallow Ok")
+    };
+
+    let (via_parse_shallow, _) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT /*rs+ CREATE SHALLOW CACHE */ id FROM t WHERE id = ?",
+    )
+    .expect("parse shallow");
+
+    assert_eq!(
+        *shallow, via_parse_shallow,
+        "CREATE CACHE path must produce the same hint-stripped ShallowCacheQuery as the query path"
     );
 }
 
