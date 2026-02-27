@@ -11,6 +11,8 @@ use smallvec::SmallVec;
 use tracing::debug;
 use vec1::{vec1, Vec1};
 
+use dataflow_expression::Expr;
+
 use super::Side;
 use crate::prelude::*;
 use crate::processing::{
@@ -69,6 +71,13 @@ pub struct Join {
     // We skip serde since we don't want the state of the node, just the configuration.
     #[serde(skip)]
     pub missing_upqueries: HashMap<(Vec<KeyComparison>, Side), Vec<ColumnMiss>>,
+
+    /// Optional filter expression evaluated on left rows for LEFT JOINs.
+    /// When present and the filter evaluates to false for a left row,
+    /// the join skips the right-side lookup and directly emits a NULL-extended row.
+    /// This implements correct LEFT JOIN semantics for ON-clause predicates
+    /// that reference only the left side of the join.
+    left_filter: Option<Expr>,
 }
 
 impl Join {
@@ -85,6 +94,7 @@ impl Join {
         on: Vec<(usize, usize)>,
         emit: Vec<(Side, usize)>,
         rhs_full_mat: bool,
+        left_filter: Option<Expr>,
     ) -> Self {
         let (in_place_left_emit, in_place_right_emit) = {
             let compute_in_place_emit = |side| {
@@ -138,6 +148,7 @@ impl Join {
             kind,
             rhs_full_mat,
             missing_upqueries: Default::default(),
+            left_filter,
         }
     }
 
@@ -208,10 +219,64 @@ impl Join {
         let hm = self.build_join_hash_map(build_side, &build_keys);
 
         let mut key: Vec<&DfValue> = vec![&DfValue::None; probe_keys.len()];
+
+        if self.kind == JoinType::Left && !probe_is_left {
+            // When probe is right and build is left for a LEFT JOIN,
+            // we need to handle this differently: iterate left (build) side
+            // and look up right (probe) side.
+            // For correctness, iterate left records directly.
+            let right_keys: Vec<usize> = self.on.iter().map(|(_, r)| *r).collect();
+            let left_keys: Vec<usize> = self.on.iter().map(|(l, _)| *l).collect();
+            let right_hm = self.build_join_hash_map(&right, &right_keys);
+
+            let mut rkey: Vec<&DfValue> = vec![&DfValue::None; left_keys.len()];
+            for left_rec in left.iter() {
+                invariant!(
+                    left_rec.is_positive(),
+                    "replays should only include positive records"
+                );
+                if !self.left_filter_passes(left_rec.row())? {
+                    ret.push(Record::Positive(self.generate_null(left_rec.row())));
+                    continue;
+                }
+                for i in 0..left_keys.len() {
+                    rkey[i] = &left_rec[left_keys[i]];
+                }
+                if let Some(right_recs) = right_hm.get(&rkey) {
+                    for right_rec in right_recs {
+                        ret.push(Record::Positive(
+                            self.generate_row(left_rec.row(), right_rec.row()),
+                        ));
+                    }
+                } else {
+                    ret.push(Record::Positive(self.generate_null(left_rec.row())));
+                }
+            }
+            return Ok(ret.into());
+        }
+
         for prob_rec in probe_side {
             for i in 0..probe_keys.len() {
                 key[i] = &prob_rec[probe_keys[i]];
             }
+
+            // For LEFT JOINs where probe is left, check the filter
+            let filter_passes = if self.kind == JoinType::Left && probe_is_left {
+                self.left_filter_passes(prob_rec.row())?
+            } else {
+                true
+            };
+
+            if !filter_passes {
+                // Left row fails filter — emit NULL-extended
+                invariant!(
+                    prob_rec.is_positive(),
+                    "replays should only include positive records"
+                );
+                ret.push(Record::Positive(self.generate_null(prob_rec.row())));
+                continue;
+            }
+
             if let Some(build_recs) = hm.get(&key) {
                 invariant!(
                     prob_rec.is_positive(),
@@ -232,7 +297,14 @@ impl Join {
                         )),
                     }
                 }
-            };
+            } else if self.kind == JoinType::Left && probe_is_left {
+                // Left row with no right match — emit NULL-extended
+                invariant!(
+                    prob_rec.is_positive(),
+                    "replays should only include positive records"
+                );
+                ret.push(Record::Positive(self.generate_null(prob_rec.row())));
+            }
         }
         Ok(ret.into())
     }
@@ -249,6 +321,17 @@ impl Join {
                 }
             })
             .collect()
+    }
+
+    /// Returns `true` if the left row passes the `left_filter`, or if no filter is set.
+    ///
+    /// # Errors
+    /// Propagates any evaluation error from the filter expression.
+    fn left_filter_passes(&self, row: &[DfValue]) -> ReadySetResult<bool> {
+        match &self.left_filter {
+            Some(filter) => Ok(filter.eval(row)?.is_truthy()),
+            None => Ok(true),
+        }
     }
 
     /// Given a column index, check if it comes from the left or the right side of the join.
@@ -566,13 +649,30 @@ impl Join {
 
                 rc_diff += if positive { 1 } else { -1 };
 
-                if other_rows.is_empty() {
+                // For LEFT JOINs from the left side, check the left_filter.
+                // If it fails, this row should be NULL-extended regardless of matches.
+                let left_filter_passes = if from_left && self.kind == JoinType::Left {
+                    self.left_filter_passes(&row)?
+                } else {
+                    true
+                };
+
+                if !left_filter_passes {
+                    // ON-clause LHS predicate failed - emit NULL-extended row
+                    ret.push((self.generate_null(&row), positive).into());
+                } else if other_rows.is_empty() {
                     if self.kind == JoinType::Left && from_left {
                         // left join, got a thing from left, no rows in right == NULL
                         ret.push((self.generate_null(&row), positive).into());
                     }
                 } else {
                     for other in other_rows.iter() {
+                        // When processing from the right side, check if the left row
+                        // passes the filter
+                        if !from_left && !self.left_filter_passes(other)? {
+                            continue;
+                        }
+
                         if from == *self.left {
                             ret.push((self.generate_row(&row, other), positive).into());
                         } else {
@@ -588,10 +688,19 @@ impl Join {
                 let old_rc = new_rc as isize - rc_diff;
                 if new_rc == 0 && old_rc != 0 {
                     for other in other_rows.iter() {
+                        // Skip left rows where the left_filter currently fails — while the
+                        // filter does not pass, these rows remain NULL-extended and should
+                        // not be affected by right-side match count changes.
+                        if !self.left_filter_passes(other)? {
+                            continue;
+                        }
                         ret.push((self.generate_null(other), true).into());
                     }
                 } else if new_rc != 0 && old_rc == 0 {
                     for other in other_rows.iter() {
+                        if !self.left_filter_passes(other)? {
+                            continue;
+                        }
                         ret.push((self.generate_null(other), false).into());
                     }
                 }
@@ -732,10 +841,52 @@ impl Join {
                         &on_cols_idx_os,
                     )?;
 
-                    for other_row in &other_side_records {
+                    if self.kind == JoinType::Left && side == Side::Left {
+                        // Records come from left side; check left_filter on each left row
                         for row in group_records {
-                            results
-                                .push((self.generate_row(row.row(), other_row.row()), true).into());
+                            if !self.left_filter_passes(row.row())? {
+                                results.push((self.generate_null(row.row()), true).into());
+                                continue;
+                            }
+                            if other_side_records.is_empty() {
+                                results.push((self.generate_null(row.row()), true).into());
+                            } else {
+                                for other_row in &other_side_records {
+                                    results.push(
+                                        (self.generate_row(row.row(), other_row.row()), true)
+                                            .into(),
+                                    );
+                                }
+                            }
+                        }
+                    } else if self.kind == JoinType::Left && side == Side::Right {
+                        // Records come from right side; other_side_records are left rows
+                        for other_row in &other_side_records {
+                            if !self.left_filter_passes(other_row.row())? {
+                                // Left row fails filter — skip matched rows
+                                continue;
+                            }
+                            for row in group_records {
+                                results.push(
+                                    (self.generate_row(other_row.row(), row.row()), true).into(),
+                                );
+                            }
+                        }
+                    } else {
+                        for other_row in &other_side_records {
+                            for row in group_records {
+                                if side == Side::Left {
+                                    results.push(
+                                        (self.generate_row(row.row(), other_row.row()), true)
+                                            .into(),
+                                    );
+                                } else {
+                                    results.push(
+                                        (self.generate_row(other_row.row(), row.row()), true)
+                                            .into(),
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -1206,6 +1357,7 @@ mod tests {
             vec![(0, 0)],
             vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
             true,
+            None,
         );
 
         g.set_op("join", &["j0", "j1", "j2"], j, false);
@@ -1550,6 +1702,7 @@ mod tests {
                     (Side::Right, 2),
                 ],
                 true,
+                None,
             );
 
             g.set_op("join", &["j0", "j1", "j2", "j3"], j, false);
@@ -1620,6 +1773,178 @@ mod tests {
                     vec![2.into(), 2.into(), "b".into(), "z".into()].into()
                 ]
             );
+        }
+    }
+
+    mod left_filter {
+        use dataflow_expression::{BinaryOperator, Expr};
+        use readyset_data::DfType;
+
+        use super::*;
+
+        /// Build a filter expression: left_column[col_idx] = literal_val
+        fn eq_filter(col_idx: usize, literal_val: DfValue) -> Expr {
+            Expr::Op {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expr::Column {
+                    index: col_idx,
+                    ty: DfType::Int,
+                }),
+                right: Box::new(Expr::Literal {
+                    val: literal_val,
+                    ty: DfType::Int,
+                }),
+                ty: DfType::Bool,
+            }
+        }
+
+        /// Setup a LEFT JOIN with a left_filter that checks l0 == 1.
+        /// Columns: left (l0, l1), right (r0, r1)
+        /// Emit: [l0, l1, r1]
+        /// Join ON: l0 = r0
+        fn setup_with_filter() -> (ops::test::MockGraph, IndexPair, IndexPair) {
+            let mut g = ops::test::MockGraph::new();
+            let l = g.add_base("left", &["l0", "l1"]);
+            let r = g.add_base("right", &["r0", "r1"]);
+
+            // Filter: left column 0 must equal 1
+            let filter = eq_filter(0, DfValue::from(1));
+
+            let j = Join::new(
+                l.as_global(),
+                r.as_global(),
+                JoinType::Left,
+                vec![(0, 0)],
+                vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+                true,
+                Some(filter),
+            );
+
+            g.set_op("join", &["j0", "j1", "j2"], j, false);
+            (g, l, r)
+        }
+
+        #[test]
+        fn left_row_passes_filter_normal_join_match() {
+            let (mut j, l, r) = setup_with_filter();
+
+            // Seed right side with a matching row (r0=1)
+            let r_row = vec![1.into(), "x".into()];
+            j.seed(r, r_row.clone());
+            j.one_row(r, r_row, false);
+
+            // Insert left row with l0=1 (passes filter l0==1), should match right
+            let l_row = vec![1.into(), "a".into()];
+            j.seed(l, l_row.clone());
+            let rs = j.one_row(l, l_row, false);
+
+            assert_eq!(
+                rs,
+                vec![(vec![1.into(), "a".into(), "x".into()], true)].into()
+            );
+        }
+
+        #[test]
+        fn left_row_fails_filter_null_extended() {
+            let (mut j, l, r) = setup_with_filter();
+
+            // Seed right side with a matching row (r0=2)
+            let r_row = vec![2.into(), "x".into()];
+            j.seed(r, r_row.clone());
+            j.one_row(r, r_row, false);
+
+            // Insert left row with l0=2 (fails filter l0==1).
+            // Even though right has a matching row for key 2, it should be NULL-extended.
+            let l_row = vec![2.into(), "b".into()];
+            j.seed(l, l_row.clone());
+            let rs = j.one_row(l, l_row, false);
+
+            assert_eq!(
+                rs,
+                vec![(vec![2.into(), "b".into(), DfValue::None], true)].into()
+            );
+        }
+
+        #[test]
+        fn right_insert_left_passes_filter_matched() {
+            let (mut j, l, r) = setup_with_filter();
+
+            // Seed left side with a row that passes filter (l0=1)
+            let l_row = vec![1.into(), "a".into()];
+            j.seed(l, l_row.clone());
+            j.one_row(l, l_row, false);
+
+            // Now insert a matching right row
+            let r_row = vec![1.into(), "x".into()];
+            j.seed(r, r_row.clone());
+            let rs = j.one_row(r, r_row, false);
+
+            // Should emit the matched row plus revoke the null-extended row
+            assert_eq!(
+                rs,
+                vec![
+                    (vec![1.into(), "a".into(), "x".into()], true),
+                    (vec![1.into(), "a".into(), DfValue::None], false),
+                ]
+                .into()
+            );
+        }
+
+        #[test]
+        fn right_insert_left_fails_filter_no_change() {
+            let (mut j, l, r) = setup_with_filter();
+
+            // Seed left side with a row that fails filter (l0=2)
+            let l_row = vec![2.into(), "b".into()];
+            j.seed(l, l_row.clone());
+            j.one_row(l, l_row, false);
+
+            // Insert a matching right row for key 2
+            let r_row = vec![2.into(), "y".into()];
+            j.seed(r, r_row.clone());
+            let rs = j.one_row(r, r_row, false);
+
+            // Left row fails filter, so no matched rows should be emitted
+            assert_eq!(rs.len(), 0);
+        }
+
+        #[test]
+        fn right_delete_left_passes_filter() {
+            let (mut j, l, r) = setup_with_filter();
+
+            // Seed right side with two rows for key 1
+            j.seed(r, vec![1.into(), "x".into()]);
+            j.one_row(r, vec![1.into(), "x".into()], false);
+            j.seed(r, vec![1.into(), "y".into()]);
+            j.one_row(r, vec![1.into(), "y".into()], false);
+
+            // Seed left side (passes filter, l0=1)
+            j.seed(l, vec![1.into(), "a".into()]);
+            j.one_row(l, vec![1.into(), "a".into()], false);
+
+            // Delete one right row — left row passes filter so matched row is revoked
+            let rs = j.one_row(r, (vec![1.into(), "x".into()], false), false);
+            assert!(rs.has_negative(&[1.into(), "a".into(), "x".into()][..]));
+        }
+
+        #[test]
+        fn right_delete_left_fails_filter() {
+            let (mut j, l, r) = setup_with_filter();
+
+            // Seed right side with two rows for key 2
+            j.seed(r, vec![2.into(), "x".into()]);
+            j.one_row(r, vec![2.into(), "x".into()], false);
+            j.seed(r, vec![2.into(), "y".into()]);
+            j.one_row(r, vec![2.into(), "y".into()], false);
+
+            // Seed left side (fails filter, l0=2)
+            j.seed(l, vec![2.into(), "b".into()]);
+            j.one_row(l, vec![2.into(), "b".into()], false);
+
+            // Delete one right row — left row fails filter so no matched row
+            // existed; the delete should not produce any output for this left row
+            let rs = j.one_row(r, (vec![2.into(), "x".into()], false), false);
+            assert_eq!(rs.len(), 0);
         }
     }
 }

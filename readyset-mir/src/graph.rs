@@ -238,11 +238,32 @@ impl MirGraph {
                 }
                 columns
             }
-            MirNodeInner::Join { on, project } | MirNodeInner::LeftJoin { on, project } => {
+            MirNodeInner::Join { on, project } => {
                 let mut columns = project.clone();
                 for c in on.iter().flat_map(|(lc, rc)| [lc, rc]) {
                     if !columns.iter().any(|col| col == c) {
                         columns.push(c.clone())
+                    }
+                }
+                columns
+            }
+            MirNodeInner::LeftJoin {
+                on,
+                project,
+                left_local_preds,
+            } => {
+                let mut columns = project.clone();
+                for c in on.iter().flat_map(|(lc, rc)| [lc, rc]) {
+                    if !columns.iter().any(|col| col == c) {
+                        columns.push(c.clone())
+                    }
+                }
+                for pred in left_local_preds {
+                    for c in pred.referred_columns() {
+                        let mir_col = MirColumn::from(c.clone());
+                        if !columns.contains(&mir_col) {
+                            columns.push(mir_col)
+                        }
                     }
                 }
                 columns

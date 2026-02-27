@@ -209,6 +209,8 @@ pub(super) fn mir_node_to_flow_parts(
                         on,
                         project,
                         JoinType::Inner,
+                        &[],
+                        custom_types,
                         mig,
                     )?)
                 }
@@ -273,7 +275,11 @@ pub(super) fn mir_node_to_flow_parts(
                     }
                     None
                 }
-                MirNodeInner::LeftJoin { on, project, .. } => {
+                MirNodeInner::LeftJoin {
+                    on,
+                    project,
+                    left_local_preds,
+                } => {
                     invariant_eq!(ancestors.len(), 2);
                     let left = ancestors[0];
                     let right = ancestors[1];
@@ -286,6 +292,8 @@ pub(super) fn mir_node_to_flow_parts(
                         on,
                         project,
                         JoinType::Left,
+                        left_local_preds,
+                        custom_types,
                         mig,
                     )?)
                 }
@@ -976,6 +984,8 @@ fn make_join_node(
     on: &[(Column, Column)],
     proj_cols: &[Column],
     kind: JoinType,
+    left_local_preds: &[Expr],
+    custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeIndex> {
     let mut left_na = graph.resolve_dataflow_node(left).ok_or_else(|| {
@@ -1055,6 +1065,37 @@ fn make_join_node(
     // we need to check if the rhs parent is fully materialized, as this is needed for straddled join
     // upquery optimizations.
     let rhs_full_mat = mig.dataflow_state.ingredients[right_na.address()].is_full_mat();
+
+    // Lower left_local_preds (ON-clause predicates referencing only the left side)
+    // into a single dataflow expression for the join operator to evaluate.
+    let left_filter = if left_local_preds.is_empty() {
+        None
+    } else {
+        let left_cols = &mig.dataflow_state.ingredients[left_na.address()]
+            .columns()
+            .to_vec();
+        let lowered: Vec<DfExpr> = left_local_preds
+            .iter()
+            .map(|pred| {
+                lower_expression(
+                    graph,
+                    left,
+                    pred.clone(),
+                    left_cols,
+                    custom_types,
+                    mig.dialect,
+                )
+            })
+            .collect::<ReadySetResult<Vec<_>>>()?;
+        // Combine multiple predicates with AND
+        lowered.into_iter().reduce(|acc, expr| DfExpr::Op {
+            op: dataflow_expression::BinaryOperator::And,
+            left: Box::new(acc),
+            right: Box::new(expr),
+            ty: DfType::Bool,
+        })
+    };
+
     let j = Join::new(
         left_na.address(),
         right_na.address(),
@@ -1062,6 +1103,7 @@ fn make_join_node(
         on_idxs,
         emit,
         rhs_full_mat,
+        left_filter,
     );
     let n = mig.add_ingredient(name, cols, j);
 
@@ -1182,6 +1224,7 @@ fn make_join_aggregates_node(
         on,
         project,
         rhs_full_mat,
+        None,
     );
     let n = mig.add_ingredient(name, cols, j);
 

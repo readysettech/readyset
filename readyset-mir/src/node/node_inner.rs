@@ -203,6 +203,10 @@ pub enum MirNodeInner {
         on: Vec<(Column, Column)>,
         /// Columns (from both parents) to project in the output.
         project: Vec<Column>,
+        /// Predicates from the ON clause that reference only the left side of the join.
+        /// These must be evaluated as part of the join semantics (not as pre-filters)
+        /// to preserve correct LEFT JOIN NULL-extension behavior.
+        left_local_preds: Vec<Expr>,
     },
     /// Join where nodes in the right-hand side depend on columns in the left-hand side
     /// (referencing tables in `dependent_tables`). These are created during compilation for
@@ -237,6 +241,9 @@ pub enum MirNodeInner {
         on: Vec<(Column, Column)>,
         /// Columns (from both parents) to project in the output.
         project: Vec<Column>,
+        /// Predicates from the ON clause that reference only the left side of the join.
+        /// Carried through decorrelation into the resulting LeftJoin node.
+        left_local_preds: Vec<Expr>,
     },
     /// Represents view key placeholders in a query that have not yet been added to the [`Leaf`][]
     /// node of the query.
@@ -606,21 +613,34 @@ impl MirNodeInner {
             MirNodeInner::LeftJoin {
                 ref on,
                 ref project,
-                ..
+                ref left_local_preds,
             } => {
                 let jc = on
                     .iter()
                     .map(|(l, r)| format!("{}:{}", l.name, r.name))
                     .collect::<Vec<_>>()
                     .join(", ");
+                let filter_str = if left_local_preds.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " where_left: {}",
+                        left_local_preds
+                            .iter()
+                            .map(|p| p.display(readyset_sql::Dialect::MySQL).to_string())
+                            .collect::<Vec<_>>()
+                            .join(" AND ")
+                    )
+                };
                 format!(
-                    "⟕ [{} on {}]",
+                    "⟕ [{} on {}{}]",
                     project
                         .iter()
                         .map(|c| c.name.as_str())
                         .collect::<Vec<_>>()
                         .join(", "),
-                    jc
+                    jc,
+                    filter_str
                 )
             }
             MirNodeInner::DependentJoin {

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use mir::NodeIndex;
 use readyset_errors::{internal_err, invariant, unsupported, ReadySetResult};
-use readyset_sql::ast::Relation;
+use readyset_sql::ast::{Expr, Relation};
 
 use super::JoinKind;
 use crate::controller::sql::mir::SqlToMirConverter;
@@ -85,15 +85,35 @@ pub(super) fn make_joins(
             }
         }
 
-        let mut left_parent = left_chain.last_node;
-        for (i, p) in left_preds.into_iter().flatten().enumerate() {
-            left_parent = mir_converter.make_predicate_nodes(
-                query_name,
-                mir_converter.generate_label(&format!("left_local_{i}").into()),
-                left_parent,
-                p,
-            )?;
-        }
+        // For LEFT JOINs, left_local_preds must NOT be applied as pre-filters on the
+        // LHS — doing so would eliminate rows before the join, preventing correct
+        // NULL-extension. Instead, they are passed into the join node itself so the
+        // dataflow Join operator can evaluate them and generate NULL-extended rows
+        // when the predicate fails.
+        //
+        // Right_local_preds reference only the right side, so applying them as
+        // pre-filters on the RHS is semantically equivalent to evaluating them
+        // as part of the ON clause — a right row that fails the predicate will
+        // simply not match, causing the left row to be NULL-extended.
+        let (left_parent, left_local_preds_for_join) = match join_kind {
+            JoinKind::Left | JoinKind::DependentLeft => {
+                let preds: Vec<Expr> = left_preds.into_iter().flatten().cloned().collect();
+                (left_chain.last_node, preds)
+            }
+            _ => {
+                // For inner joins, left_local_preds can safely be applied as pre-filters
+                let mut parent = left_chain.last_node;
+                for (i, p) in left_preds.into_iter().flatten().enumerate() {
+                    parent = mir_converter.make_predicate_nodes(
+                        query_name,
+                        mir_converter.generate_label(&format!("left_local_{i}").into()),
+                        parent,
+                        p,
+                    )?;
+                }
+                (parent, vec![])
+            }
+        };
 
         let mut right_parent = right_chain.last_node;
         for (i, p) in right_preds.into_iter().flatten().enumerate() {
@@ -112,6 +132,7 @@ pub(super) fn make_joins(
             left_parent,
             right_parent,
             join_kind,
+            left_local_preds_for_join,
         )?;
 
         // merge node chains
@@ -156,6 +177,7 @@ pub(super) fn make_cross_joins(
             n1,
             n2,
             join_kind,
+            vec![],
         )?;
         join_nodes.push(node);
         Ok(node)

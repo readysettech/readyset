@@ -1026,6 +1026,7 @@ impl SqlToMirConverter {
         left_node: NodeIndex,
         right_node: NodeIndex,
         kind: JoinKind,
+        left_local_preds: Vec<Expr>,
     ) -> ReadySetResult<NodeIndex> {
         // TODO(malte): this is where we overproject join columns in order to increase reuse
         // opportunities. Technically, we need to only project those columns here that the query
@@ -1078,9 +1079,17 @@ impl SqlToMirConverter {
 
         let inner = match kind {
             JoinKind::Inner => MirNodeInner::Join { on, project },
-            JoinKind::Left => MirNodeInner::LeftJoin { on, project },
+            JoinKind::Left => MirNodeInner::LeftJoin {
+                on,
+                project,
+                left_local_preds,
+            },
             JoinKind::DependentInner => MirNodeInner::DependentJoin { on, project },
-            JoinKind::DependentLeft => MirNodeInner::DependentLeftJoin { on, project },
+            JoinKind::DependentLeft => MirNodeInner::DependentLeftJoin {
+                on,
+                project,
+                left_local_preds,
+            },
         };
         trace!(?inner, "Added join node");
         Ok(self.add_query_node(
@@ -1127,6 +1136,7 @@ impl SqlToMirConverter {
             } else {
                 JoinKind::Left
             },
+            vec![],
         )?;
 
         Ok(self.make_filter_node(
@@ -1246,6 +1256,7 @@ impl SqlToMirConverter {
             } else {
                 JoinKind::Left
             },
+            vec![],
         )?;
 
         Ok(self.make_project_node(
@@ -1561,6 +1572,7 @@ impl SqlToMirConverter {
                 } else {
                     JoinKind::Inner
                 },
+                vec![],
             )
         }
     }
@@ -1900,6 +1912,7 @@ impl SqlToMirConverter {
                 } else {
                     JoinKind::Inner
                 },
+                vec![],
             )?
         };
 

@@ -1,0 +1,114 @@
+# Regression test for REA-6234: LEFT JOIN with ON-clause predicates referencing
+# only the left side should not eliminate left rows. Instead, when the LHS
+# predicate fails, the row should appear with NULL-extended RHS columns.
+
+statement ok
+create table lhs (
+  rownum int primary key,
+  test_char char(1)
+);
+
+statement ok
+create table rhs (
+  rownum int primary key,
+  test_varchar varchar(20)
+);
+
+statement ok
+insert into lhs (rownum, test_char) values
+  (1, '-'),
+  (2, '+'),
+  (3, 'd'),
+  (4, '-'),
+  (5, 'A');
+
+statement ok
+insert into rhs (rownum, test_varchar) values
+  (1, 'alpha'),
+  (2, 'beta'),
+  (3, 'gamma'),
+  (4, 'delta'),
+  (5, 'epsilon');
+
+# LEFT JOIN with LHS-only ON predicate: lhs.test_char = '-'
+# Rows where test_char = '-' should match and get RHS values.
+# Rows where test_char != '-' should appear with NULL for RHS columns.
+query ITT rowsort
+SELECT
+  lhs.rownum,
+  rhs.test_varchar,
+  lhs.test_char
+FROM
+  lhs
+LEFT JOIN rhs ON rhs.rownum = lhs.rownum
+  AND lhs.test_char = '-'
+----
+1
+alpha
+-
+2
+NULL
++
+3
+NULL
+d
+4
+delta
+-
+5
+NULL
+A
+
+# Same query but with the LHS predicate first in the ON clause
+query ITT rowsort
+SELECT
+  lhs.rownum,
+  rhs.test_varchar,
+  lhs.test_char
+FROM
+  lhs
+LEFT JOIN rhs ON lhs.test_char = '-'
+  AND rhs.rownum = lhs.rownum
+----
+1
+alpha
+-
+2
+NULL
++
+3
+NULL
+d
+4
+delta
+-
+5
+NULL
+A
+
+# LHS-only predicate with inequality
+query ITT rowsort
+SELECT
+  lhs.rownum,
+  rhs.test_varchar,
+  lhs.test_char
+FROM
+  lhs
+LEFT JOIN rhs ON rhs.rownum = lhs.rownum
+  AND lhs.rownum > 3
+----
+1
+NULL
+-
+2
+NULL
++
+3
+NULL
+d
+4
+delta
+-
+5
+epsilon
+A
