@@ -450,20 +450,26 @@ impl TestBuilder {
             handle.backend_ready().await;
         }
 
+        let query_status_cache = self.query_status_cache.unwrap_or_else(|| {
+            Box::leak(Box::new(
+                QueryStatusCache::new().style(self.migration_style),
+            ))
+        });
+
         let (schema_catalog_synchronizer, schema_catalog) =
             SchemaCatalogSynchronizer::new(handle.clone());
+        let schema_catalog_synchronizer = schema_catalog_synchronizer
+            .with_change_handler(Arc::new(QscSchemaChangeAdapter::new(query_status_cache)));
+        tokio::spawn(schema_catalog_synchronizer.run(shutdown_tx.subscribe()));
+        // Give the synchronizer a chance to subscribe to controller events before tests start
+        // issuing DDL/DML against the upstream, otherwise early schema updates can be missed.
+        tokio::task::yield_now().await;
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let view_name_cache = SharedCache::new();
         let view_cache = SharedCache::new();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-
-        let query_status_cache = self.query_status_cache.unwrap_or_else(|| {
-            Box::leak(Box::new(
-                QueryStatusCache::new().style(self.migration_style),
-            ))
-        });
 
         if matches!(self.migration_style, MigrationStyle::Explicit) {
             let rh = handle.clone();
@@ -616,14 +622,6 @@ impl TestBuilder {
                 _ = connection_fut => {},
             }
         });
-
-        // TODO(mvzink): Move this spawn earlier after REA-6107.
-        let schema_catalog_synchronizer = schema_catalog_synchronizer
-            .with_change_handler(Arc::new(QscSchemaChangeAdapter::new(query_status_cache)));
-        tokio::spawn(schema_catalog_synchronizer.run(shutdown_tx.subscribe()));
-        // Give the synchronizer a chance to subscribe to controller events before tests start
-        // issuing DDL/DML against the upstream, otherwise early schema updates can be missed.
-        tokio::task::yield_now().await;
 
         (
             A::connection_opts_with_port(

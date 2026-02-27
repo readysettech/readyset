@@ -1004,9 +1004,22 @@ where
 
         let (shutdown_tx, shutdown_rx) = shutdown::channel();
 
+        let migration_style = options.query_caching;
+        rs_connect.in_scope(|| info!(?migration_style));
+
+        let query_status_cache: &'static _ = Box::leak(Box::new(
+            QueryStatusCache::with_capacity(options.query_status_capacity)
+                .style(migration_style)
+                .set_placeholder_inlining(options.feature_placeholder_inlining),
+        ));
+
         rs_connect.in_scope(|| info!("Spawning schema catalog synchronizer task"));
         let (schema_catalog_synchronizer, schema_catalog) =
             SchemaCatalogSynchronizer::new(rh.clone());
+        let schema_catalog_synchronizer = schema_catalog_synchronizer
+            .with_change_handler(Arc::new(QscSchemaChangeAdapter::new(query_status_cache)));
+        rt.handle()
+            .spawn(schema_catalog_synchronizer.run(shutdown_rx.clone()));
 
         if options.noria_metrics {
             warn!("--noria-metrics is deprecated and has no effect. It will be removed in a future release.");
@@ -1063,16 +1076,6 @@ where
             rs_connect.in_scope(|| info!("Will perform Blocking Reads"));
             ReadBehavior::Blocking
         };
-
-        let migration_style = options.query_caching;
-
-        rs_connect.in_scope(|| info!(?migration_style));
-
-        let query_status_cache: &'static _ = Box::leak(Box::new(
-            QueryStatusCache::with_capacity(options.query_status_capacity)
-                .style(migration_style)
-                .set_placeholder_inlining(options.feature_placeholder_inlining),
-        ));
 
         let telemetry_sender = rt.block_on(async {
             let proxied_queries_reporter =
@@ -1361,12 +1364,6 @@ where
         } else {
             None
         };
-
-        // TODO(mvzink): After REA-6107, move this to when we create the handle. See comment there.
-        let schema_catalog_synchronizer = schema_catalog_synchronizer
-            .with_change_handler(Arc::new(QscSchemaChangeAdapter::new(query_status_cache)));
-        rt.handle()
-            .spawn(schema_catalog_synchronizer.run(shutdown_rx.clone()));
 
         health_reporter.set_state(AdapterState::Healthy);
 
