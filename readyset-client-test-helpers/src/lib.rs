@@ -13,7 +13,9 @@ use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection, Repli
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode, QueryDestination, QueryInfo};
 use readyset_adapter::metrics_handle::MetricsHandle;
-use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
+use readyset_adapter::query_status_cache::{
+    MigrationStyle, QscSchemaChangeAdapter, QueryStatusCache,
+};
 use readyset_adapter::shallow_refresh_pool::ShallowRefreshPool;
 use readyset_adapter::{
     Backend, QueryHandler, ReadySetStatusReporter, UpstreamConfig, UpstreamDatabase,
@@ -221,6 +223,7 @@ pub struct TestBuilder {
     topk: bool,
     straddled_joins: bool,
     parsing_preset: ParsingPreset,
+    replication_tables: Option<String>,
 }
 
 impl Default for TestBuilder {
@@ -259,6 +262,7 @@ impl TestBuilder {
             topk: false,
             straddled_joins: false,
             parsing_preset: ParsingPreset::for_tests(),
+            replication_tables: None,
         }
     }
 
@@ -360,6 +364,14 @@ impl TestBuilder {
         self
     }
 
+    /// Set the replication tables allowlist filter. Only tables matching the given
+    /// comma-separated `schema.table` patterns will be replicated; all others are
+    /// marked as non-replicated.
+    pub fn replication_tables(mut self, tables: String) -> Self {
+        self.replication_tables = Some(tables);
+        self
+    }
+
     pub async fn build<A>(self) -> (A::ConnectionOpts, Handle, ShutdownSender)
     where
         A: Adapter + 'static,
@@ -430,6 +442,8 @@ impl TestBuilder {
         } else {
             builder.set_replicator_server_id(unique_server_id());
         }
+
+        builder.set_replication_tables(self.replication_tables);
 
         let (mut handle, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
         if self.wait_for_backend {
@@ -604,6 +618,8 @@ impl TestBuilder {
         });
 
         // TODO(mvzink): Move this spawn earlier after REA-6107.
+        let schema_catalog_synchronizer = schema_catalog_synchronizer
+            .with_change_handler(Arc::new(QscSchemaChangeAdapter::new(query_status_cache)));
         tokio::spawn(schema_catalog_synchronizer.run(shutdown_tx.subscribe()));
         // Give the synchronizer a chance to subscribe to controller events before tests start
         // issuing DDL/DML against the upstream, otherwise early schema updates can be missed.

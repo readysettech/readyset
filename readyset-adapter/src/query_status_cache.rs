@@ -945,6 +945,28 @@ impl SchemaChangeHandler for QueryStatusCache {
     }
 }
 
+/// Bridges `&'static QueryStatusCache` to `Arc<dyn SchemaChangeHandler>`.
+///
+/// The QSC is `Box::leak`'d for `&'static` usage throughout the adapter, but the synchronizer
+/// uses `Arc<dyn SchemaChangeHandler>`. This adapter bridges the two.
+pub struct QscSchemaChangeAdapter(&'static QueryStatusCache);
+
+impl QscSchemaChangeAdapter {
+    pub fn new(qsc: &'static QueryStatusCache) -> Self {
+        Self(qsc)
+    }
+}
+
+impl SchemaChangeHandler for QscSchemaChangeAdapter {
+    fn invalidate_for_tables(&self, tables: &[Relation]) {
+        self.0.invalidate_for_tables(tables)
+    }
+
+    fn invalidate_all(&self) {
+        self.0.invalidate_all()
+    }
+}
+
 /// MigrationStyle is used to communicate which style of managing migrations we have configured.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum MigrationStyle {

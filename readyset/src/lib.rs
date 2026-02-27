@@ -32,7 +32,9 @@ use readyset_adapter::http_router::NoriaAdapterHttpRouter;
 use readyset_adapter::metrics_handle::MetricsHandle;
 use readyset_adapter::migration_handler::MigrationHandler;
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
-use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
+use readyset_adapter::query_status_cache::{
+    MigrationStyle, QscSchemaChangeAdapter, QueryStatusCache,
+};
 use readyset_adapter::shallow_refresh_pool::ShallowRefreshPool;
 use readyset_adapter::views_synchronizer::ViewsSynchronizer;
 use readyset_adapter::{
@@ -63,7 +65,7 @@ use readyset_util::retry_with_exponential_backoff;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown;
 use readyset_version::*;
-use schema_catalog::{SchemaCatalogSynchronizer, SchemaChangeHandler};
+use schema_catalog::SchemaCatalogSynchronizer;
 use tokio::net;
 use tokio::sync::RwLock;
 use tokio::time::{sleep, timeout};
@@ -861,22 +863,6 @@ pub fn init_adapter_tracing(
     Ok(rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?)
 }
 
-/// Bridges `&'static QueryStatusCache` to `Arc<dyn SchemaChangeHandler>`.
-///
-/// The QSC is `Box::leak`'d for `&'static` usage throughout the adapter, but the synchronizer
-/// uses `Arc<dyn SchemaChangeHandler>`.
-struct QscSchemaChangeAdapter(&'static QueryStatusCache);
-
-impl SchemaChangeHandler for QscSchemaChangeAdapter {
-    fn invalidate_for_tables(&self, tables: &[Relation]) {
-        self.0.invalidate_for_tables(tables)
-    }
-
-    fn invalidate_all(&self) {
-        self.0.invalidate_all()
-    }
-}
-
 impl<H> NoriaAdapter<H>
 where
     H: ConnectionHandler + Clone + Send + Sync + 'static,
@@ -1377,9 +1363,8 @@ where
         };
 
         // TODO(mvzink): After REA-6107, move this to when we create the handle. See comment there.
-        let handler: Arc<dyn SchemaChangeHandler> =
-            Arc::new(QscSchemaChangeAdapter(query_status_cache));
-        let schema_catalog_synchronizer = schema_catalog_synchronizer.with_change_handler(handler);
+        let schema_catalog_synchronizer = schema_catalog_synchronizer
+            .with_change_handler(Arc::new(QscSchemaChangeAdapter::new(query_status_cache)));
         rt.handle()
             .spawn(schema_catalog_synchronizer.run(shutdown_rx.clone()));
 

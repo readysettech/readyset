@@ -259,6 +259,14 @@ impl Builder {
         self.config.replicator_config = config;
     }
 
+    /// Set the replication tables filter (allowlist).
+    ///
+    /// Format: comma-separated `schema.table` patterns (e.g., `"mydb.t1, mydb.t2"`).
+    /// When set, only matching tables are replicated; all others are marked non-replicated.
+    pub fn set_replication_tables(&mut self, tables: Option<String>) {
+        self.config.replicator_config.replication_tables = tables;
+    }
+
     /// Set the server ID for replication
     pub fn set_replicator_server_id(&mut self, server_id: ReplicationServerId) {
         self.config.replicator_config.replication_server_id = Some(server_id);
