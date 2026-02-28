@@ -741,6 +741,96 @@ where
     pub upstream: Option<DB>,
 }
 
+impl<DB> BackendConnectors<DB>
+where
+    DB: UpstreamDatabase,
+{
+    /// Whether or not we have fallback enabled.
+    pub fn has_fallback(&self) -> bool {
+        self.upstream.is_some()
+    }
+
+    /// Rewrite and wrap a shallow query into a [`ShallowViewRequest`].
+    fn prepare_shallow_query(
+        &self,
+        shallow: Result<ShallowCacheQuery, ReadySetError>,
+    ) -> Option<(ShallowViewRequest, ShallowQueryParameters)> {
+        let Ok(mut shallow) = shallow else {
+            return None;
+        };
+        let Ok(params) =
+            adapter_rewrites::rewrite_shallow(&mut shallow, self.noria.rewrite_params())
+        else {
+            return None;
+        };
+        let shallow = ShallowViewRequest::new(shallow, self.noria.schema_search_path().to_owned());
+        Some((shallow, params))
+    }
+
+    /// Responds to a `SHOW REPLAY PATHS` query
+    /// Returns replay paths data as a result set with columns and rows
+    async fn show_replay_paths(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        // Get replay paths from the controller (already flattened and sorted)
+        let replay_paths = self.noria.replay_paths().await?;
+
+        // Create schema with all columns
+        let schema = create_dummy_schema!(
+            "domain",
+            "tag",
+            "source",
+            "destination_index",
+            "target_index",
+            "path",
+            "trigger_type",
+            "trigger_index",
+            "trigger_source_options"
+        );
+
+        // Convert each ReplayPathInfo into a row
+        let rows: Vec<Vec<DfValue>> = replay_paths
+            .into_iter()
+            .map(|info| {
+                vec![
+                    info.domain.to_string().into(),
+                    info.tag.to_string().into(),
+                    info.source
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "None".to_string())
+                        .into(),
+                    info.destination_index.unwrap_or_default().into(),
+                    info.target_index.unwrap_or_default().into(),
+                    info.path_segments.join(" → ").into(),
+                    info.trigger_type.into(),
+                    info.trigger_index.unwrap_or_default().into(),
+                    info.trigger_source_options.into(),
+                ]
+            })
+            .collect();
+
+        Ok(noria_connector::QueryResult::from_owned(
+            schema,
+            vec![Results::new(rows)],
+        ))
+    }
+
+    /// Determines via running PREPARE if the upstream can support this query.
+    async fn upstream_supports(&mut self, req: &ShallowViewRequest) -> anyhow::Result<()> {
+        let Some(upstream) = self.upstream.as_mut() else {
+            bail!("No upstream database found");
+        };
+
+        let query = if matches!(DB::SQL_DIALECT, Dialect::MySQL) {
+            let mut stmt = req.query.clone();
+            convert_placeholders_to_question_marks(&mut stmt)?;
+            stmt.display(DB::SQL_DIALECT).to_string()
+        } else {
+            req.query.display(DB::SQL_DIALECT).to_string()
+        };
+
+        upstream.can_prepare(&query).await
+    }
+}
+
 /// Variables that keep track of the [`Backend`] state
 struct BackendState<DB>
 where
@@ -804,6 +894,225 @@ where
     authority: Arc<Authority>,
     /// The time at which the adapter started.
     adapter_start_time: SystemTime,
+}
+
+impl<DB> BackendState<DB>
+where
+    DB: UpstreamDatabase,
+{
+    /// Generates response to the `EXPLAIN LAST STATEMENT` query
+    fn explain_last_statement(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let (destination, error) = self
+            .last_query
+            .as_ref()
+            .map(|info| {
+                (
+                    info.destination.to_string(),
+                    match &info.noria_error {
+                        s if s.is_empty() => "ok".to_string(),
+                        s => s.clone(),
+                    },
+                )
+            })
+            .unwrap_or_else(|| ("unknown".to_string(), "ok".to_string()));
+
+        Ok(noria_connector::QueryResult::Meta(vec![
+            ("Query_destination", destination).into(),
+            ("Readyset_error", error).into(),
+        ]))
+    }
+
+    /// Handles a `DROP ALL PROXIED QUERIES` request
+    async fn drop_all_proxied_queries(
+        &self,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        self.query_status_cache.clear_proxied_queries();
+        Ok(noria_connector::QueryResult::Empty)
+    }
+
+    fn drop_view_request(&mut self, view_request: &ViewCreateRequest) {
+        self.query_status_cache.update_query_migration_state(
+            view_request,
+            MigrationState::Pending,
+            None,
+        );
+        self.query_status_cache
+            .always_attempt_readyset(view_request, false);
+        self.invalidate_prepared_statements_cache(view_request);
+    }
+
+    fn drop_shallow_view_request(&self, shallow: &ShallowViewRequest) {
+        self.query_status_cache.update_query_migration_state(
+            shallow,
+            MigrationState::Pending,
+            None,
+        );
+        self.query_status_cache
+            .always_attempt_readyset(shallow, false);
+    }
+
+    async fn drop_shallow_cached_query(
+        &self,
+        name: Option<&Relation>,
+        query_id: Option<QueryId>,
+        ddl_req: CacheDDLRequest,
+    ) -> ReadySetResult<()> {
+        let info = self
+            .shallow
+            .get(name, query_id.as_ref())
+            .map(|cache| cache.get_info());
+
+        self.shallow.drop_cache(name, query_id.as_ref())?;
+
+        if let Some(CacheInfo {
+            query,
+            schema_search_path,
+            ..
+        }) = info
+        {
+            let view_request = ShallowViewRequest::new(query, schema_search_path);
+            self.drop_shallow_view_request(&view_request);
+        };
+
+        if let Err(e) = retry_with_exponential_backoff!(
+            || async {
+                self
+                    .authority
+                    .remove_shallow_cache_ddl_request(ddl_req.clone())
+                    .await
+            },
+            retries: 5,
+            delay: 1,
+            backoff: 2,
+        ) {
+            warn!(
+                error = %e,
+                "Failed to remove shallow cache DDL request"
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Iterate over the cache of the prepared statements, and invalidate those that are
+    /// equal to the one provided
+    fn invalidate_prepared_statements_cache(&mut self, stmt: &ViewCreateRequest) {
+        // Linear scan, but we shouldn't be doing it often, right?
+        self.prepared_statements
+            .iter_mut()
+            .filter_map(
+                |(
+                    _,
+                    PreparedStatement {
+                        prep,
+                        migration_state,
+                        view_request,
+                        ..
+                    },
+                )| {
+                    if matches!(*migration_state, MigrationState::Successful(_))
+                        && view_request.as_ref() == Some(stmt)
+                    {
+                        *migration_state = MigrationState::Pending;
+                        Some(prep)
+                    } else {
+                        None
+                    }
+                },
+            )
+            .for_each(|ps| ps.make_upstream_only());
+    }
+
+    fn readyset_adapter_status(&self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let mut statuses = match self.metrics_handle.as_ref() {
+            Some(handle) => handle.readyset_status(),
+            None => vec![],
+        };
+        let time_ms = self
+            .adapter_start_time
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        statuses.push((
+            "Process start time".to_string(),
+            time_or_null(Some(time_ms)),
+        ));
+
+        Ok(noria_connector::QueryResult::MetaVariables(
+            statuses.into_iter().map(MetaVariable::from).collect(),
+        ))
+    }
+
+    fn show_connections(&self) -> Result<noria_connector::QueryResult<'static>, ReadySetError> {
+        let schema = SelectSchema {
+            schema: Cow::Owned(vec![ColumnSchema {
+                column: ast::Column {
+                    name: "remote_addr".into(),
+                    table: None,
+                },
+                column_type: DfType::DEFAULT_TEXT,
+                base: None,
+            }]),
+            columns: Cow::Owned(vec!["remote_addr".into()]),
+        };
+
+        let data = self
+            .connections
+            .iter()
+            .flat_map(|c| c.iter())
+            .map(|conn| vec![conn.to_string().into()])
+            .collect::<Vec<_>>();
+
+        Ok(noria_connector::QueryResult::from_owned(
+            schema,
+            vec![Results::new(data)],
+        ))
+    }
+
+    /// Responds to a `SHOW SHALLOW CACHE ENTRIES` query
+    async fn show_shallow_entries(
+        &self,
+        query_id: Option<&str>,
+        limit: Option<u64>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let query_id = query_id.map(|q| q.parse()).transpose()?;
+        let limit = limit.map(|l| l as usize);
+        let shallow = Arc::clone(&self.shallow);
+
+        let rows: Vec<Vec<DfValue>> = tokio::task::spawn_blocking(move || {
+            let entries = shallow.list_entries(query_id, limit);
+            entries
+                .into_iter()
+                .map(|entry| {
+                    vec![
+                        entry
+                            .query_id
+                            .map(|id| id.to_string().into())
+                            .unwrap_or(DfValue::None),
+                        DfValue::from(format!("{:016x}", entry.entry_id)),
+                        time_or_null(Some(entry.last_accessed_ms)).into(),
+                        time_or_null(Some(entry.last_refreshed_ms)).into(),
+                        DfValue::from(entry.refresh_time_ms as i64),
+                    ]
+                })
+                .collect()
+        })
+        .await
+        .map_err(|e| internal_err!("spawn_blocking failed: {}", e))?;
+
+        let select_schema = create_dummy_schema!(
+            "query id",
+            "entry id",
+            "last accessed",
+            "last refreshed",
+            "refresh time ms"
+        );
+
+        Ok(noria_connector::QueryResult::from_owned(
+            select_schema,
+            vec![Results::new(rows)],
+        ))
+    }
 }
 
 /// Settings that have no state and are constant for a given [`Backend`]
@@ -1485,7 +1794,7 @@ where
                 // For select statements only InRequestPath should trigger migrations
                 // synchronously, or if no upstream is present.
                 must_migrate: self.settings.migration_mode == MigrationMode::InRequestPath
-                    || !Self::has_fallback(&self.connectors),
+                    || !self.connectors.has_fallback(),
                 should_do_noria: should_do_readyset,
                 always: status.always,
                 schema_generation: rewrite_context.schema_generation(),
@@ -1521,8 +1830,7 @@ where
             }
         };
 
-        if let Some((shallow, params)) =
-            Self::prepare_shallow_query(&self.connectors, shallow_parsed)
+        if let Some((shallow, params)) = self.connectors.prepare_shallow_query(shallow_parsed)
             && let Some((query_id, always)) = Self::should_query_shallow(
                 &mut self.connectors,
                 &self.settings,
@@ -2065,39 +2373,6 @@ where
         Ok(())
     }
 
-    /// Iterate over the cache of the prepared statements, and invalidate those that are
-    /// equal to the one provided
-    fn invalidate_prepared_statements_cache(
-        state: &mut BackendState<DB>,
-        stmt: &ViewCreateRequest,
-    ) {
-        // Linear scan, but we shouldn't be doing it often, right?
-        state
-            .prepared_statements
-            .iter_mut()
-            .filter_map(
-                |(
-                    _,
-                    PreparedStatement {
-                        prep,
-                        migration_state,
-                        view_request,
-                        ..
-                    },
-                )| {
-                    if matches!(*migration_state, MigrationState::Successful(_))
-                        && view_request.as_ref() == Some(stmt)
-                    {
-                        *migration_state = MigrationState::Pending;
-                        Some(prep)
-                    } else {
-                        None
-                    }
-                },
-            )
-            .for_each(|ps| ps.make_upstream_only());
-    }
-
     fn upstream_mut(upstream: &mut Option<DB>) -> ReadySetResult<&mut DB> {
         upstream
             .as_mut()
@@ -2449,30 +2724,6 @@ where
         }
     }
 
-    /// Generates response to the `EXPLAIN LAST STATEMENT` query
-    fn explain_last_statement(
-        state: &BackendState<DB>,
-    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let (destination, error) = state
-            .last_query
-            .as_ref()
-            .map(|info| {
-                (
-                    info.destination.to_string(),
-                    match &info.noria_error {
-                        s if s.is_empty() => "ok".to_string(),
-                        s => s.clone(),
-                    },
-                )
-            })
-            .unwrap_or_else(|| ("unknown".to_string(), "ok".to_string()));
-
-        Ok(noria_connector::QueryResult::Meta(vec![
-            ("Query_destination", destination).into(),
-            ("Readyset_error", error).into(),
-        ]))
-    }
-
     fn make_name_and_id(
         name: &mut Option<Relation>,
         query_id: QueryId,
@@ -2637,7 +2888,7 @@ where
             ddl_req.ok_or_else(|| internal_err!("No statement supplied to shallow cache"))?;
 
         let shallow = shallow?;
-        if let Err(e) = Self::upstream_supports(connectors, &shallow).await {
+        if let Err(e) = connectors.upstream_supports(&shallow).await {
             return Err(ReadySetError::CreateCacheError(e.to_string()));
         }
 
@@ -2750,26 +3001,6 @@ where
         }
 
         res
-    }
-
-    /// Determines via running PREPARE if the upstream can support this query.
-    async fn upstream_supports(
-        connectors: &mut BackendConnectors<DB>,
-        req: &ShallowViewRequest,
-    ) -> anyhow::Result<()> {
-        let Some(upstream) = connectors.upstream.as_mut() else {
-            bail!("No upstream database found");
-        };
-
-        let query = if matches!(DB::SQL_DIALECT, Dialect::MySQL) {
-            let mut stmt = req.query.clone();
-            convert_placeholders_to_question_marks(&mut stmt)?;
-            stmt.display(DB::SQL_DIALECT).to_string()
-        } else {
-            req.query.display(DB::SQL_DIALECT).to_string()
-        };
-
-        upstream.can_prepare(&query).await
     }
 
     /// Extract any requested cache type from the EXPLAIN statement.
@@ -3027,8 +3258,7 @@ where
             }
             Some(CacheType::Shallow) => {
                 let shallow = shallow?;
-                let supported = if let Err(e) = Self::upstream_supports(connectors, &shallow).await
-                {
+                let supported = if let Err(e) = connectors.upstream_supports(&shallow).await {
                     &format!("no: {e}")
                 } else {
                     "yes"
@@ -3053,7 +3283,7 @@ where
                     | MigrationState::Supported
                     | MigrationState::Unsupported(..) => {
                         let shallow = shallow?;
-                        if let Err(e) = Self::upstream_supports(connectors, &shallow).await {
+                        if let Err(e) = connectors.upstream_supports(&shallow).await {
                             (None, Some(shallow), &format!("no: {e}"))
                         } else {
                             (None, Some(shallow), "yes")
@@ -3078,29 +3308,6 @@ where
         }
     }
 
-    fn drop_view_request(state: &mut BackendState<DB>, view_request: &ViewCreateRequest) {
-        state.query_status_cache.update_query_migration_state(
-            view_request,
-            MigrationState::Pending,
-            None,
-        );
-        state
-            .query_status_cache
-            .always_attempt_readyset(view_request, false);
-        Self::invalidate_prepared_statements_cache(state, view_request);
-    }
-
-    fn drop_shallow_view_request(state: &BackendState<DB>, shallow: &ShallowViewRequest) {
-        state.query_status_cache.update_query_migration_state(
-            shallow,
-            MigrationState::Pending,
-            None,
-        );
-        state
-            .query_status_cache
-            .always_attempt_readyset(shallow, false);
-    }
-
     /// Forwards a `DROP CACHE` request to noria
     async fn drop_cached_query(
         connectors: &mut BackendConnectors<DB>,
@@ -3110,54 +3317,11 @@ where
         let maybe_view_request = connectors.noria.view_create_request_from_name(name).await;
         let result = connectors.noria.drop_view(name).await?;
         if let Some(view_request) = maybe_view_request {
-            Self::drop_view_request(state, &view_request);
+            state.drop_view_request(&view_request);
         }
         Ok(noria_connector::QueryResult::Delete {
             num_rows_deleted: result,
         })
-    }
-
-    async fn drop_shallow_cached_query(
-        state: &BackendState<DB>,
-        name: Option<&Relation>,
-        query_id: Option<QueryId>,
-        ddl_req: CacheDDLRequest,
-    ) -> ReadySetResult<()> {
-        let info = state
-            .shallow
-            .get(name, query_id.as_ref())
-            .map(|cache| cache.get_info());
-
-        state.shallow.drop_cache(name, query_id.as_ref())?;
-
-        if let Some(CacheInfo {
-            query,
-            schema_search_path,
-            ..
-        }) = info
-        {
-            let view_request = ShallowViewRequest::new(query, schema_search_path);
-            Self::drop_shallow_view_request(state, &view_request);
-        };
-
-        if let Err(e) = retry_with_exponential_backoff!(
-            || async {
-                state
-                    .authority
-                    .remove_shallow_cache_ddl_request(ddl_req.clone())
-                    .await
-            },
-            retries: 5,
-            delay: 1,
-            backoff: 2,
-        ) {
-            warn!(
-                error = %e,
-                "Failed to remove shallow cache DDL request"
-            );
-        }
-
-        Ok(())
     }
 
     /// Forwards a `DROP ALL CACHES` request to noria
@@ -3242,17 +3406,11 @@ where
                 statement = %Sensitive(&query.display(settings.dialect)),
                 "Dropping previously shallow-cached query",
             );
-            Self::drop_shallow_cached_query(state, name.as_ref(), query_id, ddl_req).await?;
+            state
+                .drop_shallow_cached_query(name.as_ref(), query_id, ddl_req)
+                .await?;
         }
         Ok(())
-    }
-
-    /// Handles a `DROP ALL PROXIED QUERIES` request
-    async fn drop_all_proxied_queries(
-        state: &BackendState<DB>,
-    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        state.query_status_cache.clear_proxied_queries();
-        Ok(noria_connector::QueryResult::Empty)
     }
 
     /// Responds to a `SHOW PROXIED QUERIES` query
@@ -3478,121 +3636,6 @@ where
         ))
     }
 
-    /// Responds to a `SHOW SHALLOW CACHE ENTRIES` query
-    async fn show_shallow_entries(
-        state: &BackendState<DB>,
-        query_id: Option<&str>,
-        limit: Option<u64>,
-    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let query_id = query_id.map(|q| q.parse()).transpose()?;
-        let limit = limit.map(|l| l as usize);
-        let shallow = Arc::clone(&state.shallow);
-
-        let rows: Vec<Vec<DfValue>> = tokio::task::spawn_blocking(move || {
-            let entries = shallow.list_entries(query_id, limit);
-            entries
-                .into_iter()
-                .map(|entry| {
-                    vec![
-                        entry
-                            .query_id
-                            .map(|id| id.to_string().into())
-                            .unwrap_or(DfValue::None),
-                        DfValue::from(format!("{:016x}", entry.entry_id)),
-                        time_or_null(Some(entry.last_accessed_ms)).into(),
-                        time_or_null(Some(entry.last_refreshed_ms)).into(),
-                        DfValue::from(entry.refresh_time_ms as i64),
-                    ]
-                })
-                .collect()
-        })
-        .await
-        .map_err(|e| internal_err!("spawn_blocking failed: {}", e))?;
-
-        let select_schema = create_dummy_schema!(
-            "query id",
-            "entry id",
-            "last accessed",
-            "last refreshed",
-            "refresh time ms"
-        );
-
-        Ok(noria_connector::QueryResult::from_owned(
-            select_schema,
-            vec![Results::new(rows)],
-        ))
-    }
-
-    fn readyset_adapter_status(
-        state: &BackendState<DB>,
-    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let mut statuses = match state.metrics_handle.as_ref() {
-            Some(handle) => handle.readyset_status(),
-            None => vec![],
-        };
-        let time_ms = state
-            .adapter_start_time
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-        statuses.push((
-            "Process start time".to_string(),
-            time_or_null(Some(time_ms)),
-        ));
-
-        Ok(noria_connector::QueryResult::MetaVariables(
-            statuses.into_iter().map(MetaVariable::from).collect(),
-        ))
-    }
-
-    /// Responds to a `SHOW REPLAY PATHS` query
-    /// Returns replay paths data as a result set with columns and rows
-    async fn show_replay_paths(
-        connectors: &mut BackendConnectors<DB>,
-    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        // Get replay paths from the controller (already flattened and sorted)
-        let replay_paths = connectors.noria.replay_paths().await?;
-
-        // Create schema with all columns
-        let schema = create_dummy_schema!(
-            "domain",
-            "tag",
-            "source",
-            "destination_index",
-            "target_index",
-            "path",
-            "trigger_type",
-            "trigger_index",
-            "trigger_source_options"
-        );
-
-        // Convert each ReplayPathInfo into a row
-        let rows: Vec<Vec<DfValue>> = replay_paths
-            .into_iter()
-            .map(|info| {
-                vec![
-                    info.domain.to_string().into(),
-                    info.tag.to_string().into(),
-                    info.source
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| "None".to_string())
-                        .into(),
-                    info.destination_index.unwrap_or_default().into(),
-                    info.target_index.unwrap_or_default().into(),
-                    info.path_segments.join(" → ").into(),
-                    info.trigger_type.into(),
-                    info.trigger_index.unwrap_or_default().into(),
-                    info.trigger_source_options.into(),
-                ]
-            })
-            .collect();
-
-        Ok(noria_connector::QueryResult::from_owned(
-            schema,
-            vec![Results::new(rows)],
-        ))
-    }
-
     async fn query_readyset_extensions<'a>(
         connectors: &'a mut BackendConnectors<DB>,
         settings: &'a BackendSettings,
@@ -3606,9 +3649,7 @@ where
         let start = Instant::now();
 
         let res = match query {
-            SqlQuery::Explain(ExplainStatement::LastStatement) => {
-                Self::explain_last_statement(state)
-            }
+            SqlQuery::Explain(ExplainStatement::LastStatement) => state.explain_last_statement(),
             SqlQuery::Explain(ExplainStatement::Graphviz {
                 simplified: _,
                 for_cache,
@@ -3762,7 +3803,8 @@ where
                     .await?;
                 let DropCacheStatement { name } = drop_cache;
 
-                if Self::drop_shallow_cached_query(state, Some(name), None, ddl_req.clone())
+                if state
+                    .drop_shallow_cached_query(Some(name), None, ddl_req.clone())
                     .await
                     .is_ok()
                 {
@@ -3808,7 +3850,7 @@ where
                 if !settings.allow_cache_ddl {
                     unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
                 }
-                Self::drop_all_proxied_queries(state).await
+                state.drop_all_proxied_queries().await
             }
             SqlQuery::Show(ShowStatement::CachedQueries(cache_type, query_id)) => {
                 // Log a telemetry event
@@ -3823,16 +3865,16 @@ where
                 Self::show_caches(connectors, state, *cache_type, query_id.as_deref()).await
             }
             SqlQuery::Show(ShowStatement::ShallowCacheEntries { query_id, limit }) => {
-                Self::show_shallow_entries(state, query_id.as_deref(), *limit).await
+                state
+                    .show_shallow_entries(query_id.as_deref(), *limit)
+                    .await
             }
             SqlQuery::Show(ShowStatement::ReadySetStatus) => Ok(state
                 .status_reporter
                 .report_status()
                 .await
                 .into_query_result()),
-            SqlQuery::Show(ShowStatement::ReadySetStatusAdapter) => {
-                Self::readyset_adapter_status(state)
-            }
+            SqlQuery::Show(ShowStatement::ReadySetStatusAdapter) => state.readyset_adapter_status(),
             SqlQuery::Show(ShowStatement::ReadySetMigrationStatus(id)) => {
                 connectors.noria.migration_status(*id).await
             }
@@ -3840,7 +3882,7 @@ where
             SqlQuery::Show(ShowStatement::ReadySetTables(options)) => {
                 connectors.noria.table_statuses(options.all).await
             }
-            SqlQuery::Show(ShowStatement::Connections) => Self::show_connections(state),
+            SqlQuery::Show(ShowStatement::Connections) => state.show_connections(),
             SqlQuery::Show(ShowStatement::ProxiedQueries(ProxiedQueriesOptions {
                 query_id,
                 only_supported,
@@ -3860,7 +3902,7 @@ where
                 Self::show_proxied_queries(state, query_id, *only_supported, *limit, *cache_type)
                     .await
             }
-            SqlQuery::Show(ShowStatement::ReplayPaths) => Self::show_replay_paths(connectors).await,
+            SqlQuery::Show(ShowStatement::ReplayPaths) => connectors.show_replay_paths().await,
             SqlQuery::Show(ShowStatement::Rls(_maybe_table)) => {
                 unsupported!("SHOW RLS statement is not yet supported")
             }
@@ -3939,24 +3981,6 @@ where
         res
     }
 
-    /// Rewrite and wrap a shallow query into a [`ShallowViewRequest`].
-    fn prepare_shallow_query(
-        connectors: &BackendConnectors<DB>,
-        shallow: Result<ShallowCacheQuery, ReadySetError>,
-    ) -> Option<(ShallowViewRequest, ShallowQueryParameters)> {
-        let Ok(mut shallow) = shallow else {
-            return None;
-        };
-        let Ok(params) =
-            adapter_rewrites::rewrite_shallow(&mut shallow, connectors.noria.rewrite_params())
-        else {
-            return None;
-        };
-        let shallow =
-            ShallowViewRequest::new(shallow, connectors.noria.schema_search_path().to_owned());
-        Some((shallow, params))
-    }
-
     /// Check whether a shallow cache exists for this query and should be used for routing.  If no
     /// cache exists and a `CreateCache` hint directive is present, attempt to create one first.
     /// Returns `(query_id, always)` when the query should be served from the shallow cache, `None`
@@ -4021,7 +4045,7 @@ where
             return None;
         }
 
-        if let Err(e) = Self::upstream_supports(connectors, shallow).await {
+        if let Err(e) = connectors.upstream_supports(shallow).await {
             warn!(error = %e, "Hint-based shallow cache creation failed: upstream unsupported");
             return None;
         }
@@ -4723,8 +4747,7 @@ where
             (parsed, (shallow_parsed, hint))
         };
 
-        if let Some((shallow, params)) =
-            Self::prepare_shallow_query(&self.connectors, shallow_parsed)
+        if let Some((shallow, params)) = self.connectors.prepare_shallow_query(shallow_parsed)
             && let Some((query_id, _)) = Self::should_query_shallow(
                 &mut self.connectors,
                 &self.settings,
@@ -4772,7 +4795,7 @@ where
 
         let result = match parsed {
             // Parse error, but no fallback exists
-            Err(e) if !Self::has_fallback(&self.connectors) => {
+            Err(e) if !self.connectors.has_fallback() => {
                 error!("{}", e);
                 event.set_noria_error(&e);
                 Err(e.into())
@@ -4859,8 +4882,7 @@ where
                 .await
             }
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
-                if !Handler::return_default_response(parsed_query)
-                    && Self::has_fallback(&self.connectors)
+                if !Handler::return_default_response(parsed_query) && self.connectors.has_fallback()
                 {
                     if let SqlQuery::Select(stmt) = parsed_query {
                         event.sql_type = SqlQueryType::Read;
@@ -4892,7 +4914,7 @@ where
                     &rewrite_context,
                 ) {
                     Ok(params) => params,
-                    Err(_) if Self::has_fallback(&self.connectors) => {
+                    Err(_) if self.connectors.has_fallback() => {
                         let result = Self::query_fallback(
                             self.connectors.upstream.as_mut(),
                             query,
@@ -4990,11 +5012,6 @@ where
         result.map(|r| (r, proxy_state))
     }
 
-    /// Whether or not we have fallback enabled.
-    pub fn has_fallback(connectors: &BackendConnectors<DB>) -> bool {
-        connectors.upstream.is_some()
-    }
-
     /// Mark or unmark this backend connection as an internal ReadySet connection
     pub fn set_internal_connection(&mut self, is_internal: bool) {
         self.state.is_internal_connection = is_internal;
@@ -5046,34 +5063,6 @@ where
         } else {
             query
         }
-    }
-
-    fn show_connections(
-        state: &BackendState<DB>,
-    ) -> Result<noria_connector::QueryResult<'static>, ReadySetError> {
-        let schema = SelectSchema {
-            schema: Cow::Owned(vec![ColumnSchema {
-                column: ast::Column {
-                    name: "remote_addr".into(),
-                    table: None,
-                },
-                column_type: DfType::DEFAULT_TEXT,
-                base: None,
-            }]),
-            columns: Cow::Owned(vec!["remote_addr".into()]),
-        };
-
-        let data = state
-            .connections
-            .iter()
-            .flat_map(|c| c.iter())
-            .map(|conn| vec![conn.to_string().into()])
-            .collect::<Vec<_>>();
-
-        Ok(noria_connector::QueryResult::from_owned(
-            schema,
-            vec![Results::new(data)],
-        ))
     }
 
     /// Returns the current `ProxyState`, which protocol-specific backends
