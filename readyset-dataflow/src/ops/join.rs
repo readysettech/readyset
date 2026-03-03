@@ -517,7 +517,8 @@ impl Join {
             let (on_cols_os, on_cols_ts) = self.on.iter().copied().unzip();
             (on_cols_ts, on_cols_os)
         };
-        let replay_key_cols = replay_key_cols.unwrap();
+        let replay_key_cols =
+            replay_key_cols.expect("replay columns must map through emit for regular lookup");
         if rs.is_empty() {
             return Ok(ProcessingResult {
                 results: rs,
@@ -588,16 +589,40 @@ impl Join {
                         new_right_count = Some(rc);
                     }
                     IngredientLookupResult::Miss => {
-                        // we got something from right, but that row's key is not in right??
+                        // We got something from right, but that row's join key is not in
+                        // right's state. This can happen in two cases:
                         //
-                        // this *can* happen! imagine if you have two partial indices on right,
-                        // one on column a and one on column b. imagine that a is the join key.
-                        // we get a replay request for b = 4, which must then be replayed from
-                        // right (since left doesn't have b). say right replays (a=1,b=4). we
-                        // will hit this case, since a=1 is not in right. the correct thing to
-                        // do here is to replay a=1 first, and *then* replay b=4 again
-                        // (possibly several times over for each a).
-                        continue;
+                        // 1. Two partial indices on right (e.g., on column `a` = join key and
+                        //    column `b` = non-join key). A replay for b=4 brings (a=1,b=4),
+                        //    but a=1 is a hole in the [a] index. We should skip this record
+                        //    so the system can fill a=1 first, then retry b=4.
+                        //
+                        // 2. The replay is for a non-join-key column (e.g., test_int) while
+                        //    the right side is only indexed on that column, not the join key.
+                        //    The join-key lookup misses because the join-key index was never
+                        //    filled by this replay. In this case, the NULL emission/retraction
+                        //    count is irrelevant — the replay is filling a downstream hole
+                        //    from scratch — so we proceed without the count. (REA-6339)
+                        if let Some(ref rkc) = replay_key_cols {
+                            // Compare as sets: rkc is ordered by replay.cols()
+                            // (downstream index), while on_cols_ts is ordered by
+                            // self.on declaration.  For compound keys these can
+                            // differ, so a plain slice comparison would give a
+                            // false negative.
+                            let replay_is_join_key = rkc.len() == on_cols_ts.len()
+                                && rkc.iter().all(|c| on_cols_ts.contains(c));
+                            if replay_is_join_key {
+                                // Case 1: replay key IS the join key, skip and retry later.
+                                continue;
+                            }
+                            // Case 2: replay key differs from join key, proceed without
+                            // the right-side count (disables NULL emission/retraction).
+                            // (REA-6339)
+                        } else {
+                            // Non-replay update: right-side join-key index is a hole,
+                            // skip this record (picked up on a future replay).
+                            continue;
+                        }
                     }
                 }
             }
@@ -1682,10 +1707,84 @@ mod tests {
         }
     }
 
+    /// REA-6339: When a LEFT JOIN replay is keyed on a non-join-key column
+    /// (e.g. column 2 = Right.r1) and the right-side join-key lookup misses
+    /// (because the partial index on the join key has a hole for that value),
+    /// the record must NOT be dropped. The old code treated this as Case 1
+    /// (replay-key == join-key) and issued `continue`, discarding the row.
+    #[test]
+    fn left_join_replay_non_join_key_miss_proceeds() {
+        use std::collections::HashSet;
+
+        use dataflow_state::MaterializedNodeState;
+        use readyset_client::KeyComparison;
+
+        // Standard left-join setup:
+        //   left  [l0, l1]       right [r0, r1]
+        //   join on (l0 = r0)
+        //   emit  [L0, L1, R1]  →  output columns j0, j1, j2
+        let (mut g, l, r) = setup();
+
+        // ---- make right's join-key index PARTIAL ----
+        // Replace right's state so that column-0 (the join key) is a partial
+        // index with tag 0. Keys that haven't been explicitly filled are holes.
+        let tag = Tag::new(0);
+        let mut partial_state = MemoryState::default();
+        partial_state.add_index(Index::hash_map(vec![0]), Some(vec![tag]));
+        // Also need the weak index that suggest_indexes added, so the
+        // non-replay weak-lookup path still works.
+        partial_state.add_weak_index(Index::hash_map(vec![0]));
+        g.states
+            .insert(*r, MaterializedNodeState::Memory(partial_state));
+
+        // ---- seed left (non-partial) with a row whose join key = 5 ----
+        g.seed(l, vec![5.into(), "left_val".into()]);
+
+        // ---- build the partial replay context ----
+        // Replay key is emitted column 2, which maps to Right.r1.
+        // trace_replay_column_source will return [1] (right col 1),
+        // which differs from on_cols_ts = [0] (right col 0).
+        let replay_key: KeyComparison = vec1!["rval".into()].into();
+        let replay_keys = HashSet::from([replay_key]);
+        let replay_ctx = ReplayContext::Partial {
+            key_cols: &[2], // emitted column 2 = Right.r1
+            keys: &replay_keys,
+            requesting_shard: 0,
+            requesting_replica: 0,
+            tag,
+            unishard: true,
+        };
+
+        // ---- send a right-side record during the replay ----
+        // join-key = 5, r1 = "rval". The partial index on right col 0
+        // does NOT have key=5 filled, so the self-lookup at line 482
+        // returns Miss. With the fix (Case 2), we proceed anyway.
+        let right_record: Record = vec![5.into(), "rval".into()].into();
+        let res = g.input_raw(r, vec![right_record], replay_ctx, false);
+
+        // The Join operator returns Regular (not ReplayPiece) — replay
+        // buffering happens at a higher layer. Verify the rows are present.
+        match res {
+            RawProcessingResult::Regular(ref pr) => {
+                assert!(
+                    !pr.results.is_empty(),
+                    "replay records should not be dropped when replay key != join key"
+                );
+                assert!(
+                    pr.results
+                        .has_positive(&[5.into(), "left_val".into(), "rval".into()][..]),
+                    "expected joined row (5, left_val, rval), got: {:?}",
+                    pr.results
+                );
+            }
+            other => panic!("expected Regular processing result, got: {:?}", other),
+        }
+    }
+
     mod compound_keys {
         use super::*;
 
-        fn setup() -> (ops::test::MockGraph, IndexPair, IndexPair) {
+        pub(super) fn setup() -> (ops::test::MockGraph, IndexPair, IndexPair) {
             let mut g = ops::test::MockGraph::new();
             let l = g.add_base("left", &["l0", "l1", "l2"]);
             let r = g.add_base("right", &["r0", "r1", "r2"]);
@@ -1773,6 +1872,138 @@ mod tests {
                     vec![2.into(), 2.into(), "b".into(), "z".into()].into()
                 ]
             );
+        }
+    }
+
+    /// Compound-key variant of left_join_replay_non_join_key_miss_proceeds.
+    /// Replay key columns ARE the join key but listed in reversed order
+    /// (downstream index chose [j1, j0] instead of [j0, j1]).  The
+    /// set-equality check must still recognise this as Case 1 (skip).
+    /// A plain slice comparison would give a false negative, incorrectly
+    /// taking Case 2 (proceed without count).
+    #[test]
+    fn compound_join_key_reversed_order_is_case1() {
+        use std::collections::HashSet;
+
+        use dataflow_state::MaterializedNodeState;
+        use readyset_client::KeyComparison;
+
+        // Compound left-join setup:
+        //   left  [l0, l1, l2]     right [r0, r1, r2]
+        //   join ON (l0=r0, l1=r1)
+        //   emit  [L0, L1, L2, R2]  →  output columns j0, j1, j2, j3
+        let (mut g, l, r) = compound_keys::setup();
+
+        // Make right's compound join-key index PARTIAL.
+        let tag = Tag::new(0);
+        let mut partial_state = MemoryState::default();
+        partial_state.add_index(Index::hash_map(vec![0, 1]), Some(vec![tag]));
+        partial_state.add_weak_index(Index::hash_map(vec![0, 1]));
+        g.states
+            .insert(*r, MaterializedNodeState::Memory(partial_state));
+
+        // Seed left with a matching row.
+        g.seed(l, vec![5.into(), 6.into(), "left_val".into()]);
+
+        // Replay key_cols = [1, 0] (emitted columns j1, j0) — these map to
+        // the join key columns but in REVERSED order relative to self.on
+        // which declares [(0,0),(1,1)].
+        //
+        // trace_replay_column_source resolves:
+        //   emit[1] = (Left,1) → right col 1 (via on)
+        //   emit[0] = (Left,0) → right col 0 (via on)
+        // So rkc = [1, 0], while on_cols_ts = [0, 1].
+        // These represent the same set of columns → Case 1 (skip).
+        let replay_key: KeyComparison = vec1![6.into(), 5.into()].into();
+        let replay_keys = HashSet::from([replay_key]);
+        let replay_ctx = ReplayContext::Partial {
+            key_cols: &[1, 0], // reversed order
+            keys: &replay_keys,
+            requesting_shard: 0,
+            requesting_replica: 0,
+            tag,
+            unishard: true,
+        };
+
+        // Send a right-side record whose compound join key (5,6) is a HOLE
+        // in right's partial index.  Case 1 should `continue` (skip it).
+        let right_record: Record = vec![5.into(), 6.into(), "rval".into()].into();
+        let res = g.input_raw(r, vec![right_record], replay_ctx, false);
+
+        match res {
+            RawProcessingResult::Regular(ref pr) => {
+                // Case 1 skips the record, so output must be empty.
+                assert!(
+                    pr.results.is_empty(),
+                    "replay key == join key (reversed order) should be Case 1 (skip), \
+                     but got results: {:?}",
+                    pr.results
+                );
+            }
+            other => panic!("expected Regular processing result, got: {:?}", other),
+        }
+    }
+
+    /// Compound-key join where the replay is on a non-join-key column.
+    /// Should take Case 2 (proceed without right-side count).
+    #[test]
+    fn compound_join_non_join_key_replay_proceeds() {
+        use std::collections::HashSet;
+
+        use dataflow_state::MaterializedNodeState;
+        use readyset_client::KeyComparison;
+
+        // Compound left-join setup:
+        //   left  [l0, l1, l2]     right [r0, r1, r2]
+        //   join ON (l0=r0, l1=r1)
+        //   emit  [L0, L1, L2, R2]  →  output columns j0, j1, j2, j3
+        let (mut g, l, r) = compound_keys::setup();
+
+        // Make right's compound join-key index PARTIAL.
+        let tag = Tag::new(0);
+        let mut partial_state = MemoryState::default();
+        partial_state.add_index(Index::hash_map(vec![0, 1]), Some(vec![tag]));
+        partial_state.add_weak_index(Index::hash_map(vec![0, 1]));
+        g.states
+            .insert(*r, MaterializedNodeState::Memory(partial_state));
+
+        // Seed left with a matching row.
+        g.seed(l, vec![5.into(), 6.into(), "left_val".into()]);
+
+        // Replay key_cols = [3] (emitted column j3 = Right.r2).
+        // trace_replay_column_source resolves emit[3] = (Right,2) → right col 2.
+        // rkc = [2], on_cols_ts = [0, 1] → different set → Case 2 (proceed).
+        let replay_key: KeyComparison = vec1!["rval".into()].into();
+        let replay_keys = HashSet::from([replay_key]);
+        let replay_ctx = ReplayContext::Partial {
+            key_cols: &[3], // emitted column 3 = Right.r2 (non-join-key)
+            keys: &replay_keys,
+            requesting_shard: 0,
+            requesting_replica: 0,
+            tag,
+            unishard: true,
+        };
+
+        // Send a right-side record.  Compound join key (5,6) is a HOLE in
+        // right's partial index, but replay key != join key → Case 2,
+        // proceed and produce the joined row.
+        let right_record: Record = vec![5.into(), 6.into(), "rval".into()].into();
+        let res = g.input_raw(r, vec![right_record], replay_ctx, false);
+
+        match res {
+            RawProcessingResult::Regular(ref pr) => {
+                assert!(
+                    !pr.results.is_empty(),
+                    "non-join-key replay on compound join should proceed (Case 2)"
+                );
+                assert!(
+                    pr.results
+                        .has_positive(&[5.into(), 6.into(), "left_val".into(), "rval".into()][..]),
+                    "expected joined row, got: {:?}",
+                    pr.results
+                );
+            }
+            other => panic!("expected Regular processing result, got: {:?}", other),
         }
     }
 

@@ -1031,6 +1031,94 @@ async fn it_works_with_duplicate_subquery() {
     shutdown_tx.shutdown().await;
 }
 
+/// REA-6339: LEFT JOIN + subquery with CROSS JOIN + COUNT(*) + parameterized WHERE on right-side
+/// column. The initial replay correctness is covered by logictests; this test exercises the
+/// incremental dataflow update path after the cache is filled.
+#[tokio::test(flavor = "multi_thread")]
+async fn left_join_subquery_count_parameterized() {
+    let (mut g, shutdown_tx) =
+        start_simple_unsharded("left_join_subquery_count_parameterized").await;
+    let sql = vec![
+        "CREATE TABLE s (sn int, PRIMARY KEY(sn));",
+        "CREATE TABLE spj (sn int, qty int);",
+        "CREATE TABLE dt (test_int int);",
+        "CREATE CACHE CountByTestInt FROM \
+            SELECT COUNT(*) FROM s \
+            LEFT OUTER JOIN (SELECT sn, qty, test_int FROM spj CROSS JOIN dt) sub \
+            ON s.sn = sub.sn \
+            WHERE sub.test_int = ?;",
+    ];
+
+    eventually! {
+        g.extend_recipe(ChangeList::from_strings(sql.clone(), Dialect::DEFAULT_MYSQL).unwrap())
+            .await
+            .is_ok()
+    };
+
+    let mut s = g.table("s").await.unwrap();
+    let mut spj = g.table("spj").await.unwrap();
+    let mut dt = g.table("dt").await.unwrap();
+    let mut getter = g
+        .view("CountByTestInt")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
+
+    // s has 3 rows; spj has 2 matching (sn=1,2); dt has 2 rows (0,1).
+    // CROSS JOIN produces 4 rows; LEFT JOIN matches sn=1,2; WHERE filters by test_int.
+    s.insert(vec![1i64.into()]).await.unwrap();
+    s.insert(vec![2i64.into()]).await.unwrap();
+    s.insert(vec![3i64.into()]).await.unwrap();
+    spj.insert(vec![1i64.into(), 10.into()]).await.unwrap();
+    spj.insert(vec![2i64.into(), 20.into()]).await.unwrap();
+    dt.insert(vec![0i64.into()]).await.unwrap();
+    dt.insert(vec![1i64.into()]).await.unwrap();
+
+    sleep().await;
+
+    // Warm the cache with an initial lookup (correctness covered by logictests).
+    let rs = getter
+        .lookup(&[0i64.into()], true)
+        .await
+        .unwrap()
+        .into_vec();
+    assert_eq!(rs[0][0], readyset_data::DfValue::Int(2));
+
+    // Incremental update: insert spj row (sn=3, qty=30) so s.sn=3 now matches.
+    // CROSS JOIN with dt produces (sn=3,test_int=0) and (sn=3,test_int=1),
+    // so both counts should increase from 2 to 3.
+    spj.insert(vec![3i64.into(), 30.into()]).await.unwrap();
+
+    sleep().await;
+
+    let rs = getter
+        .lookup(&[0i64.into()], true)
+        .await
+        .unwrap()
+        .into_vec();
+    assert_eq!(
+        rs[0][0],
+        readyset_data::DfValue::Int(3),
+        "expected count=3 for test_int=0 after insert, got {:?}",
+        rs[0]
+    );
+
+    let rs = getter
+        .lookup(&[1i64.into()], true)
+        .await
+        .unwrap()
+        .into_vec();
+    assert_eq!(
+        rs[0][0],
+        readyset_data::DfValue::Int(3),
+        "expected count=3 for test_int=1 after insert, got {:?}",
+        rs[0]
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_reads_before_writes() {
     let (mut g, shutdown_tx) = start_simple_unsharded("it_works_with_reads_before_writes").await;

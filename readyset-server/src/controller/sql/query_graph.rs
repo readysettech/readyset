@@ -2119,4 +2119,66 @@ mod tests {
             );
         }
     }
+
+    /// REA-6339: Parameterized WHERE on right side of LEFT JOIN with aggregation.
+    mod left_join_right_side_params {
+        use super::*;
+
+        fn try_make_query_graph(sql: &str) -> ReadySetResult<QueryGraph> {
+            let query = match parse_query(Dialect::MySQL, sql).unwrap() {
+                SqlQuery::Select(stmt) => stmt,
+                q => panic!("Unexpected query type; expected SelectStatement but got {q:?}"),
+            };
+            to_query_graph(query, readyset_data::Dialect::DEFAULT_MYSQL)
+        }
+
+        #[test]
+        fn parameterized_where_on_left_join_right_side_with_agg_supported() {
+            // REA-6339: Parameterized WHERE on right-side column of LEFT JOIN with
+            // aggregation is supported. The parameter column becomes a GROUP BY column
+            // in the aggregation. The LEFT JOIN's replay handling skips the right-side
+            // count check when the replay key differs from the join key.
+            let result = try_make_query_graph(
+                "SELECT COUNT(*) FROM s \
+                 LEFT JOIN (SELECT sn, test_int FROM spj CROSS JOIN dt) sub \
+                 ON s.sn = sub.sn \
+                 WHERE sub.test_int = ?",
+            );
+            result.unwrap();
+        }
+
+        #[test]
+        fn parameterized_where_on_left_join_left_side_supported() {
+            let result = try_make_query_graph(
+                "SELECT COUNT(*) FROM s \
+                 LEFT JOIN t ON s.id = t.id \
+                 WHERE s.id = ?",
+            );
+            result.unwrap();
+        }
+
+        #[test]
+        fn literal_where_on_left_join_right_side_supported() {
+            let result = try_make_query_graph(
+                "SELECT COUNT(*) FROM s \
+                 LEFT JOIN (SELECT sn, test_int FROM spj CROSS JOIN dt) sub \
+                 ON s.sn = sub.sn \
+                 WHERE sub.test_int = 0",
+            );
+            result.unwrap();
+        }
+
+        #[test]
+        fn parameterized_where_on_left_join_right_side_without_agg_supported() {
+            // Without aggregation, the parameter is a simple view key lookup on
+            // the materialized LEFT JOIN output, which works correctly.
+            let result = try_make_query_graph(
+                "SELECT J.aid, J.other FROM B \
+                 LEFT JOIN (SELECT A.aid, A.other FROM A WHERE A.other = 5) AS J \
+                 ON J.aid = B.bid \
+                 WHERE J.aid = ?",
+            );
+            result.unwrap();
+        }
+    }
 }

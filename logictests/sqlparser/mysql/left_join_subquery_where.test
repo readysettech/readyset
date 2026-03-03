@@ -1,0 +1,62 @@
+# LEFT JOIN + subquery + parameterized WHERE on right-side non-join column
+#
+# Verifies that a LEFT JOIN with a subquery and a parameterized WHERE on a
+# right-side column (sub.pn) that differs from the join key (s.sn = sub.sn)
+# returns correct results after caching. Without the REA-6339 fix, the
+# parameterized version incorrectly returns 0 rows. (REA-5879)
+
+statement ok
+CREATE TABLE s (sn TEXT, sname TEXT, status INT, city TEXT)
+
+statement ok
+CREATE TABLE p (pn TEXT)
+
+statement ok
+CREATE TABLE spj (sn TEXT, pn TEXT, jn TEXT, qty INT)
+
+statement ok
+INSERT INTO s VALUES ('S1', 'Smith', 20, 'London'), ('S2', 'Jones', 10, 'Paris'), ('S3', 'Blake', 30, 'Paris')
+
+statement ok
+INSERT INTO p VALUES ('P1'), ('P2')
+
+statement ok
+INSERT INTO spj VALUES ('S1', 'P1', 'J1', 100), ('S1', 'P2', 'J2', 200), ('S2', 'P2', 'J3', 300)
+
+# Literal version: LEFT JOIN + subquery + WHERE on right-side column
+query TTI nosort
+SELECT s.sn, sub.pn, sub.qty FROM s LEFT OUTER JOIN (SELECT spj.sn, spj.pn, spj.qty FROM spj JOIN p ON spj.pn = p.pn) sub ON s.sn = sub.sn WHERE sub.pn = 'P2' ORDER BY sub.qty
+----
+S1
+P2
+200
+S2
+P2
+300
+
+# Parameterized: same query with ?
+query TTI nosort
+SELECT s.sn, sub.pn, sub.qty FROM s LEFT OUTER JOIN (SELECT spj.sn, spj.pn, spj.qty FROM spj JOIN p ON spj.pn = p.pn) sub ON s.sn = sub.sn WHERE sub.pn = ? ORDER BY sub.qty
+? = P2
+----
+S1
+P2
+200
+S2
+P2
+300
+
+# Parameterized: different value
+query TTI nosort
+SELECT s.sn, sub.pn, sub.qty FROM s LEFT OUTER JOIN (SELECT spj.sn, spj.pn, spj.qty FROM spj JOIN p ON spj.pn = p.pn) sub ON s.sn = sub.sn WHERE sub.pn = ? ORDER BY sub.qty
+? = P1
+----
+S1
+P1
+100
+
+# Parameterized: non-matching value returns 0 rows
+query TTI nosort
+SELECT s.sn, sub.pn, sub.qty FROM s LEFT OUTER JOIN (SELECT spj.sn, spj.pn, spj.qty FROM spj JOIN p ON spj.pn = p.pn) sub ON s.sn = sub.sn WHERE sub.pn = ? ORDER BY sub.qty
+? = P99
+----

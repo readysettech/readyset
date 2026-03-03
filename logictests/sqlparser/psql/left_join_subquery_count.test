@@ -1,0 +1,49 @@
+# LEFT JOIN + subquery + COUNT(*) + parameterized WHERE on right-side column
+#
+# Verifies that a LEFT JOIN with a subquery, an aggregate, and a parameterized
+# WHERE on a right-side column returns correct results. The fix is in the LEFT
+# JOIN's replay handling: when the replay key (test_int) differs from the join
+# key (sn), the LEFT JOIN skips the right-side match count check. (REA-6339)
+
+statement ok
+CREATE TABLE s (sn INT)
+
+statement ok
+CREATE TABLE spj (sn INT, qty INT)
+
+statement ok
+CREATE TABLE dt (test_int INT)
+
+statement ok
+INSERT INTO s VALUES (1), (2), (3)
+
+statement ok
+INSERT INTO spj VALUES (1, 10), (2, 20)
+
+statement ok
+INSERT INTO dt VALUES (0), (1)
+
+# Literal version: cached and returns correct result
+query I nosort
+SELECT COUNT(*) FROM s LEFT OUTER JOIN (SELECT sn, qty, test_int FROM spj CROSS JOIN dt) sub ON s.sn = sub.sn WHERE test_int = 0
+----
+2
+
+# Parameterized version: cached and returns correct result
+query I nosort
+SELECT COUNT(*) FROM s LEFT OUTER JOIN (SELECT sn, qty, test_int FROM spj CROSS JOIN dt) sub ON s.sn = sub.sn WHERE test_int = $1
+$1 = 0
+----
+2
+
+query I nosort
+SELECT COUNT(*) FROM s LEFT OUTER JOIN (SELECT sn, qty, test_int FROM spj CROSS JOIN dt) sub ON s.sn = sub.sn WHERE test_int = $1
+$1 = 1
+----
+2
+
+query I nosort
+SELECT COUNT(*) FROM s LEFT OUTER JOIN (SELECT sn, qty, test_int FROM spj CROSS JOIN dt) sub ON s.sn = sub.sn WHERE test_int = $1
+$1 = 99
+----
+0
