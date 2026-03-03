@@ -5,63 +5,60 @@ publish = false
 authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2024"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 ahash = { workspace = true }
 anyhow = { workspace = true }
-clap = { workspace = true, features = ["derive", "env"] }
-fail = { workspace = true }
-failpoint-macros = { path = "../failpoint-macros" }
-futures-util = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
-tracing = { workspace = true, features = ["release_max_level_debug"] }
-vec1 = { workspace = true }
-itertools = { workspace = true }
 async-trait = { workspace = true }
-readyset-util = { path = "../readyset-util" }
+bincode = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+crossbeam-skiplist = { workspace = true }
+dashmap = { workspace = true }
+fail = { workspace = true }
+futures = { workspace = true }
+futures-util = { workspace = true }
+hyper = { workspace = true, features = ["stream", "server", "http1"] }
+indexmap = { workspace = true }
+itertools = { workspace = true }
+lru = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
-futures = { workspace = true }
+mysql_common = { workspace = true }
+parking_lot = { workspace = true }
+rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-hyper = { workspace = true, features = ["stream", "server", "http1"] }
-tokio-stream = { workspace = true, features = ["net"] }
-tower = { workspace = true, features = ["util"] }
-dashmap = { workspace = true }
-mysql_common = { workspace = true }
-bincode = { workspace = true }
-parking_lot = { workspace = true }
-sqlformat = { workspace = true }
-indexmap = { workspace = true }
-lru = { workspace = true }
-crossbeam-skiplist = { workspace = true }
 slab = { workspace = true }
-xxhash-rust = { workspace = true }
-rand = { workspace = true }
+sqlformat = { workspace = true }
 sqlparser = { workspace = true }
 streaming-iterator = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true, features = ["net"] }
+tower = { workspace = true, features = ["util"] }
+tracing = { workspace = true, features = ["release_max_level_debug"] }
+vec1 = { workspace = true }
+xxhash-rust = { workspace = true }
 
+database-utils = { path = "../database-utils" }
+dataflow-expression = { path = "../dataflow-expression" }
+failpoint-macros = { path = "../failpoint-macros" }
+health-reporter = { path = "../health-reporter" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-alloc = { path = "../readyset-alloc" }
 readyset-client = { path = "../readyset-client" }
+readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-common = { path = "../readyset-common" }
-readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data/" }
+readyset-dataflow = { path = "../readyset-dataflow" }
+readyset-errors = { path = "../readyset-errors" }
 readyset-server = { path = "../readyset-server" }
 readyset-shallow = { path = "../readyset-shallow" }
-dataflow-expression = { path = "../dataflow-expression" }
-readyset-tracing = { path = "../readyset-tracing" }
-readyset-dataflow = { path = "../readyset-dataflow" }
-
-readyset-client-metrics = { path = "../readyset-client-metrics" }
-readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
+readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
+readyset-tracing = { path = "../readyset-tracing" }
+readyset-util = { path = "../readyset-util" }
 readyset-version = { path = "../readyset-version" }
-health-reporter = { path = "../health-reporter" }
-database-utils = { path = "../database-utils" }
 schema-catalog = { path = "../schema-catalog" }
 
 [dev-dependencies]
