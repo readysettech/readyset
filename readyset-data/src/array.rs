@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::fmt::{self, Display};
 
 use fallible_iterator::FallibleIterator;
@@ -161,15 +162,54 @@ impl Array {
     /// - Duplicates don't matter: `ARRAY[1,1] @> ARRAY[1]` is true
     /// - Empty array is contained by everything
     /// - Multi-dimensional arrays are flattened to element sets for comparison
-    /// - NULL contains NULL (element-level equality)
+    /// - NULL needles always fail: PostgreSQL's `=` yields NULL for `NULL = x`,
+    ///   so a NULL element in `other` can never be "found" in `self`
+    ///
+    /// NOTE: This uses O(n*m) pairwise comparison rather than HashSet because
+    /// `DfValue`'s `Hash` and `PartialEq` are not fully consistent across type
+    /// variants (e.g., `Int(1) == UnsignedInt(1)` but they hash differently).
+    /// PostgreSQL arrays are homogeneously typed so this would be safe in
+    /// practice, but the linear scan is correct for all `DfValue` combinations.
     pub fn contains(&self, other: &Array) -> bool {
         if other.is_empty() {
             return true;
         }
+        // A NULL needle can never be "found" (PG's = yields NULL for NULL = anything),
+        // so !needle.is_none() short-circuits to false for NULL elements in `other`.
         other
             .contents
             .iter()
-            .all(|needle| self.contents.iter().any(|e| e == needle))
+            .all(|needle| !needle.is_none() && self.contents.iter().any(|e| e == needle))
+    }
+
+    /// PostgreSQL array overlap (`&&`): returns `true` if `self` and `other` share at least one
+    /// common element.
+    ///
+    /// Semantics follow PostgreSQL:
+    /// - Set-based comparison: element order is irrelevant
+    /// - Multi-dimensional arrays are flattened to element sets
+    /// - Empty arrays never overlap with anything
+    /// - NULL elements are skipped (PostgreSQL's `=` yields NULL for `NULL = NULL`)
+    ///
+    /// NOTE: Uses `HashSet` for O(n+m) lookup. This relies on arrays being
+    /// homogeneously typed (as in PostgreSQL). `DfValue`'s `Hash` and `PartialEq`
+    /// are not fully consistent across type variants, so mixed-type arrays could
+    /// produce incorrect results via hash-bucket misses.
+    pub fn overlaps(&self, other: &Array) -> bool {
+        if self.is_empty() || other.is_empty() {
+            return false;
+        }
+        // Build HashSet from the smaller array for efficiency.
+        let (build_from, probe_with) = if self.contents.len() <= other.contents.len() {
+            (&self.contents, &other.contents)
+        } else {
+            (&other.contents, &self.contents)
+        };
+        let haystack: HashSet<&DfValue> = build_from.iter().filter(|v| !v.is_none()).collect();
+        probe_with
+            .iter()
+            .filter(|v| !v.is_none())
+            .any(|e| haystack.contains(e))
     }
 
     /// PostgreSQL array concatenation (`||`): produces a new 1-D array by appending elements.
@@ -1286,9 +1326,11 @@ mod tests {
 
     #[test]
     fn contains_null_elements() {
+        // PostgreSQL: ARRAY[NULL, 1] @> ARRAY[NULL] => false
+        // NULL = NULL yields NULL (falsy), so NULLs are skipped in containment.
         let a = Array::from(vec![DfValue::None, DfValue::from(1)]);
         let b = Array::from(vec![DfValue::None]);
-        assert!(a.contains(&b));
+        assert!(!a.contains(&b));
     }
 
     #[test]
@@ -1308,6 +1350,108 @@ mod tests {
         );
         let b = Array::from(vec![DfValue::from(2), DfValue::from(4)]);
         assert!(a.contains(&b));
+    }
+
+    // ---------------------------------------------------------------
+    // Overlap tests (&&)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn overlaps_basic() {
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)]);
+        let b = Array::from(vec![DfValue::from(3), DfValue::from(4)]);
+        assert!(a.overlaps(&b));
+    }
+
+    #[test]
+    fn overlaps_no_common() {
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        let b = Array::from(vec![DfValue::from(3), DfValue::from(4)]);
+        assert!(!a.overlaps(&b));
+    }
+
+    #[test]
+    fn overlaps_empty_left() {
+        let a = Array::from(vec![]);
+        let b = Array::from(vec![DfValue::from(1)]);
+        assert!(!a.overlaps(&b));
+    }
+
+    #[test]
+    fn overlaps_empty_right() {
+        let a = Array::from(vec![DfValue::from(1)]);
+        let b = Array::from(vec![]);
+        assert!(!a.overlaps(&b));
+    }
+
+    #[test]
+    fn overlaps_both_empty() {
+        let a = Array::from(vec![]);
+        let b = Array::from(vec![]);
+        assert!(!a.overlaps(&b));
+    }
+
+    #[test]
+    fn overlaps_duplicates() {
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(1)]);
+        let b = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        assert!(a.overlaps(&b));
+    }
+
+    #[test]
+    fn overlaps_null_only() {
+        // PostgreSQL: ARRAY[NULL::int] && ARRAY[NULL::int] => false
+        // NULL = NULL yields NULL (falsy), so NULLs never match in overlap.
+        let a = Array::from(vec![DfValue::None]);
+        let b = Array::from(vec![DfValue::None]);
+        assert!(!a.overlaps(&b));
+    }
+
+    #[test]
+    fn overlaps_null_with_shared_non_null() {
+        // NULLs are skipped; overlap is found via shared non-NULL element.
+        let a = Array::from(vec![DfValue::None, DfValue::from(1)]);
+        let b = Array::from(vec![DfValue::None, DfValue::from(1)]);
+        assert!(a.overlaps(&b));
+    }
+
+    #[test]
+    fn overlaps_null_no_shared_non_null() {
+        // NULLs are skipped; no shared non-NULL elements => false.
+        let a = Array::from(vec![DfValue::None, DfValue::from(1)]);
+        let b = Array::from(vec![DfValue::None, DfValue::from(2)]);
+        assert!(!a.overlaps(&b));
+    }
+
+    #[test]
+    fn overlaps_symmetric() {
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)]);
+        let b = Array::from(vec![DfValue::from(3), DfValue::from(4)]);
+        assert_eq!(a.overlaps(&b), b.overlaps(&a));
+
+        let c = Array::from(vec![DfValue::from(5)]);
+        assert_eq!(a.overlaps(&c), c.overlaps(&a));
+
+        let d = Array::from(vec![]);
+        assert_eq!(a.overlaps(&d), d.overlaps(&a));
+    }
+
+    #[test]
+    fn overlaps_multidimensional() {
+        let a = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(1),
+                    DfValue::from(2),
+                    DfValue::from(3),
+                    DfValue::from(4),
+                ],
+            )
+            .unwrap(),
+        );
+        let b = Array::from(vec![DfValue::from(4), DfValue::from(5)]);
+        assert!(a.overlaps(&b));
     }
 
     // ---------------------------------------------------------------

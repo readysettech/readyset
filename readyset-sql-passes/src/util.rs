@@ -306,6 +306,7 @@ pub fn is_predicate(op: &BinaryOperator) -> bool {
             | IsNot
             | AtArrowRight
             | AtArrowLeft
+            | DoubleAmpersand
     )
 }
 

@@ -1,0 +1,56 @@
+# Tests for PostgreSQL array overlap operator (&&)
+
+statement ok
+create table t_ov (id int, arr int[]);
+
+statement ok
+insert into t_ov values
+    (1, '{1,2}'),
+    (2, '{1,2,3}'),
+    (3, '{10}'),
+    (4, '{1,3}'),
+    (5, '{}');
+
+# basic overlap: arrays sharing element 2
+query I rowsort
+select id from t_ov where arr && ARRAY[2, 4];
+----
+1
+2
+
+# overlap with element present in multiple rows
+query I rowsort
+select id from t_ov where arr && ARRAY[1];
+----
+1
+2
+4
+
+# no overlap — empty result
+query I rowsort
+select id from t_ov where arr && ARRAY[99];
+----
+
+# overlap with empty array (never true per PG semantics)
+query I rowsort
+select id from t_ov where arr && '{}'::int[];
+----
+
+# overlap with single shared element
+query I rowsort
+select id from t_ov where arr && ARRAY[10];
+----
+3
+
+# overlap combined with other conditions
+query I rowsort
+select id from t_ov where arr && ARRAY[1,2] and id > 2;
+----
+4
+
+# negated overlap
+query I rowsort
+select id from t_ov where NOT (arr && ARRAY[1]);
+----
+3
+5

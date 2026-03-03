@@ -1042,6 +1042,10 @@ impl BinaryOperator {
                     Ok((Self::JsonContainedIn, false))
                 }
             }
+            DoubleAmpersand if dialect.engine() != SqlEngine::PostgreSQL => {
+                unsupported!("'&&' array overlap not available in {}", dialect.engine())
+            }
+            DoubleAmpersand => Ok((Self::ArrayOverlap, false)),
         }
     }
 
@@ -1177,7 +1181,7 @@ impl BinaryOperator {
                     Some(DfType::Array(Box::new(DfType::DEFAULT_TEXT))),
                 ))
             }
-            ArrayContains | ArrayContainedIn | ArrayConcat => {
+            ArrayContains | ArrayContainedIn | ArrayConcat | ArrayOverlap => {
                 let (l, r) = pg_array_coercion(left_type, right_type);
                 Ok((l, r))
             }
@@ -1257,7 +1261,8 @@ impl BinaryOperator {
             | Self::JsonContains
             | Self::JsonContainedIn
             | Self::ArrayContains
-            | Self::ArrayContainedIn => Ok(DfType::Bool),
+            | Self::ArrayContainedIn
+            | Self::ArrayOverlap => Ok(DfType::Bool),
 
             Self::AtTimeZone => {
                 if dialect.engine() == SqlEngine::PostgreSQL {

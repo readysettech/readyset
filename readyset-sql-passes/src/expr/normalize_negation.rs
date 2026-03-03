@@ -50,7 +50,8 @@ fn negate_expr(expr: &mut Expr) -> bool {
                 | BinaryOperator::QuestionMarkPipe
                 | BinaryOperator::QuestionMarkAnd
                 | BinaryOperator::AtArrowRight
-                | BinaryOperator::AtArrowLeft => {
+                | BinaryOperator::AtArrowLeft
+                | BinaryOperator::DoubleAmpersand => {
                     // Note we return true in this case to bypass the *op = ... above
                     *expr = Expr::UnaryOp {
                         op: UnaryOperator::Not,
@@ -179,6 +180,16 @@ mod tests {
         // The ? Operator is Postgres-specific
         let mut expr = parse_expr(Dialect::PostgreSQL, "NOT (j ? 'key' AND NOT b)").unwrap();
         let expected = parse_expr(Dialect::PostgreSQL, "NOT j ? 'key' OR b").unwrap();
+        normalize_negation(&mut expr);
+        assert_eq!(expr, expected);
+    }
+
+    #[test]
+    fn normalize_double_ampersand() {
+        // && (array overlap) has no inverse operator, so NOT wraps it
+        let mut expr =
+            parse_expr(Dialect::PostgreSQL, "NOT (arr && ARRAY[1,2] AND NOT b)").unwrap();
+        let expected = parse_expr(Dialect::PostgreSQL, "NOT arr && ARRAY[1,2] OR b").unwrap();
         normalize_negation(&mut expr);
         assert_eq!(expr, expected);
     }

@@ -682,6 +682,12 @@ pub enum BinaryOperator {
     /// Postgres-specific JSONB operator. Behaves like [`BinaryOperator::AtArrowRight`] with
     /// switched sides for the operands.
     AtArrowLeft,
+
+    /// `&&`
+    ///
+    /// Postgres-specific array overlap operator. Returns true if the two arrays have any elements
+    /// in common.
+    DoubleAmpersand,
 }
 
 #[derive(Default)]
@@ -741,6 +747,7 @@ impl Arbitrary for BinaryOperator {
                 Just(Self::HashArrow2),
                 Just(Self::AtArrowRight),
                 Just(Self::AtArrowLeft),
+                Just(Self::DoubleAmpersand),
             ]
             .boxed()
         }
@@ -811,7 +818,7 @@ impl TryFrom<sqlparser::ast::BinaryOperator> for BinaryOperator {
             BinOp::PGLikeMatch => Self::Like,
             BinOp::PGNotILikeMatch => Self::NotILike,
             BinOp::PGNotLikeMatch => Self::NotLike,
-            BinOp::PGOverlap => unsupported!("PGOverlap '&&'")?,
+            BinOp::PGOverlap => Self::DoubleAmpersand,
             BinOp::PGRegexIMatch => unsupported!("PGRegexIMatch '~*'")?,
             BinOp::PGRegexMatch => unsupported!("PGRegexMatch '~'")?,
             BinOp::PGRegexNotIMatch => unsupported!("PGRegexNotIMatch '!~*'")?,
@@ -880,6 +887,7 @@ impl fmt::Display for BinaryOperator {
             Self::HashArrow2 => "#>>",
             Self::AtArrowRight => "@>",
             Self::AtArrowLeft => "<@",
+            Self::DoubleAmpersand => "&&",
             Self::AtTimeZone => "AT TIME ZONE",
         };
         f.write_str(op)

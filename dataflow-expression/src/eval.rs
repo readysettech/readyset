@@ -235,6 +235,11 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
             let right_arr = non_null!(right).as_array()?;
             Ok(DfValue::from(left_arr.concat(right_arr)))
         }
+        ArrayOverlap => {
+            let left_arr = non_null!(left).as_array()?;
+            let right_arr = non_null!(right).as_array()?;
+            Ok(DfValue::from(left_arr.overlaps(right_arr)))
+        }
         StringConcat => {
             let left_str = <&str>::try_from(non_null!(left))?;
             let right_str = <&str>::try_from(non_null!(right))?;

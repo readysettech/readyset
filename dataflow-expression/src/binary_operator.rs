@@ -116,6 +116,9 @@ pub enum BinaryOperator {
     /// `||` for PostgreSQL arrays (concatenation)
     ArrayConcat,
 
+    /// `&&` for PostgreSQL arrays (overlap / any-common-element)
+    ArrayOverlap,
+
     /// `||` for PostgreSQL string concatenation
     StringConcat,
 
@@ -156,6 +159,7 @@ impl fmt::Display for BinaryOperator {
             Self::JsonKeyPathExtractText => "#>>",
             Self::JsonContains | Self::ArrayContains => "@>",
             Self::JsonContainedIn | Self::ArrayContainedIn => "<@",
+            Self::ArrayOverlap => "&&",
         };
         f.write_str(op)
     }
