@@ -214,7 +214,11 @@ impl DdlEvent {
                             like: None,
                             options: Ok(vec![]),
                         },
-                        pg_meta: Some(PostgresTableMetadata { oid, column_oids }),
+                        pg_meta: Some(PostgresTableMetadata {
+                            oid,
+                            column_oids,
+                            replica_identity_key: None,
+                        }),
                     }),
                     Err(desc) => Ok(Change::AddNonReplicatedRelation(NonReplicatedRelation {
                         name: table,

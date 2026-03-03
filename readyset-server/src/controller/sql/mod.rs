@@ -1133,10 +1133,14 @@ impl SqlIncorporator {
         pg_meta: Option<PostgresTableMetadata>,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<(Relation, NodeIndex)> {
+        let replica_identity_key = pg_meta
+            .as_ref()
+            .and_then(|m| m.replica_identity_key.as_deref());
+
         // first, compute the MIR representation of the SQL query
-        let mir = self
-            .mir_converter
-            .named_base_to_mir(name.clone(), &statement)?;
+        let mir =
+            self.mir_converter
+                .named_base_to_mir(name.clone(), &statement, replica_identity_key)?;
 
         trace!(base_node_mir = ?mir);
 

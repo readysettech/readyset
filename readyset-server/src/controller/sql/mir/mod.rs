@@ -402,8 +402,14 @@ impl SqlToMirConverter {
         &mut self,
         name: Relation,
         body: &CreateTableBody,
+        replica_identity_key: Option<&[SqlIdentifier]>,
     ) -> ReadySetResult<MirBase<'_>> {
-        let n = self.make_base_node(&name, &body.fields, body.keys.as_ref())?;
+        let n = self.make_base_node(
+            &name,
+            &body.fields,
+            body.keys.as_ref(),
+            replica_identity_key,
+        )?;
         Ok(MirBase {
             name,
             mir_node: n,
@@ -577,6 +583,7 @@ impl SqlToMirConverter {
         table_name: &Relation,
         cols: &[ColumnSpecification],
         keys: Option<&Vec<TableKey>>,
+        replica_identity_key: Option<&[SqlIdentifier]>,
     ) -> ReadySetResult<NodeIndex> {
         if let Some(ni) = self.get_relation(table_name) {
             match &self.mir_graph[ni].inner {
@@ -675,6 +682,23 @@ impl SqlToMirConverter {
 
                 (primary_key, unique_keys_vec.into_boxed_slice())
             }
+        };
+
+        // If a replica identity key override is specified, use it as the primary key
+        // and demote the original PK to a unique key.
+        let (primary_key, unique_keys) = if let Some(ri_cols) = replica_identity_key {
+            let ri_key: Box<[Column]> = ri_cols
+                .iter()
+                .map(|name| Column::new(Some(table_name.clone()), name.clone()))
+                .collect();
+
+            let mut uks = unique_keys.into_vec();
+            if let Some(old_pk) = primary_key {
+                uks.push(old_pk);
+            }
+            (Some(ri_key), uks.into_boxed_slice())
+        } else {
+            (primary_key, unique_keys)
         };
 
         // remember the schema for this version
@@ -3053,7 +3077,7 @@ mod tests {
             ..Default::default()
         });
 
-        let _ = converter.make_base_node(&Relation::from(table_name), columns, keys)?;
+        let _ = converter.make_base_node(&Relation::from(table_name), columns, keys, None)?;
 
         let node = converter.named_query_to_mir(
             &Relation::from(name),
@@ -3306,7 +3330,7 @@ mod tests {
                 let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_MYSQL);
                 converter.set_config($config);
                 let result = converter
-                    .make_base_node(&table_name.into(), columns, None)
+                    .make_base_node(&table_name.into(), columns, None, None)
                     .and_then(|_| {
                         converter.named_query_to_mir(
                             &"q1".into(),
@@ -3452,7 +3476,7 @@ mod tests {
 
         let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_MYSQL);
         let result = converter
-            .make_base_node(&"test_table".into(), columns, None)
+            .make_base_node(&"test_table".into(), columns, None, None)
             .and_then(|_| {
                 converter.named_query_to_mir(&"q1".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
             });
@@ -3492,7 +3516,7 @@ mod tests {
 
         let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_MYSQL);
         let result = converter
-            .make_base_node(&"test_table".into(), columns, None)
+            .make_base_node(&"test_table".into(), columns, None, None)
             .and_then(|_| {
                 converter.named_query_to_mir(&"q1".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
             });
@@ -3532,7 +3556,7 @@ mod tests {
 
         let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_MYSQL);
         let result = converter
-            .make_base_node(&"test_table".into(), columns, None)
+            .make_base_node(&"test_table".into(), columns, None, None)
             .and_then(|_| {
                 converter.named_query_to_mir(&"q1".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
             });
@@ -3572,7 +3596,7 @@ mod tests {
 
         let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_POSTGRESQL);
         let result = converter
-            .make_base_node(&"test_table".into(), columns, None)
+            .make_base_node(&"test_table".into(), columns, None, None)
             .and_then(|_| {
                 converter.named_query_to_mir(&"q1".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
             });
@@ -3656,7 +3680,7 @@ mod tests {
             ..Default::default()
         });
 
-        let _ = converter.make_base_node(&table_name.into(), columns, None)?;
+        let _ = converter.make_base_node(&table_name.into(), columns, None, None)?;
         let node = converter.named_query_to_mir(
             &"q_test".into(),
             &qg,
@@ -3827,6 +3851,150 @@ mod tests {
             }
         } else {
             panic!("Expected leaf node");
+        }
+    }
+
+    #[test]
+    fn make_base_node_with_replica_identity_override() {
+        use readyset_sql::ast::{IndexKeyPart, SqlIdentifier};
+
+        let table_name: Relation = "test_table".into();
+        let columns = &[
+            ColumnSpecification {
+                column: Column::from("test_table.id"),
+                sql_type: SqlType::Int(None),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+            ColumnSpecification {
+                column: Column::from("test_table.email"),
+                sql_type: SqlType::VarChar(Some(255)),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+            ColumnSpecification {
+                column: Column::from("test_table.name"),
+                sql_type: SqlType::VarChar(Some(255)),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+        ];
+        let keys = vec![
+            TableKey::PrimaryKey {
+                constraint_name: None,
+                constraint_timing: None,
+                index_name: None,
+                columns: vec![IndexKeyPart::Column(Column {
+                    name: "id".into(),
+                    table: None,
+                })],
+            },
+            TableKey::UniqueKey {
+                constraint_name: None,
+                constraint_timing: None,
+                index_name: None,
+                columns: vec![
+                    IndexKeyPart::Column(Column {
+                        name: "id".into(),
+                        table: None,
+                    }),
+                    IndexKeyPart::Column(Column {
+                        name: "email".into(),
+                        table: None,
+                    }),
+                ],
+                index_type: None,
+                nulls_distinct: None,
+            },
+        ];
+
+        let ri_cols: Vec<SqlIdentifier> = vec!["id".into(), "email".into()];
+
+        let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_POSTGRESQL);
+        let ni = converter
+            .make_base_node(&table_name, columns, Some(&keys), Some(&ri_cols))
+            .unwrap();
+
+        match &converter.mir_graph[ni].inner {
+            MirNodeInner::Base {
+                primary_key,
+                unique_keys,
+                ..
+            } => {
+                // Primary key should be the RI columns (id, email)
+                let pk = primary_key.as_ref().expect("should have primary key");
+                assert_eq!(pk.len(), 2);
+                assert_eq!(pk[0].name, "id");
+                assert_eq!(pk[1].name, "email");
+
+                // The original PK (id) should be demoted to a unique key,
+                // plus the original UK (id, email) should also be present
+                assert_eq!(unique_keys.len(), 2);
+                // First UK: original (id, email) from the table definition
+                assert_eq!(unique_keys[0].len(), 2);
+                assert_eq!(unique_keys[0][0].name, "id");
+                assert_eq!(unique_keys[0][1].name, "email");
+                // Second UK: demoted original PK (id)
+                assert_eq!(unique_keys[1].len(), 1);
+                assert_eq!(unique_keys[1][0].name, "id");
+            }
+            other => panic!("expected Base node, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn make_base_node_without_replica_identity_override() {
+        use readyset_sql::ast::IndexKeyPart;
+
+        let table_name: Relation = "test_table".into();
+        let columns = &[
+            ColumnSpecification {
+                column: Column::from("test_table.id"),
+                sql_type: SqlType::Int(None),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+            ColumnSpecification {
+                column: Column::from("test_table.email"),
+                sql_type: SqlType::VarChar(Some(255)),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+        ];
+        let keys = vec![TableKey::PrimaryKey {
+            constraint_name: None,
+            constraint_timing: None,
+            index_name: None,
+            columns: vec![IndexKeyPart::Column(Column {
+                name: "id".into(),
+                table: None,
+            })],
+        }];
+
+        let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_POSTGRESQL);
+        let ni = converter
+            .make_base_node(&table_name, columns, Some(&keys), None)
+            .unwrap();
+
+        match &converter.mir_graph[ni].inner {
+            MirNodeInner::Base {
+                primary_key,
+                unique_keys,
+                ..
+            } => {
+                // PK should remain (id) — no override
+                let pk = primary_key.as_ref().expect("should have primary key");
+                assert_eq!(pk.len(), 1);
+                assert_eq!(pk[0].name, "id");
+                // No unique keys besides the PK
+                assert_eq!(unique_keys.len(), 0);
+            }
+            other => panic!("expected Base node, got {other:?}"),
         }
     }
 }

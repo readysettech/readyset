@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::future;
@@ -344,19 +344,50 @@ impl TableEntry {
             .try_collect()
     }
 
+    /// Batch-query replica identity columns for many tables at once.
+    ///
+    /// Returns a map from table OID to the ordered list of replica identity column names.
+    /// Tables that use the default replica identity (primary key) are absent from the map.
+    async fn batch_get_replica_identity_columns<'a>(
+        oids: &[u32],
+        transaction: &'a pgsql::Transaction<'a>,
+    ) -> ReadySetResult<HashMap<u32, Vec<SqlIdentifier>>> {
+        if oids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let query = r"
+            SELECT i.indrelid, a.attname
+            FROM pg_index i
+            JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+            WHERE i.indrelid = ANY($1::oid[]) AND i.indisreplident = true
+              AND a.attnum > 0 AND NOT a.attisdropped
+            ORDER BY i.indrelid, array_position(i.indkey, a.attnum)
+        ";
+
+        let rows = transaction.query(query, &[&oids]).await?;
+        let mut map: HashMap<u32, Vec<SqlIdentifier>> = HashMap::new();
+        for row in rows {
+            let oid: u32 = row.try_get(0)?;
+            let name: String = row.try_get(1)?;
+            map.entry(oid).or_default().push(SqlIdentifier::from(name));
+        }
+        Ok(map)
+    }
+
     async fn get_table<'a>(
         &self,
         transaction: &'a pgsql::Transaction<'a>,
         parsing_preset: ParsingPreset,
     ) -> Result<TableDescription, ReadySetError> {
+        let table_relation = Relation {
+            schema: Some(self.schema.clone().into()),
+            name: self.name.clone().into(),
+        };
         let columns = Self::get_columns(self.oid, transaction)
             .await
             .map_err(|e| {
                 ReadySetError::TableError {
-                    table: Relation {
-                        schema: Some(self.schema.clone().into()),
-                        name: self.name.clone().into(),
-                    },
+                    table: table_relation.clone(),
                     source: Box::new(e),
                 }
                 .context("when loading columns for the table")
@@ -365,10 +396,7 @@ impl TableEntry {
             .await
             .map_err(|e| {
                 ReadySetError::TableError {
-                    table: Relation {
-                        schema: Some(self.schema.clone().into()),
-                        name: self.name.clone().into(),
-                    },
+                    table: table_relation.clone(),
                     source: Box::new(ReadySetError::ReplicationFailed(e.to_string())),
                 }
                 .context("when loading constraints")
@@ -376,10 +404,7 @@ impl TableEntry {
 
         Ok(TableDescription {
             oid: self.oid,
-            name: Relation {
-                schema: Some(self.schema.clone().into()),
-                name: self.name.clone().into(),
-            },
+            name: table_relation,
             columns,
             constraints,
         })
@@ -431,7 +456,41 @@ impl TableDescription {
             .ok_or_else(|| internal_err!("All tables must have a schema in the replicator"))
     }
 
-    fn try_into_change(self, parsing_preset: ParsingPreset) -> ReadySetResult<Change> {
+    fn try_into_change(
+        self,
+        parsing_preset: ParsingPreset,
+        replica_identity_columns: Option<Vec<SqlIdentifier>>,
+    ) -> ReadySetResult<Change> {
+        // Compute replica_identity_key by comparing RI columns with PK columns.
+        // If they match (or no RI override), set None.
+        let replica_identity_key = replica_identity_columns.and_then(|ri_cols| {
+            let pk_columns: Vec<&SqlIdentifier> = self
+                .constraints
+                .iter()
+                .filter_map(|c| match &c.definition {
+                    TableKey::PrimaryKey { columns, .. } => Some(
+                        columns
+                            .iter()
+                            .filter_map(|kp| kp.as_column().map(|c| &c.name)),
+                    ),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+
+            let matches = pk_columns.len() == ri_cols.len()
+                && pk_columns
+                    .iter()
+                    .zip(ri_cols.iter())
+                    .all(|(pk, ri)| *pk == ri);
+
+            if matches {
+                None
+            } else {
+                Some(ri_cols.into_boxed_slice())
+            }
+        });
+
         Ok(Change::CreateTable {
             pg_meta: Some(PostgresTableMetadata {
                 oid: self.oid,
@@ -440,6 +499,7 @@ impl TableDescription {
                     .iter()
                     .map(|c| (c.name.clone().into(), c.attnum))
                     .collect(),
+                replica_identity_key,
             }),
             statement: CreateTableStatement {
                 if_not_exists: false,
@@ -753,6 +813,8 @@ impl<'a> PostgresReplicator<'a> {
 
         self.set_replica_identity_for_tables(&table_list).await?;
 
+        let all_oids: Vec<u32> = table_list.iter().map(|t| t.oid).collect();
+
         self.noria
             .extend_recipe_no_leader_ready(ChangeList::from_changes(
                 non_replicated
@@ -806,17 +868,23 @@ impl<'a> PostgresReplicator<'a> {
             }
         }
 
+        // Batch-fetch replica identity columns for all tables in a single query
+        let mut ri_columns_map =
+            TableEntry::batch_get_replica_identity_columns(&all_oids, get_transaction!(self))
+                .await?;
+
         // For each table, retrieve its structure
         let mut tables = Vec::with_capacity(table_list.len());
         for table in table_list {
             let table_name = &table.name.clone().to_string();
+            let ri_cols = ri_columns_map.remove(&table.oid);
             let res = table
                 .get_table(get_transaction!(self), self.parsing_preset)
                 .and_then(|create_table| {
                     future::ready(
                         create_table
                             .clone()
-                            .try_into_change(self.parsing_preset)
+                            .try_into_change(self.parsing_preset, ri_cols)
                             .map(move |change| (change, create_table)),
                     )
                 })
@@ -1129,6 +1197,16 @@ impl<'a> PostgresReplicator<'a> {
         &self,
         table_list: &[TableEntry],
     ) -> ReadySetResult<()> {
+        // Suppress these self-issued ALTERs from reaching the WAL replication stream.
+        // The replicate_alter_table event trigger checks this flag and early-returns,
+        // preventing a resnapshot loop (RI changes now trigger resnapshot).
+        get_transaction!(self)
+            .execute(
+                "SET LOCAL readyset.current_command_is_replica_identity TO true",
+                &[],
+            )
+            .await?;
+
         let tables_needing_replica_identity = get_transaction!(self)
             .query(
                 // Find all tables that are in the table list, and don't already have a primary key
@@ -1154,6 +1232,13 @@ impl<'a> PostgresReplicator<'a> {
                 )
                 .await?;
         }
+
+        get_transaction!(self)
+            .execute(
+                "SET LOCAL readyset.current_command_is_replica_identity TO false",
+                &[],
+            )
+            .await?;
 
         Ok(())
     }
@@ -1263,6 +1348,176 @@ mod tests {
                 assert_eq!(columns.first().unwrap().as_column().unwrap().name, "key");
             }
             _ => panic!(),
+        }
+    }
+
+    /// Helper to build a TableDescription with a single PK constraint for testing.
+    fn make_table_with_pk(pk_columns: Vec<&str>) -> TableDescription {
+        TableDescription {
+            oid: 1234,
+            name: Relation {
+                schema: Some("public".into()),
+                name: "users".into(),
+            },
+            columns: vec![
+                ColumnEntry {
+                    attnum: 1,
+                    name: "id".into(),
+                    sql_type: "integer".into(),
+                    not_null: true,
+                    pg_type: Type::INT4,
+                },
+                ColumnEntry {
+                    attnum: 2,
+                    name: "email".into(),
+                    sql_type: "varchar".into(),
+                    not_null: true,
+                    pg_type: Type::VARCHAR,
+                },
+                ColumnEntry {
+                    attnum: 3,
+                    name: "name".into(),
+                    sql_type: "varchar".into(),
+                    not_null: false,
+                    pg_type: Type::VARCHAR,
+                },
+            ],
+            constraints: vec![ConstraintEntry {
+                name: "users_pkey".into(),
+                definition: TableKey::PrimaryKey {
+                    constraint_name: None,
+                    constraint_timing: None,
+                    index_name: None,
+                    columns: pk_columns
+                        .into_iter()
+                        .map(|name| {
+                            IndexKeyPart::Column(Column {
+                                name: name.into(),
+                                table: None,
+                            })
+                        })
+                        .collect(),
+                },
+                kind: Some(ConstraintKind::PrimaryKey),
+            }],
+        }
+    }
+
+    #[test]
+    fn try_into_change_ri_matches_pk_returns_none() {
+        let desc = make_table_with_pk(vec!["id"]);
+        let change = desc
+            .try_into_change(ParsingPreset::for_tests(), Some(vec!["id".into()]))
+            .unwrap();
+
+        match change {
+            Change::CreateTable { pg_meta, statement } => {
+                let pg_meta = pg_meta.unwrap();
+                assert!(
+                    pg_meta.replica_identity_key.is_none(),
+                    "RI matching PK should produce None"
+                );
+                // The PK constraint should be preserved as-is in the statement
+                let keys = statement.body.unwrap().keys.unwrap();
+                assert!(keys
+                    .iter()
+                    .any(|k| matches!(k, TableKey::PrimaryKey { .. })));
+            }
+            other => panic!("expected CreateTable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_into_change_ri_differs_from_pk() {
+        let desc = make_table_with_pk(vec!["id"]);
+        let change = desc
+            .try_into_change(
+                ParsingPreset::for_tests(),
+                Some(vec!["id".into(), "email".into()]),
+            )
+            .unwrap();
+
+        match change {
+            Change::CreateTable { pg_meta, statement } => {
+                let pg_meta = pg_meta.unwrap();
+                let ri_key = pg_meta.replica_identity_key.unwrap();
+                assert_eq!(ri_key.len(), 2);
+                assert_eq!(ri_key[0], "id");
+                assert_eq!(ri_key[1], "email");
+                // The statement's PK should NOT be mutated
+                let keys = statement.body.unwrap().keys.unwrap();
+                let pk = keys
+                    .iter()
+                    .find(|k| matches!(k, TableKey::PrimaryKey { .. }))
+                    .expect("PK should still exist in statement");
+                match pk {
+                    TableKey::PrimaryKey { columns, .. } => {
+                        assert_eq!(columns.len(), 1);
+                        assert_eq!(columns[0].as_column().unwrap().name, "id");
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            other => panic!("expected CreateTable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_into_change_no_ri_returns_none() {
+        let desc = make_table_with_pk(vec!["id"]);
+        let change = desc
+            .try_into_change(ParsingPreset::for_tests(), None)
+            .unwrap();
+
+        match change {
+            Change::CreateTable { pg_meta, .. } => {
+                assert!(pg_meta.unwrap().replica_identity_key.is_none());
+            }
+            other => panic!("expected CreateTable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_into_change_ri_with_no_existing_pk() {
+        let desc = TableDescription {
+            oid: 1234,
+            name: Relation {
+                schema: Some("public".into()),
+                name: "users".into(),
+            },
+            columns: vec![
+                ColumnEntry {
+                    attnum: 1,
+                    name: "id".into(),
+                    sql_type: "integer".into(),
+                    not_null: true,
+                    pg_type: Type::INT4,
+                },
+                ColumnEntry {
+                    attnum: 2,
+                    name: "email".into(),
+                    sql_type: "varchar".into(),
+                    not_null: true,
+                    pg_type: Type::VARCHAR,
+                },
+            ],
+            constraints: vec![],
+        };
+        let change = desc
+            .try_into_change(
+                ParsingPreset::for_tests(),
+                Some(vec!["id".into(), "email".into()]),
+            )
+            .unwrap();
+
+        match change {
+            Change::CreateTable { pg_meta, .. } => {
+                let ri_key = pg_meta.unwrap().replica_identity_key.unwrap();
+                assert_eq!(ri_key.len(), 2);
+                assert_eq!(ri_key[0], "id");
+                assert_eq!(ri_key[1], "email");
+            }
+            other => panic!("expected CreateTable, got {other:?}"),
         }
     }
 }

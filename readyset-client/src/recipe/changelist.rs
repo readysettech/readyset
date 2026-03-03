@@ -358,6 +358,11 @@ pub struct PostgresTableMetadata {
     pub oid: u32,
     /// A map from column name to the attribute number of that column
     pub column_oids: HashMap<SqlIdentifier, i16>,
+    /// When the table's REPLICA IDENTITY USING INDEX references columns different
+    /// from the PRIMARY KEY, this holds those columns. The base node uses these as
+    /// its primary key (for RocksDB storage and WAL key matching).
+    #[serde(default)]
+    pub replica_identity_key: Option<Box<[SqlIdentifier]>>,
 }
 
 impl Hash for PostgresTableMetadata {
@@ -366,6 +371,7 @@ impl Hash for PostgresTableMetadata {
         let mut column_oids = self.column_oids.iter().collect::<Vec<_>>();
         column_oids.sort();
         column_oids.hash(state);
+        self.replica_identity_key.hash(state);
     }
 }
 
@@ -469,9 +475,14 @@ impl Change {
                         | AlterTableDefinition::AddKey(TableKey::PrimaryKey { .. })
                         | AlterTableDefinition::AddKey(TableKey::UniqueKey { .. })
                         | AlterTableDefinition::DropForeignKey { .. }
-                        | AlterTableDefinition::DropConstraint { .. } => true,
-                        AlterTableDefinition::ReplicaIdentity(_)
-                        | AlterTableDefinition::AddKey(TableKey::FulltextKey { .. })
+                        | AlterTableDefinition::DropConstraint { .. }
+                        // All replica identity changes require resnapshotting.
+                        // Self-issued ALTERs during snapshot are suppressed at the DDL
+                        // event trigger level (via
+                        // readyset.current_command_is_replica_identity), so any RI change
+                        // arriving via WAL is user-initiated and requires resnapshot.
+                        | AlterTableDefinition::ReplicaIdentity(_) => true,
+                        AlterTableDefinition::AddKey(TableKey::FulltextKey { .. })
                         | AlterTableDefinition::AddKey(TableKey::Key { .. })
                         | AlterTableDefinition::AddKey(TableKey::CheckConstraint { .. })
                         | AlterTableDefinition::AddKey(TableKey::ForeignKey { .. })
@@ -587,6 +598,8 @@ mod tests {
     hash_laws!(PostgresTableMetadata);
 
     mod requires_resnapshot {
+        use readyset_sql::ast::ReplicaIdentity;
+
         use super::*;
 
         #[test]
@@ -626,6 +639,56 @@ mod tests {
                     original_variants: Some(vec!["a".into(), "c".into()]),
                 },
             };
+            assert!(change.requires_resnapshot())
+        }
+
+        #[test]
+        fn alter_table_replica_identity_using_index() {
+            let change = Change::AlterTable(AlterTableStatement {
+                table: "users".into(),
+                only: false,
+                definitions: Ok(vec![AlterTableDefinition::ReplicaIdentity(
+                    ReplicaIdentity::UsingIndex {
+                        index_name: "users_id_email_unique".into(),
+                    },
+                )]),
+            });
+            assert!(change.requires_resnapshot())
+        }
+
+        #[test]
+        fn alter_table_replica_identity_nothing() {
+            let change = Change::AlterTable(AlterTableStatement {
+                table: "items".into(),
+                only: false,
+                definitions: Ok(vec![AlterTableDefinition::ReplicaIdentity(
+                    ReplicaIdentity::Nothing,
+                )]),
+            });
+            assert!(change.requires_resnapshot())
+        }
+
+        #[test]
+        fn alter_table_replica_identity_default() {
+            let change = Change::AlterTable(AlterTableStatement {
+                table: "items".into(),
+                only: false,
+                definitions: Ok(vec![AlterTableDefinition::ReplicaIdentity(
+                    ReplicaIdentity::Default,
+                )]),
+            });
+            assert!(change.requires_resnapshot())
+        }
+
+        #[test]
+        fn alter_table_replica_identity_full() {
+            let change = Change::AlterTable(AlterTableStatement {
+                table: "items".into(),
+                only: false,
+                definitions: Ok(vec![AlterTableDefinition::ReplicaIdentity(
+                    ReplicaIdentity::Full,
+                )]),
+            });
             assert!(change.requires_resnapshot())
         }
     }
