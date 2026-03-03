@@ -1373,7 +1373,9 @@ where
     Handler: 'static + QueryHandler,
 {
     pub fn version(&self) -> String {
-        if let Some(version) = &self.state.db_version {
+        if let Some(version) = &self.state.db_version
+            && !version.is_empty()
+        {
             return version.clone();
         }
 

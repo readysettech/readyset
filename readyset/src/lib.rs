@@ -1539,9 +1539,11 @@ where
                                 .instrument(debug_span!("Building noria connector"))
                                 .await;
 
-                                let backend = backend_builder
-                                    .clone()
-                                    .db_version(sys_props.db_version.clone())
+                                let mut builder = backend_builder.clone();
+                                if !sys_props.db_version.is_empty() {
+                                    builder = builder.db_version(sys_props.db_version.clone());
+                                }
+                                let backend = builder
                                     .build(
                                         noria,
                                         upstream,

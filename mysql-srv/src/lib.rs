@@ -518,7 +518,11 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             1 + 16 + 4 + 8 + 1 + 2 + 1 + 2 + 2 + 1 + 6 + 4 + 12 + 1 + AUTH_PLUGIN_NAME.len() + 1,
         );
         init_packet.extend_from_slice(&[10]); // protocol 10
-        init_packet.extend_from_slice(self.shim.version().as_bytes());
+        let version = self.shim.version();
+        init_packet.extend_from_slice(version.as_bytes());
+        if !version.ends_with('\0') {
+            init_packet.push(0); // ensure null-terminated version string
+        }
         init_packet.extend_from_slice(&[0x08, 0x00, 0x00, 0x00]); // TODO: connection ID
         init_packet.extend_from_slice(&auth_data[..8]);
         init_packet.push(0);
