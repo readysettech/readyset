@@ -39,7 +39,7 @@ async fn test_window_output_column_filter_patterns() {
         .recreate_database(false)
         .parsing_preset(ParsingPreset::OnlySqlparser)
         .set_straddled_joins(true)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .build::<MySQLAdapter>()
         .await;
 

@@ -383,7 +383,7 @@ impl Default for BackendBuilder {
             allow_cache_ddl: true,
             sampler_tx: None,
             db_version: None,
-            cache_mode: CacheMode::default(),
+            cache_mode: CacheMode::Deep,
             default_ttl_ms: 10_000,
             default_coalesce_ms: 5_000,
             upstream_config: None,

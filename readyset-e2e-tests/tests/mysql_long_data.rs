@@ -19,7 +19,7 @@ fn mysql_send_long_data() {
 
 async fn mysql_send_long_data_inner() {
     let (rs_opts, _rs_handle, shutdown_tx) = TestBuilder::default()
-        .replicate_db("mysql_long_data".to_string())
+        .replicate_db("mysql_long_data")
         .fallback(true)
         .migration_mode(readyset_adapter::backend::MigrationMode::OutOfBand)
         .build::<MySQLAdapter>()

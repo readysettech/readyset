@@ -46,7 +46,7 @@ async fn functional_uk_only_rejects_table() {
 
     let (_rs_opts, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .parsing_preset(ParsingPreset::OnlySqlparser)
         .build::<MySQLAdapter>()
         .await;
@@ -118,7 +118,7 @@ async fn no_pk_functional_first_uk_usable_second_uk_succeeds() {
 
     let (rs_opts, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .parsing_preset(ParsingPreset::OnlySqlparser)
         .build::<MySQLAdapter>()
         .await;
@@ -207,7 +207,7 @@ async fn test_functional_index_snapshot() {
     // Setup ReadySet connection after table creation (triggers snapshot)
     let (rs_opts, _rs_handle, tx) = TestBuilder::default()
         .recreate_database(false)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .parsing_preset(ParsingPreset::OnlySqlparser)
         .build::<MySQLAdapter>()
         .await;
@@ -256,7 +256,7 @@ async fn test_functional_index_replication() {
     // Setup ReadySet connection BEFORE table creation (so CREATE TABLE comes via replication)
     let (rs_opts, _rs_handle, tx) = TestBuilder::default()
         .recreate_database(false)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .parsing_preset(ParsingPreset::OnlySqlparser)
         .build::<MySQLAdapter>()
         .await;
@@ -355,7 +355,7 @@ async fn test_mixed_functional_index_snapshot() {
     // Setup ReadySet connection after table creation (triggers snapshot)
     let (rs_opts, _rs_handle, tx) = TestBuilder::default()
         .recreate_database(false)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .parsing_preset(ParsingPreset::OnlySqlparser)
         .build::<MySQLAdapter>()
         .await;
@@ -403,7 +403,7 @@ async fn test_mixed_functional_index_replication() {
     // Setup ReadySet connection BEFORE table creation (so CREATE TABLE comes via replication)
     let (rs_opts, _rs_handle, tx) = TestBuilder::default()
         .recreate_database(false)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .parsing_preset(ParsingPreset::OnlySqlparser)
         .build::<MySQLAdapter>()
         .await;
@@ -501,7 +501,7 @@ async fn test_mixed_functional_index_update_delete() {
     // Setup ReadySet after data is inserted (triggers snapshot)
     let (rs_opts, _rs_handle, tx) = TestBuilder::default()
         .recreate_database(false)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .parsing_preset(ParsingPreset::OnlySqlparser)
         .build::<MySQLAdapter>()
         .await;

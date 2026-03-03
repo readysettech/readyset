@@ -1103,7 +1103,7 @@ mod types {
             .unwrap();
 
         let (rs_config, _handle, shutdown_tx) = TestBuilder::default()
-            .replicate_db("psql_date_only_test".to_string())
+            .replicate_db("psql_date_only_test")
             .recreate_database(false)
             .build::<PostgreSQLAdapter>()
             .await;

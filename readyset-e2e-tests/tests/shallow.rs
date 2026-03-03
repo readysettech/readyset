@@ -414,7 +414,7 @@ async fn mysql_change_upstream() {
 
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend_builder)
         .recreate_database(false)
-        .replicate_db(db_a.clone())
+        .replicate_db(&db_a)
         .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .build::<MySQLAdapter>()
@@ -827,7 +827,7 @@ async fn pg_change_upstream() {
 
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend_builder)
         .recreate_database(false)
-        .replicate_db(db_a.clone())
+        .replicate_db(&db_a)
         .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .build::<PostgreSQLAdapter>()

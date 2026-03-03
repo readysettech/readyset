@@ -465,9 +465,9 @@ pub fn shard_by(dt: &DfValue, shards: usize) -> usize {
 #[derive(Clone, Copy, Debug, Default, PartialEq, ValueEnum)]
 pub enum CacheMode {
     /// Only try deep caching.
-    #[default]
     Deep,
     /// Only try shallow caching.
+    #[default]
     Shallow,
     /// First try deep caching, and then fall back to shallow caching.
     DeepThenShallow,

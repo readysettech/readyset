@@ -20,7 +20,7 @@ async fn test_sj_eviction_no_remapping() {
         .recreate_database(false)
         .migration_mode(MigrationMode::OutOfBand)
         .set_straddled_joins(true)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .build::<MySQLAdapter>()
         .await;
 

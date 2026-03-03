@@ -41,7 +41,7 @@ async fn test_topk_dual_lookup() {
         .parsing_preset(ParsingPreset::OnlyNom)
         .fallback(true)
         .set_topk(true)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .build::<MySQLAdapter>()
         .await;
 
@@ -178,7 +178,7 @@ async fn test_topk_limit_catch_all() {
         .recreate_database(false)
         .migration_mode(MigrationMode::OutOfBand)
         .set_topk(true)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .build::<MySQLAdapter>()
         .await;
 
@@ -255,7 +255,7 @@ async fn test_topk_eviction_aux_cleanup() {
         .recreate_database(false)
         .fallback(false)
         .set_topk(true)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .build::<MySQLAdapter>()
         .await;
 

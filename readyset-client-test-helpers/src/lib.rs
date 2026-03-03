@@ -275,13 +275,13 @@ impl TestBuilder {
         self
     }
 
-    pub fn replicate_url(mut self, fallback_url: String) -> Self {
-        self.replicate = ReplicationBehavior::Url(fallback_url);
+    pub fn replicate_url(mut self, fallback_url: &str) -> Self {
+        self.replicate = ReplicationBehavior::Url(fallback_url.to_string());
         self
     }
 
-    pub fn replicate_db(mut self, db_name: String) -> Self {
-        self.replicate = ReplicationBehavior::DB(db_name);
+    pub fn replicate_db(mut self, db_name: &str) -> Self {
+        self.replicate = ReplicationBehavior::DB(db_name.to_string());
         self
     }
 

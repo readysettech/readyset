@@ -131,7 +131,16 @@ run_docker_compose() {
     echo -e "${RED}${ROTATING_LIGHT}Unable to pull Readyset images.${NOCOLOR}"
     exit 1
   fi
-  if ! docker compose -f readyset.compose.yml up -d --wait; then
+
+  # Add additional Readyset configuration.
+  cat << EOF > readyset.compose.override.yml
+services:
+  cache:
+    environment:
+      CACHE_MODE: deep
+EOF
+
+  if ! docker compose -f readyset.compose.yml -f readyset.compose.override.yml up -d --wait; then
     echo -e "${RED}${ROTATING_LIGHT}Docker compose setup failed.${NOCOLOR}"
     exit 1
   fi

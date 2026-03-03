@@ -55,7 +55,7 @@ async fn add_table_makes_query_cacheable() {
     // Start Readyset with only t1 replicated. t2 will be non-replicated.
     let (rs_opts, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .replication_tables(format!("{db_name}.t1"))
         .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
@@ -158,7 +158,7 @@ async fn alter_table_invalidates_proxied_query() {
 
     let (rs_opts, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .migration_style(MigrationStyle::Explicit)

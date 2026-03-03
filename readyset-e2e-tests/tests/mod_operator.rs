@@ -278,7 +278,7 @@ async fn mod_correctness_through_cache_mysql() {
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
         .parsing_preset(ParsingPreset::OnlySqlparser)
         .recreate_database(false)
-        .replicate_db(db_name.to_string())
+        .replicate_db(db_name)
         .build::<MySQLAdapter>()
         .await;
     let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();

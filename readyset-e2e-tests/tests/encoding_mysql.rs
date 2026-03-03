@@ -80,7 +80,7 @@ where
     // Test snapshot replication
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .replicate_db(db_name.clone())
+        .replicate_db(&db_name)
         .build::<MySQLAdapter>()
         .await;
 
@@ -211,7 +211,7 @@ where
     // Test streaming replication
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .replicate_db(db_name.clone())
+        .replicate_db(&db_name)
         .build::<MySQLAdapter>()
         .await;
 
