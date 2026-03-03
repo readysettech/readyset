@@ -779,7 +779,7 @@ async fn load_system_props<U>(
 where
     U: UpstreamDatabase,
 {
-    if no_upstream_conns {
+    if no_upstream_conns || upstream_config.upstream_db_url.is_none() {
         return Arc::new(RwLock::new(Ok(UpstreamSystemProperties {
             search_path: upstream_config.default_schema_search_path(),
             timezone_name: upstream_config.default_timezone_name(),
@@ -791,7 +791,10 @@ where
         let upstream = connect_upstream::<U>(upstream_config.clone(), no_upstream_conns).await?;
 
         let Some(mut upstream) = upstream else {
-            return Ok(Default::default());
+            return Err(internal_err!(
+                "connect_upstream returned None when upstream_db_url is set"
+            )
+            .into());
         };
 
         let search_path = upstream.schema_search_path().await?;

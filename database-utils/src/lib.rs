@@ -264,12 +264,10 @@ impl UpstreamConfig {
     }
 
     pub fn default_schema_search_path(&self) -> Vec<SqlIdentifier> {
-        if self.upstream_db_url.is_some()
-            && let Ok(ref db_url) = self
-                .upstream_db_url
-                .as_ref()
-                .unwrap()
-                .parse::<DatabaseURL>()
+        if let Some(Ok(ref db_url)) = self
+            .upstream_db_url
+            .as_ref()
+            .map(|u| u.parse::<DatabaseURL>())
         {
             return db_url.default_schema_search_path();
         }
