@@ -42,7 +42,9 @@ pub use dataflow_state::{
     BaseTableState, DurabilityMode, MaterializedNodeState, PersistenceParameters, PersistentState,
 };
 
-pub use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender, DualTcpStream};
+pub use crate::domain::channel::{
+    ChannelCoordinator, DomainReceiver, DomainSender, DualTcpStream, ReplayReceiver, ReplaySender,
+};
 use crate::domain::ReplicaAddress;
 pub use crate::domain::{Domain, DomainBuilder, DomainIndex, ReplayPath, ReplayPathWithContext};
 pub use crate::node_map::NodeMap;

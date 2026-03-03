@@ -7,7 +7,9 @@ use std::time::Duration;
 use dataflow::payload::packets::*;
 use dataflow::payload::{MaterializedState, SourceChannelIdentifier};
 use dataflow::prelude::Upcall;
-use dataflow::{Domain, DomainReceiver, DomainRequest, DualTcpStream, Outboxes, Packet};
+use dataflow::{
+    Domain, DomainReceiver, DomainRequest, DualTcpStream, Outboxes, Packet, ReplayReceiver,
+};
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::StreamExt;
 use futures_util::FutureExt;
@@ -82,6 +84,10 @@ pub struct Replica {
 
     init_state_reqs: mpsc::Receiver<MaterializedState>,
 
+    /// Bounded channel for receiving chunked replay packets from the replay thread.
+    /// Provides backpressure so the replay thread doesn't outrun the domain.
+    replay_rx: ReplayReceiver,
+
     /// Stores pending outgoing messages
     out: Outboxes,
 
@@ -96,6 +102,7 @@ impl Replica {
         locals: DomainReceiver,
         requests: mpsc::Receiver<WrappedDomainRequest>,
         init_state_reqs: mpsc::Receiver<MaterializedState>,
+        replay_rx: ReplayReceiver,
         cc: Arc<ChannelCoordinator>,
     ) -> Self {
         Replica {
@@ -107,6 +114,7 @@ impl Replica {
             refresh_sizes: IntervalStream::new(tokio::time::interval(Duration::from_millis(500))),
             requests,
             init_state_reqs,
+            replay_rx,
             client: reqwest::Client::new(),
         }
     }
@@ -517,6 +525,7 @@ impl Replica {
             requests,
             out,
             init_state_reqs,
+            replay_rx,
             client,
         } = &mut self;
 
@@ -565,6 +574,22 @@ impl Replica {
                     packets.as_ref().map_or(None, |x| x.as_ref().map(|x| x.len())),
                     Self::handle_packets(packets?, &mut established, domain, out).await
                 ),
+
+                // Receive chunked replay packets from the bounded replay channel
+                Some(packet) = replay_rx.recv() => {
+                    let mut replay_packets = VecDeque::with_capacity(1);
+                    replay_packets.push_back(packet);
+                    call!(
+                        "handle_packets",
+                        Some(replay_packets.len()),
+                        Self::handle_packets(
+                            Some(replay_packets),
+                            &mut established,
+                            domain,
+                            out,
+                        ).await
+                    )
+                },
 
                 // Poll the send packets future and reissue if outstanding packets are present
                 Some(res) = send_packets.next() => res?,

@@ -32,7 +32,7 @@ use vec1::Vec1;
 use crate::coordination::{DomainDescriptor, RunDomainResponse};
 use crate::worker::replica::WrappedDomainRequest;
 use dataflow::payload::{packets::Evict, Eviction};
-use dataflow::{ChannelCoordinator, DomainBuilder, DomainRequest, Packet, Readers};
+use dataflow::{ChannelCoordinator, Domain, DomainBuilder, DomainRequest, Packet, Readers};
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
@@ -313,7 +313,7 @@ impl Worker {
                 let (init_state_tx, init_state_rx) = tokio::sync::mpsc::channel(1);
 
                 let state_size = Arc::new(AtomicUsize::new(0));
-                let domain = builder.build(
+                let (domain, replay_rx) = builder.build(
                     self.readers.clone(),
                     self.coord.clone(),
                     state_size.clone(),
@@ -324,7 +324,7 @@ impl Worker {
 
                 // this channel is used for in-process domain traffic, to avoid going through the
                 // network stack unnecessarily
-                let (local_tx, local_rx) = domain.channel();
+                let (local_tx, local_rx) = Domain::channel();
                 // this channel is used for domain requests; it has a buffer size of 1 to prevent
                 // flooding a domain with requests
                 let (req_tx, req_rx) = tokio::sync::mpsc::channel(1);
@@ -346,6 +346,7 @@ impl Worker {
                     local_rx,
                     req_rx,
                     init_state_rx,
+                    replay_rx,
                     self.coord.clone(),
                 );
                 // Each domain is single threaded in nature, so we spawn each one in a separate

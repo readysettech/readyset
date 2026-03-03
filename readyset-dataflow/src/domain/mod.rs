@@ -62,7 +62,9 @@ use vec1::Vec1;
 
 use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
 pub use self::replay_paths::{ReplayPath, ReplayPathWithContext};
-use crate::domain::channel::{ChannelCoordinator, DomainReceiver, DomainSender};
+use crate::domain::channel::{
+    ChannelCoordinator, DomainReceiver, DomainSender, ReplayReceiver, ReplaySender,
+};
 use crate::domain::NodeOperator::Join;
 use crate::node::special::EgressTx;
 use crate::node::{Column, NodeProcessingResult, ProcessEnv};
@@ -495,6 +497,8 @@ impl DomainBuilder {
     }
 
     /// Starts up the domain represented by this `DomainBuilder`.
+    /// Returns the Domain and a [`ReplayReceiver`] that should be polled by the Replica
+    /// event loop to receive chunked replay packets with backpressure.
     pub fn build(
         self,
         readers: Readers,
@@ -503,7 +507,7 @@ impl DomainBuilder {
         init_state_tx: Sender<MaterializedState>,
         unquery: bool,
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
-    ) -> Domain {
+    ) -> (Domain, ReplayReceiver) {
         // initially, all nodes are not ready
         let not_ready = self
             .nodes
@@ -517,7 +521,9 @@ impl DomainBuilder {
             ("replica", self.replica.to_string()),
         ];
 
-        Domain {
+        let (replay_sender, replay_receiver) = channel::replay_channel();
+
+        let domain = Domain {
             index: self.index,
             shard: self.shard,
             replica: self.replica,
@@ -565,7 +571,10 @@ impl DomainBuilder {
             init_state_tx,
             materialization_persistence: self.config.materialization_persistence,
             table_status_tx,
-        }
+            replay_sender,
+        };
+
+        (domain, replay_receiver)
     }
 }
 
@@ -656,6 +665,9 @@ pub struct Domain {
     materialization_persistence: bool,
     /// Any TableStatus updates sent here will be sent to the current controller.
     table_status_tx: UnboundedSender<(Relation, TableStatus)>,
+    /// Sender for the bounded replay channel. Cloned and moved into the replay thread
+    /// for backpressure during full materialization replays.
+    replay_sender: ReplaySender,
 }
 
 /// Creates the materialized node state for the given node.
@@ -2108,7 +2120,7 @@ impl Domain {
             r
         };
 
-        let replay_tx_desc = self.channel_coordinator.builder_for(&self.address())?;
+        let replay_tx = self.replay_sender.clone();
 
         let address = self.address();
         std::thread::Builder::new()
@@ -2116,15 +2128,6 @@ impl Domain {
             .spawn_wrapper(move || {
                 let span = info_span!("full_replay", %address, src = %link.src);
                 let _guard = span.enter();
-
-                // TODO: make async
-                let mut chunked_replay_tx = match replay_tx_desc.build_sync() {
-                    Ok(r) => r,
-                    Err(error) => {
-                        error!(%error, "Error building channel for chunked replay");
-                        return;
-                    }
-                };
 
                 let start = time::Instant::now();
                 debug!(node = %link.dst, "starting state chunker");
@@ -2138,7 +2141,7 @@ impl Domain {
                     .peekable();
 
                 // process all records in state to completion within domain and then
-                // forward on tx (if there is one)
+                // forward via the bounded replay channel (provides backpressure)
                 let mut sent_last = is_empty;
                 while let Some((i, chunk)) = iter.next() {
                     let len = chunk.len();
@@ -2156,7 +2159,7 @@ impl Domain {
                     });
 
                     trace!(num = i, len, "sending batch");
-                    if let Err(error) = chunked_replay_tx.send(p) {
+                    if let Err(error) = replay_tx.blocking_send(p) {
                         warn!(%error, "replayer noticed domain shutdown");
                         break;
                     }
@@ -2169,7 +2172,7 @@ impl Domain {
                 // tell the target domain we're done
                 if !sent_last {
                     trace!("Sending empty last batch");
-                    if let Err(error) = chunked_replay_tx.send(Packet::ReplayPiece(ReplayPiece {
+                    if let Err(error) = replay_tx.blocking_send(Packet::ReplayPiece(ReplayPiece {
                         tag,
                         link,
                         context: ReplayPieceContext::Full {
@@ -4912,7 +4915,7 @@ impl Domain {
         Ok(())
     }
 
-    pub fn channel(&self) -> (DomainSender, DomainReceiver) {
+    pub fn channel() -> (DomainSender, DomainReceiver) {
         channel::domain_channel()
     }
 

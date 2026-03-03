@@ -27,6 +27,50 @@ pub mod tcp;
 
 pub use self::tcp::{DualTcpStream, TcpSender};
 
+/// Default capacity for the bounded replay channel used for backpressure during full
+/// materialization replays.
+const DEFAULT_REPLAY_CHANNEL_CAPACITY: usize = 256;
+
+/// Sender half of the bounded replay channel. Used by the replay thread to send chunked
+/// replay packets back to the domain with backpressure.
+#[derive(Clone)]
+pub struct ReplaySender {
+    tx: mpsc::Sender<Packet>,
+}
+
+impl ReplaySender {
+    /// Send a replay packet, blocking the current thread until capacity is available.
+    /// This provides backpressure so the replay thread doesn't outrun the domain.
+    #[allow(clippy::result_large_err)]
+    pub fn blocking_send(&self, packet: Packet) -> Result<(), mpsc::error::SendError<Packet>> {
+        self.tx.blocking_send(packet)
+    }
+}
+
+/// Receiver half of the bounded replay channel. Polled by the Replica event loop to
+/// receive chunked replay packets.
+pub struct ReplayReceiver {
+    rx: mpsc::Receiver<Packet>,
+}
+
+impl ReplayReceiver {
+    /// Receive the next replay packet, or `None` if all senders have been dropped.
+    pub async fn recv(&mut self) -> Option<Packet> {
+        self.rx.recv().await
+    }
+}
+
+/// Create a bounded replay channel with the default capacity.
+pub fn replay_channel() -> (ReplaySender, ReplayReceiver) {
+    replay_channel_with_capacity(DEFAULT_REPLAY_CHANNEL_CAPACITY)
+}
+
+/// Create a bounded replay channel with the given capacity.
+pub fn replay_channel_with_capacity(capacity: usize) -> (ReplaySender, ReplayReceiver) {
+    let (tx, rx) = mpsc::channel(capacity);
+    (ReplaySender { tx }, ReplayReceiver { rx })
+}
+
 /// Buffer size to use for the broadcast channel to notify replicas about changes to the addresses
 /// of other replicas
 ///
