@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use common::IndexType;
 use itertools::Either;
@@ -333,7 +333,7 @@ impl SingleState {
         };
 
         removed
-            .filter(|(r, _)| Rc::strong_count(&r.data) == 1)
+            .filter(|(r, _)| Arc::strong_count(&r.data) == 1)
             .map(|(r, count)| r.deep_size_of() * count)
             .sum()
     }

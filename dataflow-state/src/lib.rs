@@ -10,7 +10,7 @@ use std::fmt::{self, Debug};
 use std::hash::Hash;
 use std::iter::FromIterator;
 use std::ops::Deref;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::vec;
 
 use ahash::RandomState;
@@ -608,17 +608,13 @@ impl std::hash::BuildHasher for GlobalRandomState {
 /// The hash is computed once when the Row is created using a global RandomState,
 /// and reused for all subsequent operations. This is especially beneficial when
 /// rows are inserted into multiple indices.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
-    data: Rc<Vec<DfValue>>,
+    data: Arc<Vec<DfValue>>,
     cached_hash: u64,
 }
 
 pub type Rows = HashBag<Row, GlobalRandomState>;
-
-// SAFETY: All references to the same row always belong to the same `State`, so won't be cloned
-// across threads (which would be UB). See [`Row:clone`].
-unsafe impl Send for Row {}
 
 impl Hash for Row {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -639,7 +635,7 @@ impl Row {
     fn new(data: Vec<DfValue>) -> Self {
         let cached_hash = global_random_state().hash_one(&data);
         Row {
-            data: Rc::new(data),
+            data: Arc::new(data),
             cached_hash,
         }
     }
@@ -649,21 +645,6 @@ impl Row {
     pub(crate) fn batch_new_parallel(data_vec: Vec<Vec<DfValue>>) -> Vec<Self> {
         data_vec.into_par_iter().map(Self::new).collect()
     }
-
-    /// Clone a row with a `State` and its original thread.
-    ///
-    /// # Safety
-    ///
-    /// This is very unsafe. Since `Row` unsafely implements `Send`, one can clone a row
-    /// and have two `Row`s with an inner Rc being sent to two different threads leading
-    /// to undefined behaviour. In the context of `State` it is only safe because all references
-    /// to the same row always belong to the same state, which lives on a single thread.
-    pub(crate) unsafe fn clone(&self) -> Self {
-        Row {
-            data: Rc::clone(&self.data),
-            cached_hash: self.cached_hash,
-        }
-    }
 }
 
 impl From<Vec<DfValue>> for Row {
@@ -672,8 +653,8 @@ impl From<Vec<DfValue>> for Row {
     }
 }
 
-impl From<Rc<Vec<DfValue>>> for Row {
-    fn from(r: Rc<Vec<DfValue>>) -> Self {
+impl From<Arc<Vec<DfValue>>> for Row {
+    fn from(r: Arc<Vec<DfValue>>) -> Self {
         let cached_hash = global_random_state().hash_one(&*r);
         Row {
             data: r,

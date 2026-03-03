@@ -255,8 +255,7 @@ impl KeyedState {
                     Err(None) => None,
                     Err(Some((row, _))) => {
                         // there are still copies of the row left in rs
-                        // SAFETY: row is never moved to another thread
-                        Some(unsafe { row.clone() })
+                        Some(row.clone())
                     }
                 }
             };

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use common::{IndexType, Record, Records, Tag};
 use hashbag::HashBag;
@@ -452,8 +452,7 @@ impl State for MemoryState {
             // The first strict index we merge into the weak index is a special case. We don't need
             // to worry about duplicate rows yet, so we can just copy in every row directly:
             for row in first_strict_index.values().flatten() {
-                // SAFETY: row remains inside the same state
-                weak_index.insert(&index.columns, unsafe { row.clone() }, false);
+                weak_index.insert(&index.columns, row.clone(), false);
             }
         }
 
@@ -479,8 +478,7 @@ impl State for MemoryState {
                     // If one copy of the row isn't a duplicate, none of the copies are, so go
                     // ahead and insert every copy in one go to save on repeated checks:
                     for _ in 0..duplicate_count {
-                        // SAFETY: row remains inside the same state
-                        weak_index.insert(&index.columns, unsafe { row.clone() }, false);
+                        weak_index.insert(&index.columns, row.clone(), false);
                     }
                 }
             }
@@ -527,13 +525,11 @@ impl MemoryState {
                 }
             };
             self.mem_size += r.deep_size_of();
-            // SAFETY: row remains inside the same state
-            self.state[i].insert_row(unsafe { r.clone() })
+            self.state[i].insert_row(r.clone())
         } else {
             let mut hit_any = false;
             for i in 0..self.state.len() {
-                // SAFETY: row remains inside the same state
-                hit_any |= self.state[i].insert_row(unsafe { r.clone() });
+                hit_any |= self.state[i].insert_row(r.clone());
             }
             if hit_any {
                 self.mem_size += r.deep_size_of();
@@ -543,8 +539,7 @@ impl MemoryState {
 
         if hit {
             for (key, weak_index) in self.weak_indices.iter_mut() {
-                // SAFETY: row remains inside the same state
-                weak_index.insert(key, unsafe { r.clone() }, false);
+                weak_index.insert(key, r.clone(), false);
             }
         }
 
@@ -555,7 +550,7 @@ impl MemoryState {
         let mut hit = false;
         for s in &mut self.state {
             if let Some(row) = s.remove_row(r, &mut hit) {
-                if Rc::strong_count(&row.data) == 1 {
+                if Arc::strong_count(&row.data) == 1 {
                     self.mem_size = self.mem_size.saturating_sub(row.deep_size_of());
                 }
             }
@@ -581,7 +576,7 @@ impl MemoryState {
 
         // Only count strong references after we removed a row from `weak_indices`
         // otherwise if it is there, it will never have a reference count of 1
-        if Rc::strong_count(&row.data) == 1 {
+        if Arc::strong_count(&row.data) == 1 {
             row.deep_size_of()
         } else {
             0
