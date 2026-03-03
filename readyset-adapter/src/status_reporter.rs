@@ -122,8 +122,12 @@ where
         authority: Arc<Authority>,
         enabled_features: Vec<String>,
     ) -> Self {
+        let upstream = upstream_config
+            .upstream_db_url
+            .is_some()
+            .then(|| upstream_config.into());
         let inner = Arc::new(Mutex::new(ReadySetStatusReporterInner {
-            upstream: upstream_config.into(),
+            upstream,
             rs_handle,
             connections,
             authority,
@@ -142,7 +146,7 @@ where
 /// [`ReadySetStatusReporterInner`] is responsible for aggregating status-related information from
 /// various sources and generating a [`ReadySetStatus`].
 struct ReadySetStatusReporterInner<U> {
-    pub(crate) upstream: LazyUpstream<U>,
+    pub(crate) upstream: Option<LazyUpstream<U>>,
     /// A handle to the ReadySet controller, for making controller rpc calls to obtain
     /// a [`ReadySetControllerStatus`]
     pub(crate) rs_handle: Option<ReadySetHandle>,
@@ -175,15 +179,17 @@ where
     }
 
     async fn upstream_reachable(&mut self) -> Option<bool> {
+        let upstream = self.upstream.as_mut()?;
+
         // Check current connection status
-        if self.upstream.is_connected().await.unwrap_or(false) {
+        if upstream.is_connected().await.unwrap_or(false) {
             return Some(true);
         }
 
         // Our connection may have been broken.
         // Attempt to reconnect once to confirm reachability.
-        match self.upstream.connect().await {
-            Ok(_) => match self.upstream.is_connected().await {
+        match upstream.connect().await {
+            Ok(_) => match upstream.is_connected().await {
                 Ok(is_connected) => Some(is_connected),
                 _ => {
                     warn!("Unable to re-establish connection to Upstream");
