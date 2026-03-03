@@ -304,6 +304,9 @@ pub fn is_predicate(op: &BinaryOperator) -> bool {
             | LessOrEqual
             | Is
             | IsNot
+            | QuestionMark
+            | QuestionMarkPipe
+            | QuestionMarkAnd
             | AtArrowRight
             | AtArrowLeft
             | DoubleAmpersand

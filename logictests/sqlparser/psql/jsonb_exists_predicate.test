@@ -1,0 +1,39 @@
+# Tests for JSONB existence operators (?, ?|, ?&) used as WHERE predicates.
+# These operators return boolean and must be recognized as predicates
+# by the query graph builder.
+
+statement ok
+create table t_jb (id int, data jsonb);
+
+statement ok
+insert into t_jb values
+    (1, '{"a": 1, "b": 2}'),
+    (2, '{"b": 3, "c": 4}'),
+    (3, '{"a": 5, "c": 6}'),
+    (4, '{"d": 7}');
+
+# ? operator: key exists
+query I rowsort
+select id from t_jb where data ? 'a';
+----
+1
+3
+
+# ? operator: key not present
+query I rowsort
+select id from t_jb where data ? 'z';
+----
+
+# ?| operator: any key exists
+query I rowsort
+select id from t_jb where data ?| array['a', 'd'];
+----
+1
+3
+4
+
+# ?& operator: all keys exist
+query I rowsort
+select id from t_jb where data ?& array['a', 'b'];
+----
+1
