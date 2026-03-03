@@ -1535,19 +1535,23 @@ pub struct AllRecords(PersistentStateHandle);
 
 /// RAII guard providing the ability to stream all the records out of a persistent state.
 ///
-/// Holds a read lock on `SharedState` to ensure index metadata is consistent during iteration.
+/// Extracts the primary column family name under a short-lived lock, then releases it.
+/// This avoids holding a long-lived `SharedState` read lock during iteration, which would
+/// deadlock with the WalFlusher's periodic write lock under `parking_lot`'s writer-preference
+/// fairness policy.
 pub struct AllRecordsGuard<'a> {
     db: &'a DB,
-    shared_state: parking_lot::RwLockReadGuard<'a, SharedState>,
+    primary_cf_name: String,
 }
 
 impl AllRecords {
     /// Construct an RAII guard providing the ability to stream all the records out of a persistent
     /// state
     pub fn read(&self) -> AllRecordsGuard<'_> {
+        let primary_cf_name = self.0.shared_state().indices[0].column_family.clone();
         AllRecordsGuard {
             db: self.0.db(),
-            shared_state: self.0.shared_state(),
+            primary_cf_name,
         }
     }
 }
@@ -1560,7 +1564,7 @@ impl<'a> AllRecordsGuard<'a> {
     {
         let cf = self
             .db
-            .cf_handle(&self.shared_state.indices[0].column_family)
+            .cf_handle(&self.primary_cf_name)
             .expect("Column families always exist for all indices");
         self.db
             .full_iterator_cf(&cf, IteratorMode::Start)
