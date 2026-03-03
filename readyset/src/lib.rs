@@ -146,12 +146,12 @@ pub struct Options {
     pub deployment: String,
 
     /// Database engine protocol to emulate. If omitted, will be inferred from the
-    /// `upstream-db-url`
+    /// `upstream-db-url` or `cdc-db-url`
     #[arg(
         long,
         env = "DATABASE_TYPE",
         value_enum,
-        required_unless_present("upstream_db_url"),
+        required_unless_present_any(["upstream_db_url", "cdc_db_url"]),
         hide = true
     )]
     pub database_type: Option<DatabaseType>,
@@ -526,15 +526,14 @@ impl Options {
         Ok(url.parse::<DatabaseURL>()?.database_type())
     }
 
-    /// Check that the user has provided the same database type for both the upstream and cdc URLs
-    ///
-    /// # Output
-    ///
-    /// - An `anyhow::Result` indicating whether the database types match
-    fn check_replication_and_cdc_urls(&self) -> anyhow::Result<()> {
-        if let Some(url) = &self.server_worker_options.replicator_config.upstream_db_url {
-            let inferred = self.infer_database_type_from_url(url)?;
-            if let Some(cdc_url) = &self.server_worker_options.replicator_config.cdc_db_url {
+    /// Infer the database type from the upstream and/or CDC URLs, validating that they agree if
+    /// both are present. Returns `None` if neither URL is provided.
+    fn infer_database_type_from_urls(&self) -> anyhow::Result<Option<DatabaseType>> {
+        let upstream = &self.server_worker_options.replicator_config.upstream_db_url;
+        let cdc = &self.server_worker_options.replicator_config.cdc_db_url;
+        match (upstream, cdc) {
+            (Some(url), Some(cdc_url)) => {
+                let inferred = self.infer_database_type_from_url(url)?;
                 let cdc_inferred = self.infer_database_type_from_url(cdc_url)?;
                 if inferred != cdc_inferred {
                     bail!(
@@ -544,33 +543,29 @@ impl Options {
                         cdc_inferred
                     );
                 }
+                Ok(Some(inferred))
             }
+            (Some(url), None) | (None, Some(url)) => {
+                Ok(Some(self.infer_database_type_from_url(url)?))
+            }
+            (None, None) => Ok(None),
         }
-
-        Ok(())
     }
 
-    /// Check that the user has provided a database type or an upstream URL
-    /// If the user has provided both, we will check that the database types match
-    ///
-    /// # Output
-    ///
-    /// - An `anyhow::Result` indicating whether the database types match and the database type
+    /// Check that the user has provided a database type or a database URL (upstream or CDC).
+    /// If both are provided, we verify they are consistent.
     pub fn database_type(&self) -> anyhow::Result<DatabaseType> {
-        self.check_replication_and_cdc_urls()?;
-        match (
-            self.database_type,
-            &self.server_worker_options.replicator_config.upstream_db_url,
-        ) {
-            (None, None) => bail!("One of either --database-type or --upstream-db-url is required"),
-            (None, Some(url)) => self.infer_database_type_from_url(url),
-            (Some(dt), None) => Ok(dt),
-            (Some(dt), Some(url)) => {
-                let inferred = self.infer_database_type_from_url(url)?;
+        let inferred = self.infer_database_type_from_urls()?;
+        match (self.database_type, inferred) {
+            (None, None) => {
+                bail!("One of --database-type, --upstream-db-url, or --cdc-db-url is required")
+            }
+            (None, Some(dt)) | (Some(dt), None) => Ok(dt),
+            (Some(dt), Some(inferred)) => {
                 if dt != inferred {
                     bail!(
-                        "Provided --database-type {dt} does not match database type {inferred} for \
-                         --upstream-db-url"
+                        "Provided --database-type {dt} does not match database type {inferred} \
+                         inferred from database URL"
                     );
                 }
                 Ok(dt)
