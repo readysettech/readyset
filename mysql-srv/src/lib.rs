@@ -514,11 +514,27 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         let auth_data =
             generate_auth_data().map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
         self.auth_data = auth_data;
+        let version = self.shim.version();
+        let version_len = version.len() + if version.ends_with('\0') { 0 } else { 1 };
+        // HandshakeV10 packet layout — see MySQL protocol docs for field descriptions.
         let mut init_packet = Vec::with_capacity(
-            1 + 16 + 4 + 8 + 1 + 2 + 1 + 2 + 2 + 1 + 6 + 4 + 12 + 1 + AUTH_PLUGIN_NAME.len() + 1,
+            1                        // protocol version
+            + version_len            // server version string + NUL
+            + 4                       // connection id
+            + 8                       // auth_data part 1
+            + 1                       // filler
+            + 2                       // capability flags (lower 2 bytes)
+            + 1                       // character set
+            + 2                       // status flags
+            + 2                       // capability flags (upper 2 bytes)
+            + 1                       // auth plugin data length
+            + 10                      // reserved
+            + 12                      // auth_data part 2
+            + 1                       // auth_data part 2 NUL
+            + AUTH_PLUGIN_NAME.len()  // auth plugin name
+            + 1, // auth plugin name NUL
         );
         init_packet.extend_from_slice(&[10]); // protocol 10
-        let version = self.shim.version();
         init_packet.extend_from_slice(version.as_bytes());
         if !version.ends_with('\0') {
             init_packet.push(0); // ensure null-terminated version string
