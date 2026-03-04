@@ -2603,13 +2603,14 @@ impl QueryOperation {
                     })
                 };
 
-                let partition_by = match config.over_clause {
+                let mut partition_by: Vec<Expr> = match config.over_clause {
                     OverClauseKind::PartitionOnly(count)
                     | OverClauseKind::PartitionAndOrder(count, _) => {
                         iter::repeat_with(&mut make_column).take(count).collect()
                     }
                     _ => vec![],
                 };
+                partition_by.dedup();
 
                 let make_ordering = || {
                     (
@@ -2619,13 +2620,14 @@ impl QueryOperation {
                     )
                 };
 
-                let order_by = match config.over_clause {
+                let mut order_by: Vec<(Expr, OrderType, NullOrder)> = match config.over_clause {
                     OverClauseKind::OrderOnly(count)
                     | OverClauseKind::PartitionAndOrder(_, count) => {
                         iter::repeat_with(make_ordering).take(count).collect()
                     }
                     _ => vec![],
                 };
+                order_by.dedup();
 
                 query.fields.push(FieldDefinitionExpr::Expr {
                     alias: Some(state.fresh_alias()),
