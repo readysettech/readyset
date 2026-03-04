@@ -246,14 +246,9 @@ impl DialectDisplay for Literal {
                     }
                 }
             },
-            Literal::Blob(bv) => write!(
-                f,
-                "{}",
-                bv.iter()
-                    .map(|v| format!("{v:x}"))
-                    .collect::<Vec<String>>()
-                    .join(" ")
-            ),
+            Literal::Blob(bv) => {
+                write!(f, "X'{}'", bv.iter().map(|v| format!("{v:02X}")).join(""))
+            }
             Literal::ByteArray(b) => {
                 // E'\x...' can produce invalid UTF-8 sequences.
                 write!(f, "X'{}'", b.iter().map(|v| format!("{v:02X}")).join(""))
@@ -322,8 +317,8 @@ impl Literal {
             SqlType::MediumIntUnsigned(_) => (0..(1u32 << 24))
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
+            SqlType::ByteArray => any::<Vec<u8>>().prop_map(Self::ByteArray).boxed(),
             SqlType::Blob
-            | SqlType::ByteArray
             | SqlType::LongBlob
             | SqlType::MediumBlob
             | SqlType::TinyBlob
@@ -429,5 +424,42 @@ impl Literal {
     #[must_use]
     pub fn is_placeholder(&self) -> bool {
         matches!(self, Self::Placeholder(_))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Dialect;
+
+    #[test]
+    fn blob_display_produces_valid_hex_literal() {
+        let blob = Literal::Blob(vec![0x8d, 0x33, 0x4e, 0x00, 0x0a, 0xff]);
+        let mysql = blob.display(Dialect::MySQL).to_string();
+        let psql = blob.display(Dialect::PostgreSQL).to_string();
+
+        assert_eq!(mysql, "X'8D334E000AFF'");
+        assert_eq!(psql, "X'8D334E000AFF'");
+    }
+
+    #[test]
+    fn blob_display_empty() {
+        let blob = Literal::Blob(vec![]);
+        assert_eq!(blob.display(Dialect::MySQL).to_string(), "X''");
+        assert_eq!(blob.display(Dialect::PostgreSQL).to_string(), "X''");
+    }
+
+    #[test]
+    fn byte_array_display_matches_blob() {
+        let data = vec![0x01, 0xab, 0xcd, 0xef];
+        let blob = Literal::Blob(data.clone());
+        let byte_array = Literal::ByteArray(data);
+
+        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+            assert_eq!(
+                blob.display(dialect).to_string(),
+                byte_array.display(dialect).to_string(),
+            );
+        }
     }
 }
