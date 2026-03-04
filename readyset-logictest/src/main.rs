@@ -321,6 +321,11 @@ struct Verify {
     #[arg(long, short = 'v')]
     verbose: bool,
 
+    /// Continue running after query failures, reporting all failures at the end.
+    /// Statement failures still bail immediately since subsequent records depend on them.
+    #[arg(long, alias = "nff")]
+    no_fail_fast: bool,
+
     /// Logging/tracing options
     #[command(flatten)]
     tracing: readyset_tracing::Options,
@@ -555,6 +560,7 @@ impl From<&Verify> for RunOptions {
             replication_url: verify.replication_url.clone(),
             time: verify.time,
             verbose: verify.verbose,
+            no_fail_fast: verify.no_fail_fast,
         }
     }
 }

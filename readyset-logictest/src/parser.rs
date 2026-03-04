@@ -426,7 +426,9 @@ pub fn records(i: &[u8]) -> IResult<&[u8], Vec<Record>> {
     ))(i)
 }
 
-pub fn read_records<R>(mut input: R) -> anyhow::Result<Vec<Record>>
+/// Read and parse records from the input, returning each record paired with its 1-based line number
+/// in the input.
+pub fn read_records<R>(mut input: R) -> anyhow::Result<Vec<(usize, Record)>>
 where
     R: io::Read,
 {
@@ -435,7 +437,8 @@ where
     input
         .read_to_end(&mut bytes)
         .with_context(|| "Failed to read input file")?;
-    let (remaining, records) = records(bytes.as_slice()).map_err(|e| match e {
+
+    let map_nom_err = |e: nom::Err<nom::error::Error<&[u8]>>| match e {
         nom::Err::Incomplete(_) => anyhow!("Parse error: Incomplete"),
         nom::Err::Error(nom::error::Error { input, code })
         | nom::Err::Failure(nom::error::Error { input, code }) => {
@@ -446,15 +449,27 @@ where
                 code
             )
         }
-    })?;
+    };
 
-    if !remaining.is_empty() {
-        bail!(
-            "Parse error, at {}: expected end of file",
-            &String::from_utf8_lossy(remaining)[..32]
-        );
+    let all_bytes = bytes.as_slice();
+    let mut remaining = ignore(all_bytes).map(|(r, _)| r).unwrap_or(all_bytes);
+    let mut result = Vec::new();
+
+    while !remaining.is_empty() {
+        // Compute 1-based line number from byte offset before parsing each record
+        let offset = all_bytes.len() - remaining.len();
+        let line = all_bytes[..offset].iter().filter(|&&b| b == b'\n').count() + 1;
+
+        let (r, rec) = complete(record)(remaining).map_err(&map_nom_err)?;
+        result.push((line, rec));
+        remaining = ignore(r).map(|(r, _)| r).unwrap_or(r);
     }
-    Ok(records)
+
+    if result.is_empty() {
+        bail!("Parse error: no records found");
+    }
+
+    Ok(result)
 }
 
 #[cfg(test)]

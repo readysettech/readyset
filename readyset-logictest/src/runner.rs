@@ -30,14 +30,15 @@ use crate::parser;
 #[derive(Debug, Clone)]
 pub struct TestScript {
     path: PathBuf,
-    records: Vec<Record>,
+    /// Records paired with their 1-based line numbers (0 means no line info).
+    records: Vec<(usize, Record)>,
 }
 
 impl From<Vec<Record>> for TestScript {
     fn from(records: Vec<Record>) -> Self {
         TestScript {
             path: "".into(),
-            records,
+            records: records.into_iter().map(|r| (0, r)).collect(),
         }
     }
 }
@@ -50,7 +51,7 @@ impl FromIterator<Record> for TestScript {
 
 impl Extend<Record> for TestScript {
     fn extend<T: IntoIterator<Item = Record>>(&mut self, iter: T) {
-        self.records.extend(iter)
+        self.records.extend(iter.into_iter().map(|r| (0, r)))
     }
 }
 
@@ -65,7 +66,7 @@ impl TestScript {
 
 impl Display for TestScript {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}", self.records().iter().join("\n"))
+        writeln!(f, "{}", self.records.iter().map(|(_, r)| r).join("\n"))
     }
 }
 
@@ -82,6 +83,10 @@ pub struct RunOptions {
     pub enable_reuse: bool,
     pub time: bool,
     pub verbose: bool,
+    /// When true, continue running after query failures and report all failures at the end.
+    /// DDL/DML statement failures still bail immediately since subsequent records depend on them.
+    /// SELECT statement error failures are collected like query failures.
+    pub no_fail_fast: bool,
 }
 
 impl RunOptions {
@@ -95,6 +100,7 @@ impl RunOptions {
             database_type,
             parsing_preset: ParsingPreset::for_tests(),
             verbose: false,
+            no_fail_fast: false,
         }
     }
 }
@@ -310,7 +316,10 @@ impl TestScript {
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(8);
 
-        for record in &self.records {
+        // Collected query failures when no_fail_fast is enabled
+        let mut query_failures: Vec<(usize, String)> = Vec::new();
+
+        for (line_num, record) in &self.records {
             match record {
                 Record::Statement(stmt) => {
                     if conditional_skip(&stmt.conditionals) {
@@ -324,7 +333,7 @@ impl TestScript {
                         update_system_timezone = true;
                     }
                     debug!(command = stmt.command, "Running statement");
-                    retry_with_exponential_backoff!(
+                    let stmt_result = retry_with_exponential_backoff!(
                         {
                         self.run_statement(stmt, conn)
                             .await
@@ -334,7 +343,26 @@ impl TestScript {
                         delay: 100,
                         backoff: 2,
                     )
-                    .with_context(|| format!("Running statement with {retries} retries"))?;
+                    .with_context(|| {
+                        if *line_num > 0 {
+                            format!("Running statement at line {line_num} with {retries} retries")
+                        } else {
+                            format!("Running statement with {retries} retries")
+                        }
+                    });
+
+                    if let Err(e) = stmt_result {
+                        // For read-only statement errors (SELECT or WITH/CTE), no_fail_fast
+                        // can safely collect the failure since they don't affect subsequent
+                        // records.
+                        let upper = stmt.command.trim_start().to_ascii_uppercase();
+                        let is_read_only = upper.starts_with("SELECT") || upper.starts_with("WITH");
+                        if opts.no_fail_fast && is_read_only {
+                            query_failures.push((*line_num, format!("{e:#}")));
+                        } else {
+                            return Err(e);
+                        }
+                    }
                 }
 
                 Record::Query(query) => {
@@ -367,9 +395,8 @@ impl TestScript {
 
                     // 100 ms, 2x backoff
                     // 25.5 seconds total
-                    match retry_with_exponential_backoff!(
+                    let query_result = retry_with_exponential_backoff!(
                         {
-                            {
                                 let query_result = self
                                     .run_query(query, conn, is_readyset)
                                     .await
@@ -382,21 +409,28 @@ impl TestScript {
                                     (Err(e), false) => Err(e),
                                     _ => Ok(()),
                                 }
-                            }
                         },
                         retries: retries,
                         delay: 100,
                         backoff: 2,
-                    ) {
+                    );
+
+                    match query_result {
                         Ok(_) => {
                             if let Some((label, start)) = &timer {
                                 let duration = start.elapsed();
                                 debug!(label, "Query succeeded in {duration:?}");
                             };
-                            Ok(())
                         }
-                        Err(e) => Err(e.context(format!("Query failed after {retries} retries"))),
-                    }?
+                        Err(e) => {
+                            let err = e.context(format!("Query failed after {retries} retries"));
+                            if opts.no_fail_fast {
+                                query_failures.push((*line_num, format!("{err:#}")));
+                            } else {
+                                return Err(err);
+                            }
+                        }
+                    }
                 }
                 Record::HashThreshold(_) => {}
                 Record::Halt { .. } => break,
@@ -415,6 +449,23 @@ impl TestScript {
                 }
             }
         }
+
+        if !query_failures.is_empty() {
+            let count = query_failures.len();
+            let details: String = query_failures
+                .iter()
+                .map(|(line, msg)| {
+                    if *line > 0 {
+                        format!("  line {line}: {msg}")
+                    } else {
+                        format!("  {msg}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            bail!("{count} query failure(s):\n{details}");
+        }
+
         Ok(())
     }
 
@@ -440,7 +491,15 @@ impl TestScript {
                         }
                     }
                 }
-                Ok(_) => bail!("Statement should have failed, but succeeded"),
+                Ok(_) => {
+                    if let Some(pattern) = pattern {
+                        bail!(
+                            "Statement should have failed, but succeeded (expected error matching: {pattern})"
+                        )
+                    } else {
+                        bail!("Statement should have failed, but succeeded")
+                    }
+                }
             },
         }
         Ok(())
@@ -585,8 +644,8 @@ impl TestScript {
         Ok(())
     }
 
-    /// Get a reference to the test script's records.
-    pub fn records(&self) -> &[Record] {
-        &self.records
+    /// Get a reference to the test script's records (without line numbers).
+    pub fn records(&self) -> Vec<&Record> {
+        self.records.iter().map(|(_, r)| r).collect()
     }
 }
