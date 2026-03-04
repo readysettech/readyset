@@ -730,7 +730,7 @@ fn make_window_node(
 
             match mig.dialect.engine() {
                 SqlEngine::MySQL => {
-                    if ty.is_any_float() {
+                    if ty.is_any_float() || ty.is_any_text() {
                         DfType::Double
                     } else if ty.is_any_int() || ty.is_numeric() {
                         DfType::DEFAULT_NUMERIC

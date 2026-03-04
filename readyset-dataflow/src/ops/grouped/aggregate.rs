@@ -47,7 +47,8 @@ impl Aggregation {
 
                 match dialect.engine() {
                     SqlEngine::MySQL => {
-                        if over_col_ty.is_any_float() {
+                        if over_col_ty.is_any_float() || over_col_ty.is_any_text() {
+                            // MySQL returns DOUBLE for SUM over float and text columns
                             DfType::Double
                         } else {
                             DfType::DEFAULT_NUMERIC
@@ -70,7 +71,8 @@ impl Aggregation {
             }
             Aggregation::Avg => {
                 antithesis_sdk::assert_reachable!("Aggregation::Avg");
-                if over_col_ty.is_any_float() {
+                if over_col_ty.is_any_float() || over_col_ty.is_any_text() {
+                    // MySQL returns DOUBLE for AVG over float and text columns
                     DfType::Double
                 } else {
                     DfType::DEFAULT_NUMERIC
@@ -186,8 +188,19 @@ impl GroupedOperation for Aggregator {
 
     fn to_diff(&self, r: &[DfValue], pos: bool) -> ReadySetResult<Self::Diff> {
         let group_hash = hash_grouped_records(r, self.group_by());
+        let value = r[self.over].clone();
+        let value = match self.op {
+            Aggregation::Sum | Aggregation::Avg => {
+                // MySQL implicitly coerces text to numeric for SUM/AVG,
+                // treating non-numeric strings as 0.
+                value
+                    .coerce_to(&self.out_ty, &DfType::Unknown)
+                    .unwrap_or_else(|_| self.new_data().unwrap_or(DfValue::Int(0)))
+            }
+            Aggregation::Count => value,
+        };
         Ok(NumericalDiff {
-            value: r[self.over].clone(),
+            value,
             positive: pos,
             group_hash,
         })
@@ -1131,6 +1144,90 @@ mod tests {
             ]
             .into()
         );
+    }
+
+    /// Helper to set up an aggregation over a text column (MySQL).
+    fn setup_text_column(aggregation: Aggregation, mat: bool) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y"]);
+        g.set_op(
+            "identity",
+            &["x", "ys"],
+            aggregation
+                .over(
+                    s.as_global(),
+                    1,
+                    &[0],
+                    &DfType::DEFAULT_TEXT,
+                    &Dialect::DEFAULT_MYSQL,
+                )
+                .expect("failed to create aggregation over text column"),
+            mat,
+        );
+        g
+    }
+
+    /// SUM over a text column should coerce text values to numeric (MySQL behavior).
+    /// Non-numeric strings are treated as 0. MySQL returns DOUBLE for SUM(text).
+    #[test]
+    fn sum_over_text_column() {
+        let mut c = setup_text_column(Aggregation::Sum, true);
+
+        // Add a numeric string "5"
+        let u: Record = vec![1.into(), DfValue::from("5")].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        match rs.into_iter().next().expect("expected one record") {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                // "5" coerced to Double 5.0
+                assert_eq!(r[1], DfValue::Double(5.0));
+            }
+            other => panic!("expected Positive, got {other:?}"),
+        }
+
+        // Add a non-numeric string "hello" — should be treated as 0
+        let u: Record = vec![1.into(), DfValue::from("hello")].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+        // Negative of previous value
+        match rs.next().expect("expected record") {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], DfValue::Double(5.0));
+            }
+            other => panic!("expected Negative, got {other:?}"),
+        }
+        // Positive with same value (0 was added)
+        match rs.next().expect("expected record") {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], DfValue::Double(5.0));
+            }
+            other => panic!("expected Positive, got {other:?}"),
+        }
+
+        // Add another numeric string "3"
+        let u: Record = vec![1.into(), DfValue::from("3")].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+        match rs.next().expect("expected record") {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], DfValue::Double(5.0));
+            }
+            other => panic!("expected Negative, got {other:?}"),
+        }
+        match rs.next().expect("expected record") {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                // 5.0 + 0.0 + 3.0 = 8.0
+                assert_eq!(r[1], DfValue::Double(8.0));
+            }
+            other => panic!("expected Positive, got {other:?}"),
+        }
     }
 
     #[test]

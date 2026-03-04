@@ -195,6 +195,22 @@ macro_rules! test_aggregation_type {
             }
         }
     };
+    (mysql, $name:ident, $expr:expr, $coltype:expr, [$($value:expr),+ $(,)?]) => {
+        paste::paste! {
+            #[tokio::test]
+            #[tags(serial, slow)]
+            #[upstream(mysql57, mysql80, mysql84)]
+            async fn [<$name _mysql>]() {
+                test_aggregation_type_inner_mysql(
+                    $expr,
+                    $coltype,
+                    &[$($value),+],
+                    false
+                )
+                .await;
+            }
+        }
+    };
 }
 
 macro_rules! test_window_aggregation_type {
@@ -289,6 +305,9 @@ test_aggregation_type!(mysql, sum_numeric, "sum(x)", SqlType::Numeric(None));
 test_aggregation_type!(mysql, sum_decimal, "sum(x)", SqlType::Decimal(43, 16));
 test_aggregation_type!(mysql, sum_int, "sum(x)", SqlType::Int(None));
 test_aggregation_type!(mysql, sum_bigint, "sum(x)", SqlType::BigInt(None));
+
+test_aggregation_type!(mysql, sum_text, "sum(x)", SqlType::Text, ["'5'", "'hello'", "'3'"]);
+test_aggregation_type!(mysql, avg_text, "avg(x)", SqlType::Text, ["'5'", "'hello'", "'3'"]);
 
 test_aggregation_type!(mysql, count_bigint, "count(x)", SqlType::BigInt(None));
 test_aggregation_type!(mysql, count_text, "count(x)", SqlType::Text);

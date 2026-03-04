@@ -1,0 +1,57 @@
+# REA-6277: SUM/AVG on text columns should coerce text to numeric
+#
+# MySQL implicitly converts text to numeric for SUM/AVG, treating
+# non-numeric strings as 0. Readyset previously crashed (domain 0.0.0
+# panic) because the arithmetic_operation! macro had no match arm for
+# Text + Numeric.
+
+statement ok
+CREATE TABLE t_text_agg (grp INT, val TEXT);
+
+statement ok
+INSERT INTO t_text_agg (grp, val) VALUES (1, '5'), (1, '3'), (1, 'hello'), (2, '10'), (2, '');
+
+# SUM over text: numeric strings parsed, non-numeric treated as 0
+query R nosort
+SELECT SUM(val) FROM t_text_agg WHERE grp = 1;
+----
+8
+
+# SUM over text in group 2: '10' + '' = 10 + 0 = 10
+query R nosort
+SELECT SUM(val) FROM t_text_agg WHERE grp = 2;
+----
+10
+
+# AVG over text: (5 + 3 + 0) / 3
+query R nosort
+SELECT AVG(val) FROM t_text_agg WHERE grp = 1;
+----
+2.666666666666666666666666666666667
+
+# SUM with GROUP BY
+query IR rowsort
+SELECT grp, SUM(val) FROM t_text_agg GROUP BY grp;
+----
+1
+8
+2
+10
+
+# SUM over all-non-numeric text should be 0
+statement ok
+INSERT INTO t_text_agg (grp, val) VALUES (3, 'foo'), (3, 'bar');
+
+query R nosort
+SELECT SUM(val) FROM t_text_agg WHERE grp = 3;
+----
+0
+
+# SUM with NULL text values (NULLs should be ignored, not treated as 0)
+statement ok
+INSERT INTO t_text_agg (grp, val) VALUES (4, '7'), (4, NULL), (4, '3');
+
+query R nosort
+SELECT SUM(val) FROM t_text_agg WHERE grp = 4;
+----
+10
