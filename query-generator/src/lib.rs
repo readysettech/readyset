@@ -1212,6 +1212,19 @@ impl AggregateType {
         }
     }
 
+    /// Returns true if this aggregate accumulates all input row values into a single,
+    /// potentially unbounded result (e.g. `array_agg`, `group_concat`, `string_agg`).
+    /// These are dangerous in fuzz-generated queries without WHERE clauses because they can
+    /// cause OOM on large tables (REA-6279).
+    pub fn is_unbounded_accumulator(&self) -> bool {
+        matches!(
+            self,
+            AggregateType::ArrayAgg { .. }
+                | AggregateType::GroupConcat { .. }
+                | AggregateType::StringAgg { .. }
+        )
+    }
+
     /// Check if this aggregate function is supported by the given SQL dialect
     pub fn is_supported_by(&self, dialect: ParseDialect) -> bool {
         match (self, dialect) {
@@ -2902,9 +2915,28 @@ fn prune_query_operations(ops: &mut Vec<QueryOperation>) {
     // (REA-5805)
     let mut topk_found = false;
 
+    // Don't generate unbounded accumulator aggregates (array_agg, group_concat, string_agg)
+    // without a WHERE parameter to limit the input rows. Without a filter these aggregates scan
+    // the entire table and accumulate all values into a single result, which can OOM on large
+    // tables (REA-6279).
+    let has_parameter = ops.iter().any(|op| {
+        matches!(
+            op,
+            QueryOperation::SingleParameter
+                | QueryOperation::MultipleParameters
+                | QueryOperation::InParameter { .. }
+                | QueryOperation::RangeParameter
+                | QueryOperation::MultipleRangeParameters
+        )
+    });
+
     ops.retain(|op| match op {
         QueryOperation::ColumnAggregate(agg) if agg.is_distinct() => {
-            if in_parameter_found || window_function_found || topk_found {
+            if in_parameter_found
+                || window_function_found
+                || topk_found
+                || (agg.is_unbounded_accumulator() && !has_parameter)
+            {
                 false
             } else {
                 distinct_found = true;
@@ -2957,8 +2989,11 @@ fn prune_query_operations(ops: &mut Vec<QueryOperation>) {
                 true
             }
         }
-        QueryOperation::ColumnAggregate(_) => {
-            if window_function_found || topk_found {
+        QueryOperation::ColumnAggregate(agg) => {
+            if window_function_found
+                || topk_found
+                || (agg.is_unbounded_accumulator() && !has_parameter)
+            {
                 false
             } else {
                 aggregate_found = true;
@@ -3642,6 +3677,59 @@ mod tests {
         query
             .detect_problematic_self_joins()
             .expect("subquery join should not produce a problematic self-join");
+    }
+
+    #[test]
+    fn prunes_unbounded_accumulators_without_parameter() {
+        // Without any parameter (WHERE filter), unbounded accumulators should be pruned
+        // to avoid OOM on large tables (REA-6279)
+        let mut ops = vec![
+            QueryOperation::ColumnAggregate(AggregateType::ArrayAgg { distinct: false }),
+            QueryOperation::ColumnAggregate(AggregateType::Count {
+                column_type: SqlType::Int(None),
+                distinct: false,
+            }),
+        ];
+        prune_query_operations(&mut ops);
+        // array_agg should be pruned, count should remain
+        assert_eq!(ops.len(), 1);
+        assert!(matches!(
+            &ops[0],
+            QueryOperation::ColumnAggregate(AggregateType::Count { .. })
+        ));
+    }
+
+    #[test]
+    fn keeps_unbounded_accumulators_with_parameter() {
+        // With a parameter (WHERE filter), unbounded accumulators are safe
+        let mut ops = vec![
+            QueryOperation::SingleParameter,
+            QueryOperation::ColumnAggregate(AggregateType::ArrayAgg { distinct: false }),
+        ];
+        prune_query_operations(&mut ops);
+        assert_eq!(ops.len(), 2);
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            QueryOperation::ColumnAggregate(AggregateType::ArrayAgg { .. })
+        )));
+    }
+
+    #[test]
+    fn prunes_distinct_unbounded_accumulators_without_parameter() {
+        let mut ops = vec![
+            QueryOperation::ColumnAggregate(AggregateType::GroupConcat { distinct: true }),
+            QueryOperation::ColumnAggregate(AggregateType::Sum {
+                column_type: SqlType::Int(None),
+                distinct: true,
+            }),
+        ];
+        prune_query_operations(&mut ops);
+        // group_concat(distinct) should be pruned, sum(distinct) should remain
+        assert_eq!(ops.len(), 1);
+        assert!(matches!(
+            &ops[0],
+            QueryOperation::ColumnAggregate(AggregateType::Sum { .. })
+        ));
     }
 
     #[test]
