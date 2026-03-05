@@ -120,10 +120,18 @@ pub(crate) async fn recreate_test_database(url: &DatabaseURL) -> anyhow::Result<
         DatabaseType::PostgreSQL => "postgres".to_owned(),
         DatabaseType::MySQL => "mysql".to_owned(),
     });
-    let mut admin_conn = admin_url
-        .connect(&ServerCertVerification::Default)
-        .await
-        .with_context(|| "connecting to upstream")?;
+    let mut admin_conn = retry_with_exponential_backoff!(
+        {
+            admin_url
+                .connect(&ServerCertVerification::Default)
+                .await
+                .with_context(|| "connecting to upstream")
+        },
+        retries: 5,
+        delay: 500,
+        backoff: 2,
+    )
+    .with_context(|| "connecting to upstream after retries")?;
 
     admin_conn
         .query_drop(format!("DROP DATABASE IF EXISTS {db_name}"))
@@ -192,10 +200,18 @@ impl TestScript {
         }
 
         if let Some(upstream_url) = &opts.upstream_database_url {
-            let mut conn = upstream_url
-                .connect(&ServerCertVerification::Default)
-                .await
-                .with_context(|| "connecting to upstream database")?;
+            let mut conn = retry_with_exponential_backoff!(
+                {
+                    upstream_url
+                        .connect(&ServerCertVerification::Default)
+                        .await
+                        .with_context(|| "connecting to upstream database")
+                },
+                retries: 5,
+                delay: 500,
+                backoff: 2,
+            )
+            .with_context(|| "connecting to upstream database after retries")?;
 
             // We expect it's harmless to always enable the built-in citext extension, which fuzz
             // tests might generate.
@@ -232,10 +248,18 @@ impl TestScript {
     ) -> anyhow::Result<()> {
         let (_noria_handle, server_shutdown_tx, adapter_shutdown_tx, adapter_task, db_url) =
             crate::in_process_readyset::start_readyset(opts, out_of_band_migration).await;
-        let mut conn = match db_url
-            .connect(&ServerCertVerification::Default)
-            .await
-            .with_context(|| "connecting to adapter")
+        let mut conn = match retry_with_exponential_backoff!(
+            {
+                db_url
+                    .connect(&ServerCertVerification::Default)
+                    .await
+                    .with_context(|| "connecting to adapter")
+            },
+            retries: 5,
+            delay: 500,
+            backoff: 2,
+        )
+        .with_context(|| "connecting to adapter after retries")
         {
             Ok(conn) => conn,
             Err(e) => {
