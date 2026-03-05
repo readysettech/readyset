@@ -444,10 +444,9 @@ pub(super) fn post_lookup_aggregates(
                 | Lower { .. }
                 | Upper { .. }
                 | Bucket { .. } => continue,
-                // TODO: should this be supported given the projection workaround we have?
-                JsonObjectAgg { .. } => PostLookupAggregateFunction::JsonObjectAgg {
-                    op: function.try_into()?,
-                },
+                JsonObjectAgg { .. } => {
+                    unsupported!("JsonObjectAgg is not supported as a post-lookup aggregate")
+                }
                 StringAgg { .. } => PostLookupAggregateFunction::StringAgg {
                     op: function.try_into()?,
                 },

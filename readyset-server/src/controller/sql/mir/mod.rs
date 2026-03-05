@@ -3301,6 +3301,30 @@ mod tests {
         expect_success: false
     }
 
+    // REA-6024: json_object_agg is not supported as a post-lookup aggregate
+    test_mir_with_config! {
+        name: json_object_agg_with_where_in_unsupported,
+        query: "SELECT json_object_agg(test_table.a, test_table.b) FROM test_table WHERE test_table.c = 5 GROUP BY test_table.c",
+        collapsed_where_in: true,
+        config: Config {
+            allow_post_lookup: true,
+            ..Default::default()
+        },
+        expect_success: false
+    }
+
+    // json_object_agg without collapsed WHERE IN should succeed (no post-lookup needed)
+    test_mir_with_config! {
+        name: json_object_agg_without_where_in_supported,
+        query: "SELECT json_object_agg(test_table.a, test_table.b) FROM test_table WHERE test_table.c = 5 GROUP BY test_table.c",
+        collapsed_where_in: false,
+        config: Config {
+            allow_post_lookup: true,
+            ..Default::default()
+        },
+        expect_success: true
+    }
+
     #[test]
     fn function_call_predicate_is_supported() {
         let query = parse_select(

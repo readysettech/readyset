@@ -1225,6 +1225,17 @@ impl AggregateType {
         )
     }
 
+    /// Returns true if this aggregate is NOT supported as a post-lookup aggregate.
+    /// Post-lookup aggregation is required when queries use `IN (?, ?)` parameters
+    /// (collapsed to `= ?`) or range parameters (BTreeMap index).
+    /// Mirrors the unsupported!() checks in `post_lookup_aggregates()` (grouped.rs).
+    pub fn unsupported_as_post_lookup(&self) -> bool {
+        matches!(
+            self,
+            AggregateType::Avg { .. } | AggregateType::JsonObjectAgg { .. }
+        ) || self.is_distinct()
+    }
+
     /// Check if this aggregate function is supported by the given SQL dialect
     pub fn is_supported_by(&self, dialect: ParseDialect) -> bool {
         match (self, dialect) {
@@ -2901,6 +2912,11 @@ fn prune_query_operations(ops: &mut Vec<QueryOperation>) {
     let mut distinct_found = false;
     let mut in_parameter_found = false;
 
+    // Don't generate aggregates unsupported as post-lookup (Avg, JsonObjectAgg, DISTINCT
+    // aggregates) in the same query as a WHERE IN clause, since post-lookup aggregation for
+    // these is not supported (REA-6024)
+    let mut post_lookup_unsupported_agg_found = false;
+
     // Don't generate an OR filter in the same query as a parameter of any kind, since
     // we don't support those queries (ENG-2976)
     let mut parameter_found = false;
@@ -2955,7 +2971,12 @@ fn prune_query_operations(ops: &mut Vec<QueryOperation>) {
             }
         }
         QueryOperation::InParameter { .. } => {
-            if distinct_found || or_filter_found || window_function_found || in_parameter_found {
+            if distinct_found
+                || or_filter_found
+                || window_function_found
+                || in_parameter_found
+                || post_lookup_unsupported_agg_found
+            {
                 false
             } else {
                 in_parameter_found = true;
@@ -2995,9 +3016,13 @@ fn prune_query_operations(ops: &mut Vec<QueryOperation>) {
             if window_function_found
                 || topk_found
                 || (agg.is_unbounded_accumulator() && !has_parameter)
+                || (agg.unsupported_as_post_lookup() && in_parameter_found)
             {
                 false
             } else {
+                if agg.unsupported_as_post_lookup() {
+                    post_lookup_unsupported_agg_found = true;
+                }
                 aggregate_found = true;
                 true
             }
