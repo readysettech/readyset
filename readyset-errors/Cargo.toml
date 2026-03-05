@@ -7,11 +7,20 @@ edition = "2024"
 
 [dependencies]
 anyhow = { workspace = true }
+bincode = { workspace = true }
+deadpool-postgres = { workspace = true }
+derive_more = { workspace = true }
 futures = { workspace = true }
 hyper = { workspace = true }
-pem = { workspace = true }
-thiserror = { workspace = true }
 mysql_async = { workspace = true }
+pem = { workspace = true }
+petgraph = { workspace = true, features = ["serde-1"] }
+rmp-serde = { workspace = true }
+serde = { workspace = true, features = ["rc", "derive"] }
+serde_json = { workspace = true, features = ["arbitrary_precision"] }
+thiserror = { workspace = true }
+tikv-jemalloc-ctl = { workspace = true }
+tokio-native-tls = { workspace = true }
 tokio-postgres = { workspace = true, features = [
     "with-chrono-0_4",
     "with-eui48-1",
@@ -19,21 +28,13 @@ tokio-postgres = { workspace = true, features = [
     "with-serde_json-1",
     "with-bit-vec-0_6",
 ] }
-petgraph = { workspace = true, features = ["serde-1"] }
-rmp-serde = { workspace = true }
 tokio-tower = { workspace = true }
 url = { workspace = true, features = ["serde"] }
-serde_json = { workspace = true, features = ["arbitrary_precision"] }
-derive_more = { workspace = true }
-bincode = { workspace = true }
-serde = { workspace = true, features = ["rc", "derive"] }
 vec1 = { workspace = true, features = ["serde"] }
-tikv-jemalloc-ctl = { workspace = true }
+
 readyset-decimal = { path = "../readyset-decimal" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
-deadpool-postgres = { workspace = true }
-tokio-native-tls = { workspace = true }
 
 [lints]
 workspace = true
