@@ -10,6 +10,10 @@ autotests = false
 name = "tests"
 path = "tests.rs"
 
+[[bench]]
+name = "json_object_agg"
+harness = false
+
 [build-dependencies]
 test-discovery = { path = "../test-discovery" }
 
@@ -42,6 +46,7 @@ readyset-spatial = { path = "../readyset-spatial" }
 partial-map = { path = "../partial-map" }
 
 [dev-dependencies]
+criterion = { workspace = true }
 anyhow = { workspace = true }
 bytes = { workspace = true }
 mysql_async = { workspace = true }

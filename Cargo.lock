@@ -1092,6 +1092,7 @@ dependencies = [
  "cached",
  "chrono",
  "chrono-tz",
+ "criterion",
  "itertools 0.14.0",
  "lazy_static",
  "mysql-time",
