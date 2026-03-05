@@ -174,7 +174,7 @@ impl GroupedOperation for Accumulator {
 
             invariant_eq!(group_hash, group);
             if is_positive {
-                prev_state.data.add(&self.op, value);
+                prev_state.data.add(&self.op, value)?;
             } else {
                 prev_state.data.remove(&self.op, value)?;
             }

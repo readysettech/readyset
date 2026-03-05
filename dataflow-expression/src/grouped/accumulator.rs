@@ -10,12 +10,13 @@
 //! Currently, the `ORDER BY` expr must either be a positional indicator and must be a value of `1`,
 //! or must match the column name of the function's expr (which currently must be a column).
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter, Result};
+use std::sync::Arc;
 
-use crate::eval::json;
-use readyset_data::{Collation, DfValue};
+use readyset_data::{Array, Collation, DfValue};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::analysis::is_aggregate;
 use readyset_sql::analysis::visit::{self, Visitor};
@@ -23,6 +24,7 @@ use readyset_sql::ast::{
     DistinctOption, Expr, FieldReference, FunctionExpr, NullOrder, OrderClause, OrderType,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use strum::IntoStaticStr;
 
 /// Supported accumulation operators.
@@ -50,6 +52,98 @@ pub enum AccumulationOp {
         distinct: DistinctOption,
         order_by: Option<(OrderType, NullOrder)>,
     },
+}
+
+/// Convert a `&DfValue` to a `JsonValue` without cloning the DfValue.
+///
+/// This is a borrowing alternative to `TryFrom<DfValue> for JsonValue`, used on the apply() hot
+/// path to avoid cloning every stored element.
+fn dfvalue_to_json(val: &DfValue) -> ReadySetResult<JsonValue> {
+    Ok(match val {
+        DfValue::Int(i) => JsonValue::Number((*i).into()),
+        DfValue::UnsignedInt(u) => JsonValue::Number((*u).into()),
+        DfValue::Float(f) => serde_json::Number::from_f64(*f as f64)
+            .map(JsonValue::Number)
+            .unwrap_or(JsonValue::Null),
+        DfValue::Double(f) => serde_json::Number::from_f64(*f)
+            .map(JsonValue::Number)
+            .unwrap_or(JsonValue::Null),
+        DfValue::Text(t) => JsonValue::String(t.as_str().to_string()),
+        DfValue::TinyText(t) => JsonValue::String(t.as_str().to_string()),
+        DfValue::TimestampTz(ts) => JsonValue::String(ts.to_string()),
+        DfValue::Time(t) => JsonValue::String(t.to_string()),
+        DfValue::Numeric(d) => JsonValue::String(d.to_string()),
+        DfValue::None | DfValue::Default | DfValue::Max | DfValue::PassThrough(_) => {
+            JsonValue::Null
+        }
+        other => {
+            return Err(internal_err!(
+                "json_object_agg: cannot convert {:?} to JSON value",
+                std::mem::discriminant(other)
+            ))
+        }
+    })
+}
+
+/// Extract a key/value pair from a stored json_object_agg element, returning types ready for
+/// JSON serialization. Borrows the key string directly from the stored DfValue.
+///
+/// Expects the **array format**: `DfValue::Array([key, value])` — borrows key as `&str`,
+/// converts value to `JsonValue` without cloning. AccumulatorData is never persisted; it is
+/// always rebuilt from replay, so all stored elements use the array format produced by
+/// `json_kv_to_array()`.
+fn extract_json_kv_for_serial(value: &DfValue) -> ReadySetResult<(Cow<'_, str>, JsonValue)> {
+    let arr = match value {
+        DfValue::Array(arr) => arr,
+        _ => {
+            return Err(internal_err!(
+                "json_object_agg: expected Array, got {:?}",
+                std::mem::discriminant(value)
+            ))
+        }
+    };
+    let mut vals = arr.values();
+    let key = vals
+        .next()
+        .ok_or_else(|| internal_err!("json_object_agg: array missing key"))?;
+    let val = vals
+        .next()
+        .ok_or_else(|| internal_err!("json_object_agg: array missing value"))?;
+    debug_assert!(
+        vals.next().is_none(),
+        "json_object_agg: array has more than 2 elements"
+    );
+    let key_str =
+        <&str>::try_from(key).map_err(|_| internal_err!("json_object_agg: key is not a string"))?;
+    let val_json = dfvalue_to_json(val)?;
+    Ok((Cow::Borrowed(key_str), val_json))
+}
+
+/// Parse a JSON object DfValue (like `{"key": value}`) into a `DfValue::Array([key, value])`.
+///
+/// Used by `add()` and `remove()` for `JsonObjectAgg` to store key/value pairs in a format that
+/// avoids repeated JSON parsing in `apply_json_object_agg()`.
+fn json_kv_to_array(value: DfValue) -> ReadySetResult<DfValue> {
+    let json_obj = value
+        .to_json()
+        .map_err(|_| internal_err!("json_object_agg: failed to parse json"))?;
+    let obj = match json_obj {
+        JsonValue::Object(map) => map,
+        _ => return Err(internal_err!("json_object_agg: value is not an object")),
+    };
+    if obj.len() != 1 {
+        return Err(internal_err!(
+            "json_object_agg: expected single-key object, got {} keys",
+            obj.len()
+        ));
+    }
+    // SAFETY of unwrap: checked len == 1 above
+    #[allow(clippy::unwrap_used)]
+    let (k, v) = obj.into_iter().next().unwrap();
+    Ok(DfValue::Array(Arc::new(Array::from(vec![
+        DfValue::from(k.as_str()),
+        DfValue::from(v),
+    ]))))
 }
 
 impl AccumulationOp {
@@ -81,9 +175,7 @@ impl AccumulationOp {
 
     fn apply_array_agg(&self, data: &AccumulatorData) -> ReadySetResult<DfValue> {
         if data.is_empty() {
-            return Ok(DfValue::Array(std::sync::Arc::new(
-                readyset_data::Array::from(vec![]),
-            )));
+            return Ok(DfValue::Array(Arc::new(readyset_data::Array::from(vec![]))));
         }
 
         let vals: Vec<DfValue> = match data {
@@ -116,7 +208,7 @@ impl AccumulationOp {
             readyset_data::Array::from(vals)
         };
 
-        Ok(DfValue::Array(std::sync::Arc::new(arr)))
+        Ok(DfValue::Array(Arc::new(arr)))
     }
 
     fn apply_group_concat(
@@ -159,31 +251,32 @@ impl AccumulationOp {
             }
         };
 
-        let mut json_keys = Vec::new();
-        let mut json_vals = Vec::new();
-
-        for value in data {
-            let (key, val) = value
-                .to_json()
-                .map_err(|_| internal_err!("json_object_agg: failed to parse json"))?
-                .as_object()
-                .ok_or_else(|| {
-                    internal_err!("json_object_agg: json_object value is not an object")
-                })?
-                .iter()
-                .next()
-                .ok_or_else(|| internal_err!("json_object_agg: json_object is empty"))
-                .map(|(k, v)| (DfValue::from(k.as_str()), DfValue::from(v)))?;
-
-            json_keys.push(key);
-            json_vals.push(val);
+        if data.is_empty() {
+            return Ok("{}".into());
         }
 
-        json::json_object_from_keys_and_values(
-            &json_keys.into(),
-            &json_vals.into(),
-            allow_duplicate_keys,
-        )
+        // Serialize directly from stored [key, value] arrays to JSON string, bypassing
+        // the intermediate DfValue Vecs, Array constructions, and re-iteration that
+        // json_object_from_keys_and_values would require.
+        let json_str = if allow_duplicate_keys {
+            let mut pairs: Vec<(Cow<'_, str>, JsonValue)> = Vec::with_capacity(data.len());
+            for value in data {
+                pairs.push(extract_json_kv_for_serial(value)?);
+            }
+            let serializable = crate::utils::serialize_slice_as_map(&pairs);
+            serde_json::to_string(&serializable)
+        } else {
+            let mut map: BTreeMap<Cow<'_, str>, JsonValue> = BTreeMap::new();
+            for value in data {
+                let (k, v) = extract_json_kv_for_serial(value)?;
+                map.insert(k, v);
+            }
+            serde_json::to_string(&map)
+        };
+
+        json_str
+            .map(|s| s.into())
+            .map_err(|e| internal_err!("json_object_agg: serialization failed: {e}"))
     }
 
     /// Emit raw accumulated values as a `DfValue::Array` without finalization.
@@ -356,7 +449,9 @@ impl Display for OrderableDfValue {
 
 impl AccumulatorData {
     pub fn add_accummulated(&mut self, op: &AccumulationOp, value: DfValue) -> ReadySetResult<()> {
-        op.split(&value)?.into_iter().for_each(|v| self.add(op, v));
+        for v in op.split(&value)? {
+            self.add(op, v)?;
+        }
         Ok(())
     }
 
@@ -390,12 +485,22 @@ impl AccumulatorData {
         }
     }
 
-    pub fn add(&mut self, op: &AccumulationOp, value: DfValue) {
+    pub fn add(&mut self, op: &AccumulationOp, value: DfValue) -> ReadySetResult<()> {
         match self {
             AccumulatorData::Simple(v) => {
-                // check to make sure we've got the correct data structure
-                assert!(!op.is_distinct());
-                v.push(value);
+                if op.is_distinct() {
+                    return Err(internal_err!(
+                        "AccumulatorData::Simple received a distinct op: {:?}",
+                        <&str>::from(op)
+                    ));
+                }
+                if matches!(op, AccumulationOp::JsonObjectAgg { .. }) {
+                    // Parse the JSON string once on entry and store as a [key, value] array,
+                    // avoiding repeated JSON parsing in apply_json_object_agg().
+                    v.push(json_kv_to_array(value)?);
+                } else {
+                    v.push(value);
+                }
             }
             AccumulatorData::DistinctOrdered(v) => {
                 let order_by = op.order_by();
@@ -403,14 +508,25 @@ impl AccumulatorData {
                 v.entry(key).and_modify(|cnt| *cnt += 1).or_insert(1);
             }
         }
+        Ok(())
     }
 
     pub fn remove(&mut self, op: &AccumulationOp, value: DfValue) -> ReadySetResult<()> {
         match self {
             AccumulatorData::Simple(v) => {
+                let search_value = if matches!(op, AccumulationOp::JsonObjectAgg { .. }) {
+                    // Convert the incoming JSON string to the same [key, value] array format
+                    // used for storage, so the equality comparison finds the correct element.
+                    json_kv_to_array(value)?
+                } else {
+                    value
+                };
+                // NOTE: rposition() is O(N) and Vec::remove() is O(N) for element shifting,
+                // making N consecutive deletes O(N^2). swap_remove would be O(1) but cannot
+                // be used because json_object_agg preserves insertion order.
                 let item_pos = v
                     .iter()
-                    .rposition(|x| x == &value)
+                    .rposition(|x| x == &search_value)
                     .ok_or_else(|| internal_err!("accumulator couldn't remove value from data"))?;
                 v.remove(item_pos);
             }
@@ -711,6 +827,167 @@ mod tests {
             ));
 
             let result = validate_accumulator_order_by(&expr, &order_clause);
+            assert!(result.is_err());
+        }
+    }
+
+    mod json_object_agg_tests {
+        use super::*;
+
+        fn make_json_obj_op(allow_duplicate_keys: bool) -> AccumulationOp {
+            AccumulationOp::JsonObjectAgg {
+                allow_duplicate_keys,
+            }
+        }
+
+        /// Simulate what the upstream `json_build_object(key, value)` projection produces.
+        fn make_json_object(key: &str, value: &str) -> DfValue {
+            DfValue::from(format!("{{\"{key}\":\"{value}\"}}"))
+        }
+
+        fn make_json_object_int(key: &str, value: i64) -> DfValue {
+            DfValue::from(format!("{{\"{key}\":{value}}}"))
+        }
+
+        #[test]
+        fn add_stores_as_array() {
+            let op = make_json_obj_op(true);
+            let mut data = AccumulatorData::from(&op);
+            data.add(&op, make_json_object("a", "1")).unwrap();
+
+            match &data {
+                AccumulatorData::Simple(v) => {
+                    assert_eq!(v.len(), 1);
+                    assert!(matches!(&v[0], DfValue::Array(_)));
+                }
+                _ => panic!("expected Simple"),
+            }
+        }
+
+        #[test]
+        fn add_and_apply_round_trip() {
+            let op = make_json_obj_op(true);
+            let mut data = AccumulatorData::from(&op);
+
+            data.add(&op, make_json_object("a", "1")).unwrap();
+            data.add(&op, make_json_object("b", "2")).unwrap();
+
+            let result = op.apply(&data).unwrap();
+            let result_str: String = (&result).try_into().unwrap();
+            assert_eq!(result_str, r#"{"a":"1","b":"2"}"#);
+        }
+
+        #[test]
+        fn add_remove_apply() {
+            let op = make_json_obj_op(true);
+            let mut data = AccumulatorData::from(&op);
+
+            data.add(&op, make_json_object("a", "1")).unwrap();
+            data.add(&op, make_json_object("b", "2")).unwrap();
+            data.add(&op, make_json_object("c", "3")).unwrap();
+
+            // Remove the middle element
+            data.remove(&op, make_json_object("b", "2")).unwrap();
+
+            let result = op.apply(&data).unwrap();
+            let result_str: String = (&result).try_into().unwrap();
+            assert_eq!(result_str, r#"{"a":"1","c":"3"}"#);
+        }
+
+        #[test]
+        fn remove_nonexistent_returns_error() {
+            let op = make_json_obj_op(true);
+            let mut data = AccumulatorData::from(&op);
+
+            data.add(&op, make_json_object("a", "1")).unwrap();
+            let result = data.remove(&op, make_json_object("x", "9"));
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn jsonb_no_duplicate_keys() {
+            let op = make_json_obj_op(false);
+            let mut data = AccumulatorData::from(&op);
+
+            data.add(&op, make_json_object("a", "1")).unwrap();
+            data.add(&op, make_json_object("a", "2")).unwrap();
+
+            let result = op.apply(&data).unwrap();
+            let result_str: String = (&result).try_into().unwrap();
+            // jsonb_object_agg deduplicates: last value wins
+            assert_eq!(result_str, r#"{"a":"2"}"#);
+        }
+
+        #[test]
+        fn integer_values() {
+            let op = make_json_obj_op(true);
+            let mut data = AccumulatorData::from(&op);
+
+            data.add(&op, make_json_object_int("x", 42)).unwrap();
+            data.add(&op, make_json_object_int("y", 99)).unwrap();
+
+            let result = op.apply(&data).unwrap();
+            let result_str: String = (&result).try_into().unwrap();
+            assert_eq!(result_str, r#"{"x":42,"y":99}"#);
+        }
+
+        #[test]
+        fn empty_data_produces_empty_object() {
+            let op = make_json_obj_op(true);
+            let data = AccumulatorData::from(&op);
+
+            let result = op.apply(&data).unwrap();
+            let result_str: String = (&result).try_into().unwrap();
+            assert_eq!(result_str, "{}");
+        }
+
+        #[test]
+        fn nested_object_values() {
+            // Nested JSON objects are stored as serialized strings through the
+            // DfValue round-trip (JsonValue::Object → DfValue::Text → JsonValue::String).
+            // This means nested objects become double-serialized strings in the output.
+            // This matches the behavior of the previous json_object_from_keys_and_values
+            // code path and is a known limitation.
+            let op = make_json_obj_op(true);
+            let mut data = AccumulatorData::from(&op);
+
+            data.add(&op, DfValue::from(r#"{"a":{"nested":true}}"#))
+                .unwrap();
+
+            let result = op.apply(&data).unwrap();
+            let result_str: String = (&result).try_into().unwrap();
+            assert_eq!(result_str, r#"{"a":"{\"nested\":true}"}"#);
+        }
+
+        #[test]
+        fn null_json_values() {
+            let op = make_json_obj_op(true);
+            let mut data = AccumulatorData::from(&op);
+
+            data.add(&op, DfValue::from(r#"{"a":null}"#)).unwrap();
+
+            let result = op.apply(&data).unwrap();
+            let result_str: String = (&result).try_into().unwrap();
+            assert_eq!(result_str, r#"{"a":null}"#);
+        }
+
+        #[test]
+        fn multi_key_input_rejected() {
+            let op = make_json_obj_op(true);
+            let mut data = AccumulatorData::from(&op);
+
+            let result = data.add(&op, DfValue::from(r#"{"a":1,"b":2}"#));
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn non_array_in_apply_returns_error() {
+            // If AccumulatorData somehow contains non-Array elements,
+            // extract_json_kv_for_serial should return an error.
+            let op = make_json_obj_op(true);
+            let data = AccumulatorData::Simple(vec![DfValue::from(r#"{"a":"1"}"#)]);
+
+            let result = op.apply(&data);
             assert!(result.is_err());
         }
     }
@@ -1112,8 +1389,8 @@ mod tests {
         fn apply_array_agg_on_array_columns() {
             let op = simple_array_agg();
             let mut data = AccumulatorData::from(&op);
-            data.add(&op, make_array_val(vec![1, 2]));
-            data.add(&op, make_array_val(vec![3, 4]));
+            data.add(&op, make_array_val(vec![1, 2])).unwrap();
+            data.add(&op, make_array_val(vec![3, 4])).unwrap();
 
             let result = op.apply(&data).unwrap();
             match &result {
@@ -1129,8 +1406,8 @@ mod tests {
         fn apply_array_agg_mixed_types_errors() {
             let op = simple_array_agg();
             let mut data = AccumulatorData::from(&op);
-            data.add(&op, make_array_val(vec![1, 2]));
-            data.add(&op, DfValue::from(42));
+            data.add(&op, make_array_val(vec![1, 2])).unwrap();
+            data.add(&op, DfValue::from(42)).unwrap();
 
             let result = op.apply(&data);
             assert!(result.is_err());
@@ -1140,8 +1417,8 @@ mod tests {
         fn apply_array_agg_mismatched_shapes_errors() {
             let op = simple_array_agg();
             let mut data = AccumulatorData::from(&op);
-            data.add(&op, make_array_val(vec![1, 2]));
-            data.add(&op, make_array_val(vec![3]));
+            data.add(&op, make_array_val(vec![1, 2])).unwrap();
+            data.add(&op, make_array_val(vec![3])).unwrap();
 
             let result = op.apply(&data);
             assert!(result.is_err());
@@ -1153,8 +1430,8 @@ mod tests {
             // The result should be identical (round-trip).
             let op = simple_array_agg();
             let mut data = AccumulatorData::from(&op);
-            data.add(&op, make_array_val(vec![1, 2]));
-            data.add(&op, make_array_val(vec![3, 4]));
+            data.add(&op, make_array_val(vec![1, 2])).unwrap();
+            data.add(&op, make_array_val(vec![3, 4])).unwrap();
 
             let original = op.apply(&data).unwrap();
 
@@ -1168,7 +1445,7 @@ mod tests {
 
             let mut data2 = AccumulatorData::from(&op);
             for p in parts {
-                data2.add(&op, p);
+                data2.add(&op, p).unwrap();
             }
             let roundtripped = op.apply(&data2).unwrap();
             assert_eq!(original, roundtripped);
@@ -1178,9 +1455,9 @@ mod tests {
         fn split_roundtrip_1d_unchanged() {
             let op = simple_array_agg();
             let mut data = AccumulatorData::from(&op);
-            data.add(&op, DfValue::from(1));
-            data.add(&op, DfValue::from(2));
-            data.add(&op, DfValue::from(3));
+            data.add(&op, DfValue::from(1)).unwrap();
+            data.add(&op, DfValue::from(2)).unwrap();
+            data.add(&op, DfValue::from(3)).unwrap();
 
             let original = op.apply(&data).unwrap();
             let parts = op.split(&original).unwrap();
@@ -1195,9 +1472,9 @@ mod tests {
         fn distinct_ordered_array_agg_on_array_columns() {
             let op = distinct_array_agg();
             let mut data = AccumulatorData::from(&op);
-            data.add(&op, make_array_val(vec![3, 4]));
-            data.add(&op, make_array_val(vec![1, 2]));
-            data.add(&op, make_array_val(vec![3, 4])); // duplicate
+            data.add(&op, make_array_val(vec![3, 4])).unwrap();
+            data.add(&op, make_array_val(vec![1, 2])).unwrap();
+            data.add(&op, make_array_val(vec![3, 4])).unwrap(); // duplicate
 
             let result = op.apply(&data).unwrap();
             match &result {

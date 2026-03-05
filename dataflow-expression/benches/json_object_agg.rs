@@ -30,7 +30,7 @@ fn build_accumulator(n: usize) -> (AccumulationOp, AccumulatorData, Vec<DfValue>
     for i in 0..n {
         let v = make_json_object(&format!("key_{i}"), &format!("value_{i}"));
         values.push(v.clone());
-        data.add(&op, v);
+        data.add(&op, v).expect("add failed");
     }
 
     (op, data, values)
@@ -65,7 +65,7 @@ fn bench_add(c: &mut Criterion) {
                     (op, data, new_val)
                 },
                 |(op, mut data, val)| {
-                    data.add(&op, val);
+                    data.add(&op, val).expect("add failed");
                 },
                 criterion::BatchSize::SmallInput,
             );
@@ -134,7 +134,8 @@ fn bench_apply_int_values(c: &mut Criterion) {
         };
         let mut data = AccumulatorData::from(&op);
         for i in 0..n {
-            data.add(&op, make_json_object_int(&format!("k{i}"), i as i64));
+            data.add(&op, make_json_object_int(&format!("k{i}"), i as i64))
+                .expect("add failed");
         }
 
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, _| {
@@ -167,7 +168,7 @@ fn build_large_accumulator(n: usize) -> (AccumulationOp, AccumulatorData, Vec<Df
         let val = make_large_value(i * 2 + 1);
         let v = DfValue::from(format!("{{\"{}\":\"{}\"}}", key, val));
         values.push(v.clone());
-        data.add(&op, v);
+        data.add(&op, v).expect("add failed");
     }
 
     (op, data, values)
