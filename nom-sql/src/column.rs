@@ -179,7 +179,8 @@ fn generated_column(
         Ok((
             i,
             GeneratedColumn {
-                expr,
+                expr: Some(expr),
+                kind: GeneratedKind::Always,
                 stored: stored.unwrap_or(false),
             },
         ))
@@ -198,11 +199,12 @@ mod tests {
         #[test]
         fn multiple_generated_column() {
             let mut default_gen_col = GeneratedColumn {
-                expr: Expr::BinaryOp {
+                expr: Some(Expr::BinaryOp {
                     lhs: Box::new(Expr::Literal(Literal::Integer(1))),
                     op: BinaryOperator::Add,
                     rhs: Box::new(Expr::Literal(Literal::Integer(1))),
-                },
+                }),
+                kind: GeneratedKind::Always,
                 stored: true,
             };
 
