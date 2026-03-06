@@ -8,7 +8,7 @@ query IR
 SELECT COUNT(*), AVG(a) FROM t;
 ----
 3
-4.333333333
+4.3333
 
 query IR
 SELECT COUNT(*), ROUND(AVG(a), 3) FROM t;

@@ -1,0 +1,24 @@
+# MySQL AVG() on integer columns should return DECIMAL(14,4), not DOUBLE.
+# Reproducer: AVG(int_col) was returning DOUBLE instead of DECIMAL(14,4).
+
+statement ok
+CREATE TABLE t0 (c0 INT PRIMARY KEY, c1 INT);
+
+statement ok
+INSERT INTO t0 VALUES (0, 1);
+
+query R nosort
+SELECT avg(c1) FROM t0;
+----
+1.0000
+
+statement ok
+INSERT INTO t0 VALUES (1, 3);
+
+query R nosort
+SELECT avg(c1) FROM t0;
+----
+2.0000
+
+statement ok
+DROP TABLE t0;

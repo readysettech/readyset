@@ -249,6 +249,33 @@ impl DfType {
     pub const DEFAULT_NUMERIC_SCALE: u8 = 0;
 
     pub const DEFAULT_BIT: Self = Self::Bit(1);
+
+    /// Returns the MySQL output type for AVG() given the input column type.
+    ///
+    /// Per [MySQL's `Item_sum_avg::resolve_type`][examples] and the
+    /// [`div_precision_increment`][dpi] system variable (default 4):
+    ///
+    /// - Integer input → `DECIMAL(prec + incr, 0 + incr)`, i.e. `DECIMAL(14, 4)` at default
+    /// - `DECIMAL(prec, scale)` input → `DECIMAL(min(prec+incr, 65), min(scale+incr, 30))`
+    /// - Float/Double/Text input → `DOUBLE`
+    ///
+    /// We hardcode the increment to 4 (MySQL's default). If we ever need to support
+    /// non-default `div_precision_increment`, this should be parameterized.
+    ///
+    /// [examples]: https://dev.mysql.com/doc/refman/8.4/en/precision-math-examples.html
+    /// [dpi]: https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html#sysvar_div_precision_increment
+    pub fn mysql_avg_output_type(over_col_ty: &DfType) -> DfType {
+        if over_col_ty.is_any_int() {
+            DfType::Numeric { prec: 14, scale: 4 }
+        } else if let DfType::Numeric { prec, scale } = over_col_ty {
+            DfType::Numeric {
+                prec: (*prec + 4).min(65),
+                scale: (*scale + 4).min(30),
+            }
+        } else {
+            DfType::Double
+        }
+    }
 }
 
 /// Conversions to/from [`SqlType`].

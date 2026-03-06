@@ -711,18 +711,21 @@ fn make_window_node(
         Avg => {
             let ty = find_input_type()?;
 
-            match ty {
-                DfType::Int
-                | DfType::TinyInt
-                | DfType::SmallInt
-                | DfType::BigInt
-                | DfType::UnsignedInt
-                | DfType::UnsignedTinyInt
-                | DfType::UnsignedSmallInt
-                | DfType::UnsignedBigInt
-                | DfType::Numeric { .. } => DfType::DEFAULT_NUMERIC,
-                DfType::Float | DfType::Double => DfType::Double,
-                t => unsupported!("Unsupported type {t:?} for AVG window function"),
+            match mig.dialect.engine() {
+                SqlEngine::MySQL => DfType::mysql_avg_output_type(&ty),
+                SqlEngine::PostgreSQL => match ty {
+                    DfType::Int
+                    | DfType::TinyInt
+                    | DfType::SmallInt
+                    | DfType::BigInt
+                    | DfType::UnsignedInt
+                    | DfType::UnsignedTinyInt
+                    | DfType::UnsignedSmallInt
+                    | DfType::UnsignedBigInt
+                    | DfType::Numeric { .. } => DfType::DEFAULT_NUMERIC,
+                    DfType::Float | DfType::Double => DfType::Double,
+                    t => unsupported!("Unsupported type {t:?} for AVG window function"),
+                },
             }
         }
         Sum => {

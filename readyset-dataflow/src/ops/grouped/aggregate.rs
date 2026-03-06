@@ -71,11 +71,15 @@ impl Aggregation {
             }
             Aggregation::Avg => {
                 antithesis_sdk::assert_reachable!("Aggregation::Avg");
-                if over_col_ty.is_any_float() || over_col_ty.is_any_text() {
-                    // MySQL returns DOUBLE for AVG over float and text columns
-                    DfType::Double
-                } else {
-                    DfType::DEFAULT_NUMERIC
+                match dialect.engine() {
+                    SqlEngine::MySQL => DfType::mysql_avg_output_type(over_col_ty),
+                    SqlEngine::PostgreSQL => {
+                        if over_col_ty.is_any_float() {
+                            DfType::Double
+                        } else {
+                            DfType::DEFAULT_NUMERIC
+                        }
+                    }
                 }
             }
         };
@@ -131,6 +135,16 @@ pub struct NumericalDiff {
 struct AverageDataPair {
     count: DfValue,
     sum: DfValue,
+    /// The zero value for this aggregation, used when count drops to 0.
+    #[serde(default = "default_avg_zero")]
+    zero: DfValue,
+    /// If set, round the result to this many decimal places.
+    #[serde(default)]
+    target_scale: Option<i64>,
+}
+
+fn default_avg_zero() -> DfValue {
+    DfValue::Double(0.0)
 }
 
 impl AverageDataPair {
@@ -144,9 +158,13 @@ impl AverageDataPair {
         }
 
         if self.count > DfValue::Int(0) {
-            &self.sum / &self.count
+            let result = (&self.sum / &self.count)?;
+            match (&result, self.target_scale) {
+                (DfValue::Numeric(dec), Some(scale)) => Ok(DfValue::from(dec.round_dp(scale))),
+                _ => Ok(result),
+            }
         } else {
-            Ok(DfValue::Double(0.0))
+            Ok(self.zero.clone())
         }
     }
 }
@@ -236,12 +254,19 @@ impl GroupedOperation for Aggregator {
             None => internal!("Missing auxiliary state for Aggregation node"),
         };
 
+        let avg_zero = self.new_data()?;
+        let avg_target_scale = match &self.out_ty {
+            DfType::Numeric { scale, .. } => Some(*scale as i64),
+            _ => None,
+        };
         let mut apply_avg = |_curr, diff: Self::Diff| -> ReadySetResult<DfValue> {
             count_sum_map
                 .entry(diff.group_hash)
                 .or_insert(AverageDataPair {
-                    sum: DfValue::Double(0.0),
+                    sum: avg_zero.clone(),
                     count: DfValue::Int(0),
+                    zero: avg_zero.clone(),
+                    target_scale: avg_target_scale,
                 })
                 .apply_diff(diff)
         };
@@ -1225,6 +1250,78 @@ mod tests {
                 assert_eq!(r[0], 1.into());
                 // 5.0 + 0.0 + 3.0 = 8.0
                 assert_eq!(r[1], DfValue::Double(8.0));
+            }
+            other => panic!("expected Positive, got {other:?}"),
+        }
+    }
+
+    /// Helper to set up an aggregation over an integer column (MySQL).
+    fn setup_int_column(aggregation: Aggregation, mat: bool) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y"]);
+        g.set_op(
+            "identity",
+            &["x", "ys"],
+            aggregation
+                .over(
+                    s.as_global(),
+                    1,
+                    &[0],
+                    &DfType::Int,
+                    &Dialect::DEFAULT_MYSQL,
+                )
+                .expect("failed to create aggregation over int column"),
+            mat,
+        );
+        g
+    }
+
+    /// AVG over an integer column in MySQL should produce Numeric(14,4) values,
+    /// matching MySQL's DECIMAL(14,4) output for AVG on integer inputs.
+    #[test]
+    fn avg_of_integers_mysql_decimal_precision() {
+        let mut c = setup_int_column(Aggregation::Avg, true);
+
+        // Add Group=1, Value=1
+        let u: Record = vec![1.into(), 1.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        match rs.into_iter().next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                // Verify it's actually a Numeric, not a Double
+                assert!(
+                    matches!(r[1], DfValue::Numeric(_)),
+                    "AVG result should be DfValue::Numeric, got {:?}",
+                    r[1]
+                );
+                // MySQL AVG(int) should return DECIMAL with 4 decimal places
+                assert_eq!(
+                    r[1].to_string(),
+                    "1.0000",
+                    "AVG(1) should be 1.0000, got {:?}",
+                    r[1]
+                );
+            }
+            other => panic!("expected Positive, got {other:?}"),
+        }
+
+        // Add Group=1, Value=3 — average should be 2.0000
+        let u: Record = vec![1.into(), 3.into()].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+        // Skip the Negative record
+        rs.next().unwrap();
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(
+                    r[1].to_string(),
+                    "2.0000",
+                    "AVG(1,3) should be 2.0000, got {:?}",
+                    r[1]
+                );
             }
             other => panic!("expected Positive, got {other:?}"),
         }
