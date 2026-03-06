@@ -1941,7 +1941,11 @@ where
     }
 
     /// Provides metadata required to prepare a select query
-    async fn plan_prepare_select(&mut self, stmt: SelectStatement) -> ReadySetResult<PrepareMeta> {
+    async fn plan_prepare_select(
+        &mut self,
+        stmt: SelectStatement,
+        is_skip_cache: bool,
+    ) -> ReadySetResult<PrepareMeta> {
         let rewrite_context =
             Self::rewrite_context(&self.connectors, &self.settings, &self.state, None).await?;
         let mut rewritten = stmt.clone();
@@ -1956,6 +1960,10 @@ where
             );
             return Ok(PrepareMeta::FailedToRewrite(e));
         };
+
+        if is_skip_cache {
+            return Ok(PrepareMeta::Proxy);
+        }
 
         let status = self
             .state
@@ -2012,6 +2020,8 @@ where
             }
         };
 
+        let is_skip_cache = matches!(&hint, Some(ReadysetHintDirective::SkipCache));
+
         if let Some((shallow, params)) = self.connectors.prepare_shallow_query(shallow_parsed) {
             *query_shallow = Some(shallow.clone());
             if let Some((query_id, always)) = Self::should_query_shallow(
@@ -2033,7 +2043,7 @@ where
         }
 
         match parsed {
-            Ok(SqlQuery::Select(stmt)) => self.plan_prepare_select(stmt).await,
+            Ok(SqlQuery::Select(stmt)) => self.plan_prepare_select(stmt, is_skip_cache).await,
             Ok(
                 query @ SqlQuery::Insert(_)
                 | query @ SqlQuery::Update(_)
@@ -2119,7 +2129,9 @@ where
 
                 res
             }
-            PrepareMeta::Proxy => unsupported!("No upstream, so query cannot be proxied"),
+            PrepareMeta::Proxy => {
+                unsupported!("No upstream, so query cannot be proxied")
+            }
             PrepareMeta::Transaction { .. } => {
                 unsupported!("No upstream, transactions not supported")
             }
@@ -4203,6 +4215,10 @@ where
         hint_directive: Option<ReadysetHintDirective>,
     ) -> Option<(QueryId, bool)> {
         let (query_id, migration) = state.query_status_cache.query_migration_state(shallow);
+
+        if matches!(&hint_directive, Some(ReadysetHintDirective::SkipCache)) {
+            return None;
+        }
         if migration != MigrationState::Successful(CacheType::Shallow) {
             // No cache yet — try hint-based creation and use the resulting state.
             let migration = Self::create_shallow_cache_from_hint(
@@ -4363,6 +4379,7 @@ where
         params: QueryParameters,
         schema_generation: SchemaGeneration,
         event: &mut QueryExecutionEvent,
+        is_skip_cache: bool,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         match Self::noria_should_try_select(
             &connectors.noria,
@@ -4371,6 +4388,7 @@ where
             &mut view_request,
             params,
             schema_generation,
+            is_skip_cache,
         ) {
             ShouldTrySelect::Yes {
                 status,
@@ -4574,11 +4592,14 @@ where
         rewrite_params: AdapterRewriteParams,
         params: QueryParameters,
         schema_generation: SchemaGeneration,
+        is_skip_cache: bool,
     ) -> ShouldTrySelect {
         match adapter_rewrites::rewrite_for_readyset(&mut q.statement, rewrite_params, params) {
             Ok(params) => {
                 let status = state.query_status_cache.query_status(q);
-                let should_try = if state.proxy_state.should_proxy() {
+                let should_try = if is_skip_cache {
+                    false
+                } else if state.proxy_state.should_proxy() {
                     status.always
                 } else {
                     true
@@ -4616,6 +4637,7 @@ where
         rewrite_params: AdapterRewriteParams,
         params: QueryParameters,
         schema_generation: SchemaGeneration,
+        is_skip_cache: bool,
     ) -> ShouldTrySelect {
         // if the cache is not yet created, it's probably better
         // to let the adapter try the other path.
@@ -4626,6 +4648,7 @@ where
             rewrite_params,
             params,
             schema_generation,
+            is_skip_cache,
         ) {
             ShouldTrySelect::Yes {
                 status:
@@ -4671,6 +4694,7 @@ where
         q: &mut ViewCreateRequest,
         params: QueryParameters,
         schema_generation: SchemaGeneration,
+        is_skip_cache: bool,
     ) -> ShouldTrySelect {
         let mut rewrite_params = noria.rewrite_params();
 
@@ -4687,6 +4711,7 @@ where
                 rewrite_params,
                 params.clone(),
                 schema_generation,
+                is_skip_cache,
             ) {
                 yes @ ShouldTrySelect::Yes { .. } => return yes,
                 ShouldTrySelect::No { .. } => {
@@ -4706,13 +4731,14 @@ where
             rewrite_params,
             params,
             schema_generation,
+            is_skip_cache,
         ) {
             ShouldTrySelect::Yes { status, params, .. } => ShouldTrySelect::Yes {
                 status,
                 params,
                 schema_generation,
             },
-            ShouldTrySelect::No { error } => ShouldTrySelect::No { error },
+            no @ ShouldTrySelect::No { .. } => no,
         }
     }
 
@@ -4962,6 +4988,8 @@ where
             return Ok(QueryResult::ReadysetSchema(result));
         }
 
+        let is_skip_cache = matches!(&hint, Some(ReadysetHintDirective::SkipCache));
+
         if let Some((shallow, params)) = connectors.prepare_shallow_query(shallow_parsed) {
             if let Some((query_id, _)) =
                 Self::should_query_shallow(connectors, settings, state, &shallow, hint).await
@@ -5103,8 +5131,8 @@ where
                     event.query = Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
                 }
 
-                // force the QueryLogger to recalculate the query_id, instead of doing it here
-                // on the hot path as it will execute a rewrite pass over the query.
+                // force the QueryLogger to recalculate the query_id, instead of doing it
+                // here on the hot path as it will execute a rewrite pass over the query.
                 event.query_id =
                     QueryIdWrapper::Uncalculated(connectors.noria.schema_search_path().into());
 
@@ -5117,6 +5145,7 @@ where
                     params,
                     rewrite_context.schema_generation(),
                     event,
+                    is_skip_cache,
                 )
                 .await
             }
