@@ -330,6 +330,24 @@ impl ProxyState {
         matches!(self, ProxyState::InTransaction | ProxyState::AutocommitOff)
     }
 
+    /// Returns true when the proxy state is set to always proxy upstream,
+    /// typically due to an unsupported SET statement.
+    pub fn is_proxy_always(&self) -> bool {
+        *self == ProxyState::ProxyAlways
+    }
+
+    /// Returns a reason tag for the skip-cache metric describing why queries
+    /// are being proxied upstream.
+    pub fn skip_reason(&self) -> &'static str {
+        if self.in_transaction_or_implicit() {
+            "trx"
+        } else if self.is_proxy_always() {
+            "unsupported_set"
+        } else {
+            "unknown"
+        }
+    }
+
     /// Sets the autocommit state accordingly. If turning autocommit on, will set ProxyState to
     /// Fallback as long as current state is AutocommitOff or InTransaction (the latter models
     /// MySQL's implicit COMMIT on `SET autocommit=1` during an active transaction).
@@ -353,6 +371,17 @@ impl ProxyState {
     fn is_fallback(&self) -> bool {
         matches!(self, Self::Fallback)
     }
+}
+
+/// Records a skip-cache metric for a query that bypassed a cache.
+fn record_skip_cache(query_id: String, cache_type: &'static str, reason: &'static str) {
+    metrics::counter!(
+        recorded::QUERY_LOG_TOTAL_SKIP_CACHE,
+        "query_id" => query_id,
+        "type" => cache_type,
+        "reason" => reason
+    )
+    .increment(1);
 }
 
 /// Builder for a [`Backend`]
@@ -1966,16 +1995,6 @@ where
         };
 
         if is_skip_cache {
-            let query_id = QueryId::from(&ViewCreateRequest::new(
-                rewritten,
-                self.connectors.noria.schema_search_path().to_owned(),
-            ));
-            metrics::counter!(
-                recorded::QUERY_LOG_TOTAL_SKIP_CACHE,
-                "query_id" => query_id.to_string(),
-                "type" => "deep"
-            )
-            .increment(1);
             return Ok(PrepareMeta::Proxy);
         }
 
@@ -1986,7 +2005,7 @@ where
                 rewritten.clone(),
                 self.connectors.noria.schema_search_path().to_owned(),
             ));
-        if self.state.proxy_state == ProxyState::ProxyAlways && !status.always {
+        if self.state.proxy_state.is_proxy_always() && !status.always {
             Ok(PrepareMeta::Proxy)
         } else {
             let should_do_readyset =
@@ -2725,6 +2744,34 @@ where
 
                 if cached_statement.is_unsupported_execute() {
                     true
+                } else if !is_recovering && self.state.proxy_state.should_proxy() {
+                    let has_cache = matches!(
+                        &cached_statement.prep.inner,
+                        PrepareResultInner::Noria(_)
+                            | PrepareResultInner::NoriaAndUpstream(..)
+                            | PrepareResultInner::Shallow(_)
+                    );
+                    if has_cache {
+                        let query_id = cached_statement
+                            .query_id
+                            .as_ref()
+                            .map(|id| id.to_string())
+                            .unwrap_or_default();
+                        let cache_type = if matches!(
+                            &cached_statement.prep.inner,
+                            PrepareResultInner::Shallow(_)
+                        ) {
+                            "shallow"
+                        } else {
+                            "deep"
+                        };
+                        record_skip_cache(
+                            query_id,
+                            cache_type,
+                            self.state.proxy_state.skip_reason(),
+                        );
+                    }
+                    true
                 } else {
                     is_recovering || self.state.proxy_state.should_proxy()
                 }
@@ -2748,12 +2795,7 @@ where
                         .as_ref()
                         .map(|id| id.to_string())
                         .unwrap_or_default();
-                    metrics::counter!(
-                        recorded::QUERY_LOG_TOTAL_SKIP_CACHE,
-                        "query_id" => query_id,
-                        "type" => "deep"
-                    )
-                    .increment(1);
+                    record_skip_cache(query_id, "deep", "hint");
                 }
                 Self::execute_upstream(
                     Self::upstream_mut(upstream)?,
@@ -4258,12 +4300,7 @@ where
 
         if matches!(&hint_directive, Some(ReadysetHintDirective::SkipCache)) {
             if migration == MigrationState::Successful(CacheType::Shallow) {
-                metrics::counter!(
-                    recorded::QUERY_LOG_TOTAL_SKIP_CACHE,
-                    "query_id" => query_id.to_string(),
-                    "type" => "shallow"
-                )
-                .increment(1);
+                record_skip_cache(query_id.to_string(), "shallow", "hint");
             }
             return None;
         }
@@ -4286,6 +4323,11 @@ where
             .try_query_status(shallow)
             .is_some_and(|status| status.always);
         if state.proxy_state.should_proxy() && !always {
+            record_skip_cache(
+                query_id.to_string(),
+                "shallow",
+                state.proxy_state.skip_reason(),
+            );
             return None;
         }
         Some((query_id, always))
@@ -4645,15 +4687,23 @@ where
         match adapter_rewrites::rewrite_for_readyset(&mut q.statement, rewrite_params, params) {
             Ok(params) => {
                 let status = state.query_status_cache.query_status(q);
+                let has_deep_cache = matches!(
+                    status.migration_state,
+                    MigrationState::Successful(CacheType::Deep)
+                );
                 let should_try = if is_skip_cache {
-                    metrics::counter!(
-                        recorded::QUERY_LOG_TOTAL_SKIP_CACHE,
-                        "query_id" => QueryId::from(&*q).to_string(),
-                        "type" => "deep"
-                    )
-                    .increment(1);
+                    if has_deep_cache {
+                        record_skip_cache(QueryId::from(&*q).to_string(), "deep", "hint");
+                    }
                     false
                 } else if state.proxy_state.should_proxy() {
+                    if !status.always && has_deep_cache {
+                        record_skip_cache(
+                            QueryId::from(&*q).to_string(),
+                            "deep",
+                            state.proxy_state.skip_reason(),
+                        );
+                    }
                     status.always
                 } else {
                     true
