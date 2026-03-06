@@ -188,6 +188,44 @@ fn check_error_pattern(error: &dyn Display, pattern: &str) -> anyhow::Result<()>
     Ok(())
 }
 
+/// Extract the root cause error message from an anyhow error chain.
+///
+/// This walks the chain to the deepest cause and returns its `Display` output,
+/// which is the actual error message without any wrapping context (like
+/// "Running query ..." or "Query failed after N retries").
+fn root_cause_message(err: &anyhow::Error) -> String {
+    err.root_cause().to_string()
+}
+
+/// Format collected query failures for `--no-fail-fast` output.
+///
+/// Output format (one block per failure, blocks separated by blank lines):
+///
+/// ```text
+///   line 42
+///   error: db error: ERROR: unsupported query
+///
+///   line 56
+///   error: Incorrect values returned from query ...
+/// ```
+///
+/// This format is designed to be unambiguously machine-parseable: the error
+/// message is always on the line starting with `  error: `, and the line
+/// number is always on the line starting with `  line `.
+fn format_query_failures(failures: &[(usize, String)]) -> String {
+    failures
+        .iter()
+        .map(|(line, msg)| {
+            if *line > 0 {
+                format!("  line {line}\n  error: {msg}")
+            } else {
+                format!("  error: {msg}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 impl TestScript {
     pub fn read<R: io::Read>(path: PathBuf, input: R) -> anyhow::Result<Self> {
         let records = parser::read_records(input)?;
@@ -324,20 +362,6 @@ impl TestScript {
         Ok(())
     }
 
-    fn format_query_failures(query_failures: &[(usize, String)]) -> String {
-        query_failures
-            .iter()
-            .map(|(line, msg)| {
-                if *line > 0 {
-                    format!("  line {line}: {msg}")
-                } else {
-                    format!("  {msg}")
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
     pub async fn run_on_database(
         &self,
         opts: &RunOptions,
@@ -362,7 +386,8 @@ impl TestScript {
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(8);
 
-        // Collected query failures when no_fail_fast is enabled
+        // Collected query failures when no_fail_fast is enabled.
+        // Each entry is (line_number, root_cause_error_message).
         let mut query_failures: Vec<(usize, String)> = Vec::new();
 
         let script_start = Instant::now();
@@ -376,7 +401,7 @@ impl TestScript {
                         bail!("Test script timed out after {elapsed:?} with no accumulated errors");
                     }
                     let count = query_failures.len();
-                    let details = Self::format_query_failures(&query_failures);
+                    let details = format_query_failures(&query_failures);
                     bail!(
                         "Test script timed out after {elapsed:?} with {count} accumulated query failure(s):\n{details}"
                     );
@@ -419,7 +444,7 @@ impl TestScript {
                         // can safely collect the failure since they don't affect subsequent
                         // records.
                         if opts.no_fail_fast && is_select_statement(&stmt.command) {
-                            query_failures.push((*line_num, format!("{e:#}")));
+                            query_failures.push((*line_num, root_cause_message(&e)));
                         } else {
                             return Err(e);
                         }
@@ -484,11 +509,12 @@ impl TestScript {
                             };
                         }
                         Err(e) => {
-                            let err = e.context(format!("Query failed after {retries} retries"));
                             if opts.no_fail_fast {
-                                query_failures.push((*line_num, format!("{err:#}")));
+                                query_failures.push((*line_num, root_cause_message(&e)));
                             } else {
-                                return Err(err);
+                                return Err(
+                                    e.context(format!("Query failed after {retries} retries"))
+                                );
                             }
                         }
                     }
@@ -513,7 +539,7 @@ impl TestScript {
 
         if !query_failures.is_empty() {
             let count = query_failures.len();
-            let details = Self::format_query_failures(&query_failures);
+            let details = format_query_failures(&query_failures);
             bail!("{count} query failure(s):\n{details}");
         }
 
