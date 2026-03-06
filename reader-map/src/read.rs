@@ -162,36 +162,6 @@ where
         }))
     }
 
-    /// Returns a guarded reference to _one_ value corresponding to the key.
-    ///
-    /// This is mostly intended for use when you are working with no more than one value per key.
-    /// If there are multiple values stored for this key, there are no guarantees to which element
-    /// is returned.
-    ///
-    /// While the guard lives, changes to the map cannot be published.
-    ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the key type.
-    ///
-    /// Note that not all writes will be included with this read -- only those that have been
-    /// refreshed by the writer. If no refresh has happened, or the map has been destroyed, this
-    /// function returns an [`Error`].
-    #[inline]
-    pub fn first<'rh, Q>(&'rh self, key: &'_ Q) -> Result<Option<ReadGuard<'rh, V>>>
-    where
-        K: Borrow<Q>,
-        V: Ord,
-        Q: Ord + Clone + Hash,
-    {
-        let vs = match self.get_raw(key.borrow())? {
-            Some(vs) => vs,
-            _ => {
-                return Ok(None);
-            }
-        };
-        Ok(ReadGuard::try_map(vs, |x| x.first()))
-    }
-
     /// Returns a guarded reference to the values corresponding to the key along with the map
     /// meta.
     ///

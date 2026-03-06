@@ -300,20 +300,6 @@ where
         }
     }
 
-    /// Returns a guarded reference to _one_ value corresponding to the key.
-    ///
-    /// This is mostly intended for use when you are working with no more than one value per key.
-    /// If there are multiple values stored for this key, the smallest one is returned
-    pub fn first(&self) -> Option<&T>
-    where
-        T: Ord,
-    {
-        match self.values {
-            ValuesInner::InitSmallVec { ref v, .. } | ValuesInner::SmallVec(ref v) => v.first(),
-            ValuesInner::BTreeMap { ref map, .. } => map.first_key_value().map(|(wr, _)| &wr.value),
-        }
-    }
-
     fn find(
         values: &SmallVec<[T; 1]>,
         order: &I,
@@ -525,7 +511,6 @@ mod tests {
             assert_eq!($x.len(), 0);
             assert!($x.is_empty());
             assert_eq!($x.iter().count(), 0);
-            assert_eq!($x.first(), None);
         };
     }
 
@@ -561,10 +546,8 @@ mod tests {
             assert!(v.contains(&i));
         }
         assert_len!(v, len);
-        assert!(values.contains(v.first().unwrap()));
 
         v.clear();
-
         assert_empty!(v);
     }
 

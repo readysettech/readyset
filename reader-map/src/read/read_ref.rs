@@ -138,27 +138,6 @@ where
         })
     }
 
-    /// Returns a guarded reference to the smallest value corresponding to the key.
-    ///
-    /// This is mostly intended for use when you are working with no more than one value per key.
-    /// If there are multiple values stored for this key, there are no guarantees to which element
-    /// is returned.
-    ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form *must* match those for the key type.
-    ///
-    /// Note that not all writes will be included with this read -- only those that have been
-    /// published by the writer. If no publish has happened, or the map has been destroyed, this
-    /// function returns `None`.
-    pub fn first<'a, Q>(&'a self, key: &'_ Q) -> Option<&'a V>
-    where
-        K: Borrow<Q>,
-        V: Ord,
-        Q: Ord + Hash + ?Sized,
-    {
-        self.guard.data.get(key).and_then(|values| values.first())
-    }
-
     /// Returns true if the map contains any values for the specified key.
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed

@@ -717,22 +717,6 @@ fn foreach() {
 }
 
 #[test]
-fn first() {
-    let x = ('x', 42);
-
-    let (mut w, r) = reader_map::new();
-
-    w.insert(x.0, x);
-    w.insert(x.0, x);
-
-    assert_match!(r.first(&x.0), Err(NotPublished));
-
-    w.publish();
-
-    assert_match!(r.first(&x.0).unwrap().as_deref(), Some(('x', 42)));
-}
-
-#[test]
 fn insert_remove_value() {
     let x = 'x';
 
