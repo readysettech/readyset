@@ -40,6 +40,14 @@ pub const QUERY_LOG_TOTAL_KEYS_READ: &str = "readyset_query_log_total_keys_read"
 /// | cache_name | The name of the cache associated with this key read. |
 pub const QUERY_LOG_TOTAL_CACHE_MISSES: &str = "readyset_query_log_total_cache_misses";
 
+/// Counter: The number of queries bypassed due to the `SKIP CACHE` hint.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID of the cache associated with this query. |
+/// | type | `deep` or `shallow` |
+pub const QUERY_LOG_TOTAL_SKIP_CACHE: &str = "readyset_query_log_total_skip_cache";
+
 /// Counter: The number of queries which encountered at least one cache miss.
 ///
 /// | Tag | Description |

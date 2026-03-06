@@ -684,6 +684,10 @@ where
     shallow: Option<ShallowViewRequest>,
     /// Query parameters from rewrite_shallow, used for shallow cache key generation
     params: Option<ShallowQueryParameters>,
+    /// Whether the original query contained a SKIP CACHE hint directive.
+    /// Stored at prepare time so the execute path can emit the skip-cache
+    /// metric with `reason => "hint"`.
+    is_skip_cache: bool,
 }
 
 impl<DB> PreparedStatement<DB>
@@ -1962,6 +1966,16 @@ where
         };
 
         if is_skip_cache {
+            let query_id = QueryId::from(&ViewCreateRequest::new(
+                rewritten,
+                self.connectors.noria.schema_search_path().to_owned(),
+            ));
+            metrics::counter!(
+                recorded::QUERY_LOG_TOTAL_SKIP_CACHE,
+                "query_id" => query_id.to_string(),
+                "type" => "deep"
+            )
+            .increment(1);
             return Ok(PrepareMeta::Proxy);
         }
 
@@ -1991,13 +2005,16 @@ where
         }
     }
 
-    /// Provides metadata required to prepare a query
+    /// Provides metadata required to prepare a query.
+    ///
+    /// Returns `(PrepareMeta, is_skip_cache)` where `is_skip_cache` is true
+    /// when the query contained a `/*rs+ SKIP CACHE */` hint directive.
     async fn plan_prepare(
         &mut self,
         query: &str,
         query_shallow: &mut Option<ShallowViewRequest>,
         event: &mut QueryExecutionEvent,
-    ) -> ReadySetResult<PrepareMeta> {
+    ) -> ReadySetResult<(PrepareMeta, bool)> {
         let (parsed, (shallow_parsed, hint)) = match self.state.parsed_query_cache.get(query) {
             Some(cached_query) => {
                 let _t = event.start_parse_timer();
@@ -2033,37 +2050,40 @@ where
             )
             .await
             {
-                return Ok(PrepareMeta::ShallowSelect(PrepareShallowSelectMeta {
-                    query_id,
-                    stmt: shallow,
-                    params,
-                    always,
-                }));
+                return Ok((
+                    PrepareMeta::ShallowSelect(PrepareShallowSelectMeta {
+                        query_id,
+                        stmt: shallow,
+                        params,
+                        always,
+                    }),
+                    is_skip_cache,
+                ));
             }
         }
 
-        match parsed {
-            Ok(SqlQuery::Select(stmt)) => self.plan_prepare_select(stmt, is_skip_cache).await,
+        let meta = match parsed {
+            Ok(SqlQuery::Select(stmt)) => self.plan_prepare_select(stmt, is_skip_cache).await?,
             Ok(
                 query @ SqlQuery::Insert(_)
                 | query @ SqlQuery::Update(_)
                 | query @ SqlQuery::Delete(_),
-            ) => Ok(PrepareMeta::Write { stmt: query }),
+            ) => PrepareMeta::Write { stmt: query },
             Ok(
                 query @ SqlQuery::StartTransaction(_)
                 | query @ SqlQuery::Commit(_)
                 | query @ SqlQuery::Rollback(_),
-            ) => Ok(PrepareMeta::Transaction { stmt: query }),
-            Ok(SqlQuery::Set(s)) => Ok(PrepareMeta::Set { stmt: s }),
+            ) => PrepareMeta::Transaction { stmt: query },
+            Ok(SqlQuery::Set(s)) => PrepareMeta::Set { stmt: s },
             Ok(pq) => {
                 debug!(
                     statement = %pq.display(self.settings.dialect),
                     "Statement cannot be prepared by Readyset"
                 );
-                Ok(PrepareMeta::Unimplemented(unsupported_err!(
+                PrepareMeta::Unimplemented(unsupported_err!(
                     "{} not supported without an upstream",
                     pq.query_type()
-                )))
+                ))
             }
             Err(_) => {
                 let mode = if self.state.proxy_state == ProxyState::Never {
@@ -2072,9 +2092,10 @@ where
                     PrepareMeta::Proxy
                 };
                 debug!(query = %Sensitive(&query), plan = ?mode, "Readyset failed to parse query");
-                Ok(mode)
+                mode
             }
-        }
+        };
+        Ok((meta, is_skip_cache))
     }
 
     /// Prepares a query on noria and upstream based on the provided PrepareMeta
@@ -2148,6 +2169,7 @@ where
         prepare_meta: PrepareMeta,
         prep: PrepareResultInner<DB>,
         statement_id: StatementId,
+        is_skip_cache: bool,
     ) -> PreparedStatement<DB> {
         match prepare_meta {
             PrepareMeta::Write { stmt } | PrepareMeta::Transaction { stmt } => PreparedStatement {
@@ -2160,6 +2182,7 @@ where
                 shallow: None,
                 always: false,
                 params: None,
+                is_skip_cache,
             },
             PrepareMeta::Set { stmt } => PreparedStatement {
                 query_id: None,
@@ -2171,6 +2194,7 @@ where
                 shallow: None,
                 always: false,
                 params: None,
+                is_skip_cache,
             },
             PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
@@ -2200,6 +2224,7 @@ where
                     shallow: None,
                     always,
                     params: None,
+                    is_skip_cache,
                 }
             }
             PrepareMeta::ShallowSelect(PrepareShallowSelectMeta {
@@ -2217,6 +2242,7 @@ where
                 shallow: Some(stmt),
                 always,
                 params: Some(params),
+                is_skip_cache,
             },
             PrepareMeta::Proxy
             | PrepareMeta::FailedToParse
@@ -2231,6 +2257,7 @@ where
                 shallow: None,
                 always: false,
                 params: None,
+                is_skip_cache,
             },
         }
     }
@@ -2249,7 +2276,7 @@ where
             return Ok(self.state.unnamed_prepared_statements[query]);
         }
 
-        let meta = self.plan_prepare(query, query_shallow, event).await?;
+        let (meta, is_skip_cache) = self.plan_prepare(query, query_shallow, event).await?;
         let prep = self
             .do_prepare(&meta, query, data, statement_type, event)
             .await?;
@@ -2260,7 +2287,7 @@ where
             .vacant_key()
             .try_into()
             .expect("Cannot prepare more than u32::MAX statements with a single connection");
-        let prepared_statement = self.create_prepared_statement(meta, prep, next_id);
+        let prepared_statement = self.create_prepared_statement(meta, prep, next_id, is_skip_cache);
         let statement_id = self.state.prepared_statements.insert(prepared_statement) as StatementId;
         assert_eq!(next_id, statement_id);
 
@@ -2714,6 +2741,19 @@ where
                     self.state
                         .query_status_cache
                         .inlined_cache_miss(cached_statement.as_view_request()?, params.to_vec())
+                }
+                if cached_statement.is_skip_cache {
+                    let query_id = cached_statement
+                        .query_id
+                        .as_ref()
+                        .map(|id| id.to_string())
+                        .unwrap_or_default();
+                    metrics::counter!(
+                        recorded::QUERY_LOG_TOTAL_SKIP_CACHE,
+                        "query_id" => query_id,
+                        "type" => "deep"
+                    )
+                    .increment(1);
                 }
                 Self::execute_upstream(
                     Self::upstream_mut(upstream)?,
@@ -4217,6 +4257,14 @@ where
         let (query_id, migration) = state.query_status_cache.query_migration_state(shallow);
 
         if matches!(&hint_directive, Some(ReadysetHintDirective::SkipCache)) {
+            if migration == MigrationState::Successful(CacheType::Shallow) {
+                metrics::counter!(
+                    recorded::QUERY_LOG_TOTAL_SKIP_CACHE,
+                    "query_id" => query_id.to_string(),
+                    "type" => "shallow"
+                )
+                .increment(1);
+            }
             return None;
         }
         if migration != MigrationState::Successful(CacheType::Shallow) {
@@ -4598,6 +4646,12 @@ where
             Ok(params) => {
                 let status = state.query_status_cache.query_status(q);
                 let should_try = if is_skip_cache {
+                    metrics::counter!(
+                        recorded::QUERY_LOG_TOTAL_SKIP_CACHE,
+                        "query_id" => QueryId::from(&*q).to_string(),
+                        "type" => "deep"
+                    )
+                    .increment(1);
                     false
                 } else if state.proxy_state.should_proxy() {
                     status.always
