@@ -1,0 +1,57 @@
+-- test point lookups on timestamp columns (no timezone)
+statement ok
+create table t1(c1 timestamp);
+
+statement ok
+insert into t1 values ('2023-04-25 21:23:26');
+
+query Z
+select * from t1
+----
+2023-04-25 21:23:26
+
+query Z
+select * from t1 where c1 = '2023-04-25 21:23:26'
+----
+2023-04-25 21:23:26
+
+
+-- test point lookups on timestamptz columns (with timezone)
+statement ok
+create table t2(c1 timestamptz);
+
+statement ok
+insert into t2 values ('2023-04-25 21:23:26 +01:23'),
+  ('2024-10-04 04:42:18');
+
+query Z
+select * from t2
+----
+2023-04-25 20:00:26+00
+2024-10-04 04:42:18+00
+
+query Z
+select * from t2 where c1 > '2024-10-03 11:11:11'
+----
+2024-10-04 04:42:18+00
+
+query Z
+select * from t2 where c1 > '2024-10-04 04:42:11'
+----
+2024-10-04 04:42:18+00
+
+query Z
+select * from t2 where c1 < '2024-10-04 04:42:19'
+----
+2023-04-25 20:00:26+00
+2024-10-04 04:42:18+00
+
+query Z
+select * from t2 where c1 = '2024-10-04 04:42:18'
+----
+2024-10-04 04:42:18+00
+
+query Z
+select * from t2 where c1 = '2023-04-25 21:23:26 +01:23'
+----
+2023-04-25 20:00:26+00

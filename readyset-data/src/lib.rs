@@ -805,6 +805,9 @@ impl DfValue {
             Some((s, collation)) => Cow::Owned(collation.key(s).into()),
             None => match self {
                 DfValue::Float(f) => Cow::Owned((*f as f64).try_into().unwrap()),
+                DfValue::TimestampTz(ts) => {
+                    Cow::Owned(DfValue::TimestampTz(ts.normalize_for_key()))
+                }
                 _ => Cow::Borrowed(self),
             },
         }

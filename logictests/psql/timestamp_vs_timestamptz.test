@@ -1,0 +1,89 @@
+-- REA-6311: Comparison of TIMESTAMP columns with TIMESTAMPTZ columns.
+-- Per PostgreSQL, when comparing TIMESTAMP with TIMESTAMPTZ, the TIMESTAMP
+-- is implicitly converted to TIMESTAMPTZ using the session timezone.
+-- ReadySet assumes UTC session timezone.
+
+statement ok
+create table ts_table(id int, ts timestamp);
+
+statement ok
+create table tstz_table(id int, tstz timestamptz);
+
+statement ok
+insert into ts_table values (1, '2020-06-15 12:00:00'), (2, '2021-01-01 00:00:00');
+
+-- Insert TIMESTAMPTZ values that represent the same UTC instants
+-- (since session tz is UTC, bare timestamps are UTC)
+statement ok
+insert into tstz_table values (1, '2020-06-15 12:00:00+00'), (2, '2021-01-01 00:00:00+00');
+
+-- Verify data
+query IZ rowsort
+select * from ts_table
+----
+1
+2020-06-15 12:00:00
+2
+2021-01-01 00:00:00
+
+query IZ rowsort
+select * from tstz_table
+----
+1
+2020-06-15 12:00:00+00
+2
+2021-01-01 00:00:00+00
+
+-- Cross-table equality comparison: should return matching rows
+query IZIZ rowsort
+select ts_table.id, ts, tstz_table.id, tstz from ts_table, tstz_table where ts = tstz
+----
+1
+2020-06-15 12:00:00
+1
+2020-06-15 12:00:00+00
+2
+2021-01-01 00:00:00
+2
+2021-01-01 00:00:00+00
+
+-- Join syntax
+query IZIZ rowsort
+select ts_table.id, ts, tstz_table.id, tstz from ts_table join tstz_table on ts = tstz
+----
+1
+2020-06-15 12:00:00
+1
+2020-06-15 12:00:00+00
+2
+2021-01-01 00:00:00
+2
+2021-01-01 00:00:00+00
+
+-- Non-UTC TIMESTAMPTZ that equals the same UTC instant (positive offset)
+statement ok
+insert into tstz_table values (3, '2020-06-15 17:00:00+05');
+
+-- Negative offset, same UTC instant as row 2 (2021-01-01 00:00:00 UTC)
+statement ok
+insert into tstz_table values (4, '2020-12-31 21:00:00-03');
+
+query IZIZ rowsort
+select ts_table.id, ts, tstz_table.id, tstz from ts_table join tstz_table on ts = tstz
+----
+1
+2020-06-15 12:00:00
+1
+2020-06-15 12:00:00+00
+1
+2020-06-15 12:00:00
+3
+2020-06-15 12:00:00+00
+2
+2021-01-01 00:00:00
+2
+2021-01-01 00:00:00+00
+2
+2021-01-01 00:00:00
+4
+2021-01-01 00:00:00+00

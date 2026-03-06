@@ -1,0 +1,61 @@
+-- Basic DATETIME point lookup tests for MySQL.
+-- Validates that normalize_for_key does not break MySQL datetime equality.
+--
+-- Note: MySQL TIMESTAMP is not tested here because it converts values
+-- to/from UTC using the session time_zone, making expected values
+-- environment-dependent. DATETIME stores values as-is and is the type
+-- that maps to DfType::DateTime in ReadySet.
+
+statement ok
+create table dt_test(id int, dt datetime);
+
+statement ok
+insert into dt_test values (1, '2023-04-25 10:30:00'), (2, '2024-01-15 23:59:59');
+
+query IZ rowsort
+select * from dt_test
+----
+1
+2023-04-25 10:30:00
+2
+2024-01-15 23:59:59
+
+query IZ
+select * from dt_test where dt = '2023-04-25 10:30:00'
+----
+1
+2023-04-25 10:30:00
+
+query IZ
+select * from dt_test where dt = '2024-01-15 23:59:59'
+----
+2
+2024-01-15 23:59:59
+
+-- Range lookups
+query IZ
+select * from dt_test where dt > '2024-01-01 00:00:00'
+----
+2
+2024-01-15 23:59:59
+
+query IZ rowsort
+select * from dt_test where dt < '2025-01-01 00:00:00'
+----
+1
+2023-04-25 10:30:00
+2
+2024-01-15 23:59:59
+
+-- Subsecond precision
+statement ok
+create table dt_micro(id int, dt datetime(6));
+
+statement ok
+insert into dt_micro values (1, '2023-01-15 10:30:45.123456');
+
+query IZ
+select * from dt_micro where dt = '2023-01-15 10:30:45.123456'
+----
+1
+2023-01-15 10:30:45.123456

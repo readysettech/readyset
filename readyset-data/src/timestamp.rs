@@ -157,6 +157,36 @@ impl TimestampTz {
             | (self.extra[2] & !TimestampTz::SUBSECOND_DIGITS_BITS);
     }
 
+    /// Return a normalized copy suitable for use as a serialized key.
+    ///
+    /// Ensures that two `TimestampTz` values representing the same instant in time produce
+    /// identical bytes when serialized, regardless of how they were constructed. This is
+    /// required because RocksDB keys are compared byte-by-byte, bypassing the semantic
+    /// `Eq`/`Hash` impls (which correctly normalize via `to_chrono()`).
+    ///
+    /// Normalization: for datetime/timestamp values, converts to UTC and sets offset to 0,
+    /// matching PostgreSQL's internal storage semantics. The `TIMEZONE_FLAG` is always set so
+    /// that timestamps originating from `From<NaiveDateTime>` (no flag) and `set_offset(0)`
+    /// (flag set) produce the same bytes. Date-only values are left without a timezone offset.
+    ///
+    /// Deliberately does NOT preserve `subsecond_digits` — it is display metadata that must
+    /// not affect key comparison.
+    pub fn normalize_for_key(&self) -> Self {
+        if self.is_zero() {
+            return Self::zero();
+        }
+        let mut normalized = TimestampTz {
+            datetime: self.datetime,
+            extra: [0u8; 3],
+        };
+        if self.has_date_only() {
+            normalized.set_date_only();
+        } else {
+            normalized.set_offset(0);
+        }
+        normalized
+    }
+
     /// Construct an invalid timestamp representing the invalid MySQL zero date (0000-00-00).
     pub fn zero() -> Self {
         let mut extra = [0; 3];
@@ -1002,5 +1032,229 @@ mod tests {
         assert_eq!(ts.subsecond_digits(), 2);
         assert!(ts.has_timezone());
         assert_eq!(ts.to_string(), "2004-10-19 10:23:54.12+05:30");
+    }
+
+    #[test]
+    fn normalize_for_key_consistent_bytes() {
+        // A NaiveDateTime (no timezone flag) and a set_offset(0) value representing the same
+        // instant must produce identical normalized representations.
+        let from_naive: TimestampTz = NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(2024, 4, 25).unwrap(),
+            NaiveTime::from_hms_opt(20, 0, 26).unwrap(),
+        )
+        .into();
+        assert!(!from_naive.has_timezone());
+
+        let mut from_pg = from_naive;
+        from_pg.set_offset(0); // Simulates what PostgreSQL does
+        assert!(from_pg.has_timezone());
+
+        // Raw bytes differ (different TIMEZONE_FLAG)
+        assert_ne!(from_naive.extra, from_pg.extra);
+        // But normalized forms are byte-identical
+        let n1 = from_naive.normalize_for_key();
+        let n2 = from_pg.normalize_for_key();
+        assert_eq!(n1.extra, n2.extra);
+        let (dt1, dt2) = (n1.datetime, n2.datetime);
+        assert_eq!(dt1, dt2);
+    }
+
+    #[test]
+    fn normalize_for_key_different_offsets() {
+        // Two timestamps representing the same UTC instant but with different timezone offsets
+        // must normalize to the same bytes.
+        let ts_utc = TimestampTz::from_str("2024-04-25 20:00:26+00").unwrap();
+        let ts_offset = TimestampTz::from_str("2024-04-25 21:23:26+01:23").unwrap();
+
+        // They are logically equal
+        assert_eq!(ts_utc, ts_offset);
+        // But raw bytes differ
+        assert_ne!(ts_utc.extra, ts_offset.extra);
+
+        // Normalized forms must be byte-identical
+        let n1 = ts_utc.normalize_for_key();
+        let n2 = ts_offset.normalize_for_key();
+        assert_eq!(n1.extra, n2.extra);
+        let (dt1, dt2) = (n1.datetime, n2.datetime);
+        assert_eq!(dt1, dt2);
+    }
+
+    #[test]
+    fn normalize_for_key_zeroes_subsecond_digits() {
+        // subsecond_digits is display metadata and must be zeroed during
+        // normalization so that stored values and lookup keys with different
+        // precision settings produce identical bytes.
+        let ts = TimestampTz::from_str("2023-01-15 10:30:45.123456+05:30").unwrap();
+        assert_eq!(ts.subsecond_digits(), 6);
+        let normalized = ts.normalize_for_key();
+        assert_eq!(normalized.subsecond_digits(), 0);
+    }
+
+    #[test]
+    fn normalize_for_key_preserves_date_only() {
+        let date = TimestampTz::from(NaiveDate::from_ymd_opt(2023, 6, 15).unwrap());
+        assert!(date.has_date_only());
+        let normalized = date.normalize_for_key();
+        assert!(normalized.has_date_only());
+        assert!(
+            !normalized.has_timezone(),
+            "date-only should not have timezone flag"
+        );
+        assert_eq!(normalized.subsecond_digits(), 0);
+        let (dt1, dt2) = (date.datetime, normalized.datetime);
+        assert_eq!(dt1, dt2);
+    }
+
+    #[test]
+    fn transform_for_serialized_key_byte_equality() {
+        use crate::DfValue;
+
+        // Path 1: From<NaiveDateTime> (no timezone flag)
+        let naive_ts = TimestampTz::from(NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(2023, 4, 25).unwrap(),
+            NaiveTime::from_hms_opt(20, 0, 26).unwrap(),
+        ));
+
+        // Path 2: set_offset(0) (timezone flag set) — simulates PG snapshot
+        let mut pg_ts = naive_ts;
+        pg_ts.set_offset(0);
+
+        // Path 3: non-zero offset, same UTC instant
+        let offset_ts = TimestampTz::from_str("2023-04-25 21:23:26+01:23").unwrap();
+
+        // Path 4: negative offset, same UTC instant
+        let neg_offset_ts = TimestampTz::from_str("2023-04-25 15:00:26-05").unwrap();
+
+        // All four are semantically equal
+        assert_eq!(naive_ts, pg_ts);
+        assert_eq!(naive_ts, offset_ts);
+        assert_eq!(naive_ts, neg_offset_ts);
+
+        let v1 = DfValue::TimestampTz(naive_ts);
+        let v2 = DfValue::TimestampTz(pg_ts);
+        let v3 = DfValue::TimestampTz(offset_ts);
+        let v4 = DfValue::TimestampTz(neg_offset_ts);
+
+        let s1 = bincode::serialize(&*v1.transform_for_serialized_key()).unwrap();
+        let s2 = bincode::serialize(&*v2.transform_for_serialized_key()).unwrap();
+        let s3 = bincode::serialize(&*v3.transform_for_serialized_key()).unwrap();
+        let s4 = bincode::serialize(&*v4.transform_for_serialized_key()).unwrap();
+
+        assert_eq!(s1, s2, "naive vs set_offset(0) must serialize identically");
+        assert_eq!(
+            s1, s3,
+            "naive vs positive offset must serialize identically"
+        );
+        assert_eq!(
+            s1, s4,
+            "naive vs negative offset must serialize identically"
+        );
+    }
+
+    mod proptests {
+        use proptest::prelude::*;
+        use readyset_util::arbitrary::{arbitrary_date_time, arbitrary_naive_date_time};
+        use test_strategy::proptest;
+
+        use super::*;
+        use crate::DfValue;
+
+        /// Property 1: Serialized key consistency across construction paths.
+        ///
+        /// Two TimestampTz values representing the same UTC instant but constructed
+        /// via different code paths must produce byte-identical serialized keys.
+        /// This is the exact bug class that REA-6120 fixed: RocksDB keys are compared
+        /// byte-by-byte, so construction-path-dependent extra bytes caused missed lookups.
+        #[proptest]
+        fn serialized_key_consistent_across_construction_paths(
+            #[strategy(arbitrary_date_time())] dt: DateTime<FixedOffset>,
+        ) {
+            // Path A: From<NaiveDateTime> — the snapshot/replication path.
+            // This has no TIMEZONE_FLAG set.
+            let from_naive = TimestampTz::from(dt.naive_utc());
+
+            // Path B: set_offset(0) — simulates PostgreSQL storing a timestamptz
+            // with explicit UTC offset.
+            let mut from_pg = TimestampTz::from(dt.naive_utc());
+            from_pg.set_offset(0);
+
+            // Path C: From<DateTime<FixedOffset>> — the original offset path.
+            // This stores the offset in extra bytes and adjusts datetime to local time.
+            let from_offset = TimestampTz::from(dt);
+
+            // All three represent the same UTC instant.
+            prop_assert_eq!(from_naive, from_pg);
+            prop_assert_eq!(from_naive, from_offset);
+
+            // Serialized keys must be byte-identical.
+            let va = DfValue::TimestampTz(from_naive);
+            let vb = DfValue::TimestampTz(from_pg);
+            let vc = DfValue::TimestampTz(from_offset);
+
+            let sa = bincode::serialize(&*va.transform_for_serialized_key()).unwrap();
+            let sb = bincode::serialize(&*vb.transform_for_serialized_key()).unwrap();
+            let sc = bincode::serialize(&*vc.transform_for_serialized_key()).unwrap();
+
+            prop_assert_eq!(&sa, &sb, "naive vs set_offset(0)");
+            prop_assert_eq!(&sa, &sc, "naive vs From<DateTime<FixedOffset>>");
+        }
+
+        /// Property 1b: Varying subsecond_digits must not affect serialized keys.
+        ///
+        /// The same instant with different display precision (e.g. digits=0 from
+        /// snapshot vs digits=6 from text coercion) must produce identical keys.
+        #[proptest]
+        fn serialized_key_ignores_subsecond_digits(
+            #[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime,
+            #[strategy(0u8..=6)] digits_a: u8,
+            #[strategy(0u8..=6)] digits_b: u8,
+        ) {
+            let mut ts_a = TimestampTz::from(ndt);
+            ts_a.set_subsecond_digits(digits_a);
+
+            let mut ts_b = TimestampTz::from(ndt);
+            ts_b.set_subsecond_digits(digits_b);
+
+            let va = DfValue::TimestampTz(ts_a);
+            let vb = DfValue::TimestampTz(ts_b);
+
+            let sa = bincode::serialize(&*va.transform_for_serialized_key()).unwrap();
+            let sb = bincode::serialize(&*vb.transform_for_serialized_key()).unwrap();
+
+            prop_assert_eq!(
+                sa,
+                sb,
+                "digits {} vs {} must serialize identically",
+                digits_a,
+                digits_b
+            );
+        }
+
+        /// Property 2: normalize_for_key is idempotent.
+        ///
+        /// Applying normalization twice must produce the same bytes as applying it once.
+        #[proptest]
+        fn normalize_for_key_is_idempotent(ts: TimestampTz) {
+            let once = ts.normalize_for_key();
+            let twice = once.normalize_for_key();
+
+            prop_assert_eq!(once.extra, twice.extra);
+            prop_assert_eq!(once.datetime, twice.datetime);
+        }
+
+        /// Property 2b: normalize_for_key preserves the UTC instant.
+        ///
+        /// The point in time must not shift during normalization — only the
+        /// representation (offset, subsecond_digits) changes.
+        #[proptest]
+        fn normalize_for_key_preserves_utc_instant(ts: TimestampTz) {
+            prop_assume!(!ts.is_zero());
+            let normalized = ts.normalize_for_key();
+            prop_assert_eq!(
+                ts.to_chrono().naive_utc(),
+                normalized.to_chrono().naive_utc(),
+                "UTC instant must survive normalization"
+            );
+        }
     }
 }
