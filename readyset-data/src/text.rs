@@ -461,7 +461,13 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                     DfValue::TimestampTz(crate::TimestampTz::from(tmz.to_chrono().date_naive()))
                 }),
 
-            DfType::Timestamp { .. } | DfType::DateTime { .. } | DfType::TimestampTz { .. } => str
+            DfType::Timestamp { .. } | DfType::DateTime { .. } => str
+                .trim()
+                .parse::<crate::TimestampTz>()
+                .map_err(|e| Self::coerce_err(to_ty, e))
+                .and_then(|ts| ts.coerce_to(to_ty)),
+
+            DfType::TimestampTz { .. } => str
                 .trim()
                 .parse::<crate::TimestampTz>()
                 .map_err(|e| Self::coerce_err(to_ty, e))
@@ -947,5 +953,51 @@ mod tests {
         DfValue::from("16777216")
             .coerce_to(&DfType::UnsignedMediumInt, &DfType::DEFAULT_TEXT)
             .unwrap_err();
+    }
+
+    #[test]
+    fn text_to_timestamp_strips_timezone() {
+        // REA-4147: coercing text with a timezone offset to TIMESTAMP (without tz)
+        // should parse and then discard the timezone offset.
+        let ts_type = DfType::Timestamp {
+            subsecond_digits: 0,
+        };
+        let val = DfValue::from("2020-01-02 03:04:05+08:00")
+            .coerce_to(&ts_type, &DfType::DEFAULT_TEXT)
+            .unwrap();
+        // The timezone should be ignored — the naive datetime is preserved as-is.
+        assert_eq!(val.to_string(), "2020-01-02 03:04:05");
+
+        // Same value without timezone should produce the same result.
+        let val_no_tz = DfValue::from("2020-01-02 03:04:05")
+            .coerce_to(&ts_type, &DfType::DEFAULT_TEXT)
+            .unwrap();
+        assert_eq!(val, val_no_tz);
+    }
+
+    #[test]
+    fn text_to_datetime_preserves_timezone() {
+        // DateTime (MySQL) routes through coerce_to which preserves the offset —
+        // MySQL DATETIME has no timezone stripping semantics like PG TIMESTAMP.
+        let dt_type = DfType::DateTime {
+            subsecond_digits: 0,
+        };
+        let val = DfValue::from("2020-01-02 03:04:05+08:00")
+            .coerce_to(&dt_type, &DfType::DEFAULT_TEXT)
+            .unwrap();
+        assert_eq!(val.to_string(), "2020-01-02 03:04:05+08:00");
+    }
+
+    #[test]
+    fn text_to_timestamptz_preserves_timezone() {
+        // TimestampTz text coercion preserves the parsed timezone offset.
+        let tstz_type = DfType::TimestampTz {
+            subsecond_digits: 0,
+        };
+        let val = DfValue::from("2020-01-02 03:04:05+08:00")
+            .coerce_to(&tstz_type, &DfType::DEFAULT_TEXT)
+            .unwrap();
+        // The offset is preserved in the parsed value.
+        assert_eq!(val.to_string(), "2020-01-02 03:04:05+08:00");
     }
 }

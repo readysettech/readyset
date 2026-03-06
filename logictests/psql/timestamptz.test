@@ -16,6 +16,25 @@ select * from t1 where c1 = '2023-04-25 21:23:26'
 2023-04-25 21:23:26
 
 
+-- REA-4147: querying a TIMESTAMP (no tz) column with a literal containing a
+-- timezone offset. Per PostgreSQL docs, TIMESTAMP WITHOUT TIME ZONE ignores
+-- the timezone offset in the literal.
+query Z
+select * from t1 where c1 = '2023-04-25 21:23:26+08:00'
+----
+2023-04-25 21:23:26
+
+query Z
+select * from t1 where c1 = '2023-04-25 21:23:26-05:00'
+----
+2023-04-25 21:23:26
+
+query Z
+select * from t1 where c1 = '2023-04-25 21:23:26+00'
+----
+2023-04-25 21:23:26
+
+
 -- test point lookups on timestamptz columns (with timezone)
 statement ok
 create table t2(c1 timestamptz);
