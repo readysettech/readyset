@@ -422,6 +422,83 @@ fn parse_unknown_directive() {
     assert!(result.is_none());
 }
 
+// --- SKIP CACHE hint directive tests ---
+
+#[test]
+fn parse_skip_cache_hint_basic() {
+    let result = parse_hint_directive(Dialect::MySQL, "SKIP CACHE").expect("should parse");
+    assert_eq!(result, Some(ReadysetHintDirective::SkipCache));
+}
+
+#[test]
+fn parse_skip_cache_hint_case_insensitive() {
+    let result = parse_hint_directive(Dialect::MySQL, "skip cache").expect("should parse");
+    assert_eq!(result, Some(ReadysetHintDirective::SkipCache));
+
+    let result = parse_hint_directive(Dialect::MySQL, "Skip Cache").expect("should parse");
+    assert_eq!(result, Some(ReadysetHintDirective::SkipCache));
+}
+
+#[test]
+fn parse_skip_cache_hint_with_extra_spaces() {
+    let result =
+        parse_hint_directive(Dialect::MySQL, "  SKIP   CACHE  ").expect("should parse");
+    assert_eq!(result, Some(ReadysetHintDirective::SkipCache));
+}
+
+#[test]
+fn parse_skip_cache_hint_trailing_garbage() {
+    let result = parse_hint_directive(Dialect::MySQL, "SKIP CACHE SOMETHING");
+    assert!(result.is_err(), "SKIP CACHE with trailing tokens should error");
+}
+
+#[test]
+fn parse_create_skip_cache_is_not_skip_cache() {
+    // "CREATE SKIP CACHE" is invalid — it should not be parsed as SkipCache.
+    let result =
+        parse_hint_directive(Dialect::MySQL, "CREATE SKIP CACHE");
+    assert!(result.is_err(), "CREATE SKIP CACHE should be unrecognized, not SkipCache");
+}
+
+#[test]
+fn parse_skip_without_cache_is_unrecognized() {
+    let result =
+        parse_hint_directive(Dialect::MySQL, "SKIP SOMETHING").expect("should parse");
+    assert!(result.is_none(), "SKIP without CACHE should be unrecognized");
+}
+
+#[test]
+fn parse_skip_cache_in_select() {
+    let (query, directive) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT /*rs+ SKIP CACHE */ * FROM users WHERE id = 1",
+    )
+    .expect("should parse");
+    assert_eq!(directive, Some(ReadysetHintDirective::SkipCache));
+
+    // The hint should be stripped, producing the same query as without the hint.
+    let (plain, _) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT * FROM users WHERE id = 1",
+    )
+    .expect("should parse plain query");
+    assert_eq!(query, plain, "SKIP CACHE hint should be stripped from query");
+}
+
+#[test]
+fn parse_skip_cache_in_union() {
+    let (query, directive) = parse_shallow_query(
+        Dialect::MySQL,
+        "SELECT /*rs+ SKIP CACHE */ 1 UNION SELECT 2",
+    )
+    .expect("should parse");
+    assert_eq!(directive, Some(ReadysetHintDirective::SkipCache));
+
+    let (plain, _) = parse_shallow_query(Dialect::MySQL, "SELECT 1 UNION SELECT 2")
+        .expect("should parse plain UNION");
+    assert_eq!(query, plain, "SKIP CACHE hint in UNION should be stripped");
+}
+
 #[test]
 fn parse_empty_hint() {
     let result = parse_hint_directive(Dialect::MySQL, "").expect("should parse");

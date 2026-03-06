@@ -1332,7 +1332,7 @@ async fn hint_prepared_statement_creates_cache() {
 /// Verify that when `allow_cache_ddl` is false, hints do not create caches.
 /// The query should fall through to normal execution without error.
 #[test]
-#[tags(serial, slow)]
+#[tags(serial)]
 #[upstream(mysql57, mysql80, mysql84)]
 async fn hint_skipped_when_cache_ddl_disabled() {
     use readyset_adapter::BackendBuilder;
@@ -1612,6 +1612,206 @@ async fn malformed_hint_does_not_bypass_existing_cache() {
         last_query_info(&mut readyset).await.destination,
         QueryDestination::ReadysetShallow,
         "Malformed hint must not bypass an existing shallow cache"
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Verify that `/*rs+ SKIP CACHE */` bypasses the shallow cache and routes to upstream.
+#[test]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
+async fn skip_cache_hint_bypasses_shallow_cache() {
+    init_test_logging();
+
+    let test_name = derive_test_name!();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+
+    upstream
+        .query_drop("CREATE TABLE t (id INT, val INT)")
+        .await
+        .unwrap();
+    upstream
+        .query_drop("INSERT INTO t VALUES (1, 100), (2, 200)")
+        .await
+        .unwrap();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    // Create a shallow cache via DDL.
+    readyset
+        .query_drop("CREATE SHALLOW CACHE FROM SELECT id, val FROM t WHERE id = ?")
+        .await
+        .unwrap();
+
+    // First query: cache miss, goes to upstream and populates the cache.
+    let rows: Vec<(i32, i32)> = readyset
+        .query("SELECT id, val FROM t WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![(1, 100)]);
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::Upstream,
+        "First query should go to upstream (cache miss)"
+    );
+
+    // Second query: cache hit, served from shallow cache.
+    let rows: Vec<(i32, i32)> = readyset
+        .query("SELECT id, val FROM t WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![(1, 100)]);
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow,
+        "Second query should hit the shallow cache"
+    );
+
+    // Update upstream data so we can verify SKIP CACHE reads fresh data.
+    upstream
+        .query_drop("UPDATE t SET val = 999 WHERE id = 1")
+        .await
+        .unwrap();
+
+    // Third query with SKIP CACHE hint: should bypass shallow cache and go to upstream.
+    let rows: Vec<(i32, i32)> = readyset
+        .query("SELECT /*rs+ SKIP CACHE */ id, val FROM t WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![(1, 999)], "SKIP CACHE should return fresh data from upstream");
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::Upstream,
+        "SKIP CACHE should route to upstream"
+    );
+
+    // Fourth query without hint: should still serve from the shallow cache (stale data).
+    let rows: Vec<(i32, i32)> = readyset
+        .query("SELECT id, val FROM t WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![(1, 100)], "Without hint, cache should still serve stale data");
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow,
+        "Without hint, query should hit the shallow cache"
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Verify that `/*rs+ SKIP CACHE */` bypasses the shallow cache for prepared statements
+/// via the binary protocol (plan_prepare + execute path).
+#[test]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
+async fn skip_cache_hint_bypasses_shallow_cache_prepared() {
+    init_test_logging();
+
+    let test_name = derive_test_name!();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+
+    upstream
+        .query_drop("CREATE TABLE t (id INT, val INT)")
+        .await
+        .unwrap();
+    upstream
+        .query_drop("INSERT INTO t VALUES (1, 100), (2, 200)")
+        .await
+        .unwrap();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    // Create a shallow cache via DDL.
+    readyset
+        .query_drop("CREATE SHALLOW CACHE FROM SELECT id, val FROM t WHERE id = ?")
+        .await
+        .unwrap();
+
+    // First exec_first (no hint): cache miss, goes to upstream.
+    let row: (i32, i32) = readyset
+        .exec_first("SELECT id, val FROM t WHERE id = ?", (1,))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row, (1, 100));
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::Upstream,
+        "First prepared exec should be a cache miss (upstream)"
+    );
+
+    // Second exec_first (no hint): should hit the shallow cache.
+    let row: (i32, i32) = readyset
+        .exec_first("SELECT id, val FROM t WHERE id = ?", (1,))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row, (1, 100));
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow,
+        "Second prepared exec should hit shallow cache"
+    );
+
+    // Update upstream data so we can verify SKIP CACHE reads fresh data.
+    upstream
+        .query_drop("UPDATE t SET val = 999 WHERE id = 1")
+        .await
+        .unwrap();
+
+    // Prepared exec with SKIP CACHE hint: should bypass shallow cache, go to upstream.
+    let row: (i32, i32) = readyset
+        .exec_first(
+            "SELECT /*rs+ SKIP CACHE */ id, val FROM t WHERE id = ?",
+            (1,),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row, (1, 999), "SKIP CACHE prepared exec should return fresh data from upstream");
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::Upstream,
+        "SKIP CACHE prepared exec should route to upstream"
+    );
+
+    // Prepared exec without hint: should still serve from shallow cache (stale data).
+    let row: (i32, i32) = readyset
+        .exec_first("SELECT id, val FROM t WHERE id = ?", (1,))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row, (1, 100), "Without hint, cache should still serve stale data");
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow,
+        "Without hint, prepared exec should hit the shallow cache"
     );
 
     shutdown_tx.shutdown().await;
