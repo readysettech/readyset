@@ -1146,4 +1146,6 @@ impl DialectDisplay for CreateCacheStatement {
 pub enum ReadysetHintDirective {
     /// `/*rs+ CREATE SHALLOW CACHE [TTL n] [REFRESH n] [ALWAYS] */`
     CreateCache(CreateCacheOptions),
+    /// `/*rs+ SKIP CACHE */` — bypass the cache and route directly to upstream.
+    SkipCache,
 }
