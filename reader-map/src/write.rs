@@ -132,16 +132,9 @@ where
         self.add_op(Operation::SetMeta(meta));
     }
 
-    fn add_ops<IT>(&mut self, ops: IT) -> &mut Self
-    where
-        IT: IntoIterator<Item = Operation<K, V, M>>,
-    {
-        self.handle.extend(ops);
-        self
-    }
-
     fn add_op(&mut self, op: Operation<K, V, M>) -> &mut Self {
-        self.add_ops(vec![op])
+        self.handle.append(op);
+        self
     }
 
     /// Add the given value to the value-bag of the given key.
