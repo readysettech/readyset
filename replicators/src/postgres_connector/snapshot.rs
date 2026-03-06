@@ -34,7 +34,7 @@ use crate::db_util::CreateSchema;
 use crate::table_filter::TableFilter;
 use crate::{report_snapshot_progress, TablesSnapshottingGaugeGuard};
 
-const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to ReadySet
+const BATCH_SIZE: usize = 1024; // How many rows to buffer before pushing to ReadySet
 
 macro_rules! get_transaction {
     ($self:expr) => {
@@ -518,9 +518,8 @@ impl TableDescription {
         let rows = transaction.copy_out(query.as_str()).await?;
 
         let type_map: Vec<_> = self.columns.iter().map(|c| c.pg_type.clone()).collect();
-        let binary_row_batches = pgsql::binary_copy::BinaryCopyOutStream::new(rows, &type_map)
-            .chunks(BATCH_SIZE)
-            .peekable();
+        let binary_row_batches =
+            pgsql::binary_copy::BinaryCopyOutStream::new(rows, &type_map).chunks(BATCH_SIZE);
 
         pin_mut!(binary_row_batches);
 
@@ -531,11 +530,9 @@ impl TableDescription {
         let mut last_log = start;
         let mut last_status = start;
         let mut progress = 0;
-        let mut set_replication_offset_and_snapshot_mode = false;
-        while let Some(batch) = binary_row_batches.as_mut().next().await {
+        while let Some(batch) = binary_row_batches.next().await {
             let progress_copy = progress;
-            let batch_size = batch.len();
-            let noria_rows_iter = batch
+            let noria_rows = batch
                 .into_iter()
                 .enumerate()
                 .map(|(index_within_batch, row)| {
@@ -552,38 +549,12 @@ impl TableDescription {
                                 ))
                             })
                     })
-                });
+                })
+                .collect::<Result<Vec<_>, _>>()?;
 
-            progress += batch_size;
+            progress += noria_rows.len();
 
-            if binary_row_batches.as_mut().peek().await.is_none() {
-                // This is the last batch of rows we're adding to the table, so batch the RPCs to
-                // set the replication offset and compact the table along with the insertion
-                info!(
-                    table = %noria_table.table_name().display(Dialect::PostgreSQL),
-                    %wal_position,
-                    "Setting replication offset and compacting table"
-                );
-
-                let capacity = match noria_rows_iter.size_hint() {
-                    (_, Some(high)) => high,
-                    (low, None) => low,
-                } + 2;
-                let mut actions = Vec::with_capacity(capacity);
-                for row in noria_rows_iter {
-                    actions.push(TableOperation::Insert(row?));
-                }
-
-                actions.push(TableOperation::SetReplicationOffset(wal_position.clone()));
-                actions.push(TableOperation::SetSnapshotMode(false));
-
-                noria_table.perform_all(actions).await?;
-                set_replication_offset_and_snapshot_mode = true;
-            } else {
-                noria_table
-                    .insert_many(noria_rows_iter.collect::<Result<Vec<_>, _>>()?)
-                    .await?
-            }
+            noria_table.insert_many(noria_rows).await?;
 
             report_snapshot_progress(
                 noria_table.table_name(),
@@ -597,16 +568,18 @@ impl TableDescription {
             );
         }
 
-        // If the table was empty, we didn't set the replication offset or disable snapshot mode
-        // above, so we need to do it here
-        if !set_replication_offset_and_snapshot_mode {
-            noria_table
-                .perform_all([
-                    TableOperation::SetReplicationOffset(wal_position.clone()),
-                    TableOperation::SetSnapshotMode(false),
-                ])
-                .await?;
-        }
+        // Set replication offset and disable snapshot mode after all rows are inserted.
+        info!(
+            table = %noria_table.table_name().display(Dialect::PostgreSQL),
+            %wal_position,
+            "Setting replication offset and disabling snapshot mode"
+        );
+        noria_table
+            .perform_all([
+                TableOperation::SetReplicationOffset(wal_position.clone()),
+                TableOperation::SetSnapshotMode(false),
+            ])
+            .await?;
 
         info!(rows_replicated = %progress, "Snapshotting finished");
 
