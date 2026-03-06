@@ -67,7 +67,6 @@ members = [
     "system-benchmarks",
     "test-discovery",
     "test-utils",
-    "tinylb",
     "tournament-kway",
 ]
 resolver = "2"
