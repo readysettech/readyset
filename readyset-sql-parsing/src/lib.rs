@@ -620,10 +620,11 @@ fn parse_create_cache(
 
 /// Parse a readyset hint text (without `/*rs+` and `*/` markers) into a directive.
 ///
-/// Uses the same `parse_cache_options()` infrastructure as `CREATE CACHE` DDL parsing,
-/// so any new options added to `CREATE CACHE` are automatically supported in hints.
+/// Dispatches to the appropriate parser based on the first keyword:
+/// - `CREATE [DEEP|SHALLOW] CACHE ...` → [`ReadysetHintDirective::CreateCache`]
+/// - `SKIP CACHE` → [`ReadysetHintDirective::SkipCache`]
 ///
-/// Returns `Ok(None)` for unrecognized directives (future-proof).
+/// Returns `Ok(None)` for unrecognized directives (forward-compatible).
 /// Returns `Err(...)` for recognized but malformed directives.
 pub fn parse_hint_directive(
     dialect: Dialect,
@@ -639,25 +640,24 @@ pub fn parse_hint_directive(
         .try_with_sql(text)
         .map_err(|e| ReadysetParsingError::ReadysetParsingError(e.to_string()))?;
 
-    // Try parsing as CREATE [DEEP|SHALLOW] CACHE using the same function as DDL.
-    // If the first token isn't CREATE, this is an unrecognized directive.
-    let directive = match parse_create_cache_keywords(&mut parser) {
-        Ok(cache_type) => {
-            let opts = parse_cache_options(&mut parser, cache_type)?;
-            ReadysetHintDirective::CreateCache(opts)
-        }
-        Err(_) => return Ok(None),
+    let directive = if parser.parse_keywords(&[Keyword::SKIP, Keyword::CACHE]) {
+        Some(ReadysetHintDirective::SkipCache)
+    } else if parser.peek_keyword(Keyword::CREATE) {
+        let cache_type = parse_create_cache_keywords(&mut parser)?;
+        let opts = parse_cache_options(&mut parser, cache_type)?;
+        Some(ReadysetHintDirective::CreateCache(opts))
+    } else {
+        None
     };
 
-    // Ensure all hint text was consumed
-    if parser.peek_token() != Token::EOF {
+    if directive.is_some() && parser.peek_token() != Token::EOF {
         return Err(ReadysetParsingError::ReadysetParsingError(format!(
-            "Unexpected token in CREATE CACHE hint: {}",
+            "Unexpected token in hint: {}",
             parser.peek_token()
         )));
     }
 
-    Ok(Some(directive))
+    Ok(directive)
 }
 
 fn peek_create_cache(parser: &mut Parser) -> bool {

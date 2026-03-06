@@ -418,7 +418,7 @@ fn parse_create_cache_hint_case_insensitive() {
 
 #[test]
 fn parse_unknown_directive() {
-    let result = parse_hint_directive(Dialect::MySQL, "SKIP CACHE").expect("should parse");
+    let result = parse_hint_directive(Dialect::MySQL, "FOO BAR").expect("should parse");
     assert!(result.is_none());
 }
 
