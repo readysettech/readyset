@@ -11,7 +11,7 @@ common_values:
 env:
   ECR_PLUGIN_VERSION: "v2.10.0"
   DOCKER_PLUGIN_VERSION: "v5.13.0"
-  DOCKER_COMPOSE_PLUGIN_VERSION: "v5.10.0"
+  DOCKER_COMPOSE_PLUGIN_VERSION: "v5.12.1"
 
 steps:
   - label: ':clojure: Run jepsen test with --help'
