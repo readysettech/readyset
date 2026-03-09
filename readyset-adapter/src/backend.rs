@@ -3434,14 +3434,17 @@ where
     /// Responds to a `SHOW PROXIED QUERIES` query
     async fn show_proxied_queries(
         state: &mut BackendState<DB>,
+        settings: &BackendSettings,
         query_id: &Option<String>,
         only_supported: bool,
         limit: Option<u64>,
         cache_type: Option<CacheType>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let mut queries = state
-            .query_status_cache
-            .proxied_list(cache_type.unwrap_or(CacheType::Deep));
+        let cache_type = cache_type.unwrap_or(match settings.cache_mode {
+            CacheMode::Deep | CacheMode::DeepThenShallow => CacheType::Deep,
+            CacheMode::Shallow => CacheType::Shallow,
+        });
+        let mut queries = state.query_status_cache.proxied_list(cache_type);
         if let Some(q_id) = query_id {
             queries.retain(|q| &q.id.to_string() == q_id);
         }
@@ -3920,8 +3923,15 @@ where
                     trace!("No telemetry sender. not sending metric for SHOW PROXIED QUERIES");
                 }
 
-                Self::show_proxied_queries(state, query_id, *only_supported, *limit, *cache_type)
-                    .await
+                Self::show_proxied_queries(
+                    state,
+                    settings,
+                    query_id,
+                    *only_supported,
+                    *limit,
+                    *cache_type,
+                )
+                .await
             }
             SqlQuery::Show(ShowStatement::ReplayPaths) => connectors.show_replay_paths().await,
             SqlQuery::Show(ShowStatement::Rls(_maybe_table)) => {
