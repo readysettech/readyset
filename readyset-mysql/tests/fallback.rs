@@ -409,10 +409,11 @@ async fn prep_then_always_select_in_tx() {
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
-    sleep().await;
-    conn.query_drop("CREATE CACHE ALWAYS test_always FROM SELECT x FROM t;")
-        .await
-        .unwrap();
+    eventually! {
+        conn.query_drop("CREATE CACHE ALWAYS test_always FROM SELECT x FROM t;")
+            .await
+            .is_ok()
+    };
     let prepared = conn.prep("SELECT x FROM t").await.unwrap();
     let mut tx = conn
         .start_transaction(mysql_async::TxOpts::new())
@@ -444,11 +445,12 @@ async fn always_should_bypass_tx() {
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
-    sleep().await;
 
-    conn.query_drop("CREATE CACHE ALWAYS test_always FROM SELECT x FROM t;")
-        .await
-        .unwrap();
+    eventually! {
+        conn.query_drop("CREATE CACHE ALWAYS test_always FROM SELECT x FROM t;")
+            .await
+            .is_ok()
+    };
     let mut tx = conn
         .start_transaction(mysql_async::TxOpts::new())
         .await
@@ -566,11 +568,12 @@ async fn always_should_never_proxy_exec() {
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
-    sleep().await;
 
-    conn.query_drop("CREATE CACHE ALWAYS FROM SELECT * FROM t")
-        .await
-        .unwrap();
+    eventually! {
+        conn.query_drop("CREATE CACHE ALWAYS FROM SELECT * FROM t")
+            .await
+            .is_ok()
+    };
     let prepared = conn.prep("SELECT * FROM t").await.unwrap();
     let _: Option<i64> = conn.exec_first(prepared, ()).await.unwrap();
     assert_matches!(
@@ -702,11 +705,12 @@ async fn transaction_proxies() {
     let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
-    sleep().await;
 
-    conn.query_drop("CREATE CACHE FROM SELECT * FROM t")
-        .await
-        .unwrap();
+    eventually! {
+        conn.query_drop("CREATE CACHE FROM SELECT * FROM t")
+            .await
+            .is_ok()
+    };
 
     conn.query_drop("BEGIN;").await.unwrap();
     conn.query_drop("SELECT * FROM t;").await.unwrap();
@@ -933,18 +937,21 @@ async fn replication_failure_ignores_table() {
         .await
         .unwrap();
 
-    sleep().await;
-    sleep().await;
-
-    assert_last_statement_matches("cats", "upstream", "ok", &mut client).await;
-    client
-        .query_drop("CREATE CACHE FROM SELECT * FROM cats")
-        .await
-        .unwrap();
-    client
-        .query_drop("CREATE CACHE FROM SELECT * FROM cats_view")
-        .await
-        .unwrap();
+    eventually! {
+        last_statement_matches("upstream", "ok", &mut client).await.0
+    };
+    eventually! {
+        client
+            .query_drop("CREATE CACHE FROM SELECT * FROM cats")
+            .await
+            .is_ok()
+    };
+    eventually! {
+        client
+            .query_drop("CREATE CACHE FROM SELECT * FROM cats_view")
+            .await
+            .is_ok()
+    };
     sleep().await;
 
     let result: i32 = client
@@ -1218,11 +1225,12 @@ async fn rollback_to_savepoint_preserves_transaction() {
     let mut conn = Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
-    sleep().await;
 
-    conn.query_drop("CREATE CACHE FROM SELECT * FROM t")
-        .await
-        .unwrap();
+    eventually! {
+        conn.query_drop("CREATE CACHE FROM SELECT * FROM t")
+            .await
+            .is_ok()
+    };
     eventually! {
         conn.query_drop("SELECT * FROM t").await.unwrap();
         matches!(last_query_info(&mut conn).await.destination, QueryDestination::Readyset(_))

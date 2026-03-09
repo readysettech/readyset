@@ -763,10 +763,12 @@ async fn alter_enum_rename_value() {
         .await
         .unwrap();
 
-    client
-        .simple_query("CREATE CACHE ALWAYS FROM SELECT e FROM t")
-        .await
-        .unwrap();
+    eventually! {
+        client
+            .simple_query("CREATE CACHE ALWAYS FROM SELECT e FROM t")
+            .await
+            .is_ok()
+    };
 
     eventually!(run_test: {
         let res = client.simple_query("SELECT e FROM t").await;
@@ -912,19 +914,21 @@ async fn setup_for_replication_failure(client: &Client) {
         .await
         .unwrap();
 
-    sleep().await;
-    sleep().await;
-
-    assert_last_statement_matches!("cats", "upstream", "ok", client);
-    client
-        .simple_query("CREATE CACHE FROM SELECT * FROM cats")
-        .await
-        .unwrap();
-    client
-        .simple_query("CREATE CACHE FROM SELECT * FROM cats_view")
-        .await
-        .unwrap();
-    sleep().await;
+    eventually! {
+        last_statement_matches("upstream", "ok", client).await.0
+    };
+    eventually! {
+        client
+            .simple_query("CREATE CACHE FROM SELECT * FROM cats")
+            .await
+            .is_ok()
+    };
+    eventually! {
+        client
+            .simple_query("CREATE CACHE FROM SELECT * FROM cats_view")
+            .await
+            .is_ok()
+    };
 
     let result = client
         .query_one("SELECT * FROM cats", &[])
@@ -1981,8 +1985,6 @@ async fn named_cache_queryable_after_being_cleared() {
             .await
             .unwrap();
         conn.simple_query("CREATE TABLE t (x int)").await.unwrap();
-        // TODO(mvzink): Remove sleep once REA-6109 is fixed.
-        sleep().await;
         eventually!(
             conn.simple_query("CREATE CACHE test FROM SELECT * FROM t WHERE x = 1")
                 .await
@@ -2118,7 +2120,7 @@ mod failure_injection_tests {
     /// it.
     async fn setup_reload_controller_state_test(
         prefix: &str,
-        queries: &[&str],
+        queries: &[(&str, bool)],
     ) -> (
         tokio_postgres::Config,
         Handle,
@@ -2138,11 +2140,16 @@ mod failure_injection_tests {
                 .await;
 
             let conn = connect(config).await;
-            for query in queries {
+            for (query, retry) in queries {
                 debug!(%query, "Running Query");
-                let _res = conn.simple_query(query).await;
-                // give it some time to propagate
-                sleep().await;
+                if *retry {
+                    eventually! {
+                        conn.simple_query(query).await.is_ok()
+                    };
+                } else {
+                    let _res = conn.simple_query(query).await;
+                    sleep().await;
+                }
             }
 
             let err_to_inject =
@@ -2193,8 +2200,8 @@ mod failure_injection_tests {
     #[upstream(postgres13, postgres15)]
     async fn caches_recreated_after_backwards_incompatible_upgrade() {
         let queries = [
-            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
-            "CREATE CACHE test_query FROM SELECT * FROM users;",
+            ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
+            ("CREATE CACHE test_query FROM SELECT * FROM users;", true),
         ];
         let (config, mut handle, _authority, shutdown_tx) =
             setup_reload_controller_state_test("caches_recreated", &queries).await;
@@ -2213,8 +2220,8 @@ mod failure_injection_tests {
     #[upstream(postgres13, postgres15)]
     async fn caches_recreated_using_rewritten_query() {
         let queries = [
-            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
-            "CREATE CACHE test_query FROM SELECT * FROM users WHERE id = 1;",
+            ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
+            ("CREATE CACHE test_query FROM SELECT * FROM users WHERE id = 1;", true),
         ];
         let (config, mut handle, _authority, shutdown_tx) =
             setup_reload_controller_state_test("caches_recreated_rewritten", &queries).await;
@@ -2235,10 +2242,10 @@ mod failure_injection_tests {
     #[upstream(postgres13, postgres15)]
     async fn dropped_caches_not_recreated() {
         let queries = [
-            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
-            "CREATE CACHE dropped_query FROM SELECT * FROM users;",
-            "CREATE CACHE cached_query FROM SELECT * FROM users where id = 1;",
-            "DROP CACHE dropped_query",
+            ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
+            ("CREATE CACHE dropped_query FROM SELECT * FROM users;", true),
+            ("CREATE CACHE cached_query FROM SELECT * FROM users where id = 1;", true),
+            ("DROP CACHE dropped_query", false),
         ];
         let (config, mut handle, _authority, shutdown_tx) =
             setup_reload_controller_state_test("caches_not_recreated", &queries).await;
@@ -2258,12 +2265,12 @@ mod failure_injection_tests {
     #[upstream(postgres13, postgres15)]
     async fn dropped_then_recreated_cache_recreated() {
         let queries = [
-            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
-            "CREATE CACHE dropped_query FROM SELECT * FROM users;",
-            "DROP CACHE dropped_query",
-            "CREATE CACHE cached_query FROM SELECT * FROM users;",
-            "DROP CACHE cached_query;",
-            "CREATE CACHE cached_query FROM SELECT * FROM users",
+            ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
+            ("CREATE CACHE dropped_query FROM SELECT * FROM users;", true),
+            ("DROP CACHE dropped_query", false),
+            ("CREATE CACHE cached_query FROM SELECT * FROM users;", true),
+            ("DROP CACHE cached_query;", false),
+            ("CREATE CACHE cached_query FROM SELECT * FROM users", true),
         ];
 
         let (config, mut handle, _authority, shutdown_tx) =
@@ -2284,8 +2291,8 @@ mod failure_injection_tests {
     #[upstream(postgres13, postgres15)]
     async fn caches_added_if_extend_recipe_times_out() {
         let queries = [
-            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
-            "CREATE CACHE test_query FROM SELECT * FROM users;",
+            ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
+            ("CREATE CACHE test_query FROM SELECT * FROM users;", true),
         ];
 
         // This is set to be larger than  EXTEND_RECIPE_MAX_SYNC_TIME, which is 5 seconds
@@ -2317,8 +2324,8 @@ mod failure_injection_tests {
     #[upstream(postgres13, postgres15)]
     async fn create_cache_not_added_if_extend_recipe_fails() {
         let queries = [
-            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
-            "CREATE CACHE test_query FROM SELECT * FROM idontexist;",
+            ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
+            ("CREATE CACHE test_query FROM SELECT * FROM idontexist;", false),
         ];
 
         let (_config, mut handle, authority, shutdown_tx) =
@@ -2338,8 +2345,8 @@ mod failure_injection_tests {
     #[upstream(postgres13, postgres15)]
     async fn drop_cache_not_added_if_drop_fails() {
         let queries = [
-            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
-            "DROP CACHE idontexist;",
+            ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
+            ("DROP CACHE idontexist;", false),
         ];
 
         let (_config, mut handle, authority, shutdown_tx) =
@@ -2448,8 +2455,8 @@ mod failure_injection_tests {
         })
         .expect("failed to configure failpoint");
         let queries = [
-            "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
-            "CREATE CACHE test_query FROM SELECT * FROM users;",
+            ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
+            ("CREATE CACHE test_query FROM SELECT * FROM users;", true),
         ];
 
         let (_config, mut handle, _authority, shutdown_tx) =
@@ -2486,45 +2493,53 @@ async fn drop_and_recreate_demo_cache() {
 
     let conn = connect(opts).await;
 
-    let queries = [
+    conn.simple_query(
         "CREATE TABLE public.title_basics (
-            tconst text NOT NULL,
-            titletype text,
-            primarytitle text,
-            originaltitle text,
-            isadult boolean,
-            startyear integer,
-            endyear integer,
-            runtimeminutes integer,
-            genres text
-        );",
-        "CREATE TABLE public.title_ratings (
-            tconst text NOT NULL,
-            averagerating numeric,
-            numvotes integer
-        );",
-        "CREATE CACHE FROM
-           SELECT count(*)
-             FROM title_ratings
-             JOIN title_basics
-               ON title_ratings.tconst = title_basics.tconst
-            WHERE title_basics.startyear = 2000
-              AND title_ratings.averagerating > 5;",
-        "DROP CACHE q_bccd97aea07c545f;",
-        "CREATE CACHE FROM
-           SELECT count(*)
-             FROM title_ratings
-             JOIN title_basics
-               ON title_ratings.tconst = title_basics.tconst
-            WHERE title_basics.startyear = 2000
-              AND title_ratings.averagerating > 5;",
-    ];
+           tconst text NOT NULL,
+           titletype text,
+           primarytitle text,
+           originaltitle text,
+           isadult boolean,
+           startyear integer,
+           endyear integer,
+           runtimeminutes integer,
+           genres text
+         )"
+    ).await.unwrap();
 
-    for query in queries {
-        let _res = conn.simple_query(query).await.expect("query failed");
-        // give it some time to propagate
-        sleep().await;
-    }
+    conn.simple_query(
+        "CREATE TABLE public.title_ratings (
+           tconst text NOT NULL,
+           averagerating numeric,
+           numvotes integer
+         )"
+    ).await.unwrap();
+
+    eventually! {
+        conn.simple_query(
+            "CREATE CACHE FROM
+               SELECT count(*)
+                 FROM title_ratings
+                 JOIN title_basics
+                   ON title_ratings.tconst = title_basics.tconst
+                WHERE title_basics.startyear = 2000
+                  AND title_ratings.averagerating > 5"
+        ).await.is_ok()
+    };
+
+    conn.simple_query("DROP CACHE q_bccd97aea07c545f").await.unwrap();
+
+    eventually! {
+        conn.simple_query(
+            "CREATE CACHE FROM
+               SELECT count(*)
+                 FROM title_ratings
+                 JOIN title_basics
+                   ON title_ratings.tconst = title_basics.tconst
+                WHERE title_basics.startyear = 2000
+                  AND title_ratings.averagerating > 5"
+        ).await.is_ok()
+    };
 
     shutdown_tx.shutdown().await;
 }
@@ -2678,12 +2693,13 @@ async fn rollback_to_savepoint_preserves_transaction() {
     let client = connect(config).await;
 
     client.simple_query("CREATE TABLE t (x int)").await.unwrap();
-    sleep().await;
 
-    client
-        .simple_query("CREATE CACHE FROM SELECT * FROM t")
-        .await
-        .unwrap();
+    eventually! {
+        client
+            .simple_query("CREATE CACHE FROM SELECT * FROM t")
+            .await
+            .is_ok()
+    };
 
     eventually! {
         let _ = client.query("SELECT * FROM t", &[]).await.unwrap();
