@@ -883,8 +883,11 @@ where
             Ok(Some(coerced_key)) => coerced_key,
             // Coercion did not happen, use the original key.
             Ok(None) => key,
-            // Coercion happened, but was not successful, return empty result.
-            Err(_) => return Ok(IngredientLookupResult::Miss),
+            // Coercion happened, but was not successful — the key can never match
+            // any records in the indexed column (e.g. TEXT vs INT), so return empty.
+            // Returning Miss here would trigger a replay for a key that can never
+            // exist, which causes a "no tag found" panic in the domain.
+            Err(_) => return Ok(IngredientLookupResult::empty()),
         };
 
         match states.get(parent_index) {
