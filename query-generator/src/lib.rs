@@ -1229,11 +1229,11 @@ impl AggregateType {
     /// Post-lookup aggregation is required when queries use `IN (?, ?)` parameters
     /// (collapsed to `= ?`) or range parameters (BTreeMap index).
     /// Mirrors the unsupported!() checks in `post_lookup_aggregates()` (grouped.rs).
+    ///
+    /// AVG (non-DISTINCT) is supported: the adapter decomposes it into
+    /// SUM + COUNT + MIN for post-lookup recomputation.
     pub fn unsupported_as_post_lookup(&self) -> bool {
-        matches!(
-            self,
-            AggregateType::Avg { .. } | AggregateType::JsonObjectAgg { .. }
-        ) || self.is_distinct()
+        matches!(self, AggregateType::JsonObjectAgg { .. }) || self.is_distinct()
     }
 
     /// Check if this aggregate function is supported by the given SQL dialect
@@ -2909,7 +2909,7 @@ fn prune_query_operations(ops: &mut Vec<QueryOperation>) {
     let mut distinct_found = false;
     let mut in_parameter_found = false;
 
-    // Don't generate aggregates unsupported as post-lookup (Avg, JsonObjectAgg, DISTINCT
+    // Don't generate aggregates unsupported as post-lookup (JsonObjectAgg, DISTINCT
     // aggregates) in the same query as a WHERE IN clause, since post-lookup aggregation for
     // these is not supported (REA-6024)
     let mut post_lookup_unsupported_agg_found = false;

@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::mem;
 use std::sync::{Arc, atomic};
 use std::time::Instant;
 
@@ -28,7 +29,9 @@ use readyset_sql::ast::{
     UpdateStatement,
 };
 use readyset_sql::{DialectDisplay, TryFromDialect as _, TryIntoDialect as _};
-use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams, DfQueryParameters};
+use readyset_sql_passes::adapter_rewrites::{
+    self, AdapterRewriteParams, DfQueryParameters, PostLookupColumn, PostLookupPlan,
+};
 use readyset_util::redacted::Sensitive;
 use readyset_util::shared_cache::{self, LocalCache};
 use schema_catalog::{RewriteContext, SchemaGeneration};
@@ -1688,6 +1691,121 @@ impl NoriaConnector {
     }
 }
 
+/// Apply post-lookup decompositions to transform result rows and schema.
+///
+/// For each decomposed aggregate (e.g. AVG decomposed into SUM + COUNT), this:
+/// 1. Computes the final aggregate value from source columns (e.g. SUM / COUNT)
+/// 2. Places the computed value at the original result position
+/// 3. Removes any columns that were added by the decomposition (e.g. the extra COUNT column)
+/// 4. Updates the schema to match
+fn postprocess_decompositions<'a>(
+    result: QueryResult<'a>,
+    plan: &PostLookupPlan,
+    dialect: Dialect,
+) -> QueryResult<'a> {
+    if plan.is_empty() {
+        return result;
+    }
+
+    let (rows, schema) = match result {
+        QueryResult::Select { rows, schema } => (rows, schema),
+        other => return other,
+    };
+
+    let decompositions = plan.decompositions();
+    let column_plan = plan.column_plan();
+    let columns_to_remove = plan.columns_to_remove();
+
+    let mut transformed_rows: Vec<Vec<DfValue>> = Vec::new();
+    let mut computed: Vec<DfValue> = Vec::with_capacity(decompositions.len());
+    for mut row in rows {
+        // Pre-compute decomposed values while the row is intact, before
+        // any values are moved out by Direct columns below.
+        computed.clear();
+        // Allocate once per row (borrows row, so can't hoist further),
+        // reused across decompositions via clear(). Capacity is taken from
+        // the first decomposition; subsequent ones reuse or grow as needed.
+        let mut sources: Vec<&DfValue> =
+            Vec::with_capacity(decompositions.first().map_or(0, |d| d.source_columns.len()));
+        for d in decompositions {
+            sources.clear();
+            for s in d.source_columns.iter() {
+                sources.push(row.get(s.field_index).unwrap_or_else(|| {
+                    error!(
+                        field_index = s.field_index,
+                        row_len = row.len(),
+                        "post-lookup decomposition: source column OOB"
+                    );
+                    &DfValue::None
+                }));
+            }
+            computed.push(d.kind.compute(&sources));
+        }
+
+        let mut out_row: Vec<DfValue> = Vec::with_capacity(column_plan.len());
+        for col in column_plan {
+            out_row.push(match col {
+                PostLookupColumn::Direct(idx) => {
+                    row.get_mut(*idx).map(mem::take).unwrap_or_else(|| {
+                        error!(
+                            idx,
+                            row_len = row.len(),
+                            "post-lookup decomposition: direct column OOB"
+                        );
+                        DfValue::None
+                    })
+                }
+                PostLookupColumn::Computed(decomp_idx) => mem::take(&mut computed[*decomp_idx]),
+            });
+        }
+        transformed_rows.push(out_row);
+    }
+
+    // Update schema: remove added columns and fix types for computed columns
+    let mut new_schema_vec = schema.schema.into_owned();
+    let mut new_columns_vec = schema.columns.into_owned();
+
+    // Update the type and alias for computed result columns.
+    // IMPORTANT: This must happen BEFORE the removal loop below, because
+    // `result_index` refers to positions in the original (pre-removal) schema.
+    for d in decompositions {
+        if d.result_index < new_schema_vec.len() {
+            let source_types: Vec<&DfType> = d
+                .source_columns
+                .iter()
+                .map(|s| {
+                    new_schema_vec
+                        .get(s.field_index)
+                        .map(|cs| &cs.column_type)
+                        .unwrap_or(&DfType::Unknown)
+                })
+                .collect();
+            new_schema_vec[d.result_index].column_type = d.kind.result_type(&source_types, dialect);
+        }
+        if d.result_index < new_columns_vec.len() {
+            new_columns_vec[d.result_index] = d.original_alias.clone();
+        }
+    }
+
+    // Remove added columns in reverse order to preserve indices
+    for &idx in columns_to_remove.iter().rev() {
+        if idx < new_schema_vec.len() {
+            new_schema_vec.remove(idx);
+        }
+        if idx < new_columns_vec.len() {
+            new_columns_vec.remove(idx);
+        }
+    }
+
+    QueryResult::Select {
+        rows: ResultIterator::owned(vec![Results::new(transformed_rows)]),
+        schema: SelectSchema {
+            schema: Cow::Owned(new_schema_vec),
+            columns: Cow::Owned(new_columns_vec),
+        },
+    }
+}
+
 /// Creates keys from processed query params, gets the select statement binops, and calls
 /// View::build_view_query.
 fn build_view_query<'a>(
@@ -1793,9 +1911,395 @@ async fn do_read<'a>(
         data,
     );
 
+    let plan = processed_query_params.post_lookup_plan();
+    let result = postprocess_decompositions(result, plan, dialect);
+
     Ok(ReadResult {
         result,
         num_keys,
         cache_misses,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use readyset_data::{DfType, DfValue};
+    use readyset_sql::ast::SqlIdentifier;
+    use readyset_sql_passes::adapter_rewrites::{
+        PostLookupAggregateKind, PostLookupDecomposition, PostLookupPlan, SourceColumn,
+    };
+
+    use super::*;
+
+    // Unit tests for PostLookupPlan construction, compute_avg, and result_type live in
+    // readyset-sql-passes::adapter_rewrites::post_lookup_decomposition::tests.
+    // Tests below exercise postprocess_decompositions (the adapter-side row transformation).
+
+    #[test]
+    fn postprocess_empty_decompositions() {
+        let schema = SelectSchema {
+            schema: Cow::Owned(vec![]),
+            columns: Cow::Owned(vec![]),
+        };
+        let result = QueryResult::Select {
+            rows: ResultIterator::owned(vec![]),
+            schema,
+        };
+
+        // No decompositions means pass-through
+        let empty_plan = PostLookupPlan::new(vec![], 0);
+        let result = postprocess_decompositions(result, &empty_plan, Dialect::DEFAULT_MYSQL);
+        match result {
+            QueryResult::Select { rows, .. } => {
+                assert!(rows.into_vec().is_empty());
+            }
+            _ => panic!("expected Select"),
+        }
+    }
+
+    #[test]
+    fn postprocess_avg_decomposition() {
+        // Simulate: SELECT AVG(x) FROM t  (x is INT)
+        // Rewritten to: SELECT SUM(x), COUNT(x), MIN(x) FROM t
+        // Row: [SUM=10, COUNT=2, MIN=3]
+        // Expected output: [AVG=5.0] with type Numeric{14,4} (MySQL AVG of int)
+        let schema = SelectSchema {
+            schema: Cow::Owned(vec![
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "sum_x".into(),
+                        table: None,
+                    },
+                    column_type: DfType::BigInt,
+                    base: None,
+                },
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "count_x".into(),
+                        table: None,
+                    },
+                    column_type: DfType::BigInt,
+                    base: None,
+                },
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "min_x".into(),
+                        table: None,
+                    },
+                    column_type: DfType::Int,
+                    base: None,
+                },
+            ]),
+            columns: Cow::Owned(vec!["sum_x".into(), "count_x".into(), "min_x".into()]),
+        };
+        let rows = vec![vec![DfValue::Int(10), DfValue::Int(2), DfValue::Int(3)]];
+        let result = QueryResult::Select {
+            rows: ResultIterator::owned(vec![Results::new(rows)]),
+            schema,
+        };
+
+        let plan = PostLookupPlan::new(
+            vec![PostLookupDecomposition {
+                kind: PostLookupAggregateKind::Avg,
+                result_index: 0,
+                source_columns: Box::new([
+                    SourceColumn {
+                        field_index: 0,
+                        added: false,
+                    },
+                    SourceColumn {
+                        field_index: 1,
+                        added: true,
+                    },
+                    SourceColumn {
+                        field_index: 2,
+                        added: true,
+                    },
+                ]),
+                original_alias: SqlIdentifier::from("avg_x"),
+            }],
+            3,
+        );
+
+        let result = postprocess_decompositions(result, &plan, Dialect::DEFAULT_MYSQL);
+        match result {
+            QueryResult::Select { rows, schema } => {
+                let data = rows.into_vec();
+                assert_eq!(data.len(), 1);
+                assert_eq!(data[0].len(), 1); // COUNT and MIN columns removed
+                assert_eq!(data[0][0], DfValue::try_from(5.0_f64).unwrap());
+
+                // Schema should have 1 column with correct name and type.
+                assert_eq!(schema.columns.len(), 1);
+                assert_eq!(schema.columns[0], SqlIdentifier::from("avg_x"));
+                // MySQL AVG(int) → Numeric{14,4}
+                assert_eq!(
+                    schema.schema[0].column_type,
+                    DfType::Numeric { prec: 14, scale: 4 }
+                );
+            }
+            _ => panic!("expected Select"),
+        }
+    }
+
+    #[test]
+    fn postprocess_mixed_columns_with_avg() {
+        // Simulate: SELECT id, AVG(x), name FROM t GROUP BY id, name  (x is INT)
+        // Rewritten to: SELECT id, SUM(x), name, COUNT(x), MIN(x) FROM t GROUP BY id, name
+        // Row: [1, 30, "alice", 3, 5]
+        // Expected output: [1, 10.0, "alice"]
+        let schema = SelectSchema {
+            schema: Cow::Owned(vec![
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "id".into(),
+                        table: None,
+                    },
+                    column_type: DfType::Int,
+                    base: None,
+                },
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "sum_x".into(),
+                        table: None,
+                    },
+                    column_type: DfType::BigInt,
+                    base: None,
+                },
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "name".into(),
+                        table: None,
+                    },
+                    column_type: DfType::DEFAULT_TEXT,
+                    base: None,
+                },
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "count_x".into(),
+                        table: None,
+                    },
+                    column_type: DfType::BigInt,
+                    base: None,
+                },
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "min_x".into(),
+                        table: None,
+                    },
+                    column_type: DfType::Int,
+                    base: None,
+                },
+            ]),
+            columns: Cow::Owned(vec![
+                "id".into(),
+                "sum_x".into(),
+                "name".into(),
+                "count_x".into(),
+                "min_x".into(),
+            ]),
+        };
+        let rows = vec![vec![
+            DfValue::Int(1),
+            DfValue::Int(30),
+            DfValue::from("alice"),
+            DfValue::Int(3),
+            DfValue::Int(5),
+        ]];
+        let result = QueryResult::Select {
+            rows: ResultIterator::owned(vec![Results::new(rows)]),
+            schema,
+        };
+
+        let plan = PostLookupPlan::new(
+            vec![PostLookupDecomposition {
+                kind: PostLookupAggregateKind::Avg,
+                result_index: 1,
+                source_columns: Box::new([
+                    SourceColumn {
+                        field_index: 1,
+                        added: false,
+                    },
+                    SourceColumn {
+                        field_index: 3,
+                        added: true,
+                    },
+                    SourceColumn {
+                        field_index: 4,
+                        added: true,
+                    },
+                ]),
+                original_alias: SqlIdentifier::from("avg_x"),
+            }],
+            5,
+        );
+
+        let result = postprocess_decompositions(result, &plan, Dialect::DEFAULT_MYSQL);
+        match result {
+            QueryResult::Select { rows, schema } => {
+                let data = rows.into_vec();
+                assert_eq!(data.len(), 1);
+                assert_eq!(data[0].len(), 3); // 5 columns - 2 removed = 3
+                assert_eq!(data[0][0], DfValue::Int(1));
+                assert_eq!(data[0][1], DfValue::try_from(10.0_f64).unwrap());
+                assert_eq!(data[0][2], DfValue::from("alice"));
+
+                assert_eq!(schema.columns.len(), 3);
+                assert_eq!(schema.columns[1], SqlIdentifier::from("avg_x"));
+                // MySQL AVG(int) → Numeric{14,4}
+                assert_eq!(
+                    schema.schema[1].column_type,
+                    DfType::Numeric { prec: 14, scale: 4 }
+                );
+            }
+            _ => panic!("expected Select"),
+        }
+    }
+
+    #[test]
+    fn postprocess_multiple_avg_decompositions() {
+        // Simulate: SELECT AVG(x), AVG(y) FROM t  (x is INT, y is FLOAT)
+        // Rewritten to: SELECT SUM(x), SUM(y), COUNT(x), COUNT(y), MIN(x), MIN(y)
+        // Row: [SUM(x)=20, SUM(y)=90.0, COUNT(x)=4, COUNT(y)=3, MIN(x)=2, MIN(y)=10.0]
+        // Expected: [AVG(x)=5.0, AVG(y)=30.0]
+        let schema = SelectSchema {
+            schema: Cow::Owned(vec![
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "sum_x".into(),
+                        table: None,
+                    },
+                    column_type: DfType::BigInt,
+                    base: None,
+                },
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "sum_y".into(),
+                        table: None,
+                    },
+                    column_type: DfType::Double,
+                    base: None,
+                },
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "count_x".into(),
+                        table: None,
+                    },
+                    column_type: DfType::BigInt,
+                    base: None,
+                },
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "count_y".into(),
+                        table: None,
+                    },
+                    column_type: DfType::BigInt,
+                    base: None,
+                },
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "min_x".into(),
+                        table: None,
+                    },
+                    column_type: DfType::Int,
+                    base: None,
+                },
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "min_y".into(),
+                        table: None,
+                    },
+                    column_type: DfType::Float,
+                    base: None,
+                },
+            ]),
+            columns: Cow::Owned(vec![
+                "sum_x".into(),
+                "sum_y".into(),
+                "count_x".into(),
+                "count_y".into(),
+                "min_x".into(),
+                "min_y".into(),
+            ]),
+        };
+        let rows = vec![vec![
+            DfValue::Int(20),
+            DfValue::try_from(90.0_f64).unwrap(),
+            DfValue::Int(4),
+            DfValue::Int(3),
+            DfValue::Int(2),
+            DfValue::try_from(10.0_f64).unwrap(),
+        ]];
+        let result = QueryResult::Select {
+            rows: ResultIterator::owned(vec![Results::new(rows)]),
+            schema,
+        };
+
+        let plan = PostLookupPlan::new(
+            vec![
+                PostLookupDecomposition {
+                    kind: PostLookupAggregateKind::Avg,
+                    result_index: 0,
+                    source_columns: Box::new([
+                        SourceColumn {
+                            field_index: 0,
+                            added: false,
+                        },
+                        SourceColumn {
+                            field_index: 2,
+                            added: true,
+                        },
+                        SourceColumn {
+                            field_index: 4,
+                            added: true,
+                        },
+                    ]),
+                    original_alias: SqlIdentifier::from("avg_x"),
+                },
+                PostLookupDecomposition {
+                    kind: PostLookupAggregateKind::Avg,
+                    result_index: 1,
+                    source_columns: Box::new([
+                        SourceColumn {
+                            field_index: 1,
+                            added: false,
+                        },
+                        SourceColumn {
+                            field_index: 3,
+                            added: true,
+                        },
+                        SourceColumn {
+                            field_index: 5,
+                            added: true,
+                        },
+                    ]),
+                    original_alias: SqlIdentifier::from("avg_y"),
+                },
+            ],
+            6,
+        );
+
+        let result = postprocess_decompositions(result, &plan, Dialect::DEFAULT_MYSQL);
+        match result {
+            QueryResult::Select { rows, schema } => {
+                let data = rows.into_vec();
+                assert_eq!(data.len(), 1);
+                assert_eq!(data[0].len(), 2); // COUNT and MIN columns removed
+                assert_eq!(data[0][0], DfValue::try_from(5.0_f64).unwrap());
+                assert_eq!(data[0][1], DfValue::try_from(30.0_f64).unwrap());
+
+                assert_eq!(schema.columns.len(), 2);
+                assert_eq!(schema.columns[0], SqlIdentifier::from("avg_x"));
+                assert_eq!(schema.columns[1], SqlIdentifier::from("avg_y"));
+                // MySQL AVG(int) → Numeric{14,4}
+                assert_eq!(
+                    schema.schema[0].column_type,
+                    DfType::Numeric { prec: 14, scale: 4 }
+                );
+                // MySQL AVG(float) → Double
+                assert_eq!(schema.schema[1].column_type, DfType::Double);
+            }
+            _ => panic!("expected Select"),
+        }
+    }
 }

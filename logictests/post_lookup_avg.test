@@ -1,0 +1,243 @@
+# Tests for AVG as a post-lookup aggregate (PLA).
+#
+# When queries have WHERE IN or range conditions, the adapter reads from the
+# reader node multiple times and consolidates results (post-lookup aggregation).
+# AVG cannot be naively re-aggregated (avg-of-avgs != weighted avg), so the
+# adapter decomposes AVG(x) into SUM(x), COUNT(x), and MIN(x) (type sentinel),
+# re-aggregates SUM and COUNT, then divides to get the correct average.
+#
+# The test data is designed so that groups have different sizes, making
+# avg-of-avgs != correct average. This ensures the SUM/COUNT decomposition
+# produces correct results.
+
+statement ok
+CREATE TABLE pla_avg (id INT PRIMARY KEY, grp INT, val INT, extra INT)
+
+statement ok
+INSERT INTO pla_avg VALUES
+  (1, 1, 10, 100),
+  (2, 1, 20, 200),
+  (3, 2, 100, 300),
+  (4, 2, 100, 400),
+  (5, 2, 100, 500),
+  (6, 3, 30, 600)
+
+# 1. Basic AVG with WHERE IN (triggers PLA via collapse)
+# grp=1: vals 10,20 → avg=15
+# grp=2: vals 100,100,100 → avg=100
+# Correct overall: (10+20+100+100+100)/5 = 330/5 = 66.0000
+query R
+SELECT AVG(val) FROM pla_avg WHERE grp IN (1, 2)
+----
+66.0000
+
+# 2. AVG with GROUP BY + WHERE IN
+query IR rowsort
+SELECT grp, AVG(val) FROM pla_avg WHERE grp IN (1, 2, 3) GROUP BY grp
+----
+1
+15.0000
+2
+100.0000
+3
+30.0000
+
+# 3. AVG with range condition (triggers PLA via BTreeMap)
+# All 6 rows: (10+20+100+100+100+30)/6 = 360/6 = 60.0000
+query R
+SELECT AVG(val) FROM pla_avg WHERE grp <= 3
+----
+60.0000
+
+# 4. AVG with BETWEEN (another range trigger)
+# grp 1 and 2: (10+20+100+100+100)/5 = 66.0000
+query R
+SELECT AVG(val) FROM pla_avg WHERE grp BETWEEN 1 AND 2
+----
+66.0000
+
+# 5. Mixed aggregates: AVG + SUM + COUNT in same query
+#    Tests COUNT reuse and SUM coexistence.
+query RII rowsort
+SELECT AVG(val), SUM(val), COUNT(val) FROM pla_avg WHERE grp IN (1, 2)
+----
+66.0000
+330
+5
+
+# 6. Multiple AVGs on different columns
+# Correct avg(val): 330/5=66.0000
+# Correct avg(extra): (100+200+300+400+500)/5=1500/5=300.0000
+query RR
+SELECT AVG(val), AVG(extra) FROM pla_avg WHERE grp IN (1, 2)
+----
+66.0000
+300.0000
+
+# 7. AVG with WHERE IN combined with BETWEEN
+query IR rowsort
+SELECT grp, AVG(val) FROM pla_avg WHERE grp IN (1, 2, 3) AND val BETWEEN 0 AND 200 GROUP BY grp
+----
+1
+15.0000
+2
+100.0000
+3
+30.0000
+
+# 8. AVG with no matching rows should return NULL
+query R
+SELECT AVG(val) FROM pla_avg WHERE grp IN (99, 100)
+----
+NULL
+
+# 9. Single-group WHERE IN (trivial case, no re-aggregation)
+query R
+SELECT AVG(val) FROM pla_avg WHERE grp IN (1)
+----
+15.0000
+
+# Type-specific tests
+
+statement ok
+CREATE TABLE pla_avg_types (
+  id INT PRIMARY KEY,
+  grp INT,
+  val_float FLOAT,
+  val_double DOUBLE,
+  val_decimal DECIMAL(10,2)
+)
+
+statement ok
+INSERT INTO pla_avg_types VALUES
+  (1, 1, 1.5, 1.5, 1.50),
+  (2, 1, 2.5, 2.5, 2.50),
+  (3, 2, 10.0, 10.0, 10.00),
+  (4, 2, 10.0, 10.0, 10.00),
+  (5, 2, 10.0, 10.0, 10.00)
+
+# 10. AVG of DOUBLE column
+query R
+SELECT AVG(val_double) FROM pla_avg_types WHERE grp IN (1, 2)
+----
+6.8
+
+# 11. AVG of DECIMAL column
+query R
+SELECT AVG(val_decimal) FROM pla_avg_types WHERE grp IN (1, 2)
+----
+6.800000
+
+# 12. Mixed types: AVG(int), AVG(float), AVG(decimal) in one query
+
+statement ok
+CREATE TABLE pla_avg_mixed (
+  id INT PRIMARY KEY,
+  grp INT,
+  val_int INT,
+  val_float FLOAT,
+  val_decimal DECIMAL(10,2)
+)
+
+statement ok
+INSERT INTO pla_avg_mixed VALUES
+  (1, 1, 10, 1.5, 1.50),
+  (2, 1, 20, 2.5, 2.50),
+  (3, 2, 100, 10.0, 10.00),
+  (4, 2, 100, 10.0, 10.00),
+  (5, 2, 100, 10.0, 10.00)
+
+query RRR
+SELECT AVG(val_int), AVG(val_float), AVG(val_decimal) FROM pla_avg_mixed WHERE grp IN (1, 2)
+----
+66.0000
+6.8
+6.800000
+
+# 13. AVG of DECIMAL with GROUP BY
+query IR rowsort
+SELECT grp, AVG(val_decimal) FROM pla_avg_types WHERE grp IN (1, 2) GROUP BY grp
+----
+1
+2.000000
+2
+10.000000
+
+# Nested expression tests
+
+# 14. AVG of arithmetic expression: AVG(val + 1)
+# Correct overall: (11+21+101+101+101)/5 = 335/5 = 67.0000
+query R
+SELECT AVG(val + 1) FROM pla_avg WHERE grp IN (1, 2)
+----
+67.0000
+
+# 15. AVG of expression with GROUP BY
+query IR rowsort
+SELECT grp, AVG(val * 2) FROM pla_avg WHERE grp IN (1, 2, 3) GROUP BY grp
+----
+1
+30.0000
+2
+200.0000
+3
+60.0000
+
+# 16. Multiple AVGs with different nested expressions
+query RR
+SELECT AVG(val + 1), AVG(val * val) FROM pla_avg WHERE grp IN (1, 2)
+----
+67.0000
+6100.0000
+
+# Edge cases
+
+# 17. AVG without PLA trigger (no WHERE IN, no range)
+#     Should go through normal aggregate node, not decomposed.
+query R
+SELECT AVG(val) FROM pla_avg WHERE grp = 1
+----
+15.0000
+
+# 18. AVG with explicit alias on a nested expression
+query R
+SELECT AVG(val * 2 + 1) AS double_plus_one_avg FROM pla_avg WHERE grp IN (1, 2)
+----
+133.0000
+
+# NULL value tests: NULLs should be excluded from both
+# SUM and COUNT.
+statement ok
+CREATE TABLE pla_avg_nulls (id INT PRIMARY KEY, grp INT, val INT)
+
+statement ok
+INSERT INTO pla_avg_nulls VALUES
+  (1, 1, 10),
+  (2, 1, NULL),
+  (3, 1, 30),
+  (4, 2, NULL),
+  (5, 2, 50),
+  (6, 2, NULL)
+
+# 19. AVG with NULL values in the averaged column
+# Correct overall: (10+30+50)/3 = 90/3 = 30.0000
+query R
+SELECT AVG(val) FROM pla_avg_nulls WHERE grp IN (1, 2)
+----
+30.0000
+
+# 20. AVG with GROUP BY + NULLs in some groups
+query IR rowsort
+SELECT grp, AVG(val) FROM pla_avg_nulls WHERE grp IN (1, 2) GROUP BY grp
+----
+1
+20.0000
+2
+50.0000
+
+# 21. AVG(DISTINCT) is not decomposable for PLA — the dataflow rejects it
+# because AVG cannot be naively re-aggregated across keys, and DISTINCT
+# prevents the SUM/COUNT decomposition (the deduplication happens per-key,
+# not globally).
+statement error: AVG\(DISTINCT \.\.\.\) is not supported as a post-lookup aggregate
+CREATE CACHE FROM SELECT AVG(DISTINCT val) FROM pla_avg WHERE grp IN (?, ?)

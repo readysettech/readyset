@@ -415,8 +415,14 @@ pub(super) fn post_lookup_aggregates(
                 ArrayAgg { .. } => PostLookupAggregateFunction::ArrayAgg {
                     op: function.try_into()?,
                 },
+                Avg { distinct: true, .. } => {
+                    unsupported!("AVG(DISTINCT ...) is not supported as a post-lookup aggregate")
+                }
                 Avg { .. } => {
-                    unsupported!("Average is not supported as a post-lookup aggregate")
+                    unsupported!(
+                        "AVG is not supported as a post-lookup aggregate in this context \
+                         (e.g. nested in expressions, HAVING, ORDER BY, or subqueries)"
+                    )
                 }
                 Count { distinct, .. } if *distinct => {
                     // TODO(REA-4289)
