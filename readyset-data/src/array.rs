@@ -24,6 +24,9 @@ use crate::{DfType, DfValue, DfValueKind};
 /// 3. Are always homogeneously typed
 ///
 /// This struct supports the first two features, but does not enforce the third.
+//
+// NOTE: PartialEq/Hash are derived, but Ord/PartialOrd are manually implemented
+// with PostgreSQL NULL-high semantics. Consistency is verified by ord_laws! proptests.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Array {
     /// The lower bounds for each of the dimensions
@@ -250,12 +253,45 @@ impl Array {
     }
 }
 
+/// Lexicographically compare two element iterators with PostgreSQL NULL semantics:
+/// NULL is considered greater than any non-NULL value. If one iterator is a prefix
+/// of the other, the shorter one is less.
+///
+/// This differs from `DfValue::cmp`, where `None` (variant 0) sorts below all
+/// other variants. We cannot change `DfValue::Ord` globally because range query
+/// sentinels (`DfValue::MIN`) depend on `None` being the minimum value.
+fn cmp_elements_nulls_high<'a>(
+    mut a: impl Iterator<Item = &'a DfValue>,
+    mut b: impl Iterator<Item = &'a DfValue>,
+) -> Ordering {
+    loop {
+        match (a.next(), b.next()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) => {
+                // Match on DfValue variants directly: DfValue::None represents SQL NULL
+                let ord = match (x, y) {
+                    (DfValue::None, DfValue::None) => Ordering::Equal,
+                    (DfValue::None, _) => Ordering::Greater,
+                    (_, DfValue::None) => Ordering::Less,
+                    _ => x.cmp(y),
+                };
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+            }
+        }
+    }
+}
+
 impl Ord for Array {
     fn cmp(&self, other: &Self) -> Ordering {
         // PostgreSQL array comparison semantics:
         // 1. Compare elements in row-major order (element-by-element lexicographic).
-        //    Iterator::cmp handles the prefix case: shorter is less when one array
-        //    is a prefix of the other.
+        //    NULL is greater than any non-NULL value (handled by
+        //    cmp_elements_nulls_high). Shorter is less when one array is a prefix
+        //    of the other.
         // 2. If contents are equal, compare number of dimensions as tiebreaker.
         // 3. If ndim also equal, compare dimension sizes lexicographically.
         // 4. Lower bounds as final tiebreaker for Ord/PartialEq consistency.
@@ -263,9 +299,7 @@ impl Ord for Array {
         // From the PostgreSQL docs: "If the contents of two arrays are equal but
         // the dimensionality is different, the first difference in the
         // dimensionality information determines the sort order."
-        self.contents
-            .iter()
-            .cmp(other.contents.iter())
+        cmp_elements_nulls_high(self.contents.iter(), other.contents.iter())
             .then_with(|| self.contents.ndim().cmp(&other.contents.ndim()))
             .then_with(|| self.contents.shape().cmp(other.contents.shape()))
             .then_with(|| self.lower_bounds.cmp(&other.lower_bounds))
@@ -714,11 +748,36 @@ mod tests {
         })
     }
 
+    /// Strategy that generates 1-D arrays with a mix of NULL and Int elements.
+    /// This exercises the NULL-aware comparison logic in `cmp_elements_nulls_high`.
+    fn nullable_int_array() -> impl Strategy<Value = Array> {
+        use proptest::collection::vec;
+        use proptest::prelude::*;
+
+        vec(
+            prop_oneof![Just(DfValue::None), any::<i64>().prop_map(DfValue::from),],
+            1..=5,
+        )
+        .prop_map(Array::from)
+    }
+
     ord_laws!(
         // see [note: mixed-type-comparisons]
         #[strategy(non_numeric_array())]
         Array
     );
+
+    // Also verify Ord laws hold for arrays containing NULLs, since Array::cmp
+    // uses custom NULL ordering (cmp_elements_nulls_high) that differs from
+    // DfValue::Ord.
+    mod ord_with_nulls {
+        use super::*;
+
+        ord_laws!(
+            #[strategy(nullable_int_array())]
+            Array
+        );
+    }
 
     #[test]
     fn from_vec() {
@@ -1013,6 +1072,26 @@ mod tests {
         assert_eq!(a == b, a.cmp(&b) == Ordering::Equal);
     }
 
+    // Proptest: Ord and PartialEq must agree for nullable arrays
+    #[tags(no_retry)]
+    #[proptest]
+    fn eq_consistent_with_cmp_nullable(
+        #[strategy(nullable_int_array())] a: Array,
+        #[strategy(nullable_int_array())] b: Array,
+    ) {
+        assert_eq!(a == b, a.cmp(&b) == Ordering::Equal);
+    }
+
+    // Proptest: NULL element is always greater than any non-NULL Int element
+    #[tags(no_retry)]
+    #[proptest]
+    fn null_element_greater_than_int(v: i64) {
+        let null_arr = Array::from(vec![DfValue::None]);
+        let int_arr = Array::from(vec![DfValue::from(v)]);
+        assert_eq!(null_arr.cmp(&int_arr), Ordering::Greater);
+        assert_eq!(int_arr.cmp(&null_arr), Ordering::Less);
+    }
+
     // --- 1-D comparison tests ---
 
     #[test]
@@ -1259,21 +1338,39 @@ mod tests {
     }
 
     // --- NULL element tests ---
-    // NOTE: PostgreSQL treats NULL as greater than any non-NULL value in array
-    // element comparison. DfValue::Ord compares mismatched variants by
-    // discriminant order, where None (variant 0) < Int (variant 1). This means
-    // ReadySet's NULL ordering in arrays does NOT match PostgreSQL. Fixing this
-    // requires changes to DfValue::Ord, which is out of scope for this change.
-    // These tests document the current (incorrect) behavior.
+    // PostgreSQL treats NULL as greater than any non-NULL value in array element
+    // comparison. Array::cmp uses cmp_elements_nulls_high to match this behavior.
 
     #[test]
-    fn cmp_1d_null_element_ordering() {
-        // PostgreSQL: ARRAY[1, NULL] > ARRAY[1, 999] (NULL > non-NULL)
-        // ReadySet: DfValue::None < DfValue::Int, so this is reversed.
+    fn cmp_1d_null_greater_than_int() {
+        // PostgreSQL: ARRAY[1, NULL] > ARRAY[1, 999]
         let a = Array::from(vec![DfValue::from(1), DfValue::None]);
         let b = Array::from(vec![DfValue::from(1), DfValue::from(999)]);
-        // Document current behavior (opposite of PostgreSQL):
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_1d_int_less_than_null() {
+        // PostgreSQL: ARRAY[1, 999] < ARRAY[1, NULL]
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(999)]);
+        let b = Array::from(vec![DfValue::from(1), DfValue::None]);
         assert_eq!(a.cmp(&b), Ordering::Less);
+    }
+
+    #[test]
+    fn cmp_1d_null_only_greater_than_any_value() {
+        // PostgreSQL: ARRAY[NULL::int] > ARRAY[1]
+        let a = Array::from(vec![DfValue::None]);
+        let b = Array::from(vec![DfValue::from(1)]);
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_1d_null_greater_than_text() {
+        // NULL > any text value
+        let a = Array::from(vec![DfValue::from("abc"), DfValue::None]);
+        let b = Array::from(vec![DfValue::from("abc"), DfValue::from("zzz")]);
+        assert_eq!(a.cmp(&b), Ordering::Greater);
     }
 
     #[test]
@@ -1286,9 +1383,102 @@ mod tests {
 
     #[test]
     fn cmp_1d_all_nulls_different_lengths() {
+        // Shorter all-null array is less than longer all-null array
         let a = Array::from(vec![DfValue::None]);
         let b = Array::from(vec![DfValue::None, DfValue::None]);
         assert_eq!(a.cmp(&b), Ordering::Less);
+    }
+
+    #[test]
+    fn cmp_1d_null_first_element() {
+        // PostgreSQL: ARRAY[NULL, 1] > ARRAY[999, 1] (NULL > 999 in first position)
+        let a = Array::from(vec![DfValue::None, DfValue::from(1)]);
+        let b = Array::from(vec![DfValue::from(999), DfValue::from(1)]);
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_1d_null_vs_negative() {
+        // NULL > negative numbers too
+        let a = Array::from(vec![DfValue::None]);
+        let b = Array::from(vec![DfValue::from(-999)]);
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_1d_null_vs_zero() {
+        let a = Array::from(vec![DfValue::None]);
+        let b = Array::from(vec![DfValue::from(0)]);
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_1d_multiple_nulls_equal() {
+        let a = Array::from(vec![DfValue::None, DfValue::None]);
+        let b = Array::from(vec![DfValue::None, DfValue::None]);
+        assert_eq!(a.cmp(&b), Ordering::Equal);
+    }
+
+    #[test]
+    fn cmp_1d_null_then_value_vs_null_then_null() {
+        // ARRAY[NULL, 1] < ARRAY[NULL, NULL] (first elements equal, then 1 < NULL)
+        let a = Array::from(vec![DfValue::None, DfValue::from(1)]);
+        let b = Array::from(vec![DfValue::None, DfValue::None]);
+        assert_eq!(a.cmp(&b), Ordering::Less);
+    }
+
+    #[test]
+    fn cmp_1d_mixed_null_positions() {
+        // ARRAY[1, NULL, 3] vs ARRAY[1, 2, 3]: second element NULL > 2
+        let a = Array::from(vec![DfValue::from(1), DfValue::None, DfValue::from(3)]);
+        let b = Array::from(vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)]);
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_2d_null_element() {
+        // NULL ordering applies in multi-dimensional arrays too
+        let a = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(1),
+                    DfValue::None,
+                    DfValue::from(3),
+                    DfValue::from(4),
+                ],
+            )
+            .unwrap(),
+        );
+        let b = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(1),
+                    DfValue::from(999),
+                    DfValue::from(3),
+                    DfValue::from(4),
+                ],
+            )
+            .unwrap(),
+        );
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_1d_null_shorter_vs_non_null_longer() {
+        // ARRAY[NULL] vs ARRAY[1, 2]: first element NULL > 1, so Greater
+        let a = Array::from(vec![DfValue::None]);
+        let b = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+    }
+
+    #[test]
+    fn cmp_1d_equal_prefix_then_null_vs_shorter() {
+        // ARRAY[1, NULL] vs ARRAY[1]: equal prefix, then longer wins
+        let a = Array::from(vec![DfValue::from(1), DfValue::None]);
+        let b = Array::from(vec![DfValue::from(1)]);
+        assert_eq!(a.cmp(&b), Ordering::Greater);
     }
 
     // ---------------------------------------------------------------

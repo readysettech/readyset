@@ -1,0 +1,90 @@
+# Tests for PostgreSQL array comparison with NULL elements.
+# PostgreSQL treats NULL as greater than any non-NULL value in array comparisons.
+
+statement ok
+create table arr_cmp (id int, val int[]);
+
+statement ok
+insert into arr_cmp values
+    (1, '{1,2}'),
+    (2, '{1,NULL}'),
+    (3, '{NULL,1}'),
+    (4, '{NULL,NULL}'),
+    (5, '{1,999}');
+
+# NULL > any non-NULL: ARRAY[1, NULL] > ARRAY[1, 999]
+query I rowsort
+select id from arr_cmp where val > ARRAY[1, 999];
+----
+2
+3
+4
+
+# ARRAY[1, 2] < ARRAY[1, NULL] (2 < NULL)
+query I rowsort
+select id from arr_cmp where val < ARRAY[1, NULL];
+----
+1
+5
+
+# ARRAY[1, NULL] = ARRAY[1, NULL]
+query I rowsort
+select id from arr_cmp where val = ARRAY[1, NULL];
+----
+2
+
+# ARRAY[NULL, NULL] is the greatest
+query I rowsort
+select id from arr_cmp where val >= ARRAY[NULL::int, NULL::int];
+----
+4
+
+# ARRAY[NULL, 1] > ARRAY[1, anything] because NULL > 1 in first position
+query I rowsort
+select id from arr_cmp where val > ARRAY[1, 2];
+----
+2
+3
+4
+5
+
+# ARRAY[1, 2] < ARRAY[1, NULL::int] (2 < NULL), so <= holds too
+query I rowsort
+select id from arr_cmp where val <= ARRAY[1, NULL::int];
+----
+1
+2
+5
+
+# ARRAY[1, NULL] >= ARRAY[1, 999] (NULL > 999)
+query I rowsort
+select id from arr_cmp where val >= ARRAY[1, 999];
+----
+2
+3
+4
+5
+
+# NULL in first position: ARRAY[NULL, 1] > ARRAY[1, 999]
+query I rowsort
+select id from arr_cmp where val > ARRAY[1, 999] and val < ARRAY[NULL::int, NULL::int];
+----
+2
+3
+
+# equal prefix then NULL > value: all rows with second element > 2
+query I rowsort
+select id from arr_cmp where val > ARRAY[1, 2] and val <= ARRAY[1, NULL::int];
+----
+2
+5
+
+# ORDER BY: verify total ordering matches PostgreSQL
+query I nosort
+select id from arr_cmp order by val;
+----
+1
+5
+2
+3
+4
