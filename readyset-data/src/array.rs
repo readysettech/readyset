@@ -165,21 +165,35 @@ impl Array {
     /// - NULL needles always fail: PostgreSQL's `=` yields NULL for `NULL = x`,
     ///   so a NULL element in `other` can never be "found" in `self`
     ///
-    /// NOTE: This uses O(n*m) pairwise comparison rather than HashSet because
-    /// `DfValue`'s `Hash` and `PartialEq` are not fully consistent across type
-    /// variants (e.g., `Int(1) == UnsignedInt(1)` but they hash differently).
-    /// PostgreSQL arrays are homogeneously typed so this would be safe in
-    /// practice, but the linear scan is correct for all `DfValue` combinations.
+    /// NOTE: For large arrays, uses `HashSet` for O(n+m) lookup. This relies on
+    /// arrays being homogeneously typed (as in PostgreSQL). `DfValue`'s `Hash` and
+    /// `PartialEq` are not fully consistent across type variants (e.g.,
+    /// `Int(1) == UnsignedInt(1)` but they hash differently), so mixed-type arrays
+    /// could produce incorrect results via hash-bucket misses. For small arrays,
+    /// falls back to O(n*m) linear scan to avoid HashSet allocation overhead.
     pub fn contains(&self, other: &Array) -> bool {
         if other.is_empty() {
             return true;
         }
+        if self.is_empty() {
+            return false;
+        }
         // A NULL needle can never be "found" (PG's = yields NULL for NULL = anything),
         // so !needle.is_none() short-circuits to false for NULL elements in `other`.
+        let n = self.contents.len();
+        let m = other.contents.len();
+        if n * m <= 64 {
+            // For small arrays, linear scan avoids HashSet allocation overhead.
+            return other
+                .contents
+                .iter()
+                .all(|needle| !needle.is_none() && self.contents.iter().any(|e| e == needle));
+        }
+        let haystack: HashSet<&DfValue> = self.contents.iter().collect();
         other
             .contents
             .iter()
-            .all(|needle| !needle.is_none() && self.contents.iter().any(|e| e == needle))
+            .all(|needle| !needle.is_none() && haystack.contains(needle))
     }
 
     /// PostgreSQL array overlap (`&&`): returns `true` if `self` and `other` share at least one
@@ -1350,6 +1364,59 @@ mod tests {
         );
         let b = Array::from(vec![DfValue::from(2), DfValue::from(4)]);
         assert!(a.contains(&b));
+    }
+
+    // Proptest: contains() must agree with naive O(n*m) linear scan.
+    // Uses non_numeric_array() which generates independent random DfValueKinds
+    // per array — covers both same-type (meaningful) and cross-type (vacuous) pairs.
+    #[tags(no_retry)]
+    #[proptest]
+    fn contains_matches_linear_scan(
+        #[strategy(non_numeric_array())] a: Array,
+        #[strategy(non_numeric_array())] b: Array,
+    ) {
+        let expected = b
+            .contents
+            .iter()
+            .all(|needle| !needle.is_none() && a.contents.iter().any(|e| e == needle));
+        assert_eq!(a.contains(&b), expected);
+    }
+
+    // Targeted test: same-type arrays with overlapping values exercise the
+    // HashSet lookup path (unlike the cross-type proptest pairs which are vacuous).
+    #[test]
+    fn contains_same_type_overlap() {
+        let a = Array::from(vec![
+            DfValue::from("apple"),
+            DfValue::from("banana"),
+            DfValue::from("cherry"),
+            DfValue::from("date"),
+            DfValue::from("elderberry"),
+            DfValue::from("fig"),
+            DfValue::from("grape"),
+            DfValue::from("honeydew"),
+            DfValue::from("kiwi"),
+        ]);
+        // Subset — should be contained
+        let b = Array::from(vec![DfValue::from("banana"), DfValue::from("fig")]);
+        assert!(a.contains(&b));
+        // Non-subset — should not be contained
+        let c = Array::from(vec![DfValue::from("banana"), DfValue::from("mango")]);
+        assert!(!a.contains(&c));
+    }
+
+    // Proptest: overlaps() must agree with naive O(n*m) linear scan.
+    #[tags(no_retry)]
+    #[proptest]
+    fn overlaps_matches_linear_scan(
+        #[strategy(non_numeric_array())] a: Array,
+        #[strategy(non_numeric_array())] b: Array,
+    ) {
+        let expected = a
+            .contents
+            .iter()
+            .any(|e| !e.is_none() && b.contents.iter().any(|f| !f.is_none() && e == f));
+        assert_eq!(a.overlaps(&b), expected);
     }
 
     // ---------------------------------------------------------------

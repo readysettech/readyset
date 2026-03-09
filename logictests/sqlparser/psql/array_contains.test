@@ -1,0 +1,92 @@
+# Tests for PostgreSQL array containment operators (@> and <@)
+
+statement ok
+create table t_ct (id int, arr int[]);
+
+statement ok
+insert into t_ct values
+    (1, '{1,2,3}'),
+    (2, '{1,2}'),
+    (3, '{10}'),
+    (4, '{1,3}'),
+    (5, '{}');
+
+# basic containment: arr contains {1,2}
+query I rowsort
+select id from t_ct where arr @> ARRAY[1, 2];
+----
+1
+2
+
+# single-element containment
+query I rowsort
+select id from t_ct where arr @> ARRAY[10];
+----
+3
+
+# empty RHS always matches (everything contains the empty set)
+query I rowsort
+select id from t_ct where arr @> '{}'::int[];
+----
+1
+2
+3
+4
+5
+
+# no match
+query I rowsort
+select id from t_ct where arr @> ARRAY[99];
+----
+
+# contained-by (<@): arr is contained by {1,2,3}
+query I rowsort
+select id from t_ct where arr <@ ARRAY[1, 2, 3];
+----
+1
+2
+4
+5
+
+# contained-by with empty LHS (empty is contained by anything)
+query I rowsort
+select id from t_ct where arr <@ ARRAY[99];
+----
+5
+
+# negated containment
+query I rowsort
+select id from t_ct where NOT (arr @> ARRAY[1]);
+----
+3
+5
+
+# containment combined with other conditions
+query I rowsort
+select id from t_ct where arr @> ARRAY[1] and id > 2;
+----
+4
+
+# --- NULL handling ---
+
+statement ok
+insert into t_ct values (6, '{1,NULL,3}');
+
+# NULL in haystack doesn't prevent matching non-NULL elements
+query I rowsort
+select id from t_ct where arr @> ARRAY[1, 3];
+----
+1
+4
+6
+
+# NULL needle always fails (PostgreSQL: NULL = x is NULL, not true)
+query I rowsort
+select id from t_ct where arr @> ARRAY[NULL::int];
+----
+
+# contained-by with empty RHS (only empty arrays are contained by empty)
+query I rowsort
+select id from t_ct where arr <@ '{}'::int[];
+----
+5
