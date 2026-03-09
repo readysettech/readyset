@@ -187,6 +187,10 @@ fn alter_readyset() {
         "expected MEMORY LIMIT or PERIOD after SET EVICTION"
     );
     check_parse_both!("ALTER READYSET CHANGE UPSTREAM TO 'mysql://host/db';");
+    check_parse_both!("ALTER READYSET STOP REPLICATION;");
+    check_parse_both!("ALTER READYSET START REPLICATION;");
+    check_parse_both!("ALTER READYSET SET REPLICATION POSITION 'mysql-bin.000003:154';");
+    check_parse_both!("ALTER READYSET CHANGE CDC TO 'mysql://host/db';");
 }
 
 #[test]

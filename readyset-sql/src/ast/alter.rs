@@ -494,6 +494,18 @@ pub struct ChangeUpstreamStatement {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct SetReplicationPositionStatement {
+    /// The replication position string (e.g. "mysql-bin.000003:154" or "0/16B3748").
+    pub position: String,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct ChangeCdcStatement {
+    /// The new CDC URL.
+    pub url: String,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterReadysetStatement {
     ResnapshotTable(ResnapshotTableStatement),
     AddTables(AddTablesStatement),
@@ -502,6 +514,10 @@ pub enum AlterReadysetStatement {
     SetLogLevel(String),
     SetEviction(SetEviction),
     ChangeUpstream(ChangeUpstreamStatement),
+    StopReplication,
+    StartReplication,
+    SetReplicationPosition(SetReplicationPositionStatement),
+    ChangeCdc(ChangeCdcStatement),
 }
 
 impl DialectDisplay for AlterReadysetStatement {
@@ -538,6 +554,18 @@ impl DialectDisplay for AlterReadysetStatement {
             }
             Self::ChangeUpstream(stmt) => {
                 write!(f, "CHANGE UPSTREAM TO '{}'", stmt.url)
+            }
+            Self::StopReplication => {
+                write!(f, "STOP REPLICATION")
+            }
+            Self::StartReplication => {
+                write!(f, "START REPLICATION")
+            }
+            Self::SetReplicationPosition(stmt) => {
+                write!(f, "SET REPLICATION POSITION '{}'", stmt.position)
+            }
+            Self::ChangeCdc(stmt) => {
+                write!(f, "CHANGE CDC TO '{}'", stmt.url)
             }
         })
     }

@@ -6,10 +6,10 @@ use clap::ValueEnum;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{
     AddTablesStatement, AlterReadysetStatement, AlterTableStatement, CacheInner, CacheType,
-    ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement, CreateTableStatement,
-    CreateViewStatement, DropCacheStatement, EvictionPolicy, Expr, ReadysetHintDirective,
-    ResnapshotTableStatement, SelectStatement, SetEviction, ShallowCacheQuery, SqlQuery, SqlType,
-    TableKey,
+    ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement,
+    CreateTableStatement, CreateViewStatement, DropCacheStatement, EvictionPolicy, Expr,
+    ReadysetHintDirective, ResnapshotTableStatement, SelectStatement, SetEviction,
+    SetReplicationPositionStatement, ShallowCacheQuery, SqlQuery, SqlType, TableKey,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -203,6 +203,7 @@ fn sqlparser_dialect_from_readyset_dialect(
 #[derive(Debug, Clone, Copy)]
 enum ReadysetKeyword {
     CACHES,
+    CDC,
     DEEP,
     DOMAINS,
     ENTER,
@@ -224,6 +225,7 @@ enum ReadysetKeyword {
     RESNAPSHOT,
     SHALLOW,
     SIMPLIFIED,
+    STOP,
     SUPPORTED,
     TTL,
     UPSTREAM,
@@ -236,6 +238,7 @@ impl ReadysetKeyword {
     fn as_str(&self) -> &str {
         match self {
             Self::CACHES => "CACHES",
+            Self::CDC => "CDC",
             Self::DEEP => "DEEP",
             Self::DOMAINS => "DOMAINS",
             Self::ENTER => "ENTER",
@@ -257,6 +260,7 @@ impl ReadysetKeyword {
             Self::RESNAPSHOT => "RESNAPSHOT",
             Self::SHALLOW => "SHALLOW",
             Self::SIMPLIFIED => "SIMPLIFIED",
+            Self::STOP => "STOP",
             Self::SUPPORTED => "SUPPORTED",
             Self::TTL => "TTL",
             Self::UPSTREAM => "UPSTREAM",
@@ -429,10 +433,57 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
             Ok(SqlQuery::AlterReadySet(
                 AlterReadysetStatement::ChangeUpstream(ChangeUpstreamStatement { url }),
             ))
-        } else {
-            Err(ReadysetParsingError::ReadysetParsingError(
-                "expected RESNAPSHOT TABLE, or ADD TABLES after READYSET".into(),
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::STOP,
+                ReadysetKeyword::Standard(Keyword::REPLICATION),
+            ],
+        ) {
+            Ok(SqlQuery::AlterReadySet(
+                AlterReadysetStatement::StopReplication,
             ))
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::Standard(Keyword::START),
+                ReadysetKeyword::Standard(Keyword::REPLICATION),
+            ],
+        ) {
+            Ok(SqlQuery::AlterReadySet(
+                AlterReadysetStatement::StartReplication,
+            ))
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::Standard(Keyword::SET),
+                ReadysetKeyword::Standard(Keyword::REPLICATION),
+            ],
+        ) {
+            parser.expect_keyword(Keyword::POSITION)?;
+            let position = parser.parse_literal_string()?;
+            Ok(SqlQuery::AlterReadySet(
+                AlterReadysetStatement::SetReplicationPosition(SetReplicationPositionStatement {
+                    position,
+                }),
+            ))
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::Standard(Keyword::CHANGE),
+                ReadysetKeyword::CDC,
+            ],
+        ) {
+            parser.expect_keyword(Keyword::TO)?;
+            let url = parser.parse_literal_string()?;
+            Ok(SqlQuery::AlterReadySet(AlterReadysetStatement::ChangeCdc(
+                ChangeCdcStatement { url },
+            )))
+        } else {
+            Err(ReadysetParsingError::ReadysetParsingError(format!(
+                "unexpected token after ALTER READYSET: {}",
+                parser.peek_token()
+            )))
         }
     } else {
         Ok(parser.parse_alter()?.try_into_dialect(dialect)?)

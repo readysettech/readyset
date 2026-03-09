@@ -504,6 +504,72 @@ pub fn change_upstream_statement(
     }
 }
 
+pub fn stop_replication_statement(
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("stop")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("replication")(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((i, AlterReadysetStatement::StopReplication))
+    }
+}
+
+pub fn start_replication_statement(
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("start")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("replication")(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((i, AlterReadysetStatement::StartReplication))
+    }
+}
+
+pub fn set_replication_position_statement(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("set")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("replication")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("position")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, position) = dialect.utf8_string_literal()(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((
+            i,
+            AlterReadysetStatement::SetReplicationPosition(SetReplicationPositionStatement {
+                position,
+            }),
+        ))
+    }
+}
+
+pub fn change_cdc_statement(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("change")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("cdc")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("to")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, url) = dialect.utf8_string_literal()(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((
+            i,
+            AlterReadysetStatement::ChangeCdc(ChangeCdcStatement { url }),
+        ))
+    }
+}
+
 pub fn alter_readyset_statement(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
@@ -513,13 +579,21 @@ pub fn alter_readyset_statement(
         let (i, _) = tag_no_case("readyset")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, statement) = alt((
-            resnapshot_table_statement(dialect),
-            add_tables_statement(dialect),
-            enter_maintenance_mode_statement(),
-            exit_maintenance_mode_statement(),
-            set_eviction_statement(dialect),
-            set_log_level_statement(dialect),
-            change_upstream_statement(dialect),
+            alt((
+                resnapshot_table_statement(dialect),
+                add_tables_statement(dialect),
+                enter_maintenance_mode_statement(),
+                exit_maintenance_mode_statement(),
+                set_eviction_statement(dialect),
+                set_log_level_statement(dialect),
+                change_upstream_statement(dialect),
+            )),
+            alt((
+                stop_replication_statement(),
+                start_replication_statement(),
+                set_replication_position_statement(dialect),
+                change_cdc_statement(dialect),
+            )),
         ))(i)?;
 
         Ok((i, statement))
@@ -1739,6 +1813,53 @@ mod tests {
             assert_eq!(
                 res,
                 AlterReadysetStatement::ChangeUpstream(ChangeUpstreamStatement {
+                    url: "mysql://host/db".to_string(),
+                })
+            );
+        }
+
+        #[test]
+        fn alter_readyset_stop_replication() {
+            let qstring = b"ALTER READYSET STOP REPLICATION;";
+            let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+            assert_eq!(res, AlterReadysetStatement::StopReplication);
+        }
+
+        #[test]
+        fn alter_readyset_start_replication() {
+            let qstring = b"ALTER READYSET START REPLICATION;";
+            let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+            assert_eq!(res, AlterReadysetStatement::StartReplication);
+        }
+
+        #[test]
+        fn alter_readyset_set_replication_position() {
+            let qstring = b"ALTER READYSET SET REPLICATION POSITION 'mysql-bin.000003:154';";
+            let res = test_parse!(alter_readyset_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::SetReplicationPosition(SetReplicationPositionStatement {
+                    position: "mysql-bin.000003:154".to_string(),
+                })
+            );
+
+            let qstring = b"ALTER READYSET SET REPLICATION POSITION '0/16B3748';";
+            let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::SetReplicationPosition(SetReplicationPositionStatement {
+                    position: "0/16B3748".to_string(),
+                })
+            );
+        }
+
+        #[test]
+        fn alter_readyset_change_cdc() {
+            let qstring = b"ALTER READYSET CHANGE CDC TO 'mysql://host/db';";
+            let res = test_parse!(alter_readyset_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::ChangeCdc(ChangeCdcStatement {
                     url: "mysql://host/db".to_string(),
                 })
             );

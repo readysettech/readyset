@@ -1262,7 +1262,11 @@ pub fn walk_alter_readyset_statement<'a, V: Visitor<'a>>(
         | AlterReadysetStatement::ExitMaintenanceMode
         | AlterReadysetStatement::SetLogLevel(_)
         | AlterReadysetStatement::SetEviction(_)
-        | AlterReadysetStatement::ChangeUpstream(_) => Ok(()),
+        | AlterReadysetStatement::ChangeUpstream(_)
+        | AlterReadysetStatement::StopReplication
+        | AlterReadysetStatement::StartReplication
+        | AlterReadysetStatement::SetReplicationPosition(_)
+        | AlterReadysetStatement::ChangeCdc(_) => Ok(()),
     }
 }
 
