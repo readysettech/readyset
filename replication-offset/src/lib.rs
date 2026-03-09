@@ -711,5 +711,28 @@ mod tests {
                 "3E11FA47-71CA-11E1-9E33-C80AA9429562:1-10".parse().unwrap();
             assert_eq!(offset.dialect(), Dialect::MySQL);
         }
+
+        #[test]
+        fn binlog_to_gtid_same_dialect() {
+            let binlog: ReplicationOffset = "mysql-bin.000003:154".parse().unwrap();
+            let gtid: ReplicationOffset =
+                "3E11FA47-71CA-11E1-9E33-C80AA9429562:1-10".parse().unwrap();
+            assert_eq!(binlog.dialect(), gtid.dialect());
+        }
+
+        #[test]
+        fn mysql_to_postgres_different_dialect() {
+            let mysql: ReplicationOffset = "mysql-bin.000003:154".parse().unwrap();
+            let postgres: ReplicationOffset = "0/16B3748".parse().unwrap();
+            assert_ne!(mysql.dialect(), postgres.dialect());
+        }
+
+        #[test]
+        fn gtid_to_postgres_different_dialect() {
+            let gtid: ReplicationOffset =
+                "3E11FA47-71CA-11E1-9E33-C80AA9429562:1-10".parse().unwrap();
+            let postgres: ReplicationOffset = "0/16B3748".parse().unwrap();
+            assert_ne!(gtid.dialect(), postgres.dialect());
+        }
     }
 }

@@ -6263,6 +6263,7 @@ dependencies = [
  "readyset-sql-parsing",
  "readyset-tracing",
  "readyset-util",
+ "replication-offset",
  "schema-catalog",
  "test-discovery",
  "test-strategy",

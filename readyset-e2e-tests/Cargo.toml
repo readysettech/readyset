@@ -27,6 +27,7 @@ postgres-types = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 readyset-adapter = { path = "../readyset-adapter" }
+replication-offset = { path = "../replication-offset" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers" }
 readyset-tracing = { path = "../readyset-tracing" }
