@@ -216,7 +216,11 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                 DfType::Uuid => Ok(Type::UUID_ARRAY),
                 DfType::Bit(_) => Ok(Type::BIT_ARRAY),
                 DfType::VarBit(_) => Ok(Type::VARBIT_ARRAY),
-                DfType::Array(_) | DfType::Row => unsupported_type!(),
+                // PostgreSQL uses the same array OID regardless of dimensionality
+                // (e.g. int8[] and int8[][] both use INT8_ARRAY), so recursively
+                // unwrap to find the base scalar type.
+                DfType::Array(_) => type_to_pgsql(elem),
+                DfType::Row => unsupported_type!(),
                 // postgres built-in point type not supported, but postgis point is supported
                 DfType::Point => unsupported_type!(),
                 DfType::PostgisPoint => Ok(Type::BYTEA_ARRAY),
@@ -225,5 +229,34 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
             }
         }
         DfType::Row => Ok(Type::RECORD),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio_postgres::types::Type;
+
+    #[test]
+    fn multidimensional_array_uses_same_oid() {
+        // PostgreSQL uses the same array OID regardless of dimensionality.
+        // e.g. int8[] and int8[][] both map to INT8_ARRAY.
+        let one_d = DfType::Array(Box::new(DfType::BigInt));
+        let two_d = DfType::Array(Box::new(DfType::Array(Box::new(DfType::BigInt))));
+        let three_d = DfType::Array(Box::new(DfType::Array(Box::new(DfType::Array(Box::new(
+            DfType::BigInt,
+        ))))));
+
+        assert_eq!(type_to_pgsql(&one_d).unwrap(), Type::INT8_ARRAY);
+        assert_eq!(type_to_pgsql(&two_d).unwrap(), Type::INT8_ARRAY);
+        assert_eq!(type_to_pgsql(&three_d).unwrap(), Type::INT8_ARRAY);
+    }
+
+    #[test]
+    fn multidimensional_text_array() {
+        let two_d = DfType::Array(Box::new(DfType::Array(Box::new(DfType::Text(
+            Collation::Utf8,
+        )))));
+        assert_eq!(type_to_pgsql(&two_d).unwrap(), Type::TEXT_ARRAY);
     }
 }

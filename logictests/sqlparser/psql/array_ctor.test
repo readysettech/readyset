@@ -383,3 +383,15 @@ select array(select tag from tags where d_id = d.id order by tag) from dogs d, t
 ----
 {AAA,yyy,zzz}
 
+
+#####
+# REA-6385: ARRAY(SELECT ARRAY[...]) — nested array in array constructor
+# PostgreSQL returns a 2D array; the wire OID is the same as a 1D array.
+####
+
+# correlated subquery returning array literals (produces int[][])
+query T
+select array(select array[d_id] from tags where d_id = d.id) from dogs d where d.id = 2;
+----
+{{2},{2},{2}}
+

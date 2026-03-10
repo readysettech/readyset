@@ -86,24 +86,37 @@ impl AccumulationOp {
             )));
         }
 
-        match data {
-            AccumulatorData::Simple(v) => Ok(DfValue::Array(std::sync::Arc::new(
-                readyset_data::Array::from(v.to_vec()),
-            ))),
-            AccumulatorData::DistinctOrdered(t) => {
-                let vals: Vec<_> = t
-                    .iter()
-                    .flat_map(|(k, &count)| {
-                        let repeat_count = if self.is_distinct() { 1 } else { count };
-                        std::iter::repeat_n(k.value.clone(), repeat_count)
-                    })
-                    .collect();
+        let vals: Vec<DfValue> = match data {
+            AccumulatorData::Simple(v) => v.to_vec(),
+            AccumulatorData::DistinctOrdered(t) => t
+                .iter()
+                .flat_map(|(k, &count)| {
+                    let repeat_count = if self.is_distinct() { 1 } else { count };
+                    std::iter::repeat_n(k.value.clone(), repeat_count)
+                })
+                .collect(),
+        };
 
-                Ok(DfValue::Array(std::sync::Arc::new(
-                    readyset_data::Array::from(vals),
-                )))
-            }
-        }
+        // When aggregating array-typed columns, stack sub-arrays into a multidimensional
+        // array rather than creating a 1D array of array elements. PostgreSQL's array_agg()
+        // on an int[] column produces int[][], not an array-of-arrays.
+        let arr = if vals.first().is_some_and(|v| matches!(v, DfValue::Array(_))) {
+            let sub_arrays: ReadySetResult<Vec<_>> = vals
+                .into_iter()
+                .map(|v| match v {
+                    DfValue::Array(a) => Ok(a),
+                    other => Err(readyset_errors::invalid_query_err!(
+                        "Mixed array and non-array elements in array_agg: expected Array, got {:?}",
+                        other.infer_dataflow_type()
+                    )),
+                })
+                .collect();
+            readyset_data::Array::from_sub_arrays(&sub_arrays?)?
+        } else {
+            readyset_data::Array::from(vals)
+        };
+
+        Ok(DfValue::Array(std::sync::Arc::new(arr)))
     }
 
     fn apply_group_concat(
@@ -243,6 +256,16 @@ impl AccumulationOp {
 
         let res = match self {
             AccumulationOp::ArrayAgg { .. } => match value {
+                DfValue::Array(arr) if arr.num_dimensions() > 1 => {
+                    // Reconstruct DfValue::Array sub-arrays from the outer dimension
+                    // so that re-aggregation via apply_array_agg → from_sub_arrays
+                    // preserves dimensionality.
+                    std::sync::Arc::unwrap_or_clone(arr.clone())
+                        .into_sub_arrays()
+                        .into_iter()
+                        .map(|sub| DfValue::Array(std::sync::Arc::new(sub)))
+                        .collect()
+                }
                 DfValue::Array(arr) => arr.values().cloned().collect(),
                 _ => vec![value.clone()],
             },
@@ -1062,6 +1085,132 @@ mod tests {
             // Only 3 values: AAA was merged into aaa
             assert_eq!(parts.len(), 3);
             assert!(!parts.contains(&"AAA"), "AAA should be merged into aaa");
+        }
+    }
+
+    mod array_agg_multidim_tests {
+        use super::*;
+
+        fn simple_array_agg() -> AccumulationOp {
+            AccumulationOp::ArrayAgg {
+                distinct: DistinctOption::NotDistinct,
+                order_by: None,
+            }
+        }
+
+        fn distinct_array_agg() -> AccumulationOp {
+            AccumulationOp::ArrayAgg {
+                distinct: DistinctOption::IsDistinct,
+                order_by: Some((OrderType::OrderAscending, NullOrder::NullsFirst)),
+            }
+        }
+
+        fn make_array_val(vals: Vec<i64>) -> DfValue {
+            DfValue::Array(std::sync::Arc::new(readyset_data::Array::from(
+                vals.into_iter().map(DfValue::from).collect::<Vec<_>>(),
+            )))
+        }
+
+        #[test]
+        fn apply_array_agg_on_array_columns() {
+            let op = simple_array_agg();
+            let mut data = AccumulatorData::from(&op);
+            data.add(&op, make_array_val(vec![1, 2]));
+            data.add(&op, make_array_val(vec![3, 4]));
+
+            let result = op.apply(&data).unwrap();
+            match &result {
+                DfValue::Array(arr) => {
+                    assert_eq!(arr.num_dimensions(), 2);
+                    assert_eq!(arr.to_string(), "{{1,2},{3,4}}");
+                }
+                other => panic!("Expected Array, got: {:?}", other),
+            }
+        }
+
+        #[test]
+        fn apply_array_agg_mixed_types_errors() {
+            let op = simple_array_agg();
+            let mut data = AccumulatorData::from(&op);
+            data.add(&op, make_array_val(vec![1, 2]));
+            data.add(&op, DfValue::from(42));
+
+            let result = op.apply(&data);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn apply_array_agg_mismatched_shapes_errors() {
+            let op = simple_array_agg();
+            let mut data = AccumulatorData::from(&op);
+            data.add(&op, make_array_val(vec![1, 2]));
+            data.add(&op, make_array_val(vec![3]));
+
+            let result = op.apply(&data);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn split_roundtrip_multidim_array_agg() {
+            // Build a 2D array via apply, then split it back, then re-apply.
+            // The result should be identical (round-trip).
+            let op = simple_array_agg();
+            let mut data = AccumulatorData::from(&op);
+            data.add(&op, make_array_val(vec![1, 2]));
+            data.add(&op, make_array_val(vec![3, 4]));
+
+            let original = op.apply(&data).unwrap();
+
+            // Split and re-accumulate
+            let parts = op.split(&original).unwrap();
+            assert_eq!(parts.len(), 2);
+            // Each part should be a DfValue::Array
+            for p in &parts {
+                assert!(matches!(p, DfValue::Array(_)));
+            }
+
+            let mut data2 = AccumulatorData::from(&op);
+            for p in parts {
+                data2.add(&op, p);
+            }
+            let roundtripped = op.apply(&data2).unwrap();
+            assert_eq!(original, roundtripped);
+        }
+
+        #[test]
+        fn split_roundtrip_1d_unchanged() {
+            let op = simple_array_agg();
+            let mut data = AccumulatorData::from(&op);
+            data.add(&op, DfValue::from(1));
+            data.add(&op, DfValue::from(2));
+            data.add(&op, DfValue::from(3));
+
+            let original = op.apply(&data).unwrap();
+            let parts = op.split(&original).unwrap();
+            assert_eq!(parts.len(), 3);
+            assert_eq!(
+                parts,
+                vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)]
+            );
+        }
+
+        #[test]
+        fn distinct_ordered_array_agg_on_array_columns() {
+            let op = distinct_array_agg();
+            let mut data = AccumulatorData::from(&op);
+            data.add(&op, make_array_val(vec![3, 4]));
+            data.add(&op, make_array_val(vec![1, 2]));
+            data.add(&op, make_array_val(vec![3, 4])); // duplicate
+
+            let result = op.apply(&data).unwrap();
+            match &result {
+                DfValue::Array(arr) => {
+                    assert_eq!(arr.num_dimensions(), 2);
+                    // Distinct: only {1,2} and {3,4}; ordered ascending
+                    assert_eq!(arr.to_string(), "{{1,2},{3,4}}");
+                }
+                other => panic!("Expected Array, got: {:?}", other),
+            }
         }
     }
 }
