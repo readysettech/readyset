@@ -4,17 +4,19 @@ pub mod mysql;
 pub mod mysql_gtid;
 pub mod postgres;
 
-pub use mysql_gtid::{GtidEvent, GtidRange, GtidSet, GtidSource};
+pub use mysql_gtid::{GtidEvent, GtidRange, GtidSet, GtidSource, looks_like_gtid};
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
+use std::str::FromStr;
 
 use mysql::MySqlPosition;
 use postgres::PostgresPosition;
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err, replication_failed};
+use readyset_sql::Dialect;
 use readyset_sql::ast::Relation;
 use serde::{Deserialize, Serialize};
 
@@ -110,6 +112,28 @@ impl fmt::Display for ReplicationOffset {
     }
 }
 
+impl FromStr for ReplicationOffset {
+    type Err = ReadySetError;
+
+    /// Parse a replication position string into a [`ReplicationOffset`].
+    ///
+    /// The format is auto-detected:
+    /// - Contains `'/'` → PostgreSQL LSN (e.g. `"0/16B3748"`)
+    /// - Contains a UUID prefix → MySQL GTID (e.g.
+    ///   `"3E11FA47-71CA-11E1-9E33-C80AA9429562:1-10"`)
+    /// - Otherwise → MySQL binlog position (e.g. `"mysql-bin.000003:154"`)
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.contains('/') {
+            let commit_lsn: postgres::CommitLsn = s.parse()?;
+            Ok(Self::Postgres(PostgresPosition::commit_end(commit_lsn)))
+        } else if looks_like_gtid(s) {
+            Ok(Self::Gtid(GtidSet::parse(s)?))
+        } else {
+            Ok(Self::MySql(s.parse()?))
+        }
+    }
+}
+
 impl PartialOrd for ReplicationOffset {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
@@ -149,6 +173,14 @@ impl ReplicationOffset {
             _ => Err(internal_err!(
                 "Cannot compare replication offsets from different database backends"
             )),
+        }
+    }
+
+    /// Returns the SQL dialect corresponding to this replication offset variant.
+    pub fn dialect(&self) -> Dialect {
+        match self {
+            Self::MySql(_) | Self::Gtid(_) => Dialect::MySQL,
+            Self::Postgres(_) => Dialect::PostgreSQL,
         }
     }
 
@@ -567,6 +599,117 @@ mod tests {
             assert_eq!(ranges.len(), 1);
             assert_eq!(ranges[0].start, 1);
             assert_eq!(ranges[0].end, 15);
+        }
+    }
+
+    mod parse_replication_offset {
+        use super::*;
+
+        #[test]
+        fn parse_mysql_binlog_position() {
+            let offset: ReplicationOffset = "mysql-bin.000003:154".parse().unwrap();
+            let mysql_pos = MySqlPosition::try_from(offset).unwrap();
+            assert_eq!(mysql_pos.binlog_file_suffix, 3);
+            assert_eq!(mysql_pos.position, 154);
+        }
+
+        #[test]
+        fn parse_mysql_binlog_position_invalid() {
+            assert!("invalid".parse::<ReplicationOffset>().is_err());
+            assert!("".parse::<ReplicationOffset>().is_err());
+            assert!(":".parse::<ReplicationOffset>().is_err());
+            assert!(":154".parse::<ReplicationOffset>().is_err());
+            assert!("file:notanumber".parse::<ReplicationOffset>().is_err());
+            assert!(
+                "file:99999999999999999999"
+                    .parse::<ReplicationOffset>()
+                    .is_err()
+            );
+        }
+
+        #[test]
+        fn parse_postgres_lsn() {
+            let offset: ReplicationOffset = "0/16B3748".parse().unwrap();
+            assert!(matches!(offset, ReplicationOffset::Postgres(_)));
+        }
+
+        #[test]
+        fn parse_postgres_lsn_invalid() {
+            assert!("0/".parse::<ReplicationOffset>().is_err());
+            assert!("/16B3748".parse::<ReplicationOffset>().is_err());
+        }
+
+        #[test]
+        fn parse_gtid_untagged() {
+            let offset: ReplicationOffset =
+                "3E11FA47-71CA-11E1-9E33-C80AA9429562:1-10".parse().unwrap();
+            assert!(matches!(offset, ReplicationOffset::Gtid(_)));
+        }
+
+        #[test]
+        fn parse_gtid_tagged() {
+            let offset: ReplicationOffset = "3E11FA47-71CA-11E1-9E33-C80AA9429562:mytag:1-10"
+                .parse()
+                .unwrap();
+            assert!(matches!(offset, ReplicationOffset::Gtid(_)));
+        }
+
+        #[test]
+        fn parse_gtid_mixed_tagged_and_untagged() {
+            let offset: ReplicationOffset =
+                "3E11FA47-71CA-11E1-9E33-C80AA9429562:1-121:readtest:1-3:repltest:1-6"
+                    .parse()
+                    .unwrap();
+            assert!(matches!(offset, ReplicationOffset::Gtid(_)));
+        }
+
+        #[test]
+        fn parse_gtid_multiple_uuids() {
+            let offset: ReplicationOffset = "3E11FA47-71CA-11E1-9E33-C80AA9429562:1-10,\
+                 A0B1C2D3-E4F5-6789-ABCD-EF0123456789:1-5"
+                .parse()
+                .unwrap();
+            assert!(matches!(offset, ReplicationOffset::Gtid(_)));
+        }
+
+        #[test]
+        fn parse_gtid_multiple_uuids_with_tags() {
+            let offset: ReplicationOffset = "3E11FA47-71CA-11E1-9E33-C80AA9429562:1-10:mytag:1-3,\
+                 A0B1C2D3-E4F5-6789-ABCD-EF0123456789:othertag:1-5"
+                .parse()
+                .unwrap();
+            assert!(matches!(offset, ReplicationOffset::Gtid(_)));
+        }
+
+        #[test]
+        fn parse_gtid_invalid() {
+            // UUID with no ranges
+            assert!(
+                "3E11FA47-71CA-11E1-9E33-C80AA9429562"
+                    .parse::<ReplicationOffset>()
+                    .is_err()
+            );
+            // Malformed UUID
+            assert!("not-a-uuid:1-10".parse::<ReplicationOffset>().is_err());
+        }
+
+        #[test]
+        fn dialect_mysql_binlog() {
+            let offset: ReplicationOffset = "mysql-bin.000003:154".parse().unwrap();
+            assert_eq!(offset.dialect(), Dialect::MySQL);
+        }
+
+        #[test]
+        fn dialect_postgres() {
+            let offset: ReplicationOffset = "0/16B3748".parse().unwrap();
+            assert_eq!(offset.dialect(), Dialect::PostgreSQL);
+        }
+
+        #[test]
+        fn dialect_gtid() {
+            let offset: ReplicationOffset =
+                "3E11FA47-71CA-11E1-9E33-C80AA9429562:1-10".parse().unwrap();
+            assert_eq!(offset.dialect(), Dialect::MySQL);
         }
     }
 }

@@ -28,6 +28,19 @@ use readyset_errors::{ReadySetError, ReadySetResult, replication_failed, replica
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Returns `true` if the string looks like a MySQL GTID set.
+///
+/// GTID entries start with a UUID (`xxxxxxxx-xxxx-...`), while binlog positions
+/// start with a filename. We check whether the portion before the first `':'`
+/// could be a UUID.
+pub fn looks_like_gtid(s: &str) -> bool {
+    if let Some(prefix) = s.split(':').next() {
+        Uuid::parse_str(prefix.trim()).is_ok()
+    } else {
+        false
+    }
+}
+
 /// Identifier for a GTID source within a MySQL topology.
 ///
 /// At minimum this consists of the MySQL server UUID. Newer versions of MySQL optionally support

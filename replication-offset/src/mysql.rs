@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt;
+use std::str::FromStr;
 
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_util::fmt::fmt_with;
@@ -74,6 +75,26 @@ impl MySqlPosition {
                 "Cannot compare MySQL positions in two different binlogs".into(),
             )
         })
+    }
+}
+
+impl FromStr for MySqlPosition {
+    type Err = ReadySetError;
+
+    /// Parse a MySQL binlog position from `"file:position"` format
+    /// (e.g. `"mysql-bin.000003:154"`).
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (file, pos) = s.split_once(':').ok_or_else(|| {
+            ReadySetError::ReplicationFailed(format!(
+                "Invalid MySQL replication position '{s}': expected format 'file:position'"
+            ))
+        })?;
+        let pos: u64 = pos.parse().map_err(|e| {
+            ReadySetError::ReplicationFailed(format!(
+                "Invalid MySQL replication position '{s}': {e}"
+            ))
+        })?;
+        Self::from_file_name_and_position(file.to_string(), pos)
     }
 }
 
