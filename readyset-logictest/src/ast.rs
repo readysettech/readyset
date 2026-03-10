@@ -1067,18 +1067,29 @@ pub struct Query {
     pub query: String,
     pub results: QueryResults,
     pub params: QueryParams,
+    /// When set, the test expects the query to fail (wrong results, prepare/execute error, or
+    /// proxied to upstream). The optional pattern is matched as a regex against the error message.
+    /// The test passes if the query fails (optionally matching the pattern) and fails if it
+    /// succeeds (indicating the bug is fixed — remove the `error` tag).
+    pub expected_error: Option<String>,
 }
 
 impl Display for Query {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let error_tag = match &self.expected_error {
+            Some(pattern) if !pattern.is_empty() => format!(" error: {pattern}"),
+            Some(_) => " error".to_string(),
+            None => String::new(),
+        };
         write!(
             f,
-            "{}\nquery {} {}\n{}\n{}----\n{}",
+            "{}\nquery {} {}{}\n{}\n{}----\n{}",
             self.conditionals.iter().join("\n"),
             self.column_types
                 .as_ref()
                 .map_or("".to_owned(), |cts| cts.iter().join("")),
             self.sort_mode.map_or("".to_owned(), |sm| sm.to_string()),
+            error_tag,
             self.query,
             self.params,
             self.results,
@@ -1151,6 +1162,7 @@ impl Record {
             query,
             results: QueryResults::hash(&results.into_iter().flatten().collect::<Vec<_>>()),
             params: QueryParams::PositionalParams(params),
+            expected_error: None,
         })
     }
 }

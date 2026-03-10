@@ -332,12 +332,30 @@ fn query(i: &[u8]) -> IResult<&[u8], Query> {
     let (i, _) = tag("query")(i)?;
     let (i, column_types) = opt(preceded(space0, column_types))(i)?;
     let (i, sort_mode) = opt(preceded(space0, sort_mode))(i)?;
-    let (i, label) = opt(preceded(
+    // Parse optional "error" or "error: <pattern>" before the label.
+    let (i, expected_error) = opt(preceded(
         space0,
-        map_opt(not_line_ending, |s: &[u8]| {
-            String::from_utf8(s.into()).ok().filter(|s| !s.is_empty())
-        }),
+        preceded(
+            tag("error"),
+            map(
+                opt(preceded(tag(":"), preceded(space0, not_line_ending))),
+                |pat| {
+                    pat.map(|s| String::from_utf8_lossy(s).trim().to_string())
+                        .unwrap_or_default()
+                },
+            ),
+        ),
     ))(i)?;
+    let (i, label) = if expected_error.is_some() {
+        (i, None)
+    } else {
+        opt(preceded(
+            space0,
+            map_opt(not_line_ending, |s: &[u8]| {
+                String::from_utf8(s.into()).ok().filter(|s| !s.is_empty())
+            }),
+        ))(i)?
+    };
     let (i, _) = line_ending(i)?;
     let (i, query) = map(many_till(anychar, end_of_query), |(s, _)| {
         s.into_iter().collect::<String>()
@@ -373,6 +391,7 @@ fn query(i: &[u8]) -> IResult<&[u8], Query> {
             query,
             results,
             params,
+            expected_error,
         },
     ))
 }
@@ -946,6 +965,69 @@ b'00000000000000000'
                 ..Default::default()
             })]
         )
+    }
+
+    #[test]
+    fn parse_query_error() {
+        let input = b"query I nosort error
+SELECT a FROM t1
+----
+1
+2
+3
+";
+        let result = complete(query)(input);
+        let q = result.unwrap().1;
+        assert_eq!(q.expected_error, Some(String::new()));
+        assert_eq!(q.column_types, Some(vec![Type::Integer]));
+        assert_eq!(q.sort_mode, Some(SortMode::NoSort));
+    }
+
+    #[test]
+    fn parse_query_error_with_pattern() {
+        let input = b"query I nosort error: unsupported.*
+SELECT a FROM t1
+----
+1
+";
+        let result = complete(query)(input);
+        let q = result.unwrap().1;
+        assert_eq!(q.expected_error, Some("unsupported.*".to_string()));
+    }
+
+    #[test]
+    fn parse_query_without_error_has_none() {
+        let input = b"query I nosort
+SELECT a FROM t1
+----
+1
+";
+        let result = complete(query)(input);
+        assert_eq!(result.unwrap().1.expected_error, None);
+    }
+
+    #[test]
+    fn parse_query_error_in_records() {
+        let input = b"statement ok
+CREATE TABLE t1(a INT)
+
+query I nosort error
+SELECT a FROM t1
+----
+99
+
+statement ok
+DROP TABLE t1";
+        let result = complete(records)(input);
+        let recs = result.unwrap().1;
+        assert_eq!(recs.len(), 3);
+        match &recs[1] {
+            Record::Query(q) => {
+                assert_eq!(q.expected_error, Some(String::new()));
+                assert_eq!(q.query, "SELECT a FROM t1");
+            }
+            other => panic!("Expected Query, got {other:?}"),
+        }
     }
 
     #[test]

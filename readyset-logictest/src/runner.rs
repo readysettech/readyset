@@ -161,6 +161,19 @@ pub(crate) async fn recreate_test_database(url: &DatabaseURL) -> anyhow::Result<
     Ok(())
 }
 
+/// If `pattern` is non-empty, compile it as a regex and verify that `error` matches it.
+/// Returns `Ok(())` if the pattern is empty or matches; returns an error otherwise.
+fn check_error_pattern(error: &dyn Display, pattern: &str) -> anyhow::Result<()> {
+    if !pattern.is_empty() {
+        let err_str = error.to_string();
+        let re = regex::Regex::new(pattern).context("Invalid regex in error pattern")?;
+        if !re.is_match(&err_str) {
+            bail!("Error message: {err_str} (expected to match pattern: {pattern})");
+        }
+    }
+    Ok(())
+}
+
 impl TestScript {
     pub fn read<R: io::Read>(path: PathBuf, input: R) -> anyhow::Result<Self> {
         let records = parser::read_records(input)?;
@@ -492,11 +505,7 @@ impl TestScript {
             StatementResult::Error { ref pattern } => match res {
                 Err(e) => {
                     if let Some(pattern) = pattern {
-                        if !pattern.is_empty()
-                            && !regex::Regex::new(pattern).unwrap().is_match(&e.to_string())
-                        {
-                            bail!("Statement failed with unexpected error: {} (expected to match: {})", e, pattern);
-                        }
+                        check_error_pattern(&e, pattern)?;
                     }
                 }
                 Ok(_) => {
@@ -514,6 +523,33 @@ impl TestScript {
     }
 
     async fn run_query(
+        &self,
+        query: &Query,
+        conn: &mut DatabaseConnection,
+        is_readyset: bool,
+        opts: &RunOptions,
+    ) -> anyhow::Result<()> {
+        let result = self.run_query_inner(query, conn, is_readyset, opts).await;
+
+        if let Some(error_pattern) = &query.expected_error {
+            match result {
+                Err(e) => {
+                    check_error_pattern(&e, error_pattern)?;
+                    Ok(())
+                }
+                Ok(()) => {
+                    bail!(
+                        "Expected query to error, but it succeeded \
+                         (if the bug is fixed, remove the `error` tag)"
+                    )
+                }
+            }
+        } else {
+            result
+        }
+    }
+
+    async fn run_query_inner(
         &self,
         query: &Query,
         conn: &mut DatabaseConnection,
