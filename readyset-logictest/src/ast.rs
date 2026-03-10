@@ -443,22 +443,31 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
     ) -> Result<Self, Box<dyn Error + Sync + Send>> {
         use pgsql::types::Type;
 
-        // Macro to handle integer array conversion for different integer types
+        // Macro to handle integer array conversion for different integer types.
+        // Falls back to readyset_data::Array for multidimensional arrays, since
+        // tokio-postgres's Vec<T>::from_sql rejects dimensions > 1.
         macro_rules! handle_int_array {
             ($int_type:ty) => {{
-                // convert an int array into something like "{int,int,NULL,int}"
-                // we need to handle NULLs in some sane way, and this mimics what
-                // pg's array_agg() function does.
-                let int_array = Vec::<Option<$int_type>>::from_sql(ty, raw)?;
-                let joined = int_array
-                    .iter()
-                    .map(|opt| match opt {
-                        Some(v) => v.to_string(),
-                        None => "NULL".to_string(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(",");
-                Ok(Self::Text(format!("{{{}}}", joined)))
+                match Vec::<Option<$int_type>>::from_sql(ty, raw) {
+                    Ok(int_array) => {
+                        let joined = int_array
+                            .iter()
+                            .map(|opt| match opt {
+                                Some(v) => v.to_string(),
+                                None => "NULL".to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        Ok(Self::Text(format!("{{{}}}", joined)))
+                    }
+                    Err(e) => {
+                        // tokio-postgres Vec<T>::from_sql rejects dimensions > 1;
+                        // fall back to readyset_data::Array for multidimensional arrays.
+                        tracing::debug!(%e, "Vec::from_sql failed, falling back to Array::from_sql");
+                        let arr = readyset_data::Array::from_sql(ty, raw)?;
+                        Ok(Self::Text(arr.to_string()))
+                    }
+                }
             }};
         }
 
@@ -474,15 +483,24 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             Type::TEXT | Type::VARCHAR => Ok(Self::Text(String::from_sql(ty, raw)?)),
             Type::TEXT_ARRAY | Type::VARCHAR_ARRAY => {
                 // convert a text array into something like "{string1,string2,NULL,string3}"
-                // we need to handle NULLs in some sane way, and this mimics what
-                // pg's array_agg() function does.
-                let string_array = Vec::<Option<String>>::from_sql(ty, raw)?;
-                let joined = string_array
-                    .iter()
-                    .map(|opt| opt.as_deref().unwrap_or("NULL"))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                Ok(Self::Text(format!("{{{}}}", joined)))
+                // Falls back to readyset_data::Array for multidimensional arrays.
+                match Vec::<Option<String>>::from_sql(ty, raw) {
+                    Ok(string_array) => {
+                        let joined = string_array
+                            .iter()
+                            .map(|opt| opt.as_deref().unwrap_or("NULL"))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        Ok(Self::Text(format!("{{{}}}", joined)))
+                    }
+                    Err(e) => {
+                        // tokio-postgres Vec<T>::from_sql rejects dimensions > 1;
+                        // fall back to readyset_data::Array for multidimensional arrays.
+                        tracing::debug!(%e, "Vec::from_sql failed, falling back to Array::from_sql");
+                        let arr = readyset_data::Array::from_sql(ty, raw)?;
+                        Ok(Self::Text(arr.to_string()))
+                    }
+                }
             }
             Type::INT2_ARRAY => handle_int_array!(i16),
             Type::INT4_ARRAY => handle_int_array!(i32),
