@@ -995,6 +995,35 @@ impl NoriaConnector {
         self.inner.noria.set_memory_limit(period, limit).await?;
         Ok(QueryResult::Empty)
     }
+
+    pub(crate) async fn stop_replication(&mut self) -> ReadySetResult<QueryResult<'static>> {
+        self.inner.noria.stop_replication().await?;
+        Ok(QueryResult::Empty)
+    }
+
+    pub(crate) async fn start_replication(&mut self) -> ReadySetResult<QueryResult<'static>> {
+        self.inner.noria.start_replication().await?;
+        Ok(QueryResult::Empty)
+    }
+
+    pub(crate) async fn set_replication_position(
+        &mut self,
+        position: &str,
+    ) -> ReadySetResult<QueryResult<'static>> {
+        self.inner
+            .noria
+            .set_replication_position(position.to_string())
+            .await?;
+        Ok(QueryResult::Empty)
+    }
+
+    pub(crate) async fn change_cdc_url(
+        &mut self,
+        url: &str,
+    ) -> ReadySetResult<QueryResult<'static>> {
+        self.inner.noria.change_cdc_url(url.to_string()).await?;
+        Ok(QueryResult::Empty)
+    }
 }
 
 impl NoriaConnector {

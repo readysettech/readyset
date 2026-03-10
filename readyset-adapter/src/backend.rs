@@ -104,11 +104,11 @@ use readyset_errors::{ReadySetResult, internal, internal_err, unsupported, unsup
 use readyset_schema::{ReadysetSchema, ReadysetSchemaSession};
 use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
-    self, AlterReadysetStatement, CacheInner, CacheType, ChangeUpstreamStatement,
-    CreateCacheOptions, CreateCacheStatement, DeallocateStatement, DropAllCachesStatement,
-    DropCacheStatement, ExplainStatement, ProxiedQueriesOptions, ReadysetHintDirective, Relation,
-    SelectStatement, SetStatement, ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery,
-    StatementIdentifier, UseStatement,
+    self, AlterReadysetStatement, CacheInner, CacheType, ChangeCdcStatement,
+    ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement, DeallocateStatement,
+    DropAllCachesStatement, DropCacheStatement, ExplainStatement, ProxiedQueriesOptions,
+    ReadysetHintDirective, Relation, SelectStatement, SetStatement, ShallowCacheQuery,
+    ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
@@ -4267,6 +4267,21 @@ where
                 info!(url = %redacted, "Changed upstream configuration");
                 Ok(noria_connector::QueryResult::Empty)
             }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::StopReplication) => {
+                connectors.noria.stop_replication().await
+            }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::StartReplication) => {
+                connectors.noria.start_replication().await
+            }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::SetReplicationPosition(stmt)) => {
+                connectors
+                    .noria
+                    .set_replication_position(&stmt.position)
+                    .await
+            }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::ChangeCdc(ChangeCdcStatement {
+                url,
+            })) => connectors.noria.change_cdc_url(url).await,
             SqlQuery::CreateRls(_create_rls) => {
                 unsupported!("CREATE RLS statement is not yet supported")
             }
