@@ -11,6 +11,7 @@ use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::union;
 use dataflow::ops::window::WindowOperationKind;
 use dataflow_expression::grouped::accumulator::AccumulationOp;
+use dataflow_expression::PostLookupAggregateFunction;
 use lazy_static::lazy_static;
 use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
@@ -2965,6 +2966,17 @@ impl SqlToMirConverter {
                                     }
                                     if found {
                                         pla.raw_values = true;
+                                    } else if matches!(
+                                        &pla.function,
+                                        PostLookupAggregateFunction::JsonObjectAgg { .. }
+                                    ) {
+                                        // json_object_agg cannot round-trip through split()
+                                        // when allow_duplicate_keys=true (serde_json::Map
+                                        // deduplicates). Require the raw path.
+                                        internal!(
+                                            "Failed to find Accumulator node for json_object_agg \
+                                             post-lookup; cannot fall back to split() path"
+                                        );
                                     }
                                 }
                             }
@@ -3518,16 +3530,16 @@ mod tests {
         expect_success: false
     }
 
-    // REA-6024: json_object_agg is not supported as a post-lookup aggregate
+    // REA-6397: json_object_agg is now supported as a post-lookup aggregate
     test_mir_with_config! {
-        name: json_object_agg_with_where_in_unsupported,
+        name: json_object_agg_with_where_in_supported,
         query: "SELECT json_object_agg(test_table.a, test_table.b) FROM test_table WHERE test_table.c = 5 GROUP BY test_table.c",
         collapsed_where_in: true,
         config: Config {
             allow_post_lookup: true,
             ..Default::default()
         },
-        expect_success: false
+        expect_success: true
     }
 
     // json_object_agg without collapsed WHERE IN should succeed (no post-lookup needed)
@@ -4089,6 +4101,107 @@ mod tests {
                 assert_eq!(unique_keys.len(), 0);
             }
             other => panic!("expected Base node, got {other:?}"),
+        }
+    }
+
+    /// Verify that MIR compilation sets `skip_finalization=true` on the Accumulator node
+    /// and `raw_values=true` on the Leaf aggregate for json_object_agg with collapsed
+    /// WHERE IN. This is a critical invariant: json_object_agg (allow_duplicate_keys=true)
+    /// *cannot* fall back to the split() path because serde_json::Map would silently
+    /// deduplicate keys. The logictest proves the end-to-end behavior, but only this
+    /// test distinguishes "worked via raw path" from "worked via split path" (the latter
+    /// being silently wrong for json_object_agg).
+    ///
+    /// Note: this test manually builds column specs instead of using `test_mir_with_config!`
+    /// because the macro only checks compilation success/failure — it doesn't expose the
+    /// MIR graph for node inspection.
+    #[test]
+    fn skip_finalization_set_on_json_object_agg_with_where_in() {
+        let cols = vec![
+            ColumnSpecification {
+                column: Column::from("t.id"),
+                sql_type: SqlType::Int(None),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+            ColumnSpecification {
+                column: Column::from("t.k"),
+                sql_type: SqlType::VarChar(Some(255)),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+            ColumnSpecification {
+                column: Column::from("t.v"),
+                sql_type: SqlType::VarChar(Some(255)),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+        ];
+        let mut query = parse_select(
+            readyset_sql::Dialect::PostgreSQL,
+            "SELECT json_object_agg(t.k, t.v) FROM t WHERE t.id = 1",
+        )
+        .unwrap();
+        query.metadata.push(SelectMetadata::CollapsedWhereIn);
+
+        let qg = to_query_graph(query, Dialect::DEFAULT_POSTGRESQL).unwrap();
+
+        let mut converter = SqlToMirConverter::new(Dialect::DEFAULT_POSTGRESQL);
+        converter.set_config(Config {
+            allow_post_lookup: true,
+            ..Default::default()
+        });
+
+        let _ = converter
+            .make_base_node(&"t".into(), &cols, None, None)
+            .unwrap();
+        let node = converter
+            .named_query_to_mir(&"q_test".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
+            .unwrap();
+
+        let query = converter.make_mir_query("q_test".into(), node);
+
+        // Find the Accumulator node and verify skip_finalization is set
+        let mut found_accumulator = false;
+        for n in query.topo_nodes() {
+            if let MirNodeInner::Accumulator {
+                skip_finalization, ..
+            } = &query.get_node(n).unwrap().inner
+            {
+                assert!(
+                    *skip_finalization,
+                    "Accumulator should have skip_finalization=true for json_object_agg"
+                );
+                found_accumulator = true;
+            }
+        }
+        assert!(found_accumulator, "Expected to find an Accumulator node");
+
+        // Verify the leaf has raw_values set on the aggregate
+        if let MirNodeInner::Leaf { aggregates, .. } = &query.get_node(node).unwrap().inner {
+            let agg = aggregates
+                .as_ref()
+                .expect("should have post-lookup aggregates");
+            let accum_aggs: Vec<_> = agg
+                .aggregates
+                .iter()
+                .filter(|a| a.function.is_accumulation())
+                .collect();
+            assert!(
+                !accum_aggs.is_empty(),
+                "should have accumulation aggregates"
+            );
+            for a in accum_aggs {
+                assert!(
+                    a.raw_values,
+                    "json_object_agg aggregate should have raw_values=true"
+                );
+            }
+        } else {
+            panic!("Expected leaf node");
         }
     }
 }

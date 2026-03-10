@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use partial_map::InsertionOrder;
 use readyset_data::DfValue;
-use readyset_errors::{internal, unsupported, ReadySetResult};
+use readyset_errors::{internal, ReadySetResult};
 use readyset_sql::ast::{NullOrder, OrderType};
 use serde::{Deserialize, Serialize};
 
-use crate::grouped::accumulator::{AccumulationOp, AccumulatorData};
+use crate::grouped::accumulator::{finalize_raw_json, AccumulationOp, AccumulatorData};
 
 /// Representation of an aggregate function
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
@@ -78,11 +78,9 @@ impl PostLookupAggregateFunction {
         match self {
             PostLookupAggregateFunction::ArrayAgg { op }
             | PostLookupAggregateFunction::GroupConcat { op }
+            | PostLookupAggregateFunction::JsonObjectAgg { op }
             | PostLookupAggregateFunction::StringAgg { op } => {
                 data.add_accummulated(op, value.clone())
-            }
-            PostLookupAggregateFunction::JsonObjectAgg { .. } => {
-                unsupported!("JsonObjectAgg is not supported as a post-lookup aggregate")
             }
             PostLookupAggregateFunction::Max
             | PostLookupAggregateFunction::Min
@@ -127,10 +125,8 @@ impl PostLookupAggregateFunction {
         match self {
             PostLookupAggregateFunction::ArrayAgg { op }
             | PostLookupAggregateFunction::GroupConcat { op }
+            | PostLookupAggregateFunction::JsonObjectAgg { op }
             | PostLookupAggregateFunction::StringAgg { op } => data.add_raw(op, value),
-            PostLookupAggregateFunction::JsonObjectAgg { .. } => {
-                unsupported!("JsonObjectAgg is not supported as a post-lookup aggregate")
-            }
             PostLookupAggregateFunction::Max
             | PostLookupAggregateFunction::Min
             | PostLookupAggregateFunction::Sum => {
@@ -175,8 +171,17 @@ impl PostLookupAggregateFunction {
                 acc_data.add_raw(op, value)?;
                 op.apply(&acc_data)
             }
-            PostLookupAggregateFunction::JsonObjectAgg { .. } => {
-                unsupported!("JsonObjectAgg is not supported as a post-lookup aggregate")
+            PostLookupAggregateFunction::JsonObjectAgg { op } => {
+                // json_object_agg is always non-distinct, non-ordered.
+                // Fast path: serialize directly from the raw [k,v] sub-arrays,
+                // skipping the intermediate AccumulatorData allocation.
+                let AccumulationOp::JsonObjectAgg {
+                    allow_duplicate_keys,
+                } = op
+                else {
+                    internal!("JsonObjectAgg PostLookupAggregateFunction with non-JsonObjectAgg op")
+                };
+                finalize_raw_json(*allow_duplicate_keys, value)
             }
             PostLookupAggregateFunction::Max
             | PostLookupAggregateFunction::Min

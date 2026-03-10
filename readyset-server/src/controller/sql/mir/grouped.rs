@@ -449,9 +449,9 @@ pub(super) fn post_lookup_aggregates(
                 | Lower { .. }
                 | Upper { .. }
                 | Bucket { .. } => continue,
-                JsonObjectAgg { .. } => {
-                    unsupported!("JsonObjectAgg is not supported as a post-lookup aggregate")
-                }
+                JsonObjectAgg { .. } => PostLookupAggregateFunction::JsonObjectAgg {
+                    op: function.try_into()?,
+                },
                 StringAgg { .. } => PostLookupAggregateFunction::StringAgg {
                     op: function.try_into()?,
                 },

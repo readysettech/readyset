@@ -1,0 +1,72 @@
+# Test json_object_agg and jsonb_object_agg with WHERE IN,
+# which triggers post-lookup aggregation.
+
+statement ok
+CREATE TABLE joa_pl (grp INT, key TEXT, val TEXT, PRIMARY KEY (grp, key));
+
+statement ok
+INSERT INTO joa_pl VALUES
+  (1, 'a', 'alpha'),
+  (1, 'b', 'bravo'),
+  (2, 'c', 'charlie'),
+  (2, 'd', 'delta'),
+  (3, 'e', 'echo');
+
+# json_object_agg with WHERE IN — post-lookup merges two groups
+query T nosort
+SELECT json_object_agg(key, val) FROM joa_pl WHERE grp IN (1, 2);
+----
+{"a":"alpha","b":"bravo","c":"charlie","d":"delta"}
+
+# jsonb_object_agg (deduplicates keys) with WHERE IN
+query T nosort
+SELECT jsonb_object_agg(key, val) FROM joa_pl WHERE grp IN (1, 2);
+----
+{"a":"alpha","b":"bravo","c":"charlie","d":"delta"}
+
+# Single group via WHERE IN — should still work
+query T nosort
+SELECT json_object_agg(key, val) FROM joa_pl WHERE grp IN (3);
+----
+{"e":"echo"}
+
+# All three groups
+query T nosort
+SELECT json_object_agg(key, val) FROM joa_pl WHERE grp IN (1, 2, 3);
+----
+{"a":"alpha","b":"bravo","c":"charlie","d":"delta","e":"echo"}
+
+# Verify deletes propagate correctly through post-lookup
+# Use jsonb_object_agg for DML tests since json_object_agg key order is
+# non-deterministic (PG uses table order, ReadySet uses group merge order).
+statement ok
+DELETE FROM joa_pl WHERE grp = 1 AND key = 'b';
+
+query T nosort
+SELECT jsonb_object_agg(key, val) FROM joa_pl WHERE grp IN (1, 2);
+----
+{"a":"alpha","c":"charlie","d":"delta"}
+
+# Verify inserts propagate correctly through post-lookup
+statement ok
+INSERT INTO joa_pl VALUES (1, 'f', 'foxtrot');
+
+query T nosort
+SELECT jsonb_object_agg(key, val) FROM joa_pl WHERE grp IN (1, 2);
+----
+{"a":"alpha","c":"charlie","d":"delta","f":"foxtrot"}
+
+# jsonb_object_agg with duplicate keys across groups — last writer wins
+statement ok
+INSERT INTO joa_pl VALUES (2, 'a', 'overwritten');
+
+query T nosort
+SELECT jsonb_object_agg(key, val) FROM joa_pl WHERE grp IN (1, 2);
+----
+{"a":"overwritten","c":"charlie","d":"delta","f":"foxtrot"}
+
+# Empty result from WHERE IN
+query T nosort
+SELECT json_object_agg(key, val) FROM joa_pl WHERE grp IN (999);
+----
+NULL
