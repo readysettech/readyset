@@ -146,6 +146,47 @@ fn json_kv_to_array(value: DfValue) -> ReadySetResult<DfValue> {
     ]))))
 }
 
+/// Finalize a raw `DfValue::Array` of `[key, value]` sub-arrays directly into a JSON string.
+///
+/// Bypasses intermediate `AccumulatorData` allocation. Used by the `finalize_raw` fast path
+/// for single-group post-lookup aggregation.
+pub fn finalize_raw_json(allow_duplicate_keys: bool, value: &DfValue) -> ReadySetResult<DfValue> {
+    let arr = match value {
+        DfValue::Array(arr) => arr,
+        DfValue::None => return Ok(DfValue::None),
+        other => {
+            return Err(internal_err!(
+                "finalize_raw_json: expected DfValue::Array, got {:?}",
+                std::mem::discriminant(other)
+            ))
+        }
+    };
+
+    if arr.total_len() == 0 {
+        return Ok(DfValue::None);
+    }
+
+    let json_str = if allow_duplicate_keys {
+        let mut pairs: Vec<(Cow<'_, str>, JsonValue)> = Vec::with_capacity(arr.total_len());
+        for sub in arr.values() {
+            pairs.push(extract_json_kv_for_serial(sub)?);
+        }
+        let serializable = crate::utils::serialize_slice_as_map(&pairs);
+        serde_json::to_string(&serializable)
+    } else {
+        let mut map: BTreeMap<Cow<'_, str>, JsonValue> = BTreeMap::new();
+        for sub in arr.values() {
+            let (k, v) = extract_json_kv_for_serial(sub)?;
+            map.insert(k, v);
+        }
+        serde_json::to_string(&map)
+    };
+
+    json_str
+        .map(DfValue::from)
+        .map_err(|e| internal_err!("finalize_raw_json: serialization failed: {e}"))
+}
+
 impl AccumulationOp {
     pub fn ignore_nulls(&self) -> bool {
         match self {
@@ -369,8 +410,35 @@ impl AccumulationOp {
                 Some(t) => t.split(separator).map(DfValue::from).collect(),
                 None => internal!("Must be a text type: {:?}", value),
             },
-            AccumulationOp::JsonObjectAgg { .. } => {
-                unsupported!("Post-lookup json_object_agg not supoorted yet")
+            AccumulationOp::JsonObjectAgg {
+                allow_duplicate_keys,
+            } => {
+                // serde_json::Map is BTreeMap-backed: it deduplicates and reorders keys.
+                // json_object_agg (allow_duplicate_keys=true) can have duplicate keys and
+                // preserves insertion order, so split() would silently lose data.
+                // The raw path (emit_raw/add_raw) must be used instead.
+                if *allow_duplicate_keys {
+                    internal!(
+                        "split() cannot round-trip json_object_agg with duplicate keys; \
+                         use the raw path (skip_finalization + raw_values)"
+                    )
+                }
+                // Parse the finalized JSON object string back into individual
+                // single-key JSON objects (e.g. {"k1":"v1","k2":"v2"} -> [{"k1":"v1"}, {"k2":"v2"}]).
+                // Each element is a DfValue string that `add()` will convert via json_kv_to_array().
+                // Note: this round-trips through JSON serialization twice (here + json_kv_to_array),
+                // but this is the non-raw fallback path and only applies to jsonb_object_agg.
+                let json_str = value
+                    .as_str()
+                    .ok_or_else(|| internal_err!("json_object_agg split: expected string"))?;
+                let obj: serde_json::Map<String, JsonValue> = serde_json::from_str(json_str)
+                    .map_err(|e| internal_err!("json_object_agg split: invalid JSON: {e}"))?;
+                obj.into_iter()
+                    .map(|(k, v)| {
+                        let single = serde_json::json!({ k: v });
+                        DfValue::from(single.to_string())
+                    })
+                    .collect::<Vec<_>>()
             }
             AccumulationOp::StringAgg { separator, .. } => {
                 let sep = match separator {
@@ -992,6 +1060,228 @@ mod tests {
 
             let result = op.apply(&data);
             assert!(result.is_err());
+        }
+
+        #[test]
+        fn split_round_trips_through_add() {
+            // split() should decompose a finalized JSON string into individual
+            // single-key JSON objects that add() can re-ingest.
+            let op = make_json_obj_op(false);
+            let finalized = DfValue::from(r#"{"alpha":"one","beta":"two","gamma":"three"}"#);
+
+            let parts = op.split(&finalized).unwrap();
+            assert_eq!(parts.len(), 3);
+
+            // Feed the split parts through add() to rebuild the accumulator
+            let mut data = AccumulatorData::Simple(vec![]);
+            for part in parts {
+                data.add(&op, part).unwrap();
+            }
+
+            let result = op.apply(&data).unwrap();
+            let result_str = result.as_str().expect("should be text");
+            // BTreeMap ordering: alpha, beta, gamma
+            assert_eq!(
+                result_str,
+                r#"{"alpha":"one","beta":"two","gamma":"three"}"#
+            );
+        }
+
+        #[test]
+        fn split_rejects_allow_duplicate_keys() {
+            // json_object_agg (allow_duplicate_keys=true) cannot round-trip through
+            // split() because serde_json::Map deduplicates keys. The raw path must be used.
+            let op = make_json_obj_op(true);
+            let finalized = DfValue::from(r#"{"a":"1","b":"2"}"#);
+
+            let result = op.split(&finalized);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn split_empty_object() {
+            let op = make_json_obj_op(false);
+            let finalized = DfValue::from("{}");
+
+            let parts = op.split(&finalized).unwrap();
+            assert!(parts.is_empty());
+        }
+
+        #[test]
+        fn emit_raw_round_trips_through_add_raw() {
+            // Simulates the post-lookup path: emit_raw -> add_raw -> apply
+            let op = make_json_obj_op(false);
+            let mut data = AccumulatorData::Simple(vec![]);
+            for (k, v) in [("x", "1"), ("y", "2"), ("z", "3")] {
+                data.add(&op, make_json_object(k, v)).unwrap();
+            }
+
+            // emit_raw produces a DfValue::Array of [key, value] arrays
+            let raw = op.emit_raw(&data);
+
+            // Simulate post-lookup: add_raw into a fresh accumulator, then apply
+            let mut post_data = AccumulatorData::Simple(vec![]);
+            post_data.add_raw(&op, &raw).unwrap();
+            let result = op.apply(&post_data).unwrap();
+            let result_str = result.as_str().expect("should be text");
+            assert_eq!(result_str, r#"{"x":"1","y":"2","z":"3"}"#);
+        }
+
+        #[test]
+        fn emit_raw_round_trips_allow_duplicate_keys() {
+            // json_object_agg (allow_duplicate_keys=true) through the raw post-lookup path
+            // should preserve duplicate keys across groups.
+            let op = make_json_obj_op(true);
+
+            let mut data1 = AccumulatorData::Simple(vec![]);
+            data1.add(&op, make_json_object("a", "first")).unwrap();
+            let raw1 = op.emit_raw(&data1);
+
+            let mut data2 = AccumulatorData::Simple(vec![]);
+            data2.add(&op, make_json_object("a", "second")).unwrap();
+            let raw2 = op.emit_raw(&data2);
+
+            let mut merged = AccumulatorData::Simple(vec![]);
+            merged.add_raw(&op, &raw1).unwrap();
+            merged.add_raw(&op, &raw2).unwrap();
+
+            let result = op.apply(&merged).unwrap();
+            let result_str = result.as_str().expect("should be text");
+            // allow_duplicate_keys=true preserves both entries
+            assert_eq!(result_str, r#"{"a":"first","a":"second"}"#);
+        }
+
+        #[test]
+        fn finalize_raw_json_allow_duplicate_keys() {
+            // finalize_raw_json with allow_duplicate_keys=true preserves duplicates
+            let op = make_json_obj_op(true);
+            let mut data = AccumulatorData::Simple(vec![]);
+            data.add(&op, make_json_object("k", "one")).unwrap();
+            data.add(&op, make_json_object("k", "two")).unwrap();
+            let raw = op.emit_raw(&data);
+
+            let result = finalize_raw_json(true, &raw).unwrap();
+            let result_str = result.as_str().expect("should be text");
+            assert_eq!(result_str, r#"{"k":"one","k":"two"}"#);
+        }
+
+        #[test]
+        fn finalize_raw_json_none_returns_none() {
+            let result = finalize_raw_json(false, &DfValue::None).unwrap();
+            assert_eq!(result, DfValue::None);
+        }
+
+        #[test]
+        fn emit_raw_merges_multiple_groups() {
+            // Simulates post-lookup merging two groups' raw emissions
+            let op = make_json_obj_op(false);
+
+            let mut data1 = AccumulatorData::Simple(vec![]);
+            data1.add(&op, make_json_object("a", "1")).unwrap();
+            data1.add(&op, make_json_object("b", "2")).unwrap();
+            let raw1 = op.emit_raw(&data1);
+
+            let mut data2 = AccumulatorData::Simple(vec![]);
+            data2.add(&op, make_json_object("c", "3")).unwrap();
+            let raw2 = op.emit_raw(&data2);
+
+            // Merge via add_raw
+            let mut merged = AccumulatorData::Simple(vec![]);
+            merged.add_raw(&op, &raw1).unwrap();
+            merged.add_raw(&op, &raw2).unwrap();
+
+            let result = op.apply(&merged).unwrap();
+            let result_str = result.as_str().expect("should be text");
+            assert_eq!(result_str, r#"{"a":"1","b":"2","c":"3"}"#);
+        }
+
+        mod proptests {
+            use proptest::prelude::*;
+
+            use super::*;
+
+            /// Strategy for generating valid JSON keys (non-empty alphanumeric).
+            fn json_key() -> impl Strategy<Value = String> {
+                "[a-zA-Z][a-zA-Z0-9]{0,15}"
+            }
+
+            /// Strategy for generating JSON-serializable values of various types.
+            fn json_value_str() -> impl Strategy<Value = String> {
+                prop_oneof![
+                    // String values
+                    "[a-zA-Z0-9 ]{0,30}".prop_map(|s| { serde_json::json!(s).to_string() }),
+                    // Integer values
+                    any::<i32>().prop_map(|n| n.to_string()),
+                    // Null
+                    Just("null".to_string()),
+                ]
+            }
+
+            /// Strategy for generating a single-key JSON object string like {"key":value}
+            fn json_kv_pair() -> impl Strategy<Value = (String, String)> {
+                (json_key(), json_value_str())
+            }
+
+            proptest! {
+                #[test]
+                fn split_round_trips_through_add_apply(
+                    pairs in prop::collection::hash_map(json_key(), json_value_str(), 1..20)
+                ) {
+                    // Build the initial accumulator via add()
+                    let op = make_json_obj_op(false); // jsonb: deduplicate keys
+                    let mut data = AccumulatorData::Simple(vec![]);
+                    for (k, v) in &pairs {
+                        // Build {"key": <raw_value>} — value is already a JSON literal
+                        let json_str = format!(r#"{{"{k}":{v}}}"#);
+                        data.add(&op, DfValue::from(json_str)).unwrap();
+                    }
+
+                    // Finalize to JSON string
+                    let finalized = op.apply(&data).unwrap();
+                    let finalized_str = finalized.as_str().expect("should be text");
+
+                    // split() it back
+                    let parts = op.split(&finalized).unwrap();
+                    prop_assert_eq!(parts.len(), pairs.len());
+
+                    // Rebuild through add() and re-finalize
+                    let mut rebuilt = AccumulatorData::Simple(vec![]);
+                    for part in parts {
+                        rebuilt.add(&op, part).unwrap();
+                    }
+                    let result = op.apply(&rebuilt).unwrap();
+                    let result_str = result.as_str().expect("should be text");
+
+                    // Round-trip should produce identical JSON
+                    prop_assert_eq!(finalized_str, result_str);
+                }
+
+                #[test]
+                fn emit_raw_round_trips_through_add_raw_apply(
+                    pairs in prop::collection::vec(json_kv_pair(), 1..20)
+                ) {
+                    let op = make_json_obj_op(false);
+                    let mut data = AccumulatorData::Simple(vec![]);
+                    for (k, v) in &pairs {
+                        let json_str = format!(r#"{{"{k}":{v}}}"#);
+                        data.add(&op, DfValue::from(json_str)).unwrap();
+                    }
+
+                    // Finalize the original
+                    let expected = op.apply(&data).unwrap();
+
+                    // emit_raw -> add_raw -> apply
+                    let raw = op.emit_raw(&data);
+                    let mut rebuilt = AccumulatorData::Simple(vec![]);
+                    rebuilt.add_raw(&op, &raw).unwrap();
+                    let result = op.apply(&rebuilt).unwrap();
+
+                    prop_assert_eq!(
+                        expected.as_str().expect("text"),
+                        result.as_str().expect("text")
+                    );
+                }
+            }
         }
     }
 
