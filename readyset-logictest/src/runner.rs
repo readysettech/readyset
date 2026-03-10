@@ -110,6 +110,16 @@ impl RunOptions {
     }
 }
 
+fn is_select_statement(command: &str) -> bool {
+    let trimmed = command.trim_start().as_bytes();
+    trimmed
+        .get(..6)
+        .is_some_and(|b| b.eq_ignore_ascii_case(b"SELECT"))
+        || trimmed
+            .get(..4)
+            .is_some_and(|b| b.eq_ignore_ascii_case(b"WITH"))
+}
+
 fn compare_results(results: &[Value], expected: &[Value], type_sensitive: bool) -> bool {
     if type_sensitive {
         return results == expected;
@@ -353,7 +363,7 @@ impl TestScript {
                     debug!(command = stmt.command, "Running statement");
                     let stmt_result = retry_with_exponential_backoff!(
                         {
-                        self.run_statement(stmt, conn, opts.query_timeout)
+                        self.run_statement(stmt, conn, opts.query_timeout, is_readyset)
                             .await
                             .with_context(|| format!("Running statement {}", stmt.command))
                         },
@@ -373,9 +383,7 @@ impl TestScript {
                         // For read-only statement errors (SELECT or WITH/CTE), no_fail_fast
                         // can safely collect the failure since they don't affect subsequent
                         // records.
-                        let upper = stmt.command.trim_start().to_ascii_uppercase();
-                        let is_read_only = upper.starts_with("SELECT") || upper.starts_with("WITH");
-                        if opts.no_fail_fast && is_read_only {
+                        if opts.no_fail_fast && is_select_statement(&stmt.command) {
                             query_failures.push((*line_num, format!("{e:#}")));
                         } else {
                             return Err(e);
@@ -492,6 +500,7 @@ impl TestScript {
         stmt: &Statement,
         conn: &mut DatabaseConnection,
         query_timeout: Duration,
+        is_readyset: bool,
     ) -> anyhow::Result<()> {
         let res = timeout(query_timeout, conn.query_drop(&stmt.command))
             .await
@@ -509,6 +518,20 @@ impl TestScript {
                     }
                 }
                 Ok(_) => {
+                    // For SELECT/WITH statements on readyset, a "successful" query_drop
+                    // may have been proxied to upstream. Check EXPLAIN LAST STATEMENT:
+                    // if the query went to upstream, treat it as an expected failure.
+                    if is_readyset && is_select_statement(&stmt.command) {
+                        if let Some(status) = self.check_proxied(conn).await? {
+                            // Query was proxied — if a pattern was given, check the
+                            // readyset error status matches it.
+                            if let Some(pattern) = pattern {
+                                check_error_pattern(&status, pattern)?;
+                            }
+                            return Ok(());
+                        }
+                    }
+
                     if let Some(pattern) = pattern {
                         bail!(
                             "Statement should have failed, but succeeded (expected error matching: {pattern})"
@@ -520,6 +543,42 @@ impl TestScript {
             },
         }
         Ok(())
+    }
+
+    /// Check if the last statement was proxied to upstream. Returns `Some(status)` if proxied,
+    /// `None` if it went to readyset.
+    async fn check_proxied(&self, conn: &mut DatabaseConnection) -> anyhow::Result<Option<String>> {
+        let explain_results = conn
+            .simple_query("EXPLAIN LAST STATEMENT")
+            .await
+            .context("checking if last statement was proxied")?;
+        let explain_values: Vec<Vec<DfValue>> = explain_results.try_into()?;
+        if let Some(explain) = explain_values.first() {
+            let mut strings = explain.iter().map(|v| -> anyhow::Result<String> {
+                Ok(
+                    v.coerce_to(&DfType::Text(Collation::Utf8), &DfType::Unknown)
+                        .context("coercing EXPLAIN value to text")?
+                        .as_str()
+                        .ok_or_else(|| anyhow!("EXPLAIN value was not a string"))?
+                        .to_string(),
+                )
+            });
+            let destination = strings
+                .next()
+                .transpose()?
+                .map(|s| s.try_into())
+                .transpose()?;
+            let status = strings
+                .next()
+                .transpose()?
+                .unwrap_or_else(|| "no status".to_string());
+            if let Some(destination) = destination {
+                if !matches!(destination, QueryDestination::Readyset(_)) {
+                    return Ok(Some(status));
+                }
+            }
+        }
+        Ok(None)
     }
 
     async fn run_query(
@@ -658,7 +717,11 @@ impl TestScript {
             }
             QueryResults::Results(expected_vals) => {
                 if vals.len() != expected_vals.len() {
-                    bail!("The number of values returned does not match the number of values expected (left: expected, right: actual): \n {}, {}",expected_vals.len(), vals.len());
+                    bail!(
+                        "The number of values returned does not match the number of values expected (left: expected, right: actual): \n {}, {}",
+                        expected_vals.len(),
+                        vals.len()
+                    );
                 }
                 if !compare_results(&vals, expected_vals, query.column_types.is_some()) {
                     bail!(
@@ -671,25 +734,8 @@ impl TestScript {
 
         // If we are running against a remote readyset which could proxy, verify it didn't.
         if is_readyset {
-            let explain_results = conn.simple_query("EXPLAIN LAST STATEMENT").await?;
-            let explain_values: Vec<Vec<DfValue>> = explain_results.try_into()?;
-            if let Some(explain) = explain_values.first() {
-                let mut strings = explain.iter().map(|v| {
-                    v.coerce_to(&DfType::Text(Collation::Utf8), &DfType::Unknown)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_string()
-                });
-                let destination = strings.next().map(|s| s.try_into()).transpose()?;
-                let status = strings.next().unwrap_or("no status".to_string());
-                if let Some(destination) = destination {
-                    if !matches!(destination, QueryDestination::Readyset(_)) {
-                        bail!("Query destination should be readyset, was {destination}: {status}");
-                    }
-                } else {
-                    bail!("Could not get destination");
-                }
+            if let Some(status) = self.check_proxied(conn).await? {
+                bail!("Query destination should be readyset, was proxied: {status}");
             }
         }
 
