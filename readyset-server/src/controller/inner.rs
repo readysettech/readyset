@@ -114,6 +114,10 @@ pub struct Leader {
     table_statuses: TableStatusState,
     /// Any TableStatus updates sent here will update this controller's state machine.
     table_status_tx: UnboundedSender<(Relation, TableStatus)>,
+    /// Handle to the running replicator task, used to stop it for failover.
+    pub(super) replicator_handle: Option<JoinHandle<()>>,
+    /// Dedicated stop signal for the replicator task (separate from process shutdown).
+    pub(super) replicator_stop_tx: Option<tokio::sync::watch::Sender<bool>>,
 }
 
 impl Leader {
@@ -147,8 +151,14 @@ impl Leader {
 
         // When the controller becomes the leader, we need to read updates
         // from the binlog.
-        self.start_replication_task(controller_tx, replicator_rx, telemetry_sender, shutdown_rx)
-            .await;
+        self.start_replication_task(
+            controller_tx,
+            replicator_rx,
+            telemetry_sender,
+            shutdown_rx,
+            true, // server_startup: resnapshot to capture config changes
+        )
+        .await;
     }
 
     /// Start replication/binlog synchronization in an infinite loop
@@ -157,17 +167,20 @@ impl Leader {
     /// connect again, and catch up from the binlog
     ///
     /// TODO: how to handle the case where we need a full new replica
-    async fn start_replication_task(
+    /// Returns `true` if a replication task was actually spawned, `false` if
+    /// replication was skipped due to configuration (disabled, no URL, etc.).
+    pub(super) async fn start_replication_task(
         &mut self,
         controller_tx: UnboundedSender<ControllerMessage>,
         mut replicator_rx: UnboundedReceiver<ReplicatorMessage>,
         telemetry_sender: TelemetrySender,
         mut shutdown_rx: ShutdownReceiver,
-    ) {
+        server_startup: bool,
+    ) -> bool {
         if !self.replicator_config.replication_enabled {
             let _ = controller_tx.send(ControllerMessage::SnapshotDone);
             info!("Replication disabled; skipping snapshotting and replication");
-            return;
+            return false;
         }
 
         if self.replicator_config.cdc_db_url.is_none()
@@ -180,7 +193,7 @@ impl Leader {
             // of the channel
             let _ = controller_tx.send(ControllerMessage::SnapshotDone);
             info!("No primary instance specified");
-            return;
+            return false;
         }
         let url: DatabaseURL = match self.replicator_config.get_cdc_db_url() {
             Ok(url) => url,
@@ -189,7 +202,7 @@ impl Leader {
                 if let Err(e) = controller_tx.send(ControllerMessage::UnrecoverableError(e)) {
                     error!("Failed to notify controller of replication config error: {e}");
                 }
-                return;
+                return false;
             }
         };
         let mut table_filter = match TableFilter::try_new(
@@ -207,29 +220,35 @@ impl Leader {
                 if let Err(e) = controller_tx.send(ControllerMessage::UnrecoverableError(e)) {
                     error!("Failed to notify controller of replication filter config error: {e}");
                 }
-                return;
+                return false;
             }
         };
 
-        let authority = Arc::clone(&self.authority);
+        let controller_uri = self.controller_uri.clone();
         let replicator_restart_timeout = self.replicator_config.replicator_restart_timeout;
         let config = self.replicator_config.clone();
         let replicator_statement_logging = self.replicator_statement_logging;
         let parsing_preset = self.parsing_preset;
         let table_status_tx = self.table_status_tx.clone();
 
+        let (stop_tx, mut stop_rx) = watch::channel(false);
+
         // The replication task ideally won't panic, but if it does and we arent replicating, that
         // will mean the data we return, will be more and more stale, and the transaction logs on
         // the upstream will be filling up disk
         // So, we abort on any panic of the replicator task.
-        tokio::spawn(abort_on_panic(async move {
+        let handle = tokio::spawn(abort_on_panic(async move {
             let replication_future = async move {
                 // The replicator wants to know if we're restarting the server so that it can
                 // resnapshot to capture changes made to replication-tables.
-                let mut server_startup = true;
+                let mut server_startup = server_startup;
                 loop {
                     let noria: readyset_client::ReadySetHandle =
-                        readyset_client::ReadySetHandle::new(Arc::clone(&authority)).await;
+                        readyset_client::ReadySetHandle::make_raw(
+                            controller_uri.clone(),
+                            None,
+                            None,
+                        );
 
                     match replicators::NoriaAdapter::start(
                         noria,
@@ -278,8 +297,13 @@ impl Leader {
             tokio::select! {
                 _ = replication_future => {},
                 _ = shutdown_rx.recv() => {},
+                _ = stop_rx.wait_for(|v| *v) => {},
             }
         }));
+
+        self.replicator_handle = Some(handle);
+        self.replicator_stop_tx = Some(stop_tx);
+        true
     }
 
     fn log_incoming_create_cache_stmts(&self, changelist: &ChangeList) {
@@ -307,6 +331,7 @@ impl Leader {
         authority: &Arc<Authority>,
         leader_ready: bool,
         maintenance_mode: bool,
+        replication_stopped: bool,
     ) -> ReadySetResult<Vec<u8>> {
         macro_rules! return_serialized {
             ($expr:expr) => {{
@@ -614,10 +639,12 @@ impl Leader {
                     } else {
                         CurrentStatus::SnapshotInProgress
                     },
-                    replication_status: if self.replicator_config.replication_enabled {
-                        ReplicationStatus::Running
-                    } else {
+                    replication_status: if !self.replicator_config.replication_enabled {
                         ReplicationStatus::Disabled
+                    } else if replication_stopped {
+                        ReplicationStatus::Stopped
+                    } else {
+                        ReplicationStatus::Running
                     },
 
                     max_replication_offset: replication_offsets
@@ -1154,6 +1181,8 @@ impl Leader {
             controller_tx,
             table_statuses,
             table_status_tx,
+            replicator_handle: None,
+            replicator_stop_tx: None,
         }
     }
 }

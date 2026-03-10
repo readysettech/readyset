@@ -27,6 +27,7 @@ use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::retry_with_exponential_backoff;
 use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
+use replication_offset::ReplicationOffset;
 use replicators::{ControllerMessage, ReplicatorMessage};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -63,6 +64,12 @@ const LEADER_STATE_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Timeout for HTTP requests made to the controller.
 const CONTROLLER_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Maximum time to wait for the replicator task to stop gracefully before aborting it.
+const REPLICATOR_STOP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Timeout for failover command responses from the controller event loop.
+const FAILOVER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A set of placement restrictions applied to a domain
 /// that a dataflow node is in. Each base table node can have
@@ -220,7 +227,7 @@ impl Worker {
 /// Type alias for "a worker's URI" (as reported in a `RegisterPayload`).
 type WorkerIdentifier = Url;
 
-/// Channel used to notify the controller of events.
+/// Channel for replicator → controller notifications (snapshot progress, errors, etc.).
 pub struct ControllerChannel {
     sender: UnboundedSender<ControllerMessage>,
     receiver: UnboundedReceiver<ControllerMessage>,
@@ -233,6 +240,41 @@ impl ControllerChannel {
     }
 
     fn sender(&self) -> UnboundedSender<ControllerMessage> {
+        self.sender.clone()
+    }
+}
+
+/// Admin command sent from the HTTP handler to the controller event loop.
+///
+/// Unlike [`ControllerMessage`] (replicator notifications), these are request/response
+/// commands that carry a oneshot channel for the caller to await the result.
+#[derive(Debug)]
+pub(crate) enum AdminCommand {
+    StopReplication(tokio::sync::oneshot::Sender<ReadySetResult<()>>),
+    StartReplication(tokio::sync::oneshot::Sender<ReadySetResult<()>>),
+    SetReplicationPosition {
+        position: String,
+        response: tokio::sync::oneshot::Sender<ReadySetResult<()>>,
+    },
+    ChangeCdcUrl {
+        url: String,
+        response: tokio::sync::oneshot::Sender<ReadySetResult<()>>,
+    },
+}
+
+/// Channel for adapter/HTTP → controller commands (failover, admin operations).
+pub(crate) struct AdapterControllerChannel {
+    sender: UnboundedSender<AdminCommand>,
+    receiver: UnboundedReceiver<AdminCommand>,
+}
+
+impl AdapterControllerChannel {
+    fn new() -> Self {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        Self { sender, receiver }
+    }
+
+    fn sender(&self) -> UnboundedSender<AdminCommand> {
         self.sender.clone()
     }
 }
@@ -398,14 +440,21 @@ pub struct Controller {
     parsing_preset: ParsingPreset,
     /// Whether we are in maintenance mode
     maintenance_mode: Arc<AtomicBool>,
+    /// Whether replication has been explicitly stopped
+    replication_stopped: Arc<AtomicBool>,
+    /// Serializes failover operations (stop/start replication, set position, change CDC URL)
+    /// so that only one runs at a time, preventing race conditions between them.
+    failover_mutex: Arc<tokio::sync::Mutex<()>>,
     /// Cache ddl statements to re-run after a backwards incompatible upgrade, if relevant
     cache_ddl: Option<Vec<CacheDDLRequest>>,
     /// Connection pool to whichever controller is presently leader.
     controller_http: ControllerConnectionPool,
-    /// Channel used to notify the controller of events.
+    /// Replicator → controller notifications.
     controller_channel: ControllerChannel,
-    /// Channel used to notify the replicator of events.
+    /// Controller → replicator notifications.
     replicator_channel: ReplicatorChannel,
+    /// Adapter/HTTP → controller commands.
+    adapter_controller_channel: AdapterControllerChannel,
     /// Provides the ability to report metrics to Segment
     telemetry_sender: TelemetrySender,
     /// Whether or not to consider failed writes to base tables as no-ops
@@ -462,10 +511,13 @@ impl Controller {
             parsing_preset,
             leader_ready: Arc::new(AtomicBool::new(false)),
             maintenance_mode: Arc::new(AtomicBool::new(false)),
+            replication_stopped: Arc::new(AtomicBool::new(false)),
+            failover_mutex: Arc::new(tokio::sync::Mutex::new(())),
             cache_ddl: None,
             controller_http,
             controller_channel: ControllerChannel::new(),
             replicator_channel: ReplicatorChannel::new(),
+            adapter_controller_channel: AdapterControllerChannel::new(),
             telemetry_sender,
             permissive_writes,
             dialect,
@@ -608,6 +660,7 @@ impl Controller {
                     .await;
 
                 self.inner.replace(leader).await;
+                self.replication_stopped.store(false, Ordering::Release);
                 self.controller_http
                     .set(
                         self.our_descriptor.controller_uri.clone(),
@@ -670,6 +723,7 @@ impl Controller {
 
         let leader_ready = self.leader_ready.clone();
         let maintenance_mode = self.maintenance_mode.clone();
+        let replication_stopped = self.replication_stopped.clone();
         loop {
             // There is either...
             let running_recovery = self
@@ -715,12 +769,15 @@ impl Controller {
                     if let Some(req) = req {
                         let leader_ready = leader_ready.load(Ordering::Acquire);
                         let maintenance_mode = maintenance_mode.load(Ordering::Acquire);
+                        let replication_stopped = replication_stopped.load(Ordering::Acquire);
                         tokio::spawn(handle_controller_request(
                             req,
                             self.authority.clone(),
                             self.inner.clone(),
+                            self.adapter_controller_channel.sender(),
                             leader_ready,
                             maintenance_mode,
+                            replication_stopped,
                         ));
                     }
                     else {
@@ -825,6 +882,53 @@ impl Controller {
                     }
 
                 }
+                cmd = self.adapter_controller_channel.receiver.recv() => {
+                    if let Some(cmd) = cmd {
+                        // All failover handlers are spawned as separate tasks
+                        // so the select loop stays free to process HTTP
+                        // requests (avoids deadlock). The failover_mutex
+                        // serializes them to prevent race conditions.
+                        let inner = self.inner.clone();
+                        let stopped = self.replication_stopped.clone();
+                        let mutex = self.failover_mutex.clone();
+                        match cmd {
+                            AdminCommand::StopReplication(response_tx) => {
+                                Self::spawn_failover_handler(mutex, response_tx, async move {
+                                    Self::handle_stop_replication(inner, stopped).await
+                                });
+                            },
+                            AdminCommand::StartReplication(response_tx) => {
+                                let controller_tx = self.controller_channel.sender();
+                                let telemetry_sender = self.telemetry_sender.clone();
+                                let shutdown_rx = self.shutdown_rx.clone();
+                                Self::spawn_failover_handler(mutex, response_tx, async move {
+                                    Self::handle_start_replication(
+                                        inner,
+                                        stopped,
+                                        controller_tx,
+                                        telemetry_sender,
+                                        shutdown_rx,
+                                    )
+                                    .await
+                                });
+                            },
+                            AdminCommand::SetReplicationPosition { position, response } => {
+                                let authority = self.authority.clone();
+                                Self::spawn_failover_handler(mutex, response, async move {
+                                    Self::handle_set_replication_position(
+                                        inner, stopped, authority, position,
+                                    )
+                                    .await
+                                });
+                            },
+                            AdminCommand::ChangeCdcUrl { url, response } => {
+                                Self::spawn_failover_handler(mutex, response, async move {
+                                    Self::handle_change_cdc_url(inner, stopped, url).await
+                                });
+                            },
+                        }
+                    }
+                }
                 res = running_recovery => {
                     res?; // If recovery fails, fail the whole controller (there's not much else we
                           // can do!)
@@ -855,6 +959,257 @@ impl Controller {
             }
         }
         Ok(())
+    }
+
+    /// Spawn a failover handler as a separate tokio task, serialized by the failover mutex.
+    fn spawn_failover_handler<F>(
+        mutex: Arc<tokio::sync::Mutex<()>>,
+        response_tx: tokio::sync::oneshot::Sender<ReadySetResult<()>>,
+        handler: F,
+    ) where
+        F: std::future::Future<Output = ReadySetResult<()>> + Send + 'static,
+    {
+        tokio::spawn(async move {
+            let _guard = mutex.lock().await;
+            let result = handler.await;
+            if response_tx.send(result).is_err() {
+                warn!("Failover response receiver dropped");
+            }
+        });
+    }
+
+    /// Handle STOP REPLICATION: signal the replicator task to stop and await its completion.
+    ///
+    /// This is a standalone associated function (not `&mut self`) so it can be spawned as a
+    /// separate tokio task from the controller event loop without blocking it.
+    ///
+    /// The write lock on LeaderHandle is held only briefly to extract the stop channel
+    /// and task handle. The actual await on the JoinHandle happens without any lock held
+    /// to avoid blocking all controller HTTP operations.
+    async fn handle_stop_replication(
+        inner: Arc<LeaderHandle>,
+        replication_stopped: Arc<AtomicBool>,
+    ) -> ReadySetResult<()> {
+        if replication_stopped.load(Ordering::Acquire) {
+            return Err(ReadySetError::Internal(
+                "replication is already stopped".into(),
+            ));
+        }
+
+        // Take the stop channel and task handle under a short write lock,
+        // then drop the lock before awaiting the handle.
+        let (stop_tx, handle) = {
+            let mut guard = inner.write().await;
+            if let Some(ref mut leader) = *guard {
+                let stop_tx = leader.replicator_stop_tx.take();
+                let handle = leader.replicator_handle.take();
+                if stop_tx.is_none() && handle.is_none() {
+                    return Err(ReadySetError::Internal(
+                        "no replicator task is running".into(),
+                    ));
+                }
+                (stop_tx, handle)
+            } else {
+                return Err(ReadySetError::NotLeader);
+            }
+        };
+
+        // Signal the replicator to stop
+        if let Some(stop_tx) = stop_tx {
+            let _ = stop_tx.send(true);
+        }
+
+        // Await the replicator task with a timeout (no lock held)
+        if let Some(handle) = handle {
+            let abort = handle.abort_handle();
+            match tokio::time::timeout(REPLICATOR_STOP_TIMEOUT, handle).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    error!(%e, "Replicator task panicked during shutdown");
+                    replication_stopped.store(true, Ordering::Release);
+                    return Err(ReadySetError::Internal(format!(
+                        "replicator panicked during shutdown: {e}"
+                    )));
+                }
+                Err(_) => {
+                    abort.abort();
+                    replication_stopped.store(true, Ordering::Release);
+                    return Err(ReadySetError::Internal(
+                        "replicator did not stop within timeout; aborted".into(),
+                    ));
+                }
+            }
+        }
+
+        replication_stopped.store(true, Ordering::Release);
+
+        // Log the position (re-acquire read lock briefly)
+        let position = {
+            let guard = inner.read().await;
+            if let Some(ref leader) = *guard {
+                leader
+                    .dataflow_state_handle
+                    .read()
+                    .await
+                    .replication_offsets()
+                    .await
+                    .ok()
+                    .and_then(|offsets| offsets.min_present_offset().ok().flatten().cloned())
+            } else {
+                None
+            }
+        };
+        match position {
+            Some(pos) => info!(%pos, "Replication stopped"),
+            None => info!("Replication stopped"),
+        }
+        Ok(())
+    }
+
+    /// Handle START REPLICATION: respawn the replicator task with current config.
+    ///
+    /// Spawned as a separate tokio task to avoid blocking the controller event loop.
+    async fn handle_start_replication(
+        inner: Arc<LeaderHandle>,
+        replication_stopped: Arc<AtomicBool>,
+        controller_tx: UnboundedSender<ControllerMessage>,
+        telemetry_sender: TelemetrySender,
+        shutdown_rx: ShutdownReceiver,
+    ) -> ReadySetResult<()> {
+        if !replication_stopped.load(Ordering::Acquire) {
+            return Err(ReadySetError::Internal("replication is not stopped".into()));
+        }
+
+        let mut guard = inner.write().await;
+        if let Some(ref mut leader) = *guard {
+            // Create a new replicator channel pair for the restarted task
+            let (replicator_tx, replicator_rx) =
+                tokio::sync::mpsc::unbounded_channel::<ReplicatorMessage>();
+            leader.replicator_tx = replicator_tx;
+
+            let started = leader
+                .start_replication_task(
+                    controller_tx,
+                    replicator_rx,
+                    telemetry_sender,
+                    shutdown_rx,
+                    false, // not server_startup: skip resnapshot, resume from current position
+                )
+                .await;
+
+            if !started {
+                return Err(ReadySetError::Internal(
+                    "replication could not be started; check server configuration".into(),
+                ));
+            }
+
+            replication_stopped.store(false, Ordering::Release);
+            info!("Replication started");
+            Ok(())
+        } else {
+            Err(ReadySetError::NotLeader)
+        }
+    }
+
+    /// Handle SET REPLICATION POSITION: update replication offsets for all tables.
+    ///
+    /// Spawned as a separate tokio task because it makes RPC calls (via ReadySetHandle)
+    /// that route back through the controller's HTTP handler. Running this inline in the
+    /// select loop would deadlock since the loop couldn't process those RPCs.
+    async fn handle_set_replication_position(
+        inner: Arc<LeaderHandle>,
+        replication_stopped: Arc<AtomicBool>,
+        authority: Arc<Authority>,
+        position: String,
+    ) -> ReadySetResult<()> {
+        if !replication_stopped.load(Ordering::Acquire) {
+            return Err(ReadySetError::Internal(
+                "replication must be stopped before setting position".into(),
+            ));
+        }
+
+        let (tables, offset) = {
+            let guard = inner.read().await;
+            if let Some(ref leader) = *guard {
+                let ds = leader.dataflow_state_handle.read().await;
+                let offset: ReplicationOffset = position.parse()?;
+
+                let replication_offsets = ds.replication_offsets().await?;
+
+                // Block cross-dialect position changes (e.g. MySQL -> PostgreSQL)
+                // but allow switching between MySQL offset types (file+pos <-> GTID).
+                if let Some(current) = replication_offsets.max_offset()? {
+                    if current.dialect() != offset.dialect() {
+                        return Err(ReadySetError::Internal(format!(
+                            "cannot change replication position from {} to {}",
+                            current.dialect(),
+                            offset.dialect(),
+                        )));
+                    }
+                }
+
+                let tables: Vec<Relation> = replication_offsets.tables.keys().cloned().collect();
+                (tables, offset)
+            } else {
+                return Err(ReadySetError::NotLeader);
+            }
+        };
+
+        // RPCs go through HTTP back to the controller, which is why this
+        // handler must run in a spawned task (not inline in the select loop).
+        let mut noria = readyset_client::ReadySetHandle::new(authority).await;
+        for table in &tables {
+            let mut table_handle = noria.table(table.clone()).await?;
+            table_handle.set_replication_offset(offset.clone()).await?;
+        }
+
+        noria.set_schema_replication_offset(Some(&offset)).await?;
+
+        info!(%position, "Replication position updated");
+        Ok(())
+    }
+
+    /// Handle CHANGE CDC: update the CDC URL in the replicator config.
+    ///
+    /// Spawned as a separate tokio task to avoid blocking the controller event loop
+    /// while waiting on the LeaderHandle write lock.
+    async fn handle_change_cdc_url(
+        inner: Arc<LeaderHandle>,
+        replication_stopped: Arc<AtomicBool>,
+        url: String,
+    ) -> ReadySetResult<()> {
+        if !replication_stopped.load(Ordering::Acquire) {
+            return Err(ReadySetError::Internal(
+                "replication must be stopped before changing CDC URL".into(),
+            ));
+        }
+
+        // Validate the URL parses correctly.
+        // Avoid including the parse error in the message as it may contain credentials.
+        let parsed: database_utils::DatabaseURL = url
+            .parse()
+            .map_err(|_| ReadySetError::Internal("invalid CDC URL".into()))?;
+
+        // Validate dialect matches and update config under a single write lock
+        // to avoid a TOCTOU race between validation and mutation.
+        let mut guard = inner.write().await;
+        if let Some(ref mut leader) = *guard {
+            let ds = leader.dataflow_state_handle.read().await;
+            let expected_dialect: readyset_sql::Dialect = ds.recipe.dialect().into();
+            if parsed.dialect() != expected_dialect {
+                return Err(ReadySetError::Internal(format!(
+                    "CDC URL dialect mismatch: expected {expected_dialect:?}, got {:?}",
+                    parsed.dialect()
+                )));
+            }
+            drop(ds);
+
+            leader.replicator_config.cdc_db_url = Some(url.into());
+            info!("CDC URL changed");
+            Ok(())
+        } else {
+            Err(ReadySetError::NotLeader)
+        }
     }
 
     async fn maybe_recreate_caches(&mut self) -> ReadySetResult<()> {
@@ -1447,12 +1802,102 @@ pub(crate) async fn authority_runner(
     Ok(())
 }
 
+/// Handle failover-related requests that must be processed WITHOUT holding the Leader read lock.
+///
+/// These requests send a [`AdminCommand`] via the command channel and await the result.
+/// The controller event loop handlers need a write lock on Leader to manage the replicator task,
+/// so we must not hold any read lock while waiting for the response.
+///
+/// Returns `Some(result)` if the request was handled, `None` if it's not a failover request.
+async fn handle_failover_request(
+    method: &Method,
+    path: &str,
+    body: &hyper::body::Bytes,
+    command_tx: &UnboundedSender<AdminCommand>,
+) -> Option<ReadySetResult<Vec<u8>>> {
+    let await_response = |rx: tokio::sync::oneshot::Receiver<ReadySetResult<()>>| async move {
+        let result = tokio::time::timeout(FAILOVER_RESPONSE_TIMEOUT, rx)
+            .await
+            .map_err(|_| ReadySetError::Internal("failover command timed out".into()))?
+            .map_err(|_| ReadySetError::Internal("controller dropped".into()))?;
+        result?;
+        Ok(bincode::serialize(&())?)
+    };
+
+    match (method, path) {
+        (&Method::POST, "/stop_replication") => {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            if command_tx.send(AdminCommand::StopReplication(tx)).is_err() {
+                return Some(Err(ReadySetError::Internal(
+                    "controller channel closed".into(),
+                )));
+            }
+            Some(await_response(rx).await)
+        }
+        (&Method::POST, "/start_replication") => {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            if command_tx.send(AdminCommand::StartReplication(tx)).is_err() {
+                return Some(Err(ReadySetError::Internal(
+                    "controller channel closed".into(),
+                )));
+            }
+            Some(await_response(rx).await)
+        }
+        (&Method::POST, "/set_replication_position") => {
+            let position: String = match bincode::deserialize(body) {
+                Ok(p) => p,
+                Err(e) => {
+                    return Some(Err(ReadySetError::Internal(format!(
+                        "deserialize error: {e}"
+                    ))))
+                }
+            };
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            if command_tx
+                .send(AdminCommand::SetReplicationPosition {
+                    position,
+                    response: tx,
+                })
+                .is_err()
+            {
+                return Some(Err(ReadySetError::Internal(
+                    "controller channel closed".into(),
+                )));
+            }
+            Some(await_response(rx).await)
+        }
+        (&Method::POST, "/change_cdc_url") => {
+            let url: String = match bincode::deserialize(body) {
+                Ok(u) => u,
+                Err(e) => {
+                    return Some(Err(ReadySetError::Internal(format!(
+                        "deserialize error: {e}"
+                    ))))
+                }
+            };
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            if command_tx
+                .send(AdminCommand::ChangeCdcUrl { url, response: tx })
+                .is_err()
+            {
+                return Some(Err(ReadySetError::Internal(
+                    "controller channel closed".into(),
+                )));
+            }
+            Some(await_response(rx).await)
+        }
+        _ => None,
+    }
+}
+
 async fn handle_controller_request(
     req: ControllerRequest,
     authority: Arc<Authority>,
     leader_handle: Arc<LeaderHandle>,
+    command_tx: UnboundedSender<AdminCommand>,
     leader_ready: bool,
     maintenance_mode: bool,
+    replication_stopped: bool,
 ) {
     let ControllerRequest {
         method,
@@ -1464,8 +1909,15 @@ async fn handle_controller_request(
 
     let request_start = Instant::now();
     let ret: Result<Result<Vec<u8>, Vec<u8>>, StatusCode> = {
-        let guard = leader_handle.read().await;
-        let resp = {
+        // Failover commands must be handled WITHOUT holding the Leader read lock,
+        // because the controller event loop handlers need a write lock on Leader.
+        // Holding the read lock here while awaiting the oneshot would deadlock.
+        let resp = if let Some(result) =
+            handle_failover_request(&method, &path, &body, &command_tx).await
+        {
+            Ok(result)
+        } else {
+            let guard = leader_handle.read().await;
             if let Some(ref ci) = *guard {
                 Ok(ci
                     .external_request(
@@ -1476,6 +1928,7 @@ async fn handle_controller_request(
                         &authority,
                         leader_ready,
                         maintenance_mode,
+                        replication_stopped,
                     )
                     .await)
             } else {

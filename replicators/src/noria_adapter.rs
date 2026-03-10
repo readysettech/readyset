@@ -325,21 +325,49 @@ impl<'a> NoriaAdapter<'a> {
             backoff: 2,
         )?;
 
-        // Only check for GTID mode when explicitly enabled via --enable-gtid
-        let gtid_mode = if config.enable_gtid {
-            let mut conn = mysql::Conn::new(mysql_opts_builder.clone()).await?;
-            let server_gtid = is_gtid_mode_enabled(&mut conn).await?;
-            if !server_gtid {
-                return Err(ReadySetError::ReplicationFailed(
-                    "--enable-gtid is set but the upstream MySQL server does not have \
-                     gtid_mode=ON. Enable GTID mode on the server or remove --enable-gtid"
-                        .to_string(),
-                ));
+        // Determine GTID mode: infer from stored offset type when available,
+        // fall back to --require-gtid flag for fresh starts.
+        let gtid_mode = match replication_offsets.min_present_offset()? {
+            Some(offset) if offset.is_gtid() => {
+                // Stored offset is GTID-based — verify server supports it
+                let mut conn = mysql::Conn::new(mysql_opts_builder.clone()).await?;
+                let server_gtid = is_gtid_mode_enabled(&mut conn).await?;
+                if !server_gtid {
+                    return Err(ReadySetError::ReplicationFailed(
+                        "Stored replication offset is GTID-based but the upstream MySQL \
+                         server does not have gtid_mode=ON"
+                            .to_string(),
+                    ));
+                }
+                info!("GTID mode inferred from stored replication offset");
+                true
             }
-            info!("GTID mode enabled via --enable-gtid, server confirms gtid_mode=ON");
-            true
-        } else {
-            false
+            Some(_) => {
+                // Stored offset is binlog file+pos — use file-based replication
+                false
+            }
+            None => {
+                // Fresh start — use the --require-gtid flag
+                if config.require_gtid {
+                    let mut conn = mysql::Conn::new(mysql_opts_builder.clone()).await?;
+                    let server_gtid = is_gtid_mode_enabled(&mut conn).await?;
+                    if !server_gtid {
+                        return Err(ReadySetError::ReplicationFailed(
+                            "--require-gtid is set but the upstream MySQL server \
+                             does not have gtid_mode=ON. Enable GTID mode on \
+                             the server or remove --require-gtid"
+                                .to_string(),
+                        ));
+                    }
+                    info!(
+                        "GTID mode enabled via --require-gtid, \
+                         server confirms gtid_mode=ON"
+                    );
+                    true
+                } else {
+                    false
+                }
+            }
         };
 
         let pos = match (replication_offsets.min_present_offset()?, resnapshot) {
@@ -466,7 +494,6 @@ impl<'a> NoriaAdapter<'a> {
                 table_filter.clone(),
                 parsing_preset,
                 config,
-                gtid_mode,
             )
             .await?,
         );

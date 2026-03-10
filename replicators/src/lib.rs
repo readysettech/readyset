@@ -19,7 +19,7 @@ use strum::EnumDiscriminants;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, info};
 
-/// Event notification sent to the controller.
+/// Event notification sent from the replicator to the controller.
 #[derive(Debug, EnumDiscriminants)]
 pub enum ControllerMessage {
     /// The replicator is about to begin a snapshot (initial or re-snapshot)

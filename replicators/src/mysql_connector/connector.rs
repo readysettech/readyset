@@ -168,8 +168,6 @@ pub(crate) struct MySqlBinlogConnector {
     table_schemas: HashMap<Relation, CreateTableBody>,
     /// Parsing mode that determines which parser(s) to use and how to handle conflicts
     parsing_config: ParsingConfig,
-    /// Whether the upstream server has GTID mode enabled.
-    gtid_mode: bool,
     /// Number of row events to skip during crash recovery.
     ///
     /// When resuming from a persisted GTID set with a pending transaction, we need to
@@ -404,7 +402,6 @@ impl MySqlBinlogConnector {
         table_filter: TableFilter,
         parsing_preset: ParsingPreset,
         config: &UpstreamConfig,
-        gtid_mode: bool,
     ) -> ReadySetResult<Self> {
         let server_id = config
             .replication_server_id
@@ -434,7 +431,6 @@ impl MySqlBinlogConnector {
             table_filter,
             table_schemas: Default::default(),
             parsing_config: parsing_preset.into_config().rate_limit_logging(false),
-            gtid_mode,
             events_to_skip: 0,
             max_gtid_rows_to_skip: config.max_gtid_rows_to_skip,
         };
@@ -461,13 +457,6 @@ impl MySqlBinlogConnector {
                 );
                 connector.events_to_skip = pending.event_index();
             }
-        }
-
-        // Validate that offset type matches gtid_mode
-        if connector.replication_offset.is_gtid() && !connector.gtid_mode {
-            replication_failed!(
-                "GTID replication offset provided but gtid_mode is not enabled on the server"
-            );
         }
 
         connector.set_parameters().await?;

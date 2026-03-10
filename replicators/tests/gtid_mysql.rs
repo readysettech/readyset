@@ -432,7 +432,7 @@ async fn gtid_basic_replication() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -502,7 +502,7 @@ async fn gtid_multiple_transactions() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -574,7 +574,7 @@ async fn gtid_update_delete() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -673,7 +673,7 @@ async fn gtid_catch_up_after_offline() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -721,7 +721,7 @@ async fn gtid_catch_up_after_offline() {
     ctx.replicator_tx = Some(
         ctx.start_repl(
             Some(Config {
-                enable_gtid: true,
+                require_gtid: true,
                 ..Default::default()
             }),
             telemetry_sender,
@@ -782,7 +782,7 @@ async fn gtid_transaction_rollback() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -874,7 +874,7 @@ async fn gtid_crash_recovery() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -949,7 +949,7 @@ async fn gtid_crash_recovery() {
     ctx.replicator_tx = Some(
         ctx.start_repl(
             Some(Config {
-                enable_gtid: true,
+                require_gtid: true,
                 ..Default::default()
             }),
             telemetry_sender,
@@ -1034,7 +1034,7 @@ async fn gtid_crash_recovery_with_post_crash_transactions() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -1122,7 +1122,7 @@ async fn gtid_crash_recovery_with_post_crash_transactions() {
     ctx.replicator_tx = Some(
         ctx.start_repl(
             Some(Config {
-                enable_gtid: true,
+                require_gtid: true,
                 ..Default::default()
             }),
             telemetry_sender,
@@ -1202,7 +1202,7 @@ async fn gtid_tag_basic_replication() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -1267,7 +1267,7 @@ async fn gtid_tag_mixed_tagged_and_untagged() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -1338,7 +1338,7 @@ async fn gtid_tag_multiple_tags() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -1414,7 +1414,7 @@ async fn gtid_tag_update_delete() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -1522,7 +1522,7 @@ async fn gtid_tag_catch_up_after_offline() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -1573,7 +1573,7 @@ async fn gtid_tag_catch_up_after_offline() {
     ctx.replicator_tx = Some(
         ctx.start_repl(
             Some(Config {
-                enable_gtid: true,
+                require_gtid: true,
                 ..Default::default()
             }),
             telemetry_sender,
@@ -1643,7 +1643,7 @@ async fn gtid_tag_crash_recovery() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -1729,7 +1729,7 @@ async fn gtid_tag_crash_recovery() {
     ctx.replicator_tx = Some(
         ctx.start_repl(
             Some(Config {
-                enable_gtid: true,
+                require_gtid: true,
                 ..Default::default()
             }),
             telemetry_sender,
@@ -1797,7 +1797,7 @@ async fn gtid_binlog_rotation() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )
@@ -1882,7 +1882,7 @@ async fn gtid_ddl_replication() {
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            enable_gtid: true,
+            require_gtid: true,
             ..Default::default()
         }),
     )

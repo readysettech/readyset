@@ -110,12 +110,14 @@ pub struct UpstreamConfig {
     #[serde(default)]
     pub replication_server_uuid: Option<Uuid>,
 
-    /// Enable GTID-based replication for MySQL. When set, Readyset uses GTID
+    /// Require GTID-based replication for MySQL. When set, Readyset uses GTID
     /// (Global Transaction Identifiers) instead of traditional binlog file/position
     /// tracking. Requires the upstream MySQL server to have gtid_mode=ON.
-    #[arg(long, env = "ENABLE_GTID")]
+    /// If the server does not support GTID, replication will fail rather than
+    /// falling back to binlog file/position.
+    #[arg(long, env = "REQUIRE_GTID")]
     #[serde(default)]
-    pub enable_gtid: bool,
+    pub require_gtid: bool,
 
     /// Maximum number of row events to skip during GTID crash recovery. When
     /// Readyset restarts after a crash mid-transaction, it replays from the
@@ -382,7 +384,7 @@ impl Default for UpstreamConfig {
             replication_enabled: true,
             replication_server_id: Default::default(),
             replication_server_uuid: Default::default(),
-            enable_gtid: false,
+            require_gtid: false,
             max_gtid_rows_to_skip: default_max_gtid_rows_to_skip(),
             replica_report_host: Default::default(),
             replica_report_port: Default::default(),
