@@ -34,7 +34,7 @@ services:
       retries: 5
       start_period: 5s
   prometheus:
-    image: "public.ecr.aws/readyset/readyset-prometheus:latest"
+    image: "docker.io/readysettech/readyset-prometheus:latest"
     healthcheck:
       test: ["CMD", "nc", "-vz", "localhost", "9090"]
       interval: 5s
@@ -49,7 +49,7 @@ services:
     expose:
       - 9091
   grafana:
-    image: "public.ecr.aws/readyset/readyset-grafana:latest"
+    image: "docker.io/readysettech/readyset-grafana:latest"
     ports:
       - 4000:4000
     environment:
