@@ -1,0 +1,45 @@
+services:
+  mysql-primary:
+    image: mysql:9.6
+    container_name: mysql-primary
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: noria
+      MYSQL_USER: repl_user
+      MYSQL_PASSWORD: repl_password
+    ports:
+      - "3366:3306"
+    volumes:
+      - ./primary.cnf:/etc/mysql/conf.d/primary.cnf
+    networks:
+      - mysql-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mysql-replica:
+    image: mysql:9.6
+    container_name: mysql-replica
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: noria
+    ports:
+      - "3367:3306"
+    volumes:
+      - ./replica.cnf:/etc/mysql/conf.d/replica.cnf
+      - ./init-replica.sh:/docker-entrypoint-initdb.d/init-replica.sh
+    networks:
+      - mysql-net
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+
+volumes:
+  mysql_primary_data:
+  mysql_replica_data:
+
+networks:
+  mysql-net:
+    driver: bridge

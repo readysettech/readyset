@@ -1,0 +1,10 @@
+[mysqld]
+server-id                = 2
+log_bin                  = mysql-bin
+binlog_format            = ROW
+gtid_mode                = ON
+enforce_gtid_consistency = ON
+
+# Relay log settings
+relay_log                = relay-bin
+log_replica_updates      = ON   # needed if this replica may itself be a source
