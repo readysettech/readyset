@@ -120,6 +120,69 @@ impl Array {
             .map(|contents| ArrayView { contents })
     }
 
+    /// Construct a multidimensional array by stacking a list of sub-arrays as a new outer
+    /// dimension. All sub-arrays must have the same shape and lower bounds. This is used by
+    /// `array_agg()` when aggregating array-typed columns — PostgreSQL produces a
+    /// (N+1)-dimensional array from N-dimensional elements.
+    ///
+    /// Accepts `Arc<Array>` references to avoid unnecessary deep clones when the caller
+    /// already holds Arc-wrapped arrays.
+    ///
+    /// If `sub_arrays` is empty, returns an empty 1D array. If any sub-array has a different
+    /// shape or lower bounds than the first, returns an error.
+    pub fn from_sub_arrays(sub_arrays: &[std::sync::Arc<Array>]) -> ReadySetResult<Self> {
+        if sub_arrays.is_empty() {
+            return Ok(Self::from(vec![]));
+        }
+
+        let expected_shape = sub_arrays[0].contents.shape();
+        let expected_bounds = &sub_arrays[0].lower_bounds;
+        let elements_per_sub: usize = expected_shape.iter().product();
+        let mut all_values = Vec::with_capacity(sub_arrays.len() * elements_per_sub);
+        for arr in sub_arrays {
+            if arr.contents.shape() != expected_shape {
+                return Err(invalid_query_err!(
+                    "Multidimensional arrays must have sub-arrays with matching dimensions"
+                ));
+            }
+            if arr.lower_bounds != *expected_bounds {
+                return Err(invalid_query_err!(
+                    "Multidimensional arrays must have sub-arrays with matching lower bounds"
+                ));
+            }
+            all_values.extend(arr.contents.iter().cloned());
+        }
+
+        let mut new_shape: SmallVec<[usize; 4]> = smallvec![sub_arrays.len()];
+        new_shape.extend_from_slice(expected_shape);
+        let mut lower_bounds: SmallVec<[i32; 2]> = smallvec![1]; // outer dim starts at 1
+        lower_bounds.extend_from_slice(expected_bounds);
+
+        Ok(Self {
+            lower_bounds,
+            contents: ArrayD::from_shape_vec(IxDyn(&new_shape), all_values).map_err(|e| {
+                invalid_query_err!("Failed to construct multidimensional array: {e}")
+            })?,
+        })
+    }
+
+    /// Split a multidimensional array into sub-arrays along the outermost dimension.
+    /// Each element of the returned Vec is an owned `Array` representing one slice of the
+    /// outer dimension. This is the inverse of [`from_sub_arrays`].
+    ///
+    /// For a 1D array, returns each scalar element wrapped in `DfValue` directly (via the
+    /// caller — this method is only intended for ndim > 1).
+    pub fn into_sub_arrays(self) -> Vec<Array> {
+        let inner_bounds: SmallVec<[i32; 2]> = self.lower_bounds[1..].into();
+        self.contents
+            .outer_iter()
+            .map(|view| Array {
+                lower_bounds: inner_bounds.clone(),
+                contents: view.to_owned(),
+            })
+            .collect()
+    }
+
     /// Returns `true` if the array does not contain a mix of inferred types.
     pub fn is_homogeneous(&self) -> bool {
         let mut iter = self.values();
@@ -1744,5 +1807,104 @@ mod tests {
         let a = Array::from(vec![]);
         let b = Array::from(vec![]);
         assert_eq!(a.concat(&b), Array::from(vec![]));
+    }
+
+    // ---------------------------------------------------------------
+    // from_sub_arrays / into_sub_arrays tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn from_sub_arrays_builds_2d() {
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        let b = Array::from(vec![DfValue::from(3), DfValue::from(4)]);
+        let result =
+            Array::from_sub_arrays(&[std::sync::Arc::new(a), std::sync::Arc::new(b)]).unwrap();
+        assert_eq!(result.num_dimensions(), 2);
+        assert_eq!(result.to_string(), "{{1,2},{3,4}}");
+    }
+
+    #[test]
+    fn from_sub_arrays_empty_returns_empty_1d() {
+        let result = Array::from_sub_arrays(&[]).unwrap();
+        assert_eq!(result.num_dimensions(), 1);
+        assert_eq!(result.total_len(), 0);
+    }
+
+    #[test]
+    fn from_sub_arrays_mismatched_shapes_errors() {
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        let b = Array::from(vec![DfValue::from(3)]);
+        let result = Array::from_sub_arrays(&[std::sync::Arc::new(a), std::sync::Arc::new(b)]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn from_sub_arrays_mismatched_lower_bounds_errors() {
+        let a = Array {
+            lower_bounds: smallvec![1],
+            contents: ArrayD::from_shape_vec(IxDyn(&[2]), vec![DfValue::from(1), DfValue::from(2)])
+                .unwrap(),
+        };
+        let b = Array {
+            lower_bounds: smallvec![0],
+            contents: ArrayD::from_shape_vec(IxDyn(&[2]), vec![DfValue::from(3), DfValue::from(4)])
+                .unwrap(),
+        };
+        let result = Array::from_sub_arrays(&[std::sync::Arc::new(a), std::sync::Arc::new(b)]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn into_sub_arrays_roundtrip_2d() {
+        let a = Array::from(vec![DfValue::from(1), DfValue::from(2)]);
+        let b = Array::from(vec![DfValue::from(3), DfValue::from(4)]);
+        let stacked = Array::from_sub_arrays(&[
+            std::sync::Arc::new(a.clone()),
+            std::sync::Arc::new(b.clone()),
+        ])
+        .unwrap();
+        let split = stacked.into_sub_arrays();
+        assert_eq!(split.len(), 2);
+        assert_eq!(split[0], a);
+        assert_eq!(split[1], b);
+    }
+
+    #[test]
+    fn into_sub_arrays_roundtrip_3d() {
+        // Build 2D sub-arrays, stack into 3D, then split back
+        let sub1 = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(1),
+                    DfValue::from(2),
+                    DfValue::from(3),
+                    DfValue::from(4),
+                ],
+            )
+            .unwrap(),
+        );
+        let sub2 = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2]),
+                vec![
+                    DfValue::from(5),
+                    DfValue::from(6),
+                    DfValue::from(7),
+                    DfValue::from(8),
+                ],
+            )
+            .unwrap(),
+        );
+        let stacked = Array::from_sub_arrays(&[
+            std::sync::Arc::new(sub1.clone()),
+            std::sync::Arc::new(sub2.clone()),
+        ])
+        .unwrap();
+        assert_eq!(stacked.num_dimensions(), 3);
+        let split = stacked.into_sub_arrays();
+        assert_eq!(split.len(), 2);
+        assert_eq!(split[0], sub1);
+        assert_eq!(split[1], sub2);
     }
 }
