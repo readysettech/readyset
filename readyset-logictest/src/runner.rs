@@ -9,7 +9,7 @@ use std::{io, mem};
 
 use anyhow::{anyhow, bail, Context};
 use itertools::Itertools;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use tracing::{debug, info};
 
 #[cfg(feature = "in-process-readyset")]
@@ -87,6 +87,10 @@ pub struct RunOptions {
     /// DDL/DML statement failures still bail immediately since subsequent records depend on them.
     /// SELECT statement error failures are collected like query failures.
     pub no_fail_fast: bool,
+    /// Per-query timeout. If a single query or statement execution takes longer than this, it will
+    /// be aborted with a timeout error. This prevents hangs when domain threads panic and drop
+    /// response channels.
+    pub query_timeout: Duration,
 }
 
 impl RunOptions {
@@ -101,6 +105,7 @@ impl RunOptions {
             parsing_preset: ParsingPreset::for_tests(),
             verbose: false,
             no_fail_fast: false,
+            query_timeout: Duration::from_secs(60),
         }
     }
 }
@@ -335,7 +340,7 @@ impl TestScript {
                     debug!(command = stmt.command, "Running statement");
                     let stmt_result = retry_with_exponential_backoff!(
                         {
-                        self.run_statement(stmt, conn)
+                        self.run_statement(stmt, conn, opts.query_timeout)
                             .await
                             .with_context(|| format!("Running statement {}", stmt.command))
                         },
@@ -398,7 +403,7 @@ impl TestScript {
                     let query_result = retry_with_exponential_backoff!(
                         {
                                 let query_result = self
-                                    .run_query(query, conn, is_readyset)
+                                    .run_query(query, conn, is_readyset, opts)
                                     .await
                                     .with_context(|| format!("Running query {}", query.query));
 
@@ -473,8 +478,11 @@ impl TestScript {
         &self,
         stmt: &Statement,
         conn: &mut DatabaseConnection,
+        query_timeout: Duration,
     ) -> anyhow::Result<()> {
-        let res = conn.query_drop(&stmt.command).await;
+        let res = timeout(query_timeout, conn.query_drop(&stmt.command))
+            .await
+            .map_err(|_| anyhow!("Statement timed out after {query_timeout:?}"))?;
         match stmt.result {
             StatementResult::Ok => {
                 if let Err(e) = res {
@@ -510,6 +518,7 @@ impl TestScript {
         query: &Query,
         conn: &mut DatabaseConnection,
         is_readyset: bool,
+        opts: &RunOptions,
     ) -> anyhow::Result<()> {
         // If this is readyset, drop proxied queries, so that if we are retrying a SELECT and it was
         // previously unsupported (e.g. because a required table hadn't yet been replicated), we
@@ -521,13 +530,20 @@ impl TestScript {
             conn.query_drop("DROP ALL PROXIED QUERIES").await?;
         }
 
+        let query_timeout = opts.query_timeout;
         let results = if query.params.is_empty() {
-            conn.query(&query.query).await?
+            timeout(query_timeout, conn.query(&query.query))
+                .await
+                .map_err(|_| anyhow!("Query timed out after {query_timeout:?}"))??
         } else {
             // We manually prepare and drop the statement, so that we can retry caching it if it was
             // previously unsupported.
-            let stmt = conn.prepare(&query.query).await?;
-            let results = conn.execute(&stmt, query.params.clone()).await?;
+            let stmt = timeout(query_timeout, conn.prepare(&query.query))
+                .await
+                .map_err(|_| anyhow!("Prepare timed out after {query_timeout:?}"))??;
+            let results = timeout(query_timeout, conn.execute(&stmt, query.params.clone()))
+                .await
+                .map_err(|_| anyhow!("Execute timed out after {query_timeout:?}"))??;
             conn.drop_prepared(stmt).await?;
             results
         };

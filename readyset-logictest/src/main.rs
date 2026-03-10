@@ -45,8 +45,6 @@ use crate::generate::Generate;
 use crate::permute::Permute;
 use crate::runner::{RunOptions, TestScript};
 
-const REPORT_HANG: Duration = Duration::from_secs(20 * 60);
-
 #[derive(Parser)]
 struct Opts {
     #[command(subcommand)]
@@ -326,6 +324,16 @@ struct Verify {
     #[arg(long, alias = "nff")]
     no_fail_fast: bool,
 
+    /// Per-query timeout in seconds. If a single query or statement execution takes longer than
+    /// this, it will be aborted with a timeout error. Prevents hangs when domain threads panic.
+    #[arg(long, default_value = "60")]
+    query_timeout: u64,
+
+    /// Per-script timeout in seconds. If an entire test script takes longer than this, it will be
+    /// aborted.
+    #[arg(long, default_value = "2700")]
+    script_timeout: u64,
+
     /// Logging/tracing options
     #[command(flatten)]
     tracing: readyset_tracing::Options,
@@ -442,24 +450,21 @@ impl Verify {
             let rename_passing = self.rename_passing;
             let rename_failing = self.rename_failing;
 
+            let script_timeout = Duration::from_secs(self.script_timeout);
+
             tasks.push(tokio::spawn(async move {
                 let test_started = Instant::now();
 
                 let script_name = script.name().to_string();
-                let hang_notifier = tokio::spawn(async move {
-                    tokio::time::sleep(REPORT_HANG).await;
-                    info!(
-                        script_name,
-                        "Test has been running for {REPORT_HANG:?}; it may be stuck"
-                    );
-                });
 
-                let script_result = script
-                    .run(run_opts)
-                    .await
-                    .with_context(|| format!("Running test script {}", script.name()));
-
-                hang_notifier.abort();
+                let script_result = tokio::select! {
+                    result = script.run(run_opts) => {
+                        result.with_context(|| format!("Running test script {}", script_name))
+                    }
+                    _ = tokio::time::sleep(script_timeout) => {
+                        Err(anyhow!("Test script {} timed out after {script_timeout:?}", script_name))
+                    }
+                };
 
                 info!(
                     script_name = %script.name(),
@@ -561,6 +566,7 @@ impl From<&Verify> for RunOptions {
             time: verify.time,
             verbose: verify.verbose,
             no_fail_fast: verify.no_fail_fast,
+            query_timeout: Duration::from_secs(verify.query_timeout),
         }
     }
 }
@@ -628,6 +634,10 @@ pub struct Fuzz {
         hide = true
     )]
     parsing_preset: ParsingPreset,
+
+    /// Per-query timeout in seconds.
+    #[arg(long, default_value = "60")]
+    query_timeout: u64,
 }
 
 impl Fuzz {
@@ -666,6 +676,7 @@ impl Fuzz {
                 upstream_database_is_readyset: readyset_url.is_some(),
                 replication_url: Some(self.compare_to.clone()),
                 parsing_preset: self.parsing_preset,
+                query_timeout: Duration::from_secs(self.query_timeout),
                 ..RunOptions::default_for_database(self.dialect().into())
             }))
             .map_err(|err| TestCaseError::fail(format!("{:#}\n{:?}", err.root_cause(), err)))
