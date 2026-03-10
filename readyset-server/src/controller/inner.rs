@@ -26,7 +26,7 @@ use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::{ChangeList, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use readyset_client::replay_path::ReplayPathInfo;
-use readyset_client::status::{CurrentStatus, ReadySetControllerStatus};
+use readyset_client::status::{CurrentStatus, ReadySetControllerStatus, ReplicationStatus};
 use readyset_client::{GraphvizOptions, TableStatus, ViewCreateRequest, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::Relation;
@@ -613,6 +613,11 @@ impl Leader {
                         }
                     } else {
                         CurrentStatus::SnapshotInProgress
+                    },
+                    replication_status: if self.replicator_config.replication_enabled {
+                        ReplicationStatus::Running
+                    } else {
+                        ReplicationStatus::Disabled
                     },
 
                     max_replication_offset: replication_offsets

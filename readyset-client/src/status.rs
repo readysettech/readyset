@@ -20,6 +20,7 @@ use replication_offset::ReplicationOffset;
 // Consts for variable names.
 
 const STATUS_VARIABLE: &str = "Status";
+const REPLICATION_STATUS_VARIABLE: &str = "Replication Status";
 const MAX_REPLICATION_OFFSET: &str = "Maximum Replication Offset";
 const MIN_REPLICATION_OFFSET: &str = "Minimum Replication Offset";
 
@@ -33,6 +34,8 @@ const MIN_REPLICATION_OFFSET: &str = "Minimum Replication Offset";
 pub struct ReadySetControllerStatus {
     /// The status of the current leader.
     pub current_status: CurrentStatus,
+    /// The status of the replicator.
+    pub replication_status: ReplicationStatus,
     /// The current maximum replication offset known by the leader.
     pub max_replication_offset: Option<ReplicationOffset>,
     /// The current minimum replication offset known by the leader.
@@ -41,10 +44,16 @@ pub struct ReadySetControllerStatus {
 
 impl From<ReadySetControllerStatus> for Vec<(String, String)> {
     fn from(status: ReadySetControllerStatus) -> Vec<(String, String)> {
-        let mut res = vec![(
-            STATUS_VARIABLE.to_string(),
-            status.current_status.to_string(),
-        )];
+        let mut res = vec![
+            (
+                STATUS_VARIABLE.to_string(),
+                status.current_status.to_string(),
+            ),
+            (
+                REPLICATION_STATUS_VARIABLE.to_string(),
+                status.replication_status.to_string(),
+            ),
+        ];
 
         if let Some(replication_offset) = status.max_replication_offset {
             res.push((
@@ -81,6 +90,28 @@ impl Display for CurrentStatus {
             CurrentStatus::SnapshotInProgress => "Snapshot In Progress",
             CurrentStatus::Online => "Online",
             CurrentStatus::MaintenanceMode => "Maintenance Mode",
+        };
+        write!(f, "{s}")
+    }
+}
+
+/// The status of the replicator.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+pub enum ReplicationStatus {
+    /// Replication is active.
+    Running,
+    /// Replication has been explicitly stopped via ALTER READYSET STOP REPLICATION.
+    Stopped,
+    /// Replicator was not started (e.g., shallow caching mode).
+    Disabled,
+}
+
+impl Display for ReplicationStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            ReplicationStatus::Running => "Running",
+            ReplicationStatus::Stopped => "Stopped",
+            ReplicationStatus::Disabled => "Disabled",
         };
         write!(f, "{s}")
     }

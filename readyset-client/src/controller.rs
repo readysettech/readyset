@@ -593,6 +593,26 @@ impl ReadySetHandle {
         exit_maintenance_mode() -> ()
     );
 
+    simple_request!(
+        /// Stop replication
+        stop_replication() -> ()
+    );
+
+    simple_request!(
+        /// Start replication
+        start_replication() -> ()
+    );
+
+    simple_request!(
+        /// Set the replication position for all tables
+        set_replication_position(position: String) -> ()
+    );
+
+    simple_request!(
+        /// Change the CDC URL used for replication
+        change_cdc_url(url: String) -> ()
+    );
+
     /// Return a list of all relations (tables or views) which are known to exist in the upstream
     /// database that we are replicating from, but are not being replicated to ReadySet (which are
     /// recorded via [`Change::AddNonReplicatedRelation`]).
