@@ -159,52 +159,9 @@ steps:
             arch: "arm"
     retry: *retry_on_agent_kill
 
-  - label: ":rust: Run tests (MRBR on)"
-    key: rust-tests-mrbr
-    command: |
-      [ -d public ] && cd public
-      ../.buildkite/retrieve_last_artifact.sh '**/proptest-regressions/*.txt'
-      ../.buildkite/retrieve_last_artifact.sh '**/*.proptest-regressions'
-      .buildkite/run-tests.sh
-      echo "~~~ Show sccache stats"
-      sccache --show-stats
-    timeout_in_minutes: 60
-    plugins:
-      - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
-          run: app
-          tty: true           # nextest makes colored output if we use tty
-          env:
-            - BUILDKITE_PARALLEL_JOB
-            - BUILDKITE_JOB_ID
-            - BUILDKITE_API_TOKEN # buildkite vars needed to fetch regression artifacts
-            - BUILDKITE_GRAPHQL_API_TOKEN
-            - BUILDKITE_ORGANIZATION_SLUG
-            - BUILDKITE_PIPELINE_SLUG
-            - BUILDKITE_BRANCH
-            - BUILDKITE_STEP_KEY
-            - BUILDKITE_LABEL
-            - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
-            - SCCACHE_REGION=us-east-2
-            - CARGO_INCREMENTAL=0
-            - RUST_BACKTRACE=full
-            - CARGO_TERM_PROGRESS_WHEN=never     # disable progress bars if tty=true
-            - MYSQL_MRBR=on
-          config:
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-tcv.yml"
-          mount-buildkite-agent: true
-          quiet-pull: true    # don't log all the image pulls
-          pull-retries: 3
-          upload-container-logs: always
-      - ecr#${ECR_PLUGIN_VERSION}:
-          login: true
-          retries: 3
-    agents: { queue: c6a-4xlarge-nospot }
-    retry: *retry_on_agent_kill
-
   - label: ":junit: Annotate JUnit XML"
     depends_on:
       - rust-tests
-      - rust-tests-mrbr
     allow_dependency_failure: true
     plugins:
       - junit-annotate#v2.7.0:

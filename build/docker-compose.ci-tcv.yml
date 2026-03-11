@@ -31,8 +31,6 @@ services:
       - TCV_SERVER_HOST=tcv
       - TCV_NETWORK=tcv-test-network
       - ALLOW_UNAUTHENTICATED_CONNECTIONS=true
-      # Version/config env vars (inherited from pipeline)
-      - MYSQL_MRBR
       # disabled because we would have to log in to ECR within the tcv container:
       # - PUBLIC_REPO_BASE
     depends_on:

@@ -105,11 +105,73 @@ pub fn upstream(args: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as proc_macro2::TokenStream);
     let item = parse_macro_input!(item as ItemFn);
 
-    let variants: Vec<Ident> = args
+    let explicit_variants: Vec<Ident> = args
         .into_iter()
         .filter_map(|tt| match tt {
             TokenTree::Ident(ident) => Some(ident),
             _ => None,
+        })
+        .collect();
+
+    // Auto-expand MySQL 8.0+ variants with an `_auto_` marker so CI can
+    // filter them out (they only run in the nightly pipeline). Explicitly
+    // declared variants (e.g. `mysql80_gtid`) always run in CI.
+    //
+    // Expansion adds the missing flags (mrbr, gtid) as _auto_ variants:
+    //   mysql80           → + auto_mrbr, auto_gtid, auto_nogtid, auto_mrbr_gtid
+    //   mysql80_mrbr      → + auto_mrbr_gtid
+    //   mysql80_gtid      → + auto_mrbr_gtid
+    //   mysql80_mrbr_gtid → (nothing, fully specified)
+    //   mysql80_nogtid    → (nothing, nogtid is terminal)
+    //
+    // Variants containing "auto" or "nogtid" are never expanded further.
+    let variants: Vec<Ident> = explicit_variants
+        .into_iter()
+        .flat_map(|ident| {
+            let name = ident.to_string();
+            let is_mysql80_plus = name
+                .strip_prefix("mysql")
+                .and_then(|rest| {
+                    rest.chars()
+                        .take_while(|c| c.is_ascii_digit())
+                        .collect::<String>()
+                        .parse::<u32>()
+                        .ok()
+                })
+                .is_some_and(|ver| ver >= 80);
+
+            let span = ident.span();
+            let mut out = vec![ident];
+
+            if !is_mysql80_plus || name.contains("auto") || name.contains("nogtid") {
+                return out;
+            }
+
+            let has_mrbr = name.contains("mrbr");
+            let has_gtid = name.contains("gtid");
+
+            // Extract the base (e.g. "mysql80" from "mysql80_gtid")
+            let base: String = name
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect();
+
+            match (has_mrbr, has_gtid) {
+                // mysql80 → all four auto variants
+                (false, false) => {
+                    for suffix in ["auto_mrbr", "auto_gtid", "auto_nogtid", "auto_mrbr_gtid"] {
+                        out.push(Ident::new(&format!("{base}_{suffix}"), span));
+                    }
+                }
+                // mysql80_mrbr or mysql80_gtid → only auto_mrbr_gtid
+                (true, false) | (false, true) => {
+                    out.push(Ident::new(&format!("{base}_auto_mrbr_gtid"), span));
+                }
+                // mysql80_mrbr_gtid → fully specified, nothing to add
+                (true, true) => {}
+            }
+
+            out
         })
         .collect();
 

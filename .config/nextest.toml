@@ -7,7 +7,7 @@
 #   not very valuable unless you're working on related code.
 # - Only mysql80 and postgres15 upstream tests run by default. Other upstream versions (mysql57,
 #   mysql84, postgres13) are excluded to keep local test runs fast. The `ci` profile runs all of them.
-default-filter = 'not test(/:very_slow:/) and not (test(/:mysql\d+:/) and not test(/:mysql80:/)) and not (test(/:postgres\d+:/) and not test(/:postgres15:/))'
+default-filter = 'not test(/:very_slow:/) and not (test(/:mysql\d+\w*:/) and not test(/:mysql80\w*:/)) and not (test(/:postgres\d+:/) and not test(/:postgres15:/))'
 slow-timeout = { period = "120s", terminate-after = 2, grace-period = "20s" }
 
 [test-groups]
@@ -21,7 +21,7 @@ filter = 'test(/:very_slow:/)'
 priority = 100
 
 [[profile.default.overrides]]
-filter = 'test(/:serial:/) and not (test(/:postgres\d+:/) or test(/:mysql\d+:/))'
+filter = 'test(/:serial:/) and not (test(/:postgres\d+:/) or test(/:mysql\d+\w*:/))'
 test-group = 'serial'
 
 [[profile.default.overrides]]
@@ -29,7 +29,7 @@ filter = 'test(/:serial:/) and test(/:postgres\d+:/)'
 test-group = 'serial-postgres'
 
 [[profile.default.overrides]]
-filter = 'test(/:serial:/) and test(/:mysql\d+:/)'
+filter = 'test(/:serial:/) and test(/:mysql\d+\w*:/)'
 test-group = 'serial-mysql'
 
 [[profile.default.overrides]]

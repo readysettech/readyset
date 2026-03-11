@@ -48,17 +48,10 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
     FILTERSET=""
     if [[ "$(uname -m)" == "aarch64" ]]; then
         echo "--- Excluding mysql57 tests (no native ARM64 image)"
-        FILTERSET='not test(/:mysql57:/)'
+        FILTERSET='not test(/:mysql57\w*:/)'
     fi
 
-    if [[ "${MYSQL_MRBR:-off}" == "on" ]]; then
-        echo "+++ :rust: Run tests (MySQL MRBR on)"
-        if [[ -n "$FILTERSET" ]]; then
-            FILTERSET="test(/:mysql\d+:/) & $FILTERSET"
-        else
-            FILTERSET='test(/:mysql\d+:/)'
-        fi
-    elif [[ -n "${NEXTEST_FILTERSET:-}" ]]; then
+    if [[ -n "${NEXTEST_FILTERSET:-}" ]]; then
         echo "+++ :rust: Run tests (nextest, filterset: $NEXTEST_FILTERSET)"
         if [[ -n "$FILTERSET" ]]; then
             FILTERSET="$NEXTEST_FILTERSET & $FILTERSET"
