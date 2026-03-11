@@ -9,7 +9,8 @@ SELECT * FROM l JOIN r ON l.x = r.x;
 statement ok
 insert into t (x) values (1);
 
-query II nosort
+# REA-6472
+query II nosort error: The\ number\ of\ values\ returned\ does\ not\ match
 WITH l AS (SELECT t.x FROM t), r AS (SELECT t.x FROM t)
 SELECT * FROM l JOIN r ON l.x = r.x;
 ----

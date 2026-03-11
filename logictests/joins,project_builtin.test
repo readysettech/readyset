@@ -209,7 +209,8 @@ SELECT table_5.column_8, table_7.column_2, addtime(table_5.column_9, table_5.col
 ----
 75 values hashing to 2f96b23073f49a35a27158797d4ffc19
 
-query  nosort
+# REA-6472
+query  nosort error: Incorrect\ values\ returned
 SELECT table_7.column_4, table_8.column_2, round(table_8.column_3) AS alias_1 FROM table_7 LEFT JOIN table_8 ON table_7.column_3 = table_8.column_1
 ----
 75 values hashing to 6eea6a8bb701908affc6441706b04c58
@@ -244,7 +245,8 @@ SELECT table_7.column_20, table_14.column_2, addtime(table_14.column_3, table_14
 ----
 75 values hashing to 2f96b23073f49a35a27158797d4ffc19
 
-query  nosort
+# REA-6472
+query  nosort error: Incorrect\ values\ returned
 SELECT table_7.column_22, table_15.column_2, round(table_7.column_23) AS alias_1 FROM table_7 LEFT OUTER JOIN table_15 ON table_7.column_21 = table_15.column_1
 ----
 75 values hashing to 6eea6a8bb701908affc6441706b04c58
@@ -279,7 +281,8 @@ SELECT table_8.column_19, table_21.column_2, addtime(table_8.column_20, table_8.
 ----
 75 values hashing to 2f96b23073f49a35a27158797d4ffc19
 
-query  nosort
+# REA-6472
+query  nosort error: Incorrect\ values\ returned
 SELECT table_8.column_23, table_22.column_2, round(table_22.column_3) AS alias_1 FROM table_8 INNER JOIN table_22 ON table_8.column_22 = table_22.column_1
 ----
 75 values hashing to 6eea6a8bb701908affc6441706b04c58

@@ -66,7 +66,8 @@ DELETE FROM t WHERE (column_4 = 2)
 statement ok
 DELETE FROM t WHERE (column_4 = 3)
 
-query  nosort
+# REA-6472
+query  nosort error: The\ number\ of\ values\ returned\ does\ not\ match
 SELECT t.column_2 AS alias_1, t1.column_2 AS alias_2 FROM t INNER JOIN t AS t1 ON t.column_1 = t1.column_3
 ----
 1

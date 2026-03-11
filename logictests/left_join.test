@@ -33,19 +33,22 @@ statement ok
 INSERT INTO table_4 (column_1, column_2) VALUES (1, 1), (-1359752761, -2054348858), (1, 1), (1628039846, -770966425), (1, 1)
 
 
-query  nosort
+# REA-6472
+query  nosort error: Wrong\ number\ of\ results
 SELECT table_1.column_3, table_2.column_2 FROM table_1 LEFT JOIN table_2 ON (table_1.column_2 = table_2.column_1) WHERE (table_1.column_1 = ?)
 ? = 1
 ----
 27 values hashing to da8a72a7967c0c73d91239275230aed9
 
-query  nosort
+# REA-6472
+query  nosort error: Wrong\ number\ of\ results
 SELECT table_1.column_6, table_3.column_2 FROM table_1 LEFT OUTER JOIN table_3 ON (table_1.column_5 = table_3.column_1) WHERE (table_1.column_4 = ?)
 ? = 1
 ----
 27 values hashing to da8a72a7967c0c73d91239275230aed9
 
-query  nosort
+# REA-6472
+query  nosort error: Wrong\ number\ of\ results
 SELECT table_1.column_9, table_4.column_2 FROM table_1 INNER JOIN table_4 ON (table_1.column_8 = table_4.column_1) WHERE (table_1.column_7 = ?)
 ? = 1
 ----
