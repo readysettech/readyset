@@ -64,7 +64,8 @@ mod tests {
     use dataflow::ops::grouped::aggregate::Aggregation;
     use readyset_client::ViewPlaceholder;
     use readyset_sql::ast::{
-        self, BinaryOperator, ColumnSpecification, Expr, FunctionExpr, Literal, Relation, SqlType,
+        self, BinaryOperator, ColumnSpecification, Expr, FunctionExpr, Literal, NullOrder,
+        OrderType, Relation, SqlType,
     };
 
     use super::*;
@@ -232,5 +233,85 @@ mod tests {
             mir_graph.columns(prj),
             vec![Column::named("a"), Column::named("b")]
         );
+    }
+
+    #[test]
+    fn topk_group_by_unchanged() {
+        // Verify that pull_all_required_columns does NOT push columns into
+        // TopK's group_by. The downstream Project needs column "b" which is
+        // not in the Aggregate output. It should be pulled through TopK's
+        // parent (Aggregate), not absorbed into TopK's group_by.
+        let query_name: Relation = "topk_group_by_unchanged".into();
+        let mut mir_graph = MirGraph::new();
+        let base = create_base_node(&mut mir_graph);
+        mir_graph[base].add_owner(query_name.clone());
+
+        // SUM(c) GROUP BY a
+        let agg = mir_graph.add_node(MirNode::new(
+            "agg".into(),
+            MirNodeInner::Aggregation {
+                on: "c".into(),
+                group_by: vec!["a".into()],
+                output_column: Column::named("total"),
+                kind: Aggregation::Sum,
+            },
+        ));
+        mir_graph[agg].add_owner(query_name.clone());
+        mir_graph.add_edge(base, agg, 0);
+
+        // TopK: ORDER BY total DESC LIMIT 3, group_by = [a]
+        let topk = mir_graph.add_node(MirNode::new(
+            "topk".into(),
+            MirNodeInner::TopK {
+                order: vec![(
+                    "total".into(),
+                    OrderType::OrderDescending,
+                    NullOrder::NullsLast,
+                )],
+                group_by: vec!["a".into()],
+                limit: 3,
+            },
+        ));
+        mir_graph[topk].add_owner(query_name.clone());
+        mir_graph.add_edge(agg, topk, 0);
+
+        // Project: emit [b, total] — "b" is NOT in Aggregate output
+        let prj = mir_graph.add_node(MirNode::new(
+            "prj".into(),
+            MirNodeInner::Project {
+                emit: vec![
+                    ProjectExpr::Column("b".into()),
+                    ProjectExpr::Column("total".into()),
+                ],
+            },
+        ));
+        mir_graph[prj].add_owner(query_name.clone());
+        mir_graph.add_edge(topk, prj, 0);
+
+        let mut query = MirQuery::new(query_name, prj, &mut mir_graph);
+        pull_all_required_columns(&mut query).unwrap();
+
+        // TopK's group_by must NOT have been modified
+        match &mir_graph[topk].inner {
+            MirNodeInner::TopK { group_by, .. } => {
+                assert_eq!(
+                    group_by,
+                    &vec![Column::from("a")],
+                    "TopK group_by should not be modified by pull_all_required_columns"
+                );
+            }
+            _ => unreachable!(),
+        }
+
+        // "b" should have been pulled through to the Aggregate's group_by instead
+        match &mir_graph[agg].inner {
+            MirNodeInner::Aggregation { group_by, .. } => {
+                assert!(
+                    group_by.contains(&Column::from("b")),
+                    "Column 'b' should have been added to Aggregate's group_by"
+                );
+            }
+            _ => unreachable!(),
+        }
     }
 }

@@ -439,9 +439,12 @@ impl MirNodeInner {
                 group_by.push(c);
                 Ok(true)
             }
-            MirNodeInner::TopK { group_by, .. } => {
-                group_by.push(c);
-                Ok(true)
+            MirNodeInner::TopK { .. } => {
+                // TopK is transparent: its output columns are its parent's columns.
+                // Adding a column here would incorrectly push it into group_by,
+                // changing the grouping semantics. Return false so the column
+                // is pulled through the parent instead.
+                Ok(false)
             }
             _ => Ok(false),
         }

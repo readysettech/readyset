@@ -4389,6 +4389,183 @@ async fn topk_updates() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn topk_with_join_aggregate_order_by() {
+    let (mut g, shutdown_tx) = start_simple_unsharded("topk_with_join_aggregate_order_by").await;
+    g.extend_recipe(
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE dept_emp (dept_no INTEGER, emp_id INTEGER);",
+                "CREATE TABLE departments (dept_no INTEGER, dept_name TEXT);",
+                "CREATE CACHE top_depts FROM
+                 SELECT departments.dept_name, count(*) AS employee_count
+                 FROM dept_emp
+                 JOIN departments ON (dept_emp.dept_no = departments.dept_no)
+                 GROUP BY dept_emp.dept_no
+                 ORDER BY employee_count DESC
+                 LIMIT 3;",
+            ],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let mut dept_emp = g.table("dept_emp").await.unwrap();
+    let mut departments = g.table("departments").await.unwrap();
+    let mut top_depts = g
+        .view("top_depts")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
+
+    // Create 5 departments
+    departments
+        .insert_many((1..=5).map(|i| vec![i.into(), format!("Dept{}", i).into()]))
+        .await
+        .unwrap();
+
+    // dept 1 has 5 employees, dept 2 has 3, dept 3 has 2,
+    // dept 4 has 4, dept 5 has 1
+    dept_emp
+        .insert_many(
+            [
+                (1, 1),
+                (1, 2),
+                (1, 3),
+                (1, 4),
+                (1, 5),
+                (2, 1),
+                (2, 2),
+                (2, 3),
+                (3, 1),
+                (3, 2),
+                (4, 1),
+                (4, 2),
+                (4, 3),
+                (4, 4),
+                (5, 1),
+            ]
+            .map(|(d, e)| vec![d.into(), e.into()]),
+        )
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    eventually!(
+        run_test: {
+            top_depts.lookup(&[0i64.into()], true).await.unwrap().into_vec()
+        },
+        then_assert: |rows| {
+            assert_eq!(
+                rows.len(),
+                3,
+                "Expected 3 rows due to LIMIT 3, but got {}: {:?}",
+                rows.len(),
+                rows
+            );
+            // Verify the correct top-3 departments by employee count: 5, 4, 3
+            let counts: Vec<i64> = rows
+                .iter()
+                .map(|r| f64::try_from(&r[1]).unwrap() as i64)
+                .collect();
+            assert_eq!(counts, vec![5, 4, 3]);
+        }
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn topk_non_grouped_select_column() {
+    // Tests that TopK correctly limits results when a non-GROUP-BY column
+    // appears in SELECT (MySQL non-strict GROUP BY behavior).
+    // Without the add_column fix, pull_all_required_columns pushes
+    // the non-grouped column into TopK's group_by, fracturing the
+    // single global group and preventing proper LIMIT filtering.
+    let (mut g, shutdown_tx) = start_simple_unsharded("topk_non_grouped_select_column").await;
+    g.extend_recipe(
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE products (category INT, name TEXT, price INT);",
+                "CREATE CACHE top_categories FROM
+                 SELECT name, SUM(price) AS total
+                 FROM products
+                 GROUP BY category
+                 ORDER BY total DESC
+                 LIMIT 3;",
+            ],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let mut products = g.table("products").await.unwrap();
+    let mut top_categories = g
+        .view("top_categories")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
+
+    // 5 categories with different totals:
+    //   category 1: 10+20 = 30
+    //   category 2: 5+15  = 20
+    //   category 3: 30+25 = 55
+    //   category 4: 1+2   = 3
+    //   category 5: 100   = 100
+    products
+        .insert_many(
+            [
+                (1, "a", 10),
+                (1, "b", 20),
+                (2, "c", 5),
+                (2, "d", 15),
+                (3, "e", 30),
+                (3, "f", 25),
+                (4, "g", 1),
+                (4, "h", 2),
+                (5, "i", 100),
+            ]
+            .map(|(cat, name, price)| vec![cat.into(), DfValue::from(name), price.into()]),
+        )
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    eventually!(
+        run_test: {
+            top_categories.lookup(&[0i64.into()], true).await.unwrap().into_vec()
+        },
+        then_assert: |rows| {
+            assert_eq!(
+                rows.len(),
+                3,
+                "Expected 3 rows due to LIMIT 3, but got {}: {:?}",
+                rows.len(),
+                rows
+            );
+            // The non-GROUP-BY column "name" gets added to the Aggregate's
+            // group_by by pull_all_required_columns, so the aggregate groups
+            // by (category, name) producing per-row sums. TopK correctly
+            // limits to 3 from 9 groups.
+            let totals: Vec<i64> = rows
+                .iter()
+                .map(|r| f64::try_from(&r[1]).unwrap() as i64)
+                .collect();
+            assert_eq!(totals, vec![100, 30, 25]);
+        }
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn simple_pagination() {
     let (mut g, shutdown_tx) = start_simple_unsharded("simple_pagination").await;
     let sql = vec![

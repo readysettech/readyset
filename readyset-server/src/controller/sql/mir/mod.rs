@@ -2970,10 +2970,10 @@ impl SqlToMirConverter {
                 // In that case, limit is required for correctness.
                 if self.config.allow_topk && is_topk_query && !are_repeat_reads_required {
                     limit = None;
-                    // TODO: even though we are doing topk, we still need the reader
-                    // to order stuff. Becuase TopK communictes the diff,
-                    // and the reader keeps the values in ASC order if ORDER BY
-                    // is not specified. Please refer to [reader_map::Values] struct.
+                    // Even though we are doing topk, we still need the reader
+                    // to order results. Because TopK communicates the unordered
+                    // diff, and the reader auto-sorts values in ASC order if
+                    // ORDER BY is not specified. See reader_map::Values.
                     // order_by = None;
                 }
 
