@@ -2,7 +2,7 @@
 ARG TCV_IMAGE_TAG=87c75e439d6169669fd06f036c328e8df873cbee
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/test-container-vendor:${TCV_IMAGE_TAG} AS tcv
 
-FROM public.ecr.aws/docker/library/rust:1.93.0
+FROM public.ecr.aws/docker/library/rust:1.94.0
 
 ARG TARGETARCH
 
