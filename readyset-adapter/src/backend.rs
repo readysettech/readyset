@@ -2682,10 +2682,8 @@ where
             SqlQuery::Commit(_) => {
                 proxy_state.end_transaction();
             }
-            SqlQuery::Rollback(rollback_stmt) => {
-                if rollback_stmt.ends_transaction() {
-                    proxy_state.end_transaction();
-                }
+            SqlQuery::Rollback(rollback_stmt) if rollback_stmt.ends_transaction() => {
+                proxy_state.end_transaction();
             }
             _ => (),
         }

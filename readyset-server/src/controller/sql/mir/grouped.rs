@@ -210,7 +210,7 @@ pub(super) fn make_grouped(
             .collect();
         let gb_and_param_cols = dedup_gb_cols
             .into_iter()
-            .chain(param_cols.into_iter())
+            .chain(param_cols)
             .map(Column::from);
 
         let mut have_parent_cols = HashSet::new();

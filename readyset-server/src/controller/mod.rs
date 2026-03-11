@@ -1295,8 +1295,8 @@ impl AuthorityWorkerState {
 
         let failed_workers: Vec<_> = self
             .active_workers
-            .iter()
-            .filter_map(|(w, _)| {
+            .keys()
+            .filter_map(|w| {
                 if !workers.contains(w) {
                     Some(w.clone())
                 } else {

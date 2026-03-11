@@ -313,7 +313,7 @@ impl PreparedStatement {
         let params = statement
             .query_param_types()
             .into_iter()
-            .zip(spec.0.into_iter())
+            .zip(spec.0)
             .map(|(sql_type, annotation)| ParameterGenerationSpec {
                 column_type: sql_type.clone(),
                 generator: annotation.spec.generator_for_col(sql_type),

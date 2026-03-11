@@ -491,20 +491,20 @@ impl Leader {
                     let pairs = querystring::querify(query);
                     if let Some((_, worker)) = &pairs.into_iter().find(|(k, _)| *k == "w") {
                         ds.nodes_on_worker(Some(&worker.parse()?))
-                            .into_iter()
-                            .flat_map(|(_, ni)| ni)
+                            .into_values()
+                            .flatten()
                             .collect::<Vec<_>>()
                     } else {
                         ds.nodes_on_worker(None)
-                            .into_iter()
-                            .flat_map(|(_, ni)| ni)
+                            .into_values()
+                            .flatten()
                             .collect::<Vec<_>>()
                     }
                 } else {
                     // all data-flow nodes
                     ds.nodes_on_worker(None)
-                        .into_iter()
-                        .flat_map(|(_, ni)| ni)
+                        .into_values()
+                        .flatten()
                         .collect::<Vec<_>>()
                 };
                 return_serialized!(&nodes

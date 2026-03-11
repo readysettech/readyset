@@ -195,10 +195,7 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             put_i32(LENGTH_PLACEHOLDER, dst);
             put_i16(COUNT_PLACEHOLDER, dst);
             let mut n_values = 0;
-            loop {
-                let Some(v) = values.get(n_values) else {
-                    break;
-                };
+            while let Some(v) = values.get(n_values) {
                 let format = match explicit_transfer_formats {
                     Some(ref fs) => *fs.get(n_values).ok_or_else(|| {
                         Error::InternalError("incorrect DataRow transfer format length".to_string())

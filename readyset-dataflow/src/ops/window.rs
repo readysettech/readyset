@@ -615,15 +615,11 @@ impl WindowOperation {
                 Ok(())
             }
             WindowOperation::RowNumber => {
-                let mut count = 1;
-
                 apply_diffs_to_partition(partition, diffs, col_index)?;
 
-                for r in partition.iter_mut() {
+                for (count, r) in (1..).zip(partition.iter_mut()) {
                     let old_count = r.to_mut().get_mut(col_index).unwrap();
                     *old_count = DfValue::Int(count);
-
-                    count += 1;
                 }
 
                 Ok(())

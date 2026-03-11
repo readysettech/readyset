@@ -42,10 +42,7 @@ where
     let task = task.fuse();
 
     let progress = tokio::spawn(async move {
-        loop {
-            let Some(Some(wait)) = backoff.next() else {
-                break;
-            };
+        while let Some(Some(wait)) = backoff.next() {
             sleep(wait).await;
             report().await;
         }

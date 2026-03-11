@@ -2814,7 +2814,7 @@ impl Domain {
 
                 for m in keys {
                     let e = evictions.entry((m.node, m.column_indices)).or_default();
-                    e.extend(m.missed_keys.into_iter());
+                    e.extend(m.missed_keys);
                 }
             }
 
@@ -4983,27 +4983,27 @@ impl Barrier {
         let mut msgs = ex.uncork().into_iter();
         let n = msgs.len() as u128;
 
-        if n == 0 {
+        let Some(each) = self.credits.checked_div(n) else {
             debug!(
                 "flushing barrier {:x} to worker, credits {:x}",
                 self.id, self.credits
             );
             self.rpc(ex, self.credits);
-        } else {
-            let each = self.credits / n;
-            let extra = self.credits % n;
-            debug!(
-                "flushing barrier {:x}, split {}, each {:x} + extra {:x}",
-                self.id, n, each, extra
-            );
-            invariant!(each > 0, "barrier split too many times");
+            return Ok(());
+        };
 
-            let (rep, msg) = msgs.next().unwrap(); // n > 0
-            self.send(ex, rep, msg, each + extra);
+        let extra = self.credits % n;
+        debug!(
+            "flushing barrier {:x}, split {}, each {:x} + extra {:x}",
+            self.id, n, each, extra
+        );
+        invariant!(each > 0, "barrier split too many times");
 
-            for (rep, msg) in msgs {
-                self.send(ex, rep, msg, each)
-            }
+        let (rep, msg) = msgs.next().unwrap(); // n > 0
+        self.send(ex, rep, msg, each + extra);
+
+        for (rep, msg) in msgs {
+            self.send(ex, rep, msg, each)
         }
 
         Ok(())

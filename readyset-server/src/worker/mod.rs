@@ -841,8 +841,7 @@ impl Barrier {
     fn new(id: u128, split: u128, done: oneshot::Receiver<ReadySetResult<()>>) -> Self {
         debug!("creating barrier {:x} with {} splits", id, split);
         let mut give = Vec::new();
-        if split > 0 {
-            let each = BarrierManager::FULL_CREDIT / split;
+        if let Some(each) = BarrierManager::FULL_CREDIT.checked_div(split) {
             let extra = BarrierManager::FULL_CREDIT % split;
             assert!(each > 0, "barrier split too many times");
             give.push(each + extra);

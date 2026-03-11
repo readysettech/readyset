@@ -245,13 +245,7 @@ impl DialectParser for Dialect {
             let literal = match &literal {
                 Literal::Placeholder(_) => literal,
                 Literal::UnsignedInteger(_) => literal,
-                Literal::Integer(int) => {
-                    if *int >= 0 {
-                        literal
-                    } else {
-                        failed!(i);
-                    }
-                }
+                Literal::Integer(int) if *int >= 0 => literal,
                 Literal::Null => match self {
                     Dialect::PostgreSQL => literal,
                     Dialect::MySQL => {
