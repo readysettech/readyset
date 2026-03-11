@@ -75,12 +75,14 @@ SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2 FROM table_
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 < 1) GROUP BY table_1.column_2
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 < 1) GROUP BY table_1.column_2
 ----
 
@@ -125,12 +127,14 @@ SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, tab
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 < 1) GROUP BY table_1.column_2
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 < 1) GROUP BY table_1.column_2
 ----
 
@@ -170,7 +174,8 @@ SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2, table_1.co
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 < table_1.column_24) AND (table_1.column_2 < 1)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
@@ -180,7 +185,8 @@ SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2, table_1.co
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 < table_1.column_26) AND (table_1.column_2 < 1)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
@@ -220,7 +226,8 @@ SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, tab
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((table_1.column_2 < table_1.column_36) AND (table_1.column_2 < 1)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
@@ -230,7 +237,8 @@ SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, tab
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((table_1.column_2 < table_1.column_38) AND (table_1.column_2 < 1)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
@@ -265,7 +273,8 @@ SELECT count(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2, table_1.
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 < table_1.column_46) OR (table_1.column_2 < table_1.column_47)) AND (table_1.column_2 < 1)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
@@ -290,7 +299,8 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4, table_1.column_2 AS alias_5 FROM table_1 WHERE (((table_1.column_2 < table_1.column_54) OR (table_1.column_2 < table_1.column_55)) AND (table_1.column_2 < 1)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
@@ -399,12 +409,14 @@ SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2 FROM table_
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 < 1) GROUP BY table_1.column_2
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 < 1) GROUP BY table_1.column_2
 ----
 
@@ -449,12 +461,14 @@ SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, tab
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 < 1) GROUP BY table_1.column_2
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 < 1) GROUP BY table_1.column_2
 ----
 
@@ -494,7 +508,8 @@ SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2, table_1.co
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 < table_1.column_24) AND (table_1.column_2 < 1)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
@@ -504,7 +519,8 @@ SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2, table_1.co
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 < table_1.column_26) AND (table_1.column_2 < 1)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
@@ -544,7 +560,8 @@ SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, tab
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((table_1.column_2 < table_1.column_36) AND (table_1.column_2 < 1)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
@@ -554,7 +571,8 @@ SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, tab
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((table_1.column_2 < table_1.column_38) AND (table_1.column_2 < 1)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
@@ -589,7 +607,8 @@ SELECT count(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2, table_1.
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(table_1.column_2) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 < table_1.column_46) OR (table_1.column_2 < table_1.column_47)) AND (table_1.column_2 < 1)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
@@ -614,7 +633,8 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 ----
 
 
-query  nosort
+# REA-6472
+query  nosort error: Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(table_1.column_2) AS alias_1, avg(table_1.column_2) AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4, table_1.column_2 AS alias_5 FROM table_1 WHERE (((table_1.column_2 < table_1.column_54) OR (table_1.column_2 < table_1.column_55)) AND (table_1.column_2 < 1)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
