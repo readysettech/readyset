@@ -497,6 +497,7 @@ impl TimestampTz {
                 Ok(DfValue::TimestampTz(ts))
             }
             DfType::TimestampTz { subsecond_digits } => {
+                // NOTE: Assumes session timezone is UTC.
                 // TODO: when converting into a timestamp with tz on postgres should apply
                 // local tz, but what is local for noria?
                 let mut ts_tz = *self;
@@ -505,7 +506,16 @@ impl TimestampTz {
                 Ok(DfValue::TimestampTz(ts_tz))
             }
             DfType::DateTime { subsecond_digits } => {
-                let mut ts = *self;
+                // NOTE: Assumes session timezone is UTC.
+                // MySQL converts timezone-aware literals to the session timezone
+                // before storing as DATETIME.
+                let mut ts: TimestampTz = if self.is_zero() {
+                    Self::zero()
+                } else if self.has_timezone() {
+                    self.to_chrono().naive_utc().into()
+                } else {
+                    *self
+                };
                 ts.set_subsecond_digits(subsecond_digits as u8);
                 Ok(DfValue::TimestampTz(ts))
             }

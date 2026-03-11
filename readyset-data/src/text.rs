@@ -976,16 +976,45 @@ mod tests {
     }
 
     #[test]
-    fn text_to_datetime_preserves_timezone() {
-        // DateTime (MySQL) routes through coerce_to which preserves the offset —
-        // MySQL DATETIME has no timezone stripping semantics like PG TIMESTAMP.
+    fn text_to_datetime_converts_tz_to_utc() {
+        // REA-6487: MySQL converts timezone-aware literals to session timezone
+        // (assumed UTC) when storing as DATETIME.
         let dt_type = DfType::DateTime {
             subsecond_digits: 0,
         };
+
+        // +08:00 offset: 03:04:05 in +08 = 19:04:05 UTC on the previous day.
         let val = DfValue::from("2020-01-02 03:04:05+08:00")
             .coerce_to(&dt_type, &DfType::DEFAULT_TEXT)
             .unwrap();
-        assert_eq!(val.to_string(), "2020-01-02 03:04:05+08:00");
+        assert_eq!(val.to_string(), "2020-01-01 19:04:05");
+
+        // -05:00 offset: 03:04:05 in -05 = 08:04:05 UTC.
+        let val = DfValue::from("2020-01-02 03:04:05-05:00")
+            .coerce_to(&dt_type, &DfType::DEFAULT_TEXT)
+            .unwrap();
+        assert_eq!(val.to_string(), "2020-01-02 08:04:05");
+
+        // +00:00 offset: already UTC, no change.
+        let val = DfValue::from("2020-01-02 03:04:05+00:00")
+            .coerce_to(&dt_type, &DfType::DEFAULT_TEXT)
+            .unwrap();
+        assert_eq!(val.to_string(), "2020-01-02 03:04:05");
+
+        // No offset: treated as session timezone (UTC), no change.
+        let val_no_tz = DfValue::from("2020-01-02 03:04:05")
+            .coerce_to(&dt_type, &DfType::DEFAULT_TEXT)
+            .unwrap();
+        assert_eq!(val_no_tz.to_string(), "2020-01-02 03:04:05");
+
+        // Subsecond digits + timezone offset + date/year boundary crossing.
+        let dt_type_6 = DfType::DateTime {
+            subsecond_digits: 6,
+        };
+        let val = DfValue::from("2020-01-01 00:30:00.123456+02:00")
+            .coerce_to(&dt_type_6, &DfType::DEFAULT_TEXT)
+            .unwrap();
+        assert_eq!(val.to_string(), "2019-12-31 22:30:00.123456");
     }
 
     #[test]

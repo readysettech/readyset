@@ -47,6 +47,48 @@ select * from dt_test where dt < '2025-01-01 00:00:00'
 2
 2024-01-15 23:59:59
 
+-- REA-6487: Timezone offset in WHERE clause is converted to session tz (UTC).
+-- MySQL: CAST('2020-01-02 03:04:05+08:00' AS DATETIME) = '2020-01-01 19:04:05'
+
+statement ok
+create table dt_tz(id int, dt datetime);
+
+statement ok
+insert into dt_tz values (1, '2020-01-02 03:04:05');
+
+-- No offset: exact match.
+query IZ
+select * from dt_tz where dt = '2020-01-02 03:04:05'
+----
+1
+2020-01-02 03:04:05
+
+-- +00:00 offset: already UTC, matches.
+query IZ
+select * from dt_tz where dt = '2020-01-02 03:04:05+00:00'
+----
+1
+2020-01-02 03:04:05
+
+-- Insert rows at the expected UTC-converted values so we can verify
+-- positive matches, not just absence.
+statement ok
+insert into dt_tz values (2, '2020-01-01 19:04:05'), (3, '2020-01-02 08:04:05');
+
+-- +08:00 offset: converts to 2020-01-01 19:04:05 UTC, matches row 2.
+query IZ
+select * from dt_tz where dt = '2020-01-02 03:04:05+08:00'
+----
+2
+2020-01-01 19:04:05
+
+-- -05:00 offset: converts to 2020-01-02 08:04:05 UTC, matches row 3.
+query IZ
+select * from dt_tz where dt = '2020-01-02 03:04:05-05:00'
+----
+3
+2020-01-02 08:04:05
+
 -- Subsecond precision
 statement ok
 create table dt_micro(id int, dt datetime(6));
