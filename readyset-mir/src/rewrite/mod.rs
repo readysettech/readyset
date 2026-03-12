@@ -7,6 +7,7 @@ mod decorrelate;
 mod filters_to_join_keys;
 mod fuse;
 mod predicate_pushup;
+mod prune_columns;
 mod pull_columns;
 mod pull_keys;
 
@@ -20,8 +21,16 @@ impl MirQuery<'_> {
         filters_to_join_keys::convert_filters_to_join_keys(&mut self, dialect)?;
         add_bogokey::add_bogokey_if_necessary(&mut self)?;
         pull_columns::pull_all_required_columns(&mut self)?;
-        fuse::fuse_project_nodes(&mut self)?;
-        fuse::fuse_filter_nodes(&mut self)?;
+
+        loop {
+            let changed = prune_columns::prune_unused_columns(&mut self)?
+                | fuse::fuse_project_nodes(&mut self)?
+                | fuse::fuse_filter_nodes(&mut self)?;
+            if !changed {
+                break;
+            }
+        }
+
         Ok(self)
     }
 }

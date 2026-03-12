@@ -292,6 +292,28 @@ impl MirGraph {
                     .expect("AliasTable node must have a parent");
                 self.columns(parent)
             }
+            // Union strips table qualifiers from emit columns, so, like
+            // AliasTable, we must return the parent's columns rather than
+            // the unqualified emit entries.  Otherwise demand-driven pruning
+            // sees a mismatch between the unqualified demand and the
+            // table-qualified parent columns, and incorrectly prunes them.
+            MirNodeInner::Union { emit, .. } => {
+                let ancestors: Vec<_> = self.sorted_ancestors(node).collect();
+                let mut columns = vec![];
+                for (i, e) in emit.iter().enumerate() {
+                    if let Some(&ancestor) = ancestors.get(i) {
+                        let parent_cols = self.columns(ancestor);
+                        for ec in e {
+                            for pc in &parent_cols {
+                                if pc.name == ec.name && !columns.contains(pc) {
+                                    columns.push(pc.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                columns
+            }
             _ => self.columns(node),
         }
     }

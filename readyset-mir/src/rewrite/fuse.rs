@@ -10,11 +10,13 @@ use crate::node::{MirNode, MirNodeInner, ProjectExpr};
 use crate::query::MirQuery;
 use crate::Column;
 
+/// Fuse consecutive pairs of candidate nodes in the query.
+/// Returns `true` if at least one pair was fused.
 fn fuse_nodes(
     query: &mut MirQuery<'_>,
     is_candidate: impl Fn(&MirNode) -> bool,
     fuse_into: impl Fn(&mut MirNode, MirNode) -> ReadySetResult<()>,
-) -> ReadySetResult<()> {
+) -> ReadySetResult<bool> {
     let mut nodes_to_fuse = vec![];
     for child_ni in query.topo_nodes() {
         let node = query.get_node(child_ni).unwrap();
@@ -44,6 +46,7 @@ fn fuse_nodes(
         nodes_to_fuse.push((parent_ni, child_ni));
     }
 
+    let mut fused = false;
     for (parent_ni, child_ni) in nodes_to_fuse {
         trace!(
             parent_ni = %parent_ni.index(),
@@ -63,9 +66,10 @@ fn fuse_nodes(
         };
 
         fuse_into(child_node, parent_node)?;
+        fused = true;
     }
 
-    Ok(())
+    Ok(fused)
 }
 
 fn inline_expr_references(expr: &mut Expr, parent_emit: &[ProjectExpr]) {
@@ -101,7 +105,8 @@ fn inline_expr_references(expr: &mut Expr, parent_emit: &[ProjectExpr]) {
 /// in the final query graph.
 ///
 /// [`Project`]: MirNodeInner::Project
-pub(crate) fn fuse_project_nodes(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
+/// Returns `true` if at least one pair of project nodes was fused.
+pub(crate) fn fuse_project_nodes(query: &mut MirQuery<'_>) -> ReadySetResult<bool> {
     fuse_nodes(
         query,
         |node| matches!(node.inner, MirNodeInner::Project { .. }),
@@ -156,7 +161,8 @@ pub(crate) fn fuse_project_nodes(query: &mut MirQuery<'_>) -> ReadySetResult<()>
 ///
 /// [`Project`]: MirNodeInner::Project
 /// [`And`]: BinaryOperator::And
-pub(crate) fn fuse_filter_nodes(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
+/// Returns `true` if at least one pair of filter nodes was fused.
+pub(crate) fn fuse_filter_nodes(query: &mut MirQuery<'_>) -> ReadySetResult<bool> {
     fuse_nodes(
         query,
         |node| matches!(node.inner, MirNodeInner::Filter { .. }),

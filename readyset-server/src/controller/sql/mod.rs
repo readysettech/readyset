@@ -1520,6 +1520,33 @@ impl SqlIncorporator {
                 stack.extend(next_for(node));
             }
         }
+
+        // When a query owns no DF nodes (e.g. all intermediate MIR nodes were
+        // optimized away, leaving only AliasTable/Leaf which produce no DF
+        // nodes), the traversal above has no starting points and misses the
+        // reader.  Find orphaned readers by scanning external nodes for readers
+        // whose name matches a removed relation.
+        if removal_result.dataflow_nodes_to_remove.is_empty() {
+            for ni in mig
+                .dataflow_state
+                .ingredients
+                .externals(petgraph::EdgeDirection::Outgoing)
+            {
+                if mig.dataflow_state.ingredients[ni].is_dropped() {
+                    continue;
+                }
+                if !mig.dataflow_state.ingredients[ni].is_reader() {
+                    continue;
+                }
+                let name = mig.dataflow_state.ingredients[ni].name();
+                if removal_result.relations_removed.contains(name) {
+                    let df = DfNodeIndex::new(ni);
+                    removed.push(df);
+                    mig.changes.drop_node(ni);
+                }
+            }
+        }
+
         removal_result.dataflow_nodes_to_remove.extend(removed);
     }
 
