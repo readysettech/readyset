@@ -450,21 +450,13 @@ impl Verify {
             let rename_passing = self.rename_passing;
             let rename_failing = self.rename_failing;
 
-            let script_timeout = Duration::from_secs(self.script_timeout);
-
             tasks.push(tokio::spawn(async move {
                 let test_started = Instant::now();
 
                 let script_name = script.name().to_string();
 
-                let script_result = tokio::select! {
-                    result = script.run(run_opts) => {
-                        result.with_context(|| format!("Running test script {}", script_name))
-                    }
-                    _ = tokio::time::sleep(script_timeout) => {
-                        Err(anyhow!("Test script {} timed out after {script_timeout:?}", script_name))
-                    }
-                };
+                let script_result = script.run(run_opts).await
+                    .with_context(|| format!("Running test script {}", script_name));
 
                 info!(
                     script_name = %script.name(),
@@ -567,6 +559,7 @@ impl From<&Verify> for RunOptions {
             verbose: verify.verbose,
             no_fail_fast: verify.no_fail_fast,
             query_timeout: Duration::from_secs(verify.query_timeout),
+            script_timeout: Some(Duration::from_secs(verify.script_timeout)),
         }
     }
 }

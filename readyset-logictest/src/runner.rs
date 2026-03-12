@@ -91,6 +91,9 @@ pub struct RunOptions {
     /// be aborted with a timeout error. This prevents hangs when domain threads panic and drop
     /// response channels.
     pub query_timeout: Duration,
+    /// Per-script timeout. If set, the script will stop processing new records after this duration
+    /// and report any accumulated failures (in no-fail-fast mode) along with the timeout.
+    pub script_timeout: Option<Duration>,
 }
 
 impl RunOptions {
@@ -106,6 +109,7 @@ impl RunOptions {
             verbose: false,
             no_fail_fast: false,
             query_timeout: Duration::from_secs(60),
+            script_timeout: None,
         }
     }
 }
@@ -320,6 +324,20 @@ impl TestScript {
         Ok(())
     }
 
+    fn format_query_failures(query_failures: &[(usize, String)]) -> String {
+        query_failures
+            .iter()
+            .map(|(line, msg)| {
+                if *line > 0 {
+                    format!("  line {line}: {msg}")
+                } else {
+                    format!("  {msg}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     pub async fn run_on_database(
         &self,
         opts: &RunOptions,
@@ -347,7 +365,24 @@ impl TestScript {
         // Collected query failures when no_fail_fast is enabled
         let mut query_failures: Vec<(usize, String)> = Vec::new();
 
+        let script_start = Instant::now();
+        let script_deadline = opts.script_timeout.map(|t| script_start + t);
+
         for (line_num, record) in &self.records {
+            if let Some(deadline) = script_deadline {
+                if Instant::now() >= deadline {
+                    let elapsed = script_start.elapsed();
+                    if query_failures.is_empty() {
+                        bail!("Test script timed out after {elapsed:?} with no accumulated errors");
+                    }
+                    let count = query_failures.len();
+                    let details = Self::format_query_failures(&query_failures);
+                    bail!(
+                        "Test script timed out after {elapsed:?} with {count} accumulated query failure(s):\n{details}"
+                    );
+                }
+            }
+
             match record {
                 Record::Statement(stmt) => {
                     if conditional_skip(&stmt.conditionals) {
@@ -478,17 +513,7 @@ impl TestScript {
 
         if !query_failures.is_empty() {
             let count = query_failures.len();
-            let details: String = query_failures
-                .iter()
-                .map(|(line, msg)| {
-                    if *line > 0 {
-                        format!("  line {line}: {msg}")
-                    } else {
-                        format!("  {msg}")
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+            let details = Self::format_query_failures(&query_failures);
             bail!("{count} query failure(s):\n{details}");
         }
 
