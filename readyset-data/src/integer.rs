@@ -222,3 +222,138 @@ where
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn integer_to_mediumint_bounds() {
+        // MediumInt range: -8388608 (-1 << 23) to 8388607 ((1 << 23) - 1)
+        assert_eq!(
+            coerce_integer(-8388608i64, &DfType::MediumInt, &DfType::Unknown).unwrap(),
+            DfValue::Int(-8388608)
+        );
+        assert_eq!(
+            coerce_integer(8388607i64, &DfType::MediumInt, &DfType::Unknown).unwrap(),
+            DfValue::Int(8388607)
+        );
+        coerce_integer(-8388609i64, &DfType::MediumInt, &DfType::Unknown).unwrap_err();
+        coerce_integer(8388608i64, &DfType::MediumInt, &DfType::Unknown).unwrap_err();
+
+        // UnsignedMediumInt range: 0 to 16777215 ((1 << 24) - 1)
+        assert_eq!(
+            coerce_integer(0u64, &DfType::UnsignedMediumInt, &DfType::Unknown).unwrap(),
+            DfValue::UnsignedInt(0)
+        );
+        assert_eq!(
+            coerce_integer(16777215u64, &DfType::UnsignedMediumInt, &DfType::Unknown).unwrap(),
+            DfValue::UnsignedInt(16777215)
+        );
+        coerce_integer(16777216u64, &DfType::UnsignedMediumInt, &DfType::Unknown).unwrap_err();
+    }
+
+    #[test]
+    fn integer_to_date_two_digit_year() {
+        // MySQL: 00-69 → 2000-2069, 70-99 → 1970-1999
+        // YYMMDD format
+        let val = coerce_integer(250115i64, &DfType::Date, &DfType::Unknown).unwrap();
+        assert_eq!(
+            val,
+            DfValue::from(chrono::NaiveDate::from_ymd_opt(2025, 1, 15).unwrap())
+        );
+
+        let val = coerce_integer(700101i64, &DfType::Date, &DfType::Unknown).unwrap();
+        assert_eq!(
+            val,
+            DfValue::from(chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
+        );
+
+        let val = coerce_integer(690101i64, &DfType::Date, &DfType::Unknown).unwrap();
+        assert_eq!(
+            val,
+            DfValue::from(chrono::NaiveDate::from_ymd_opt(2069, 1, 1).unwrap())
+        );
+
+        // Full YYYYMMDD bypasses two-digit year logic
+        let val = coerce_integer(19830905i64, &DfType::Date, &DfType::Unknown).unwrap();
+        assert_eq!(
+            val,
+            DfValue::from(chrono::NaiveDate::from_ymd_opt(1983, 9, 5).unwrap())
+        );
+    }
+
+    #[test]
+    fn integer_to_datetime_two_digit_year() {
+        // YYMMDDhhmmss format
+        let subsecond_digits = 0;
+        let dt_type = DfType::DateTime { subsecond_digits };
+
+        let val = coerce_integer(250115101112i64, &dt_type, &DfType::Unknown).unwrap();
+        assert_eq!(
+            val,
+            DfValue::from(
+                chrono::NaiveDate::from_ymd_opt(2025, 1, 15)
+                    .unwrap()
+                    .and_hms_opt(10, 11, 12)
+                    .unwrap()
+            )
+        );
+
+        let val = coerce_integer(690101120000i64, &dt_type, &DfType::Unknown).unwrap();
+        assert_eq!(
+            val,
+            DfValue::from(
+                chrono::NaiveDate::from_ymd_opt(2069, 1, 1)
+                    .unwrap()
+                    .and_hms_opt(12, 0, 0)
+                    .unwrap()
+            )
+        );
+
+        let val = coerce_integer(700101000000i64, &dt_type, &DfType::Unknown).unwrap();
+        assert_eq!(
+            val,
+            DfValue::from(
+                chrono::NaiveDate::from_ymd_opt(1970, 1, 1)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn integer_to_time() {
+        // hhmmss format
+        let time_type = DfType::Time {
+            subsecond_digits: 0,
+        };
+
+        assert_eq!(
+            coerce_integer(101112i64, &time_type, &DfType::Unknown).unwrap(),
+            DfValue::from(mysql_time::MySqlTime::from_hmsus(true, 10, 11, 12, 0))
+        );
+
+        // Short forms: ss and mmss
+        assert_eq!(
+            coerce_integer(30i64, &time_type, &DfType::Unknown).unwrap(),
+            DfValue::from(mysql_time::MySqlTime::from_hmsus(true, 0, 0, 30, 0))
+        );
+        assert_eq!(
+            coerce_integer(1130i64, &time_type, &DfType::Unknown).unwrap(),
+            DfValue::from(mysql_time::MySqlTime::from_hmsus(true, 0, 11, 30, 0))
+        );
+
+        // Negative integers produce negative times (MySQL supports these)
+        assert_eq!(
+            coerce_integer(-1i64, &time_type, &DfType::Unknown).unwrap(),
+            DfValue::from(mysql_time::MySqlTime::from_hmsus(false, 0, 0, 1, 0))
+        );
+    }
+
+    #[test]
+    fn integer_to_date_negative_rejected() {
+        coerce_integer(-1i64, &DfType::Date, &DfType::Unknown).unwrap_err();
+    }
+}

@@ -4421,6 +4421,60 @@ mod tests {
             );
         }
 
+        #[test]
+        fn bitvector_coerce_to_varbit_unlimited() {
+            let bv = DfValue::BitVector(Arc::new(BitVec::from_elem(100, true)));
+            assert_eq!(
+                bv.coerce_to(&DfType::VarBit(None), &DfType::Unknown)
+                    .unwrap(),
+                DfValue::BitVector(Arc::new(BitVec::from_elem(100, true)))
+            );
+        }
+
+        #[test]
+        fn bitvector_coerce_to_varbit_within_limit() {
+            let bv = DfValue::BitVector(Arc::new(BitVec::from_elem(8, true)));
+            assert_eq!(
+                bv.coerce_to(&DfType::VarBit(Some(10)), &DfType::Unknown)
+                    .unwrap(),
+                DfValue::BitVector(Arc::new(BitVec::from_elem(8, true)))
+            );
+        }
+
+        #[test]
+        fn bitvector_coerce_to_varbit_exceeds_limit() {
+            let bv = DfValue::BitVector(Arc::new(BitVec::from_elem(16, true)));
+            bv.coerce_to(&DfType::VarBit(Some(8)), &DfType::Unknown)
+                .unwrap_err();
+        }
+
+        #[test]
+        fn bitvector_coerce_to_varbit_exact_limit() {
+            // Exactly at the limit should succeed
+            let bv = DfValue::BitVector(Arc::new(BitVec::from_elem(8, true)));
+            assert_eq!(
+                bv.coerce_to(&DfType::VarBit(Some(8)), &DfType::Unknown)
+                    .unwrap(),
+                DfValue::BitVector(Arc::new(BitVec::from_elem(8, true)))
+            );
+        }
+
+        #[test]
+        fn bitvector_coerce_to_bit() {
+            let bv = DfValue::BitVector(Arc::new(BitVec::from_elem(8, true)));
+            assert_eq!(
+                bv.coerce_to(&DfType::Bit(8), &DfType::Unknown).unwrap(),
+                DfValue::BitVector(Arc::new(BitVec::from_elem(8, true)))
+            );
+        }
+
+        #[test]
+        fn bitvector_coerce_to_bit_length_mismatch_currently_allowed() {
+            // TODO: Bit(n) should reject vectors of length != n (see TODO in coerce_to)
+            let bv = DfValue::BitVector(Arc::new(BitVec::from_elem(4, true)));
+            bv.coerce_to(&DfType::Bit(8), &DfType::Unknown).unwrap();
+        }
+
         macro_rules! check_comparison {
             ($a:expr, $ty:expr, invalid $(,)?) => {
                 match $a.coerce_for_comparison(&$ty) {
