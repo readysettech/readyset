@@ -2388,6 +2388,55 @@ mod tests {
         })
     }
 
+    #[test]
+    fn is_truthy_nonzero_values() {
+        let cases = vec![
+            DfValue::Int(1),
+            DfValue::UnsignedInt(1),
+            DfValue::Float(1.0),
+            DfValue::Double(1.0),
+            DfValue::from("hello"),
+            DfValue::TinyText(TinyText::from_arr(b"hi")),
+            DfValue::TimestampTz("2024-01-01 00:00:01".parse().unwrap()),
+            DfValue::Time(MySqlTime::from_microseconds(1_000_000)),
+            DfValue::ByteArray(Arc::new(vec![1])),
+            DfValue::Numeric(Arc::new(Decimal::new(1, 0))),
+            DfValue::BitVector(Arc::new(BitVec::from_elem(1, true))),
+            DfValue::from(vec![DfValue::Int(1)]),
+            DfValue::PassThrough(Arc::new(PassThrough {
+                ty: Type::BOOL,
+                format: PassThroughFormat::Binary,
+                data: vec![1].into(),
+            })),
+        ];
+        for val in &cases {
+            assert!(val.is_truthy(), "{val:?} should be truthy");
+        }
+    }
+
+    #[test]
+    fn is_truthy_falsy_values() {
+        let cases = vec![
+            DfValue::None,
+            DfValue::Default,
+            DfValue::Max,
+            DfValue::Int(0),
+            DfValue::UnsignedInt(0),
+            DfValue::Float(0.0),
+            DfValue::Double(0.0),
+            DfValue::from(""),
+            DfValue::TinyText(TinyText::from_arr(b"")),
+            DfValue::TimestampTz(TimestampTz::zero()),
+            DfValue::Time(MySqlTime::from_microseconds(0)),
+            DfValue::ByteArray(Arc::new(vec![])),
+            DfValue::Numeric(Arc::new(Decimal::new(0, 0))),
+            DfValue::BitVector(Arc::new(BitVec::new())),
+        ];
+        for val in &cases {
+            assert!(!val.is_truthy(), "{val:?} should be falsy");
+        }
+    }
+
     eq_laws!(DfValue);
     hash_laws!(DfValue);
     ord_laws!(
