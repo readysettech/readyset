@@ -150,12 +150,18 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
             // As a number in hhmmss format, provided that it makes sense as a time. For
             // example, 101112 is understood as '10:11:12'. The following
             // alternative formats are also understood: ss, mmss, or hhmmss.
-            let ms = (val.fract() * 1000000.0).round() as u64;
-            let val = val.trunc() as u64;
-            let hh = val / 1_00_00;
-            let mm = val / 1_00 % 1_00;
-            let ss = val % 1_00;
-            Ok(mysql_time::MySqlTime::from_hmsus(true, hh as _, mm as _, ss as _, ms).into())
+            // MySQL supports negative times (e.g. -101112.0 → -10:11:12).
+            let positive = val >= 0.0;
+            let abs_val = val.abs();
+            let ms = (abs_val.fract() * 1_000_000.0).round() as u64;
+            let whole = abs_val.trunc() as u64;
+            let hh = whole / 1_00_00;
+            let mm = whole / 1_00 % 1_00;
+            let ss = whole % 1_00;
+            if mm >= 60 || ss >= 60 {
+                return Err(err("invalid time: minutes or seconds out of range"));
+            }
+            Ok(mysql_time::MySqlTime::from_hmsus(positive, hh as _, mm as _, ss as _, ms).into())
         }
 
         DfType::Date
@@ -613,5 +619,203 @@ mod tests {
         DfValue::Double(16777215.51)
             .coerce_to(&DfType::UnsignedMediumInt, &DfType::Unknown)
             .unwrap_err();
+    }
+
+    #[test]
+    fn float_to_time() {
+        // 101112 = 10:11:12
+        assert_eq!(
+            DfValue::Double(101112.0)
+                .coerce_to(
+                    &DfType::Time {
+                        subsecond_digits: 0
+                    },
+                    &DfType::Unknown
+                )
+                .unwrap(),
+            DfValue::from(mysql_time::MySqlTime::from_hmsus(true, 10, 11, 12, 0))
+        );
+
+        // 101112.5 = 10:11:12.500000
+        assert_eq!(
+            DfValue::Double(101112.5)
+                .coerce_to(
+                    &DfType::Time {
+                        subsecond_digits: 6
+                    },
+                    &DfType::Unknown
+                )
+                .unwrap(),
+            DfValue::from(mysql_time::MySqlTime::from_hmsus(true, 10, 11, 12, 500000))
+        );
+
+        // Short forms: ss and mmss
+        assert_eq!(
+            DfValue::Double(30.0)
+                .coerce_to(
+                    &DfType::Time {
+                        subsecond_digits: 0
+                    },
+                    &DfType::Unknown
+                )
+                .unwrap(),
+            DfValue::from(mysql_time::MySqlTime::from_hmsus(true, 0, 0, 30, 0))
+        );
+        assert_eq!(
+            DfValue::Double(1130.0)
+                .coerce_to(
+                    &DfType::Time {
+                        subsecond_digits: 0
+                    },
+                    &DfType::Unknown
+                )
+                .unwrap(),
+            DfValue::from(mysql_time::MySqlTime::from_hmsus(true, 0, 11, 30, 0))
+        );
+
+        // Negative float: MySQL CAST(-101112.0 AS TIME) → -10:11:12
+        assert_eq!(
+            DfValue::Double(-101112.0)
+                .coerce_to(
+                    &DfType::Time {
+                        subsecond_digits: 0
+                    },
+                    &DfType::Unknown
+                )
+                .unwrap(),
+            DfValue::from(mysql_time::MySqlTime::from_hmsus(false, 10, 11, 12, 0))
+        );
+
+        // Negative with fractional: -101112.5 → -10:11:12.500000
+        assert_eq!(
+            DfValue::Double(-101112.5)
+                .coerce_to(
+                    &DfType::Time {
+                        subsecond_digits: 6
+                    },
+                    &DfType::Unknown
+                )
+                .unwrap(),
+            DfValue::from(mysql_time::MySqlTime::from_hmsus(false, 10, 11, 12, 500000))
+        );
+
+        // Out-of-range: 61 seconds is invalid, MySQL returns NULL
+        DfValue::Double(101161.0)
+            .coerce_to(
+                &DfType::Time {
+                    subsecond_digits: 0,
+                },
+                &DfType::Unknown,
+            )
+            .unwrap_err();
+
+        // Out-of-range: 61 minutes
+        DfValue::Double(106100.0)
+            .coerce_to(
+                &DfType::Time {
+                    subsecond_digits: 0,
+                },
+                &DfType::Unknown,
+            )
+            .unwrap_err();
+    }
+
+    #[test]
+    fn float_to_bool() {
+        assert_eq!(
+            DfValue::Double(0.0)
+                .coerce_to(&DfType::Bool, &DfType::Unknown)
+                .unwrap(),
+            DfValue::from(false)
+        );
+        assert_eq!(
+            DfValue::Double(1.0)
+                .coerce_to(&DfType::Bool, &DfType::Unknown)
+                .unwrap(),
+            DfValue::from(true)
+        );
+        assert_eq!(
+            DfValue::Double(-3.17)
+                .coerce_to(&DfType::Bool, &DfType::Unknown)
+                .unwrap(),
+            DfValue::from(true)
+        );
+    }
+
+    #[test]
+    fn decimal_to_bool() {
+        assert_eq!(
+            coerce_decimal(&Decimal::new(0, 0), &DfType::Bool, &DfType::Unknown).unwrap(),
+            DfValue::from(false)
+        );
+        assert_eq!(
+            coerce_decimal(&Decimal::new(1, 0), &DfType::Bool, &DfType::Unknown).unwrap(),
+            DfValue::from(true)
+        );
+        assert_eq!(
+            coerce_decimal(&Decimal::new(-500, 2), &DfType::Bool, &DfType::Unknown).unwrap(),
+            DfValue::from(true)
+        );
+    }
+
+    #[test]
+    fn decimal_to_mediumint_bounds() {
+        // MediumInt range: -8388608 (-1 << 23) to 8388607 ((1 << 23) - 1)
+        assert_eq!(
+            coerce_decimal(
+                &Decimal::new(-8388608, 0),
+                &DfType::MediumInt,
+                &DfType::Unknown
+            )
+            .unwrap(),
+            DfValue::Int(-8388608)
+        );
+        assert_eq!(
+            coerce_decimal(
+                &Decimal::new(8388607, 0),
+                &DfType::MediumInt,
+                &DfType::Unknown
+            )
+            .unwrap(),
+            DfValue::Int(8388607)
+        );
+        coerce_decimal(
+            &Decimal::new(-8388609, 0),
+            &DfType::MediumInt,
+            &DfType::Unknown,
+        )
+        .unwrap_err();
+        coerce_decimal(
+            &Decimal::new(8388608, 0),
+            &DfType::MediumInt,
+            &DfType::Unknown,
+        )
+        .unwrap_err();
+
+        // UnsignedMediumInt range: 0 to 16777215 ((1 << 24) - 1)
+        assert_eq!(
+            coerce_decimal(
+                &Decimal::new(0, 0),
+                &DfType::UnsignedMediumInt,
+                &DfType::Unknown
+            )
+            .unwrap(),
+            DfValue::UnsignedInt(0)
+        );
+        assert_eq!(
+            coerce_decimal(
+                &Decimal::new(16777215, 0),
+                &DfType::UnsignedMediumInt,
+                &DfType::Unknown
+            )
+            .unwrap(),
+            DfValue::UnsignedInt(16777215)
+        );
+        coerce_decimal(
+            &Decimal::new(16777216, 0),
+            &DfType::UnsignedMediumInt,
+            &DfType::Unknown,
+        )
+        .unwrap_err();
     }
 }

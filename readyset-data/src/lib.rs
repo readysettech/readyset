@@ -4087,6 +4087,48 @@ mod tests {
                     .unwrap(),
                 DfValue::from(MySqlTime::from_hmsus(true, 10, 11, 12, 0))
             );
+
+            // Negative integer: MySQL CAST(-101112 AS TIME) → -10:11:12
+            assert_eq!(
+                DfValue::from(-101112i64)
+                    .coerce_to(&DfType::Time { subsecond_digits }, &DfType::Unknown)
+                    .unwrap(),
+                DfValue::from(MySqlTime::from_hmsus(false, 10, 11, 12, 0))
+            );
+
+            // Negative small values: CAST(-1 AS TIME) → -00:00:01
+            assert_eq!(
+                DfValue::from(-1i64)
+                    .coerce_to(&DfType::Time { subsecond_digits }, &DfType::Unknown)
+                    .unwrap(),
+                DfValue::from(MySqlTime::from_hmsus(false, 0, 0, 1, 0))
+            );
+
+            // CAST(-100 AS TIME) → -00:01:00
+            assert_eq!(
+                DfValue::from(-100i64)
+                    .coerce_to(&DfType::Time { subsecond_digits }, &DfType::Unknown)
+                    .unwrap(),
+                DfValue::from(MySqlTime::from_hmsus(false, 0, 1, 0, 0))
+            );
+
+            // Negative zero: CAST(-0 AS TIME) → 00:00:00 (positive)
+            assert_eq!(
+                DfValue::from(0i64)
+                    .coerce_to(&DfType::Time { subsecond_digits }, &DfType::Unknown)
+                    .unwrap(),
+                DfValue::from(MySqlTime::from_hmsus(true, 0, 0, 0, 0))
+            );
+
+            // Negative with invalid seconds: CAST(-101161 AS TIME) → NULL
+            DfValue::from(-101161i64)
+                .coerce_to(&DfType::Time { subsecond_digits }, &DfType::Unknown)
+                .unwrap_err();
+
+            // Negative with invalid minutes: CAST(-106100 AS TIME) → NULL
+            DfValue::from(-106100i64)
+                .coerce_to(&DfType::Time { subsecond_digits }, &DfType::Unknown)
+                .unwrap_err();
         }
 
         #[test]

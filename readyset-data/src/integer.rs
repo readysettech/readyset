@@ -179,11 +179,17 @@ where
             // As a number in hhmmss format, provided that it makes sense as a time. For example,
             // 101112 is understood as '10:11:12'. The following alternative formats are also
             // understood: ss, mmss, or hhmmss.
-            let val = u64::try_from(val).map_err(|_| err())?;
+            // MySQL supports negative times (e.g. -101112 → -10:11:12).
+            let ival = i64::try_from(val).map_err(|_| err())?;
+            let positive = ival >= 0;
+            let val = ival.unsigned_abs();
             let hh = val / 1_00_00;
             let mm = val / 1_00 % 1_00;
             let ss = val % 1_00;
-            Ok(mysql_time::MySqlTime::from_hmsus(true, hh as _, mm as _, ss as _, 0).into())
+            if mm >= 60 || ss >= 60 {
+                return Err(err());
+            }
+            Ok(mysql_time::MySqlTime::from_hmsus(positive, hh as _, mm as _, ss as _, 0).into())
         }
 
         DfType::Numeric { .. } => Ok(DfValue::Numeric(Arc::new(val.into()))),
