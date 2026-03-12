@@ -4442,32 +4442,97 @@ mod tests {
         }
 
         #[test]
-        fn float_and_numeric_conversions() {
-            // check_comparison!(DfValue::Float(42.1), DfType::BigInt, invalid);
-            // check_comparison!(DfValue::Double(42.1), DfType::BigInt, invalid);
+        fn numeric_coerce_for_comparison_rejects_fractional() {
             check_comparison!(
                 DfValue::Numeric(Decimal::try_from(42.1).unwrap().into()),
                 DfType::BigInt,
                 invalid,
             );
-            // check_comparison!(
-            //     DfValue::Numeric(Decimal::try_from(42.0).unwrap().into()),
-            //     DfType::BigInt,
-            //     DfValue::Int(42),
-            //     DfValue::UnsignedInt(42),
-            // );
-            // check_comparison!(
-            //     DfValue::Float(42.0),
-            //     DfType::BigInt,
-            //     DfValue::Int(42),
-            //     DfValue::UnsignedInt(42),
-            // );
-            // check_comparison!(
-            //     DfValue::Double(42.0),
-            //     DfType::BigInt,
-            //     DfValue::Int(42),
-            //     DfValue::UnsignedInt(42),
-            // );
+        }
+
+        #[test]
+        fn float_coerce_for_comparison_rejects_fractional() {
+            // Fractional floats must be rejected when comparing to int types,
+            // not silently rounded via coerce_to
+            check_comparison!(DfValue::Float(42.1), DfType::BigInt, invalid);
+            check_comparison!(DfValue::Double(42.1), DfType::BigInt, invalid);
+            check_comparison!(DfValue::Float(42.1), DfType::Int, invalid);
+            check_comparison!(DfValue::Double(42.1), DfType::TinyInt, invalid);
+            check_comparison!(DfValue::Float(42.1), DfType::UnsignedBigInt, invalid);
+            check_comparison!(DfValue::Double(42.1), DfType::UnsignedInt, invalid);
+        }
+
+        #[test]
+        fn float_coerce_for_comparison_allows_whole() {
+            check_comparison!(DfValue::Float(42.0), DfType::BigInt, DfValue::Int(42),);
+            check_comparison!(DfValue::Double(42.0), DfType::BigInt, DfValue::Int(42),);
+            check_comparison!(
+                DfValue::Float(42.0),
+                DfType::UnsignedBigInt,
+                DfValue::UnsignedInt(42),
+            );
+            check_comparison!(
+                DfValue::Double(42.0),
+                DfType::UnsignedInt,
+                DfValue::UnsignedInt(42),
+            );
+        }
+
+        #[test]
+        fn numeric_coerce_for_comparison_allows_whole() {
+            check_comparison!(
+                DfValue::Numeric(Decimal::try_from(42.0).unwrap().into()),
+                DfType::BigInt,
+                DfValue::Int(42),
+            );
+            check_comparison!(
+                DfValue::Numeric(Decimal::try_from(42.0).unwrap().into()),
+                DfType::UnsignedBigInt,
+                DfValue::UnsignedInt(42),
+            );
+        }
+
+        #[test]
+        fn text_coerce_for_comparison_rejects_fractional() {
+            check_comparison!(DfValue::from("3.14"), DfType::BigInt, invalid);
+            check_comparison!(
+                DfValue::TinyText(TinyText::from_arr(b"3.14")),
+                DfType::BigInt,
+                invalid,
+            );
+        }
+
+        #[test]
+        fn text_coerce_for_comparison_allows_whole() {
+            check_comparison!(DfValue::from("42"), DfType::BigInt, DfValue::Int(42));
+            check_comparison!(
+                DfValue::TinyText(TinyText::from_arr(b"42")),
+                DfType::BigInt,
+                DfValue::Int(42),
+            );
+        }
+
+        #[test]
+        fn byte_array_coerce_for_comparison_binary() {
+            // ByteArray → Binary should return as-is without padding
+            let bytes = DfValue::ByteArray(Arc::new(vec![1, 2, 3]));
+            check_comparison!(bytes.clone(), DfType::Binary(10), bytes.clone());
+            check_comparison!(bytes.clone(), DfType::VarBinary(10), bytes);
+        }
+
+        #[test]
+        fn text_coerce_for_comparison_binary() {
+            // Text → Binary should convert to raw bytes
+            check_comparison!(
+                DfValue::from("abc"),
+                DfType::Binary(10),
+                DfValue::ByteArray(Arc::new(b"abc".to_vec())),
+            );
+            check_comparison!(
+                DfValue::TinyText(TinyText::from_arr(b"abc")),
+                DfType::VarBinary(10),
+                DfValue::ByteArray(Arc::new(b"abc".to_vec())),
+            );
         }
 
         #[test]
