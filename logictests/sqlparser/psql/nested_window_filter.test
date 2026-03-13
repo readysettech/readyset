@@ -1,0 +1,152 @@
+# REA-6496: nested ROW_NUMBER() window functions with JOIN and CROSS JOIN.
+# The outer WHERE __rn <= 1 filter must bind to the outer window's __rn,
+# not the inner window's pass-through __rn (which is always 1 after filtering).
+
+statement ok
+CREATE TABLE rea6496c_dt3 (test_integer2 INT, rownum INT);
+
+statement ok
+INSERT INTO rea6496c_dt3 VALUES
+  (10, 1), (10, 2), (10, 3),
+  (20, 1), (20, 2),
+  (30, 1);
+
+statement ok
+CREATE TABLE rea6496c_dt (test_integer INT);
+
+# Duplicate values in join table: 10 appears 3 times, 20 twice, 30 once.
+statement ok
+INSERT INTO rea6496c_dt VALUES
+  (10), (10), (10),
+  (20), (20),
+  (30);
+
+statement ok
+CREATE TABLE rea6496c_s (x INT);
+
+statement ok
+INSERT INTO rea6496c_s VALUES (1), (2);
+
+# Inner: PARTITION BY test_integer2, one row per group -> 3 rows.
+# Middle: JOIN with dt (duplicates!) -> 3+2+1 = 6 rows. ROW_NUMBER 1-6.
+# Outer: CROSS JOIN with s (2 rows), WHERE __rn <= 1 -> 1 × 2 = 2 rows.
+query I rowsort
+SELECT
+    "INNER"."test_integer2" AS "t2"
+FROM
+    (SELECT
+            "INNER"."test_integer2" AS "test_integer2",
+            ROW_NUMBER() OVER(
+                ORDER BY
+                    "INNER"."test_integer2" ASC NULLS LAST
+            ) AS "__rn"
+        FROM
+            (SELECT
+                    "dt"."test_integer2" AS "test_integer2",
+                    "dt"."rownum" AS "rownum",
+                    ROW_NUMBER() OVER(
+                        PARTITION BY "dt"."test_integer2"
+                        ORDER BY
+                            "dt"."rownum" ASC NULLS LAST
+                    ) AS "__rn"
+                FROM
+                    "rea6496c_dt3" AS "dt"
+            ) AS "INNER"
+            INNER JOIN "rea6496c_dt" ON (
+                "INNER"."test_integer2" = "rea6496c_dt"."test_integer"
+            )
+        WHERE
+            ("INNER"."__rn" <= 1)
+    ) AS "INNER"
+    CROSS JOIN "rea6496c_s"
+WHERE
+    ("INNER"."__rn" <= 1)
+ORDER BY
+    1 NULLS LAST;
+----
+10
+10
+
+# Sanity check: without outer filter, all join-multiplied rows × 2 = 12.
+query I rowsort
+SELECT
+    "INNER"."test_integer2" AS "t2"
+FROM
+    (SELECT
+            "INNER"."test_integer2" AS "test_integer2",
+            ROW_NUMBER() OVER(
+                ORDER BY
+                    "INNER"."test_integer2" ASC NULLS LAST
+            ) AS "__rn"
+        FROM
+            (SELECT
+                    "dt"."test_integer2" AS "test_integer2",
+                    "dt"."rownum" AS "rownum",
+                    ROW_NUMBER() OVER(
+                        PARTITION BY "dt"."test_integer2"
+                        ORDER BY
+                            "dt"."rownum" ASC NULLS LAST
+                    ) AS "__rn"
+                FROM
+                    "rea6496c_dt3" AS "dt"
+            ) AS "INNER"
+            INNER JOIN "rea6496c_dt" ON (
+                "INNER"."test_integer2" = "rea6496c_dt"."test_integer"
+            )
+        WHERE
+            ("INNER"."__rn" <= 1)
+    ) AS "INNER"
+    CROSS JOIN "rea6496c_s"
+ORDER BY
+    1 NULLS LAST;
+----
+10
+10
+10
+10
+10
+10
+20
+20
+20
+20
+30
+30
+
+# Discriminator: outer __rn = 2 should give different value than __rn = 1.
+query I rowsort
+SELECT
+    "INNER"."test_integer2" AS "t2"
+FROM
+    (SELECT
+            "INNER"."test_integer2" AS "test_integer2",
+            ROW_NUMBER() OVER(
+                ORDER BY
+                    "INNER"."test_integer2" ASC NULLS LAST
+            ) AS "__rn"
+        FROM
+            (SELECT
+                    "dt"."test_integer2" AS "test_integer2",
+                    "dt"."rownum" AS "rownum",
+                    ROW_NUMBER() OVER(
+                        PARTITION BY "dt"."test_integer2"
+                        ORDER BY
+                            "dt"."rownum" ASC NULLS LAST
+                    ) AS "__rn"
+                FROM
+                    "rea6496c_dt3" AS "dt"
+            ) AS "INNER"
+            INNER JOIN "rea6496c_dt" ON (
+                "INNER"."test_integer2" = "rea6496c_dt"."test_integer"
+            )
+        WHERE
+            ("INNER"."__rn" <= 1)
+    ) AS "INNER"
+    CROSS JOIN "rea6496c_s"
+WHERE
+    ("INNER"."__rn" = 2)
+ORDER BY
+    1 NULLS LAST;
+----
+10
+10

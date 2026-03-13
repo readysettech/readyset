@@ -3,15 +3,13 @@
 # column_id_for_column resolved the shadowed __rn to the wrong (inner,
 # pass-through) column after predicate_pushup.
 #
-# MySQL rejects SELECT *, ROW_NUMBER() ... AS __rn when the subquery already
-# has a column named __rn ("Duplicate column name '__rn'"). PostgreSQL allows
-# duplicate column names in derived tables, so these tests are Postgres-only.
+# These queries use explicit column lists instead of SELECT * because
+# PostgreSQL allows duplicate column names in derived tables but ReadySet's
+# implied_tables pass requires unique column names per table.
 
-skipif mysql
 statement ok
 CREATE TABLE rea6338 (id INT PRIMARY KEY, group_id INT, val INT);
 
-skipif mysql
 statement ok
 INSERT INTO rea6338 VALUES
   (1, 1, 10), (2, 1, 20), (3, 1, 30),
@@ -20,14 +18,14 @@ INSERT INTO rea6338 VALUES
 
 # Inner level: ROW_NUMBER per group, filter to top-1 per group -> 3 rows.
 # Outer level: ROW_NUMBER over those 3, filter to top-1 overall -> 1 row.
-# Columns: id, group_id, val, __rn (inner, always 1), __rn (outer)
-skipif mysql
-query IIIII
-SELECT * FROM (
-    SELECT *, ROW_NUMBER() OVER (ORDER BY val) AS __rn
+query IIII
+SELECT id, group_id, val, __rn FROM (
+    SELECT id, group_id, val,
+           ROW_NUMBER() OVER (ORDER BY val) AS __rn
     FROM (
-        SELECT * FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY val) AS __rn
+        SELECT id, group_id, val FROM (
+            SELECT id, group_id, val,
+                   ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY val) AS __rn
             FROM rea6338
         ) level0
         WHERE __rn <= 1
@@ -39,18 +37,18 @@ WHERE __rn <= 1;
 1
 10
 1
-1
 
-# Outer __rn = 2: returns 1 row where inner __rn = 1 but outer __rn = 2.
+# Outer __rn = 2: returns 1 row where outer __rn = 2.
 # This discriminates between the two __rn columns — if they were confused,
 # the filter would match the wrong column.
-skipif mysql
-query IIIII
-SELECT * FROM (
-    SELECT *, ROW_NUMBER() OVER (ORDER BY val) AS __rn
+query IIII
+SELECT id, group_id, val, __rn FROM (
+    SELECT id, group_id, val,
+           ROW_NUMBER() OVER (ORDER BY val) AS __rn
     FROM (
-        SELECT * FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY val) AS __rn
+        SELECT id, group_id, val FROM (
+            SELECT id, group_id, val,
+                   ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY val) AS __rn
             FROM rea6338
         ) level0
         WHERE __rn <= 1
@@ -61,17 +59,17 @@ WHERE __rn = 2;
 4
 2
 40
-1
 2
 
 # Same structure but with <= 2 at the outer level -> 2 rows.
-skipif mysql
-query IIIII rowsort
-SELECT * FROM (
-    SELECT *, ROW_NUMBER() OVER (ORDER BY val) AS __rn
+query IIII rowsort
+SELECT id, group_id, val, __rn FROM (
+    SELECT id, group_id, val,
+           ROW_NUMBER() OVER (ORDER BY val) AS __rn
     FROM (
-        SELECT * FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY val) AS __rn
+        SELECT id, group_id, val FROM (
+            SELECT id, group_id, val,
+                   ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY val) AS __rn
             FROM rea6338
         ) level0
         WHERE __rn <= 1
@@ -83,21 +81,20 @@ WHERE __rn <= 2;
 1
 10
 1
-1
 4
 2
 40
-1
 2
 
 # Verify that without the outer filter we get all 3 rows (one per group).
-skipif mysql
-query IIIII rowsort
-SELECT * FROM (
-    SELECT *, ROW_NUMBER() OVER (ORDER BY val) AS __rn
+query IIII rowsort
+SELECT id, group_id, val, __rn FROM (
+    SELECT id, group_id, val,
+           ROW_NUMBER() OVER (ORDER BY val) AS __rn
     FROM (
-        SELECT * FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY val) AS __rn
+        SELECT id, group_id, val FROM (
+            SELECT id, group_id, val,
+                   ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY val) AS __rn
             FROM rea6338
         ) level0
         WHERE __rn <= 1
@@ -108,14 +105,11 @@ SELECT * FROM (
 1
 10
 1
-1
 4
 2
 40
-1
 2
 7
 3
 70
-1
 3
