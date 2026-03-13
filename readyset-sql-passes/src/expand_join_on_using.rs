@@ -107,8 +107,12 @@ impl<'a, C: StarExpansionContext> FieldNamesCache<'a, C> {
             TableExpr {
                 inner: TableExprInner::Subquery(_),
                 alias: Some(alias),
-                // TODO: Support derived table aliases, if needed
-                column_aliases: _,
+                ..
+            } => FieldKey::Alias(alias.clone()),
+            TableExpr {
+                inner: TableExprInner::Values { .. },
+                alias: Some(alias),
+                ..
             } => FieldKey::Alias(alias.clone()),
             TableExpr {
                 inner: TableExprInner::Table(table),
@@ -150,6 +154,10 @@ impl<'a, C: StarExpansionContext> FieldNamesCache<'a, C> {
                     .map(|cols| cols.into_iter().collect::<Vec<_>>())
                 {
                     columns
+                } else if let Some(field_names) = self.subquery_schemas.get(&r.name) {
+                    // CTE references appear as plain table names but their schemas
+                    // are registered in subquery_schemas by name.
+                    field_names.clone()
                 } else {
                     unsupported!(
                         "Could not find column names for table {} ",
@@ -536,5 +544,121 @@ where
         let expected = r#""#; // expect rewrite error
 
         test_it("test7", original, expected);
+    }
+
+    // VALUES clause with USING should resolve column aliases
+    #[test]
+    fn test_values_using() {
+        let original = r#"
+            SELECT c.product_category, s.sname
+            FROM (VALUES ('London'), ('Paris')) AS c(city)
+            JOIN s USING (city)
+        "#;
+
+        let expected = r#"
+            SELECT "c"."product_category", "s"."sname"
+            FROM (VALUES ('London'), ('Paris')) AS "c"("city")
+            JOIN "s" ON ("c"."city" = "s"."city")
+        "#;
+
+        test_it("test_values_using", original, expected);
+    }
+
+    // Subquery with explicit column aliases should use those for USING resolution
+    #[test]
+    fn test_subquery_column_aliases_using() {
+        let original = r#"
+            SELECT t.sn, s.sname
+            FROM (SELECT spj.sn, spj.qty FROM spj WHERE spj.qty > 100) AS t(sn, amount)
+            JOIN s USING (sn)
+        "#;
+
+        let expected = r#"
+            SELECT "t"."sn", "s"."sname"
+            FROM (SELECT "spj"."sn", "spj"."qty" FROM "spj" WHERE ("spj"."qty" > 100)) AS "t"("sn", "amount")
+            JOIN "s" ON ("t"."sn" = "s"."sn")
+        "#;
+
+        test_it("test_subquery_column_aliases_using", original, expected);
+    }
+
+    // Subquery column alias renames a field; USING should match the alias, not the original name
+    #[test]
+    fn test_subquery_column_alias_rename_using() {
+        let original = r#"
+            SELECT t.city, s.sname
+            FROM (SELECT p.city FROM p WHERE p.weight = 17) AS t(city)
+            JOIN s USING (city)
+        "#;
+
+        let expected = r#"
+            SELECT "t"."city", "s"."sname"
+            FROM (SELECT "p"."city" FROM "p" WHERE ("p"."weight" = 17)) AS "t"("city")
+            JOIN "s" ON ("t"."city" = "s"."city")
+        "#;
+
+        test_it(
+            "test_subquery_column_alias_rename_using",
+            original,
+            expected,
+        );
+    }
+
+    // VALUES with multiple columns and USING
+    #[test]
+    fn test_values_multi_column_using() {
+        let original = r#"
+            SELECT v.sn, s.sname
+            FROM (VALUES ('S1', 10), ('S2', 20)) AS v(sn, qty)
+            JOIN s USING (sn)
+        "#;
+
+        let expected = r#"
+            SELECT "v"."sn", "s"."sname"
+            FROM (VALUES ('S1', 10), ('S2', 20)) AS "v"("sn", "qty")
+            JOIN "s" ON ("v"."sn" = "s"."sn")
+        "#;
+
+        test_it("test_values_multi_column_using", original, expected);
+    }
+
+    // CTE referenced as a plain table in JOIN ... USING should resolve columns
+    #[test]
+    fn test_cte_using() {
+        let original = r#"
+            WITH filtered AS (SELECT s.sn, s.city FROM s WHERE s.status > 10)
+            SELECT p.pname, filtered.city
+            FROM p
+            JOIN filtered USING (sn)
+        "#;
+
+        let expected = r#"
+            WITH "filtered" AS (SELECT "s"."sn", "s"."city" FROM "s" WHERE ("s"."status" > 10))
+            SELECT "p"."pname", "filtered"."city"
+            FROM "p"
+            JOIN "filtered" ON ("p"."sn" = "filtered"."sn")
+        "#;
+
+        test_it("test_cte_using", original, expected);
+    }
+
+    // CTE + VALUES with USING
+    #[test]
+    fn test_cte_values_using() {
+        let original = r#"
+            WITH category_filter AS (SELECT DISTINCT s.city FROM s WHERE s.status > 10)
+            SELECT c.city, CASE WHEN f.city IS NULL THEN 0 ELSE 1 END AS available
+            FROM (VALUES ('London'), ('Paris'), ('Athens')) AS c(city)
+            LEFT JOIN category_filter f USING (city)
+        "#;
+
+        let expected = r#"
+            WITH "category_filter" AS (SELECT DISTINCT "s"."city" FROM "s" WHERE ("s"."status" > 10))
+            SELECT "c"."city", CASE WHEN ("f"."city" IS NULL) THEN 0 ELSE 1 END AS "available"
+            FROM (VALUES ('London'), ('Paris'), ('Athens')) AS "c"("city")
+            LEFT JOIN "category_filter" AS "f" ON ("c"."city" = "f"."city")
+        "#;
+
+        test_it("test_cte_values_using", original, expected);
     }
 }

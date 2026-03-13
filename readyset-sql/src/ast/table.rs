@@ -301,10 +301,6 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
             }
             // Regular derived table (subquery)
             TableFactor::Derived {
-                alias: Some(TableAlias { columns, .. }),
-                ..
-            } if !columns.is_empty() => unsupported!("Table alias with column renaming")?,
-            TableFactor::Derived {
                 subquery,
                 alias,
                 lateral,
@@ -312,10 +308,20 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
             } => match subquery.try_into_dialect(dialect)? {
                 crate::ast::SqlQuery::Select(mut subselect) => {
                     subselect.lateral = lateral;
+                    let (table_alias, column_aliases) = match alias {
+                        Some(TableAlias { name, columns, .. }) => (
+                            Some(name.into_dialect(dialect)),
+                            columns
+                                .into_iter()
+                                .map(|c| c.name.into_dialect(dialect))
+                                .collect(),
+                        ),
+                        None => (None, Vec::new()),
+                    };
                     Ok(Self {
                         inner: TableExprInner::Subquery(Box::new(subselect)),
-                        alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)),
-                        column_aliases: Vec::new(),
+                        alias: table_alias,
+                        column_aliases,
                     })
                 }
                 _ => {

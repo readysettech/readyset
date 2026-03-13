@@ -128,13 +128,18 @@ pub(crate) fn subquery_schemas<'a>(
         match &mut te.inner {
             TableExprInner::Subquery(sq) => {
                 if let Some(alias) = &te.alias {
-                    schemas.insert(
-                        alias,
-                        field_names(sq.as_mut(), dialect)?
-                            .into_iter()
-                            .map(|x| &*x)
-                            .collect(),
-                    );
+                    let mut cols: Vec<&SqlIdentifier> = field_names(sq.as_mut(), dialect)?
+                        .into_iter()
+                        .map(|x| &*x)
+                        .collect();
+                    // Explicit column aliases override the subquery's output names
+                    // e.g., `(SELECT x, y FROM t) AS sub(a, b)` → visible cols are [a, b]
+                    for (i, ca) in te.column_aliases.iter().enumerate() {
+                        if i < cols.len() {
+                            cols[i] = ca;
+                        }
+                    }
+                    schemas.insert(alias, cols);
                 }
             }
             TableExprInner::Values { .. } => {
