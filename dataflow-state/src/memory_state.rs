@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use common::{IndexType, Record, Records, Tag};
@@ -353,7 +353,7 @@ impl State for MemoryState {
 
             let (keys, rows) = evicted?;
             rows.iter()
-                .for_each(|row| bytes_freed += self.handle_evicted_row(row));
+                .for_each(|row| bytes_freed += self.handle_evicted_row(row, state_index));
             bytes_freed += base_row_bytes(&keys);
             keys_evicted.push(keys);
         }
@@ -381,7 +381,7 @@ impl State for MemoryState {
 
             rows_evicted
                 .iter()
-                .for_each(|row| bytes_freed += self.handle_evicted_row(row));
+                .for_each(|row| bytes_freed += self.handle_evicted_row(row, state_index));
 
             let key_bytes = keys
                 .iter()
@@ -414,7 +414,7 @@ impl State for MemoryState {
                 .map(|(key, rows)| {
                     let mut bytes_freed = 0;
                     rows.iter()
-                        .for_each(|row| bytes_freed += self.handle_evicted_row(row));
+                        .for_each(|row| bytes_freed += self.handle_evicted_row(row, state_index));
                     let key_bytes = key.deep_size_of();
                     bytes_freed += key_bytes;
                     self.mem_size = self.mem_size.saturating_sub(bytes_freed);
@@ -445,38 +445,18 @@ impl State for MemoryState {
 
     fn add_weak_index(&mut self, index: Index) {
         let mut weak_index = KeyedState::from(&index);
+        // Track which rows we've already inserted to deduplicate across strict indexes. The
+        // previous approach checked `weak_index.lookup(&key)` using the *weak index key*, which
+        // incorrectly skipped distinct rows that happened to share the same weak key value as a
+        // row from an earlier strict index. Using a HashSet<Row> checks full row identity instead.
+        // Row cloning is cheap (Arc refcount bump) and hashing is O(1) (cached hash).
+        let mut seen = HashSet::<Row>::new();
 
-        let mut strict_index_iter = self.state.iter();
-
-        if let Some(first_strict_index) = strict_index_iter.next() {
-            // The first strict index we merge into the weak index is a special case. We don't need
-            // to worry about duplicate rows yet, so we can just copy in every row directly:
-            for row in first_strict_index.values().flatten() {
-                weak_index.insert(&index.columns, row.clone(), false);
-            }
-        }
-
-        for strict_index in strict_index_iter {
-            // If there are any additional indexes, we need to take care to avoid duplicating rows:
+        for strict_index in self.state.iter() {
             for (row, duplicate_count) in strict_index.values().flat_map(HashBag::set_iter) {
-                // If a row is present in a strict index, then *all* the copies of that row must be
-                // present in that index, because all copies of a row share the same key, and
-                // therefore a hole wouldn't actually be filled if only some of the copies were
-                // present in that index. As such, we can safely assume that encountering the same
-                // row again in any other strict index must imply that that row is a duplicate of a
-                // row we already inserted into the weak index.
-                //
-                // It might be more efficient here to use some sort of seperate temporary data
-                // structure to track whether we've seen each row before, since having to
-                // repeatedly re-create lookup keys from the rows we're iterating over seems like
-                // an expensive way to check whether the weak index already contains a given row.
-                // But, on the other hand, that would probably be more memory-intensive, so it's
-                // unclear what's the better tradeoff, and we can always look at optimizing this
-                // later if need be.
-                let key = PointKey::from(index.columns.iter().map(|i| row[*i].clone()));
-                if weak_index.lookup(&key).is_none() {
-                    // If one copy of the row isn't a duplicate, none of the copies are, so go
-                    // ahead and insert every copy in one go to save on repeated checks:
+                if seen.insert(row.clone()) {
+                    // First time seeing this row — insert all copies (duplicate_count accounts
+                    // for identical rows within the same strict index bucket).
                     for _ in 0..duplicate_count {
                         weak_index.insert(&index.columns, row.clone(), false);
                     }
@@ -514,7 +494,7 @@ impl MemoryState {
     }
 
     fn insert_row(&mut self, r: Row, partial_tag: Option<Tag>) -> bool {
-        let hit = if let Some(tag) = partial_tag {
+        let (hit, target_index) = if let Some(tag) = partial_tag {
             let i = match self.by_tag.get(&tag) {
                 Some(i) => *i,
                 None => {
@@ -525,7 +505,7 @@ impl MemoryState {
                 }
             };
             self.mem_size += r.deep_size_of();
-            self.state[i].insert_row(r.clone())
+            (self.state[i].insert_row(r.clone()), Some(i))
         } else {
             let mut hit_any = false;
             for i in 0..self.state.len() {
@@ -534,12 +514,35 @@ impl MemoryState {
             if hit_any {
                 self.mem_size += r.deep_size_of();
             }
-            hit_any
+            (hit_any, None)
         };
 
-        if hit {
-            for (key, weak_index) in self.weak_indices.iter_mut() {
-                weak_index.insert(key, r.clone(), false);
+        if hit && !self.weak_indices.is_empty() {
+            // For partial (tagged) inserts, skip the weak index insertion if the row already
+            // exists in another strict index — that means a previous insert_row call already
+            // added it to all weak indexes. Without this check, a row present in multiple
+            // strict indexes' filled holes would be duplicated in the weak index.
+            let dominated = target_index.is_some_and(|i| {
+                self.state.iter().enumerate().any(|(j, s)| {
+                    if j == i {
+                        return false;
+                    }
+                    let key = PointKey::from(s.columns().iter().map(|&c| r[c].clone()));
+                    match s.lookup(&key) {
+                        LookupResult::Some(RecordResult::Borrowed(rows)) => {
+                            // Must pass &Row (not &[DfValue]) so the hash matches Row::Hash,
+                            // which hashes cached_hash rather than the raw data.
+                            rows.contains(&r) > 0
+                        }
+                        _ => false,
+                    }
+                })
+            });
+
+            if !dominated {
+                for (key, weak_index) in self.weak_indices.iter_mut() {
+                    weak_index.insert(key, r.clone(), false);
+                }
             }
         }
 
@@ -567,11 +570,29 @@ impl MemoryState {
 
     /// Removes a `Row` that was evicted from `self::state` from `self::weak_indices`, and returns
     /// the number of bytes freed if the last reference to the `Row` was dropped.
-    fn handle_evicted_row(&mut self, row: &Row) -> usize {
-        // TODO(ENG-3062): Possibly consider duplicate rows when removing from
-        // self.weak_indices
-        for (key, weak_index) in self.weak_indices.iter_mut() {
-            weak_index.remove(key, row, None);
+    fn handle_evicted_row(&mut self, row: &Row, evicted_index: usize) -> usize {
+        if !self.weak_indices.is_empty() {
+            // Mirror of the insert_row dedup logic: only remove the row from weak
+            // indexes if it is NOT still present in another strict index.  Without
+            // this, evicting a key from one strict index would silently lose the row
+            // from the weak index even though it's still reachable via another strict
+            // index's filled hole.
+            let still_reachable = self.state.iter().enumerate().any(|(j, s)| {
+                if j == evicted_index {
+                    return false;
+                }
+                let key = PointKey::from(s.columns().iter().map(|&c| row[c].clone()));
+                match s.lookup(&key) {
+                    LookupResult::Some(RecordResult::Borrowed(rows)) => rows.contains(row) > 0,
+                    _ => false,
+                }
+            });
+
+            if !still_reachable {
+                for (key, weak_index) in self.weak_indices.iter_mut() {
+                    weak_index.remove(key, row, None);
+                }
+            }
         }
 
         // Only count strong references after we removed a row from `weak_indices`
@@ -1152,6 +1173,173 @@ mod tests {
                 result,
                 Some(RecordResult::Owned(vec![vec![1.into(), "A".into()],]))
             );
+        }
+
+        /// Regression test for REA-3336: when multiple strict indexes have overlapping rows and
+        /// distinct rows that share the same weak index key, the weak index must contain all
+        /// unique rows without duplicates.
+        #[test]
+        fn multiple_strict_indexes_no_dropped_rows() {
+            let mut state = MemoryState::default();
+
+            // Two strict partial indexes on columns [0] and [1], weak index on column [2]
+            state.add_index(Index::hash_map(vec![0]), Some(vec![Tag::new(0)]));
+            state.add_index(Index::hash_map(vec![1]), Some(vec![Tag::new(1)]));
+
+            // Fill hole [0] = 1 with rows that all have column [2] = 3
+            state.mark_filled(KeyComparison::Equal(vec1![1.into()]), Tag::new(0));
+            let mut records_0: Records = vec![
+                (vec![1.into(), "a".into(), 3.into()], true),
+                (vec![1.into(), "b".into(), 3.into()], true),
+                (vec![1.into(), "c".into(), 3.into()], true),
+            ]
+            .into();
+            state
+                .process_records(&mut records_0, Some(Tag::new(0)), None)
+                .unwrap();
+
+            // Fill hole [1] = "a" with rows that also have column [2] = 3
+            // Row [1, "a", 3] overlaps with the first strict index
+            state.mark_filled(KeyComparison::Equal(vec1![DfValue::from("a")]), Tag::new(1));
+            let mut records_1: Records = vec![
+                (vec![1.into(), "a".into(), 3.into()], true),
+                (vec![2.into(), "a".into(), 3.into()], true),
+                (vec![3.into(), "a".into(), 3.into()], true),
+            ]
+            .into();
+            state
+                .process_records(&mut records_1, Some(Tag::new(1)), None)
+                .unwrap();
+
+            // Now add the weak index on column [2]. All 5 unique rows share weak key 3.
+            state.add_weak_index(Index::hash_map(vec![2]));
+
+            let result = state.lookup_weak(&[2], &PointKey::Single(3.into()));
+            let mut rows: Vec<Vec<DfValue>> =
+                result.unwrap().into_iter().map(|r| r.to_vec()).collect();
+            rows.sort();
+
+            let mut expected = vec![
+                vec![1.into(), "a".into(), 3.into()],
+                vec![1.into(), "b".into(), 3.into()],
+                vec![1.into(), "c".into(), 3.into()],
+                vec![2.into(), "a".into(), 3.into()],
+                vec![3.into(), "a".into(), 3.into()],
+            ];
+            expected.sort();
+
+            assert_eq!(rows, expected);
+        }
+
+        /// Regression test for REA-3336: when rows are inserted into multiple strict indexes
+        /// via separate replays (with the weak index already existing), overlapping rows must
+        /// not be duplicated in the weak index.
+        #[test]
+        fn insert_row_no_weak_duplicates() {
+            let mut state = MemoryState::default();
+
+            // Two strict partial indexes on columns [0] and [1], weak index on column [2].
+            // Weak index is created BEFORE any holes are filled (the logictest scenario).
+            state.add_index(Index::hash_map(vec![0]), Some(vec![Tag::new(0)]));
+            state.add_index(Index::hash_map(vec![1]), Some(vec![Tag::new(1)]));
+            state.add_weak_index(Index::hash_map(vec![2]));
+
+            // Fill hole [0] = 1 — rows go into strict index [0] and weak index
+            state.mark_filled(KeyComparison::Equal(vec1![1.into()]), Tag::new(0));
+            let mut records_0: Records = vec![
+                (vec![1.into(), "a".into(), 3.into()], true),
+                (vec![1.into(), "b".into(), 3.into()], true),
+                (vec![1.into(), "c".into(), 3.into()], true),
+            ]
+            .into();
+            state
+                .process_records(&mut records_0, Some(Tag::new(0)), None)
+                .unwrap();
+
+            // Fill hole [1] = "a" — rows go into strict index [1]. Row [1,"a",3] overlaps
+            // with strict index [0] and must NOT be re-inserted into the weak index.
+            state.mark_filled(KeyComparison::Equal(vec1![DfValue::from("a")]), Tag::new(1));
+            let mut records_1: Records = vec![
+                (vec![1.into(), "a".into(), 3.into()], true),
+                (vec![2.into(), "a".into(), 3.into()], true),
+                (vec![3.into(), "a".into(), 3.into()], true),
+            ]
+            .into();
+            state
+                .process_records(&mut records_1, Some(Tag::new(1)), None)
+                .unwrap();
+
+            let result = state.lookup_weak(&[2], &PointKey::Single(3.into()));
+            let mut rows: Vec<Vec<DfValue>> =
+                result.unwrap().into_iter().map(|r| r.to_vec()).collect();
+            rows.sort();
+
+            let mut expected = vec![
+                vec![1.into(), "a".into(), 3.into()],
+                vec![1.into(), "b".into(), 3.into()],
+                vec![1.into(), "c".into(), 3.into()],
+                vec![2.into(), "a".into(), 3.into()],
+                vec![3.into(), "a".into(), 3.into()],
+            ];
+            expected.sort();
+
+            assert_eq!(rows, expected);
+        }
+
+        /// Regression test: evicting a key from one strict index must not remove
+        /// overlapping rows from the weak index if they're still reachable via
+        /// another strict index.
+        #[test]
+        fn evict_key_preserves_overlapping_rows_in_weak_index() {
+            let mut state = MemoryState::default();
+
+            state.add_index(Index::hash_map(vec![0]), Some(vec![Tag::new(0)]));
+            state.add_index(Index::hash_map(vec![1]), Some(vec![Tag::new(1)]));
+            state.add_weak_index(Index::hash_map(vec![2]));
+
+            // Fill hole [0] = 1
+            state.mark_filled(KeyComparison::Equal(vec1![1.into()]), Tag::new(0));
+            let mut records_0: Records = vec![
+                (vec![1.into(), "a".into(), 3.into()], true),
+                (vec![1.into(), "b".into(), 3.into()], true),
+            ]
+            .into();
+            state
+                .process_records(&mut records_0, Some(Tag::new(0)), None)
+                .unwrap();
+
+            // Fill hole [1] = "a" — row [1,"a",3] overlaps
+            state.mark_filled(KeyComparison::Equal(vec1![DfValue::from("a")]), Tag::new(1));
+            let mut records_1: Records = vec![
+                (vec![1.into(), "a".into(), 3.into()], true),
+                (vec![2.into(), "a".into(), 3.into()], true),
+            ]
+            .into();
+            state
+                .process_records(&mut records_1, Some(Tag::new(1)), None)
+                .unwrap();
+
+            // Weak index should have 3 unique rows
+            let result = state.lookup_weak(&[2], &PointKey::Single(3.into()));
+            assert_eq!(result.unwrap().len(), 3);
+
+            // Evict hole [0] = 1 from strict index 0.
+            // Row [1,"a",3] is still in strict index 1 → must remain in weak index.
+            // Row [1,"b",3] is ONLY in strict index 0 → should be removed.
+            state.evict_keys(Tag::new(0), &[KeyComparison::Equal(vec1![1.into()])]);
+
+            let result = state.lookup_weak(&[2], &PointKey::Single(3.into()));
+            let mut rows: Vec<Vec<DfValue>> =
+                result.unwrap().into_iter().map(|r| r.to_vec()).collect();
+            rows.sort();
+
+            let mut expected = vec![
+                vec![1.into(), "a".into(), 3.into()], // still in strict index 1
+                vec![2.into(), "a".into(), 3.into()], // still in strict index 1
+            ];
+            expected.sort();
+
+            assert_eq!(rows, expected);
         }
     }
 

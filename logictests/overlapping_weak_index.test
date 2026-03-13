@@ -1,4 +1,15 @@
-# Test that reproduces #286
+# Test that reproduces #286 (REA-3336): weak index deduplication when multiple
+# strict partial indexes have overlapping rows.
+#
+# This logictest covers the insert/dedup path — filling overlapping holes via
+# queries triggers insert_row, which must avoid duplicating rows in the weak
+# index.
+#
+# The eviction-side dual (handle_evicted_row must not remove rows that are still
+# reachable via another strict index) is NOT testable from SQL — key-level
+# eviction is driven by memory pressure internally, not by DROP CACHE (which
+# removes the entire query graph).  That path is covered by the unit test
+# evict_key_preserves_overlapping_rows_in_weak_index in memory_state.rs.
 
 statement ok
 create table t1 (x int, y text)
