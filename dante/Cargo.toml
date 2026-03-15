@@ -1,0 +1,22 @@
+[package]
+name = "dante"
+publish = false
+version = "0.1.0"
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
+edition = "2024"
+
+[dependencies]
+antithesis_sdk = { workspace = true }
+indexmap = { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
+
+data-generator = { path = "../data-generator" }
+readyset-data = { path = "../readyset-data" }
+readyset-sql = { path = "../readyset-sql" }
+
+[dev-dependencies]
+readyset-sql-parsing = { path = "../readyset-sql-parsing" }
+
+[lints]
+workspace = true

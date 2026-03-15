@@ -1285,6 +1285,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dante"
+version = "0.1.0"
+dependencies = [
+ "antithesis_sdk",
+ "data-generator",
+ "indexmap 2.14.0",
+ "rand 0.10.1",
+ "readyset-data",
+ "readyset-sql",
+ "readyset-sql-parsing",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -619,7 +619,7 @@ impl FromStr for Seed {
 }
 
 /// Fuzz-test noria by randomly generating queries and seed data, and ensuring that both ReadySet
-/// and a reference database return the same results
+/// and a reference database return the same results.
 #[derive(Parser, Debug, Clone)]
 pub struct Fuzz {
     /// Number of test cases to generate

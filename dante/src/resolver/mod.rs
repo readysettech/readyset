@@ -1,0 +1,456 @@
+//! Resolver: schema constraint resolution and variable binding.
+//!
+//! The resolver takes a Recipe and a GenerationState, and binds variables
+//! to concrete schema elements (tables and columns).
+
+mod ast_builder;
+pub(crate) mod schema;
+
+use data_generator::ColumnGenerationSpec;
+use readyset_sql::ast::{SelectStatement, SqlIdentifier, SqlType};
+
+use crate::constraint::Constraint;
+use crate::entropy::Entropy;
+use crate::state::{ColumnMeta, GenerationState, TableSchema};
+use crate::var::{UnionFind, VarId, VarKind};
+
+pub(crate) use schema::resolve_schema;
+
+/// A binding for a resolved variable.
+#[derive(Debug, Clone)]
+pub(crate) enum Binding {
+    Table {
+        name: SqlIdentifier,
+        alias: Option<SqlIdentifier>,
+    },
+    Column {
+        name: SqlIdentifier,
+        sql_type: SqlType,
+        table: SqlIdentifier,
+    },
+}
+
+impl Binding {
+    /// For a Table binding, return the effective SQL name (alias if present,
+    /// otherwise the table name). This is what column references should use.
+    fn effective_table_name(&self) -> Option<&SqlIdentifier> {
+        match self {
+            Binding::Table { alias: Some(a), .. } => Some(a),
+            Binding::Table { name, .. } => Some(name),
+            Binding::Column { .. } => None,
+        }
+    }
+}
+
+/// DDL step produced by the resolver when synthesis is needed.
+#[derive(Debug, Clone)]
+pub enum DdlStep {
+    CreateTable {
+        name: SqlIdentifier,
+        schema: TableSchema,
+    },
+    AddColumn {
+        table: SqlIdentifier,
+        column_name: SqlIdentifier,
+        meta: ColumnMeta,
+    },
+}
+
+/// Parameter metadata for generated query parameters.
+#[derive(Debug, Clone)]
+pub struct ParamMeta {
+    pub sql_type: SqlType,
+    pub gen_spec: ColumnGenerationSpec,
+    pub count: u32,
+}
+
+/// Environment: the resolver's working state during constraint resolution.
+#[derive(Debug)]
+pub(crate) struct Env {
+    bindings: Vec<Option<Binding>>,
+    union_find: UnionFind,
+    ddl_steps: Vec<DdlStep>,
+    /// Tables created during this resolution (not yet existing in the DB).
+    /// Columns added to these tables are included in the CreateTable DDL
+    /// rather than emitted as separate AddColumn steps.
+    new_tables: Vec<SqlIdentifier>,
+}
+
+impl Env {
+    /// Create a new environment for `num_vars` variables.
+    pub(crate) fn new(num_vars: usize) -> Self {
+        Self {
+            bindings: vec![None; num_vars],
+            union_find: UnionFind::new(num_vars),
+            ddl_steps: Vec::new(),
+            new_tables: Vec::new(),
+        }
+    }
+
+    /// Get the binding for a variable, following the union-find representative.
+    pub(crate) fn get(&mut self, v: VarId) -> Option<&Binding> {
+        let rep = self.union_find.find(v.0);
+        self.bindings[rep].as_ref()
+    }
+
+    /// Bind a variable (using its union-find representative).
+    pub(crate) fn bind(&mut self, v: VarId, binding: Binding) {
+        let rep = self.union_find.find(v.0);
+        self.bindings[rep] = Some(binding);
+    }
+
+    /// Check if a variable is bound.
+    pub(crate) fn is_bound(&mut self, v: VarId) -> bool {
+        let rep = self.union_find.find(v.0);
+        self.bindings[rep].is_some()
+    }
+
+    /// Get the DDL steps produced during resolution.
+    #[cfg(test)]
+    pub(crate) fn ddl_steps(&self) -> &[DdlStep] {
+        &self.ddl_steps
+    }
+
+    /// Build the final DDL step list, looking up final schemas for newly
+    /// created tables from `state`.
+    ///
+    /// Returns `EmptyTableSchema` if any new table ended up with no columns
+    /// (an internal invariant violation — `resolve_table_exists` always seeds
+    /// a primary-key column).
+    pub(crate) fn into_ddl_steps(
+        self,
+        state: &GenerationState,
+    ) -> Result<Vec<DdlStep>, ResolveError> {
+        let mut steps = Vec::new();
+        // Collect the set of (table, column) pairs already covered by CreateTable.
+        let mut created_columns: std::collections::HashSet<(SqlIdentifier, SqlIdentifier)> =
+            std::collections::HashSet::new();
+        // Emit CreateTable steps with the final (populated) schema.
+        for table_name in &self.new_tables {
+            if let Some(schema) = state.table(table_name) {
+                if schema.columns.is_empty() {
+                    return Err(ResolveError::EmptyTableSchema {
+                        table: table_name.clone(),
+                    });
+                }
+                for col_name in schema.columns.keys() {
+                    created_columns.insert((table_name.clone(), col_name.clone()));
+                }
+                steps.push(DdlStep::CreateTable {
+                    name: table_name.clone(),
+                    schema: schema.clone(),
+                });
+            }
+        }
+        // Emit AddColumn steps, skipping any that are already covered by a
+        // CreateTable (this can happen when outer and inner subquery scopes
+        // both resolve the same table/column independently).
+        for step in self.ddl_steps {
+            match &step {
+                DdlStep::AddColumn {
+                    table, column_name, ..
+                } if created_columns.contains(&(table.clone(), column_name.clone())) => {
+                    // Skip — column is already part of the CreateTable.
+                }
+                _ => steps.push(step),
+            }
+        }
+        Ok(steps)
+    }
+
+    /// Capture a checkpoint of the current environment for backtracking.
+    #[cfg(test)]
+    pub(crate) fn checkpoint(&self) -> EnvCheckpoint {
+        EnvCheckpoint {
+            bindings: self.bindings.clone(),
+            union_find: self.union_find.clone(),
+            ddl_steps: self.ddl_steps.clone(),
+            new_tables: self.new_tables.clone(),
+        }
+    }
+
+    /// Restore environment from a previously captured checkpoint.
+    #[cfg(test)]
+    pub(crate) fn restore(&mut self, cp: EnvCheckpoint) {
+        self.bindings = cp.bindings;
+        self.union_find = cp.union_find;
+        self.ddl_steps = cp.ddl_steps;
+        self.new_tables = cp.new_tables;
+    }
+}
+
+/// A snapshot of Env state for checkpoint/restore (backtracking).
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub(crate) struct EnvCheckpoint {
+    bindings: Vec<Option<Binding>>,
+    union_find: UnionFind,
+    ddl_steps: Vec<DdlStep>,
+    new_tables: Vec<SqlIdentifier>,
+}
+
+/// Errors during resolution.
+#[derive(Debug, thiserror::Error)]
+pub enum ResolveError {
+    #[error("variable {0:?} is not bound")]
+    Unbound(VarId),
+    #[error("type mismatch: expected {expected}, got {actual}")]
+    TypeMismatch { expected: String, actual: String },
+    #[error("cannot satisfy NotEq: both variables bound to {0}")]
+    NotEqViolation(String),
+    #[error("unification error: {0}")]
+    UnifyError(#[from] crate::var::UnifyError),
+    #[error("limit/offset {value} exceeds i64::MAX; cannot emit as SQL integer literal")]
+    LimitOverflow { value: u64 },
+    #[error("constraint variant `{0}` is not yet supported by the resolver")]
+    Unsupported(&'static str),
+    #[error(
+        "inner subquery references {referenced} variables but the outer recipe declares only {declared} kinds"
+    )]
+    InnerVarKindsTruncated { referenced: usize, declared: usize },
+    #[error("internal error: synthesized table {table} has no columns")]
+    EmptyTableSchema { table: SqlIdentifier },
+}
+
+/// Output of the full resolution pipeline.
+#[derive(Debug)]
+pub struct ResolverOutput {
+    /// The constructed SELECT statement.
+    pub query: SelectStatement,
+    /// DDL steps needed before executing the query.
+    pub ddl: Vec<DdlStep>,
+    /// Parameter metadata for data generation.
+    pub params: Vec<ParamMeta>,
+}
+
+/// Full resolution pipeline: resolve schema constraints, then build AST.
+pub fn resolve(
+    constraints: &[Constraint],
+    var_kinds: &[VarKind],
+    state: &mut GenerationState,
+    entropy: &mut Entropy<'_>,
+) -> Result<ResolverOutput, ResolveError> {
+    let mut env = resolve_schema(constraints, var_kinds, state, entropy)?;
+    let (query, params) =
+        ast_builder::build_select(&mut env, constraints, var_kinds, state, entropy)?;
+    let ddl = env.into_ddl_steps(state)?;
+    Ok(ResolverOutput { query, ddl, params })
+}
+
+/// Attempt to resolve a recipe against the current state.
+///
+/// On success, the state is updated with any new tables/columns and the
+/// `ResolverOutput` is returned. On failure, the state is unchanged.
+///
+/// This is the core of incremental resolution for Mode 3: callers can
+/// checkpoint the state before calling this, and restore on failure.
+pub fn try_resolve(
+    recipe: &crate::pattern::Recipe,
+    state: &mut GenerationState,
+    entropy: &mut Entropy<'_>,
+) -> Result<ResolverOutput, ResolveError> {
+    let state_cp = state.checkpoint();
+    match resolve(&recipe.constraints, &recipe.var_kinds, state, entropy) {
+        Ok(output) => Ok(output),
+        Err(e) => {
+            state.restore(state_cp);
+            Err(e)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rand::SeedableRng;
+    use rand::rngs::SmallRng;
+    use readyset_sql::Dialect;
+    use readyset_sql::ast::{BinaryOperator, SqlIdentifier, SqlType};
+
+    use super::*;
+    use crate::pattern::Pattern;
+    use crate::state::GeneratorConfig;
+    use crate::var::VarKind;
+
+    fn test_env(dialect: Dialect) -> (GenerationState, SmallRng) {
+        let config = GeneratorConfig {
+            reuse_preference: 0.0, // always synthesize
+            ..Default::default()
+        };
+        let state = GenerationState::new(dialect, config);
+        let rng = SmallRng::seed_from_u64(42);
+        (state, rng)
+    }
+
+    fn make_single_table_pattern() -> Pattern {
+        use crate::pattern::PatternBuilder;
+        let mut b = PatternBuilder::new("single_table");
+        let t = b.table();
+        let c = b.column(t);
+        b.from(t);
+        b.project_column(c, t);
+        b.build()
+    }
+
+    fn make_param_pattern() -> Pattern {
+        use crate::pattern::PatternBuilder;
+        let mut b = PatternBuilder::new("param");
+        let t = b.table();
+        let c1 = b.column(t);
+        let c2 = b.column(t);
+        b.from(t);
+        b.project_column(c1, t);
+        b.where_param(c2, t, BinaryOperator::Equal);
+        b.build()
+    }
+
+    #[test]
+    fn env_checkpoint_restore_round_trips() {
+        let mut env = Env::new(4);
+        env.bind(
+            VarId(0),
+            Binding::Table {
+                name: SqlIdentifier::from("t0"),
+                alias: None,
+            },
+        );
+        env.bind(
+            VarId(1),
+            Binding::Column {
+                name: SqlIdentifier::from("c0"),
+                sql_type: SqlType::Int(None),
+                table: SqlIdentifier::from("t0"),
+            },
+        );
+
+        let cp = env.checkpoint();
+
+        // Modify state after checkpoint
+        env.bind(
+            VarId(2),
+            Binding::Table {
+                name: SqlIdentifier::from("t1"),
+                alias: None,
+            },
+        );
+        env.ddl_steps.push(DdlStep::CreateTable {
+            name: SqlIdentifier::from("t1"),
+            schema: TableSchema::new(SqlIdentifier::from("t1")),
+        });
+
+        assert!(env.is_bound(VarId(2)));
+        assert_eq!(env.ddl_steps().len(), 1);
+
+        // Restore
+        env.restore(cp);
+
+        assert!(env.is_bound(VarId(0)));
+        assert!(env.is_bound(VarId(1)));
+        assert!(!env.is_bound(VarId(2)));
+        assert_eq!(env.ddl_steps().len(), 0);
+    }
+
+    #[test]
+    fn env_checkpoint_restores_union_find() {
+        let mut env = Env::new(4);
+
+        // Checkpoint before unification
+        let cp = env.checkpoint();
+
+        // Unify vars 0 and 1
+        let mut alloc = crate::var::VarAllocator::new();
+        alloc.alloc(VarKind::Relation);
+        alloc.alloc(VarKind::Relation);
+        alloc.alloc(VarKind::Relation);
+        alloc.alloc(VarKind::Relation);
+        env.union_find.union(0, 1, alloc.kinds()).unwrap();
+        assert!(env.union_find.same_set(0, 1));
+
+        // Restore
+        env.restore(cp);
+
+        // After restore, 0 and 1 should no longer be in the same set
+        assert!(!env.union_find.same_set(0, 1));
+    }
+
+    #[test]
+    fn try_resolve_succeeds_for_compatible_recipe() {
+        let (mut state, mut rng) = test_env(Dialect::MySQL);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let pattern = make_single_table_pattern();
+        let recipe = pattern.to_recipe(0);
+
+        let result = try_resolve(&recipe, &mut state, &mut entropy);
+        assert!(result.is_ok(), "try_resolve should succeed: {result:?}");
+
+        let output = result.unwrap();
+        assert!(!output.ddl.is_empty());
+    }
+
+    #[test]
+    fn try_resolve_state_rollback_on_failure() {
+        let (mut state, mut rng) = test_env(Dialect::MySQL);
+        let mut entropy = Entropy::new(&mut rng);
+
+        // Build a pattern that Eq's two tables then NotEq's them — guaranteed failure
+        use crate::pattern::PatternBuilder;
+        let mut b = PatternBuilder::new("contradictory");
+        let t1 = b.table();
+        let t2 = b.table();
+        b.eq(t1, t2);
+        b.not_eq(t1, t2);
+        let c1 = b.column(t1);
+        b.from(t1);
+        b.project_column(c1, t1);
+        let pattern = b.build();
+        let recipe = pattern.to_recipe(0);
+
+        let result = try_resolve(&recipe, &mut state, &mut entropy);
+        assert!(result.is_err(), "should fail due to Eq+NotEq contradiction");
+
+        // The contract is that try_resolve rolls back state internally on
+        // failure — there must be no tables left over from the partial
+        // resolution. No outer restore here on purpose: that would mask a
+        // missing internal rollback by clobbering whatever state try_resolve
+        // left behind.
+        assert_eq!(
+            state.tables().len(),
+            0,
+            "try_resolve must roll back state on Err"
+        );
+    }
+
+    #[test]
+    fn multiple_try_resolve_cycles() {
+        let (mut state, mut rng) = test_env(Dialect::MySQL);
+        let mut entropy = Entropy::new(&mut rng);
+
+        // First try: succeeds
+        let p1 = make_single_table_pattern();
+        let r1 = p1.to_recipe(0);
+
+        let state_cp1 = state.checkpoint();
+        let result1 = try_resolve(&r1, &mut state, &mut entropy);
+        assert!(result1.is_ok());
+        // State now has 1 table
+        assert_eq!(state.tables().len(), 1);
+
+        // Second try: also succeeds
+        let p2 = make_param_pattern();
+        let r2 = p2.to_recipe(0);
+
+        let state_cp2 = state.checkpoint();
+        let result2 = try_resolve(&r2, &mut state, &mut entropy);
+        assert!(result2.is_ok());
+        // State now has 2 tables (fresh synthesis, reuse_preference=0)
+        assert_eq!(state.tables().len(), 2);
+
+        // Roll back second try
+        state.restore(state_cp2);
+        assert_eq!(state.tables().len(), 1);
+
+        // Roll back first try
+        state.restore(state_cp1);
+        assert_eq!(state.tables().len(), 0);
+    }
+}

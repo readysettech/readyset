@@ -69,6 +69,7 @@ members = [
     "replication-offset",
     "replicators",
     "schema-catalog",
+    "dante",
     "support",
     "system-benchmarks",
     "test-discovery",
