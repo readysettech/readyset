@@ -373,11 +373,33 @@ pub enum DomainRequest {
     /// Set up a fresh, empty state for a node, indexed by a particular column.
     ///
     /// This is done in preparation of a subsequent state replay.
+    /// This variant uses the original blocking implementation - the domain blocks
+    /// until index building is complete.
     PrepareState {
         /// The node to set up state for
         node: LocalNodeIndex,
         /// What kind of state should we set up?
         state: PrepareStateKind,
+    },
+
+    /// Set up state for a node using non-blocking online index building.
+    ///
+    /// This variant uses snapshot-based scanning with WAL catch-up, allowing
+    /// writes to continue during index building. The migration controller
+    /// must poll `PrepareStateStatus` to wait for completion.
+    PrepareStateNonBlocking {
+        /// The node to set up state for
+        node: LocalNodeIndex,
+        /// What kind of state should we set up?
+        state: PrepareStateKind,
+    },
+
+    /// Check if a node's state preparation (e.g., index building) is complete.
+    ///
+    /// Used to poll nodes that are preparing indices asynchronously during migrations.
+    /// Returns the current `IndexBuildStatus` (`Succeeded`, `InProgress`, or `Failed`).
+    PrepareStateStatus {
+        node: LocalNodeIndex,
     },
 
     /// Inform domain about a new replay path.

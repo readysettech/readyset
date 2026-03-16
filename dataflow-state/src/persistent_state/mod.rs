@@ -1737,7 +1737,6 @@ enum SecondaryIndexMessage {
 
 #[derive(Copy, Clone, Debug)]
 enum AutoCompact {
-    #[allow(dead_code)]
     Enable,
     Disable,
 }

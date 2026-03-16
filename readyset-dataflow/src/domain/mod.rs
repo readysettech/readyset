@@ -22,8 +22,8 @@ use ahash::RandomState;
 use antithesis_sdk::assert_reachable;
 use common::LenMetric;
 use dataflow_state::{
-    BaseTableState, EvictBytesResult, EvictKeysResult, EvictRandomResult, MaterializedNodeState,
-    PersistenceType, PointKey, RangeKey, RangeLookupResult,
+    BaseTableState, EvictBytesResult, EvictKeysResult, EvictRandomResult, IndexBuildStatus,
+    MaterializedNodeState, PersistenceType, PointKey, RangeKey, RangeLookupResult,
 };
 use exponential_backoff::Backoff;
 use failpoint_macros::set_failpoint;
@@ -1694,7 +1694,10 @@ impl Domain {
         node: LocalNodeIndex,
         strict_indices: HashSet<Index>,
         weak_indices: HashSet<Index>,
+        use_online_build: bool,
     ) -> ReadySetResult<()> {
+        // base tables will already be registered in self.state,
+        // so this only looking up for interior dataflow nodes.
         if !self.state.contains_key(node) {
             if self.materialization_persistence {
                 let name = format!("full_mat-{}-{}", self.index(), node.id());
@@ -1716,9 +1719,89 @@ impl Domain {
                     .insert(node, MaterializedNodeState::Memory(MemoryState::default()));
             }
         }
-        let state = self.state.get_mut(node).unwrap();
-        let strict = strict_indices.into_iter().map(|x| (x, None)).collect();
-        let weak = weak_indices.into_iter().collect();
+
+        // If there are no indices to add, we're done
+        if strict_indices.is_empty() && weak_indices.is_empty() {
+            return Ok(());
+        }
+
+        let state = self.state.get_mut(node).ok_or_else(|| {
+            internal_err!("Node {} must have state after initialization", node.id())
+        })?;
+
+        // Index builds must not arrive while the table is snapshotting:
+        // the controller rejects extend_recipe (require_leader_ready) until
+        // SnapshotDone.  Snapshot mode disables WAL, which would break
+        // WAL catch-up and corrupt the new indices.
+        if let Some(persistent) = state.as_persistent() {
+            antithesis_sdk::assert_always!(
+                !persistent.is_snapshotting(),
+                "no index build during snapshotting",
+                &serde_json::json!({ "node": node.id() })
+            );
+            if persistent.is_snapshotting() {
+                return Err(internal_err!(
+                    "cannot build indices for node {} while snapshotting is in progress",
+                    node.id()
+                ));
+            }
+        }
+
+        let strict: Vec<_> = strict_indices.into_iter().map(|x| (x, None)).collect();
+        let weak: Vec<_> = weak_indices.into_iter().collect();
+
+        // Online index build is only valid for base tables. Non-base nodes with persistent
+        // state (FullMaterialization via materialization_persistence) uses the older
+        // blocking index buid.
+        let is_base = self.nodes[node].borrow().is_base();
+        if use_online_build && is_base {
+            if let Some(persistent) = state.as_persistent_mut() {
+                if persistent.index_build_status() == IndexBuildStatus::InProgress {
+                    warn!(
+                        node = %node.id(),
+                        "received index build request while a build is already in progress"
+                    );
+                    return Err(internal_err!(
+                        "index build already in progress for node {}",
+                        node.id()
+                    ));
+                }
+
+                // Prepare indices: filter existing, create primary if needed, return filtered list
+                let Some(indices) = persistent.prepare_indices_for_build(strict, weak)? else {
+                    // No indices to build after filtering
+                    return Ok(());
+                };
+
+                persistent.mark_index_build_in_progress()?;
+                let ctx = persistent.create_index_build_context();
+
+                tokio::task::spawn_blocking(move || {
+                    // catch_unwind prevents a panic in the build thread from
+                    // tearing down the entire tokio runtime. IndexBuildGuard's
+                    // Drop impl will mark the build as Failed on unwind, so the
+                    // migration controller's status poll will see the failure.
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        ctx.build_indices(indices)
+                    }));
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => error!(error = %e, "Background index build failed"),
+                        Err(panic_payload) => {
+                            let msg = panic_payload
+                                .downcast_ref::<String>()
+                                .map(|s| s.as_str())
+                                .or_else(|| panic_payload.downcast_ref::<&str>().copied())
+                                .unwrap_or("unknown panic");
+                            error!(panic = %msg, "Background index build panicked");
+                        }
+                    }
+                });
+
+                return Ok(());
+            }
+        }
+
         state.add_index_multi(strict, weak);
 
         // If this is a Constant node, populate its state with the constant rows.
@@ -1926,6 +2009,7 @@ impl Domain {
         &mut self,
         node: LocalNodeIndex,
         state: PrepareStateKind,
+        use_online_build: bool,
     ) -> ReadySetResult<Option<Vec<u8>>> {
         match state {
             PrepareStateKind::Partial {
@@ -1935,7 +2019,7 @@ impl Domain {
             PrepareStateKind::Full {
                 strict_indices,
                 weak_indices,
-            } => self.prepare_full(node, strict_indices, weak_indices)?,
+            } => self.prepare_full(node, strict_indices, weak_indices, use_online_build)?,
             PrepareStateKind::PartialReader {
                 node_index,
                 num_columns,
@@ -2573,7 +2657,12 @@ impl Domain {
                 num_shards,
                 replication,
             ),
-            DomainRequest::PrepareState { node, state } => self.handle_prepare_state(node, state),
+            DomainRequest::PrepareState { node, state } => {
+                self.handle_prepare_state(node, state, false)
+            }
+            DomainRequest::PrepareStateNonBlocking { node, state } => {
+                self.handle_prepare_state(node, state, true) // use online build path
+            }
             DomainRequest::SetupReplayPath {
                 tag,
                 source,
@@ -2645,6 +2734,15 @@ impl Domain {
             }
             DomainRequest::IsReady { node } => {
                 Ok(Some(bincode::serialize(&!self.not_ready.contains(&node))?))
+            }
+            DomainRequest::PrepareStateStatus { node } => {
+                let status = if let Some(state) = self.state.get(node) {
+                    state.index_build_status()
+                } else {
+                    // State doesn't exist (shouldn't happen), consider ready
+                    IndexBuildStatus::Succeeded
+                };
+                Ok(Some(bincode::serialize(&status)?))
             }
             DomainRequest::AllTablesCompacted => self.handle_all_tables_compacted(),
             DomainRequest::Evict { req } => self.handle_external_eviction(executor, req),

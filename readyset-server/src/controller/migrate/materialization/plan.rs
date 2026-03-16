@@ -914,13 +914,20 @@ impl<'a> Plan<'a> {
             }
         };
 
-        self.dmp.add_message(
-            our_node.domain(),
+        let use_non_blocking =
+            self.m.config.non_blocking_index_build && matches!(s, PrepareStateKind::Full { .. });
+        let request = if use_non_blocking {
+            DomainRequest::PrepareStateNonBlocking {
+                node: our_node.local_addr(),
+                state: s,
+            }
+        } else {
             DomainRequest::PrepareState {
                 node: our_node.local_addr(),
                 state: s,
-            },
-        )?;
+            }
+        };
+        self.dmp.add_message(our_node.domain(), request)?;
 
         if self.m.config.packet_filters_enabled {
             self.setup_packet_filter()?;

@@ -38,6 +38,7 @@ use array2::Array2;
 use dataflow::node::Column;
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest, ReaderProcessing};
+use dataflow_state::IndexBuildStatus;
 use metrics::{counter, histogram};
 use readyset_client::metrics::recorded;
 use readyset_client::{KeyColumnIdx, ViewPlaceholder};
@@ -67,9 +68,9 @@ const DOMAIN_REQUEST_DELAY_BASE_BACKOFF_MS: u64 = 2;
 /// The multiplication factor used when sending follow up requests to a domain, for the exponential
 /// backoff strategy
 const DOMAIN_REQUEST_DELAY_BACKOFF_FACTOR: u64 = 2;
-/// The max possible delay used when sending follow up requests to a domain, for the exponential
-/// backoff strategy
-const DOMAIN_REQUEST_MAX_DELAY_IN_MS: u64 = 1000 * 60; // 1 min
+/// Max backoff for domain request retries during migrations. Reduced from 60s
+/// to 2s so the polling loop converges quickly on async operations.
+const DOMAIN_REQUEST_MAX_DELAY_MS: u64 = 2000; // 2 sec
 
 /// A [`DomainRequest`] with associated domain/shard information describing which domain it's for.
 ///
@@ -259,6 +260,90 @@ impl StoredDomainRequest {
                 } else {
                     dom.send_to_healthy::<()>(self.req, &mainline.workers)
                         .await?;
+                }
+            }
+            DomainRequest::PrepareStateNonBlocking { node, .. } => {
+                trace!(request = ?self.req, node = node.id(), "sending prepare state non-blocking request");
+
+                // Send the initial PrepareStateNonBlocking request
+                let req = self.req.clone();
+                if let Some(shard) = self.shard {
+                    dom.send_to_healthy_shard::<()>(shard, req, &mainline.workers)
+                        .await?;
+                } else {
+                    dom.send_to_healthy::<()>(req, &mainline.workers).await?;
+                }
+
+                return Ok(Some(StoredDomainRequest {
+                    domain: self.domain,
+                    shard: self.shard,
+                    req: DomainRequest::PrepareStateStatus { node },
+                }));
+            }
+            // Poll for PrepareStateNonBlocking completion
+            DomainRequest::PrepareStateStatus { node } => {
+                trace!(request = ?self.req, node = node.id(), "polling prepare state status");
+
+                let req = self.req.clone();
+                let statuses: Vec<IndexBuildStatus> = if let Some(shard) = self.shard {
+                    dom.send_to_healthy_shard::<IndexBuildStatus>(shard, req, &mainline.workers)
+                        .await?
+                        .into_iter()
+                        .map(|t| {
+                            t.unwrap_or(
+                                // If the domain isn't running, treat as succeeded
+                                IndexBuildStatus::Succeeded,
+                            )
+                        })
+                        .collect()
+                } else {
+                    dom.send_to_healthy::<IndexBuildStatus>(req, &mainline.workers)
+                        .await?
+                        .into_cells()
+                        .into_iter()
+                        .map(|t| {
+                            t.unwrap_or(
+                                // If the domain isn't running, treat as succeeded
+                                IndexBuildStatus::Succeeded,
+                            )
+                        })
+                        .collect()
+                };
+
+                // If any shard reported failure, abort the migration.
+                if statuses.contains(&IndexBuildStatus::Failed) {
+                    return Err(ReadySetError::Internal(format!(
+                        "background index build failed for node {} in domain {}",
+                        node.id(),
+                        self.domain
+                    )));
+                }
+
+                let all_succeeded = statuses.iter().all(|s| *s == IndexBuildStatus::Succeeded);
+
+                trace!(
+                    request = ?self.req,
+                    node = node.id(),
+                    ?statuses,
+                    "received prepare state status response"
+                );
+
+                if !all_succeeded {
+                    trace!(
+                        node = node.id(),
+                        "state preparation not complete, will retry"
+                    );
+                    return Ok(Some(StoredDomainRequest {
+                        domain: self.domain,
+                        shard: self.shard,
+                        req: DomainRequest::PrepareStateStatus { node },
+                    }));
+                } else {
+                    info!(
+                        domain = %self.domain,
+                        node = node.id(),
+                        "state preparation complete"
+                    );
                 }
             }
             _ => {
@@ -486,7 +571,7 @@ impl DomainMigrationPlan {
         let create_exponential_backoff = || {
             ExponentialBackoff::from_millis(DOMAIN_REQUEST_DELAY_BASE_BACKOFF_MS)
                 .factor(DOMAIN_REQUEST_DELAY_BACKOFF_FACTOR)
-                .max_delay(Duration::from_millis(DOMAIN_REQUEST_MAX_DELAY_IN_MS))
+                .max_delay(Duration::from_millis(DOMAIN_REQUEST_MAX_DELAY_MS))
         };
         let mut retry_strategy = create_exponential_backoff();
         while let Some(req) = stored.pop_front() {
