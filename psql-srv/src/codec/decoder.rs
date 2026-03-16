@@ -8,7 +8,10 @@ use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZon
 use cidr::IpInet;
 use eui48::MacAddress;
 use postgres_types::{FromSql, Kind, Type};
-use readyset_data::{Array, Collation, PassThroughFormat};
+use readyset_data::{
+    Array, Collation, PassThroughFormat, DATE_FORMAT, ISO_TIMESTAMP_PARSE_FORMAT,
+    TIMESTAMP_PARSE_FORMAT,
+};
 use readyset_decimal::Decimal;
 use tokio_util::codec::Decoder;
 use uuid::Uuid;
@@ -51,16 +54,53 @@ const HEADER_LENGTH: usize = 5;
 const LENGTH_NULL_SENTINEL: i32 = -1;
 const NUL_BYTE: u8 = b'\0';
 
-/// The standard postgres representation of a timestamp, as per [0].
-///
-/// [0] www.postgresql.org/docs/current/datatype-datetime.html
-const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
+/// Parse a NaiveDateTime from text, trying space-separated, ISO-8601 `T`-separated, and
+/// date-only formats. Returns the parsed datetime and any remaining text (typically a timezone
+/// offset).
+fn parse_timestamp_text(text: &str) -> Result<(NaiveDateTime, &str), Error> {
+    if let Ok((dt, remainder)) = NaiveDateTime::parse_and_remainder(text, TIMESTAMP_PARSE_FORMAT) {
+        return Ok((dt, remainder));
+    }
+    if let Ok((dt, remainder)) =
+        NaiveDateTime::parse_and_remainder(text, ISO_TIMESTAMP_PARSE_FORMAT)
+    {
+        return Ok((dt, remainder));
+    }
+    // Date-only: treat as midnight
+    let date = NaiveDate::parse_from_str(text, DATE_FORMAT)?;
+    Ok((
+        date.and_hms_opt(0, 0, 0).expect("midnight is always valid"),
+        "",
+    ))
+}
 
-/// Postgres also supports the standard ISO-8601 format, the the `T` separator
-/// between the date and the time. See note in pg docs: [0].
-///
-/// https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-INPUT
-const ISO_TIMESTAMP_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.f";
+/// Parse a timezone offset from the remainder string after timestamp parsing. Handles:
+/// - Standard offsets like `+05:00`, `-0800`
+/// - `Z`/`z` as UTC
+/// - Empty string treated as UTC (ReadySet does not track per-session timezone)
+/// - Truncated offsets like `-08` (pgjdbc compatibility)
+fn parse_timezone_offset(tag: &str) -> Result<FixedOffset, Error> {
+    let tag = tag.trim_start();
+    if tag.is_empty() || tag.eq_ignore_ascii_case("Z") {
+        return Ok(FixedOffset::east_opt(0).expect("UTC offset is always valid"));
+    }
+    if let Ok(offset) = FixedOffset::from_str(tag) {
+        return Ok(offset);
+    }
+    // pgjdbc truncates minutes when they're "00" (e.g. "-08" instead of "-0800").
+    // Only apply this workaround for inputs matching the pattern: ±D or ±DD.
+    let tag_bytes = tag.as_bytes();
+    if tag.len() == 3
+        && (tag_bytes[0] == b'+' || tag_bytes[0] == b'-')
+        && tag_bytes[1..].iter().all(|b| b.is_ascii_digit())
+    {
+        let sign: i32 = if tag_bytes[0] == b'+' { 1 } else { -1 };
+        let hours: i32 = tag[1..].parse().expect("validated ASCII digits");
+        return FixedOffset::east_opt(sign * hours * 3600)
+            .ok_or_else(|| Error::InvalidTimezoneOffset(tag.to_owned()));
+    }
+    Err(Error::InvalidTimezoneOffset(tag.to_owned()))
+}
 
 impl Decoder for Codec {
     type Item = FrontendMessage;
@@ -463,60 +503,25 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
         Type::TEXT => Ok(PsqlValue::Text(text_str.into())),
         Type::TIMESTAMP => {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
-            // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
-            let (datetime, timezone_tag) =
-                NaiveDateTime::parse_and_remainder(text_str, TIMESTAMP_FORMAT).or_else(|_| {
-                    NaiveDateTime::parse_and_remainder(text_str, ISO_TIMESTAMP_FORMAT)
-                })?;
-            if timezone_tag.is_empty() {
-                return Ok(PsqlValue::Timestamp(datetime));
+            // infinity/-infinity are not supported.
+            let (datetime, timezone_tag) = parse_timestamp_text(text_str)?;
+            // PostgreSQL silently ignores any timezone offset for TIMESTAMP WITHOUT TIME ZONE,
+            // keeping only the literal datetime. We validate the offset (so malformed input
+            // still errors) but discard the result.
+            if !timezone_tag.is_empty() {
+                let _ = parse_timezone_offset(timezone_tag)?;
             }
-
-            // hack for PGJDBC: pgjdbc always sends the UTC offset at the end of the Timestamp
-            // field string, but it may not contain the minutes information: for
-            // example, "-08" for UTC-08 (Pacific time zone); see
-            // pgjdbc/src/main/java/org/postgresql/jdbc/PgPreparedStatement.java#
-            // setTimestamp() for detailed commentary. First, though, parse for an offset,
-            // in the standard "%z" format (eg '-0800'), which must include
-            // minutes. we can use FixedOffset's native parse for this.
-            let timezone_tag = timezone_tag.trim_start();
-            let offset_parse = FixedOffset::from_str(timezone_tag);
-            if let Ok(offset) = offset_parse {
-                return Ok(PsqlValue::Timestamp(
-                    offset.from_utc_datetime(&datetime).naive_utc(),
-                ));
-            }
-
-            // To support an offset without minutes, as pgjdbc truncates the minutes value
-            // if it's "00" (no minute offset from the hour offset), blindly append two zeros
-            // to the end of the timezone tag to see if we get lucky parsing it :homer-cry:
-            let mut pgjdbc_tz_tag = timezone_tag.to_owned();
-            pgjdbc_tz_tag.push_str(String::from("00").as_str());
-            let offset = FixedOffset::from_str(&pgjdbc_tz_tag)?;
-            Ok(PsqlValue::Timestamp(
-                offset.from_utc_datetime(&datetime).naive_utc(),
-            ))
+            Ok(PsqlValue::Timestamp(datetime))
         }
         Type::TIMESTAMPTZ => {
-            // Note: read commentary in Type::TIMESTAMP above for context around pgjdbc support.
-            let (datetime, timezone_tag) =
-                NaiveDateTime::parse_and_remainder(text_str, TIMESTAMP_FORMAT)?;
-
-            let timezone_tag = timezone_tag.trim_start();
-            let offset_parse = FixedOffset::from_str(timezone_tag);
-            if let Ok(offset) = offset_parse {
-                return Ok(PsqlValue::TimestampTz(
-                    offset.from_local_datetime(&datetime).single().unwrap(),
-                ));
-            }
-
-            // To support an offset without minutes, as pgjdbc truncates the minutes value
-            // if it's "00" (no minute offset from hout offset), blindly append two zeros
-            // to the end of the timezone tag to see if we get lucky parsing it :homer-cry:
-            let mut pgjdbc_tz_tag = timezone_tag.to_owned();
-            pgjdbc_tz_tag.push_str(String::from("00").as_str());
-            let offset = FixedOffset::from_str(&pgjdbc_tz_tag)?;
-            Ok(PsqlValue::TimestampTz(offset.from_utc_datetime(&datetime)))
+            let (datetime, timezone_tag) = parse_timestamp_text(text_str)?;
+            let offset = parse_timezone_offset(timezone_tag)?;
+            Ok(PsqlValue::TimestampTz(
+                offset
+                    .from_local_datetime(&datetime)
+                    .single()
+                    .expect("FixedOffset cannot produce ambiguous local times"),
+            ))
         }
         Type::BYTEA => {
             let bytes = hex::decode(text_str).map_err(InvalidTextByteArrayValue)?;
@@ -570,6 +575,20 @@ mod tests {
 
     use super::*;
     use crate::value::PsqlValue;
+
+    fn decode_text_timestamp(input: &[u8]) -> PsqlValue {
+        let mut buf = BytesMut::new();
+        buf.put_i32(i32::try_from(input.len()).unwrap());
+        buf.extend_from_slice(input);
+        get_text_value(&mut buf.freeze(), &Type::TIMESTAMP).unwrap()
+    }
+
+    fn decode_text_timestamptz(input: &[u8]) -> PsqlValue {
+        let mut buf = BytesMut::new();
+        buf.put_i32(i32::try_from(input.len()).unwrap());
+        buf.extend_from_slice(input);
+        get_text_value(&mut buf.freeze(), &Type::TIMESTAMPTZ).unwrap()
+    }
 
     fn bytes_str(s: &str) -> BytesStr {
         let mut buf = BytesMut::new();
@@ -1502,7 +1521,8 @@ mod tests {
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::TIMESTAMP).unwrap(),
             PsqlValue::Timestamp(
-                NaiveDateTime::parse_from_str("2020-01-02 03:04:05.66", TIMESTAMP_FORMAT).unwrap()
+                NaiveDateTime::parse_from_str("2020-01-02 03:04:05.66", TIMESTAMP_PARSE_FORMAT)
+                    .unwrap()
             )
         );
     }
@@ -1515,43 +1535,35 @@ mod tests {
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::TIMESTAMP).unwrap(),
             PsqlValue::Timestamp(
-                NaiveDateTime::parse_from_str("2020-01-02 03:04:05.66", TIMESTAMP_FORMAT).unwrap()
+                NaiveDateTime::parse_from_str("2020-01-02 03:04:05.66", TIMESTAMP_PARSE_FORMAT)
+                    .unwrap()
             )
         );
     }
     #[test]
     fn test_decode_text_timestamp_with_offset() {
-        let expected =
-            FixedOffset::east_opt(18000)
-                .unwrap()
-                .from_utc_datetime(&NaiveDateTime::new(
-                    NaiveDate::from_ymd_opt(2020, 1, 2).unwrap(),
-                    NaiveTime::from_hms_milli_opt(3, 4, 5, 660).unwrap(),
-                ));
-        let mut buf = BytesMut::new();
-        buf.put_i32(27); // size
-        buf.extend_from_slice(b"2020-01-02 03:04:05.66-0800"); // value
+        // TIMESTAMP WITHOUT TIME ZONE silently discards the timezone offset per PostgreSQL
+        // semantics, keeping only the literal datetime.
+        let expected = NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(2020, 1, 2).unwrap(),
+            NaiveTime::from_hms_milli_opt(3, 4, 5, 660).unwrap(),
+        );
         assert_eq!(
-            get_text_value(&mut buf.freeze(), &Type::TIMESTAMP).unwrap(),
-            PsqlValue::Timestamp(expected.naive_utc())
+            decode_text_timestamp(b"2020-01-02 03:04:05.66-0800"),
+            PsqlValue::Timestamp(expected)
         );
     }
 
     #[test]
     fn test_decode_text_timestamp_pgjdbc_offset() {
-        let expected =
-            FixedOffset::east_opt(18000)
-                .unwrap()
-                .from_utc_datetime(&NaiveDateTime::new(
-                    NaiveDate::from_ymd_opt(2020, 1, 2).unwrap(),
-                    NaiveTime::from_hms_milli_opt(3, 4, 5, 660).unwrap(),
-                ));
-        let mut buf = BytesMut::new();
-        buf.put_i32(25); // size
-        buf.extend_from_slice(b"2020-01-02 03:04:05.66-08"); // value
+        // pgjdbc sends truncated offsets like "-08" — offset is still discarded for TIMESTAMP.
+        let expected = NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(2020, 1, 2).unwrap(),
+            NaiveTime::from_hms_milli_opt(3, 4, 5, 660).unwrap(),
+        );
         assert_eq!(
-            get_text_value(&mut buf.freeze(), &Type::TIMESTAMP).unwrap(),
-            PsqlValue::Timestamp(expected.naive_utc())
+            decode_text_timestamp(b"2020-01-02 03:04:05.66-08"),
+            PsqlValue::Timestamp(expected)
         );
     }
 
@@ -1630,38 +1642,148 @@ mod tests {
 
     #[test]
     fn test_decode_text_timestamp_tz() {
-        let dt_string = "2020-01-02 08:04:05.660 +05:00";
-        let expected =
-            FixedOffset::east_opt(18000)
-                .unwrap()
-                .from_utc_datetime(&NaiveDateTime::new(
-                    NaiveDate::from_ymd_opt(2020, 1, 2).unwrap(),
-                    NaiveTime::from_hms_milli_opt(3, 4, 5, 660).unwrap(),
-                ));
-        let mut buf = BytesMut::new();
-        buf.put_i32(30); // size (placeholder)
-        buf.extend_from_slice(dt_string.as_bytes());
+        // Input: "2020-01-02 08:04:05.660 +05:00" means local time 08:04:05.660 at +05:00.
+        // UTC = 08:04:05.660 - 5h = 03:04:05.660.
+        let offset = FixedOffset::east_opt(18000).unwrap();
+        let expected = offset
+            .from_local_datetime(&NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2020, 1, 2).unwrap(),
+                NaiveTime::from_hms_milli_opt(8, 4, 5, 660).unwrap(),
+            ))
+            .single()
+            .unwrap();
         assert_eq!(
-            get_text_value(&mut buf.freeze(), &Type::TIMESTAMPTZ).unwrap(),
+            decode_text_timestamptz(b"2020-01-02 08:04:05.660 +05:00"),
             PsqlValue::TimestampTz(expected)
         );
     }
 
     #[test]
     fn test_decode_text_timestamptz_pgjdbc_offset() {
-        let expected =
-            FixedOffset::east_opt(18000)
-                .unwrap()
-                .from_utc_datetime(&NaiveDateTime::new(
-                    NaiveDate::from_ymd_opt(2020, 1, 2).unwrap(),
-                    NaiveTime::from_hms_milli_opt(3, 4, 5, 660).unwrap(),
-                ));
+        // Input: "2020-01-02 03:04:05.66-08" means local time 03:04:05.66 at offset -08:00.
+        // UTC = 03:04:05.66 + 8h = 11:04:05.66.
+        let offset = FixedOffset::west_opt(8 * 3600).unwrap();
+        let expected = offset
+            .from_local_datetime(&NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2020, 1, 2).unwrap(),
+                NaiveTime::from_hms_milli_opt(3, 4, 5, 660).unwrap(),
+            ))
+            .single()
+            .unwrap();
         let mut buf = BytesMut::new();
         buf.put_i32(25); // size
         buf.extend_from_slice(b"2020-01-02 03:04:05.66-08"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::TIMESTAMPTZ).unwrap(),
             PsqlValue::TimestampTz(expected)
+        );
+    }
+
+    /// Tests for REA-6475: all formats that PostgreSQL accepts for timestamptz bound parameters.
+    #[test]
+    fn test_decode_text_timestamptz_iso8601_t_separator() {
+        // ISO-8601 with T separator — node-postgres default format
+        let utc_midnight = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2025, 1, 1, 0, 0, 0)
+            .single()
+            .unwrap();
+        assert_eq!(
+            decode_text_timestamptz(b"2025-01-01T00:00:00.000+00:00"),
+            PsqlValue::TimestampTz(utc_midnight)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_timestamptz_iso8601_z() {
+        // Z suffix — same UTC instant as +00:00
+        let utc_midnight = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2025, 1, 1, 0, 0, 0)
+            .single()
+            .unwrap();
+        assert_eq!(
+            decode_text_timestamptz(b"2025-01-01T00:00:00.000Z"),
+            PsqlValue::TimestampTz(utc_midnight)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_timestamptz_iso8601_negative_offset() {
+        // Negative offset — local time 19:00 at -05:00
+        let expected = FixedOffset::west_opt(5 * 3600)
+            .unwrap()
+            .with_ymd_and_hms(2024, 12, 31, 19, 0, 0)
+            .single()
+            .unwrap();
+        assert_eq!(
+            decode_text_timestamptz(b"2024-12-31T19:00:00.000-05:00"),
+            PsqlValue::TimestampTz(expected)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_timestamptz_date_only() {
+        let utc_midnight = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2025, 1, 1, 0, 0, 0)
+            .single()
+            .unwrap();
+        assert_eq!(
+            decode_text_timestamptz(b"2025-01-01"),
+            PsqlValue::TimestampTz(utc_midnight)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_timestamptz_no_timezone() {
+        // No timezone — assume UTC
+        let utc_midnight = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2025, 1, 1, 0, 0, 0)
+            .single()
+            .unwrap();
+        assert_eq!(
+            decode_text_timestamptz(b"2025-01-01 00:00:00"),
+            PsqlValue::TimestampTz(utc_midnight)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_timestamp_iso8601_z() {
+        // TIMESTAMP with Z — strips timezone, returns naive UTC datetime
+        let midnight = NaiveDate::from_ymd_opt(2025, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        assert_eq!(
+            decode_text_timestamp(b"2025-01-01T00:00:00.000Z"),
+            PsqlValue::Timestamp(midnight)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_timestamp_iso8601_with_offset() {
+        // TIMESTAMP discards the offset — keeps the literal local time per PostgreSQL semantics.
+        let expected = NaiveDateTime::new(
+            NaiveDate::from_ymd_opt(2024, 12, 31).unwrap(),
+            NaiveTime::from_hms_milli_opt(19, 0, 0, 0).unwrap(),
+        );
+        assert_eq!(
+            decode_text_timestamp(b"2024-12-31T19:00:00.000-05:00"),
+            PsqlValue::Timestamp(expected)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_timestamp_date_only() {
+        let midnight = NaiveDate::from_ymd_opt(2025, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        assert_eq!(
+            decode_text_timestamp(b"2025-01-01"),
+            PsqlValue::Timestamp(midnight)
         );
     }
 

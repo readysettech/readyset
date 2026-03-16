@@ -58,7 +58,9 @@ pub use crate::r#type::{DfType, PgEnumMetadata, PgTypeCategory};
 pub use crate::ranges::{Bound, BoundedRange, IntoBoundedRange, RangeBounds};
 pub use crate::serde::TextRef;
 pub use crate::text::{Text, TinyText};
-pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT, TIMESTAMP_PARSE_FORMAT};
+pub use crate::timestamp::{
+    TimestampTz, DATE_FORMAT, ISO_TIMESTAMP_PARSE_FORMAT, TIMESTAMP_FORMAT, TIMESTAMP_PARSE_FORMAT,
+};
 
 type JsonObject = serde_json::Map<String, JsonValue>;
 

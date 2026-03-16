@@ -40,6 +40,9 @@ pub enum DecodeError {
     #[error("invalid text timestamp value: {0}")]
     InvalidTextTimestampValue(#[from] chrono::ParseError),
 
+    #[error("invalid timezone offset: {0}")]
+    InvalidTimezoneOffset(String),
+
     #[error("invalid text byte array value: {0}")]
     InvalidTextByteArrayValue(FromHexError),
 
